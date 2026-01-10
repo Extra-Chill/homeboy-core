@@ -1,0 +1,93 @@
+---
+name: homeboy
+description: Use this skill when deploying code to production, executing WP-CLI or PM2 commands on remote servers, querying production databases, managing project/server configurations, performing component-scoped git operations, or when the user mentions Homeboy, deployment, or remote server operations.
+version: 1.1.0
+---
+
+# Homeboy CLI
+
+CLI for project development and deployment. Provides terminal access to project management, remote CLI operations (WP-CLI, PM2), database queries, deployments, and component-scoped git operations.
+
+**CLI documentation**: run `homeboy docs` (and `homeboy docs <topic>`).
+
+## Commands Overview
+
+| Command | Purpose |
+|---------|---------|
+| `projects` | List configured projects |
+| `project` | Manage project configurations (create, show, set, delete, switch, subtarget, component) |
+| `component` | Manage standalone component configurations |
+| `server` | Manage server configurations (create, show, set, delete, list) |
+| `git` | Component-scoped git operations (status, commit, push, pull, tag) |
+| `wp` | Execute WP-CLI commands on remote WordPress servers |
+| `pm2` | Execute PM2 commands on remote Node.js servers |
+| `db` | Database operations - read-only (tables, describe, query) |
+| `deploy` | Deploy components to production |
+| `ssh` | Execute SSH commands or open interactive shell |
+| `module` | Manage and run Homeboy modules |
+
+## Quick Start
+
+```bash
+homeboy projects                    # List all projects
+homeboy projects --current          # Get active project ID
+homeboy help <command>              # Get detailed help for any command
+```
+
+## Safety Guidelines
+
+1. **Deploy**: Always run with `--dry-run` first to preview changes
+2. **Database**: All `db` queries are read-only by design. For write operations, use `homeboy wp <project> db query`
+3. **SSH**: Exercise caution with destructive commands on production servers
+4. **PM2**: `restart` affects live services - confirm intent before executing
+
+## Common Patterns
+
+### Remote WordPress Operations
+```bash
+homeboy wp <project> plugin list
+homeboy wp <project> cache flush
+homeboy wp <project> core version
+```
+
+### Database Queries (Read-Only)
+```bash
+homeboy db tables <project>
+homeboy db describe <project> <table>
+homeboy db query <project> "SELECT * FROM wp_options LIMIT 10"
+```
+
+### Deployment
+```bash
+homeboy deploy <project> --dry-run --all    # Preview all deployments
+homeboy deploy <project> --outdated         # Deploy changed components only
+homeboy deploy <project> <component-id>     # Deploy specific component
+```
+
+### Git Operations (Component-Scoped)
+No more `cd` to directories - operate on components by name:
+```bash
+homeboy git status <component>              # Show git status
+homeboy git commit <component> "message"    # Stage all and commit
+homeboy git push <component>                # Push to remote
+homeboy git push <component> --tags         # Push with tags
+homeboy git pull <component>                # Pull from remote
+homeboy git tag <component> v1.0.0          # Create lightweight tag
+homeboy git tag <component> v1.0.0 -m "msg" # Create annotated tag
+```
+
+### Release Workflow (Dogfooding)
+```bash
+homeboy git commit <component> "Release v1.0.0"
+homeboy git tag <component> v1.0.0
+homeboy git push <component> --tags         # Triggers CI/CD
+```
+
+### Subtargets (Multisite/Multi-environment)
+Commands accepting `[subtarget]` can target specific blogs or environments:
+```bash
+homeboy wp <project> <subtarget> plugin list
+homeboy db query <project> <subtarget> "SELECT ..."
+```
+
+Refer to the full CLI documentation for complete command reference and configuration details.
