@@ -1,7 +1,9 @@
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 
-use homeboy_core::config::{ConfigManager, PinnedRemoteFile, PinnedRemoteLog, ProjectRecord};
+use homeboy_core::config::{
+    ConfigManager, PinnedRemoteFile, PinnedRemoteLog, ProjectManager, ProjectRecord,
+};
 use uuid::Uuid;
 
 #[derive(Args)]
@@ -23,9 +25,58 @@ enum ProjectCommand {
         /// Project ID (uses active project if not specified)
         project_id: Option<String>,
     },
+    /// Create a new project
+    Create {
+        /// Project name
+        name: String,
+        /// Public site domain
+        domain: String,
+        /// Project type (e.g. wordpress)
+        project_type: String,
+        /// Optional server ID
+        #[arg(long)]
+        server_id: Option<String>,
+        /// Optional remote base path
+        #[arg(long)]
+        base_path: Option<String>,
+        /// Optional WordPress table prefix
+        #[arg(long)]
+        table_prefix: Option<String>,
+        /// Switch active project after create
+        #[arg(long)]
+        activate: bool,
+    },
+    /// Update project configuration fields
+    Set {
+        /// Project ID
+        project_id: String,
+        /// Project name
+        #[arg(long)]
+        name: Option<String>,
+        /// Public site domain
+        #[arg(long)]
+        domain: Option<String>,
+        /// Project type (e.g. wordpress)
+        #[arg(long)]
+        project_type: Option<String>,
+        /// Server ID
+        #[arg(long)]
+        server_id: Option<String>,
+        /// Remote base path
+        #[arg(long)]
+        base_path: Option<String>,
+        /// WordPress table prefix
+        #[arg(long)]
+        table_prefix: Option<String>,
+    },
     /// Switch active project
     Switch {
         /// Project ID to switch to
+        project_id: String,
+    },
+    /// Repair a project file whose name doesn't match the stored project name
+    Repair {
+        /// Project ID (file stem)
         project_id: String,
     },
     /// Manage pinned files and logs
@@ -130,13 +181,50 @@ pub struct ProjectOutput {
     project: Option<ProjectRecord>,
     projects: Option<Vec<ProjectListItem>>,
     pin: Option<ProjectPinOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated: Option<Vec<String>>,
 }
 
 pub fn run(args: ProjectArgs) -> homeboy_core::Result<(ProjectOutput, i32)> {
     match args.command {
         ProjectCommand::List { current } => list(current),
         ProjectCommand::Show { project_id } => show(project_id),
+        ProjectCommand::Create {
+            name,
+            domain,
+            project_type,
+            server_id,
+            base_path,
+            table_prefix,
+            activate,
+        } => create(
+            &name,
+            &domain,
+            &project_type,
+            server_id,
+            base_path,
+            table_prefix,
+            activate,
+        ),
+        ProjectCommand::Set {
+            project_id,
+            name,
+            domain,
+            project_type,
+            server_id,
+            base_path,
+            table_prefix,
+        } => set(
+            &project_id,
+            name,
+            domain,
+            project_type,
+            server_id,
+            base_path,
+            table_prefix,
+        ),
         ProjectCommand::Switch { project_id } => switch(&project_id),
+        ProjectCommand::Repair { project_id } => repair(&project_id),
         ProjectCommand::Pin { command } => pin(command),
     }
 }
@@ -154,6 +242,7 @@ fn list(current: bool) -> homeboy_core::Result<(ProjectOutput, i32)> {
                 project: None,
                 projects: None,
                 pin: None,
+                updated: None,
             },
             0,
         ));
@@ -180,6 +269,7 @@ fn list(current: bool) -> homeboy_core::Result<(ProjectOutput, i32)> {
             project: None,
             projects: Some(items),
             pin: None,
+            updated: None,
         },
         0,
     ))
@@ -199,6 +289,127 @@ fn show(project_id: Option<String>) -> homeboy_core::Result<(ProjectOutput, i32)
             project: Some(project),
             projects: None,
             pin: None,
+            updated: None,
+        },
+        0,
+    ))
+}
+
+fn create(
+    name: &str,
+    domain: &str,
+    project_type: &str,
+    server_id: Option<String>,
+    base_path: Option<String>,
+    table_prefix: Option<String>,
+    activate: bool,
+) -> homeboy_core::Result<(ProjectOutput, i32)> {
+    let (created_project_id, _project) = ProjectManager::create_project(
+        name,
+        domain,
+        project_type,
+        server_id,
+        base_path,
+        table_prefix,
+    )?;
+
+    if activate {
+        ConfigManager::set_active_project(&created_project_id)?;
+    }
+
+    let project = ConfigManager::load_project_record(&created_project_id)?;
+
+    Ok((
+        ProjectOutput {
+            command: "project.create".to_string(),
+            project_id: Some(created_project_id),
+            active_project_id: None,
+            project: Some(project),
+            projects: None,
+            pin: None,
+            updated: None,
+        },
+        0,
+    ))
+}
+
+fn set(
+    project_id: &str,
+    name: Option<String>,
+    domain: Option<String>,
+    project_type: Option<String>,
+    server_id: Option<String>,
+    base_path: Option<String>,
+    table_prefix: Option<String>,
+) -> homeboy_core::Result<(ProjectOutput, i32)> {
+    let mut updated_fields: Vec<String> = Vec::new();
+
+    if let Some(name) = name {
+        let result = ProjectManager::rename_project(project_id, &name)?;
+        updated_fields.push("name".to_string());
+
+        if result.new_id != project_id {
+            updated_fields.push("id".to_string());
+        }
+
+        return Ok((
+            ProjectOutput {
+                command: "project.set".to_string(),
+                project_id: Some(result.new_id.clone()),
+                active_project_id: None,
+                project: Some(ConfigManager::load_project_record(&result.new_id)?),
+                projects: None,
+                pin: None,
+                updated: Some(updated_fields),
+            },
+            0,
+        ));
+    }
+
+    let mut project = ConfigManager::load_project(project_id)?;
+
+    if let Some(domain) = domain {
+        project.domain = domain;
+        updated_fields.push("domain".to_string());
+    }
+
+    if let Some(project_type) = project_type {
+        project.project_type = project_type;
+        updated_fields.push("projectType".to_string());
+    }
+
+    if let Some(server_id) = server_id {
+        project.server_id = Some(server_id);
+        updated_fields.push("serverId".to_string());
+    }
+
+    if let Some(base_path) = base_path {
+        project.base_path = Some(base_path);
+        updated_fields.push("basePath".to_string());
+    }
+
+    if let Some(table_prefix) = table_prefix {
+        project.table_prefix = Some(table_prefix);
+        updated_fields.push("tablePrefix".to_string());
+    }
+
+    if updated_fields.is_empty() {
+        return Err(homeboy_core::Error::Other(
+            "No fields provided to update".to_string(),
+        ));
+    }
+
+    ConfigManager::save_project(project_id, &project)?;
+
+    Ok((
+        ProjectOutput {
+            command: "project.set".to_string(),
+            project_id: Some(project_id.to_string()),
+            active_project_id: None,
+            project: Some(ConfigManager::load_project_record(project_id)?),
+            projects: None,
+            pin: None,
+            updated: Some(updated_fields),
         },
         0,
     ))
@@ -217,6 +428,30 @@ fn switch(project_id: &str) -> homeboy_core::Result<(ProjectOutput, i32)> {
             project: Some(project),
             projects: None,
             pin: None,
+            updated: None,
+        },
+        0,
+    ))
+}
+
+fn repair(project_id: &str) -> homeboy_core::Result<(ProjectOutput, i32)> {
+    let result = ProjectManager::repair_project(project_id)?;
+
+    let updated = if result.new_id != result.old_id {
+        Some(vec!["id".to_string()])
+    } else {
+        None
+    };
+
+    Ok((
+        ProjectOutput {
+            command: "project.repair".to_string(),
+            project_id: Some(result.new_id.clone()),
+            active_project_id: None,
+            project: Some(ConfigManager::load_project_record(&result.new_id)?),
+            projects: None,
+            pin: None,
+            updated,
         },
         0,
     ))
@@ -292,6 +527,7 @@ fn pin_list(
                 added: None,
                 removed: None,
             }),
+            updated: None,
         },
         0,
     ))
@@ -372,6 +608,7 @@ fn pin_add(
                 }),
                 removed: None,
             }),
+            updated: None,
         },
         0,
     ))
@@ -435,6 +672,7 @@ fn pin_remove(
                     r#type: type_string.to_string(),
                 }),
             }),
+            updated: None,
         },
         0,
     ))

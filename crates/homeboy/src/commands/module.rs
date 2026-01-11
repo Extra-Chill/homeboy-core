@@ -1,6 +1,7 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -96,6 +97,30 @@ enum ModuleCommand {
         /// Module ID
         module_id: String,
     },
+    /// Install a module from a git repository URL
+    Install {
+        /// Git repository URL
+        url: String,
+        /// Override module id (directory name)
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Update an installed module (git pull)
+    Update {
+        /// Module ID
+        module_id: String,
+        /// Force update even if module has local changes
+        #[arg(long)]
+        force: bool,
+    },
+    /// Uninstall a module (remove its directory)
+    Uninstall {
+        /// Module ID
+        module_id: String,
+        /// Delete without confirmation
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
@@ -115,6 +140,9 @@ pub fn run(args: ModuleArgs) -> CmdResult<ModuleOutput> {
             args,
         } => run_module(&module_id, project, input, args),
         ModuleCommand::Setup { module_id } => setup_module(&module_id),
+        ModuleCommand::Install { url, id } => install_module(&url, id),
+        ModuleCommand::Update { module_id, force } => update_module(&module_id, force),
+        ModuleCommand::Uninstall { module_id, force } => uninstall_module(&module_id, force),
     }
 }
 
@@ -130,6 +158,32 @@ pub struct ModuleOutput {
     pub modules: Option<Vec<ModuleEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed: Option<ModuleInstallOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated: Option<ModuleUpdateOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uninstalled: Option<ModuleUninstallOutput>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleInstallOutput {
+    pub url: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleUpdateOutput {
+    pub url: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleUninstallOutput {
+    pub path: String,
 }
 
 #[derive(Serialize)]
@@ -174,6 +228,9 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
             module_id: None,
             modules: Some(entries),
             runtime_type: None,
+            installed: None,
+            updated: None,
+            uninstalled: None,
         },
         0,
     ))
@@ -203,6 +260,9 @@ fn run_module(
             module_id: Some(module_id.to_string()),
             modules: None,
             runtime_type: Some(runtime_type.to_string()),
+            installed: None,
+            updated: None,
+            uninstalled: None,
         },
         code,
     ))
@@ -440,6 +500,237 @@ fn run_cli_module(
     Ok(status.code().unwrap_or(1))
 }
 
+fn slugify_module_id(value: &str) -> homeboy_core::Result<String> {
+    let mut output = String::new();
+    let mut last_was_dash = false;
+
+    for ch in value.chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() {
+            output.push(lower);
+            last_was_dash = false;
+            continue;
+        }
+
+        if !last_was_dash && !output.is_empty() {
+            output.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    while output.ends_with('-') {
+        output.pop();
+    }
+
+    if output.is_empty() {
+        return Err(homeboy_core::Error::Other(
+            "Unable to derive module id".to_string(),
+        ));
+    }
+
+    Ok(output)
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModuleInstallMetadata {
+    source_url: String,
+}
+
+fn install_metadata_path(module_id: &str) -> std::path::PathBuf {
+    AppPaths::module(module_id).join(".install.json")
+}
+
+fn write_install_metadata(module_id: &str, url: &str) -> homeboy_core::Result<()> {
+    let path = install_metadata_path(module_id);
+    let content = serde_json::to_string_pretty(&ModuleInstallMetadata {
+        source_url: url.to_string(),
+    })?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
+fn read_install_metadata(module_id: &str) -> homeboy_core::Result<ModuleInstallMetadata> {
+    let path = install_metadata_path(module_id);
+    if !path.exists() {
+        return Err(homeboy_core::Error::Other(format!(
+            "No .install.json found for module '{module_id}'. Reinstall it with `homeboy module install`.",
+        )));
+    }
+
+    let content = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
+}
+
+fn derive_module_id_from_url(url: &str) -> homeboy_core::Result<String> {
+    let trimmed = url.trim_end_matches('/');
+    let segment = trimmed
+        .split('/')
+        .last()
+        .unwrap_or(trimmed)
+        .trim_end_matches(".git");
+
+    slugify_module_id(segment)
+}
+
+fn confirm_dangerous_action(force: bool, message: &str) -> homeboy_core::Result<()> {
+    if force {
+        return Ok(());
+    }
+
+    Err(homeboy_core::Error::Other(format!(
+        "{message} Re-run with --force to confirm.",
+    )))
+}
+
+fn is_git_workdir_clean(path: &Path) -> bool {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(path)
+        .output();
+
+    match output {
+        Ok(output) => output.status.success() && output.stdout.is_empty(),
+        Err(_) => false,
+    }
+}
+
+fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
+    let module_id = match id {
+        Some(id) => slugify_module_id(&id)?,
+        None => derive_module_id_from_url(url)?,
+    };
+
+    let module_dir = AppPaths::module(&module_id);
+    if module_dir.exists() {
+        return Err(homeboy_core::Error::Other(format!(
+            "Module '{module_id}' already exists",
+        )));
+    }
+
+    AppPaths::ensure_directories()?;
+
+    let status = Command::new("git")
+        .args(["clone", url, module_dir.to_string_lossy().as_ref()])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+
+    if !status.success() {
+        return Err(homeboy_core::Error::Other("git clone failed".to_string()));
+    }
+
+    write_install_metadata(&module_id, url)?;
+
+    if let Some(module) = load_module(&module_id) {
+        if module.runtime.runtime_type == RuntimeType::Python {
+            let _ = setup_module(&module_id)?;
+        }
+    }
+
+    Ok((
+        ModuleOutput {
+            command: "module.install".to_string(),
+            project_id: None,
+            module_id: Some(module_id.clone()),
+            modules: None,
+            runtime_type: None,
+            installed: Some(ModuleInstallOutput {
+                url: url.to_string(),
+                path: module_dir.to_string_lossy().to_string(),
+            }),
+            updated: None,
+            uninstalled: None,
+        },
+        0,
+    ))
+}
+
+fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
+    let module_dir = AppPaths::module(module_id);
+    if !module_dir.exists() {
+        return Err(homeboy_core::Error::Other(format!(
+            "Module '{module_id}' not found",
+        )));
+    }
+
+    if !is_git_workdir_clean(&module_dir) {
+        confirm_dangerous_action(
+            force,
+            "Module has uncommitted changes; update may overwrite them.",
+        )?;
+    }
+
+    let metadata = read_install_metadata(module_id)?;
+
+    let status = Command::new("git")
+        .args(["pull", "--ff-only"])
+        .current_dir(&module_dir)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+
+    if !status.success() {
+        return Err(homeboy_core::Error::Other("git pull failed".to_string()));
+    }
+
+    if let Some(module) = load_module(module_id) {
+        if module.runtime.runtime_type == RuntimeType::Python {
+            let _ = setup_module(module_id)?;
+        }
+    }
+
+    Ok((
+        ModuleOutput {
+            command: "module.update".to_string(),
+            project_id: None,
+            module_id: Some(module_id.to_string()),
+            modules: None,
+            runtime_type: None,
+            installed: None,
+            updated: Some(ModuleUpdateOutput {
+                url: metadata.source_url,
+                path: module_dir.to_string_lossy().to_string(),
+            }),
+            uninstalled: None,
+        },
+        0,
+    ))
+}
+
+fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
+    let module_dir = AppPaths::module(module_id);
+    if !module_dir.exists() {
+        return Err(homeboy_core::Error::Other(format!(
+            "Module '{module_id}' not found",
+        )));
+    }
+
+    confirm_dangerous_action(force, "This will permanently remove the module")?;
+
+    fs::remove_dir_all(&module_dir)?;
+
+    Ok((
+        ModuleOutput {
+            command: "module.uninstall".to_string(),
+            project_id: None,
+            module_id: Some(module_id.to_string()),
+            modules: None,
+            runtime_type: None,
+            installed: None,
+            updated: None,
+            uninstalled: Some(ModuleUninstallOutput {
+                path: module_dir.to_string_lossy().to_string(),
+            }),
+        },
+        0,
+    ))
+}
+
 fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
     let module = load_module(module_id)
         .ok_or_else(|| homeboy_core::Error::Other(format!("Module '{}' not found", module_id)))?;
@@ -452,6 +743,9 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
                 module_id: Some(module_id.to_string()),
                 modules: None,
                 runtime_type: Some(format!("{:?}", module.runtime.runtime_type).to_lowercase()),
+                installed: None,
+                updated: None,
+                uninstalled: None,
             },
             0,
         ));
@@ -553,6 +847,9 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
             module_id: Some(module_id.to_string()),
             modules: None,
             runtime_type: Some("python".to_string()),
+            installed: None,
+            updated: None,
+            uninstalled: None,
         },
         0,
     ))

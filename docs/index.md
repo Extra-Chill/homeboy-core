@@ -29,10 +29,6 @@ Additional (not created by default):
 ## Documentation
 
 - Commands: [Commands index](commands/commands-index.md)
-- JSON output (global output envelope + NDJSON events): [JSON output contract](json-output/json-output-contract.md)
-- Embedded docs behavior: [Embedded docs topic resolution](embedded-docs/embedded-docs-topic-resolution.md)
-- Changelog: [Changelog](changelog.md)
-- Commands: [Commands index](commands/commands-index.md)
-- JSON output (global output envelope): [JSON output contract](json-output/json-output-contract.md)
+- JSON output contract: [JSON output contract](json-output/json-output-contract.md)
 - Embedded docs behavior: [Embedded docs topic resolution](embedded-docs/embedded-docs-topic-resolution.md)
 - Changelog: [Changelog](changelog.md)

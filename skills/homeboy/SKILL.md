@@ -1,7 +1,7 @@
 ---
 name: homeboy
 description: Use this skill when deploying code to production, executing WP-CLI or PM2 commands on remote servers, querying production databases, managing project/server configurations, performing component-scoped git operations, or when the user mentions Homeboy, deployment, or remote server operations.
-version: 1.2.0
+version: 0.1.10
 ---
 
 # Homeboy CLI
@@ -14,7 +14,7 @@ CLI for project development and deployment. Provides terminal access to project 
 
 | Command | Purpose |
 |---------|---------|
-| `project` | Manage project configurations (list, show, switch, pin) |
+| `project` | Manage project configurations (create, set, list, show, switch, repair, pin) |
 | `component` | Manage standalone component configurations |
 | `server` | Manage server configurations (create, show, set, delete, list, key) |
 | `git` | Component-scoped git operations (status, commit, push, pull, tag) |
@@ -25,7 +25,7 @@ CLI for project development and deployment. Provides terminal access to project 
 | `db` | Database operations (tables, describe, query, delete-row, drop-table, tunnel) |
 | `deploy` | Deploy components to production |
 | `ssh` | Execute SSH commands or open interactive shell |
-| `module` | Manage and run Homeboy modules |
+| `module` | Manage, source, install, update, and run Homeboy modules |
 
 ## Commands and help
 

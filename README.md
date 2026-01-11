@@ -32,6 +32,9 @@ See:
 
 ```bash
 homeboy project list
+homeboy project create "My Site" example.com wordpress --activate
+homeboy project set <project-id> --domain example.com --server-id <server-id>
+homeboy project repair <project-id>
 homeboy project switch <project-id>
 homeboy wp <project-id> core version
 homeboy deploy <project-id> --dry-run --all
@@ -53,6 +56,7 @@ Common paths:
 - `servers/`
 - `components/`
 - `modules/`
+- `module-sources/`
 - `keys/`
 
 See [CLI documentation](docs/index.md) for details.
