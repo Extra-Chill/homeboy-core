@@ -31,7 +31,7 @@ See:
 ## Usage
 
 ```bash
-homeboy projects
+homeboy project list
 homeboy project switch <project-id>
 homeboy wp <project-id> core version
 homeboy deploy <project-id> --dry-run --all

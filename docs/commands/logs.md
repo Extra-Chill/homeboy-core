@@ -40,5 +40,5 @@ Log object (`log`):
 
 ## Related
 
-- [pin](pin.md)
+- [project](project.md)
 - [file](file.md)

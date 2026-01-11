@@ -1,6 +1,7 @@
 use clap::Args;
-use homeboy_core::config::{ConfigManager, ProjectConfiguration, ProjectTypeManager};
+use homeboy_core::config::{ConfigManager, ProjectRecord, ProjectTypeManager};
 use homeboy_core::ssh::{execute_local_command, SshClient};
+
 use homeboy_core::template::{render_map, TemplateVars};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -36,9 +37,9 @@ pub fn run(args: Pm2Args) -> CmdResult<Pm2Output> {
         ));
     }
 
-    let project = ConfigManager::load_project(&args.project_id)?;
+    let project = ConfigManager::load_project_record(&args.project_id)?;
 
-    let type_def = ProjectTypeManager::resolve(&project.project_type);
+    let type_def = ProjectTypeManager::resolve(&project.project.project_type);
 
     let cli_config = type_def.cli.ok_or_else(|| {
         homeboy_core::Error::Other(format!(
@@ -60,11 +61,8 @@ pub fn run(args: Pm2Args) -> CmdResult<Pm2Output> {
         let output = execute_local_command(&command);
         output.exit_code
     } else {
-        let server_id = project.server_id.as_ref().ok_or_else(|| {
-            homeboy_core::Error::Other("Server not configured for project".to_string())
-        })?;
-        let server = ConfigManager::load_server(server_id)?;
-        let client = SshClient::from_server(&server, server_id)?;
+        let ctx = homeboy_core::context::resolve_project_server(&args.project_id)?;
+        let client = SshClient::from_server(&ctx.server, &ctx.server_id)?;
         let output = client.execute(&command);
         output.exit_code
     };
@@ -81,30 +79,32 @@ pub fn run(args: Pm2Args) -> CmdResult<Pm2Output> {
 }
 
 fn build_command(
-    project: &ProjectConfiguration,
+    project: &ProjectRecord,
     cli_config: &homeboy_core::config::CliConfig,
     args: &[String],
     local: bool,
 ) -> homeboy_core::Result<String> {
     let site_path = if local {
-        if !project.local_environment.is_configured() {
+        if !project.project.local_environment.is_configured() {
             return Err(homeboy_core::Error::Other(
                 "Local environment not configured for project".to_string(),
             ));
         }
-        project.local_environment.site_path.clone()
+        project.project.local_environment.site_path.clone()
     } else {
         project
+            .project
             .base_path
             .clone()
             .filter(|p| !p.is_empty())
             .ok_or_else(|| {
-                homeboy_core::Error::Other("Remote base path not configured".to_string())
+                homeboy_core::Error::Config("Remote base path not configured".to_string())
             })?
     };
 
     let cli_path = if local {
         project
+            .project
             .local_environment
             .cli_path
             .clone()
@@ -122,9 +122,9 @@ fn build_command(
     variables.insert(
         TemplateVars::DOMAIN.to_string(),
         if local {
-            project.local_environment.domain.clone()
+            project.project.local_environment.domain.clone()
         } else {
-            project.domain.clone()
+            project.project.domain.clone()
         },
     );
     variables.insert(TemplateVars::ARGS.to_string(), args.join(" "));

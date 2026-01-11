@@ -393,7 +393,7 @@ fn delete(id: &str, force: bool) -> CmdResult<ComponentOutput> {
         let projects = ConfigManager::list_projects().unwrap_or_default();
         let using: Vec<String> = projects
             .iter()
-            .filter(|p| p.component_ids.contains(&id.to_string()))
+            .filter(|p| p.project.component_ids.contains(&id.to_string()))
             .map(|p| p.id.clone())
             .collect();
 

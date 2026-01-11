@@ -274,7 +274,7 @@ fn delete(server_id: &str, force: bool) -> homeboy_core::Result<(ServerOutput, i
 
     let projects = ConfigManager::list_projects()?;
     for project in projects {
-        if project.server_id.as_deref() == Some(server_id) {
+        if project.project.server_id.as_deref() == Some(server_id) {
             return Err(Error::Other(format!(
                 "Server is used by project '{}'. Update or delete the project first.",
                 project.id

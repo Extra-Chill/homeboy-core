@@ -8,6 +8,44 @@ homeboy project <COMMAND>
 
 ## Subcommands
 
+### `list`
+
+```sh
+homeboy project list [--current]
+```
+
+- `--current`: return only the active project ID.
+
+JSON output (`list`):
+
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+
+```json
+{
+  "command": "project.list",
+  "activeProjectId": "<id>|null",
+  "projects": [
+    {
+      "id": "<id>",
+      "name": "<name>",
+      "domain": "<domain>",
+      "projectType": "<type>",
+      "active": true
+    }
+  ]
+}
+```
+
+JSON output (`--current`):
+
+```json
+{
+  "command": "project.current",
+  "activeProjectId": "<id>|null",
+  "projects": null
+}
+```
+
 ### `show`
 
 ```sh
@@ -50,5 +88,4 @@ JSON output:
 
 ## Related
 
-- [projects](projects.md)
 - [JSON output contract](../json-output/json-output-contract.md)

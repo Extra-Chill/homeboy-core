@@ -34,14 +34,10 @@ Segment normalization is performed by `homeboy_core::token::normalize_doc_segmen
 
 ## Available topics list format
 
-`available_topics` is returned as a single newline-separated string:
+`available_topics` is returned as a JSON array of embedded keys:
 
-```text
-changelog
-commands/build
-commands/docs
-index
-...
+```json
+["changelog", "commands/build", "commands/docs", "index"]
 ```
 
 Topics are sorted lexicographically.

@@ -2,6 +2,8 @@ mod app;
 mod component;
 mod paths;
 mod project;
+mod project_id;
+mod project_manager;
 mod project_type;
 mod server;
 
@@ -9,6 +11,8 @@ pub use app::*;
 pub use component::*;
 pub use paths::AppPaths;
 pub use project::*;
+pub use project_id::*;
+pub use project_manager::*;
 pub use project_type::*;
 pub use server::*;
 
@@ -36,23 +40,52 @@ impl ConfigManager {
     }
 
     pub fn load_project(id: &str) -> Result<ProjectConfiguration> {
+        Ok(Self::load_project_record(id)?.project)
+    }
+
+    pub fn load_project_record(id: &str) -> Result<ProjectRecord> {
         let path = AppPaths::project(id);
         if !path.exists() {
             return Err(Error::ProjectNotFound(id.to_string()));
         }
         let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        let project: ProjectConfiguration = serde_json::from_str(&content)?;
+
+        let expected_id = slugify_project_id(&project.name)?;
+        if expected_id != id {
+            return Err(Error::Config(format!(
+                "Project configuration mismatch: file '{}' implies id '{}', but name '{}' implies id '{}'. Run `homeboy project repair {}`.",
+                path.display(),
+                id,
+                project.name,
+                expected_id,
+                id
+            )));
+        }
+
+        Ok(ProjectRecord {
+            id: id.to_string(),
+            project,
+        })
     }
 
-    pub fn save_project(project: &ProjectConfiguration) -> Result<()> {
-        let path = AppPaths::project(&project.id);
+    pub fn save_project(id: &str, project: &ProjectConfiguration) -> Result<()> {
+        let expected_id = slugify_project_id(&project.name)?;
+        if expected_id != id {
+            return Err(Error::Config(format!(
+                "Project id '{}' must match slug(name) '{}'. Use `homeboy project set {id} --name \"{}\"` to rename.",
+                id, expected_id, project.name
+            )));
+        }
+
+        let path = AppPaths::project(id);
         AppPaths::ensure_directories()?;
         let content = serde_json::to_string_pretty(project)?;
         fs::write(&path, content)?;
         Ok(())
     }
 
-    pub fn list_projects() -> Result<Vec<ProjectConfiguration>> {
+    pub fn list_projects() -> Result<Vec<ProjectRecord>> {
         let dir = AppPaths::projects();
         if !dir.exists() {
             return Ok(Vec::new());
@@ -62,15 +95,33 @@ impl ConfigManager {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(project) = serde_json::from_str::<ProjectConfiguration>(&content) {
-                        projects.push(project);
-                    }
-                }
+            if !path.extension().is_some_and(|ext| ext == "json") {
+                continue;
             }
+
+            let Some(stem) = path.file_stem() else {
+                continue;
+            };
+            let id = stem.to_string_lossy().to_string();
+
+            let content = fs::read_to_string(&path)?;
+            let project: ProjectConfiguration = serde_json::from_str(&content)?;
+
+            let expected_id = slugify_project_id(&project.name)?;
+            if expected_id != id {
+                return Err(Error::Config(format!(
+                    "Project configuration mismatch: file '{}' implies id '{}', but name '{}' implies id '{}'. Run `homeboy project repair {}`.",
+                    path.display(),
+                    id,
+                    project.name,
+                    expected_id,
+                    id
+                )));
+            }
+
+            projects.push(ProjectRecord { id, project });
         }
-        projects.sort_by(|a, b| a.name.cmp(&b.name));
+        projects.sort_by(|a, b| a.project.name.cmp(&b.project.name));
         Ok(projects)
     }
 
@@ -105,14 +156,14 @@ impl ConfigManager {
         Ok(servers)
     }
 
-    pub fn get_active_project() -> Result<ProjectConfiguration> {
+    pub fn get_active_project() -> Result<ProjectRecord> {
         let app_config = Self::load_app_config()?;
         let active_id = app_config.active_project_id.ok_or(Error::NoActiveProject)?;
-        Self::load_project(&active_id)
+        Self::load_project_record(&active_id)
     }
 
     pub fn set_active_project(id: &str) -> Result<()> {
-        let _ = Self::load_project(id)?;
+        let _ = Self::load_project_record(id)?;
         let mut app_config = Self::load_app_config()?;
         app_config.active_project_id = Some(id.to_string());
         Self::save_app_config(&app_config)
@@ -141,6 +192,13 @@ impl ConfigManager {
             return Err(Error::ProjectNotFound(id.to_string()));
         }
         fs::remove_file(&path)?;
+
+        let mut app_config = Self::load_app_config()?;
+        if app_config.active_project_id.as_deref() == Some(id) {
+            app_config.active_project_id = None;
+            Self::save_app_config(&app_config)?;
+        }
+
         Ok(())
     }
 

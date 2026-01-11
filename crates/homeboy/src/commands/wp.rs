@@ -1,5 +1,7 @@
 use clap::Args;
-use homeboy_core::config::{ConfigManager, ProjectConfiguration, ProjectTypeManager};
+use homeboy_core::config::{
+    ConfigManager, ProjectConfiguration, ProjectRecord, ProjectTypeManager,
+};
 use homeboy_core::ssh::{execute_local_command, CommandOutput, SshClient};
 use homeboy_core::template::{render_map, TemplateVars};
 use homeboy_core::token;
@@ -35,12 +37,16 @@ pub struct WpOutput {
 }
 
 pub fn run(args: WpArgs) -> CmdResult<WpOutput> {
-    run_with_loader_and_executor(args, ConfigManager::load_project, execute_local_command)
+    run_with_loader_and_executor(
+        args,
+        ConfigManager::load_project_record,
+        execute_local_command,
+    )
 }
 
 fn run_with_loader_and_executor(
     args: WpArgs,
-    project_loader: fn(&str) -> homeboy_core::Result<ProjectConfiguration>,
+    project_loader: fn(&str) -> homeboy_core::Result<ProjectRecord>,
     local_executor: fn(&str) -> CommandOutput,
 ) -> CmdResult<WpOutput> {
     if args.args.is_empty() {
@@ -51,7 +57,7 @@ fn run_with_loader_and_executor(
 
     let project = project_loader(&args.project_id)?;
 
-    let type_def = ProjectTypeManager::resolve(&project.project_type);
+    let type_def = ProjectTypeManager::resolve(&project.project.project_type);
 
     let cli_config = type_def.cli.ok_or_else(|| {
         homeboy_core::Error::Other(format!(
@@ -74,11 +80,8 @@ fn run_with_loader_and_executor(
     } else {
         let (target_domain, command) = build_command(&project, &cli_config, &args.args, false)?;
 
-        let server_id = project.server_id.as_ref().ok_or_else(|| {
-            homeboy_core::Error::Other("Server not configured for project".to_string())
-        })?;
-        let server = ConfigManager::load_server(server_id)?;
-        let client = SshClient::from_server(&server, server_id)?;
+        let ctx = homeboy_core::context::resolve_project_server(&args.project_id)?;
+        let client = SshClient::from_server(&ctx.server, &ctx.server_id)?;
         let output = client.execute(&command);
         (output, Some(target_domain), command)
     };
@@ -99,29 +102,30 @@ fn run_with_loader_and_executor(
 }
 
 fn build_command(
-    project: &ProjectConfiguration,
+    project: &ProjectRecord,
     cli_config: &homeboy_core::config::CliConfig,
     args: &[String],
     use_local_domain: bool,
 ) -> homeboy_core::Result<(String, String)> {
     let base_path = if use_local_domain {
-        if !project.local_environment.is_configured() {
+        if !project.project.local_environment.is_configured() {
             return Err(homeboy_core::Error::Other(
                 "Local environment not configured for project".to_string(),
             ));
         }
-        project.local_environment.site_path.clone()
+        project.project.local_environment.site_path.clone()
     } else {
         project
+            .project
             .base_path
             .clone()
             .filter(|p| !p.is_empty())
             .ok_or_else(|| {
-                homeboy_core::Error::Other("Remote base path not configured".to_string())
+                homeboy_core::Error::Config("Remote base path not configured".to_string())
             })?
     };
 
-    let (target_domain, command_args) = resolve_subtarget(project, args, use_local_domain);
+    let (target_domain, command_args) = resolve_subtarget(&project.project, args, use_local_domain);
 
     if command_args.is_empty() {
         return Err(homeboy_core::Error::Other(
@@ -131,6 +135,7 @@ fn build_command(
 
     let cli_path = if use_local_domain {
         project
+            .project
             .local_environment
             .cli_path
             .clone()
@@ -208,32 +213,34 @@ fn resolve_subtarget(
 mod tests {
     use super::*;
 
-    fn fake_project_loader(_project_id: &str) -> homeboy_core::Result<ProjectConfiguration> {
-        Ok(ProjectConfiguration {
-            id: "saraichinwag".to_string(),
-            name: "Sarai Chinwag".to_string(),
-            domain: "example.com".to_string(),
-            project_type: "wordpress".to_string(),
-            server_id: Some("cloudways".to_string()),
-            base_path: Some("/tmp".to_string()),
-            table_prefix: Some("wp_".to_string()),
-            remote_files: Default::default(),
-            remote_logs: Default::default(),
-            database: Default::default(),
-            local_environment: homeboy_core::config::LocalEnvironmentConfig {
-                site_path: "/tmp".to_string(),
-                domain: "example.local".to_string(),
-                cli_path: None,
+    fn fake_project_loader(project_id: &str) -> homeboy_core::Result<ProjectRecord> {
+        Ok(ProjectRecord {
+            id: project_id.to_string(),
+            project: ProjectConfiguration {
+                name: "Sarai Chinwag".to_string(),
+                domain: "example.com".to_string(),
+                project_type: "wordpress".to_string(),
+                server_id: Some("cloudways".to_string()),
+                base_path: Some("/tmp".to_string()),
+                table_prefix: Some("wp_".to_string()),
+                remote_files: Default::default(),
+                remote_logs: Default::default(),
+                database: Default::default(),
+                local_environment: homeboy_core::config::LocalEnvironmentConfig {
+                    site_path: "/tmp".to_string(),
+                    domain: "example.local".to_string(),
+                    cli_path: None,
+                },
+                tools: Default::default(),
+                api: Default::default(),
+                sub_targets: vec![],
+                shared_tables: vec![],
+                component_ids: vec![],
+                table_groupings: vec![],
+                component_groupings: vec![],
+                protected_table_patterns: vec![],
+                unlocked_table_patterns: vec![],
             },
-            tools: Default::default(),
-            api: Default::default(),
-            sub_targets: vec![],
-            shared_tables: vec![],
-            component_ids: vec![],
-            table_groupings: vec![],
-            component_groupings: vec![],
-            protected_table_patterns: vec![],
-            unlocked_table_patterns: vec![],
         })
     }
 

@@ -2,6 +2,13 @@
 
 All notable changes to Homeboy CLI are documented in this file.
 
+## 0.1.9
+
+### Improvements
+- **Project management**: Added `homeboy project list` (and `--current`) plus `homeboy project pin` subcommands to manage pinned files/logs per project.
+- **Config correctness**: Project configs are now a strict `ProjectRecord` (`id` derived from slugified name) with validation to prevent mismatched IDs and to clear `active_project_id` when a project is deleted.
+- **Docs**: Updated embedded docs to reflect new/removed commands.
+
 ## 0.1.8
 
 ### Improvements

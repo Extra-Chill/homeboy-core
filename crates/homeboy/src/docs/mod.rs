@@ -11,16 +11,33 @@ fn docs_index() -> &'static HashMap<&'static str, &'static str> {
     DOCS.get_or_init(|| GENERATED_DOCS.iter().copied().collect())
 }
 
-pub fn resolve(topic: &[String]) -> (String, String) {
-    let (topic_label, key) = normalize_topic(topic);
-    let content = docs_index().get(key.as_str()).copied().unwrap_or_default();
-
-    (topic_label, content.to_string())
+#[derive(Debug, Clone)]
+pub struct ResolvedDoc {
+    pub topic_label: String,
+    pub key: String,
+    pub segments: Vec<String>,
+    pub content: String,
 }
 
-fn normalize_topic(topic: &[String]) -> (String, String) {
+pub fn resolve(topic: &[String]) -> ResolvedDoc {
+    let (topic_label, key, segments) = normalize_topic(topic);
+    let content = docs_index().get(key.as_str()).copied().unwrap_or_default();
+
+    ResolvedDoc {
+        topic_label,
+        key,
+        segments,
+        content: content.to_string(),
+    }
+}
+
+fn normalize_topic(topic: &[String]) -> (String, String, Vec<String>) {
     if topic.is_empty() {
-        return ("index".to_string(), "index".to_string());
+        return (
+            "index".to_string(),
+            "index".to_string(),
+            vec!["index".to_string()],
+        );
     }
 
     let user_label = topic.join(" ");
@@ -36,21 +53,25 @@ fn normalize_topic(topic: &[String]) -> (String, String) {
     }
 
     if segments.is_empty() {
-        return ("unknown".to_string(), "index".to_string());
+        return (
+            "unknown".to_string(),
+            "index".to_string(),
+            vec!["index".to_string()],
+        );
     }
 
     let key = segments.join("/");
 
     if user_label.is_empty() {
-        return ("unknown".to_string(), key);
+        return ("unknown".to_string(), key, segments);
     }
 
-    (user_label, key)
+    (user_label, key, segments)
 }
 
-pub fn available_topics() -> String {
+pub fn available_topics() -> Vec<String> {
     let mut keys: Vec<&'static str> = GENERATED_DOCS.iter().map(|(key, _)| *key).collect();
     keys.sort_unstable();
 
-    keys.join("\n")
+    keys.into_iter().map(|key| key.to_string()).collect()
 }

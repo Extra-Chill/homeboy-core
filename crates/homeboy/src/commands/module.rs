@@ -347,7 +347,7 @@ fn run_cli_module(
         || template::is_present(command_template, "cliPath")
         || template::is_present(command_template, "domain");
 
-    let project_config = if requires_project {
+    let (project_config, project_id) = if requires_project {
         let project_id = project
             .or_else(|| {
                 ConfigManager::load_app_config()
@@ -364,14 +364,14 @@ fn run_cli_module(
 
         if !project_config.local_environment.is_configured() {
             return Err(homeboy_core::Error::Other(format!(
-                "Local environment not configured for project '{}'. Configure 'Local Site Path' in Homeboy.app Settings.",
-                project_id
+                 "Local environment not configured for project '{}'. Configure 'Local Site Path' in Homeboy.app Settings.",
+                 project_id
             )));
         }
 
-        Some(project_config)
+        (Some(project_config), Some(project_id))
     } else {
-        None
+        (None, None)
     };
 
     let mut argv = Vec::new();
@@ -405,7 +405,7 @@ fn run_cli_module(
             .unwrap_or("wp".to_string());
 
         vec![
-            ("projectId", project_config.id.as_str()),
+            ("projectId", project_id.as_deref().unwrap_or("")),
             ("domain", local_domain.as_str()),
             (
                 "sitePath",

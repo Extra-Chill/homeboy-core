@@ -133,9 +133,9 @@ fn build_context(
     project_id: &str,
     args: &[String],
 ) -> homeboy_core::Result<(DbContext, Vec<String>)> {
-    let project = ConfigManager::load_project(project_id)?;
+    let project = ConfigManager::load_project_record(project_id)?;
 
-    let server_id = project.server_id.clone().ok_or_else(|| {
+    let server_id = project.project.server_id.clone().ok_or_else(|| {
         homeboy_core::Error::Config(format!(
             "Server not configured for project '{}'",
             project_id
@@ -144,7 +144,7 @@ fn build_context(
 
     let server = ConfigManager::load_server(&server_id)?;
 
-    let base_path = project.base_path.clone().ok_or_else(|| {
+    let base_path = project.project.base_path.clone().ok_or_else(|| {
         homeboy_core::Error::Config(format!(
             "Base path not configured for project '{}'",
             project_id
@@ -162,25 +162,25 @@ fn build_context(
         .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
 
     let mut remaining_args = args.to_vec();
-    let domain = if !project.sub_targets.is_empty() {
+    let domain = if !project.project.sub_targets.is_empty() {
         if let Some(sub_id) = args.first() {
-            if let Some(subtarget) = project.sub_targets.iter().find(|target| {
+            if let Some(subtarget) = project.project.sub_targets.iter().find(|target| {
                 token::identifier_eq(&target.id, sub_id)
                     || token::identifier_eq(&target.name, sub_id)
             }) {
                 remaining_args.remove(0);
                 subtarget.domain.clone()
             } else {
-                project.domain.clone()
+                project.project.domain.clone()
             }
         } else {
-            project.domain.clone()
+            project.project.domain.clone()
         }
     } else {
-        project.domain.clone()
+        project.project.domain.clone()
     };
 
-    let type_def = ProjectTypeManager::resolve(&project.project_type);
+    let type_def = ProjectTypeManager::resolve(&project.project.project_type);
     let cli_path = type_def
         .cli
         .as_ref()
@@ -460,9 +460,9 @@ fn drop_table(
 }
 
 fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy_core::Result<(DbOutput, i32)> {
-    let project = ConfigManager::load_project(project_id)?;
+    let project = ConfigManager::load_project_record(project_id)?;
 
-    let server_id = project.server_id.clone().ok_or_else(|| {
+    let server_id = project.project.server_id.clone().ok_or_else(|| {
         homeboy_core::Error::Config(format!(
             "Server not configured for project '{}'",
             project_id
@@ -474,21 +474,21 @@ fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy_core::Result<(Db
     let client = homeboy_core::ssh::SshClient::from_server(&server, &server_id)
         .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
 
-    let remote_host = if project.database.host.is_empty() {
+    let remote_host = if project.project.database.host.is_empty() {
         "127.0.0.1".to_string()
     } else {
-        project.database.host.clone()
+        project.project.database.host.clone()
     };
 
-    let remote_port = project.database.port;
+    let remote_port = project.project.database.port;
     let bind_port = local_port.unwrap_or(33306);
 
     let tunnel_info = DbTunnelInfo {
         local_port: bind_port,
         remote_host: remote_host.clone(),
         remote_port,
-        database: project.database.name.clone(),
-        user: project.database.user.clone(),
+        database: project.project.database.name.clone(),
+        user: project.project.database.user.clone(),
     };
 
     let mut ssh_args = Vec::new();
@@ -526,8 +526,8 @@ fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy_core::Result<(Db
         DbOutput {
             command: "db.tunnel".to_string(),
             project_id: project_id.to_string(),
-            base_path: project.base_path.clone(),
-            domain: Some(project.domain.clone()),
+            base_path: project.project.base_path.clone(),
+            domain: Some(project.project.domain.clone()),
             cli_path: None,
             stdout: None,
             stderr: None,

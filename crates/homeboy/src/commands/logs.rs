@@ -85,9 +85,10 @@ pub struct LogContent {
 }
 
 fn list(project_id: &str) -> CmdResult<LogsOutput> {
-    let project = ConfigManager::load_project(project_id)?;
+    let project = ConfigManager::load_project_record(project_id)?;
 
     let entries = project
+        .project
         .remote_logs
         .pinned_logs
         .iter()
@@ -111,21 +112,12 @@ fn list(project_id: &str) -> CmdResult<LogsOutput> {
 }
 
 fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<LogsOutput> {
-    let project = ConfigManager::load_project(project_id)?;
+    let ctx = homeboy_core::context::resolve_project_server(project_id)?;
 
-    let server_id = project.server_id.as_deref().ok_or_else(|| {
-        homeboy_core::Error::Other(format!(
-            "Server not configured for project '{}'",
-            project_id
-        ))
-    })?;
+    let full_path = base_path::join_remote_path(ctx.project.base_path.as_deref(), path)?;
 
-    let server = ConfigManager::load_server(server_id)?;
-
-    let full_path = base_path::join_remote_path(project.base_path.as_deref(), path)?;
-
-    let client = SshClient::from_server(&server, server_id)
-        .map_err(|e| homeboy_core::Error::Other(format!("SSH error: {}", e)))?;
+    let client = SshClient::from_server(&ctx.server, &ctx.server_id)
+        .map_err(|e| homeboy_core::Error::Ssh(e.to_string()))?;
 
     if follow {
         let tail_cmd = format!("tail -f '{}'", full_path);
@@ -167,21 +159,12 @@ fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<Log
 }
 
 fn clear(project_id: &str, path: &str) -> CmdResult<LogsOutput> {
-    let project = ConfigManager::load_project(project_id)?;
+    let ctx = homeboy_core::context::resolve_project_server(project_id)?;
 
-    let server_id = project.server_id.as_deref().ok_or_else(|| {
-        homeboy_core::Error::Other(format!(
-            "Server not configured for project '{}'",
-            project_id
-        ))
-    })?;
+    let client = SshClient::from_server(&ctx.server, &ctx.server_id)
+        .map_err(|e| homeboy_core::Error::Ssh(e.to_string()))?;
 
-    let server = ConfigManager::load_server(server_id)?;
-
-    let client = SshClient::from_server(&server, server_id)
-        .map_err(|e| homeboy_core::Error::Other(format!("SSH error: {}", e)))?;
-
-    let full_path = base_path::join_remote_path(project.base_path.as_deref(), path)?;
+    let full_path = base_path::join_remote_path(ctx.project.base_path.as_deref(), path)?;
 
     let command = format!(": > '{}'", full_path);
     let output = client.execute(&command);

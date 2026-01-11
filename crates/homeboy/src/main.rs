@@ -4,8 +4,8 @@ mod commands;
 mod docs;
 
 use commands::{
-    build, changelog, component, db, deploy, docs as docs_command, file, git, logs, module, pin,
-    pm2, project, projects, server, ssh, version, wp,
+    build, changelog, component, db, deploy, docs as docs_command, file, git, logs, module, pm2,
+    project, server, ssh, version, wp,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -21,8 +21,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// List all configured projects
-    Projects(projects::ProjectsArgs),
     /// Manage project configuration
     Project(project::ProjectArgs),
     /// SSH into a project server or configured server
@@ -43,8 +41,6 @@ enum Commands {
     Deploy(deploy::DeployArgs),
     /// Manage standalone component configurations
     Component(component::ComponentArgs),
-    /// Manage pinned files and logs
-    Pin(pin::PinArgs),
     /// Execute CLI-compatible modules
     Module(module::ModuleArgs),
     /// Display CLI documentation
@@ -63,9 +59,6 @@ fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
 
     let (json_result, exit_code) = match cli.command {
-        Commands::Projects(args) => {
-            homeboy_core::output::map_cmd_result_to_json(projects::run(args))
-        }
         Commands::Project(args) => homeboy_core::output::map_cmd_result_to_json(project::run(args)),
         Commands::Ssh(args) => homeboy_core::output::map_cmd_result_to_json(ssh::run(args)),
         Commands::Wp(args) => homeboy_core::output::map_cmd_result_to_json(wp::run(args)),
@@ -78,7 +71,6 @@ fn main() -> std::process::ExitCode {
         Commands::Component(args) => {
             homeboy_core::output::map_cmd_result_to_json(component::run(args))
         }
-        Commands::Pin(args) => homeboy_core::output::map_cmd_result_to_json(pin::run(args)),
         Commands::Module(args) => homeboy_core::output::map_cmd_result_to_json(module::run(args)),
         Commands::Docs(args) => {
             homeboy_core::output::map_cmd_result_to_json(docs_command::run(args))

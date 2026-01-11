@@ -11,9 +11,9 @@ pub struct ChangelogOutput {
 }
 
 pub fn run() -> CmdResult<ChangelogOutput> {
-    let (topic_label, content) = docs::resolve(&["changelog".to_string()]);
+    let resolved = docs::resolve(&["changelog".to_string()]);
 
-    if content.is_empty() {
+    if resolved.content.is_empty() {
         return Err(homeboy_core::Error::Other(
             "No changelog found (expected embedded docs topic 'changelog')".to_string(),
         ));
@@ -21,8 +21,8 @@ pub fn run() -> CmdResult<ChangelogOutput> {
 
     Ok((
         ChangelogOutput {
-            topic_label,
-            content,
+            topic_label: resolved.topic_label,
+            content: resolved.content,
         },
         0,
     ))

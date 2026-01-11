@@ -88,15 +88,16 @@ pub struct DeployOutput {
 }
 
 pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
-    let project = ConfigManager::load_project(&args.project_id)?;
+    let project = ConfigManager::load_project_record(&args.project_id)?;
 
-    let server_id = project.server_id.clone().ok_or_else(|| {
+    let server_id = project.project.server_id.clone().ok_or_else(|| {
         homeboy_core::Error::Other("Server not configured for project".to_string())
     })?;
 
     let server = ConfigManager::load_server(&server_id)?;
 
     let base_path = project
+        .project
         .base_path
         .clone()
         .filter(|p| !p.is_empty())
@@ -106,7 +107,7 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
 
     let client = SshClient::from_server(&server, &server_id)?;
 
-    let all_components = load_components(&project.component_ids);
+    let all_components = load_components(&project.project.component_ids);
     if all_components.is_empty() {
         return Err(homeboy_core::Error::Other(
             "No components configured for project".to_string(),

@@ -97,9 +97,9 @@ struct FileContext {
 }
 
 fn build_context(project_id: &str) -> homeboy_core::Result<FileContext> {
-    let project = ConfigManager::load_project(project_id)?;
+    let project = ConfigManager::load_project_record(project_id)?;
 
-    let server_id = project.server_id.ok_or_else(|| {
+    let server_id = project.project.server_id.ok_or_else(|| {
         homeboy_core::Error::Config(format!(
             "Server not configured for project '{}'",
             project_id
@@ -112,7 +112,7 @@ fn build_context(project_id: &str) -> homeboy_core::Result<FileContext> {
 
     Ok(FileContext {
         client,
-        base_path: project.base_path,
+        base_path: project.project.base_path,
     })
 }
 

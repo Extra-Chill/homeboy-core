@@ -1,5 +1,5 @@
 use clap::Args;
-use homeboy_core::config::{ConfigManager, ProjectConfiguration, ServerConfig};
+use homeboy_core::config::{ConfigManager, ProjectConfiguration, ProjectRecord, ServerConfig};
 use homeboy_core::ssh::SshClient;
 use serde::Serialize;
 
@@ -34,7 +34,7 @@ pub struct SshOutput {
 pub fn run(args: SshArgs) -> CmdResult<SshOutput> {
     run_with_loaders_and_executor(
         args,
-        ConfigManager::load_project,
+        ConfigManager::load_project_record,
         ConfigManager::load_server,
         execute_interactive,
     )
@@ -42,7 +42,7 @@ pub fn run(args: SshArgs) -> CmdResult<SshOutput> {
 
 fn run_with_loaders_and_executor(
     args: SshArgs,
-    project_loader: fn(&str) -> homeboy_core::Result<ProjectConfiguration>,
+    project_loader: fn(&str) -> homeboy_core::Result<ProjectRecord>,
     server_loader: fn(&str) -> homeboy_core::Result<ServerConfig>,
     executor: fn(&ServerConfig, &str, Option<&str>) -> homeboy_core::Result<i32>,
 ) -> CmdResult<SshOutput> {
@@ -79,13 +79,13 @@ fn execute_interactive(
 
 fn resolve_context(
     args: &SshArgs,
-    project_loader: fn(&str) -> homeboy_core::Result<ProjectConfiguration>,
+    project_loader: fn(&str) -> homeboy_core::Result<ProjectRecord>,
     server_loader: fn(&str) -> homeboy_core::Result<ServerConfig>,
 ) -> homeboy_core::Result<(String, Option<String>, String, ServerConfig)> {
     if let Some(project_id) = &args.project {
-        let project = project_loader(project_id)?;
-        let (server_id, server) = resolve_from_loaded_project(&project, server_loader)?;
-        return Ok(("project".to_string(), Some(project.id), server_id, server));
+        let record = project_loader(project_id)?;
+        let (server_id, server) = resolve_from_loaded_project(&record.project, server_loader)?;
+        return Ok(("project".to_string(), Some(record.id), server_id, server));
     }
 
     if let Some(server_id) = &args.server {
@@ -97,9 +97,9 @@ fn resolve_context(
         homeboy_core::Error::Other("Project ID or server ID is required".to_string())
     })?;
 
-    if let Ok(project) = project_loader(id) {
-        let (server_id, server) = resolve_from_loaded_project(&project, server_loader)?;
-        return Ok(("project".to_string(), Some(project.id), server_id, server));
+    if let Ok(record) = project_loader(id) {
+        let (server_id, server) = resolve_from_loaded_project(&record.project, server_loader)?;
+        return Ok(("project".to_string(), Some(record.id), server_id, server));
     }
 
     if let Ok(server) = server_loader(id) {
@@ -140,28 +140,30 @@ mod tests {
         }
     }
 
-    fn project(id: &str, server_id: Option<&str>) -> ProjectConfiguration {
-        ProjectConfiguration {
+    fn project(id: &str, server_id: Option<&str>) -> ProjectRecord {
+        ProjectRecord {
             id: id.to_string(),
-            name: String::new(),
-            domain: String::new(),
-            project_type: "wordpress".to_string(),
-            server_id: server_id.map(|s| s.to_string()),
-            base_path: None,
-            table_prefix: None,
-            remote_files: homeboy_core::config::RemoteFileConfig::default(),
-            remote_logs: homeboy_core::config::RemoteLogConfig::default(),
-            database: homeboy_core::config::DatabaseConfig::default(),
-            local_environment: homeboy_core::config::LocalEnvironmentConfig::default(),
-            tools: homeboy_core::config::ToolsConfig::default(),
-            api: homeboy_core::config::ApiConfig::default(),
-            sub_targets: vec![],
-            shared_tables: vec![],
-            component_ids: vec![],
-            table_groupings: vec![],
-            component_groupings: vec![],
-            protected_table_patterns: vec![],
-            unlocked_table_patterns: vec![],
+            project: ProjectConfiguration {
+                name: String::new(),
+                domain: String::new(),
+                project_type: "wordpress".to_string(),
+                server_id: server_id.map(|s| s.to_string()),
+                base_path: None,
+                table_prefix: None,
+                remote_files: homeboy_core::config::RemoteFileConfig::default(),
+                remote_logs: homeboy_core::config::RemoteLogConfig::default(),
+                database: homeboy_core::config::DatabaseConfig::default(),
+                local_environment: homeboy_core::config::LocalEnvironmentConfig::default(),
+                tools: homeboy_core::config::ToolsConfig::default(),
+                api: homeboy_core::config::ApiConfig::default(),
+                sub_targets: vec![],
+                shared_tables: vec![],
+                component_ids: vec![],
+                table_groupings: vec![],
+                component_groupings: vec![],
+                protected_table_patterns: vec![],
+                unlocked_table_patterns: vec![],
+            },
         }
     }
 
