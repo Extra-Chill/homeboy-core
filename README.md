@@ -2,6 +2,8 @@
 
 LLM-first CLI for development and deployment automation. Designed for LLMs and developers using LLMs to iterate, debug, and ship fast.
 
+Note: This should be considered experimental and is still early in development. 
+
 ## Installation
 
 ### Homebrew
