@@ -9,7 +9,6 @@ mod project_id;
 mod project_manager;
 mod project_type;
 mod record;
-pub mod resolve;
 mod scoped_module;
 mod server;
 

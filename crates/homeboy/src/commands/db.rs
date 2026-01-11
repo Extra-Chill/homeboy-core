@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use std::process::{Command, Stdio};
 
-use homeboy_core::config::{resolve, ConfigManager, ProjectTypeManager, SlugIdentifiable};
+use homeboy_core::config::{ConfigManager, ProjectTypeManager, SlugIdentifiable};
 use homeboy_core::context::{resolve_project_ssh, resolve_project_ssh_with_base_path};
 use homeboy_core::shell;
 use homeboy_core::ssh::SshClient;
@@ -156,13 +156,13 @@ fn build_context(
         project.config.domain.clone()
     };
 
+    let app_config = ConfigManager::load_app_config()?;
     let type_def = ProjectTypeManager::resolve(&project.config.project_type);
     let cli_path = type_def
         .cli
         .as_ref()
         .and_then(|cli| cli.default_cli_path.clone())
-        .or_else(|| resolve::resolve_cli_path().ok())
-        .unwrap_or_else(|| "wp".to_string());
+        .unwrap_or_else(|| app_config.default_cli_path.clone());
 
     Ok((
         DbContext {
@@ -442,20 +442,16 @@ fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy_core::Result<(Db
     let server = ctx.server;
     let client = ctx.client;
 
-    let db_settings = resolve::resolve_db_settings().unwrap_or_else(|_| resolve::EffectiveDbSettings {
-        cli_path: "wp".to_string(),
-        host: "127.0.0.1".to_string(),
-        local_port: 33306,
-    });
+    let app_config = ConfigManager::load_app_config()?;
 
     let remote_host = if project.config.database.host.is_empty() {
-        db_settings.host
+        app_config.default_database_host.clone()
     } else {
         project.config.database.host.clone()
     };
 
     let remote_port = project.config.database.port;
-    let bind_port = local_port.unwrap_or(db_settings.local_port);
+    let bind_port = local_port.unwrap_or(app_config.default_local_db_port);
 
     let tunnel_info = DbTunnelInfo {
         local_port: bind_port,

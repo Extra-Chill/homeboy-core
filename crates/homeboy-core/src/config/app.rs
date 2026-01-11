@@ -1,7 +1,31 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_cli_path() -> String {
+    "wp".to_string()
+}
+
+fn default_database_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_local_db_port() -> u16 {
+    33306
+}
+
+fn is_default_cli_path(v: &String) -> bool {
+    v == "wp"
+}
+
+fn is_default_database_host(v: &String) -> bool {
+    v == "127.0.0.1"
+}
+
+fn is_default_local_db_port(v: &u16) -> bool {
+    *v == 33306
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -16,14 +40,28 @@ pub struct AppConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_modules: Option<HashMap<String, InstalledModuleConfig>>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_cli_path: Option<String>,
+    #[serde(default = "default_cli_path", skip_serializing_if = "is_default_cli_path")]
+    pub default_cli_path: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_database_host: Option<String>,
+    #[serde(default = "default_database_host", skip_serializing_if = "is_default_database_host")]
+    pub default_database_host: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_local_db_port: Option<u16>,
+    #[serde(default = "default_local_db_port", skip_serializing_if = "is_default_local_db_port")]
+    pub default_local_db_port: u16,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            active_project_id: None,
+            default_changelog_next_section_label: None,
+            default_changelog_next_section_aliases: None,
+            installed_modules: None,
+            default_cli_path: default_cli_path(),
+            default_database_host: default_database_host(),
+            default_local_db_port: default_local_db_port(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

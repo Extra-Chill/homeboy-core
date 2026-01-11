@@ -737,12 +737,7 @@ mod tests {
         });
         let typed = AppConfig {
             active_project_id: Some("abc".to_string()),
-            default_changelog_next_section_label: None,
-            default_changelog_next_section_aliases: None,
-            installed_modules: None,
-            default_cli_path: None,
-            default_database_host: None,
-            default_local_db_port: None,
+            ..Default::default()
         };
         let path = Path::new("/tmp/config.json");
         scanner.emit_unknown_keys(path, "AppConfig", &raw, &typed);
@@ -758,12 +753,7 @@ mod tests {
         let mut scanner = Scanner::new();
         scanner.app_config = Some(AppConfig {
             active_project_id: Some("missing".to_string()),
-            default_changelog_next_section_label: None,
-            default_changelog_next_section_aliases: None,
-            installed_modules: None,
-            default_cli_path: None,
-            default_database_host: None,
-            default_local_db_port: None,
+            ..Default::default()
         });
         scanner.validate_cross_refs();
 

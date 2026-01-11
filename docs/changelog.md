@@ -2,6 +2,15 @@
 
 All notable changes to Homeboy CLI are documented in this file.
 
+## 0.2.2
+
+
+- Default app config values are serialized (no more Option-based defaults for DB settings)
+
+- DB commands now read default CLI path/host/port from AppConfig instead of resolve helpers
+
+## Unreleased
+
 ## 0.2.0
 
 ### Improvements
