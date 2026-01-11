@@ -194,32 +194,23 @@ pub fn finalize_next_section(
 
     let mut out_lines: Vec<String> = Vec::new();
 
-    // Copy everything before the next-section heading.
+    // Copy everything before ## Unreleased.
     for line in &lines[..start] {
         out_lines.push((*line).to_string());
     }
 
-    // Insert new version section before the existing next section.
+    // Add new empty ## Unreleased at the top.
     if out_lines.last().is_some_and(|l| !l.trim().is_empty()) {
         out_lines.push(String::new());
     }
-    out_lines.push(format!("## {}", new_version.trim()));
-    out_lines.push(String::new());
-
-    for line in body_lines {
-        out_lines.push((*line).to_string());
-    }
-
-    // Ensure a blank line before re-creating the empty next section.
-    if out_lines.last().is_some_and(|l| !l.trim().is_empty()) {
-        out_lines.push(String::new());
-    }
-
     out_lines.push(format!("## {}", next_label));
     out_lines.push(String::new());
 
-    // Copy rest of changelog after original next section.
-    for line in &lines[end..] {
+    // Replace old ## Unreleased with ## <new_version>.
+    out_lines.push(format!("## {}", new_version.trim()));
+
+    // Copy everything after the old heading (body + rest of file).
+    for line in &lines[start + 1..] {
         out_lines.push((*line).to_string());
     }
 
@@ -241,9 +232,11 @@ mod tests {
         let aliases = vec!["Unreleased".to_string(), "[Unreleased]".to_string()];
         let (out, changed) = finalize_next_section(content, &aliases, "0.2.0", false).unwrap();
         assert!(changed);
-        assert!(out.contains("## 0.2.0\n\n\n- First\n- Second"));
-        assert!(out.contains("## Unreleased"));
-        assert!(out.contains("## 0.2.0"));
+        // ## Unreleased should be at the top (before ## 0.2.0)
+        let unreleased_pos = out.find("## Unreleased").unwrap();
+        let version_pos = out.find("## 0.2.0").unwrap();
+        assert!(unreleased_pos < version_pos, "## Unreleased should come before ## 0.2.0");
+        assert!(out.contains("## 0.2.0\n\n- First\n- Second"));
         assert!(out.contains("## 0.1.0"));
     }
 
@@ -384,9 +377,6 @@ fn append_item_to_next_section(
         out.push('\n');
 
         if idx + 1 == end {
-            if !out.ends_with("\n\n") {
-                out.push('\n');
-            }
             out.push_str(&bullet);
             out.push('\n');
         }
