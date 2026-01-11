@@ -100,16 +100,25 @@ pub struct ConfigKeyOutput {
 
 pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
     match args.command {
-        ConfigCommand::Path => Ok((
-            ConfigOutput::Path {
-                path: AppPaths::config().to_string_lossy().to_string(),
-            },
-            0,
-        )),
+        ConfigCommand::Path => {
+            let path = AppPaths::config()?;
+            Ok((
+                ConfigOutput::Path {
+                    path: path.to_string_lossy().to_string(),
+                },
+                0,
+            ))
+        }
         ConfigCommand::Show => {
-            let path = AppPaths::config().to_string_lossy().to_string();
+            let path = AppPaths::config()?;
             let config = ConfigManager::load_app_config()?;
-            Ok((ConfigOutput::Show { path, config }, 0))
+            Ok((
+                ConfigOutput::Show {
+                    path: path.to_string_lossy().to_string(),
+                    config,
+                },
+                0,
+            ))
         }
         ConfigCommand::Keys => {
             let keys = KNOWN_CONFIG_KEYS
@@ -136,7 +145,7 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
 
             let json_value = parse_config_value(known.value_type, &value)?;
 
-            let path = AppPaths::config();
+            let path = AppPaths::config()?;
             AppPaths::ensure_directories()?;
 
             let mut root = if path.exists() {
@@ -166,7 +175,7 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
                 )));
             };
 
-            let path = AppPaths::config();
+            let path = AppPaths::config()?;
             if !path.exists() {
                 return Err(homeboy_core::Error::Config(format!(
                     "Config file not found: {}",
@@ -205,7 +214,7 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
             let json_value: serde_json::Value = serde_json::from_str(&value)
                 .map_err(|e| homeboy_core::Error::Config(format!("Invalid JSON value: {}", e)))?;
 
-            let path = AppPaths::config();
+            let path = AppPaths::config()?;
             AppPaths::ensure_directories()?;
 
             let mut root = if path.exists() {

@@ -1,85 +1,90 @@
-use crate::Result;
+use crate::{Error, Result};
 use std::path::PathBuf;
 
 pub struct AppPaths;
 
 impl AppPaths {
-    pub fn homeboy() -> PathBuf {
-        dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("~"))
-            .join("Homeboy")
+    pub fn homeboy() -> Result<PathBuf> {
+        let config_dir = dirs::config_dir().ok_or_else(|| {
+            Error::Other(
+                "Unable to resolve a config directory for this OS. This likely indicates a broken environment (missing HOME/USERPROFILE/APPDATA/XDG_CONFIG_HOME) or a bug in the config path resolver."
+                    .to_string(),
+            )
+        })?;
+
+        Ok(config_dir.join("homeboy"))
     }
 
-    pub fn config() -> PathBuf {
-        Self::homeboy().join("config.json")
+    pub fn config() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("config.json"))
     }
 
-    pub fn projects() -> PathBuf {
-        Self::homeboy().join("projects")
+    pub fn projects() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("projects"))
     }
 
-    pub fn servers() -> PathBuf {
-        Self::homeboy().join("servers")
+    pub fn servers() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("servers"))
     }
 
-    pub fn components() -> PathBuf {
-        Self::homeboy().join("components")
+    pub fn components() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("components"))
     }
 
-    pub fn modules() -> PathBuf {
-        Self::homeboy().join("modules")
+    pub fn modules() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("modules"))
     }
 
-    pub fn keys() -> PathBuf {
-        Self::homeboy().join("keys")
+    pub fn keys() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("keys"))
     }
 
-    pub fn backups() -> PathBuf {
-        Self::homeboy().join("backups")
+    pub fn backups() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("backups"))
     }
 
-    pub fn project_types() -> PathBuf {
-        Self::homeboy().join("project-types")
+    pub fn project_types() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("project-types"))
     }
 
-    pub fn playwright_browsers() -> PathBuf {
-        Self::homeboy().join("playwright-browsers")
+    pub fn playwright_browsers() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("playwright-browsers"))
     }
 
-    pub fn docs() -> PathBuf {
-        Self::homeboy().join("docs")
+    pub fn docs() -> Result<PathBuf> {
+        Ok(Self::homeboy()?.join("docs"))
     }
 
-    pub fn project(id: &str) -> PathBuf {
-        Self::projects().join(format!("{}.json", id))
+    pub fn project(id: &str) -> Result<PathBuf> {
+        Ok(Self::projects()?.join(format!("{}.json", id)))
     }
 
-    pub fn server(id: &str) -> PathBuf {
-        Self::servers().join(format!("{}.json", id))
+    pub fn server(id: &str) -> Result<PathBuf> {
+        Ok(Self::servers()?.join(format!("{}.json", id)))
     }
 
-    pub fn component(id: &str) -> PathBuf {
-        Self::components().join(format!("{}.json", id))
+    pub fn component(id: &str) -> Result<PathBuf> {
+        Ok(Self::components()?.join(format!("{}.json", id)))
     }
 
-    pub fn module(id: &str) -> PathBuf {
-        Self::modules().join(id)
+    pub fn module(id: &str) -> Result<PathBuf> {
+        Ok(Self::modules()?.join(id))
     }
 
-    pub fn key(server_id: &str) -> PathBuf {
-        Self::keys().join(format!("{}_id_rsa", server_id))
+    pub fn key(server_id: &str) -> Result<PathBuf> {
+        Ok(Self::keys()?.join(format!("{}_id_rsa", server_id)))
     }
 
     pub fn ensure_directories() -> Result<()> {
         let dirs = [
-            Self::homeboy(),
-            Self::projects(),
-            Self::servers(),
-            Self::components(),
-            Self::modules(),
-            Self::keys(),
-            Self::backups(),
-            Self::project_types(),
+            Self::homeboy()?,
+            Self::projects()?,
+            Self::servers()?,
+            Self::components()?,
+            Self::modules()?,
+            Self::keys()?,
+            Self::backups()?,
+            Self::project_types()?,
         ];
         for dir in dirs {
             if !dir.exists() {

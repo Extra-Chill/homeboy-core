@@ -152,12 +152,10 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
                 remote_version: remote_versions.get(&component.id).cloned(),
                 error: None,
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(
-                    homeboy_core::base_path::join_remote_path_or_fallback(
-                        Some(&base_path),
-                        &component.remote_path,
-                    ),
-                ),
+                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                    Some(&base_path),
+                    &component.remote_path,
+                )),
                 build_command: component.build_command.clone(),
                 build_exit_code: None,
                 scp_exit_code: None,
@@ -208,12 +206,10 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
                 remote_version,
                 error: Some(error.clone()),
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(
-                    homeboy_core::base_path::join_remote_path_or_fallback(
-                        Some(&base_path),
-                        &component.remote_path,
-                    ),
-                ),
+                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                    Some(&base_path),
+                    &component.remote_path,
+                )),
                 build_command: component.build_command.clone(),
                 build_exit_code,
                 scp_exit_code: None,
@@ -231,12 +227,10 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
                 remote_version,
                 error: Some(format!("Artifact not found: {}", component.build_artifact)),
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(
-                    homeboy_core::base_path::join_remote_path_or_fallback(
-                        Some(&base_path),
-                        &component.remote_path,
-                    ),
-                ),
+                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                    Some(&base_path),
+                    &component.remote_path,
+                )),
                 build_command: component.build_command.clone(),
                 build_exit_code,
                 scp_exit_code: None,
@@ -257,12 +251,10 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
                 remote_version,
                 error: Some(error),
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(
-                    homeboy_core::base_path::join_remote_path_or_fallback(
-                        Some(&base_path),
-                        &component.remote_path,
-                    ),
-                ),
+                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                    Some(&base_path),
+                    &component.remote_path,
+                )),
                 build_command: component.build_command.clone(),
                 build_exit_code,
                 scp_exit_code,
@@ -279,12 +271,10 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
             remote_version: local_version,
             error: None,
             artifact_path: Some(component.build_artifact.clone()),
-            remote_path: Some(
-                homeboy_core::base_path::join_remote_path_or_fallback(
-                    Some(&base_path),
-                    &component.remote_path,
-                ),
-            ),
+            remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                Some(&base_path),
+                &component.remote_path,
+            )),
             build_command: component.build_command.clone(),
             build_exit_code,
             scp_exit_code,

@@ -200,7 +200,15 @@ pub struct ProjectTypeManager;
 impl ProjectTypeManager {
     pub fn resolve(type_id: &str) -> ProjectTypeDefinition {
         // First try to load from user-defined JSON
-        let path = AppPaths::project_types().join(format!("{}.json", type_id));
+        let Ok(path) = AppPaths::project_types().map(|d| d.join(format!("{}.json", type_id)))
+        else {
+            return match type_id {
+                "wordpress" => ProjectTypeDefinition::builtin_wordpress(),
+                "nodejs" => ProjectTypeDefinition::builtin_nodejs(),
+                _ => ProjectTypeDefinition::fallback_generic(),
+            };
+        };
+
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(def) = serde_json::from_str::<ProjectTypeDefinition>(&content) {

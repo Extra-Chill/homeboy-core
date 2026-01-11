@@ -150,15 +150,30 @@ impl Scanner {
                 self.validate_cross_refs();
             }
             DoctorScope::App => {
-                let path = AppPaths::config();
+                let Ok(path) = AppPaths::config() else {
+                    return;
+                };
                 if path.exists() {
                     self.scan_app_config(&path);
                 }
             }
-            DoctorScope::Projects => self.scan_dir_json(AppPaths::projects(), FileKind::Project),
-            DoctorScope::Servers => self.scan_dir_json(AppPaths::servers(), FileKind::Server),
+            DoctorScope::Projects => {
+                let Ok(dir) = AppPaths::projects() else {
+                    return;
+                };
+                self.scan_dir_json(dir, FileKind::Project)
+            }
+            DoctorScope::Servers => {
+                let Ok(dir) = AppPaths::servers() else {
+                    return;
+                };
+                self.scan_dir_json(dir, FileKind::Server)
+            }
             DoctorScope::Components => {
-                self.scan_dir_json(AppPaths::components(), FileKind::Component)
+                let Ok(dir) = AppPaths::components() else {
+                    return;
+                };
+                self.scan_dir_json(dir, FileKind::Component)
             }
             DoctorScope::Modules => self.scan_modules(),
         }
@@ -219,7 +234,9 @@ impl Scanner {
     }
 
     fn scan_modules(&mut self) {
-        let modules_dir = AppPaths::modules();
+        let Ok(modules_dir) = AppPaths::modules() else {
+            return;
+        };
         if !modules_dir.exists() {
             return;
         }
@@ -547,7 +564,9 @@ impl Scanner {
                         severity: DoctorSeverity::Error,
                         code: "BROKEN_REFERENCE".to_string(),
                         message: "activeProjectId references missing project".to_string(),
-                        file: AppPaths::config().to_string_lossy().to_string(),
+                        file: AppPaths::config()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "<unresolved config path>".to_string()),
                         pointer: Some("/activeProjectId".to_string()),
                         details: Some(serde_json::json!({"id": active})),
                     });
@@ -562,7 +581,9 @@ impl Scanner {
                         severity: DoctorSeverity::Warning,
                         code: "BROKEN_REFERENCE".to_string(),
                         message: "project.serverId references missing server".to_string(),
-                        file: AppPaths::project(project_id).to_string_lossy().to_string(),
+                        file: AppPaths::project(project_id)
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "<unresolved project path>".to_string()),
                         pointer: Some("/serverId".to_string()),
                         details: Some(serde_json::json!({"id": server_id})),
                     });
@@ -575,7 +596,9 @@ impl Scanner {
                         severity: DoctorSeverity::Warning,
                         code: "BROKEN_REFERENCE".to_string(),
                         message: "project.componentIds contains missing component".to_string(),
-                        file: AppPaths::project(project_id).to_string_lossy().to_string(),
+                        file: AppPaths::project(project_id)
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "<unresolved project path>".to_string()),
                         pointer: Some("/componentIds".to_string()),
                         details: Some(serde_json::json!({"id": component_id})),
                     });

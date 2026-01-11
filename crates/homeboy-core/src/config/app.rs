@@ -40,13 +40,22 @@ pub struct AppConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_modules: Option<HashMap<String, InstalledModuleConfig>>,
 
-    #[serde(default = "default_cli_path", skip_serializing_if = "is_default_cli_path")]
+    #[serde(
+        default = "default_cli_path",
+        skip_serializing_if = "is_default_cli_path"
+    )]
     pub default_cli_path: String,
 
-    #[serde(default = "default_database_host", skip_serializing_if = "is_default_database_host")]
+    #[serde(
+        default = "default_database_host",
+        skip_serializing_if = "is_default_database_host"
+    )]
     pub default_database_host: String,
 
-    #[serde(default = "default_local_db_port", skip_serializing_if = "is_default_local_db_port")]
+    #[serde(
+        default = "default_local_db_port",
+        skip_serializing_if = "is_default_local_db_port"
+    )]
     pub default_local_db_port: u16,
 }
 

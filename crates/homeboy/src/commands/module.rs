@@ -418,7 +418,7 @@ fn run_python_module(
     }
 
     // Set environment for Playwright
-    let playwright_path = AppPaths::playwright_browsers()
+    let playwright_path = AppPaths::playwright_browsers()?
         .to_string_lossy()
         .to_string();
 
@@ -636,12 +636,12 @@ struct ModuleInstallMetadata {
     source_url: String,
 }
 
-fn install_metadata_path(module_id: &str) -> std::path::PathBuf {
-    AppPaths::module(module_id).join(".install.json")
+fn install_metadata_path(module_id: &str) -> homeboy_core::Result<std::path::PathBuf> {
+    Ok(AppPaths::module(module_id)?.join(".install.json"))
 }
 
 fn write_install_metadata(module_id: &str, url: &str) -> homeboy_core::Result<()> {
-    let path = install_metadata_path(module_id);
+    let path = install_metadata_path(module_id)?;
     let content = serde_json::to_string_pretty(&ModuleInstallMetadata {
         source_url: url.to_string(),
     })?;
@@ -650,7 +650,7 @@ fn write_install_metadata(module_id: &str, url: &str) -> homeboy_core::Result<()
 }
 
 fn read_install_metadata(module_id: &str) -> homeboy_core::Result<ModuleInstallMetadata> {
-    let path = install_metadata_path(module_id);
+    let path = install_metadata_path(module_id)?;
     if !path.exists() {
         return Err(homeboy_core::Error::Other(format!(
             "No .install.json found for module '{module_id}'. Reinstall it with `homeboy module install`.",
@@ -700,7 +700,7 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
         None => derive_module_id_from_url(url)?,
     };
 
-    let module_dir = AppPaths::module(&module_id);
+    let module_dir = AppPaths::module(&module_id)?;
     if module_dir.exists() {
         return Err(homeboy_core::Error::Other(format!(
             "Module '{module_id}' already exists",
@@ -765,7 +765,7 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
 }
 
 fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
-    let module_dir = AppPaths::module(module_id);
+    let module_dir = AppPaths::module(module_id)?;
     if !module_dir.exists() {
         return Err(homeboy_core::Error::Other(format!(
             "Module '{module_id}' not found",
@@ -819,7 +819,7 @@ fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
 }
 
 fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
-    let module_dir = AppPaths::module(module_id);
+    let module_dir = AppPaths::module(module_id)?;
     if !module_dir.exists() {
         return Err(homeboy_core::Error::Other(format!(
             "Module '{module_id}' not found",
@@ -928,7 +928,7 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
             let venv_python = format!("{}\\Scripts\\python.exe", venv_path);
             #[cfg(not(windows))]
             let venv_python = format!("{}/bin/python3", venv_path);
-            let playwright_path = AppPaths::playwright_browsers()
+            let playwright_path = AppPaths::playwright_browsers()?
                 .to_string_lossy()
                 .to_string();
 

@@ -2,7 +2,7 @@
 
 Manage the global Homeboy config file (`config.json`).
 
-- Path: `dirs::data_dir()/Homeboy/config.json` (see `homeboy config path`)
+- Path: `dirs::config_dir()/homeboy/config.json` (see `homeboy config path`)
 - This does not edit project/component config files.
 
 ## Commands

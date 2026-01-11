@@ -115,7 +115,7 @@ pub struct SettingConfig {
 }
 
 pub fn load_module(id: &str) -> Option<ModuleManifest> {
-    let module_dir = AppPaths::module(id);
+    let module_dir = AppPaths::module(id).ok()?;
     let manifest_path = module_dir.join("module.json");
 
     if !manifest_path.exists() {
@@ -129,7 +129,9 @@ pub fn load_module(id: &str) -> Option<ModuleManifest> {
 }
 
 pub fn load_all_modules() -> Vec<ModuleManifest> {
-    let modules_dir = AppPaths::modules();
+    let Ok(modules_dir) = AppPaths::modules() else {
+        return Vec::new();
+    };
     if !modules_dir.exists() {
         return Vec::new();
     }
@@ -160,5 +162,5 @@ pub fn load_all_modules() -> Vec<ModuleManifest> {
 }
 
 pub fn module_path(id: &str) -> PathBuf {
-    AppPaths::module(id)
+    AppPaths::module(id).unwrap_or_else(|_| PathBuf::from(id))
 }

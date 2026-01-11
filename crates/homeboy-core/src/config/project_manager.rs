@@ -22,7 +22,7 @@ impl ProjectManager {
         table_prefix: Option<String>,
     ) -> Result<(String, ProjectConfiguration)> {
         let id = slugify_id(name)?;
-        let path = AppPaths::project(&id);
+        let path = AppPaths::project(&id)?;
         if path.exists() {
             return Err(Error::Config(format!("Project '{id}' already exists")));
         }
@@ -72,8 +72,8 @@ impl ProjectManager {
             });
         }
 
-        let old_path = AppPaths::project(id);
-        let new_path = AppPaths::project(&new_id);
+        let old_path = AppPaths::project(id)?;
+        let new_path = AppPaths::project(&new_id)?;
 
         if new_path.exists() {
             return Err(Error::Config(format!(
@@ -103,7 +103,7 @@ impl ProjectManager {
     }
 
     pub fn repair_project(id: &str) -> Result<RenameResult> {
-        let path = AppPaths::project(id);
+        let path = AppPaths::project(id)?;
         if !path.exists() {
             return Err(Error::ProjectNotFound(id.to_string()));
         }
@@ -120,7 +120,7 @@ impl ProjectManager {
             });
         }
 
-        let new_path = AppPaths::project(&expected_id);
+        let new_path = AppPaths::project(&expected_id)?;
         if new_path.exists() {
             return Err(Error::Config(format!(
                 "Cannot repair project '{id}' to '{expected_id}': destination already exists"

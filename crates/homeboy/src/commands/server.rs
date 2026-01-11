@@ -318,7 +318,7 @@ fn list() -> homeboy_core::Result<(ServerOutput, i32)> {
 fn key_generate(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
     ConfigManager::load_server(server_id)?;
 
-    let key_path = AppPaths::key(server_id);
+    let key_path = AppPaths::key(server_id)?;
     let key_path_str = key_path.to_string_lossy().to_string();
 
     if let Some(parent) = key_path.parent() {
@@ -378,7 +378,7 @@ fn key_generate(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
 fn key_show(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
     ConfigManager::load_server(server_id)?;
 
-    let key_path = AppPaths::key(server_id);
+    let key_path = AppPaths::key(server_id)?;
     let pub_key_path = format!("{}.pub", key_path.to_string_lossy());
 
     let public_key = fs::read_to_string(&pub_key_path)
@@ -493,7 +493,7 @@ fn key_import(
 
     let public_key = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    let key_path = AppPaths::key(server_id);
+    let key_path = AppPaths::key(server_id)?;
     let key_path_str = key_path.to_string_lossy().to_string();
 
     if let Some(parent) = key_path.parent() {

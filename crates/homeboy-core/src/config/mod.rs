@@ -33,7 +33,7 @@ pub struct ConfigManager;
 
 impl ConfigManager {
     pub fn load_app_config() -> Result<AppConfig> {
-        let path = AppPaths::config();
+        let path = AppPaths::config()?;
         if !path.exists() {
             return Ok(AppConfig::default());
         }
@@ -42,7 +42,7 @@ impl ConfigManager {
     }
 
     pub fn save_app_config(config: &AppConfig) -> Result<()> {
-        let path = AppPaths::config();
+        let path = AppPaths::config()?;
         AppPaths::ensure_directories()?;
         let content = serde_json::to_string_pretty(config)?;
         fs::write(&path, content)?;
@@ -54,7 +54,7 @@ impl ConfigManager {
     }
 
     pub fn load_project_record(id: &str) -> Result<ProjectRecord> {
-        let path = AppPaths::project(id);
+        let path = AppPaths::project(id)?;
         if !path.exists() {
             return Err(Error::ProjectNotFound(id.to_string()));
         }
@@ -88,7 +88,7 @@ impl ConfigManager {
             )));
         }
 
-        let path = AppPaths::project(id);
+        let path = AppPaths::project(id)?;
         AppPaths::ensure_directories()?;
         let content = serde_json::to_string_pretty(project)?;
         fs::write(&path, content)?;
@@ -96,7 +96,7 @@ impl ConfigManager {
     }
 
     pub fn list_projects() -> Result<Vec<ProjectRecord>> {
-        let dir = AppPaths::projects();
+        let dir = AppPaths::projects()?;
         if !dir.exists() {
             return Ok(Vec::new());
         }
@@ -136,7 +136,7 @@ impl ConfigManager {
     }
 
     pub fn load_server(id: &str) -> Result<ServerConfig> {
-        let path = AppPaths::server(id);
+        let path = AppPaths::server(id)?;
         if !path.exists() {
             return Err(Error::ServerNotFound(id.to_string()));
         }
@@ -145,7 +145,7 @@ impl ConfigManager {
     }
 
     pub fn list_servers() -> Result<Vec<ServerConfig>> {
-        let dir = AppPaths::servers();
+        let dir = AppPaths::servers()?;
         if !dir.exists() {
             return Ok(Vec::new());
         }
@@ -188,7 +188,7 @@ impl ConfigManager {
             )));
         }
 
-        let path = AppPaths::server(id);
+        let path = AppPaths::server(id)?;
         AppPaths::ensure_directories()?;
         let content = serde_json::to_string_pretty(server)?;
         fs::write(&path, content)?;
@@ -196,7 +196,7 @@ impl ConfigManager {
     }
 
     pub fn delete_server(id: &str) -> Result<()> {
-        let path = AppPaths::server(id);
+        let path = AppPaths::server(id)?;
         if !path.exists() {
             return Err(Error::ServerNotFound(id.to_string()));
         }
@@ -205,7 +205,7 @@ impl ConfigManager {
     }
 
     pub fn delete_project(id: &str) -> Result<()> {
-        let path = AppPaths::project(id);
+        let path = AppPaths::project(id)?;
         if !path.exists() {
             return Err(Error::ProjectNotFound(id.to_string()));
         }
@@ -221,7 +221,7 @@ impl ConfigManager {
     }
 
     pub fn load_component(id: &str) -> Result<ComponentConfiguration> {
-        let path = AppPaths::component(id);
+        let path = AppPaths::component(id)?;
         if !path.exists() {
             return Err(Error::ComponentNotFound(id.to_string()));
         }
@@ -238,7 +238,7 @@ impl ConfigManager {
             )));
         }
 
-        let path = AppPaths::component(id);
+        let path = AppPaths::component(id)?;
         AppPaths::ensure_directories()?;
         let content = serde_json::to_string_pretty(component)?;
         fs::write(&path, content)?;
@@ -246,7 +246,7 @@ impl ConfigManager {
     }
 
     pub fn delete_component(id: &str) -> Result<()> {
-        let path = AppPaths::component(id);
+        let path = AppPaths::component(id)?;
         if !path.exists() {
             return Err(Error::ComponentNotFound(id.to_string()));
         }
@@ -255,7 +255,7 @@ impl ConfigManager {
     }
 
     pub fn list_components() -> Result<Vec<ComponentConfiguration>> {
-        let dir = AppPaths::components();
+        let dir = AppPaths::components()?;
         if !dir.exists() {
             return Ok(Vec::new());
         }
@@ -277,7 +277,7 @@ impl ConfigManager {
     }
 
     pub fn list_component_ids() -> Result<Vec<String>> {
-        let dir = AppPaths::components();
+        let dir = AppPaths::components()?;
         if !dir.exists() {
             return Ok(Vec::new());
         }
