@@ -1,6 +1,6 @@
 # Homeboy CLI
 
-CLI tool for development and deployment automation. Component-scoped operations for the entire local dev pipeline.
+LLM-first CLI for development and deployment automation. Designed for LLMs and developers using LLMs to iterate, debug, and ship fast.
 
 ## Installation
 
