@@ -1,6 +1,7 @@
 use crate::config::{
     AppConfig, AppPaths, ComponentConfiguration, ProjectConfiguration, ServerConfig,
 };
+use crate::json::{read_json_file, write_json_file_pretty};
 use crate::module::ModuleManifest;
 use serde::Serialize;
 use serde_json::Value;
@@ -75,20 +76,43 @@ pub struct Doctor;
 
 impl Doctor {
     pub fn scan(scope: DoctorScope) -> crate::Result<DoctorScanResult> {
-        let mut scanner = Scanner::new();
+        let mut scanner = Scanner::new("doctor.scan");
         scanner.scan(scope);
         Ok(scanner.finish())
     }
 
     pub fn scan_file(path: &Path) -> crate::Result<DoctorScanResult> {
-        let mut scanner = Scanner::new();
+        let mut scanner = Scanner::new("doctor.scan");
         scanner.scan_file(path);
         Ok(scanner.finish())
     }
 
+    pub fn cleanup(scope: DoctorScope, dry_run: bool) -> crate::Result<DoctorCleanupAndScan> {
+        let cleanup_result = Cleaner::cleanup_scope(scope, dry_run)?;
+        let scan_result = Doctor::scan(scope)?;
+
+        Ok(DoctorCleanupAndScan {
+            cleanup: cleanup_result,
+            scan: scan_result.report,
+        })
+    }
+
+    pub fn cleanup_file(path: &Path, dry_run: bool) -> crate::Result<DoctorCleanupAndScan> {
+        let cleanup_result = Cleaner::cleanup_file(path, dry_run)?;
+        let scan_result = Doctor::scan_file(path)?;
+
+        Ok(DoctorCleanupAndScan {
+            cleanup: cleanup_result,
+            scan: scan_result.report,
+        })
+    }
+
     pub fn exit_code(result: &DoctorScanResult, fail_on: FailOn) -> i32 {
-        let has_errors = result
-            .report
+        Doctor::exit_code_from_report(&result.report, fail_on)
+    }
+
+    pub fn exit_code_from_report(report: &DoctorReport, fail_on: FailOn) -> i32 {
+        let has_errors = report
             .issues
             .iter()
             .any(|i| i.severity == DoctorSeverity::Error);
@@ -97,8 +121,7 @@ impl Doctor {
         }
 
         if fail_on == FailOn::Warning {
-            let has_warnings = result
-                .report
+            let has_warnings = report
                 .issues
                 .iter()
                 .any(|i| i.severity == DoctorSeverity::Warning);
@@ -116,7 +139,49 @@ pub struct DoctorScanResult {
     pub files_scanned: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorCleanupChange {
+    pub file: String,
+    pub schema: String,
+    pub removed_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorCleanupSkipped {
+    pub file: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorCleanupSummary {
+    pub files_considered: usize,
+    pub files_changed: usize,
+    pub keys_removed: usize,
+    pub files_skipped: usize,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorCleanupReport {
+    pub command: String,
+    pub summary: DoctorCleanupSummary,
+    pub changes: Vec<DoctorCleanupChange>,
+    pub skipped: Vec<DoctorCleanupSkipped>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorCleanupAndScan {
+    pub cleanup: DoctorCleanupReport,
+    pub scan: DoctorReport,
+}
+
 struct Scanner {
+    command: String,
     issues: Vec<DoctorIssue>,
     files_scanned: Vec<String>,
     app_config: Option<AppConfig>,
@@ -127,8 +192,9 @@ struct Scanner {
 }
 
 impl Scanner {
-    fn new() -> Self {
+    fn new(command: &str) -> Self {
         Self {
+            command: command.to_string(),
             issues: Vec::new(),
             files_scanned: Vec::new(),
             app_config: None,
@@ -496,13 +562,13 @@ impl Scanner {
         self.modules.insert(manifest.id.clone(), manifest);
     }
 
-    fn emit_unknown_keys<T: serde::Serialize>(
+    fn unknown_top_level_keys<T: serde::Serialize>(
         &mut self,
         path: &Path,
         schema: &str,
         raw: &Value,
         typed: &T,
-    ) {
+    ) -> Vec<String> {
         let Some(raw_obj) = raw.as_object() else {
             self.push_issue(
                 DoctorSeverity::Error,
@@ -512,7 +578,7 @@ impl Scanner {
                 None,
                 None,
             );
-            return;
+            return Vec::new();
         };
 
         let typed_value = match serde_json::to_value(typed) {
@@ -526,21 +592,31 @@ impl Scanner {
                     None,
                     Some(serde_json::json!({"error": err.to_string()})),
                 );
-                return;
+                return Vec::new();
             }
         };
 
         let Some(typed_obj) = typed_value.as_object() else {
-            return;
+            return Vec::new();
         };
 
         let raw_keys: BTreeSet<&String> = raw_obj.keys().collect();
         let typed_keys: BTreeSet<&String> = typed_obj.keys().collect();
 
-        let unknown: Vec<String> = raw_keys
+        raw_keys
             .difference(&typed_keys)
             .map(|s| (*s).clone())
-            .collect();
+            .collect()
+    }
+
+    fn emit_unknown_keys<T: serde::Serialize>(
+        &mut self,
+        path: &Path,
+        schema: &str,
+        raw: &Value,
+        typed: &T,
+    ) {
+        let unknown = self.unknown_top_level_keys(path, schema, raw, typed);
 
         if !unknown.is_empty() {
             self.push_issue(
@@ -697,7 +773,7 @@ impl Scanner {
 
         DoctorScanResult {
             report: DoctorReport {
-                command: "doctor".to_string(),
+                command: self.command.clone(),
                 summary: DoctorSummary {
                     files_scanned: self.files_scanned.len(),
                     issues: counts,
@@ -747,13 +823,235 @@ fn file_stem_id(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+struct Cleaner;
+
+impl Cleaner {
+    fn cleanup_scope(scope: DoctorScope, dry_run: bool) -> crate::Result<DoctorCleanupReport> {
+        let mut cleaner = CleanerState::new(dry_run);
+        cleaner.cleanup_scope(scope)?;
+        Ok(cleaner.finish())
+    }
+
+    fn cleanup_file(path: &Path, dry_run: bool) -> crate::Result<DoctorCleanupReport> {
+        let mut cleaner = CleanerState::new(dry_run);
+        cleaner.cleanup_file(path)?;
+        Ok(cleaner.finish())
+    }
+}
+
+struct CleanerState {
+    dry_run: bool,
+    changes: Vec<DoctorCleanupChange>,
+    skipped: Vec<DoctorCleanupSkipped>,
+    files_considered: usize,
+}
+
+impl CleanerState {
+    fn new(dry_run: bool) -> Self {
+        Self {
+            dry_run,
+            changes: Vec::new(),
+            skipped: Vec::new(),
+            files_considered: 0,
+        }
+    }
+
+    fn finish(self) -> DoctorCleanupReport {
+        let files_changed = self.changes.len();
+        let keys_removed: usize = self.changes.iter().map(|c| c.removed_keys.len()).sum();
+        let files_skipped = self.skipped.len();
+
+        DoctorCleanupReport {
+            command: "doctor.cleanup".to_string(),
+            summary: DoctorCleanupSummary {
+                files_considered: self.files_considered,
+                files_changed,
+                keys_removed,
+                files_skipped,
+                dry_run: self.dry_run,
+            },
+            changes: self.changes,
+            skipped: self.skipped,
+        }
+    }
+
+    fn cleanup_scope(&mut self, scope: DoctorScope) -> crate::Result<()> {
+        match scope {
+            DoctorScope::All => {
+                self.cleanup_scope(DoctorScope::App)?;
+                self.cleanup_scope(DoctorScope::Projects)?;
+                self.cleanup_scope(DoctorScope::Servers)?;
+                self.cleanup_scope(DoctorScope::Components)?;
+                self.cleanup_scope(DoctorScope::Modules)?;
+            }
+            DoctorScope::App => {
+                let path = AppPaths::config()?;
+                if path.exists() {
+                    self.cleanup_typed_file::<AppConfig>(&path, "AppConfig")?;
+                }
+            }
+            DoctorScope::Projects => {
+                let dir = AppPaths::projects()?;
+                self.cleanup_dir_json::<ProjectConfiguration>(&dir, "ProjectConfiguration")?;
+            }
+            DoctorScope::Servers => {
+                let dir = AppPaths::servers()?;
+                self.cleanup_dir_json::<ServerConfig>(&dir, "ServerConfig")?;
+            }
+            DoctorScope::Components => {
+                let dir = AppPaths::components()?;
+                self.cleanup_dir_json::<ComponentConfiguration>(&dir, "ComponentConfiguration")?;
+            }
+            DoctorScope::Modules => {
+                let modules_dir = AppPaths::modules()?;
+                if !modules_dir.exists() {
+                    return Ok(());
+                }
+
+                let Ok(entries) = fs::read_dir(&modules_dir) else {
+                    return Ok(());
+                };
+
+                for entry in entries.flatten() {
+                    let module_dir = entry.path();
+                    if !module_dir.is_dir() {
+                        continue;
+                    }
+                    let manifest_path = module_dir.join("module.json");
+                    if !manifest_path.exists() {
+                        continue;
+                    }
+                    self.cleanup_typed_file::<ModuleManifest>(&manifest_path, "ModuleManifest")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn cleanup_file(&mut self, path: &Path) -> crate::Result<()> {
+        let Some(kind) = classify_file(path) else {
+            return Err(crate::Error::validation_invalid_argument(
+                "file",
+                "Path is not a recognized Homeboy config JSON file kind",
+                None,
+                Some(vec![
+                    "config.json".to_string(),
+                    "projects/*.json".to_string(),
+                    "servers/*.json".to_string(),
+                    "components/*.json".to_string(),
+                    "modules/*/module.json".to_string(),
+                ]),
+            ));
+        };
+
+        match kind {
+            FileKind::App => self.cleanup_typed_file::<AppConfig>(path, "AppConfig"),
+            FileKind::Project => {
+                self.cleanup_typed_file::<ProjectConfiguration>(path, "ProjectConfiguration")
+            }
+            FileKind::Server => self.cleanup_typed_file::<ServerConfig>(path, "ServerConfig"),
+            FileKind::Component => {
+                self.cleanup_typed_file::<ComponentConfiguration>(path, "ComponentConfiguration")
+            }
+            FileKind::ModuleManifest => {
+                self.cleanup_typed_file::<ModuleManifest>(path, "ModuleManifest")
+            }
+        }
+    }
+
+    fn cleanup_dir_json<T: serde::de::DeserializeOwned + Serialize>(
+        &mut self,
+        dir: &Path,
+        schema: &str,
+    ) -> crate::Result<()> {
+        if !dir.exists() {
+            return Ok(());
+        }
+
+        let Ok(entries) = fs::read_dir(dir) else {
+            return Ok(());
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.extension().is_some_and(|ext| ext == "json") {
+                continue;
+            }
+            self.cleanup_typed_file::<T>(&path, schema)?;
+        }
+
+        Ok(())
+    }
+
+    fn cleanup_typed_file<T: serde::de::DeserializeOwned + Serialize>(
+        &mut self,
+        path: &Path,
+        schema: &str,
+    ) -> crate::Result<()> {
+        self.files_considered += 1;
+
+        let raw = match read_json_file(path) {
+            Ok(v) => v,
+            Err(err) => {
+                self.skipped.push(DoctorCleanupSkipped {
+                    file: path.to_string_lossy().to_string(),
+                    reason: format!("read_json_error: {}", err),
+                });
+                return Ok(());
+            }
+        };
+
+        let typed: T = match serde_json::from_value(raw.clone()) {
+            Ok(v) => v,
+            Err(err) => {
+                self.skipped.push(DoctorCleanupSkipped {
+                    file: path.to_string_lossy().to_string(),
+                    reason: format!("SCHEMA_DESERIALIZE_ERROR: {}", err),
+                });
+                return Ok(());
+            }
+        };
+
+        let mut scanner = Scanner::new("doctor.cleanup");
+        let unknown = scanner.unknown_top_level_keys(path, schema, &raw, &typed);
+        if unknown.is_empty() {
+            return Ok(());
+        }
+
+        let Some(mut raw_obj) = raw.as_object().cloned() else {
+            self.skipped.push(DoctorCleanupSkipped {
+                file: path.to_string_lossy().to_string(),
+                reason: format!("SCHEMA_TYPE_ERROR: Expected JSON object for {}", schema),
+            });
+            return Ok(());
+        };
+
+        for key in &unknown {
+            raw_obj.remove(key);
+        }
+
+        if !self.dry_run {
+            write_json_file_pretty(path, &Value::Object(raw_obj.clone()))?;
+        }
+
+        self.changes.push(DoctorCleanupChange {
+            file: path.to_string_lossy().to_string(),
+            schema: schema.to_string(),
+            removed_keys: unknown,
+        });
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn unknown_keys_are_detected() {
-        let mut scanner = Scanner::new();
+        let mut scanner = Scanner::new("doctor.scan");
         let raw = serde_json::json!({
             "activeProjectId": "abc",
             "unknownField": 123
@@ -772,8 +1070,45 @@ mod tests {
     }
 
     #[test]
+    fn scan_command_is_standardized() {
+        let result = Doctor::scan(DoctorScope::All).unwrap();
+        assert_eq!(result.report.command, "doctor.scan");
+    }
+
+    #[test]
+    fn cleanup_refuses_unknown_file_kind() {
+        let result = Doctor::cleanup_file(Path::new("/tmp/not-homeboy.json"), true);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code.as_str(), "validation.invalid_argument");
+    }
+
+    #[test]
+    fn cleanup_dry_run_reports_changes_without_writing() {
+        let dir = std::env::temp_dir().join("homeboy-doctor-cleanup-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("config.json");
+        let original = serde_json::json!({
+            "activeProjectId": "abc",
+            "extra": 1
+        });
+        write_json_file_pretty(&path, &original).unwrap();
+
+        let result = Doctor::cleanup_file(&path, true).unwrap();
+        assert_eq!(result.cleanup.command, "doctor.cleanup");
+        assert_eq!(result.cleanup.summary.dry_run, true);
+        assert_eq!(result.cleanup.summary.files_changed, 1);
+        assert_eq!(result.cleanup.summary.keys_removed, 1);
+
+        let after = read_json_file(&path).unwrap();
+        assert!(after.get("extra").is_some());
+    }
+
+    #[test]
     fn broken_active_project_is_error() {
-        let mut scanner = Scanner::new();
+        let mut scanner = Scanner::new("doctor.scan");
         scanner.app_config = Some(AppConfig {
             active_project_id: Some("missing".to_string()),
             ..Default::default()
