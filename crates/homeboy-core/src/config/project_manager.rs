@@ -24,7 +24,12 @@ impl ProjectManager {
         let id = slugify_id(name)?;
         let path = AppPaths::project(&id)?;
         if path.exists() {
-            return Err(Error::Config(format!("Project '{id}' already exists")));
+            return Err(Error::validation_invalid_argument(
+                "project.name",
+                format!("Project '{id}' already exists"),
+                Some(id.clone()),
+                None,
+            ));
         }
 
         let project = ProjectConfiguration {
@@ -76,16 +81,22 @@ impl ProjectManager {
         let new_path = AppPaths::project(&new_id)?;
 
         if new_path.exists() {
-            return Err(Error::Config(format!(
-                "Cannot rename project '{id}' to '{new_id}': destination already exists"
-            )));
+            return Err(Error::validation_invalid_argument(
+                "project.name",
+                format!("Cannot rename project '{id}' to '{new_id}': destination already exists"),
+                Some(new_id.clone()),
+                None,
+            ));
         }
 
         AppPaths::ensure_directories()?;
-        fs::rename(&old_path, &new_path)?;
+        fs::rename(&old_path, &new_path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("rename project".to_string())))?;
 
         if let Err(error) = ConfigManager::save_project(&new_id, &config) {
-            let _ = fs::rename(&new_path, &old_path);
+            let _ = fs::rename(&new_path, &old_path).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("rollback project rename".to_string()))
+            });
             return Err(error);
         }
 
@@ -105,11 +116,13 @@ impl ProjectManager {
     pub fn repair_project(id: &str) -> Result<RenameResult> {
         let path = AppPaths::project(id)?;
         if !path.exists() {
-            return Err(Error::ProjectNotFound(id.to_string()));
+            return Err(Error::project_not_found(id.to_string()));
         }
 
-        let content = fs::read_to_string(&path)?;
-        let config: ProjectConfiguration = serde_json::from_str(&content)?;
+        let content = fs::read_to_string(&path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read project".to_string())))?;
+        let config: ProjectConfiguration = serde_json::from_str(&content)
+            .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))?;
         let expected_id = slugify_id(&config.name)?;
 
         if expected_id == id {
@@ -122,13 +135,20 @@ impl ProjectManager {
 
         let new_path = AppPaths::project(&expected_id)?;
         if new_path.exists() {
-            return Err(Error::Config(format!(
-                "Cannot repair project '{id}' to '{expected_id}': destination already exists"
-            )));
+            return Err(Error::validation_invalid_argument(
+                "project.name",
+                format!(
+                    "Cannot repair project '{id}' to '{expected_id}': destination already exists"
+                ),
+                Some(expected_id.clone()),
+                None,
+            ));
         }
 
         AppPaths::ensure_directories()?;
-        fs::rename(&path, &new_path)?;
+        fs::rename(&path, &new_path).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("repair project rename".to_string()))
+        })?;
 
         let mut app_config = ConfigManager::load_app_config()?;
         if app_config.active_project_id.as_deref() == Some(id) {

@@ -13,11 +13,21 @@ pub fn cd_and(dir: &str, command: &str) -> Result<String> {
     let command = command.trim();
 
     if dir.is_empty() {
-        return Err(Error::Config("Directory cannot be empty".to_string()));
+        return Err(Error::validation_invalid_argument(
+            "dir",
+            "Directory cannot be empty",
+            None,
+            None,
+        ));
     }
 
     if command.is_empty() {
-        return Err(Error::Config("Command cannot be empty".to_string()));
+        return Err(Error::validation_invalid_argument(
+            "command",
+            "Command cannot be empty",
+            None,
+            None,
+        ));
     }
 
     Ok(format!(

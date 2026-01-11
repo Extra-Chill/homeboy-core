@@ -310,16 +310,6 @@ impl Error {
         )
     }
 
-    pub fn internal_json(err: serde_json::Error, context: Option<String>) -> Self {
-        let details = serde_json::to_value(InternalJsonErrorDetails {
-            error: err.to_string(),
-            context,
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-
-        Self::new(ErrorCode::InternalJsonError, "JSON error", details)
-    }
-
     pub fn config_missing_key(key: impl Into<String>, path: Option<String>) -> Self {
         let details = serde_json::to_value(ConfigMissingKeyDetails {
             key: key.into(),
@@ -400,5 +390,13 @@ impl Error {
             "Unexpected error",
             serde_json::json!({ "error": error.into() }),
         )
+    }
+
+    pub fn other(message: impl Into<String>) -> Self {
+        Self::internal_unexpected(message)
+    }
+
+    pub fn config(message: impl Into<String>) -> Self {
+        Self::config_invalid_value("config", None, message)
     }
 }

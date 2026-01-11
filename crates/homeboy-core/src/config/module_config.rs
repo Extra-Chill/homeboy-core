@@ -50,20 +50,30 @@ impl ModuleScope {
 
         if let Some(project_type) = requires.project_type.as_deref() {
             if project.project_type != project_type {
-                return Err(Error::Config(format!(
-                    "Module '{}' requires projectType '{}', but project is '{}'",
-                    module.id, project_type, project.project_type
-                )));
+                return Err(Error::validation_invalid_argument(
+                    "project.projectType",
+                    format!(
+                        "Module '{}' requires projectType '{}', but project is '{}'",
+                        module.id, project_type, project.project_type
+                    ),
+                    None,
+                    None,
+                ));
             }
         }
 
         if let Some(required_components) = requires.components.as_ref() {
             for required in required_components {
                 if !project.component_ids.iter().any(|c| c == required) {
-                    return Err(Error::Config(format!(
-                        "Module '{}' requires component '{}', but project does not include it",
-                        module.id, required
-                    )));
+                    return Err(Error::validation_invalid_argument(
+                        "project.componentIds",
+                        format!(
+                            "Module '{}' requires component '{}', but project does not include it",
+                            module.id, required
+                        ),
+                        None,
+                        None,
+                    ));
                 }
             }
         }
@@ -93,18 +103,28 @@ impl ModuleScope {
             .collect();
 
         if matching_component_ids.is_empty() {
-            return Err(Error::Config(format!(
-                "Module '{}' requires components {:?}; none are configured for this project",
-                module.id, required_components
-            )));
+            return Err(Error::validation_invalid_argument(
+                "project.componentIds",
+                format!(
+                    "Module '{}' requires components {:?}; none are configured for this project",
+                    module.id, required_components
+                ),
+                None,
+                None,
+            ));
         }
 
         if let Some(component_id) = component_id {
             if !matching_component_ids.iter().any(|c| c == component_id) {
-                return Err(Error::Config(format!(
-                    "Module '{}' only supports project components {:?}; --component '{}' is not compatible",
-                    module.id, matching_component_ids, component_id
-                )));
+                return Err(Error::validation_invalid_argument(
+                    "component",
+                    format!(
+                        "Module '{}' only supports project components {:?}; --component '{}' is not compatible",
+                        module.id, matching_component_ids, component_id
+                    ),
+                    Some(component_id.to_string()),
+                    None,
+                ));
             }
 
             return Ok(Some(component_id.to_string()));
@@ -114,9 +134,14 @@ impl ModuleScope {
             return Ok(Some(matching_component_ids[0].clone()));
         }
 
-        Err(Error::Config(format!(
-            "Module '{}' matches multiple project components {:?}; pass --component <id>",
-            module.id, matching_component_ids
-        )))
+        Err(Error::validation_invalid_argument(
+            "component",
+            format!(
+                "Module '{}' matches multiple project components {:?}; pass --component <id>",
+                module.id, matching_component_ids
+            ),
+            None,
+            None,
+        ))
     }
 }

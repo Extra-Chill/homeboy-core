@@ -20,14 +20,11 @@ pub fn resolve_project_server(project_id: &str) -> Result<ProjectServerContext> 
     let project = ConfigManager::load_project(project_id)?;
 
     let server_id = project.server_id.clone().ok_or_else(|| {
-        Error::Config(format!(
-            "Server not configured for project '{}'",
-            project_id
-        ))
+        Error::config_missing_key("project.serverId", Some(project_id.to_string()))
     })?;
 
     let server = ConfigManager::load_server(&server_id)
-        .map_err(|_| Error::Config(format!("Server '{}' not found", server_id)))?;
+        .map_err(|_| Error::server_not_found(server_id.clone()))?;
 
     Ok(ProjectServerContext {
         project,
@@ -45,10 +42,7 @@ pub fn require_project_base_path(
         .clone()
         .filter(|p| !p.is_empty())
         .ok_or_else(|| {
-            Error::Config(format!(
-                "Base path not configured for project '{}'",
-                project_id
-            ))
+            Error::config_missing_key("project.basePath", Some(project_id.to_string()))
         })?)
 }
 
@@ -65,8 +59,8 @@ pub fn resolve_project_or_server_id(id: &str) -> Result<ResolvedTarget> {
         return Ok(ResolvedTarget::Project(ctx));
     }
 
-    let server = ConfigManager::load_server(id)
-        .map_err(|_| Error::Config(format!("Server '{}' not found", id)))?;
+    let server =
+        ConfigManager::load_server(id).map_err(|_| Error::server_not_found(id.to_string()))?;
 
     Ok(ResolvedTarget::Server {
         server_id: id.to_string(),

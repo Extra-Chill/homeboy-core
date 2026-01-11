@@ -18,7 +18,12 @@ pub trait SetName {
 pub fn slugify_id(name: &str) -> Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(Error::Config("Name cannot be empty".to_string()));
+        return Err(Error::validation_invalid_argument(
+            "name",
+            "Name cannot be empty",
+            None,
+            None,
+        ));
     }
 
     let mut out = String::new();
@@ -51,8 +56,11 @@ pub fn slugify_id(name: &str) -> Result<String> {
     }
 
     if out.is_empty() {
-        return Err(Error::Config(
-            "Name must contain at least one letter or number".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "name",
+            "Name must contain at least one letter or number",
+            None,
+            None,
         ));
     }
 

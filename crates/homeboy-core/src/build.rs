@@ -41,16 +41,17 @@ pub fn detect_build_command(
 }
 
 pub fn detect_zip_single_root_dir(zip_path: &Path) -> crate::Result<Option<String>> {
-    let file = std::fs::File::open(zip_path)?;
+    let file = std::fs::File::open(zip_path)
+        .map_err(|err| crate::Error::internal_io(err.to_string(), Some("open zip".to_string())))?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| crate::Error::Other(format!("Zip parse error: {}", err)))?;
+        .map_err(|err| crate::Error::internal_unexpected(format!("Zip parse error: {}", err)))?;
 
     let mut roots: BTreeSet<String> = BTreeSet::new();
 
     for i in 0..archive.len() {
-        let entry = archive
-            .by_index(i)
-            .map_err(|err| crate::Error::Other(format!("Zip entry error: {}", err)))?;
+        let entry = archive.by_index(i).map_err(|err| {
+            crate::Error::internal_unexpected(format!("Zip entry error: {}", err))
+        })?;
         let name = entry.name();
 
         let mut parts = name.split('/').filter(|p| !p.is_empty());

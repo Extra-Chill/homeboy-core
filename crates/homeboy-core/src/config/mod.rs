@@ -38,7 +38,7 @@ impl ConfigManager {
             return Ok(AppConfig::default());
         }
         let content = fs::read_to_string(&path)
-            .map_err(|e| Error::internal_io(e, Some("read app config".to_string())))?;
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read app config".to_string())))?;
         serde_json::from_str(&content)
             .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))
     }
@@ -46,10 +46,11 @@ impl ConfigManager {
     pub fn save_app_config(config: &AppConfig) -> Result<()> {
         let path = AppPaths::config()?;
         AppPaths::ensure_directories()?;
-        let content = serde_json::to_string_pretty(config)
-            .map_err(|e| Error::internal_json(e, Some("serialize app config".to_string())))?;
+        let content = serde_json::to_string_pretty(config).map_err(|e| {
+            Error::internal_json(e.to_string(), Some("serialize app config".to_string()))
+        })?;
         fs::write(&path, content)
-            .map_err(|e| Error::internal_io(e, Some("write app config".to_string())))?;
+            .map_err(|e| Error::internal_io(e.to_string(), Some("write app config".to_string())))?;
         Ok(())
     }
 
@@ -63,7 +64,7 @@ impl ConfigManager {
             return Err(Error::project_not_found(id.to_string()));
         }
         let content = fs::read_to_string(&path)
-            .map_err(|e| Error::internal_io(e, Some("read project".to_string())))?;
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read project".to_string())))?;
         let config: ProjectConfiguration = serde_json::from_str(&content)
             .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))?;
 
@@ -92,16 +93,23 @@ impl ConfigManager {
     pub fn save_project(id: &str, project: &ProjectConfiguration) -> Result<()> {
         let expected_id = slugify_id(&project.name)?;
         if expected_id != id {
-            return Err(Error::Config(format!(
-                "Project id '{}' must match slug(name) '{}'. Use `homeboy project set {id} --name \"{}\"` to rename.",
-                id, expected_id, project.name
-            )));
+            return Err(Error::config_invalid_value(
+                "project.id",
+                Some(id.to_string()),
+                format!(
+                    "Project id '{}' must match slug(name) '{}'. Use `homeboy project set {id} --name \"{}\"` to rename.",
+                    id, expected_id, project.name
+                ),
+            ));
         }
 
         let path = AppPaths::project(id)?;
         AppPaths::ensure_directories()?;
-        let content = serde_json::to_string_pretty(project)?;
-        fs::write(&path, content)?;
+        let content = serde_json::to_string_pretty(project).map_err(|e| {
+            Error::internal_json(e.to_string(), Some("serialize project".to_string()))
+        })?;
+        fs::write(&path, content)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("write project".to_string())))?;
         Ok(())
     }
 
@@ -112,8 +120,12 @@ impl ConfigManager {
         }
 
         let mut projects = Vec::new();
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
+        for entry in fs::read_dir(&dir)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read projects dir".to_string())))?
+        {
+            let entry = entry.map_err(|e| {
+                Error::internal_io(e.to_string(), Some("read projects dir entry".to_string()))
+            })?;
             let path = entry.path();
             if !path.extension().is_some_and(|ext| ext == "json") {
                 continue;
@@ -124,19 +136,26 @@ impl ConfigManager {
             };
             let id = stem.to_string_lossy().to_string();
 
-            let content = fs::read_to_string(&path)?;
-            let config: ProjectConfiguration = serde_json::from_str(&content)?;
+            let content = fs::read_to_string(&path).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("read project file".to_string()))
+            })?;
+            let config: ProjectConfiguration = serde_json::from_str(&content)
+                .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))?;
 
             let expected_id = slugify_id(&config.name)?;
             if expected_id != id {
-                return Err(Error::Config(format!(
-                    "Project configuration mismatch: file '{}' implies id '{}', but name '{}' implies id '{}'. Run `homeboy project repair {}`.",
-                    path.display(),
-                    id,
-                    config.name,
-                    expected_id,
-                    id
-                )));
+                return Err(Error::config_invalid_value(
+                    "project.id",
+                    Some(id.to_string()),
+                    format!(
+                        "Project configuration mismatch: file '{}' implies id '{}', but name '{}' implies id '{}'. Run `homeboy project repair {}`.",
+                        path.display(),
+                        id,
+                        config.name,
+                        expected_id,
+                        id
+                    ),
+                ));
             }
 
             projects.push(ProjectRecord { id, config });
@@ -148,10 +167,12 @@ impl ConfigManager {
     pub fn load_server(id: &str) -> Result<ServerConfig> {
         let path = AppPaths::server(id)?;
         if !path.exists() {
-            return Err(Error::ServerNotFound(id.to_string()));
+            return Err(Error::server_not_found(id.to_string()));
         }
-        let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        let content = fs::read_to_string(&path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read server".to_string())))?;
+        serde_json::from_str(&content)
+            .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))
     }
 
     pub fn list_servers() -> Result<Vec<ServerConfig>> {
@@ -161,8 +182,12 @@ impl ConfigManager {
         }
 
         let mut servers = Vec::new();
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
+        for entry in fs::read_dir(&dir)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read servers dir".to_string())))?
+        {
+            let entry = entry.map_err(|e| {
+                Error::internal_io(e.to_string(), Some("read servers dir entry".to_string()))
+            })?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
                 if let Ok(content) = fs::read_to_string(&path) {
@@ -178,7 +203,10 @@ impl ConfigManager {
 
     pub fn get_active_project() -> Result<ProjectRecord> {
         let app_config = Self::load_app_config()?;
-        let active_id = app_config.active_project_id.ok_or(Error::NoActiveProject)?;
+        let config_path = AppPaths::config()?.to_string_lossy().to_string();
+        let active_id = app_config
+            .active_project_id
+            .ok_or_else(|| Error::project_no_active(Some(config_path)))?;
         Self::load_project_record(&active_id)
     }
 
@@ -192,34 +220,43 @@ impl ConfigManager {
     pub fn save_server(id: &str, server: &ServerConfig) -> Result<()> {
         let expected_id = server.slug_id()?;
         if expected_id != id {
-            return Err(Error::Config(format!(
-                "Server id '{}' must match slug(name) '{}'. Use rename to change.",
-                id, expected_id
-            )));
+            return Err(Error::config_invalid_value(
+                "server.id",
+                Some(id.to_string()),
+                format!(
+                    "Server id '{}' must match slug(name) '{}'. Use rename to change.",
+                    id, expected_id
+                ),
+            ));
         }
 
         let path = AppPaths::server(id)?;
         AppPaths::ensure_directories()?;
-        let content = serde_json::to_string_pretty(server)?;
-        fs::write(&path, content)?;
+        let content = serde_json::to_string_pretty(server).map_err(|e| {
+            Error::internal_json(e.to_string(), Some("serialize server".to_string()))
+        })?;
+        fs::write(&path, content)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("write server".to_string())))?;
         Ok(())
     }
 
     pub fn delete_server(id: &str) -> Result<()> {
         let path = AppPaths::server(id)?;
         if !path.exists() {
-            return Err(Error::ServerNotFound(id.to_string()));
+            return Err(Error::server_not_found(id.to_string()));
         }
-        fs::remove_file(&path)?;
+        fs::remove_file(&path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("delete server".to_string())))?;
         Ok(())
     }
 
     pub fn delete_project(id: &str) -> Result<()> {
         let path = AppPaths::project(id)?;
         if !path.exists() {
-            return Err(Error::ProjectNotFound(id.to_string()));
+            return Err(Error::project_not_found(id.to_string()));
         }
-        fs::remove_file(&path)?;
+        fs::remove_file(&path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("delete project".to_string())))?;
 
         let mut app_config = Self::load_app_config()?;
         if app_config.active_project_id.as_deref() == Some(id) {
@@ -233,34 +270,44 @@ impl ConfigManager {
     pub fn load_component(id: &str) -> Result<ComponentConfiguration> {
         let path = AppPaths::component(id)?;
         if !path.exists() {
-            return Err(Error::ComponentNotFound(id.to_string()));
+            return Err(Error::component_not_found(id.to_string()));
         }
-        let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        let content = fs::read_to_string(&path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read component".to_string())))?;
+        serde_json::from_str(&content)
+            .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))
     }
 
     pub fn save_component(id: &str, component: &ComponentConfiguration) -> Result<()> {
         let expected_id = component.slug_id()?;
         if expected_id != id {
-            return Err(Error::Config(format!(
-                "Component id '{}' must match slug(name) '{}'. Use rename to change.",
-                id, expected_id
-            )));
+            return Err(Error::config_invalid_value(
+                "component.id",
+                Some(id.to_string()),
+                format!(
+                    "Component id '{}' must match slug(name) '{}'. Use rename to change.",
+                    id, expected_id
+                ),
+            ));
         }
 
         let path = AppPaths::component(id)?;
         AppPaths::ensure_directories()?;
-        let content = serde_json::to_string_pretty(component)?;
-        fs::write(&path, content)?;
+        let content = serde_json::to_string_pretty(component).map_err(|e| {
+            Error::internal_json(e.to_string(), Some("serialize component".to_string()))
+        })?;
+        fs::write(&path, content)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("write component".to_string())))?;
         Ok(())
     }
 
     pub fn delete_component(id: &str) -> Result<()> {
         let path = AppPaths::component(id)?;
         if !path.exists() {
-            return Err(Error::ComponentNotFound(id.to_string()));
+            return Err(Error::component_not_found(id.to_string()));
         }
-        fs::remove_file(&path)?;
+        fs::remove_file(&path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("delete component".to_string())))?;
         Ok(())
     }
 
@@ -271,8 +318,12 @@ impl ConfigManager {
         }
 
         let mut components = Vec::new();
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
+        for entry in fs::read_dir(&dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("read components dir".to_string()))
+        })? {
+            let entry = entry.map_err(|e| {
+                Error::internal_io(e.to_string(), Some("read components dir entry".to_string()))
+            })?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
                 if let Ok(content) = fs::read_to_string(&path) {
@@ -293,8 +344,12 @@ impl ConfigManager {
         }
 
         let mut ids = Vec::new();
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
+        for entry in fs::read_dir(&dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("read components dir".to_string()))
+        })? {
+            let entry = entry.map_err(|e| {
+                Error::internal_io(e.to_string(), Some("read components dir entry".to_string()))
+            })?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
                 if let Some(stem) = path.file_stem() {

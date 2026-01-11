@@ -78,7 +78,7 @@ pub fn map_cmd_result_to_json<T: Serialize>(
             Ok(value) => (Ok(value), exit_code),
             Err(err) => (
                 Err(crate::Error::internal_json(
-                    err,
+                    err.to_string(),
                     Some("serialize response".to_string()),
                 )),
                 1,

@@ -75,18 +75,28 @@ fn autodetect_changelog_path(local_path: &str) -> Result<PathBuf> {
 
     match hits.len() {
         1 => Ok(hits.remove(0)),
-        0 => Err(Error::Config(format!(
-            "No changelog file found for component at '{}'. Create CHANGELOG.md (preferred) or docs/changelog.md, or set component.changelogTargets[0].file",
-            local_path
-        ))),
-        _ => Err(Error::Config(format!(
-            "Multiple changelog files found for component at '{}': {}. Set component.changelogTargets[0].file to disambiguate.",
-            local_path,
-            hits.iter()
-                .map(|p| p.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))),
+        0 => Err(Error::validation_invalid_argument(
+            "component.changelogTargets",
+            format!(
+                "No changelog file found for component at '{}'. Create CHANGELOG.md (preferred) or docs/changelog.md, or set component.changelogTargets[0].file",
+                local_path
+            ),
+            None,
+            None,
+        )),
+        _ => Err(Error::validation_invalid_argument(
+            "component.changelogTargets[0].file",
+            format!(
+                "Multiple changelog files found for component at '{}': {}. Set component.changelogTargets[0].file to disambiguate.",
+                local_path,
+                hits.iter()
+                    .map(|p| p.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None,
+            None,
+        )),
     }
 }
 
@@ -97,8 +107,11 @@ pub fn add_next_section_item(
 ) -> Result<(String, bool)> {
     let trimmed_message = message.trim();
     if trimmed_message.is_empty() {
-        return Err(Error::Other(
-            "Changelog message cannot be empty".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "message",
+            "Changelog message cannot be empty",
+            None,
+            None,
         ));
     }
 
@@ -116,13 +129,15 @@ pub fn read_and_add_next_section_item(
     message: &str,
 ) -> Result<(PathBuf, bool)> {
     let path = resolve_changelog_path(component)?;
-    let content = fs::read_to_string(&path)?;
+    let content = fs::read_to_string(&path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read changelog".to_string())))?;
 
     let (new_content, changed) =
         add_next_section_item(&content, &settings.next_section_aliases, message)?;
 
     if changed {
-        fs::write(&path, new_content)?;
+        fs::write(&path, new_content)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("write changelog".to_string())))?;
     }
 
     Ok((path, changed))
@@ -135,14 +150,22 @@ pub fn finalize_next_section(
     allow_empty: bool,
 ) -> Result<(String, bool)> {
     if new_version.trim().is_empty() {
-        return Err(Error::Other(
-            "New version label cannot be empty".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "newVersion",
+            "New version label cannot be empty",
+            None,
+            None,
         ));
     }
 
     let lines: Vec<&str> = changelog_content.lines().collect();
     let start = find_next_section_start(&lines, next_section_aliases).ok_or_else(|| {
-        Error::Other("Next changelog section not found (cannot finalize)".to_string())
+        Error::validation_invalid_argument(
+            "changelog",
+            "Next changelog section not found (cannot finalize)",
+            None,
+            None,
+        )
     })?;
 
     let end = find_section_end(&lines, start);
@@ -154,9 +177,11 @@ pub fn finalize_next_section(
             return Ok((changelog_content.to_string(), false));
         }
 
-        return Err(Error::Other(
-            "Next changelog section is empty (use --changelog-empty-ok to finalize anyway)"
-                .to_string(),
+        return Err(Error::validation_invalid_argument(
+            "changelog",
+            "Next changelog section is empty (use --changelog-empty-ok to finalize anyway)",
+            None,
+            None,
         ));
     }
 
@@ -338,8 +363,9 @@ fn append_item_to_next_section(
     message: &str,
 ) -> Result<(String, bool)> {
     let lines: Vec<&str> = content.lines().collect();
-    let start = find_next_section_start(&lines, aliases)
-        .ok_or_else(|| Error::Other("Next changelog section not found (unexpected)".to_string()))?;
+    let start = find_next_section_start(&lines, aliases).ok_or_else(|| {
+        Error::internal_unexpected("Next changelog section not found (unexpected)".to_string())
+    })?;
 
     let end = find_section_end(&lines, start);
     let bullet = format!("- {}", message);

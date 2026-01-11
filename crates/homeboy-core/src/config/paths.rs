@@ -6,7 +6,7 @@ pub struct AppPaths;
 impl AppPaths {
     pub fn homeboy() -> Result<PathBuf> {
         let config_dir = dirs::config_dir().ok_or_else(|| {
-            Error::Other(
+            Error::internal_unexpected(
                 "Unable to resolve a config directory for this OS. This likely indicates a broken environment (missing HOME/USERPROFILE/APPDATA/XDG_CONFIG_HOME) or a bug in the config path resolver."
                     .to_string(),
             )
@@ -88,7 +88,9 @@ impl AppPaths {
         ];
         for dir in dirs {
             if !dir.exists() {
-                std::fs::create_dir_all(&dir)?;
+                std::fs::create_dir_all(&dir).map_err(|e| {
+                    Error::internal_io(e.to_string(), Some("create config directory".to_string()))
+                })?;
             }
         }
         Ok(())

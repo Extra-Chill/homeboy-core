@@ -35,7 +35,7 @@ homeboy module setup <moduleId>
 homeboy module install <git_url> [--id <moduleId>]
 ```
 
-Installs a module by cloning it into `Homeboy/modules/<moduleId>/` and writing `.install.json` so it can be updated later.
+Installs a module by cloning it into `homeboy/modules/<moduleId>/` (under your OS config directory) and writing `.install.json` so it can be updated later.
 
 ### `update`
 

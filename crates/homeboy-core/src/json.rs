@@ -6,24 +6,30 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn read_json_file(path: impl AsRef<Path>) -> Result<Value> {
-    let content = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&content)?)
+    let content = fs::read_to_string(&path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read json file".to_string())))?;
+    serde_json::from_str(&content)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("parse json file".to_string())))
 }
 
 pub fn read_json_file_typed<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T> {
-    let content = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&content)?)
+    let content = fs::read_to_string(&path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read json file".to_string())))?;
+    serde_json::from_str(&content)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("parse json file".to_string())))
 }
 
 pub fn write_json_file_pretty(path: impl AsRef<Path>, value: &Value) -> Result<()> {
     let path = path.as_ref();
-    let content = serde_json::to_string_pretty(value)?;
+    let content = serde_json::to_string_pretty(value)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))?;
     write_file_atomic(path, content.as_bytes())
 }
 
 pub fn write_json_file_pretty_typed<T: Serialize>(path: impl AsRef<Path>, value: &T) -> Result<()> {
     let path = path.as_ref();
-    let content = serde_json::to_string_pretty(value)?;
+    let content = serde_json::to_string_pretty(value)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))?;
     write_file_atomic(path, content.as_bytes())
 }
 
@@ -41,16 +47,21 @@ pub fn set_json_pointer(root: &mut Value, pointer: &str, new_value: Value) -> Re
 pub fn remove_json_pointer(root: &mut Value, pointer: &str) -> Result<()> {
     let pointer = normalize_pointer(pointer)?;
     let Some((parent_ptr, token)) = split_parent_pointer(&pointer) else {
-        return Err(Error::Config(
-            "Cannot remove the root JSON value".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            "Cannot remove the root JSON value",
+            None,
+            None,
         ));
     };
 
     let Some(parent) = root.pointer_mut(&parent_ptr) else {
-        return Err(Error::Config(format!(
-            "JSON pointer parent path not found: {}",
-            parent_ptr
-        )));
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            format!("JSON pointer parent path not found: {}", parent_ptr),
+            None,
+            None,
+        ));
     };
 
     remove_child(parent, &token)
@@ -68,18 +79,30 @@ pub fn set_json_value_in_file(
 }
 
 fn write_file_atomic(path: &Path, content: &[u8]) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| Error::Config(format!("Invalid path: {}", path.display())))?;
+    let parent = path.parent().ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "path",
+            format!("Invalid path: {}", path.display()),
+            None,
+            None,
+        )
+    })?;
 
-    let filename = path
-        .file_name()
-        .ok_or_else(|| Error::Config(format!("Invalid path: {}", path.display())))?;
+    let filename = path.file_name().ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "path",
+            format!("Invalid path: {}", path.display()),
+            None,
+            None,
+        )
+    })?;
 
     let tmp_path: PathBuf = parent.join(format!("{}.tmp", filename.to_string_lossy()));
 
-    fs::write(&tmp_path, content)?;
-    fs::rename(&tmp_path, path)?;
+    fs::write(&tmp_path, content)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("write tmp json".to_string())))?;
+    fs::rename(&tmp_path, path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("rename tmp json".to_string())))?;
 
     Ok(())
 }
@@ -90,14 +113,21 @@ fn normalize_pointer(pointer: &str) -> Result<String> {
     }
 
     if pointer == "/" {
-        return Err(Error::Config("Invalid JSON pointer '/'".to_string()));
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            "Invalid JSON pointer '/'",
+            None,
+            None,
+        ));
     }
 
     if !pointer.starts_with('/') {
-        return Err(Error::Config(format!(
-            "JSON pointer must start with '/': {}",
-            pointer
-        )));
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            format!("JSON pointer must start with '/': {}", pointer),
+            None,
+            None,
+        ));
     }
 
     Ok(pointer.to_string())
@@ -147,19 +177,20 @@ fn ensure_pointer_container<'a>(root: &'a mut Value, pointer: &str) -> Result<&'
             Value::Array(arr) => {
                 let index = parse_index(&token)?;
                 if index >= arr.len() {
-                    return Err(Error::Config(format!(
-                        "Array index out of bounds while creating path: {}",
-                        pointer
-                    )));
+                    return Err(Error::config_invalid_value(
+                        pointer,
+                        None,
+                        "Array index out of bounds while creating path",
+                    ));
                 }
                 &mut arr[index]
             }
             _ => {
-                return Err(Error::Config(format!(
-                    "Expected object/array at pointer '{}', found {}",
+                return Err(Error::config_invalid_value(
                     pointer,
-                    value_type_name(current)
-                )))
+                    Some(value_type_name(current).to_string()),
+                    "Expected object/array at pointer",
+                ))
             }
         };
 
@@ -178,18 +209,20 @@ fn set_child(parent: &mut Value, token: &str, value: Value) -> Result<()> {
         Value::Array(arr) => {
             let index = parse_index(token)?;
             if index >= arr.len() {
-                return Err(Error::Config(format!(
-                    "Array index out of bounds: {}",
-                    index
-                )));
+                return Err(Error::config_invalid_value(
+                    "arrayIndex",
+                    Some(index.to_string()),
+                    "Array index out of bounds",
+                ));
             }
             arr[index] = value;
             Ok(())
         }
-        _ => Err(Error::Config(format!(
-            "Cannot set child on {}",
-            value_type_name(parent)
-        ))),
+        _ => Err(Error::config_invalid_value(
+            "jsonPointer",
+            Some(value_type_name(parent).to_string()),
+            "Cannot set child on non-container",
+        )),
     }
 }
 
@@ -202,25 +235,32 @@ fn remove_child(parent: &mut Value, token: &str) -> Result<()> {
         Value::Array(arr) => {
             let index = parse_index(token)?;
             if index >= arr.len() {
-                return Err(Error::Config(format!(
-                    "Array index out of bounds: {}",
-                    index
-                )));
+                return Err(Error::config_invalid_value(
+                    "arrayIndex",
+                    Some(index.to_string()),
+                    "Array index out of bounds",
+                ));
             }
             arr.remove(index);
             Ok(())
         }
-        _ => Err(Error::Config(format!(
-            "Cannot remove child on {}",
-            value_type_name(parent)
-        ))),
+        _ => Err(Error::config_invalid_value(
+            "jsonPointer",
+            Some(value_type_name(parent).to_string()),
+            "Cannot remove child on non-container",
+        )),
     }
 }
 
 fn parse_index(token: &str) -> Result<usize> {
-    token
-        .parse::<usize>()
-        .map_err(|_| Error::Config(format!("Invalid array index token: {}", token)))
+    token.parse::<usize>().map_err(|_| {
+        Error::validation_invalid_argument(
+            "arrayIndex",
+            "Invalid array index token",
+            Some(token.to_string()),
+            None,
+        )
+    })
 }
 
 fn unescape_token(token: &str) -> String {

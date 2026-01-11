@@ -4,10 +4,11 @@ Homeboy is LLM-first, human-second (for LLMs and developers using LLMs). Humans 
 
 ## Configuration
 
-Configuration and state live under the Homeboy data directory (`dirs::data_dir()/Homeboy/`):
+Configuration and state live under the OS config directory (`dirs::config_dir()/homeboy/`):
 
-- macOS: `~/Library/Application Support/Homeboy/`
-- Linux: `~/.local/share/Homeboy/` (exact path varies by distribution)
+- macOS: `~/Library/Application Support/homeboy/`
+- Linux: `$XDG_CONFIG_HOME/homeboy/` (fallback: `~/.config/homeboy/`)
+- Windows: `%APPDATA%\\homeboy\\`
 
 Common directories:
 

@@ -3,7 +3,12 @@ use crate::{Error, Result};
 pub fn slugify_project_id(name: &str) -> Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(Error::Config("Project name cannot be empty".to_string()));
+        return Err(Error::validation_invalid_argument(
+            "project.name",
+            "Project name cannot be empty",
+            None,
+            None,
+        ));
     }
 
     let mut out = String::new();
@@ -36,8 +41,11 @@ pub fn slugify_project_id(name: &str) -> Result<String> {
     }
 
     if out.is_empty() {
-        return Err(Error::Config(
-            "Project name must contain at least one letter or number".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "project.name",
+            "Project name must contain at least one letter or number",
+            None,
+            None,
         ));
     }
 

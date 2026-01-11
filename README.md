@@ -65,10 +65,11 @@ homeboy docs [topic...]
 
 ## Configuration
 
-Configuration and state live in the Homeboy data directory (from `dirs::data_dir()`), under a `Homeboy/` folder:
+Configuration and state live under the OS config directory (from `dirs::config_dir()`), under a `homeboy/` folder:
 
-- **macOS**: `~/Library/Application Support/Homeboy/`
-- **Linux**: `~/.local/share/Homeboy/` (exact path varies by distribution)
+- **macOS**: `~/Library/Application Support/homeboy/`
+- **Linux**: `$XDG_CONFIG_HOME/homeboy/` (fallback: `~/.config/homeboy/`)
+- **Windows**: `%APPDATA%\\homeboy\\`
 
 Common paths:
 
@@ -84,7 +85,7 @@ See [CLI documentation](docs/index.md) for details.
 
 ## SSH
 
-Homeboy connects over SSH using server configuration stored under `Homeboy/servers/`.
+Homeboy connects over SSH using server configuration stored under `homeboy/servers/`.
 
 Key management commands (generate/import/use/unset/show) are documented in [server](docs/commands/server.md).
 

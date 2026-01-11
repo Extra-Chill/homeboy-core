@@ -62,8 +62,11 @@ pub fn parse_config_value(value_type: ConfigValueType, raw: &str) -> Result<Valu
                 .collect();
 
             if items.is_empty() {
-                return Err(Error::Config(
-                    "String array value cannot be empty".to_string(),
+                return Err(Error::validation_invalid_argument(
+                    "value",
+                    "String array value cannot be empty",
+                    None,
+                    None,
                 ));
             }
 
