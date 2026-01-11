@@ -14,9 +14,20 @@ pub struct OpPayload<T> {
 }
 
 pub fn read_json_spec_to_string(spec: &str) -> Result<String> {
+    use std::io::IsTerminal;
+
     if spec.trim() == "-" {
         let mut buf = String::new();
-        std::io::stdin()
+        let mut stdin = std::io::stdin();
+        if stdin.is_terminal() {
+            return Err(Error::validation_invalid_argument(
+                "json",
+                "Cannot read JSON from stdin when stdin is a TTY",
+                None,
+                None,
+            ));
+        }
+        stdin
             .read_to_string(&mut buf)
             .map_err(|e| Error::internal_io(e.to_string(), Some("read stdin".to_string())))?;
         return Ok(buf);
@@ -41,6 +52,33 @@ pub fn read_json_spec_to_string(spec: &str) -> Result<String> {
     }
 
     Ok(spec.to_string())
+}
+
+pub fn read_json_from_piped_stdin() -> Result<Option<String>> {
+    use std::io::IsTerminal;
+
+    let mut stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return Ok(None);
+    }
+
+    let mut buf = String::new();
+    stdin
+        .read_to_string(&mut buf)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read stdin".to_string())))?;
+
+    if buf.trim().is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(buf))
+}
+
+pub fn read_json_input(json_spec: Option<&str>) -> Result<Option<String>> {
+    match json_spec {
+        Some(spec) => Ok(Some(read_json_spec_to_string(spec)?)),
+        None => read_json_from_piped_stdin(),
+    }
 }
 
 pub fn load_op_data<T: DeserializeOwned>(spec: &str, expected_op: &str) -> Result<T> {

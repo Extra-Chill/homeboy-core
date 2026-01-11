@@ -39,7 +39,7 @@ pub struct DocsListOutput {
     pub available_topics: Vec<String>,
 }
 
-pub fn run(args: DocsArgs) -> CmdResult<DocsOutput> {
+pub fn run(args: DocsArgs, _json_spec: Option<&str>) -> CmdResult<DocsOutput> {
     if args.list {
         return Ok((
             DocsOutput::List(DocsListOutput {

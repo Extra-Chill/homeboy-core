@@ -185,7 +185,10 @@ pub struct ProjectOutput {
     updated: Option<Vec<String>>,
 }
 
-pub fn run(args: ProjectArgs) -> homeboy_core::Result<(ProjectOutput, i32)> {
+pub fn run(
+    args: ProjectArgs,
+    _json_spec: Option<&str>,
+) -> homeboy_core::Result<(ProjectOutput, i32)> {
     match args.command {
         ProjectCommand::List { current } => list(current),
         ProjectCommand::Show { project_id } => show(project_id),

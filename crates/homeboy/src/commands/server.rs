@@ -125,7 +125,10 @@ enum KeyCommand {
     },
 }
 
-pub fn run(args: ServerArgs) -> homeboy_core::Result<(ServerOutput, i32)> {
+pub fn run(
+    args: ServerArgs,
+    _json_spec: Option<&str>,
+) -> homeboy_core::Result<(ServerOutput, i32)> {
     match args.command {
         ServerCommand::Create {
             name,

@@ -22,6 +22,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[command(version = VERSION)]
 #[command(about = "CLI tool for development and deployment automation")]
 struct Cli {
+    /// JSON input spec override.
+    ///
+    /// Use "-" to read from stdin, "@file.json" to read from a file, or an inline JSON string.
     #[arg(long, global = true)]
     json: Option<String>,
 
@@ -71,76 +74,110 @@ enum Commands {
     Error(error::ErrorArgs),
 }
 
+fn response_mode(command: &Commands) -> ResponseMode {
+    match command {
+        Commands::Ssh(args) if args.command.is_none() => ResponseMode::InteractivePassthrough,
+        Commands::Logs(args) if logs::is_interactive(args) => ResponseMode::InteractivePassthrough,
+        _ => ResponseMode::Json,
+    }
+}
+
 fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
 
-    if cli.json.is_some() {
-        if let Err(err) = validate_json_mode(&cli.command) {
-            homeboy_core::output::print_result::<serde_json::Value>(Err(err));
-            return std::process::ExitCode::from(exit_code_to_u8(2));
+    let mode = response_mode(&cli.command);
+
+    match mode {
+        ResponseMode::Json => {}
+        ResponseMode::InteractivePassthrough => {
+            if !homeboy_core::tty::require_tty_for_interactive() {
+                let err = homeboy_core::Error::validation_invalid_argument(
+                    "tty",
+                    "This command requires an interactive TTY",
+                    None,
+                    None,
+                );
+                homeboy_core::output::print_result::<serde_json::Value>(Err(err));
+                return std::process::ExitCode::from(exit_code_to_u8(2));
+            }
         }
     }
 
     let (json_result, exit_code) = match cli.command {
         Commands::Project(args) => homeboy_core::output::map_cmd_result_to_json(
-            project::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            project::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Ssh(args) => homeboy_core::output::map_cmd_result_to_json(
-            ssh::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            ssh::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Wp(args) => homeboy_core::output::map_cmd_result_to_json(
-            wp::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            wp::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Pm2(args) => homeboy_core::output::map_cmd_result_to_json(
-            pm2::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            pm2::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Server(args) => homeboy_core::output::map_cmd_result_to_json(
-            server::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            server::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Db(args) => homeboy_core::output::map_cmd_result_to_json(
-            db::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            db::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::File(args) => homeboy_core::output::map_cmd_result_to_json(
-            file::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            file::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Logs(args) => homeboy_core::output::map_cmd_result_to_json(
-            logs::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            logs::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Deploy(args) => homeboy_core::output::map_cmd_result_to_json(
-            deploy::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            deploy::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Component(args) => homeboy_core::output::map_cmd_result_to_json(
-            component::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            component::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Config(args) => homeboy_core::output::map_cmd_result_to_json(
-            config::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            config::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Module(args) => homeboy_core::output::map_cmd_result_to_json(
-            module::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            module::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Docs(args) => homeboy_core::output::map_cmd_result_to_json(
-            docs_command::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            docs_command::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Changelog(args) => homeboy_core::output::map_cmd_result_to_json(
             changelog::run(args, cli.json.as_deref())
                 .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Git(args) => homeboy_core::output::map_cmd_result_to_json(
-            git::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            git::run(args, cli.json.as_deref()).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
-        Commands::Version(args) => homeboy_core::output::map_cmd_result_to_json(version::run(args)),
+        Commands::Version(args) => {
+            homeboy_core::output::map_cmd_result_to_json(version::run(args, cli.json.as_deref()))
+        }
         Commands::Build(args) => homeboy_core::output::map_cmd_result_to_json(
-            build::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            build::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Doctor(args) => homeboy_core::output::map_cmd_result_to_json(
-            doctor::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            doctor::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         Commands::Error(args) => homeboy_core::output::map_cmd_result_to_json(
-            error::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+            error::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
     };
 
-    homeboy_core::output::print_json_result(json_result);
+    match mode {
+        ResponseMode::Json => homeboy_core::output::print_json_result(json_result),
+        ResponseMode::InteractivePassthrough => {}
+    }
 
     std::process::ExitCode::from(exit_code_to_u8(exit_code))
 }

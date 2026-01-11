@@ -72,7 +72,7 @@ pub struct FileOutput {
     success: bool,
 }
 
-pub fn run(args: FileArgs) -> homeboy_core::Result<(FileOutput, i32)> {
+pub fn run(args: FileArgs, _json_spec: Option<&str>) -> homeboy_core::Result<(FileOutput, i32)> {
     match args.command {
         FileCommand::List { project_id, path } => list(&project_id, &path),
         FileCommand::Read { project_id, path } => read(&project_id, &path),

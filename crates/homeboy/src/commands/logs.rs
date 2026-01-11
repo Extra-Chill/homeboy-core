@@ -14,7 +14,7 @@ pub struct LogsArgs {
 }
 
 #[derive(Subcommand)]
-enum LogsCommand {
+pub enum LogsCommand {
     /// List pinned log files
     List {
         /// Project ID
@@ -42,7 +42,14 @@ enum LogsCommand {
     },
 }
 
-pub fn run(args: LogsArgs) -> CmdResult<LogsOutput> {
+pub fn is_interactive(args: &LogsArgs) -> bool {
+    match &args.command {
+        LogsCommand::Show { follow: true, .. } => true,
+        _ => false,
+    }
+}
+
+pub fn run(args: LogsArgs, _json_spec: Option<&str>) -> CmdResult<LogsOutput> {
     match args.command {
         LogsCommand::List { project_id } => list(&project_id),
         LogsCommand::Show {

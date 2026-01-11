@@ -87,7 +87,7 @@ pub struct VersionOutput {
     changelog_changed: Option<bool>,
 }
 
-pub fn run(args: VersionArgs) -> homeboy_core::output::CmdResult {
+pub fn run(args: VersionArgs, _json_spec: Option<&str>) -> homeboy_core::output::CmdResult {
     match args.command {
         VersionCommand::Show { component_id } => {
             let (out, exit_code) = show(&component_id)?;

@@ -98,7 +98,7 @@ pub struct ConfigKeyOutput {
     pub value_type: String,
 }
 
-pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
+pub fn run(args: ConfigArgs, _json_spec: Option<&str>) -> CmdResult<ConfigOutput> {
     match args.command {
         ConfigCommand::Path => {
             let path = AppPaths::config()?;

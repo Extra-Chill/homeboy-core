@@ -19,9 +19,9 @@ These are provided by clap:
 
 Homeboy also defines:
 
-- `--json <spec>`: enable JSON input mode for a command.
-  - Currently supported only for `homeboy changelog`.
-  - For all other commands, using `--json` returns a `validation.invalid_argument` error.
+- `--json <spec>`: JSON input spec override for a command.
+  - Use `-` to read from stdin, `@file.json` to read from a file, or provide an inline JSON string.
+  - `--json` is a global flag and should come before the subcommand (e.g. `homeboy --json @payload.json changelog add`).
 
 ## Subcommands
 

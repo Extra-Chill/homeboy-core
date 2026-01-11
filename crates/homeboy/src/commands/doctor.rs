@@ -82,7 +82,10 @@ pub struct DoctorCleanupOutput {
     pub scan: homeboy_core::doctor::DoctorReport,
 }
 
-pub fn run(args: DoctorArgs) -> homeboy_core::Result<(serde_json::Value, i32)> {
+pub fn run(
+    args: DoctorArgs,
+    _json_spec: Option<&str>,
+) -> homeboy_core::Result<(serde_json::Value, i32)> {
     match args.command {
         DoctorCommand::Scan(args) => {
             let scan_result = if let Some(path) = args.file.as_deref() {
