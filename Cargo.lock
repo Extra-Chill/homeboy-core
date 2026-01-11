@@ -400,6 +400,7 @@ dependencies = [
  "atty",
  "clap",
  "homeboy-core",
+ "homeboy-error",
  "regex",
  "serde",
  "serde_json",

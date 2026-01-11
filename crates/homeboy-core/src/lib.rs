@@ -10,6 +10,7 @@ pub mod shell;
 pub mod ssh;
 pub mod template;
 pub mod token;
+pub mod tty;
 pub mod version;
 
 pub mod build;

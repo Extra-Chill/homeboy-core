@@ -115,14 +115,14 @@ pub struct CmdSuccess {
 pub type CmdResult = crate::Result<(serde_json::Value, Vec<CliWarning>, i32)>;
 
 pub fn map_cmd_result_to_json<T: Serialize>(
-    result: crate::Result<(T, i32)>,
+    result: crate::Result<(T, Vec<CliWarning>, i32)>,
 ) -> (crate::Result<CmdSuccess>, i32) {
     match result {
-        Ok((data, exit_code)) => match serde_json::to_value(data) {
+        Ok((data, warnings, exit_code)) => match serde_json::to_value(data) {
             Ok(value) => (
                 Ok(CmdSuccess {
                     payload: value,
-                    warnings: Vec::new(),
+                    warnings,
                 }),
                 exit_code,
             ),
@@ -134,22 +134,6 @@ pub fn map_cmd_result_to_json<T: Serialize>(
                 1,
             ),
         },
-        Err(err) => {
-            let exit_code = exit_code_for_error(err.code);
-            (Err(err), exit_code)
-        }
-    }
-}
-
-pub fn map_cmd_result_to_json_with_warnings(result: CmdResult) -> (crate::Result<CmdSuccess>, i32) {
-    match result {
-        Ok((value, warnings, exit_code)) => (
-            Ok(CmdSuccess {
-                payload: value,
-                warnings,
-            }),
-            exit_code,
-        ),
         Err(err) => {
             let exit_code = exit_code_for_error(err.code);
             (Err(err), exit_code)

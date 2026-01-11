@@ -1,4 +1,4 @@
-pub type CmdResult<T> = homeboy_core::Result<(T, Vec<homeboy_core::output::CliWarning>, i32)>;
+pub type CmdResult<T> = homeboy_core::Result<(T, i32)>;
 
 pub mod build;
 pub mod changelog;

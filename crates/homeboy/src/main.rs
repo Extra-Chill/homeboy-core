@@ -1,16 +1,10 @@
 use clap::{Parser, Subcommand};
 use serde_json;
 
-fn validate_json_mode(command: &Commands) -> homeboy_core::Result<()> {
-    match command {
-        Commands::Changelog(_) => Ok(()),
-        _ => Err(homeboy_core::Error::validation_invalid_argument(
-            "json",
-            "--json is not supported for this command yet",
-            None,
-            None,
-        )),
-    }
+#[derive(Debug, Clone, Copy)]
+enum ResponseMode {
+    Json,
+    InteractivePassthrough,
 }
 
 mod commands;
@@ -88,63 +82,62 @@ fn main() -> std::process::ExitCode {
     }
 
     let (json_result, exit_code) = match cli.command {
-        Commands::Project(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(project::run(args))
-        }
-        Commands::Ssh(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(ssh::run(args))
-        }
-        Commands::Wp(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(wp::run(args))
-        }
-        Commands::Pm2(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(pm2::run(args))
-        }
-        Commands::Server(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(server::run(args))
-        }
-        Commands::Db(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(db::run(args))
-        }
-        Commands::File(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(file::run(args))
-        }
-        Commands::Logs(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(logs::run(args))
-        }
-        Commands::Deploy(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(deploy::run(args))
-        }
-        Commands::Component(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(component::run(args))
-        }
-        Commands::Config(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(config::run(args))
-        }
-        Commands::Module(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(module::run(args))
-        }
-        Commands::Docs(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(docs_command::run(args))
-        }
-        Commands::Changelog(args) => homeboy_core::output::map_cmd_result_to_json_with_warnings(
-            changelog::run(args, cli.json.as_deref()),
+        Commands::Project(args) => homeboy_core::output::map_cmd_result_to_json(
+            project::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
-        Commands::Git(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(git::run(args))
-        }
-        Commands::Version(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(version::run(args))
-        }
-        Commands::Build(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(build::run(args))
-        }
-        Commands::Doctor(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(doctor::run(args))
-        }
-        Commands::Error(args) => {
-            homeboy_core::output::map_cmd_result_to_json_with_warnings(error::run(args))
-        }
+        Commands::Ssh(args) => homeboy_core::output::map_cmd_result_to_json(
+            ssh::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Wp(args) => homeboy_core::output::map_cmd_result_to_json(
+            wp::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Pm2(args) => homeboy_core::output::map_cmd_result_to_json(
+            pm2::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Server(args) => homeboy_core::output::map_cmd_result_to_json(
+            server::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Db(args) => homeboy_core::output::map_cmd_result_to_json(
+            db::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::File(args) => homeboy_core::output::map_cmd_result_to_json(
+            file::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Logs(args) => homeboy_core::output::map_cmd_result_to_json(
+            logs::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Deploy(args) => homeboy_core::output::map_cmd_result_to_json(
+            deploy::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Component(args) => homeboy_core::output::map_cmd_result_to_json(
+            component::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Config(args) => homeboy_core::output::map_cmd_result_to_json(
+            config::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Module(args) => homeboy_core::output::map_cmd_result_to_json(
+            module::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Docs(args) => homeboy_core::output::map_cmd_result_to_json(
+            docs_command::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Changelog(args) => homeboy_core::output::map_cmd_result_to_json(
+            changelog::run(args, cli.json.as_deref())
+                .map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Git(args) => homeboy_core::output::map_cmd_result_to_json(
+            git::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Version(args) => homeboy_core::output::map_cmd_result_to_json(version::run(args)),
+        Commands::Build(args) => homeboy_core::output::map_cmd_result_to_json(
+            build::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Doctor(args) => homeboy_core::output::map_cmd_result_to_json(
+            doctor::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        Commands::Error(args) => homeboy_core::output::map_cmd_result_to_json(
+            error::run(args).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
     };
 
     homeboy_core::output::print_json_result(json_result);

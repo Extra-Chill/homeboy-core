@@ -1,8 +1,6 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use homeboy_error;
-
 use super::CmdResult;
 
 #[derive(Args)]
@@ -44,7 +42,7 @@ pub fn run(args: ErrorArgs) -> CmdResult<serde_json::Value> {
                 command: "error.codes".to_string(),
                 codes,
             };
-            Ok((serde_json::to_value(output).unwrap(), vec![], 0))
+            Ok((serde_json::to_value(output).unwrap(), 0))
         }
         ErrorCommand::Explain { code } => {
             let Some(code_enum) = homeboy_error::parse_code(&code) else {
@@ -57,7 +55,7 @@ pub fn run(args: ErrorArgs) -> CmdResult<serde_json::Value> {
                 help,
             };
 
-            Ok((serde_json::to_value(output).unwrap(), vec![], 0))
+            Ok((serde_json::to_value(output).unwrap(), 0))
         }
     }
 }
