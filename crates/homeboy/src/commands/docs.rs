@@ -9,11 +9,11 @@ use super::CmdResult;
 pub struct DocsArgs {
     /// List available topics and exit
     #[arg(long)]
-    list: bool,
+    pub list: bool,
 
     /// Topic to filter (e.g., 'deploy', 'project set')
     #[arg(trailing_var_arg = true)]
-    topic: Vec<String>,
+    pub topic: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +37,31 @@ pub struct DocsContentOutput {
 #[derive(Serialize)]
 pub struct DocsListOutput {
     pub available_topics: Vec<String>,
+}
+
+pub fn run_markdown(args: DocsArgs) -> CmdResult<String> {
+    if args.list {
+        return Err(homeboy_core::Error::validation_invalid_argument(
+            "list",
+            "Cannot use --list with markdown output",
+            None,
+            None,
+        ));
+    }
+
+    let resolved = docs::resolve(&args.topic);
+
+    if resolved.content.is_empty() {
+        let available_topics = docs::available_topics();
+
+        return Err(homeboy_core::Error::other(format!(
+            "No documentation found for '{}' (available: {})",
+            args.topic.join(" "),
+            available_topics.join("\n")
+        )));
+    }
+
+    Ok((resolved.content, 0))
 }
 
 pub fn run(args: DocsArgs, _json_spec: Option<&str>) -> CmdResult<DocsOutput> {

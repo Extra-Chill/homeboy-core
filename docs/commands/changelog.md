@@ -3,18 +3,23 @@
 ## Synopsis
 
 ```sh
-homeboy changelog <COMMAND>
+homeboy changelog [COMMAND]
 ```
+
+## Description
+
+`homeboy changelog` prints the embedded Homeboy CLI changelog documentation (from `docs/changelog.md`) as raw markdown.
 
 ## Subcommands
 
-### `show`
 
 ```sh
-homeboy changelog show
+homeboy changelog
 ```
 
 Shows the embedded Homeboy CLI changelog documentation (from `docs/changelog.md`).
+
+This prints raw markdown to stdout.
 
 ### `add`
 
@@ -23,18 +28,22 @@ homeboy changelog add <componentId> <message> [--project-id <projectId>]
 homeboy --json <spec> changelog add
 ```
 
-Adds one or more changelog items to the configured "next" section in the component's changelog file.
+Notes:
 
-When `--json` is provided, positional args are not used. The payload's `messages` array is applied in order.
+- In non-JSON mode, `add` accepts *positional* `componentId` and `message`.
+- When `--json` is provided, positional args are ignored and the payload's `messages` array is applied in order.
+
+Adds one or more changelog items to the configured "next" section in the component's changelog file.
 
 `--json` is global and may be used with any command.
 
 Configuration / defaults:
 
 - Changelog path resolution:
-  - If `changelogTargets` is set in the component config, the first target is used.
+  - If `changelogTargets` is set in the component config, the first target's `file` is used (relative to `component.localPath` unless it's absolute).
   - Otherwise, Homeboy auto-detects (in order): `CHANGELOG.md`, then `docs/changelog.md`.
-  - If neither exists (or both exist), the command errors and asks you to set `changelogTargets`.
+  - If neither exists, the command errors and asks you to create a changelog file or set `component.changelogTargets[0].file`.
+  - If both exist, the command errors and asks you to set `component.changelogTargets[0].file` to disambiguate.
 - "Next section" resolution:
   - If no label is configured, Homeboy defaults to `Unreleased`.
   - If no aliases are configured, Homeboy matches both `Unreleased` and `[Unreleased]`.
@@ -47,9 +56,11 @@ Configuration / defaults:
 
 `homeboy changelog` returns a tagged union:
 
-- `command`: `show` | `add`
+- `command`: `show` (default) | `add`
 
-### JSON output (show)
+### JSON output (default)
+
+This section applies only when JSON output is used.
 
 ```json
 {
@@ -65,8 +76,8 @@ Configuration / defaults:
 {
   "command": "add",
   "componentId": "<componentId>",
-  "projectId": "<id>|null",
-  "changelogPath": "</absolute/or/resolved/path.md>",
+  "projectId": "<projectId>|null",
+  "changelogPath": "<absolute/or/resolved/path.md>",
   "nextSectionLabel": "<label>",
   "messages": ["<message>", "<message>"],
   "itemsAdded": 2,
@@ -77,7 +88,7 @@ Configuration / defaults:
 ## Errors
 
 - `show`: errors if embedded docs do not contain `changelog`
-- `add`: errors if changelog path cannot be resolved
+- `add`: errors if changelog path cannot be resolved, or if `messages` is empty / contains empty strings
 
 ## Related
 

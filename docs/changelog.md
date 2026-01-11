@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.2.8
+
+- docs: homeboy docs outputs raw markdown by default
+
+- changelog: homeboy changelog outputs raw markdown (removed show subcommand)
+
 ## 0.2.7
 
 - Default JSON output envelope; allow interactive passthrough

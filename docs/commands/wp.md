@@ -18,7 +18,7 @@ homeboy wp <projectId> [--local] <args...>
 
 ```json
 {
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "local": false,
   "args": ["plugin", "list"],
   "targetDomain": "<domain>|null",

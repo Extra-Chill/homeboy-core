@@ -4,7 +4,13 @@ use serde_json;
 #[derive(Debug, Clone, Copy)]
 enum ResponseMode {
     Json,
+    Raw(RawOutputMode),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RawOutputMode {
     InteractivePassthrough,
+    Markdown,
 }
 
 mod commands;
@@ -76,8 +82,16 @@ enum Commands {
 
 fn response_mode(command: &Commands) -> ResponseMode {
     match command {
-        Commands::Ssh(args) if args.command.is_none() => ResponseMode::InteractivePassthrough,
-        Commands::Logs(args) if logs::is_interactive(args) => ResponseMode::InteractivePassthrough,
+        Commands::Ssh(args) if args.command.is_none() => {
+            ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
+        }
+        Commands::Logs(args) if logs::is_interactive(args) => {
+            ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
+        }
+        Commands::Docs(args) if !args.list => ResponseMode::Raw(RawOutputMode::Markdown),
+        Commands::Changelog(args) if changelog::is_show_markdown(args) => {
+            ResponseMode::Raw(RawOutputMode::Markdown)
+        }
         _ => ResponseMode::Json,
     }
 }
@@ -89,7 +103,7 @@ fn main() -> std::process::ExitCode {
 
     match mode {
         ResponseMode::Json => {}
-        ResponseMode::InteractivePassthrough => {
+        ResponseMode::Raw(RawOutputMode::InteractivePassthrough) => {
             if !homeboy_core::tty::require_tty_for_interactive() {
                 let err = homeboy_core::Error::validation_invalid_argument(
                     "tty",
@@ -99,6 +113,28 @@ fn main() -> std::process::ExitCode {
                 );
                 homeboy_core::output::print_result::<serde_json::Value>(Err(err));
                 return std::process::ExitCode::from(exit_code_to_u8(2));
+            }
+        }
+        ResponseMode::Raw(RawOutputMode::Markdown) => {}
+    }
+
+    if let ResponseMode::Raw(RawOutputMode::Markdown) = mode {
+        let markdown_result: homeboy_core::Result<(String, i32)> = match cli.command {
+            Commands::Docs(args) => docs_command::run_markdown(args),
+            Commands::Changelog(args) => changelog::run_markdown(args),
+            _ => Err(homeboy_core::Error::other(
+                "Invalid raw markdown response mode".to_string(),
+            )),
+        };
+
+        match markdown_result {
+            Ok((content, exit_code)) => {
+                print!("{}", content);
+                return std::process::ExitCode::from(exit_code_to_u8(exit_code));
+            }
+            Err(err) => {
+                homeboy_core::output::print_result::<serde_json::Value>(Err(err));
+                return std::process::ExitCode::from(exit_code_to_u8(1));
             }
         }
     }
@@ -176,7 +212,8 @@ fn main() -> std::process::ExitCode {
 
     match mode {
         ResponseMode::Json => homeboy_core::output::print_json_result(json_result),
-        ResponseMode::InteractivePassthrough => {}
+        ResponseMode::Raw(RawOutputMode::InteractivePassthrough) => {}
+        ResponseMode::Raw(RawOutputMode::Markdown) => {}
     }
 
     std::process::ExitCode::from(exit_code_to_u8(exit_code))

@@ -131,3 +131,5 @@ Notes:
 
 - `0`: no errors (and no warnings when `--fail-on warning` is used)
 - `1`: errors found, or warnings found with `--fail-on warning`
+
+Note: `--fail-on` controls warnings vs errors only; `info` never triggers a non-zero exit code.

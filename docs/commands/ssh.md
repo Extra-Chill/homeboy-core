@@ -23,8 +23,8 @@ homeboy ssh --server <serverId> [command]
 ```json
 {
   "resolvedType": "project|server",
-  "projectId": "<id>|null",
-  "serverId": "<id>",
+  "projectId": "<projectId>|null",
+  "serverId": "<serverId>",
   "command": "<string>|null"
 }
 ```

@@ -11,7 +11,7 @@ homeboy project <COMMAND>
 ### `create`
 
 ```sh
-homeboy project create <name> <domain> <project_type> [--server-id <id>] [--base-path <path>] [--table-prefix <prefix>] [--activate]
+homeboy project create <name> <domain> <project_type> [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--activate]
 ```
 
 - `--activate`: set the new project as the active project.
@@ -23,9 +23,9 @@ JSON output:
 ```json
 {
   "command": "project.create",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "project": {
-    "id": "<id>",
+    "id": "<projectId>",
     "config": { }
   }
 }
@@ -34,7 +34,7 @@ JSON output:
 ### `set`
 
 ```sh
-homeboy project set <projectId> [--name <name>] [--domain <domain>] [--project-type <type>] [--server-id <id>] [--base-path <path>] [--table-prefix <prefix>]
+homeboy project set <projectId> [--name <name>] [--domain <domain>] [--project-type <type>] [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>]
 ```
 
 JSON output:
@@ -44,9 +44,9 @@ JSON output:
 ```json
 {
   "command": "project.set",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "project": {
-    "id": "<id>",
+    "id": "<projectId>",
     "config": { }
   },
   "updated": ["domain", "serverId"]
@@ -68,9 +68,9 @@ JSON output:
 ```json
 {
   "command": "project.repair",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "project": {
-    "id": "<id>",
+    "id": "<projectId>",
     "config": { }
   },
   "updated": ["id"]
@@ -92,10 +92,10 @@ JSON output (`list`):
 ```json
 {
   "command": "project.list",
-  "activeProjectId": "<id>|null",
+  "activeProjectId": "<projectId>|null",
   "projects": [
     {
-      "id": "<id>",
+      "id": "<projectId>",
       "name": "<name>",
       "domain": "<domain>",
       "projectType": "<type>",
@@ -110,7 +110,7 @@ JSON output (`--current`):
 ```json
 {
   "command": "project.current",
-  "activeProjectId": "<id>|null",
+  "activeProjectId": "<projectId>|null",
   "projects": null
 }
 ```
@@ -130,9 +130,9 @@ JSON output:
 ```json
 {
   "command": "project.show",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "project": {
-    "id": "<id>",
+    "id": "<projectId>",
     "config": { }
   }
 }
@@ -153,9 +153,9 @@ JSON output:
 ```json
 {
   "command": "project.switch",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "project": {
-    "id": "<id>",
+    "id": "<projectId>",
     "config": { }
   }
 }
@@ -178,10 +178,10 @@ JSON output:
 ```json
 {
   "command": "project.pin.list",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "pin": {
     "action": "list",
-    "projectId": "<id>",
+    "projectId": "<projectId>",
     "type": "file|log",
     "items": [
       {
@@ -206,10 +206,10 @@ JSON output:
 ```json
 {
   "command": "project.pin.add",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "pin": {
     "action": "add",
-    "projectId": "<id>",
+    "projectId": "<projectId>",
     "type": "file|log",
     "added": { "path": "<path>", "type": "file|log" }
   }
@@ -227,10 +227,10 @@ JSON output:
 ```json
 {
   "command": "project.pin.remove",
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "pin": {
     "action": "remove",
-    "projectId": "<id>",
+    "projectId": "<projectId>",
     "type": "file|log",
     "removed": { "path": "<path>", "type": "file|log" }
   }

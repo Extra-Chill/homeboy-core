@@ -8,7 +8,9 @@ homeboy docs [--list] [<topic>...]
 
 ## Description
 
-Returns embedded documentation content for a topic.
+By default, this command prints raw markdown to stdout.
+
+Use `--list` to return a JSON list of available topics.
 
 - Topic arguments are treated as a free-form trailing list.
 - The resolved key must exist in embedded docs; otherwise the command errors.
@@ -21,9 +23,11 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 ## Options
 
-- `--list`: return available embedded keys and exit.
+- `--list`: return available embedded keys and exit (JSON output).
 
 ## JSON output (success)
+
+This section applies only when `--list` is not used.
 
 > Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
 
@@ -31,7 +35,7 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 {
   "mode": "content",
   "topic": "<original topic as a single space-joined string>",
-  "topic_label": "<resolver topic label ('index' when no topic args)>",
+  "topic_label": "<resolver topic label (\"index\" when no topic args; \"unknown\" when user input normalizes to empty)>",
   "resolved_key": "<resolved embedded key (e.g. commands/deploy)>",
   "segments": ["<normalized>", "<segments>"] ,
   "slug": "<last segment>",
@@ -44,10 +48,10 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 - `mode`: response mode (`content`).
 - `topic`: raw user input joined by spaces.
-- `topic_label`: label returned by the resolver (`index` when no topic args are provided).
+- `topic_label`: label returned by the resolver (`index` when no topic args are provided; `unknown` when user input normalizes to empty).
 - `resolved_key`: resolved embedded key.
-- `segments`: normalized key segments.
-- `slug`: last segment of `segments`.
+- `segments`: normalized key segments (lowercased; spaces/tabs become `-`).
+- `slug`: last segment of `segments` (defaults to `index` when empty).
 - `content`: embedded markdown content.
 - `available_topics`: list of available embedded keys (sorted).
 

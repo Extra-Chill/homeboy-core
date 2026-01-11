@@ -17,7 +17,7 @@ Runs a build command for the component (either the component’s configured `bui
 ```json
 {
   "command": "build",
-  "componentId": "<id>",
+  "componentId": "<componentId>",
   "buildCommand": "<command string>",
   "stdout": "<stdout>",
   "stderr": "<stderr>",

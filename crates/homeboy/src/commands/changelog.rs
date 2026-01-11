@@ -11,14 +11,11 @@ use super::CmdResult;
 #[derive(Args)]
 pub struct ChangelogArgs {
     #[command(subcommand)]
-    command: ChangelogCommand,
+    pub command: Option<ChangelogCommand>,
 }
 
 #[derive(Subcommand)]
-enum ChangelogCommand {
-    /// Show the embedded Homeboy CLI changelog documentation
-    Show,
-
+pub enum ChangelogCommand {
     /// Add changelog items to the configured "next" section
     Add {
         /// Component ID (non-JSON mode)
@@ -71,17 +68,35 @@ struct ChangelogAddData {
     pub messages: Vec<String>,
 }
 
+pub fn run_markdown(args: ChangelogArgs) -> CmdResult<String> {
+    match args.command {
+        None => show_markdown(),
+        Some(ChangelogCommand::Add { .. }) => {
+            Err(homeboy_core::Error::validation_invalid_argument(
+                "command",
+                "Markdown output is only supported for 'changelog'",
+                None,
+                None,
+            ))
+        }
+    }
+}
+
+pub fn is_show_markdown(args: &ChangelogArgs) -> bool {
+    args.command.is_none()
+}
+
 pub fn run(args: ChangelogArgs, json_spec: Option<&str>) -> CmdResult<ChangelogOutput> {
     match args.command {
-        ChangelogCommand::Show => {
-            let (out, code) = show()?;
+        None => {
+            let (out, code) = show_json()?;
             Ok((ChangelogOutput::Show(out), code))
         }
-        ChangelogCommand::Add {
+        Some(ChangelogCommand::Add {
             component_id,
             message,
             project_id,
-        } => {
+        }) => {
             if let Some(spec) = json_spec {
                 let data: ChangelogAddData =
                     homeboy_core::json::load_op_data(spec, "changelog.add")?;
@@ -119,7 +134,19 @@ pub fn run(args: ChangelogArgs, json_spec: Option<&str>) -> CmdResult<ChangelogO
     }
 }
 
-fn show() -> CmdResult<ChangelogShowOutput> {
+fn show_markdown() -> CmdResult<String> {
+    let resolved = docs::resolve(&["changelog".to_string()]);
+
+    if resolved.content.is_empty() {
+        return Err(homeboy_core::Error::other(
+            "No changelog found (expected embedded docs topic 'changelog')".to_string(),
+        ));
+    }
+
+    Ok((resolved.content, 0))
+}
+
+fn show_json() -> CmdResult<ChangelogShowOutput> {
     let resolved = docs::resolve(&["changelog".to_string()]);
 
     if resolved.content.is_empty() {

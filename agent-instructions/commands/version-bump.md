@@ -13,7 +13,7 @@ Use Homeboy to update the version and changelog together. Do not manually edit c
 
 1. `homeboy component show <componentId>`
 2. `homeboy version show <componentId>`
-3. Decide bump interval: `patch|minor|major`
+3. Decide bump interval based on code-level changes and git logs since previous version bump: `patch|minor|major`
 4. Bump version and add changelog entries (repeat `--changelog-add` per item):
 
 ```sh
@@ -27,4 +27,4 @@ homeboy version bump <componentId> <patch|minor|major> \
 
 ## Notes
 
-- Tagging is a separate release concern. Only use `homeboy git tag` and `homeboy git push <componentId> --tags` when explicitly doing a release.
+- Ask the user if you should also use `homeboy git tag` and `homeboy git push <componentId> --tags` 

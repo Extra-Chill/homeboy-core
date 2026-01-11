@@ -10,9 +10,9 @@ homeboy component <COMMAND>
 
 - `create <name> --local-path <path> --remote-path <path> --build-artifact <path> [--version-target <file|file::pattern>]... [--build-command <cmd>] [--is-network]`
 - `import <json> [--skip-existing]`
-- `show <id>`
-- `set <id> [--name <name>] [--local-path <path>] [--remote-path <path>] [--build-artifact <path>] [--version-target <file|file::pattern>]... [--build-command <cmd>] [--is-network] [--not-network]`
-- `delete <id> --force`
+- `show <componentId>`
+- `set <componentId> [--name <name>] [--local-path <path>] [--remote-path <path>] [--build-artifact <path>] [--version-target <file|file::pattern>]... [--build-command <cmd>] [--is-network] [--not-network]`
+- `delete <componentId> --force`
 - `list`
 
 ## JSON output

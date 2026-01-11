@@ -20,7 +20,7 @@ homeboy git <COMMAND>
 
 ```json
 {
-  "componentId": "<id>",
+  "componentId": "<componentId>",
   "path": "<local path>",
   "action": "status|commit|push|pull|tag",
   "success": true,

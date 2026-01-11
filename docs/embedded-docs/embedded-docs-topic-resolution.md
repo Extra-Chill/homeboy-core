@@ -26,7 +26,7 @@ Examples:
 - Key is `segments.join("/")`.
 - `topic_label` is the user input joined with spaces (e.g. `"project set"`).
 
-If normalization yields no segments, the key falls back to `index` and `topic_label` becomes `unknown`.
+If normalization yields no segments (for example: topic args are only whitespace or only `/`), the key falls back to `index` and `topic_label` becomes `unknown`.
 
 If the resolved key does not exist in embedded docs, `homeboy docs` returns an error.
 

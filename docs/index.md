@@ -23,7 +23,7 @@ Common directories:
 
 Additional (not created by default):
 
-- `playwright-browsers/` (used via `PLAYWRIGHT_BROWSERS_PATH` for Python modules)
+- `playwright-browsers/` (used when running Python Playwright modules; see `PLAYWRIGHT_BROWSERS_PATH`)
 - `docs/` (reserved for cached/generated documentation)
 
 ## Documentation

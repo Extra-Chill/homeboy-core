@@ -18,7 +18,7 @@ homeboy pm2 <projectId> [--local] <args...>
 
 ```json
 {
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "local": false,
   "args": ["list"],
   "command": "<rendered command string>"

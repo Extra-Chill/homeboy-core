@@ -22,14 +22,14 @@ homeboy deploy <projectId> [<componentIds...>] [--all] [--outdated] [--build] [-
 
 ```json
 {
-  "projectId": "<id>",
+  "projectId": "<projectId>",
   "all": false,
   "outdated": false,
   "build": false,
   "dryRun": false,
   "components": [
     {
-      "id": "<component id>",
+      "id": "<componentId>",
       "name": "<name>",
       "status": "would_deploy|deployed|failed",
       "localVersion": "<v>|null",
@@ -45,6 +45,8 @@ homeboy deploy <projectId> [<componentIds...>] [--all] [--outdated] [--build] [-
   "summary": { "succeeded": 0, "failed": 0, "skipped": 0 }
 }
 ```
+
+Note: `buildExitCode`/`scpExitCode` are numbers when present (not strings).
 
 ## Exit code
 

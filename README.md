@@ -79,6 +79,8 @@ Common paths:
 - `components/`
 - `modules/`
 - `keys/`
+- `backups/`
+- `project-types/`
 
 See [CLI documentation](docs/index.md) for details.
 
