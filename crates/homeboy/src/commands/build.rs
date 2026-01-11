@@ -26,13 +26,26 @@ pub struct BuildOutput {
 pub fn run(args: BuildArgs) -> CmdResult<BuildOutput> {
     let component = ConfigManager::load_component(&args.component_id)?;
 
-    let build_cmd = component.build_command.ok_or_else(|| {
+    let build_cmd = component.build_command.clone().or_else(|| {
+        homeboy_core::build::detect_build_command(&component.local_path, &component.build_artifact)
+            .map(|candidate| candidate.command)
+    });
+
+    let build_cmd = build_cmd.ok_or_else(|| {
         homeboy_core::Error::Other(format!(
-            "Component '{}' has no build_command configured",
+            "Component '{}' has no build_command configured and no build script was detected",
             args.component_id
         ))
     })?;
 
+    #[cfg(windows)]
+    let output = Command::new("cmd")
+        .args(["/C", &build_cmd])
+        .current_dir(&component.local_path)
+        .output()
+        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+
+    #[cfg(not(windows))]
     let output = Command::new("sh")
         .args(["-c", &build_cmd])
         .current_dir(&component.local_path)

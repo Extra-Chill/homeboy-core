@@ -2,12 +2,18 @@
 
 All notable changes to Homeboy CLI are documented in this file.
 
+## 0.1.8
+
+### Improvements
+- **Versioning**: `versionTargets` are now first-class for component version management (supports multiple files and multiple matches per file, with strict validation).
+- **Deploy**: Reads the component version from `versionTargets[0]` for local/remote comparisons.
+
 ## 0.1.7
 
 ### Improvements
 - **Component configuration**: Support `versionTargets` (multiple version targets) and optional `buildCommand` in component config.
 - **Version bumping**: `homeboy version bump` validates that all matches in each target are the same version before replacing.
-- **Deploy JSON output**: Deploy results now include `artifactPath`, `remotePath`, `buildCommand`, `buildExitCode`, and `scpExitCode` for clearer automation.
+- **Deploy JSON output**: Deploy results include `artifactPath`, `remotePath`, `buildCommand`, `buildExitCode`, and an upload exit code for clearer automation.
 - **Docs refresh**: Updated command docs + JSON output contract; removed outdated `docs/homeboy-cli-commands-and-json-contract.md`.
 
 ## 0.1.6
@@ -38,7 +44,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### New Features
 - **Build Command**: New `homeboy build <component>` for component-scoped builds
-  - Runs component's configured `build_command` in its `local_path`
+  - Runs a component build in its `local_path`
 
 ### Improvements
 - **Version Utilities**: Refactored version parsing to shared `homeboy-core` library

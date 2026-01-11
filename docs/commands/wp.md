@@ -22,7 +22,10 @@ homeboy wp <project_id> [--local] <args...>
   "local": false,
   "args": ["plugin", "list"],
   "target_domain": "<domain>",
-  "command": "<rendered command string>"
+  "command": "<rendered command string>",
+  "stdout": "<stdout>",
+  "stderr": "<stderr>",
+  "exit_code": 0
 }
 ```
 

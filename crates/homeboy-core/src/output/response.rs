@@ -63,3 +63,19 @@ pub fn print_result<T: Serialize>(result: crate::Result<T>) {
         Err(err) => println!("{}", CliResponse::<()>::from_error(&err).to_json()),
     }
 }
+
+pub fn map_cmd_result_to_json<T: Serialize>(
+    result: crate::Result<(T, i32)>,
+) -> (crate::Result<serde_json::Value>, i32) {
+    match result {
+        Ok((data, exit_code)) => match serde_json::to_value(data) {
+            Ok(value) => (Ok(value), exit_code),
+            Err(err) => (Err(crate::Error::Json(err)), 1),
+        },
+        Err(err) => (Err(err), 1),
+    }
+}
+
+pub fn print_json_result(result: crate::Result<serde_json::Value>) {
+    print_result(result)
+}

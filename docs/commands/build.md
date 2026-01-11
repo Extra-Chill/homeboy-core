@@ -8,7 +8,7 @@ homeboy build <component_id>
 
 ## Description
 
-Runs the component’s configured `build_command` in the component’s `local_path`.
+Runs a build command for the component (either the component’s configured `build_command`, or an auto-detected default) in the component’s `local_path`.
 
 ## JSON output
 

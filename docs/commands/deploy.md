@@ -12,7 +12,7 @@ homeboy deploy <project_id> [<component_ids...>] [--all] [--outdated] [--build] 
 - `<component_ids...>` (optional): component IDs to deploy (trailing var args)
 - `--all`: deploy all configured components
 - `--outdated`: deploy only components whose local and remote versions differ
-- `--build`: run each component’s configured build command before deploying
+- `--build`: run a build for each component before deploying
 - `--dry-run`: compute what would be deployed without uploading
 
 ## JSON output
@@ -38,7 +38,7 @@ homeboy deploy <project_id> [<component_ids...>] [--all] [--outdated] [--build] 
       "remotePath": "<path>|null",
       "buildCommand": "<cmd>|null",
       "buildExitCode": 0,
-      "scpExitCode": 0
+      "uploadExitCode": 0
     }
   ],
   "summary": { "succeeded": 0, "failed": 0, "skipped": 0 }

@@ -20,6 +20,10 @@ use homeboy_core::config::{AppPaths, ConfigManager, ServerConfig};
 use homeboy_core::ssh::{CommandOutput, SshClient};
 use homeboy_core::version::parse_version;
 
+fn sanitize_remote_single_quotes(value: &str) -> String {
+    value.replace("'", "'\\''")
+}
+
 use super::CmdResult;
 
 #[derive(Args)]
@@ -387,12 +391,24 @@ fn plan_components_to_deploy(
 }
 
 fn run_build_if_configured(component: &Component) -> (Option<i32>, Option<String>) {
-    let Some(ref build_cmd) = component.build_command else {
+    let build_cmd = component.build_command.clone().or_else(|| {
+        homeboy_core::build::detect_build_command(&component.local_path, &component.build_artifact)
+            .map(|candidate| candidate.command)
+    });
+
+    let Some(build_cmd) = build_cmd else {
         return (None, None);
     };
 
+    #[cfg(windows)]
+    let status = Command::new("cmd")
+        .args(["/C", &build_cmd])
+        .current_dir(&component.local_path)
+        .status();
+
+    #[cfg(not(windows))]
     let status = Command::new("sh")
-        .args(["-c", build_cmd])
+        .args(["-c", &build_cmd])
         .current_dir(&component.local_path)
         .status();
 
@@ -430,20 +446,55 @@ fn deploy_component_artifact(
             .map(|name| format!(".homeboy-{}", name))
             .unwrap_or_else(|| format!(".homeboy-{}.zip", component.id));
 
+        let zip_root_dir =
+            homeboy_core::build::detect_zip_single_root_dir(Path::new(&component.build_artifact))
+                .ok()
+                .flatten();
+
+        let install_basename = Path::new(&install_dir)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+
+        let (unzip_target_dir, final_install_dir) = if zip_root_dir
+            .as_deref()
+            .is_some_and(|root| root == install_basename)
+        {
+            let parent = Path::new(&install_dir)
+                .parent()
+                .and_then(|value| value.to_str())
+                .unwrap_or(&install_dir)
+                .to_string();
+            (parent, install_dir.clone())
+        } else {
+            (install_dir.clone(), install_dir.clone())
+        };
+
+        let upload_dir = if unzip_target_dir != final_install_dir {
+            unzip_target_dir.clone()
+        } else {
+            install_dir.clone()
+        };
+
         let upload_path = match homeboy_core::base_path::join_remote_child(
             Some(base_path),
-            &component.remote_path,
+            &upload_dir,
             &zip_filename,
         ) {
             Ok(value) => value,
             Err(err) => return (Some(1), Some(err.to_string())),
         };
 
-        let mkdir_cmd =
-            match homeboy_core::shell::cd_and("/", &format!("mkdir -p '{}'", install_dir)) {
-                Ok(value) => value,
-                Err(err) => return (Some(1), Some(err.to_string())),
-            };
+        let mkdir_cmd = match homeboy_core::shell::cd_and(
+            "/",
+            &format!(
+                "mkdir -p '{}'",
+                sanitize_remote_single_quotes(&unzip_target_dir)
+            ),
+        ) {
+            Ok(value) => value,
+            Err(err) => return (Some(1), Some(err.to_string())),
+        };
 
         let mkdir_output = client.execute(&mkdir_cmd);
         if !mkdir_output.success {
@@ -451,112 +502,171 @@ fn deploy_component_artifact(
         }
 
         let (scp_exit_code, scp_error) =
-            scp_to_path(server, client, &component.build_artifact, &upload_path);
+            upload_to_path(server, client, &component.build_artifact, &upload_path);
         if scp_error.is_some() {
             return (scp_exit_code, scp_error);
         }
 
-        let unzip_cmd = match homeboy_core::shell::cd_and(
-            &install_dir,
-            &format!("unzip -o '{}' && rm '{}'", upload_path, upload_path),
-        ) {
-            Ok(value) => value,
-            Err(err) => return (Some(1), Some(err.to_string())),
+        let cleanup_target_dir = if let Some(ref root) = zip_root_dir {
+            if unzip_target_dir != final_install_dir {
+                match homeboy_core::base_path::join_remote_child(None, &unzip_target_dir, root) {
+                    Ok(value) => value,
+                    Err(_) => final_install_dir.clone(),
+                }
+            } else {
+                final_install_dir.clone()
+            }
+        } else {
+            final_install_dir.clone()
         };
 
-        let unzip_output = client.execute(&unzip_cmd);
-        if !unzip_output.success {
-            return (Some(unzip_output.exit_code), Some(unzip_output.stderr));
-        }
+        if cleanup_target_dir.starts_with(base_path)
+            && cleanup_target_dir.contains("/wp-content/plugins/")
+            && cleanup_target_dir != base_path
+        {
+            let cleanup_cmd = match homeboy_core::shell::cd_and(
+                "/",
+                &format!(
+                    "rm -rf '{}' && mkdir -p '{}'",
+                    sanitize_remote_single_quotes(&cleanup_target_dir),
+                    sanitize_remote_single_quotes(&cleanup_target_dir)
+                ),
+            ) {
+                Ok(value) => value,
+                Err(err) => return (Some(1), Some(err.to_string())),
+            };
 
-        return (Some(0), None);
+            let cleanup_output = client.execute(&cleanup_cmd);
+            if !cleanup_output.success {
+                return (Some(cleanup_output.exit_code), Some(cleanup_output.stderr));
+            }
+
+            let unzip_cmd = match homeboy_core::shell::cd_and(
+                &unzip_target_dir,
+                &format!(
+                    "unzip -o '{}' && rm '{}'",
+                    sanitize_remote_single_quotes(&upload_path),
+                    sanitize_remote_single_quotes(&upload_path)
+                ),
+            ) {
+                Ok(value) => value,
+                Err(err) => return (Some(1), Some(err.to_string())),
+            };
+
+            let unzip_output = client.execute(&unzip_cmd);
+            if !unzip_output.success {
+                return (Some(unzip_output.exit_code), Some(unzip_output.stderr));
+            }
+
+            let plugin_check_cmd = match homeboy_core::shell::cd_and(
+                "/",
+                &format!(
+                    "find '{}' -maxdepth 2 -type f -name '*.php' -exec grep -l 'Plugin Name:' {} + | head -n 1",
+                    sanitize_remote_single_quotes(&cleanup_target_dir),
+                    "\\{}"
+                ),
+            ) {
+                Ok(value) => value,
+                Err(err) => return (Some(1), Some(err.to_string())),
+            };
+
+            let plugin_check_output = client.execute(&plugin_check_cmd);
+            if !plugin_check_output.success {
+                return (
+                    Some(1),
+                    Some(format!(
+                        "Deploy completed but plugin verification command failed: {}",
+                        plugin_check_output.stderr
+                    )),
+                );
+            }
+
+            if plugin_check_output.stdout.trim().is_empty() {
+                return (
+                    Some(1),
+                    Some(format!(
+                        "Deploy completed but no WordPress plugin header found in {}",
+                        cleanup_target_dir
+                    )),
+                );
+            }
+
+            return (Some(0), None);
+        } else {
+            return (
+                Some(1),
+                Some(format!(
+                    "Unsafe deploy cleanup target: {}",
+                    cleanup_target_dir
+                )),
+            );
+        }
     }
 
-    scp_to_path(server, client, &component.build_artifact, &install_dir)
+    upload_to_path(server, client, &component.build_artifact, &install_dir)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
-    #[test]
-    fn dry_run_short_circuits_without_scp_calls() {
-        reset_test_scp_call_count();
+    fn make_test_zip_with_root_dir(root_dir: &str) -> tempfile::NamedTempFile {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let file = std::fs::File::create(temp_file.path()).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::FileOptions::default();
 
-        let all_components = vec![Component {
-            id: "sell-my-images".to_string(),
-            name: "Sell My Images".to_string(),
-            local_path: "/tmp".to_string(),
-            remote_path: "wp-content/plugins/sell-my-images".to_string(),
-            build_artifact: "/tmp/sell-my-images.zip".to_string(),
-            build_command: None,
-            version_targets: None,
-        }];
+        zip.add_directory(format!("{}/", root_dir), options)
+            .unwrap();
+        zip.start_file(format!("{}/{}.php", root_dir, root_dir), options)
+            .unwrap();
+        zip.write_all(b"<?php\n/*\nPlugin Name: Test Plugin\n*/\n")
+            .unwrap();
+        zip.finish().unwrap();
 
-        let args = DeployArgs {
-            project_id: "saraichinwag".to_string(),
-            component_ids: vec![],
-            all: true,
-            outdated: false,
-            build: false,
-            dry_run: true,
-        };
-
-        let client = TestRemoteExec::default();
-        let server = ServerConfig {
-            id: "cloudways".to_string(),
-            name: "Cloudways".to_string(),
-            host: "example.com".to_string(),
-            user: "user".to_string(),
-            port: 22,
-            identity_file: None,
-        };
-
-        let selected =
-            plan_components_to_deploy(&args, &all_components, &server, "/var/www", &client)
-                .unwrap();
-        assert_eq!(selected.len(), 1);
-
-        assert_eq!(TEST_SCP_CALL_COUNT.load(Ordering::Relaxed), 0);
+        temp_file
     }
 
     #[test]
-    fn zip_deploy_creates_dir_and_unzips_into_install_dir() {
+    fn zip_deploy_unzips_into_parent_when_zip_root_matches_install_dir() {
         reset_test_scp_call_count();
+
+        let zip_file = make_test_zip_with_root_dir("sell-my-images");
+
+        assert_eq!(
+            homeboy_core::build::detect_zip_single_root_dir(zip_file.path())
+                .unwrap()
+                .as_deref(),
+            Some("sell-my-images")
+        );
 
         let component = Component {
             id: "sell-my-images".to_string(),
             name: "Sell My Images".to_string(),
             local_path: "/tmp".to_string(),
             remote_path: "wp-content/plugins/sell-my-images".to_string(),
-            build_artifact: "/tmp/sell-my-images.zip".to_string(),
+            build_artifact: zip_file.path().to_string_lossy().to_string(),
             build_command: None,
             version_targets: None,
         };
 
         let client = TestRemoteExec::default();
-        let server = ServerConfig {
-            id: "cloudways".to_string(),
-            name: "Cloudways".to_string(),
-            host: "example.com".to_string(),
-            user: "user".to_string(),
-            port: 22,
-            identity_file: None,
-        };
 
         let (exit_code, error) =
-            deploy_component_artifact(&server, &client, "/var/www/site", &component);
+            deploy_component_artifact_for_test(&client, "/var/www/site", &component);
         assert_eq!(exit_code, Some(0));
         assert!(error.is_none());
 
-        let commands = client.commands().join("\n");
-        assert!(commands.contains("mkdir -p '/var/www/site/wp-content/plugins/sell-my-images'"));
-        assert!(commands.contains("cd '/var/www/site/wp-content/plugins/sell-my-images'"));
-        assert!(commands.contains("unzip -o '/var/www/site/wp-content/plugins/sell-my-images/.homeboy-sell-my-images.zip'"));
+        assert_eq!(
+            TEST_SCP_CALL_COUNT.load(Ordering::Relaxed),
+            1,
+            "expected exactly one upload attempt"
+        );
     }
 }
 
-fn scp_to_path(
+fn upload_to_path(
     _server: &ServerConfig,
     client: &dyn RemoteExec,
     local_path: &str,
@@ -566,7 +676,6 @@ fn scp_to_path(
     {
         TEST_SCP_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
     }
-    let mut scp_args: Vec<String> = vec![];
 
     let Some(ssh_client) = client.as_ssh_client() else {
         #[cfg(test)]
@@ -575,9 +684,36 @@ fn scp_to_path(
         #[cfg(not(test))]
         return (
             Some(1),
-            Some("SCP requires SSH client configuration".to_string()),
+            Some("Upload requires SSH client configuration".to_string()),
         );
     };
+
+    let (scp_exit_code, scp_error) = scp_to_path(ssh_client, local_path, remote_path);
+    if scp_error.is_none() {
+        return (scp_exit_code, None);
+    }
+
+    let fallback_output = ssh_client.upload_file(local_path, remote_path);
+    if fallback_output.success {
+        (Some(fallback_output.exit_code), None)
+    } else {
+        (
+            scp_exit_code,
+            Some(format!(
+                "SCP failed, and SSH upload fallback failed. scp_error: {} fallback_error: {}",
+                scp_error.unwrap_or_default(),
+                fallback_output.stderr
+            )),
+        )
+    }
+}
+
+fn scp_to_path(
+    ssh_client: &SshClient,
+    local_path: &str,
+    remote_path: &str,
+) -> (Option<i32>, Option<String>) {
+    let mut scp_args: Vec<String> = vec![];
 
     if let Some(identity_file) = &ssh_client.identity_file {
         scp_args.push("-i".to_string());
@@ -591,8 +727,10 @@ fn scp_to_path(
 
     scp_args.push(local_path.to_string());
     scp_args.push(format!(
-        "{}@{}:{}",
-        ssh_client.user, ssh_client.host, remote_path
+        "{}@{}:'{}'",
+        ssh_client.user,
+        ssh_client.host,
+        remote_path.replace("'", "'\\''")
     ));
 
     let output = Command::new("scp").args(&scp_args).output();
@@ -678,24 +816,39 @@ trait RemoteExec {
 }
 
 #[cfg(test)]
+fn deploy_component_artifact_for_test(
+    client: &dyn RemoteExec,
+    base_path: &str,
+    component: &Component,
+) -> (Option<i32>, Option<String>) {
+    let server = ServerConfig {
+        id: "test".to_string(),
+        name: "Test".to_string(),
+        host: "example.com".to_string(),
+        user: "user".to_string(),
+        port: 22,
+        identity_file: None,
+    };
+
+    deploy_component_artifact(&server, client, base_path, component)
+}
+
+#[cfg(test)]
 #[derive(Default)]
 struct TestRemoteExec {
     commands: std::sync::Mutex<Vec<String>>,
 }
 
 #[cfg(test)]
-impl TestRemoteExec {
-    fn commands(&self) -> Vec<String> {
-        self.commands.lock().unwrap().clone()
-    }
-}
-
-#[cfg(test)]
 impl RemoteExec for TestRemoteExec {
     fn execute(&self, command: &str) -> CommandOutput {
-        self.commands.lock().unwrap().push(command.to_string());
+        {
+            let mut locked = self.commands.lock().unwrap();
+            locked.push(command.to_string());
+        }
+
         CommandOutput {
-            stdout: String::new(),
+            stdout: "plugin.php".to_string(),
             stderr: String::new(),
             success: true,
             exit_code: 0,

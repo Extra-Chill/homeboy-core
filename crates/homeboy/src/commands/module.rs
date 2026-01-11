@@ -10,7 +10,58 @@ use homeboy_core::template;
 
 use crate::commands::CmdResult;
 
-const SYSTEM_PYTHON_PATH: &str = "/opt/homebrew/bin/python3";
+/// Find system Python by checking PATH first, then common locations (cross-platform)
+fn find_system_python() -> Option<String> {
+    // Platform-specific lookup command and Python names
+    #[cfg(windows)]
+    let (lookup_cmd, python_names) = ("where", &["python", "python3"]);
+
+    #[cfg(not(windows))]
+    let (lookup_cmd, python_names) = ("which", &["python3", "python"]);
+
+    // Try PATH lookup first (most portable)
+    for name in python_names {
+        if let Ok(output) = Command::new(lookup_cmd).arg(name).output() {
+            if output.status.success() {
+                // Take first line (Windows `where` may return multiple paths)
+                let path = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !path.is_empty() && Path::new(&path).exists() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    // Platform-specific fallback paths
+    #[cfg(windows)]
+    let common_paths: &[&str] = &[]; // Windows relies on PATH; no standard locations
+
+    #[cfg(target_os = "macos")]
+    let common_paths: &[&str] = &[
+        "/opt/homebrew/bin/python3", // M1/M2 Mac (Homebrew)
+        "/usr/local/bin/python3",    // Intel Mac (Homebrew)
+        "/usr/bin/python3",          // System Python
+    ];
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let common_paths: &[&str] = &[
+        "/usr/bin/python3",       // System Python
+        "/usr/local/bin/python3", // Local install
+    ];
+
+    for path in common_paths {
+        if Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+
+    None
+}
 
 #[derive(Args)]
 pub struct ModuleArgs {
@@ -165,17 +216,24 @@ fn run_python_module(
         .module_path
         .as_ref()
         .ok_or_else(|| homeboy_core::Error::Other("module_path not set".to_string()))?;
+    #[cfg(windows)]
+    let venv_path = format!("{}\\venv", module_path);
+    #[cfg(not(windows))]
     let venv_path = format!("{}/venv", module_path);
+
+    #[cfg(windows)]
+    let venv_python = format!("{}\\Scripts\\python.exe", venv_path);
+    #[cfg(not(windows))]
     let venv_python = format!("{}/bin/python3", venv_path);
 
     // Determine Python executable
     let python_path = if Path::new(&venv_python).exists() {
-        &venv_python
-    } else if Path::new(SYSTEM_PYTHON_PATH).exists() {
-        SYSTEM_PYTHON_PATH
+        venv_python
+    } else if let Some(system_python) = find_system_python() {
+        system_python
     } else {
         return Err(homeboy_core::Error::Other(
-            "Python not found. Install Python or run module setup.".to_string(),
+            "Python3 not found. Install Python3 and ensure it's in your PATH.".to_string(),
         ));
     };
 
@@ -247,7 +305,17 @@ fn run_shell_module(
         }
     }
 
-    let status = Command::new("/bin/bash")
+    #[cfg(windows)]
+    let status = Command::new("cmd")
+        .arg("/C")
+        .args(&arguments)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
+
+    #[cfg(not(windows))]
+    let status = Command::new("sh")
         .args(&arguments)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -352,6 +420,15 @@ fn run_cli_module(
 
     let command = template::render(command_template, &vars);
 
+    #[cfg(windows)]
+    let status = Command::new("cmd")
+        .args(["/C", &command])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
+
+    #[cfg(not(windows))]
     let status = Command::new("sh")
         .args(["-c", &command])
         .stdin(Stdio::inherit())
@@ -385,9 +462,18 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
         .as_ref()
         .ok_or_else(|| homeboy_core::Error::Other("module_path not set".to_string()))?;
 
+    #[cfg(windows)]
+    let venv_path = format!("{}\\venv", module_path);
+    #[cfg(not(windows))]
     let venv_path = format!("{}/venv", module_path);
 
-    let venv_status = Command::new(SYSTEM_PYTHON_PATH)
+    let system_python = find_system_python().ok_or_else(|| {
+        homeboy_core::Error::Other(
+            "Python3 not found. Install Python3 and ensure it's in your PATH.".to_string(),
+        )
+    })?;
+
+    let venv_status = Command::new(&system_python)
         .args(["-m", "venv", "--copies", &venv_path])
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -403,6 +489,9 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
 
     if let Some(deps) = module.runtime.dependencies.as_ref() {
         if !deps.is_empty() {
+            #[cfg(windows)]
+            let pip_path = format!("{}\\Scripts\\pip.exe", venv_path);
+            #[cfg(not(windows))]
             let pip_path = format!("{}/bin/pip", venv_path);
             let mut pip_args = vec!["install".to_string()];
             pip_args.extend(deps.clone());
@@ -425,6 +514,9 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
 
     if let Some(browsers) = module.runtime.playwright_browsers.as_ref() {
         if !browsers.is_empty() {
+            #[cfg(windows)]
+            let venv_python = format!("{}\\Scripts\\python.exe", venv_path);
+            #[cfg(not(windows))]
             let venv_python = format!("{}/bin/python3", venv_path);
             let playwright_path = AppPaths::playwright_browsers()
                 .to_string_lossy()
@@ -471,6 +563,9 @@ fn is_module_ready(module: &ModuleManifest) -> bool {
         RuntimeType::Python => {
             // Python modules need venv to be ready
             if let Some(ref path) = module.module_path {
+                #[cfg(windows)]
+                let venv_python = format!("{}\\venv\\Scripts\\python.exe", path);
+                #[cfg(not(windows))]
                 let venv_python = format!("{}/venv/bin/python3", path);
                 Path::new(&venv_python).exists()
             } else {

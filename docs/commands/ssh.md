@@ -3,12 +3,17 @@
 ## Synopsis
 
 ```sh
-homeboy ssh <project_id> [command]
+homeboy ssh <id> [command]
+# or:
+homeboy ssh --project <project_id> [command]
+homeboy ssh --server <server_id> [command]
 ```
 
-## Arguments
+## Arguments and flags
 
-- `project_id`: project ID
+- `id`: a project ID or server ID (the CLI resolves which one you mean)
+- `--project <project_id>`: force project resolution
+- `--server <server_id>`: force server resolution
 - `command` (optional): if provided, executes a single command; otherwise opens an interactive SSH session.
 
 ## JSON output
@@ -17,7 +22,9 @@ homeboy ssh <project_id> [command]
 
 ```json
 {
-  "project_id": "<id>",
+  "resolved_type": "project|server",
+  "project_id": "<id>|null",
+  "server_id": "<id>",
   "command": "<string>|null"
 }
 ```

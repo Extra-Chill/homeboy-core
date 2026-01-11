@@ -9,4 +9,6 @@ pub mod template;
 pub mod token;
 pub mod version;
 
+pub mod build;
+
 pub use error::{Error, Result};

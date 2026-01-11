@@ -23,3 +23,7 @@ shellexpand = "3.1"
 uuid.workspace = true
 atty = "0.2"
 regex = "1"
+
+[dev-dependencies]
+tempfile = "3.14"
+zip = "0.6"

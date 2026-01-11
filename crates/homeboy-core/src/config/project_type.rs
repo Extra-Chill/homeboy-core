@@ -73,7 +73,7 @@ impl ProjectTypeDefinition {
                 default_cli_path: Some("wp".to_string()),
             }),
             discovery: Some(DiscoveryConfig {
-                find_command: "find /home -name 'wp-config.php' -type f 2>/dev/null | head -20".to_string(),
+                find_command: "find /home /var/www /srv -maxdepth 6 -name 'wp-config.php' -type f 2>/dev/null | head -20".to_string(),
                 base_path_transform: "dirname".to_string(),
                 display_name_command: Some("cd {{basePath}} && wp option get blogname 2>/dev/null || basename {{basePath}}".to_string()),
             }),
@@ -96,7 +96,7 @@ impl ProjectTypeDefinition {
                 default_cli_path: Some("pm2".to_string()),
             }),
             discovery: Some(DiscoveryConfig {
-                find_command: "find /home -name 'package.json' -type f 2>/dev/null | head -20"
+                find_command: "find /home /var/www /srv -maxdepth 6 -name 'package.json' -type f 2>/dev/null | head -20"
                     .to_string(),
                 base_path_transform: "dirname".to_string(),
                 display_name_command: None,

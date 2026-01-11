@@ -1,6 +1,6 @@
 use clap::Args;
 use homeboy_core::config::{ConfigManager, ProjectConfiguration, ProjectTypeManager};
-use homeboy_core::ssh::{execute_local_command, SshClient};
+use homeboy_core::ssh::{execute_local_command, CommandOutput, SshClient};
 use homeboy_core::template::{render_map, TemplateVars};
 use homeboy_core::token;
 use serde::Serialize;
@@ -29,16 +29,27 @@ pub struct WpOutput {
     pub args: Vec<String>,
     pub target_domain: Option<String>,
     pub command: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
 }
 
 pub fn run(args: WpArgs) -> CmdResult<WpOutput> {
+    run_with_loader_and_executor(args, ConfigManager::load_project, execute_local_command)
+}
+
+fn run_with_loader_and_executor(
+    args: WpArgs,
+    project_loader: fn(&str) -> homeboy_core::Result<ProjectConfiguration>,
+    local_executor: fn(&str) -> CommandOutput,
+) -> CmdResult<WpOutput> {
     if args.args.is_empty() {
         return Err(homeboy_core::Error::Other(
             "No command provided".to_string(),
         ));
     }
 
-    let project = ConfigManager::load_project(&args.project_id)?;
+    let project = project_loader(&args.project_id)?;
 
     let type_def = ProjectTypeManager::resolve(&project.project_type);
 
@@ -56,10 +67,10 @@ pub fn run(args: WpArgs) -> CmdResult<WpOutput> {
         )));
     }
 
-    let (exit_code, target_domain, command) = if args.local {
+    let (output, target_domain, command) = if args.local {
         let (target_domain, command) = build_command(&project, &cli_config, &args.args, true)?;
-        let output = execute_local_command(&command);
-        (output.exit_code, Some(target_domain), command)
+        let output = local_executor(&command);
+        (output, Some(target_domain), command)
     } else {
         let (target_domain, command) = build_command(&project, &cli_config, &args.args, false)?;
 
@@ -69,7 +80,7 @@ pub fn run(args: WpArgs) -> CmdResult<WpOutput> {
         let server = ConfigManager::load_server(server_id)?;
         let client = SshClient::from_server(&server, server_id)?;
         let output = client.execute(&command);
-        (output.exit_code, Some(target_domain), command)
+        (output, Some(target_domain), command)
     };
 
     Ok((
@@ -79,8 +90,11 @@ pub fn run(args: WpArgs) -> CmdResult<WpOutput> {
             args: args.args,
             target_domain,
             command,
+            stdout: output.stdout,
+            stderr: output.stderr,
+            exit_code: output.exit_code,
         },
-        exit_code,
+        output.exit_code,
     ))
 }
 
@@ -188,4 +202,64 @@ fn resolve_subtarget(
     }
 
     (default_domain, args.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_project_loader(_project_id: &str) -> homeboy_core::Result<ProjectConfiguration> {
+        Ok(ProjectConfiguration {
+            id: "saraichinwag".to_string(),
+            name: "Sarai Chinwag".to_string(),
+            domain: "example.com".to_string(),
+            project_type: "wordpress".to_string(),
+            server_id: Some("cloudways".to_string()),
+            base_path: Some("/tmp".to_string()),
+            table_prefix: Some("wp_".to_string()),
+            remote_files: Default::default(),
+            remote_logs: Default::default(),
+            database: Default::default(),
+            local_environment: homeboy_core::config::LocalEnvironmentConfig {
+                site_path: "/tmp".to_string(),
+                domain: "example.local".to_string(),
+                cli_path: None,
+            },
+            tools: Default::default(),
+            api: Default::default(),
+            sub_targets: vec![],
+            shared_tables: vec![],
+            component_ids: vec![],
+            table_groupings: vec![],
+            component_groupings: vec![],
+            protected_table_patterns: vec![],
+            unlocked_table_patterns: vec![],
+        })
+    }
+
+    fn fake_executor(_command: &str) -> CommandOutput {
+        CommandOutput {
+            stdout: "ok\n".to_string(),
+            stderr: "".to_string(),
+            success: true,
+            exit_code: 0,
+        }
+    }
+
+    #[test]
+    fn wp_returns_executor_stdout_and_exit_code() {
+        let args = WpArgs {
+            project_id: "saraichinwag".to_string(),
+            local: true,
+            args: vec!["core".to_string(), "version".to_string()],
+        };
+
+        let (data, exit_code) =
+            run_with_loader_and_executor(args, fake_project_loader, fake_executor).unwrap();
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(data.exit_code, 0);
+        assert_eq!(data.stdout, "ok\n");
+        assert_eq!(data.stderr, "");
+    }
 }

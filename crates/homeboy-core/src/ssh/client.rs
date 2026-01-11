@@ -2,6 +2,10 @@ use crate::config::ServerConfig;
 use crate::Result;
 use std::process::{Command, Stdio};
 
+fn shell_escape_single_quotes(value: &str) -> String {
+    value.replace("'", "'\\''")
+}
+
 pub struct SshClient {
     pub host: String,
     pub user: String,
@@ -41,6 +45,16 @@ impl SshClient {
     }
 
     pub fn execute(&self, command: &str) -> CommandOutput {
+        self.execute_with_stdin(command, None)
+    }
+
+    pub fn upload_file(&self, local_path: &str, remote_path: &str) -> CommandOutput {
+        let escaped_remote_path = shell_escape_single_quotes(remote_path);
+        let remote_command = format!("cat > '{}'", escaped_remote_path);
+        self.execute_with_stdin(&remote_command, Some(local_path))
+    }
+
+    fn execute_with_stdin(&self, command: &str, stdin_file: Option<&str>) -> CommandOutput {
         let mut args = Vec::new();
 
         if let Some(identity_file) = &self.identity_file {
@@ -56,7 +70,26 @@ impl SshClient {
         args.push(format!("{}@{}", self.user, self.host));
         args.push(command.to_string());
 
-        let output = Command::new("/usr/bin/ssh").args(&args).output();
+        let mut cmd = Command::new("ssh");
+        cmd.args(&args);
+
+        if let Some(stdin_file_path) = stdin_file {
+            match std::fs::File::open(stdin_file_path) {
+                Ok(file) => {
+                    cmd.stdin(file);
+                }
+                Err(err) => {
+                    return CommandOutput {
+                        stdout: String::new(),
+                        stderr: format!("Failed to open stdin file: {}", err),
+                        success: false,
+                        exit_code: -1,
+                    };
+                }
+            }
+        }
+
+        let output = cmd.output();
 
         match output {
             Ok(out) => CommandOutput {
@@ -93,7 +126,7 @@ impl SshClient {
             args.push(cmd.to_string());
         }
 
-        let status = Command::new("/usr/bin/ssh")
+        let status = Command::new("ssh")
             .args(&args)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -108,7 +141,11 @@ impl SshClient {
 }
 
 pub fn execute_local_command(command: &str) -> CommandOutput {
-    let output = Command::new("/bin/bash").args(["-c", command]).output();
+    #[cfg(windows)]
+    let output = Command::new("cmd").args(["/C", command]).output();
+
+    #[cfg(not(windows))]
+    let output = Command::new("sh").args(["-c", command]).output();
 
     match output {
         Ok(out) => CommandOutput {

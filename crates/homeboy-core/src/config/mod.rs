@@ -62,7 +62,7 @@ impl ConfigManager {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "json") {
+            if path.extension().is_some_and(|ext| ext == "json") {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(project) = serde_json::from_str::<ProjectConfiguration>(&content) {
                         projects.push(project);
@@ -93,7 +93,7 @@ impl ConfigManager {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "json") {
+            if path.extension().is_some_and(|ext| ext == "json") {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(server) = serde_json::from_str::<ServerConfig>(&content) {
                         servers.push(server);
@@ -180,7 +180,7 @@ impl ConfigManager {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "json") {
+            if path.extension().is_some_and(|ext| ext == "json") {
                 if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(comp) = serde_json::from_str::<ComponentConfiguration>(&content) {
                         components.push(comp);
@@ -202,7 +202,7 @@ impl ConfigManager {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "json") {
+            if path.extension().is_some_and(|ext| ext == "json") {
                 if let Some(stem) = path.file_stem() {
                     ids.push(stem.to_string_lossy().to_string());
                 }
