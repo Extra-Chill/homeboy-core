@@ -97,7 +97,7 @@ fn status(component_id: &str) -> CmdResult<GitOutput> {
     let path = get_component_path(component_id)?;
 
     let output = execute_git(&path, &["status", "--porcelain=v1"])
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     Ok((
         GitOutput {
@@ -117,7 +117,7 @@ fn commit(component_id: &str, message: &str) -> CmdResult<GitOutput> {
     let path = get_component_path(component_id)?;
 
     let status_output = execute_git(&path, &["status", "--porcelain=v1"])
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     let status_stdout = String::from_utf8_lossy(&status_output.stdout).to_string();
 
@@ -137,7 +137,7 @@ fn commit(component_id: &str, message: &str) -> CmdResult<GitOutput> {
     }
 
     let add_output =
-        execute_git(&path, &["add", "."]).map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        execute_git(&path, &["add", "."]).map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     if !add_output.status.success() {
         let exit_code = to_exit_code(add_output.status);
@@ -156,7 +156,7 @@ fn commit(component_id: &str, message: &str) -> CmdResult<GitOutput> {
     }
 
     let commit_output = execute_git(&path, &["commit", "-m", message])
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     let exit_code = to_exit_code(commit_output.status);
 
@@ -184,7 +184,7 @@ fn push(component_id: &str, tags: bool) -> CmdResult<GitOutput> {
     };
 
     let output =
-        execute_git(&path, &push_args).map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        execute_git(&path, &push_args).map_err(|e| homeboy_core::Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok((
@@ -205,7 +205,7 @@ fn pull(component_id: &str) -> CmdResult<GitOutput> {
     let path = get_component_path(component_id)?;
 
     let output =
-        execute_git(&path, &["pull"]).map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        execute_git(&path, &["pull"]).map_err(|e| homeboy_core::Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok((
@@ -231,7 +231,7 @@ fn tag(component_id: &str, tag_name: &str, message: Option<&str>) -> CmdResult<G
     };
 
     let output =
-        execute_git(&path, &tag_args).map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        execute_git(&path, &tag_args).map_err(|e| homeboy_core::Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok((

@@ -137,7 +137,7 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
         }
         ConfigCommand::Set { key, value } => {
             let Some(known) = find_config_key(&key) else {
-                return Err(homeboy_core::Error::Config(format!(
+                return Err(homeboy_core::Error::config(format!(
                     "Unknown config key: {}. Use `homeboy config keys`.",
                     key
                 )));
@@ -169,7 +169,7 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
         }
         ConfigCommand::Unset { key } => {
             let Some(known) = find_config_key(&key) else {
-                return Err(homeboy_core::Error::Config(format!(
+                return Err(homeboy_core::Error::config(format!(
                     "Unknown config key: {}. Use `homeboy config keys`.",
                     key
                 )));
@@ -177,7 +177,7 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
 
             let path = AppPaths::config()?;
             if !path.exists() {
-                return Err(homeboy_core::Error::Config(format!(
+                return Err(homeboy_core::Error::config(format!(
                     "Config file not found: {}",
                     path.display()
                 )));
@@ -205,14 +205,14 @@ pub fn run(args: ConfigArgs) -> CmdResult<ConfigOutput> {
                 .map(|k| k.name.to_string());
 
             if recognized_key.is_none() && !allow_unknown {
-                return Err(homeboy_core::Error::Config(format!(
+                return Err(homeboy_core::Error::config(format!(
                     "Unknown JSON pointer: {}. Pass --allow-unknown to override.",
                     pointer
                 )));
             }
 
             let json_value: serde_json::Value = serde_json::from_str(&value)
-                .map_err(|e| homeboy_core::Error::Config(format!("Invalid JSON value: {}", e)))?;
+                .map_err(|e| homeboy_core::Error::config(format!("Invalid JSON value: {}", e)))?;
 
             let path = AppPaths::config()?;
             AppPaths::ensure_directories()?;

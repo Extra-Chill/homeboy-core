@@ -16,7 +16,7 @@ fn parse_version_targets(targets: &[String]) -> homeboy_core::Result<Vec<Version
             .next()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| homeboy_core::Error::Other("Invalid version target".to_string()))?;
+            .ok_or_else(|| homeboy_core::Error::other("Invalid version target".to_string()))?;
 
         let pattern = parts.next().map(str::trim).filter(|s| !s.is_empty());
 
@@ -190,7 +190,7 @@ fn create(
     let id = slugify_id(name)?;
 
     if ConfigManager::load_component(&id).is_ok() {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Component '{}' already exists",
             id
         )));
@@ -231,10 +231,10 @@ fn create(
 
 fn import(json_str: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
     let mut components: Vec<ComponentConfiguration> = serde_json::from_str(json_str)
-        .map_err(|e| homeboy_core::Error::Other(format!("Failed to parse JSON - {}", e)))?;
+        .map_err(|e| homeboy_core::Error::other(format!("Failed to parse JSON - {}", e)))?;
 
     if components.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No components in JSON array".to_string(),
         ));
     }
@@ -246,7 +246,7 @@ fn import(json_str: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
     for component in components.iter_mut() {
         component.local_path = shellexpand::tilde(&component.local_path).to_string();
 
-        let id = match component.slug_id() {
+        let id: String = match component.slug_id() {
             Ok(id) => id,
             Err(e) => {
                 errors.push(format!("{}: {}", component.name, e));
@@ -256,7 +256,7 @@ fn import(json_str: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
 
         if ConfigManager::load_component(&id).is_ok() {
             if skip_existing {
-                skipped.push(id);
+                skipped.push(id.clone());
                 continue;
             }
 
@@ -267,7 +267,7 @@ fn import(json_str: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
         if let Err(e) = ConfigManager::save_component(&id, component) {
             errors.push(format!("{}: {}", id, e));
         } else {
-            created.push(id);
+            created.push(id.clone());
         }
     }
 
@@ -364,7 +364,7 @@ fn set(
     }
 
     if updated_fields.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No fields specified to update".to_string(),
         ));
     }
@@ -389,7 +389,7 @@ fn set(
 
 fn delete(id: &str, force: bool) -> CmdResult<ComponentOutput> {
     if ConfigManager::load_component(id).is_err() {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Component '{}' not found",
             id
         )));
@@ -404,7 +404,7 @@ fn delete(id: &str, force: bool) -> CmdResult<ComponentOutput> {
             .collect();
 
         if !using.is_empty() {
-            return Err(homeboy_core::Error::Other(format!(
+            return Err(homeboy_core::Error::other(format!(
                 "Component '{}' is used by projects: {}. Use --force to delete anyway.",
                 id,
                 using.join(", ")

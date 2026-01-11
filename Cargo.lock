@@ -415,6 +415,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "dirs",
+ "homeboy-error",
  "regex",
  "serde",
  "serde_json",
@@ -423,6 +424,14 @@ dependencies = [
  "thiserror",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "homeboy-error"
+version = "0.2.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

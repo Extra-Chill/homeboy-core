@@ -54,7 +54,7 @@ pub fn run(args: DocsArgs) -> CmdResult<DocsOutput> {
     if resolved.content.is_empty() {
         let available_topics = docs::available_topics();
 
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "No documentation found for '{}' (available: {})",
             args.topic.join(" "),
             available_topics.join("\n")

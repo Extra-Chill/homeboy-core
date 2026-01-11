@@ -7,6 +7,7 @@ authors.workspace = true
 description = "Core library for Homeboy CLI"
 
 [dependencies]
+homeboy-error = { path = "../homeboy-error" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

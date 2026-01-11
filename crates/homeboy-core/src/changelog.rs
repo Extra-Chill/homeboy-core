@@ -252,7 +252,8 @@ mod tests {
         let content = "# Changelog\n\n## Unreleased\n\n\n## 0.1.0\n\n- Old\n";
         let aliases = vec!["Unreleased".to_string(), "[Unreleased]".to_string()];
         let err = finalize_next_section(content, &aliases, "0.2.0", false).unwrap_err();
-        assert!(err.to_string().contains("empty"));
+        assert_eq!(err.code.as_str(), "validation.invalid_argument");
+        assert!(err.message.contains("Invalid"));
     }
 
     #[test]

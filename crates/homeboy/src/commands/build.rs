@@ -32,7 +32,7 @@ pub fn run(args: BuildArgs) -> CmdResult<BuildOutput> {
     });
 
     let build_cmd = build_cmd.ok_or_else(|| {
-        homeboy_core::Error::Other(format!(
+        homeboy_core::Error::other(format!(
             "Component '{}' has no build_command configured and no build script was detected",
             args.component_id
         ))
@@ -43,14 +43,14 @@ pub fn run(args: BuildArgs) -> CmdResult<BuildOutput> {
         .args(["/C", &build_cmd])
         .current_dir(&component.local_path)
         .output()
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     #[cfg(not(windows))]
     let output = Command::new("sh")
         .args(["-c", &build_cmd])
         .current_dir(&component.local_path)
         .output()
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();

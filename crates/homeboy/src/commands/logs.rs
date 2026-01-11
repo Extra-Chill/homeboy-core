@@ -135,7 +135,7 @@ fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<Log
         let output = ctx.client.execute(&command);
 
         if !output.success {
-            return Err(homeboy_core::Error::Other(output.stderr));
+            return Err(homeboy_core::Error::other(output.stderr));
         }
 
         Ok((
@@ -164,7 +164,7 @@ fn clear(project_id: &str, path: &str) -> CmdResult<LogsOutput> {
     let output = ctx.client.execute(&command);
 
     if !output.success {
-        return Err(homeboy_core::Error::Other(output.stderr));
+        return Err(homeboy_core::Error::other(output.stderr));
     }
 
     Ok((

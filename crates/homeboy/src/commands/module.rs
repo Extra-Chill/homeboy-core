@@ -259,7 +259,7 @@ fn run_module(
     args: Vec<String>,
 ) -> CmdResult<ModuleOutput> {
     let module = load_module(module_id)
-        .ok_or_else(|| homeboy_core::Error::Other(format!("Module '{}' not found", module_id)))?;
+        .ok_or_else(|| homeboy_core::Error::other(format!("Module '{}' not found", module_id)))?;
 
     let app_config = ConfigManager::load_app_config()?;
     let installed_module = app_config
@@ -268,7 +268,7 @@ fn run_module(
         .and_then(|m| m.get(module_id));
 
     if installed_module.is_none() {
-        return Err(homeboy_core::Error::Config(format!(
+        return Err(homeboy_core::Error::config(format!(
             "Module '{}' is not configured. Install it with `homeboy module install <git-url>`.",
             module_id
         )));
@@ -288,7 +288,7 @@ fn run_module(
                 let project_id = project
                     .or_else(|| app_config.active_project_id.clone())
                     .ok_or_else(|| {
-                        homeboy_core::Error::Other(
+                        homeboy_core::Error::other(
                             "This module requires a project; pass --project <id>".to_string(),
                         )
                     })?;
@@ -314,7 +314,7 @@ fn run_module(
 
                 if let Some(ref component_id) = resolved_component {
                     let component = ConfigManager::load_component(component_id).map_err(|_| {
-                        homeboy_core::Error::Config(format!(
+                        homeboy_core::Error::config(format!(
                             "Component '{}' required by module '{}' is not configured",
                             component_id, module.id
                         ))
@@ -374,7 +374,7 @@ fn run_python_module(
     let module_path = module
         .module_path
         .as_ref()
-        .ok_or_else(|| homeboy_core::Error::Other("module_path not set".to_string()))?;
+        .ok_or_else(|| homeboy_core::Error::other("module_path not set".to_string()))?;
     #[cfg(windows)]
     let venv_path = format!("{}\\venv", module_path);
     #[cfg(not(windows))]
@@ -391,7 +391,7 @@ fn run_python_module(
     } else if let Some(system_python) = find_system_python() {
         system_python
     } else {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "Python3 not found. Install Python3 and ensure it's in your PATH.".to_string(),
         ));
     };
@@ -400,7 +400,7 @@ fn run_python_module(
     let entrypoint = match &module.runtime.entrypoint {
         Some(e) => format!("{}/{}", module_path, e),
         None => {
-            return Err(homeboy_core::Error::Other(
+            return Err(homeboy_core::Error::other(
                 "Module has no entrypoint defined".to_string(),
             ));
         }
@@ -430,7 +430,7 @@ fn run_python_module(
         .stderr(Stdio::inherit())
         .status();
 
-    let status = status.map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+    let status = status.map_err(|e| homeboy_core::Error::other(e.to_string()))?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -441,13 +441,13 @@ fn run_shell_module(
     let module_path = module
         .module_path
         .as_ref()
-        .ok_or_else(|| homeboy_core::Error::Other("module_path not set".to_string()))?;
+        .ok_or_else(|| homeboy_core::Error::other("module_path not set".to_string()))?;
 
     // Build entrypoint path
     let entrypoint = match &module.runtime.entrypoint {
         Some(e) => format!("{}/{}", module_path, e),
         None => {
-            return Err(homeboy_core::Error::Other(
+            return Err(homeboy_core::Error::other(
                 "Module has no entrypoint defined".to_string(),
             ));
         }
@@ -481,7 +481,7 @@ fn run_shell_module(
         .stderr(Stdio::inherit())
         .status();
 
-    let status = status.map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+    let status = status.map_err(|e| homeboy_core::Error::other(e.to_string()))?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -494,7 +494,7 @@ fn run_cli_module(
     let command_template = match &module.runtime.args {
         Some(args) if !args.trim().is_empty() => args.as_str(),
         _ => {
-            return Err(homeboy_core::Error::Other(
+            return Err(homeboy_core::Error::other(
                 "CLI module has no runtime.args command template".to_string(),
             ));
         }
@@ -514,7 +514,7 @@ fn run_cli_module(
                     .and_then(|c| c.active_project_id)
             })
             .ok_or_else(|| {
-                homeboy_core::Error::Other(
+                homeboy_core::Error::other(
                     "This module requires a project; pass --project <id>".to_string(),
                 )
             })?;
@@ -522,7 +522,7 @@ fn run_cli_module(
         let project_config = ConfigManager::load_project(&project_id)?;
 
         if !project_config.local_environment.is_configured() {
-            return Err(homeboy_core::Error::Other(format!(
+            return Err(homeboy_core::Error::other(format!(
                  "Local environment not configured for project '{}'. Configure 'Local Site Path' in Homeboy.app Settings.",
                  project_id
             )));
@@ -595,7 +595,7 @@ fn run_cli_module(
         .stderr(Stdio::inherit())
         .status();
 
-    let status = status.map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+    let status = status.map_err(|e| homeboy_core::Error::other(e.to_string()))?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -622,7 +622,7 @@ fn slugify_module_id(value: &str) -> homeboy_core::Result<String> {
     }
 
     if output.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "Unable to derive module id".to_string(),
         ));
     }
@@ -644,21 +644,44 @@ fn write_install_metadata(module_id: &str, url: &str) -> homeboy_core::Result<()
     let path = install_metadata_path(module_id)?;
     let content = serde_json::to_string_pretty(&ModuleInstallMetadata {
         source_url: url.to_string(),
+    })
+    .map_err(|err| {
+        homeboy_core::Error::internal_json(
+            err.to_string(),
+            Some("serialize module install metadata".to_string()),
+        )
     })?;
-    fs::write(path, content)?;
+
+    fs::write(path, content).map_err(|err| {
+        homeboy_core::Error::internal_io(
+            err.to_string(),
+            Some("write module install metadata".to_string()),
+        )
+    })?;
     Ok(())
 }
 
 fn read_install_metadata(module_id: &str) -> homeboy_core::Result<ModuleInstallMetadata> {
     let path = install_metadata_path(module_id)?;
     if !path.exists() {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "No .install.json found for module '{module_id}'. Reinstall it with `homeboy module install`.",
         )));
     }
 
-    let content = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&content)?)
+    let content = fs::read_to_string(path).map_err(|err| {
+        homeboy_core::Error::internal_io(
+            err.to_string(),
+            Some("read module install metadata".to_string()),
+        )
+    })?;
+
+    serde_json::from_str(&content).map_err(|err| {
+        homeboy_core::Error::internal_json(
+            err.to_string(),
+            Some("parse module install metadata".to_string()),
+        )
+    })
 }
 
 fn derive_module_id_from_url(url: &str) -> homeboy_core::Result<String> {
@@ -677,7 +700,7 @@ fn confirm_dangerous_action(force: bool, message: &str) -> homeboy_core::Result<
         return Ok(());
     }
 
-    Err(homeboy_core::Error::Other(format!(
+    Err(homeboy_core::Error::other(format!(
         "{message} Re-run with --force to confirm.",
     )))
 }
@@ -702,7 +725,7 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
 
     let module_dir = AppPaths::module(&module_id)?;
     if module_dir.exists() {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Module '{module_id}' already exists",
         )));
     }
@@ -715,10 +738,10 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     if !status.success() {
-        return Err(homeboy_core::Error::Other("git clone failed".to_string()));
+        return Err(homeboy_core::Error::other("git clone failed".to_string()));
     }
 
     write_install_metadata(&module_id, url)?;
@@ -767,7 +790,7 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
 fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
     let module_dir = AppPaths::module(module_id)?;
     if !module_dir.exists() {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Module '{module_id}' not found",
         )));
     }
@@ -788,10 +811,10 @@ fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     if !status.success() {
-        return Err(homeboy_core::Error::Other("git pull failed".to_string()));
+        return Err(homeboy_core::Error::other("git pull failed".to_string()));
     }
 
     if let Some(module) = load_module(module_id) {
@@ -821,14 +844,19 @@ fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
 fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
     let module_dir = AppPaths::module(module_id)?;
     if !module_dir.exists() {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Module '{module_id}' not found",
         )));
     }
 
     confirm_dangerous_action(force, "This will permanently remove the module")?;
 
-    fs::remove_dir_all(&module_dir)?;
+    fs::remove_dir_all(&module_dir).map_err(|err| {
+        homeboy_core::Error::internal_io(
+            err.to_string(),
+            Some("remove module directory".to_string()),
+        )
+    })?;
 
     Ok((
         ModuleOutput {
@@ -849,7 +877,7 @@ fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
 
 fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
     let module = load_module(module_id)
-        .ok_or_else(|| homeboy_core::Error::Other(format!("Module '{}' not found", module_id)))?;
+        .ok_or_else(|| homeboy_core::Error::other(format!("Module '{}' not found", module_id)))?;
 
     if module.runtime.runtime_type != RuntimeType::Python {
         return Ok((
@@ -870,7 +898,7 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
     let module_path = module
         .module_path
         .as_ref()
-        .ok_or_else(|| homeboy_core::Error::Other("module_path not set".to_string()))?;
+        .ok_or_else(|| homeboy_core::Error::other("module_path not set".to_string()))?;
 
     #[cfg(windows)]
     let venv_path = format!("{}\\venv", module_path);
@@ -878,7 +906,7 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
     let venv_path = format!("{}/venv", module_path);
 
     let system_python = find_system_python().ok_or_else(|| {
-        homeboy_core::Error::Other(
+        homeboy_core::Error::other(
             "Python3 not found. Install Python3 and ensure it's in your PATH.".to_string(),
         )
     })?;
@@ -889,10 +917,10 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+        .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
     if !venv_status.success() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "Failed to create virtual environment".to_string(),
         ));
     }
@@ -912,10 +940,10 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .status()
-                .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+                .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
             if !pip_status.success() {
-                return Err(homeboy_core::Error::Other(
+                return Err(homeboy_core::Error::other(
                     "Failed to install dependencies".to_string(),
                 ));
             }
@@ -946,10 +974,10 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .status()
-                .map_err(|e| homeboy_core::Error::Other(e.to_string()))?;
+                .map_err(|e| homeboy_core::Error::other(e.to_string()))?;
 
             if !pw_status.success() {
-                return Err(homeboy_core::Error::Other(
+                return Err(homeboy_core::Error::other(
                     "Failed to install Playwright browsers".to_string(),
                 ));
             }

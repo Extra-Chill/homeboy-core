@@ -172,7 +172,7 @@ fn create(
     let id = slugify_id(name)?;
 
     if ConfigManager::load_server(&id).is_ok() {
-        return Err(Error::Other(format!("Server '{}' already exists", id)));
+        return Err(Error::other(format!("Server '{}' already exists", id)));
     }
 
     let server = ServerConfig {
@@ -246,7 +246,7 @@ fn set(
     }
 
     if changes.is_empty() {
-        return Err(Error::Other("No changes specified".to_string()));
+        return Err(Error::other("No changes specified".to_string()));
     }
 
     ConfigManager::save_server(server_id, &server)?;
@@ -267,7 +267,7 @@ fn set(
 
 fn delete(server_id: &str, force: bool) -> homeboy_core::Result<(ServerOutput, i32)> {
     if !force {
-        return Err(Error::Other("Use --force to confirm deletion".to_string()));
+        return Err(Error::other("Use --force to confirm deletion".to_string()));
     }
 
     ConfigManager::load_server(server_id)?;
@@ -275,7 +275,7 @@ fn delete(server_id: &str, force: bool) -> homeboy_core::Result<(ServerOutput, i
     let projects = ConfigManager::list_projects()?;
     for project in projects {
         if project.config.server_id.as_deref() == Some(server_id) {
-            return Err(Error::Other(format!(
+            return Err(Error::other(format!(
                 "Server is used by project '{}'. Update or delete the project first.",
                 project.id
             )));
@@ -322,7 +322,12 @@ fn key_generate(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
     let key_path_str = key_path.to_string_lossy().to_string();
 
     if let Some(parent) = key_path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(|err| {
+            Error::internal_io(
+                err.to_string(),
+                Some("create ssh key directory".to_string()),
+            )
+        })?;
     }
 
     let _ = fs::remove_file(&key_path);
@@ -341,11 +346,15 @@ fn key_generate(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
             "-C",
             &format!("homeboy-{}", server_id),
         ])
-        .output()?;
+        .output()
+        .map_err(|err| Error::internal_io(err.to_string(), Some("run ssh-keygen".to_string())))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::Ssh(format!("ssh-keygen failed: {}", stderr)));
+        return Err(Error::internal_unexpected(format!(
+            "ssh-keygen failed: {}",
+            stderr
+        )));
     }
 
     let mut server = ConfigManager::load_server(server_id)?;
@@ -353,7 +362,12 @@ fn key_generate(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
     ConfigManager::save_server(server_id, &server)?;
 
     let pub_key_path = format!("{}.pub", key_path_str);
-    let public_key = fs::read_to_string(&pub_key_path)?;
+    let public_key = fs::read_to_string(&pub_key_path).map_err(|err| {
+        Error::internal_io(
+            err.to_string(),
+            Some("read generated ssh public key".to_string()),
+        )
+    })?;
 
     Ok((
         ServerOutput {
@@ -381,8 +395,13 @@ fn key_show(server_id: &str) -> homeboy_core::Result<(ServerOutput, i32)> {
     let key_path = AppPaths::key(server_id)?;
     let pub_key_path = format!("{}.pub", key_path.to_string_lossy());
 
-    let public_key = fs::read_to_string(&pub_key_path)
-        .map_err(|_| Error::Other(format!("No SSH key configured for server '{}'", server_id)))?;
+    let public_key = fs::read_to_string(&pub_key_path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            Error::ssh_identity_file_not_found(server_id.to_string(), pub_key_path.clone())
+        } else {
+            Error::internal_io(err.to_string(), Some("read ssh public key".to_string()))
+        }
+    })?;
 
     Ok((
         ServerOutput {
@@ -410,10 +429,10 @@ fn key_use(server_id: &str, private_key_path: &str) -> homeboy_core::Result<(Ser
     let expanded_path = shellexpand::tilde(private_key_path).to_string();
 
     if !std::path::Path::new(&expanded_path).exists() {
-        return Err(Error::Other(format!(
-            "SSH identity file not found: {}",
-            expanded_path
-        )));
+        return Err(Error::ssh_identity_file_not_found(
+            server_id.to_string(),
+            expanded_path,
+        ));
     }
 
     server.identity_file = Some(expanded_path.clone());
@@ -473,20 +492,28 @@ fn key_import(
 
     let expanded_path = shellexpand::tilde(private_key_path).to_string();
 
-    let private_key = fs::read_to_string(&expanded_path)?;
+    let private_key = fs::read_to_string(&expanded_path).map_err(|err| {
+        Error::internal_io(err.to_string(), Some("read ssh private key".to_string()))
+    })?;
 
     if !private_key.contains("-----BEGIN") || !private_key.contains("PRIVATE KEY-----") {
-        return Err(Error::Other(
-            "File doesn't appear to be a valid SSH private key".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "privateKeyPath",
+            "File doesn't appear to be a valid SSH private key",
+            Some(server_id.to_string()),
+            Some(vec![expanded_path.clone()]),
         ));
     }
 
     let output = Command::new("ssh-keygen")
         .args(["-y", "-f", &expanded_path])
-        .output()?;
+        .output()
+        .map_err(|err| {
+            Error::internal_io(err.to_string(), Some("run ssh-keygen -y".to_string()))
+        })?;
 
     if !output.status.success() {
-        return Err(Error::Ssh(
+        return Err(Error::internal_unexpected(
             "Failed to derive public key from private key".to_string(),
         ));
     }
@@ -497,18 +524,32 @@ fn key_import(
     let key_path_str = key_path.to_string_lossy().to_string();
 
     if let Some(parent) = key_path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(|err| {
+            Error::internal_io(
+                err.to_string(),
+                Some("create ssh key directory".to_string()),
+            )
+        })?;
     }
 
-    fs::write(&key_path, &private_key)?;
+    fs::write(&key_path, &private_key).map_err(|err| {
+        Error::internal_io(err.to_string(), Some("write ssh private key".to_string()))
+    })?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600))?;
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).map_err(|err| {
+            Error::internal_io(
+                err.to_string(),
+                Some("set ssh private key permissions".to_string()),
+            )
+        })?;
     }
 
-    fs::write(format!("{}.pub", key_path_str), &public_key)?;
+    fs::write(format!("{}.pub", key_path_str), &public_key).map_err(|err| {
+        Error::internal_io(err.to_string(), Some("write ssh public key".to_string()))
+    })?;
 
     let mut server = ConfigManager::load_server(server_id)?;
     server.identity_file = Some(key_path_str.clone());

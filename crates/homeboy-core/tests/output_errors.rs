@@ -1,6 +1,6 @@
-use homeboy_core::error::{RemoteCommandFailedDetails, TargetDetails};
 use homeboy_core::output::{map_cmd_result_to_json, CliResponse};
 use homeboy_core::Error;
+use homeboy_error::{RemoteCommandFailedDetails, TargetDetails};
 
 #[test]
 fn remote_command_failed_serializes_stdout_stderr() {

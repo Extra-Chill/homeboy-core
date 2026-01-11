@@ -238,7 +238,7 @@ fn describe(project_id: &str, args: &[String]) -> homeboy_core::Result<(DbOutput
 
     let table_name = remaining
         .first()
-        .ok_or_else(|| homeboy_core::Error::Config("Table name required".to_string()))?;
+        .ok_or_else(|| homeboy_core::Error::config("Table name required".to_string()))?;
 
     let command = shell::cd_and(
         &ctx.base_path,
@@ -273,7 +273,7 @@ fn query(project_id: &str, args: &[String]) -> homeboy_core::Result<(DbOutput, i
 
     let sql = remaining.join(" ");
     if sql.trim().is_empty() {
-        return Err(homeboy_core::Error::Config(
+        return Err(homeboy_core::Error::config(
             "SQL query required".to_string(),
         ));
     }
@@ -289,7 +289,7 @@ fn query(project_id: &str, args: &[String]) -> homeboy_core::Result<(DbOutput, i
         .iter()
         .any(|keyword| trimmed_sql.starts_with(keyword))
     {
-        return Err(homeboy_core::Error::Config(
+        return Err(homeboy_core::Error::config(
             "Write operations not allowed via 'db query'. Use 'homeboy wp <project> db query' for writes.".to_string(),
         ));
     }
@@ -333,7 +333,7 @@ fn delete_row(
     confirm: bool,
 ) -> homeboy_core::Result<(DbOutput, i32)> {
     if !confirm {
-        return Err(homeboy_core::Error::Config(
+        return Err(homeboy_core::Error::config(
             "Use --confirm to execute destructive operations".to_string(),
         ));
     }
@@ -341,7 +341,7 @@ fn delete_row(
     let (ctx, remaining) = build_context(project_id, args)?;
 
     if remaining.len() < 2 {
-        return Err(homeboy_core::Error::Config(
+        return Err(homeboy_core::Error::config(
             "Table name and row ID required".to_string(),
         ));
     }
@@ -351,7 +351,7 @@ fn delete_row(
 
     row_id
         .parse::<i64>()
-        .map_err(|_| homeboy_core::Error::Config("Row ID must be numeric".to_string()))?;
+        .map_err(|_| homeboy_core::Error::config("Row ID must be numeric".to_string()))?;
 
     let delete_sql = format!("DELETE FROM {} WHERE ID = {} LIMIT 1", table_name, row_id);
 
@@ -392,7 +392,7 @@ fn drop_table(
     confirm: bool,
 ) -> homeboy_core::Result<(DbOutput, i32)> {
     if !confirm {
-        return Err(homeboy_core::Error::Config(
+        return Err(homeboy_core::Error::config(
             "Use --confirm to execute destructive operations".to_string(),
         ));
     }
@@ -401,7 +401,7 @@ fn drop_table(
 
     let table_name = remaining
         .first()
-        .ok_or_else(|| homeboy_core::Error::Config("Table name required".to_string()))?;
+        .ok_or_else(|| homeboy_core::Error::config("Table name required".to_string()))?;
 
     let drop_sql = format!("DROP TABLE {}", table_name);
 
@@ -487,7 +487,7 @@ fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy_core::Result<(Db
 
     let exit_code = match status {
         Ok(s) => s.code().unwrap_or(0),
-        Err(e) => return Err(homeboy_core::Error::Other(e.to_string())),
+        Err(e) => return Err(homeboy_core::Error::other(e.to_string())),
     };
 
     let success = exit_code == 0 || exit_code == 130;

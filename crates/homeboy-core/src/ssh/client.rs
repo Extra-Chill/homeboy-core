@@ -1,6 +1,6 @@
 use crate::config::ServerConfig;
-use crate::error::{RemoteCommandFailedDetails, TargetDetails};
 use crate::Result;
+use homeboy_error::{RemoteCommandFailedDetails, TargetDetails};
 use std::process::{Command, Stdio};
 
 fn shell_escape_single_quotes(value: &str) -> String {

@@ -98,7 +98,7 @@ fn list(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)>
     let output = ctx.client.execute(&command);
 
     if !output.success {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "LIST_FAILED: {}",
             output.stderr
         )));
@@ -135,7 +135,7 @@ fn read(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)>
     let output = ctx.client.execute(&command);
 
     if !output.success {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "READ_FAILED: {}",
             output.stderr
         )));
@@ -168,7 +168,7 @@ fn write(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)
     let mut content = String::new();
     io::stdin()
         .read_to_string(&mut content)
-        .map_err(|e| homeboy_core::Error::Other(format!("STDIN_ERROR: {}", e)))?;
+        .map_err(|e| homeboy_core::Error::other(format!("STDIN_ERROR: {}", e)))?;
 
     if content.ends_with('\n') {
         content.pop();
@@ -182,7 +182,7 @@ fn write(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)
     let output = ctx.client.execute(&command);
 
     if !output.success {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "WRITE_FAILED: {}",
             output.stderr
         )));
@@ -222,7 +222,7 @@ fn delete(
     let output = ctx.client.execute(&command);
 
     if !output.success {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "DELETE_FAILED: {}",
             output.stderr
         )));
@@ -262,7 +262,7 @@ fn rename(
     let output = ctx.client.execute(&command);
 
     if !output.success {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "RENAME_FAILED: {}",
             output.stderr
         )));

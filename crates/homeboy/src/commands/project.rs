@@ -394,8 +394,11 @@ fn set(
     }
 
     if updated_fields.is_empty() {
-        return Err(homeboy_core::Error::Other(
-            "No fields provided to update".to_string(),
+        return Err(homeboy_core::Error::validation_invalid_argument(
+            "fields",
+            "No fields provided to update",
+            Some(project_id.to_string()),
+            None,
         ));
     }
 
@@ -550,10 +553,12 @@ fn pin_add(
                 .iter()
                 .any(|file| file.path == path)
             {
-                return Err(homeboy_core::Error::Other(format!(
-                    "File '{}' is already pinned",
-                    path
-                )));
+                return Err(homeboy_core::Error::validation_invalid_argument(
+                    "path",
+                    "File is already pinned",
+                    Some(project_id.to_string()),
+                    Some(vec![path.to_string()]),
+                ));
             }
 
             project.remote_files.pinned_files.push(PinnedRemoteFile {
@@ -571,10 +576,12 @@ fn pin_add(
                 .iter()
                 .any(|log| log.path == path)
             {
-                return Err(homeboy_core::Error::Other(format!(
-                    "Log '{}' is already pinned",
-                    path
-                )));
+                return Err(homeboy_core::Error::validation_invalid_argument(
+                    "path",
+                    "Log is already pinned",
+                    Some(project_id.to_string()),
+                    Some(vec![path.to_string()]),
+                ));
             }
 
             project.remote_logs.pinned_logs.push(PinnedRemoteLog {
@@ -646,10 +653,12 @@ fn pin_remove(
     };
 
     if !removed {
-        return Err(homeboy_core::Error::Other(format!(
-            "{} '{}' is not pinned",
-            type_string, path
-        )));
+        return Err(homeboy_core::Error::validation_invalid_argument(
+            "path",
+            format!("{} is not pinned", type_string),
+            Some(project_id.to_string()),
+            Some(vec![path.to_string()]),
+        ));
     }
 
     ConfigManager::save_project(project_id, &project)?;

@@ -33,7 +33,7 @@ pub struct Pm2Output {
 
 pub fn run(args: Pm2Args) -> CmdResult<Pm2Output> {
     if args.args.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No command provided".to_string(),
         ));
     }
@@ -43,14 +43,14 @@ pub fn run(args: Pm2Args) -> CmdResult<Pm2Output> {
     let type_def = ProjectTypeManager::resolve(&project.config.project_type);
 
     let cli_config = type_def.cli.ok_or_else(|| {
-        homeboy_core::Error::Other(format!(
+        homeboy_core::Error::other(format!(
             "Project type '{}' does not support CLI",
             type_def.display_name
         ))
     })?;
 
     if cli_config.tool != "pm2" {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Project '{}' is a {} project (uses '{}', not 'pm2')",
             args.project_id, type_def.display_name, cli_config.tool
         )));
@@ -86,7 +86,7 @@ fn build_command(
 ) -> homeboy_core::Result<String> {
     let site_path = if local {
         if !project.config.local_environment.is_configured() {
-            return Err(homeboy_core::Error::Other(
+            return Err(homeboy_core::Error::other(
                 "Local environment not configured for project".to_string(),
             ));
         }
@@ -98,7 +98,7 @@ fn build_command(
             .clone()
             .filter(|p| !p.is_empty())
             .ok_or_else(|| {
-                homeboy_core::Error::Config("Remote base path not configured".to_string())
+                homeboy_core::Error::config("Remote base path not configured".to_string())
             })?
     };
 

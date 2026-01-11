@@ -82,7 +82,7 @@ fn show() -> CmdResult<ChangelogShowOutput> {
     let resolved = docs::resolve(&["changelog".to_string()]);
 
     if resolved.content.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No changelog found (expected embedded docs topic 'changelog')".to_string(),
         ));
     }

@@ -132,8 +132,14 @@ fn extract_versions_from_content(
     content: &str,
     pattern: &str,
 ) -> homeboy_core::Result<Vec<String>> {
-    parse_versions(content, pattern)
-        .ok_or_else(|| Error::Other(format!("Invalid version regex pattern '{}'", pattern)))
+    parse_versions(content, pattern).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "versionPattern",
+            format!("Invalid version regex pattern '{}'", pattern),
+            None,
+            Some(vec![pattern.to_string()]),
+        )
+    })
 }
 
 fn validate_single_version(
@@ -142,7 +148,7 @@ fn validate_single_version(
     expected: &str,
 ) -> homeboy_core::Result<(String, usize)> {
     if versions.is_empty() {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Could not find version in {}",
             version_file
         )));
@@ -151,7 +157,7 @@ fn validate_single_version(
     let unique: BTreeSet<String> = versions.iter().cloned().collect();
 
     if unique.len() != 1 {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Multiple different versions found in {}: {}",
             version_file,
             unique.into_iter().collect::<Vec<_>>().join(", ")
@@ -160,7 +166,7 @@ fn validate_single_version(
 
     let found = versions[0].clone();
     if found != expected {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Version mismatch in {}: found {}, expected {}",
             version_file, found, expected
         )));
@@ -178,8 +184,15 @@ fn replace_versions_in_content(
     let all_versions = extract_versions_from_content(content, pattern)?;
     let _ = validate_single_version(all_versions, "<content>", expected_old)?;
 
-    let (replaced, replaced_count) = replace_versions(content, pattern, new_version)
-        .ok_or_else(|| Error::Other(format!("Invalid version regex pattern '{}'", pattern)))?;
+    let (replaced, replaced_count) =
+        replace_versions(content, pattern, new_version).ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "versionPattern",
+                format!("Invalid version regex pattern '{}'", pattern),
+                None,
+                Some(vec![pattern.to_string()]),
+            )
+        })?;
 
     Ok((replaced, replaced_count))
 }
@@ -197,14 +210,14 @@ fn write_updated_version(
     {
         let mut json = read_json_file(full_path)?;
         let Some(current) = json.get("version").and_then(|v| v.as_str()) else {
-            return Err(Error::Other(format!(
-                "Could not find JSON key 'version' in {}",
-                full_path
-            )));
+            return Err(Error::config_missing_key(
+                "version",
+                Some(full_path.to_string()),
+            ));
         };
 
         if current != old_version {
-            return Err(Error::Other(format!(
+            return Err(Error::internal_unexpected(format!(
                 "Version mismatch in {}: found {}, expected {}",
                 full_path, current, old_version
             )));
@@ -219,38 +232,45 @@ fn write_updated_version(
         return Ok(1);
     }
 
-    let content = fs::read_to_string(full_path)?;
+    let content = fs::read_to_string(full_path).map_err(|err| {
+        Error::internal_io(err.to_string(), Some("read version file".to_string()))
+    })?;
     let (new_content, replaced_count) =
         replace_versions_in_content(&content, version_pattern, old_version, new_version)?;
-    fs::write(full_path, &new_content)?;
+    fs::write(full_path, &new_content).map_err(|err| {
+        Error::internal_io(err.to_string(), Some("write version file".to_string()))
+    })?;
     Ok(replaced_count)
 }
 
 fn show(component_id: &str) -> homeboy_core::Result<(VersionOutput, i32)> {
     let component = ConfigManager::load_component(component_id)?;
     let targets = component.version_targets.ok_or_else(|| {
-        Error::Config(format!(
-            "Component '{}' has no versionTargets configured",
-            component_id
-        ))
+        Error::config_missing_key("versionTargets", Some(component_id.to_string()))
     })?;
 
     if targets.is_empty() {
-        return Err(Error::Config(format!(
-            "Component '{}' has no versionTargets configured",
-            component_id
-        )));
+        return Err(Error::config_invalid_value(
+            "versionTargets",
+            None,
+            format!("Component '{}' has empty versionTargets", component_id),
+        ));
     }
 
     let primary = &targets[0];
     let primary_pattern = resolve_target_pattern(primary);
     let primary_full_path = resolve_target_full_path(&component.local_path, &primary.file);
 
-    let content = fs::read_to_string(&primary_full_path)?;
+    let content = fs::read_to_string(&primary_full_path).map_err(|err| {
+        Error::internal_io(
+            err.to_string(),
+            Some("read primary version target".to_string()),
+        )
+    })?;
     let versions = extract_versions_from_content(&content, &primary_pattern)?;
 
     if versions.is_empty() {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Could not parse version from {} using pattern: {}",
             primary.file, primary_pattern
         )));
@@ -258,7 +278,7 @@ fn show(component_id: &str) -> homeboy_core::Result<(VersionOutput, i32)> {
 
     let unique: BTreeSet<String> = versions.iter().cloned().collect();
     if unique.len() != 1 {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Multiple different versions found in {}: {}",
             primary.file,
             unique.into_iter().collect::<Vec<_>>().join(", ")
@@ -299,28 +319,31 @@ fn bump(
 ) -> homeboy_core::Result<(VersionOutput, i32)> {
     let component = ConfigManager::load_component(component_id)?;
     let targets = component.version_targets.clone().ok_or_else(|| {
-        Error::Config(format!(
-            "Component '{}' has no versionTargets configured",
-            component_id
-        ))
+        Error::config_missing_key("versionTargets", Some(component_id.to_string()))
     })?;
 
     if targets.is_empty() {
-        return Err(Error::Config(format!(
-            "Component '{}' has no versionTargets configured",
-            component_id
-        )));
+        return Err(Error::config_invalid_value(
+            "versionTargets",
+            None,
+            format!("Component '{}' has empty versionTargets", component_id),
+        ));
     }
 
     let primary = &targets[0];
     let primary_pattern = resolve_target_pattern(primary);
     let primary_full_path = resolve_target_full_path(&component.local_path, &primary.file);
 
-    let primary_content = fs::read_to_string(&primary_full_path)?;
+    let primary_content = fs::read_to_string(&primary_full_path).map_err(|err| {
+        Error::internal_io(
+            err.to_string(),
+            Some("read primary version target".to_string()),
+        )
+    })?;
     let primary_versions = extract_versions_from_content(&primary_content, &primary_pattern)?;
 
     if primary_versions.is_empty() {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Could not parse version from {} using pattern: {}",
             primary.file, primary_pattern
         )));
@@ -328,7 +351,7 @@ fn bump(
 
     let unique_primary: BTreeSet<String> = primary_versions.iter().cloned().collect();
     if unique_primary.len() != 1 {
-        return Err(Error::Other(format!(
+        return Err(Error::internal_unexpected(format!(
             "Multiple different versions found in {}: {}",
             primary.file,
             unique_primary.into_iter().collect::<Vec<_>>().join(", ")
@@ -336,15 +359,23 @@ fn bump(
     }
 
     let old_version = primary_versions[0].clone();
-    let new_version = increment_version(&old_version, bump_type.as_str())
-        .ok_or_else(|| Error::Other(format!("Invalid version format: {}", old_version)))?;
+    let new_version = increment_version(&old_version, bump_type.as_str()).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "version",
+            format!("Invalid version format: {}", old_version),
+            None,
+            Some(vec![old_version.clone()]),
+        )
+    })?;
 
     let mut outputs = Vec::new();
 
     for target in targets {
         let version_pattern = resolve_target_pattern(&target);
         let full_path = resolve_target_full_path(&component.local_path, &target.file);
-        let content = fs::read_to_string(&full_path)?;
+        let content = fs::read_to_string(&full_path).map_err(|err| {
+            Error::internal_io(err.to_string(), Some("read version file".to_string()))
+        })?;
 
         let versions = extract_versions_from_content(&content, &version_pattern)?;
         let (_, match_count) = validate_single_version(versions, &target.file, &old_version)?;
@@ -353,7 +384,7 @@ fn bump(
             write_updated_version(&full_path, &version_pattern, &old_version, &new_version)?;
 
         if replaced_count != match_count {
-            return Err(Error::Other(format!(
+            return Err(Error::internal_unexpected(format!(
                 "Unexpected replacement count in {}",
                 target.file
             )));
@@ -388,7 +419,9 @@ fn bump(
         changelog_path = Some(path.to_string_lossy().to_string());
 
         if !changelog_add.is_empty() {
-            let content = fs::read_to_string(&path)?;
+            let content = fs::read_to_string(&path).map_err(|err| {
+                Error::internal_io(err.to_string(), Some("read changelog".to_string()))
+            })?;
             let mut new_content = content;
             let mut changed = false;
             let mut added_count = 0usize;
@@ -407,7 +440,9 @@ fn bump(
             }
 
             if changed {
-                fs::write(&path, &new_content)?;
+                fs::write(&path, &new_content).map_err(|err| {
+                    Error::internal_io(err.to_string(), Some("write changelog".to_string()))
+                })?;
             }
 
             changelog_items_added = Some(added_count);
@@ -415,7 +450,9 @@ fn bump(
         }
 
         if changelog_finalize {
-            let content = fs::read_to_string(&path)?;
+            let content = fs::read_to_string(&path).map_err(|err| {
+                Error::internal_io(err.to_string(), Some("read changelog".to_string()))
+            })?;
             let (new_content, changed) = changelog::finalize_next_section(
                 &content,
                 &settings.next_section_aliases,
@@ -424,7 +461,9 @@ fn bump(
             )?;
 
             if changed {
-                fs::write(&path, &new_content)?;
+                fs::write(&path, &new_content).map_err(|err| {
+                    Error::internal_io(err.to_string(), Some("write changelog".to_string()))
+                })?;
             }
 
             changelog_finalized = Some(true);

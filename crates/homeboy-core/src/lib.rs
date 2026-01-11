@@ -3,7 +3,6 @@ pub mod changelog;
 pub mod config;
 pub mod context;
 pub mod doctor;
-pub mod error;
 pub mod json;
 pub mod module;
 pub mod output;
@@ -15,4 +14,4 @@ pub mod version;
 
 pub mod build;
 
-pub use error::{Error, Result};
+pub use homeboy_error::{Error, ErrorCode, Result};

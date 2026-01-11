@@ -96,7 +96,7 @@ pub fn run(args: DeployArgs) -> CmdResult<DeployOutput> {
 
     let all_components = load_components(&project.config.component_ids);
     if all_components.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No components configured for project".to_string(),
         ));
     }
@@ -361,7 +361,7 @@ fn plan_components_to_deploy(
         return Ok(selected);
     }
 
-    Err(homeboy_core::Error::Other(
+    Err(homeboy_core::Error::other(
         "No components specified. Use component IDs, --all, or --outdated".to_string(),
     ))
 }

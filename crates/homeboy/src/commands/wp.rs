@@ -51,7 +51,7 @@ fn run_with_loader_and_executor(
     local_executor: fn(&str) -> CommandOutput,
 ) -> CmdResult<WpOutput> {
     if args.args.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No command provided".to_string(),
         ));
     }
@@ -61,14 +61,14 @@ fn run_with_loader_and_executor(
     let type_def = ProjectTypeManager::resolve(&project.config.project_type);
 
     let cli_config = type_def.cli.ok_or_else(|| {
-        homeboy_core::Error::Other(format!(
+        homeboy_core::Error::other(format!(
             "Project type '{}' does not support CLI",
             type_def.display_name
         ))
     })?;
 
     if cli_config.tool != "wp" {
-        return Err(homeboy_core::Error::Other(format!(
+        return Err(homeboy_core::Error::other(format!(
             "Project '{}' is a {} project (uses '{}', not 'wp')",
             args.project_id, type_def.display_name, cli_config.tool
         )));
@@ -109,7 +109,7 @@ fn build_command(
 ) -> homeboy_core::Result<(String, String)> {
     let base_path = if use_local_domain {
         if !project.config.local_environment.is_configured() {
-            return Err(homeboy_core::Error::Other(
+            return Err(homeboy_core::Error::other(
                 "Local environment not configured for project".to_string(),
             ));
         }
@@ -121,14 +121,14 @@ fn build_command(
             .clone()
             .filter(|p| !p.is_empty())
             .ok_or_else(|| {
-                homeboy_core::Error::Config("Remote base path not configured".to_string())
+                homeboy_core::Error::config("Remote base path not configured".to_string())
             })?
     };
 
     let (target_domain, command_args) = resolve_subtarget(&project.config, args, use_local_domain);
 
     if command_args.is_empty() {
-        return Err(homeboy_core::Error::Other(
+        return Err(homeboy_core::Error::other(
             "No command provided after subtarget".to_string(),
         ));
     }
