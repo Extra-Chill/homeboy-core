@@ -11,17 +11,17 @@ homeboy version <COMMAND>
 ### `show`
 
 ```sh
-homeboy version show <component_id>
+homeboy version show <componentId>
 ```
 
 ### `bump`
 
 ```sh
-homeboy version bump <component_id> <patch|minor|major> \
+homeboy version bump <componentId> <patch|minor|major> \
   [--changelog-add "<message>"]... \
   [--changelog-finalize] \
   [--changelog-empty-ok] \
-  [--project-id <id>]
+  [--project-id <projectId>]
 ```
 
 ## JSON output

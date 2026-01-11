@@ -19,7 +19,7 @@ Shows the embedded Homeboy CLI changelog documentation (from `docs/changelog.md`
 ### `add`
 
 ```sh
-homeboy changelog add <component_id> <message> [--project-id <id>]
+homeboy changelog add <componentId> <message> [--project-id <projectId>]
 ```
 
 Adds a changelog item to the configured "next" section in the component's changelog file.
@@ -58,7 +58,7 @@ Configuration / defaults:
 ```json
 {
   "command": "add",
-  "componentId": "<component_id>",
+  "componentId": "<componentId>",
   "projectId": "<id>|null",
   "changelogPath": "</absolute/or/resolved/path.md>",
   "nextSectionLabel": "<label>",

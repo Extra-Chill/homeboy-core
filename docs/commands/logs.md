@@ -8,9 +8,9 @@ homeboy logs <COMMAND>
 
 ## Subcommands
 
-- `list <project_id>`
-- `show <project_id> <path> [-n <lines>] [--follow]`
-- `clear <project_id> <path>`
+- `list <projectId>`
+- `show <projectId> <path> [-n <lines>] [--follow]`
+- `clear <projectId> <path>`
 
 ## JSON output
 

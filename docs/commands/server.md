@@ -14,24 +14,24 @@ homeboy server <COMMAND>
 homeboy server create <name> --host <host> --user <user> [--port <port>]
 ```
 
-`server_id` is derived from `slugify_id(<name>)`.
+`serverId` is derived from `slugify_id(<name>)`.
 
 ### `show`
 
 ```sh
-homeboy server show <server_id>
+homeboy server show <serverId>
 ```
 
 ### `set`
 
 ```sh
-homeboy server set <server_id> [--name <name>] [--host <host>] [--user <user>] [--port <port>]
+homeboy server set <serverId> [--name <name>] [--host <host>] [--user <user>] [--port <port>]
 ```
 
 ### `delete`
 
 ```sh
-homeboy server delete <server_id> --force
+homeboy server delete <serverId> --force
 ```
 
 ### `list`
@@ -48,11 +48,11 @@ homeboy server key <COMMAND>
 
 Key subcommands:
 
-- `generate <server_id>`
-- `show <server_id>`
-- `import <server_id> <private_key_path>`
-- `use <server_id> <private_key_path>`
-- `unset <server_id>`
+- `generate <serverId>`
+- `show <serverId>`
+- `import <serverId> <private_key_path>`
+- `use <serverId> <private_key_path>`
+- `unset <serverId>`
 
 ## JSON output
 

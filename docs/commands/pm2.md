@@ -3,12 +3,12 @@
 ## Synopsis
 
 ```sh
-homeboy pm2 <project_id> [--local] <args...>
+homeboy pm2 <projectId> [--local] <args...>
 ```
 
 ## Arguments and flags
 
-- `project_id`: project ID
+- `projectId`: project ID
 - `--local`: execute locally instead of on the remote server
 - `<args...>`: PM2 command and arguments (trailing var args; hyphen values allowed)
 
@@ -18,7 +18,7 @@ homeboy pm2 <project_id> [--local] <args...>
 
 ```json
 {
-  "project_id": "<id>",
+  "projectId": "<id>",
   "local": false,
   "args": ["list"],
   "command": "<rendered command string>"

@@ -11,13 +11,13 @@ homeboy module <COMMAND>
 ### `list`
 
 ```sh
-homeboy module list [--project <project_id>]
+homeboy module list [--project <projectId>]
 ```
 
 ### `run`
 
 ```sh
-homeboy module run <module_id> [--project <project_id>] [--input <key=value>...] [<args...>]
+homeboy module run <moduleId> [--project <projectId>] [--input <key=value>...] [<args...>]
 ```
 
 - `--input` repeats; each value must be in `KEY=value` form.
@@ -26,21 +26,21 @@ homeboy module run <module_id> [--project <project_id>] [--input <key=value>...]
 ### `setup`
 
 ```sh
-homeboy module setup <module_id>
+homeboy module setup <moduleId>
 ```
 
 ### `install`
 
 ```sh
-homeboy module install <git_url> [--id <module_id>]
+homeboy module install <git_url> [--id <moduleId>]
 ```
 
-Installs a module by cloning it into `Homeboy/modules/<module_id>/` and writing `.install.json` so it can be updated later.
+Installs a module by cloning it into `Homeboy/modules/<moduleId>/` and writing `.install.json` so it can be updated later.
 
 ### `update`
 
 ```sh
-homeboy module update <module_id> [--force]
+homeboy module update <moduleId> [--force]
 ```
 
 Updates a module by running `git pull --ff-only` in the module directory. If the module has uncommitted changes, `--force` is required.
@@ -48,7 +48,7 @@ Updates a module by running `git pull --ff-only` in the module directory. If the
 ### `uninstall`
 
 ```sh
-homeboy module uninstall <module_id> [--force]
+homeboy module uninstall <moduleId> [--force]
 ```
 
 Uninstalls a module by deleting its directory. `--force` is required (no interactive prompts).

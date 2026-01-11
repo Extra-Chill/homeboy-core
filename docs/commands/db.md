@@ -11,19 +11,19 @@ homeboy db <COMMAND>
 ### `tables`
 
 ```sh
-homeboy db tables <project_id> [<subtarget?> <args...>]
+homeboy db tables <projectId> [<subtarget?> <args...>]
 ```
 
 ### `describe`
 
 ```sh
-homeboy db describe <project_id> [<subtarget?> <table>]
+homeboy db describe <projectId> [<subtarget?> <table>]
 ```
 
 ### `query`
 
 ```sh
-homeboy db query <project_id> [<subtarget?> <sql...>]
+homeboy db query <projectId> [<subtarget?> <sql...>]
 ```
 
 - Rejects SQL that begins with write-operation keywords (e.g. `INSERT`, `UPDATE`, `DELETE`, `DROP`).
@@ -31,19 +31,19 @@ homeboy db query <project_id> [<subtarget?> <sql...>]
 ### `delete-row`
 
 ```sh
-homeboy db delete-row <project_id> <table> <row_id> --confirm
+homeboy db delete-row <projectId> <table> <rowId> --confirm
 ```
 
 ### `drop-table`
 
 ```sh
-homeboy db drop-table <project_id> <table> --confirm
+homeboy db drop-table <projectId> <table> --confirm
 ```
 
 ### `tunnel`
 
 ```sh
-homeboy db tunnel <project_id> [--local-port <port>]
+homeboy db tunnel <projectId> [--local-port <port>]
 ```
 
 ## JSON output

@@ -3,7 +3,7 @@
 ## Synopsis
 
 ```sh
-homeboy build <component_id>
+homeboy build <componentId>
 ```
 
 ## Description

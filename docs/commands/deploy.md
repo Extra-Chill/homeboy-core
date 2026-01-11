@@ -3,13 +3,13 @@
 ## Synopsis
 
 ```sh
-homeboy deploy <project_id> [<component_ids...>] [--all] [--outdated] [--build] [--dry-run]
+homeboy deploy <projectId> [<componentIds...>] [--all] [--outdated] [--build] [--dry-run]
 ```
 
 ## Arguments and flags
 
-- `project_id`: project ID
-- `<component_ids...>` (optional): component IDs to deploy (trailing var args)
+- `projectId`: project ID
+- `<componentIds...>` (optional): component IDs to deploy (trailing var args)
 - `--all`: deploy all configured components
 - `--outdated`: deploy only components whose local and remote versions differ
 - `--build`: run a build for each component before deploying

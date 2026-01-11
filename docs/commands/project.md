@@ -34,7 +34,7 @@ JSON output:
 ### `set`
 
 ```sh
-homeboy project set <project_id> [--name <name>] [--domain <domain>] [--project-type <type>] [--server-id <id>] [--base-path <path>] [--table-prefix <prefix>]
+homeboy project set <projectId> [--name <name>] [--domain <domain>] [--project-type <type>] [--server-id <id>] [--base-path <path>] [--table-prefix <prefix>]
 ```
 
 JSON output:
@@ -56,7 +56,7 @@ JSON output:
 ### `repair`
 
 ```sh
-homeboy project repair <project_id>
+homeboy project repair <projectId>
 ```
 
 Repairs a project file whose filename (project id) does not match its stored project name.
@@ -118,10 +118,10 @@ JSON output (`--current`):
 ### `show`
 
 ```sh
-homeboy project show [project_id]
+homeboy project show [projectId]
 ```
 
-- `project_id` (optional): if omitted, uses the active project.
+- `projectId` (optional): if omitted, uses the active project.
 
 JSON output:
 
@@ -143,7 +143,7 @@ JSON output:
 ### `switch`
 
 ```sh
-homeboy project switch <project_id>
+homeboy project switch <projectId>
 ```
 
 JSON output:
@@ -170,7 +170,7 @@ homeboy project pin <COMMAND>
 #### `pin list`
 
 ```sh
-homeboy project pin list <project_id> --type <file|log>
+homeboy project pin list <projectId> --type <file|log>
 ```
 
 JSON output:
@@ -198,7 +198,7 @@ JSON output:
 #### `pin add`
 
 ```sh
-homeboy project pin add <project_id> <path> --type <file|log> [--label <label>] [--tail <lines>]
+homeboy project pin add <projectId> <path> --type <file|log> [--label <label>] [--tail <lines>]
 ```
 
 JSON output:
@@ -219,7 +219,7 @@ JSON output:
 #### `pin remove`
 
 ```sh
-homeboy project pin remove <project_id> <path> --type <file|log>
+homeboy project pin remove <projectId> <path> --type <file|log>
 ```
 
 JSON output:

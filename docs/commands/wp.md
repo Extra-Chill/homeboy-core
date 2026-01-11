@@ -3,12 +3,12 @@
 ## Synopsis
 
 ```sh
-homeboy wp <project_id> [--local] <args...>
+homeboy wp <projectId> [--local] <args...>
 ```
 
 ## Arguments and flags
 
-- `project_id`: project ID
+- `projectId`: project ID
 - `--local`: execute locally instead of on the remote server
 - `<args...>`: WP-CLI command and arguments (trailing var args; hyphen values allowed)
 

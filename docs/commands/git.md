@@ -8,11 +8,11 @@ homeboy git <COMMAND>
 
 ## Subcommands
 
-- `status <component_id>`
-- `commit <component_id> <message>`
-- `push <component_id> [--tags]`
-- `pull <component_id>`
-- `tag <component_id> <tag_name> [-m <message>]`
+- `status <componentId>`
+- `commit <componentId> <message>`
+- `push <componentId> [--tags]`
+- `pull <componentId>`
+- `tag <componentId> <tagName> [-m <message>]`
 
 ## JSON output
 

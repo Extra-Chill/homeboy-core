@@ -8,11 +8,11 @@ homeboy file <COMMAND>
 
 ## Subcommands
 
-- `list <project_id> <path>`
-- `read <project_id> <path>`
-- `write <project_id> <path>` (reads content from stdin)
-- `delete <project_id> <path> [--recursive]`
-- `rename <project_id> <old_path> <new_path>`
+- `list <projectId> <path>`
+- `read <projectId> <path>`
+- `write <projectId> <path>` (reads content from stdin)
+- `delete <projectId> <path> [--recursive]`
+- `rename <projectId> <oldPath> <newPath>`
 
 ## JSON output
 

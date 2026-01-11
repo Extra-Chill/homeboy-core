@@ -13,7 +13,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### Improvements
 - **Changelog**: Promote `homeboy changelog` from a shortcut to a subcommand group with `show` and `add`.
-- **Changelog**: Add `homeboy changelog add <component_id> <message>` to append items to the “next” section (defaults to `Unreleased`).
+- **Changelog**: Add `homeboy changelog add <componentId> <message>` to append items to the “next” section (defaults to `Unreleased`).
 - **Changelog**: Auto-detect changelog path (`CHANGELOG.md` or `docs/changelog.md`) when `changelogTargets` is not configured.
 - **Config**: Support `changelogTargets` + `changelogNextSectionLabel`/`changelogNextSectionAliases` at component/project/app levels.
 - **Version**: Write JSON version bumps via the `version` key (pretty-printed) when using the default JSON version pattern.
@@ -36,7 +36,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### Improvements
 - **Project management**: Added `homeboy project list` (and `--current`) plus `homeboy project pin` subcommands to manage pinned files/logs per project.
-- **Config correctness**: Project configs are now a strict `ProjectRecord` (`id` derived from slugified name) with validation to prevent mismatched IDs and to clear `active_project_id` when a project is deleted.
+- **Config correctness**: Project configs are a strict `ProjectRecord` (`id` derived via `slugify_id(name)`) with validation to prevent mismatched IDs and to clear `active_project_id` when a project is deleted.
 - **Docs**: Updated embedded docs to reflect new/removed commands.
 
 ## 0.1.8
