@@ -2,7 +2,7 @@
 
 LLM-first CLI for development and deployment automation. Designed for LLMs and developers using LLMs to iterate, debug, and ship fast.
 
-Note: This should be considered experimental and is still early in development. 
+**Note:** This should be considered experimental and is still early in development. Breaking changes may be frequent before 0.3.0
 
 ## Installation
 
