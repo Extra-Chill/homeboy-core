@@ -45,8 +45,8 @@ enum Commands {
     Module(module::ModuleArgs),
     /// Display CLI documentation
     Docs(docs_command::DocsArgs),
-    /// Display the changelog
-    Changelog,
+    /// Changelog operations
+    Changelog(changelog::ChangelogArgs),
     /// Git operations for components
     Git(git::GitArgs),
     /// Version management for components
@@ -75,7 +75,9 @@ fn main() -> std::process::ExitCode {
         Commands::Docs(args) => {
             homeboy_core::output::map_cmd_result_to_json(docs_command::run(args))
         }
-        Commands::Changelog => homeboy_core::output::map_cmd_result_to_json(changelog::run()),
+        Commands::Changelog(args) => {
+            homeboy_core::output::map_cmd_result_to_json(changelog::run(args))
+        }
         Commands::Git(args) => homeboy_core::output::map_cmd_result_to_json(git::run(args)),
         Commands::Version(args) => homeboy_core::output::map_cmd_result_to_json(version::run(args)),
         Commands::Build(args) => homeboy_core::output::map_cmd_result_to_json(build::run(args)),

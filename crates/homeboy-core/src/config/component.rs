@@ -10,6 +10,12 @@ pub struct VersionTarget {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChangelogTarget {
+    pub file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ComponentConfiguration {
     pub id: String,
     pub name: String,
@@ -18,6 +24,12 @@ pub struct ComponentConfiguration {
     pub build_artifact: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version_targets: Option<Vec<VersionTarget>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changelog_targets: Option<Vec<ChangelogTarget>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changelog_next_section_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changelog_next_section_aliases: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,6 +51,9 @@ impl ComponentConfiguration {
             remote_path,
             build_artifact,
             version_targets: None,
+            changelog_targets: None,
+            changelog_next_section_label: None,
+            changelog_next_section_aliases: None,
             build_command: None,
             is_network: None,
         }

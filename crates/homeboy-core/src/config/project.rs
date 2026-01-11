@@ -35,6 +35,12 @@ pub struct ProjectConfiguration {
     #[serde(default)]
     pub api: ApiConfig,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changelog_next_section_label: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changelog_next_section_aliases: Option<Vec<String>>,
+
     #[serde(default)]
     pub sub_targets: Vec<SubTarget>,
     #[serde(default)]

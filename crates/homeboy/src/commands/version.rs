@@ -2,8 +2,10 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs;
+use std::path::Path;
 
 use homeboy_core::config::{ConfigManager, VersionTarget};
+use homeboy_core::json::{read_json_file, set_json_pointer, write_json_file_pretty};
 use homeboy_core::version::{
     default_pattern_for_file, increment_version, parse_versions, replace_versions,
 };
@@ -149,6 +151,48 @@ fn replace_versions_in_content(
     Ok((replaced, replaced_count))
 }
 
+fn write_updated_version(
+    full_path: &str,
+    version_pattern: &str,
+    old_version: &str,
+    new_version: &str,
+) -> homeboy_core::Result<usize> {
+    if Path::new(full_path)
+        .extension()
+        .is_some_and(|ext| ext == "json")
+        && version_pattern == default_pattern_for_file(full_path)
+    {
+        let mut json = read_json_file(full_path)?;
+        let Some(current) = json.get("version").and_then(|v| v.as_str()) else {
+            return Err(Error::Other(format!(
+                "Could not find JSON key 'version' in {}",
+                full_path
+            )));
+        };
+
+        if current != old_version {
+            return Err(Error::Other(format!(
+                "Version mismatch in {}: found {}, expected {}",
+                full_path, current, old_version
+            )));
+        }
+
+        set_json_pointer(
+            &mut json,
+            "/version",
+            serde_json::Value::String(new_version.to_string()),
+        )?;
+        write_json_file_pretty(full_path, &json)?;
+        return Ok(1);
+    }
+
+    let content = fs::read_to_string(full_path)?;
+    let (new_content, replaced_count) =
+        replace_versions_in_content(&content, version_pattern, old_version, new_version)?;
+    fs::write(full_path, &new_content)?;
+    Ok(replaced_count)
+}
+
 fn show(component_id: &str) -> homeboy_core::Result<(VersionOutput, i32)> {
     let component = ConfigManager::load_component(component_id)?;
     let targets = component.version_targets.ok_or_else(|| {
@@ -261,8 +305,8 @@ fn bump(component_id: &str, bump_type: BumpType) -> homeboy_core::Result<(Versio
         let versions = extract_versions_from_content(&content, &version_pattern)?;
         let (_, match_count) = validate_single_version(versions, &target.file, &old_version)?;
 
-        let (new_content, replaced_count) =
-            replace_versions_in_content(&content, &version_pattern, &old_version, &new_version)?;
+        let replaced_count =
+            write_updated_version(&full_path, &version_pattern, &old_version, &new_version)?;
 
         if replaced_count != match_count {
             return Err(Error::Other(format!(
@@ -270,8 +314,6 @@ fn bump(component_id: &str, bump_type: BumpType) -> homeboy_core::Result<(Versio
                 target.file
             )));
         }
-
-        fs::write(&full_path, &new_content)?;
 
         outputs.push(VersionTargetOutput {
             version_file: target.file,

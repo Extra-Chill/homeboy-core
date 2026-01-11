@@ -156,6 +156,8 @@ mod tests {
                 local_environment: homeboy_core::config::LocalEnvironmentConfig::default(),
                 tools: homeboy_core::config::ToolsConfig::default(),
                 api: homeboy_core::config::ApiConfig::default(),
+                changelog_next_section_label: None,
+                changelog_next_section_aliases: None,
                 sub_targets: vec![],
                 shared_tables: vec![],
                 component_ids: vec![],

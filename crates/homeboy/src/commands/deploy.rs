@@ -16,7 +16,7 @@ fn reset_test_scp_call_count() {
     TEST_SCP_CALL_COUNT.store(0, Ordering::Relaxed);
 }
 
-use homeboy_core::config::{AppPaths, ConfigManager, ServerConfig};
+use homeboy_core::config::{ConfigManager, ServerConfig};
 use homeboy_core::ssh::{CommandOutput, SshClient};
 use homeboy_core::version::parse_version;
 
@@ -750,43 +750,34 @@ fn load_components(component_ids: &[String]) -> Vec<Component> {
     let mut components = Vec::new();
 
     for id in component_ids {
-        let path = AppPaths::component(id);
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
-                let local_path = config["localPath"].as_str().unwrap_or("").to_string();
+        if let Ok(component) = ConfigManager::load_component(id) {
+            let local_path = component.local_path;
 
-                let build_artifact = config["buildArtifact"]
-                    .as_str()
-                    .map(|s| {
-                        if s.starts_with('/') {
-                            s.to_string()
-                        } else {
-                            format!("{}/{}", local_path, s)
-                        }
+            let build_artifact = if component.build_artifact.starts_with('/') {
+                component.build_artifact
+            } else {
+                format!("{}/{}", local_path, component.build_artifact)
+            };
+
+            let version_targets = component.version_targets.map(|targets| {
+                targets
+                    .into_iter()
+                    .map(|target| VersionTarget {
+                        file: target.file,
+                        pattern: target.pattern,
                     })
-                    .unwrap_or_default();
+                    .collect::<Vec<_>>()
+            });
 
-                let version_targets = config["versionTargets"].as_array().map(|targets| {
-                    targets
-                        .iter()
-                        .filter_map(|target| {
-                            let file = target["file"].as_str()?.to_string();
-                            let pattern = target["pattern"].as_str().map(|value| value.to_string());
-                            Some(VersionTarget { file, pattern })
-                        })
-                        .collect::<Vec<_>>()
-                });
-
-                components.push(Component {
-                    id: config["id"].as_str().unwrap_or(id).to_string(),
-                    name: config["name"].as_str().unwrap_or(id).to_string(),
-                    local_path,
-                    remote_path: config["remotePath"].as_str().unwrap_or("").to_string(),
-                    build_artifact,
-                    build_command: config["buildCommand"].as_str().map(|s| s.to_string()),
-                    version_targets,
-                });
-            }
+            components.push(Component {
+                id: component.id,
+                name: component.name,
+                local_path,
+                remote_path: component.remote_path,
+                build_artifact,
+                build_command: component.build_command,
+                version_targets,
+            });
         }
     }
 

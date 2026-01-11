@@ -40,6 +40,8 @@ impl ProjectManager {
             local_environment: Default::default(),
             tools: Default::default(),
             api: Default::default(),
+            changelog_next_section_label: None,
+            changelog_next_section_aliases: None,
             sub_targets: Default::default(),
             shared_tables: Default::default(),
             component_ids: Default::default(),
