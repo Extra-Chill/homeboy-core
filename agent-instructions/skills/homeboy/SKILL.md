@@ -1,7 +1,7 @@
 ---
 name: homeboy
 description: Use this skill when deploying code to production, executing module-provided CLI tools or remote process managers over SSH, querying production databases, managing project/server configurations, performing component-scoped git operations, or when the user mentions Homeboy, deployment, or remote server operations.
-version: 0.2.0
+version: 0.2.1
 ---
 
 # Homeboy CLI
@@ -92,6 +92,27 @@ homeboy git pull <component>                # Pull from remote
 homeboy git tag <component> v1.0.0          # Create lightweight tag
 homeboy git tag <component> v1.0.0 -m "msg" # Create annotated tag
 ```
+
+### Bulk Git Operations (Multi-Component)
+Use `--json` flag to operate on multiple components at once:
+```bash
+# Bulk commit with per-component messages
+homeboy git commit --json '{"components":[{"id":"comp1","message":"msg1"},{"id":"comp2","message":"msg2"}]}'
+
+# Bulk status check
+homeboy git status --json '{"componentIds":["comp1","comp2","comp3"]}'
+
+# Bulk push with tags
+homeboy git push --json '{"componentIds":["comp1","comp2"],"tags":true}'
+
+# Bulk pull
+homeboy git pull --json '{"componentIds":["comp1","comp2"]}'
+```
+
+JSON input supports:
+- Inline JSON string
+- `-` for stdin
+- `@file.json` to read from file
 
 ### Version Management (Component-Scoped)
 ```bash

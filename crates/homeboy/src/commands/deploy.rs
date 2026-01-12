@@ -4,14 +4,18 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use homeboy_core::config::ConfigManager;
-use homeboy_core::context::resolve_project_ssh_with_base_path;
+use homeboy_core::config::{ConfigManager, ProjectRecord};
+use homeboy_core::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
 use homeboy_core::deploy::{deploy_artifact, DeployResult};
 use homeboy_core::module::{load_module, DeployVerification};
 use homeboy_core::ssh::{execute_local_command_in_dir, SshClient};
 use homeboy_core::version::{default_pattern_for_file, parse_version};
 
 use super::CmdResult;
+
+type ProjectLoader = fn(&str) -> homeboy_core::Result<ProjectRecord>;
+type SshResolver = fn(&str) -> homeboy_core::Result<(RemoteProjectContext, String)>;
+type BuildRunner = fn(&Component) -> (Option<i32>, Option<String>);
 
 #[derive(Args)]
 pub struct DeployArgs {
@@ -50,6 +54,59 @@ pub struct DeployComponentResult {
     pub deploy_exit_code: Option<i32>,
 }
 
+impl DeployComponentResult {
+    fn new(component: &Component, base_path: &str) -> Self {
+        Self {
+            id: component.id.clone(),
+            name: component.name.clone(),
+            status: String::new(),
+            local_version: None,
+            remote_version: None,
+            error: None,
+            artifact_path: Some(component.build_artifact.clone()),
+            remote_path: homeboy_core::base_path::join_remote_path(
+                Some(base_path),
+                &component.remote_path,
+            )
+            .ok(),
+            build_command: component.build_command.clone(),
+            build_exit_code: None,
+            deploy_exit_code: None,
+        }
+    }
+
+    fn with_status(mut self, status: &str) -> Self {
+        self.status = status.to_string();
+        self
+    }
+
+    fn with_versions(mut self, local: Option<String>, remote: Option<String>) -> Self {
+        self.local_version = local;
+        self.remote_version = remote;
+        self
+    }
+
+    fn with_error(mut self, error: String) -> Self {
+        self.error = Some(error);
+        self
+    }
+
+    fn with_build_exit_code(mut self, code: Option<i32>) -> Self {
+        self.build_exit_code = code;
+        self
+    }
+
+    fn with_deploy_exit_code(mut self, code: Option<i32>) -> Self {
+        self.deploy_exit_code = code;
+        self
+    }
+
+    fn with_remote_path(mut self, path: String) -> Self {
+        self.remote_path = Some(path);
+        self
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeploySummary {
@@ -61,6 +118,7 @@ pub struct DeploySummary {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeployOutput {
+    pub command: String,
     pub project_id: String,
     pub all: bool,
     pub outdated: bool,
@@ -70,6 +128,20 @@ pub struct DeployOutput {
 }
 
 pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<DeployOutput> {
+    run_with_loaders(
+        args,
+        ConfigManager::load_project_record,
+        resolve_project_ssh_with_base_path,
+        run_build,
+    )
+}
+
+fn run_with_loaders(
+    args: DeployArgs,
+    project_loader: ProjectLoader,
+    ssh_resolver: SshResolver,
+    build_runner: BuildRunner,
+) -> CmdResult<DeployOutput> {
     // Check for common subcommand mistakes (deploy doesn't have subcommands)
     let subcommand_hints = ["status", "list", "show", "help"];
     if subcommand_hints.contains(&args.project_id.as_str()) {
@@ -85,8 +157,8 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         ));
     }
 
-    let project = ConfigManager::load_project_record(&args.project_id)?;
-    let (ctx, base_path) = resolve_project_ssh_with_base_path(&args.project_id)?;
+    let project = project_loader(&args.project_id)?;
+    let (ctx, base_path) = ssh_resolver(&args.project_id)?;
     let client = ctx.client;
 
     let all_components = load_components(&project.config.component_ids);
@@ -102,6 +174,7 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
     if components_to_deploy.is_empty() {
         return Ok((
             DeployOutput {
+                command: "deploy.run".to_string(),
                 project_id: args.project_id,
                 all: args.all,
                 outdated: args.outdated,
@@ -131,22 +204,13 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
     if args.dry_run {
         let results = components_to_deploy
             .iter()
-            .map(|component| DeployComponentResult {
-                id: component.id.clone(),
-                name: component.name.clone(),
-                status: "would_deploy".to_string(),
-                local_version: local_versions.get(&component.id).cloned(),
-                remote_version: remote_versions.get(&component.id).cloned(),
-                error: None,
-                artifact_path: Some(component.build_artifact.clone()),
-                remote_path: homeboy_core::base_path::join_remote_path(
-                    Some(&base_path),
-                    &component.remote_path,
-                )
-                .ok(),
-                build_command: component.build_command.clone(),
-                build_exit_code: None,
-                deploy_exit_code: None,
+            .map(|component| {
+                DeployComponentResult::new(component, &base_path)
+                    .with_status("would_deploy")
+                    .with_versions(
+                        local_versions.get(&component.id).cloned(),
+                        remote_versions.get(&component.id).cloned(),
+                    )
             })
             .collect::<Vec<_>>();
 
@@ -154,6 +218,7 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
 
         return Ok((
             DeployOutput {
+                command: "deploy.run".to_string(),
                 project_id: args.project_id,
                 all: args.all,
                 outdated: args.outdated,
@@ -178,49 +243,29 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         let remote_version = remote_versions.get(&component.id).cloned();
 
         // Build is mandatory before deploy
-        let (build_exit_code, build_error) = run_build(component);
+        let (build_exit_code, build_error) = build_runner(component);
 
         if let Some(ref error) = build_error {
-            results.push(DeployComponentResult {
-                id: component.id.clone(),
-                name: component.name.clone(),
-                status: "failed".to_string(),
-                local_version,
-                remote_version,
-                error: Some(error.clone()),
-                artifact_path: Some(component.build_artifact.clone()),
-                remote_path: homeboy_core::base_path::join_remote_path(
-                    Some(&base_path),
-                    &component.remote_path,
-                )
-                .ok(),
-                build_command: component.build_command.clone(),
-                build_exit_code,
-                deploy_exit_code: None,
-            });
+            results.push(
+                DeployComponentResult::new(component, &base_path)
+                    .with_status("failed")
+                    .with_versions(local_version, remote_version)
+                    .with_error(error.clone())
+                    .with_build_exit_code(build_exit_code),
+            );
             failed += 1;
             continue;
         }
 
         // Check artifact exists after build
         if !Path::new(&component.build_artifact).exists() {
-            results.push(DeployComponentResult {
-                id: component.id.clone(),
-                name: component.name.clone(),
-                status: "failed".to_string(),
-                local_version,
-                remote_version,
-                error: Some(format!("Artifact not found: {}", component.build_artifact)),
-                artifact_path: Some(component.build_artifact.clone()),
-                remote_path: homeboy_core::base_path::join_remote_path(
-                    Some(&base_path),
-                    &component.remote_path,
-                )
-                .ok(),
-                build_command: component.build_command.clone(),
-                build_exit_code,
-                deploy_exit_code: None,
-            });
+            results.push(
+                DeployComponentResult::new(component, &base_path)
+                    .with_status("failed")
+                    .with_versions(local_version, remote_version)
+                    .with_error(format!("Artifact not found: {}", component.build_artifact))
+                    .with_build_exit_code(build_exit_code),
+            );
             failed += 1;
             continue;
         }
@@ -232,19 +277,13 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         ) {
             Ok(v) => v,
             Err(err) => {
-                results.push(DeployComponentResult {
-                    id: component.id.clone(),
-                    name: component.name.clone(),
-                    status: "failed".to_string(),
-                    local_version,
-                    remote_version,
-                    error: Some(err.to_string()),
-                    artifact_path: Some(component.build_artifact.clone()),
-                    remote_path: None,
-                    build_command: component.build_command.clone(),
-                    build_exit_code,
-                    deploy_exit_code: None,
-                });
+                results.push(
+                    DeployComponentResult::new(component, &base_path)
+                        .with_status("failed")
+                        .with_versions(local_version, remote_version)
+                        .with_error(err.to_string())
+                        .with_build_exit_code(build_exit_code),
+                );
                 failed += 1;
                 continue;
             }
@@ -268,19 +307,14 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 exit_code,
                 ..
             }) => {
-                results.push(DeployComponentResult {
-                    id: component.id.clone(),
-                    name: component.name.clone(),
-                    status: "deployed".to_string(),
-                    local_version: local_version.clone(),
-                    remote_version: local_version,
-                    error: None,
-                    artifact_path: Some(component.build_artifact.clone()),
-                    remote_path: Some(install_dir),
-                    build_command: component.build_command.clone(),
-                    build_exit_code,
-                    deploy_exit_code: Some(exit_code),
-                });
+                results.push(
+                    DeployComponentResult::new(component, &base_path)
+                        .with_status("deployed")
+                        .with_versions(local_version.clone(), local_version)
+                        .with_remote_path(install_dir)
+                        .with_build_exit_code(build_exit_code)
+                        .with_deploy_exit_code(Some(exit_code)),
+                );
                 succeeded += 1;
             }
             Ok(DeployResult {
@@ -288,35 +322,27 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 exit_code,
                 error,
             }) => {
-                results.push(DeployComponentResult {
-                    id: component.id.clone(),
-                    name: component.name.clone(),
-                    status: "failed".to_string(),
-                    local_version,
-                    remote_version,
-                    error,
-                    artifact_path: Some(component.build_artifact.clone()),
-                    remote_path: Some(install_dir),
-                    build_command: component.build_command.clone(),
-                    build_exit_code,
-                    deploy_exit_code: Some(exit_code),
-                });
+                let mut result = DeployComponentResult::new(component, &base_path)
+                    .with_status("failed")
+                    .with_versions(local_version, remote_version)
+                    .with_remote_path(install_dir)
+                    .with_build_exit_code(build_exit_code)
+                    .with_deploy_exit_code(Some(exit_code));
+                if let Some(e) = error {
+                    result = result.with_error(e);
+                }
+                results.push(result);
                 failed += 1;
             }
             Err(err) => {
-                results.push(DeployComponentResult {
-                    id: component.id.clone(),
-                    name: component.name.clone(),
-                    status: "failed".to_string(),
-                    local_version,
-                    remote_version,
-                    error: Some(err.to_string()),
-                    artifact_path: Some(component.build_artifact.clone()),
-                    remote_path: Some(install_dir),
-                    build_command: component.build_command.clone(),
-                    build_exit_code,
-                    deploy_exit_code: None,
-                });
+                results.push(
+                    DeployComponentResult::new(component, &base_path)
+                        .with_status("failed")
+                        .with_versions(local_version, remote_version)
+                        .with_remote_path(install_dir)
+                        .with_error(err.to_string())
+                        .with_build_exit_code(build_exit_code),
+                );
                 failed += 1;
             }
         }
@@ -326,6 +352,7 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
 
     Ok((
         DeployOutput {
+            command: "deploy.run".to_string(),
             project_id: args.project_id,
             all: args.all,
             outdated: args.outdated,

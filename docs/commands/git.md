@@ -10,6 +10,8 @@ This command does not accept `--dry-run` (and has no `--json` root flag). Output
 
 ## Subcommands
 
+### Single Component Mode
+
 - `status <componentId>`
 - `commit <componentId> <message>`
 - `push <componentId> [--tags]`
@@ -17,9 +19,50 @@ This command does not accept `--dry-run` (and has no `--json` root flag). Output
 - `tag <componentId> [tagName] [-m <message>]`
   - If `tagName` is omitted, Homeboy tags `v<component version>` (from `homeboy version show`).
 
-## JSON output
+### Bulk Mode (--json)
+
+All subcommands except `tag` support a `--json` flag for bulk operations across multiple components.
+
+- `status --json '<BulkIdsInput>'`
+- `commit --json '<BulkCommitInput>'`
+- `push --json '<BulkIdsInput>'`
+- `pull --json '<BulkIdsInput>'`
+
+The JSON spec can be:
+- An inline JSON string
+- `-` to read from stdin
+- `@file.json` to read from a file
+
+## Bulk JSON Input Schemas
+
+### BulkCommitInput (for commit)
+
+```json
+{
+  "components": [
+    { "id": "extra-chill-multisite", "message": "Update multisite docs" },
+    { "id": "extra-chill-api", "message": "Update API docs" }
+  ]
+}
+```
+
+### BulkIdsInput (for status, push, pull)
+
+```json
+{
+  "componentIds": ["extra-chill-multisite", "extra-chill-api"],
+  "tags": true
+}
+```
+
+Notes:
+- `tags` field is optional (defaults to false), only used for `push`
+
+## JSON Output
 
 > Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+
+### Single Component Output
 
 ```json
 {
@@ -33,13 +76,76 @@ This command does not accept `--dry-run` (and has no `--json` root flag). Output
 }
 ```
 
+### Bulk Output
+
+```json
+{
+  "action": "status|commit|push|pull",
+  "results": [
+    {
+      "componentId": "extra-chill-multisite",
+      "path": "/path/to/component",
+      "action": "commit",
+      "success": true,
+      "exitCode": 0,
+      "stdout": "[main abc1234] Update multisite docs\n 2 files changed",
+      "stderr": ""
+    },
+    {
+      "componentId": "extra-chill-api",
+      "path": "/path/to/component",
+      "action": "commit",
+      "success": false,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "error: nothing to commit"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 1,
+    "failed": 1
+  }
+}
+```
+
 Notes:
 
 - `commit` returns a successful result with `stdout` set to `Nothing to commit, working tree clean` when there are no changes.
+- Bulk operations continue processing all components even if some fail; the summary reports total/succeeded/failed counts.
 
 ## Exit code
 
-Exit code matches the underlying `git` command.
+- Single mode: Exit code matches the underlying `git` command.
+- Bulk mode: Exit code is 0 if all components succeeded, 1 if any failed.
+
+## Examples
+
+### Single Component
+
+```sh
+homeboy git status extra-chill-multisite
+homeboy git commit extra-chill-multisite "Update docs"
+homeboy git push extra-chill-multisite --tags
+homeboy git pull extra-chill-multisite
+homeboy git tag extra-chill-multisite v1.0.0 -m "Release 1.0.0"
+```
+
+### Bulk Operations
+
+```sh
+# Bulk commit with per-component messages
+homeboy git commit --json '{"components":[{"id":"extra-chill-multisite","message":"Update multisite docs"},{"id":"extra-chill-api","message":"Update API docs"}]}'
+
+# Bulk status check
+homeboy git status --json '{"componentIds":["extra-chill-multisite","extra-chill-api","extra-chill-users"]}'
+
+# Bulk push with tags
+homeboy git push --json '{"componentIds":["extra-chill-multisite","extra-chill-api"],"tags":true}'
+
+# Bulk pull
+homeboy git pull --json '{"componentIds":["extra-chill-multisite","extra-chill-api"]}'
+```
 
 ## Related
 

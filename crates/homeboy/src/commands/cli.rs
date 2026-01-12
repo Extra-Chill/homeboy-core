@@ -1,4 +1,6 @@
-use homeboy_core::config::{ConfigManager, ProjectConfiguration, ProjectRecord, SlugIdentifiable};
+use homeboy_core::config::{
+    ComponentConfiguration, ConfigManager, ProjectConfiguration, ProjectRecord, SlugIdentifiable,
+};
 use homeboy_core::context::resolve_project_ssh;
 use homeboy_core::module::{find_module_by_tool, CliConfig, ModuleManifest};
 use homeboy_core::shell;
@@ -11,14 +13,16 @@ use std::collections::HashMap;
 use super::CmdResult;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CliOutput {
+    pub command: String,
     pub tool: String,
     pub module_id: String,
     pub project_id: String,
     pub local: bool,
     pub args: Vec<String>,
     pub target_domain: Option<String>,
-    pub command: String,
+    pub executed_command: String,
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
@@ -26,19 +30,77 @@ pub struct CliOutput {
 
 pub fn run(
     tool: &str,
-    project_id: &str,
+    identifier: &str,
     local: bool,
     args: Vec<String>,
     _global: &crate::commands::GlobalArgs,
 ) -> CmdResult<CliOutput> {
+    // Try component first
+    if let Some(result) = try_run_for_component(tool, identifier, args.clone()) {
+        return result;
+    }
+
+    // Fall back to project-based execution
     run_with_loader_and_executor(
         tool,
-        project_id,
+        identifier,
         local,
         args,
         ConfigManager::load_project_record,
         execute_local_command,
     )
+}
+
+fn try_run_for_component(
+    tool: &str,
+    identifier: &str,
+    args: Vec<String>,
+) -> Option<CmdResult<CliOutput>> {
+    let component = ConfigManager::load_component(identifier).ok()?;
+    let module = find_module_by_tool(tool)?;
+    let cli_config = module.cli.as_ref()?;
+
+    let command = build_component_command(&component, cli_config, &args);
+    let output = execute_local_command(&command);
+
+    Some(Ok((
+        CliOutput {
+            command: "cli.run".to_string(),
+            tool: tool.to_string(),
+            module_id: module.id.clone(),
+            project_id: identifier.to_string(),
+            local: true,
+            args,
+            target_domain: None,
+            executed_command: command,
+            stdout: output.stdout,
+            stderr: output.stderr,
+            exit_code: output.exit_code,
+        },
+        output.exit_code,
+    )))
+}
+
+fn build_component_command(
+    component: &ComponentConfiguration,
+    cli_config: &CliConfig,
+    args: &[String],
+) -> String {
+    let mut variables = HashMap::new();
+    variables.insert(
+        TemplateVars::SITE_PATH.to_string(),
+        component.local_path.clone(),
+    );
+    variables.insert(
+        TemplateVars::CLI_PATH.to_string(),
+        cli_config
+            .default_cli_path
+            .clone()
+            .unwrap_or_else(|| cli_config.tool.clone()),
+    );
+    variables.insert(TemplateVars::ARGS.to_string(), shell::quote_args(args));
+
+    render_map(&cli_config.command_template, &variables)
 }
 
 fn run_with_loader_and_executor(
@@ -88,13 +150,14 @@ fn run_with_loader_and_executor(
 
     Ok((
         CliOutput {
+            command: "cli.run".to_string(),
             tool: tool.to_string(),
             module_id: module.id,
             project_id: project_id.to_string(),
             local,
             args,
             target_domain,
-            command,
+            executed_command: command,
             stdout: output.stdout,
             stderr: output.stderr,
             exit_code: output.exit_code,

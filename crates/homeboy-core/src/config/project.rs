@@ -250,6 +250,61 @@ pub struct ApiConfig {
     pub enabled: bool,
     #[serde(default)]
     pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthConfig>,
+}
+
+/// Generic authentication configuration.
+/// Homeboy doesn't know about specific auth types - it just templates strings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthConfig {
+    /// Header template, e.g., "Authorization: Bearer {{access_token}}"
+    pub header: String,
+    /// Variable sources - where to get values for {{variables}}
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, VariableSource>,
+    /// Optional login flow to obtain tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login: Option<AuthFlowConfig>,
+    /// Optional refresh flow to renew tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<AuthFlowConfig>,
+}
+
+/// Source for a template variable
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableSource {
+    /// Where to get the value: "keychain", "config", "env"
+    pub source: String,
+    /// For "config" source: the literal value
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// For "env" source: the environment variable name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_var: Option<String>,
+}
+
+/// Configuration for login or refresh flow
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthFlowConfig {
+    /// Endpoint path (appended to base_url)
+    pub endpoint: String,
+    /// HTTP method (defaults to POST)
+    #[serde(default = "default_post_method")]
+    pub method: String,
+    /// Request body template - values are {{variable}} templates
+    #[serde(default)]
+    pub body: std::collections::HashMap<String, String>,
+    /// Response field mapping - keys are variable names to store, values are JSON paths
+    #[serde(default)]
+    pub store: std::collections::HashMap<String, String>,
+}
+
+fn default_post_method() -> String {
+    "POST".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

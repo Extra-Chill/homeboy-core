@@ -1,8 +1,9 @@
 use clap::{Args, Subcommand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 
 use homeboy_core::config::ConfigManager;
+use homeboy_core::json::read_json_spec_to_string;
 
 use crate::commands::version;
 
@@ -18,28 +19,50 @@ pub struct GitArgs {
 enum GitCommand {
     /// Show git status for a component
     Status {
-        /// Component ID
-        component_id: String,
+        /// JSON input spec for bulk operations.
+        /// Use "-" for stdin, "@file.json" for file, or inline JSON string.
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Component ID (non-JSON mode)
+        component_id: Option<String>,
     },
     /// Stage all changes and commit
     Commit {
-        /// Component ID
-        component_id: String,
-        /// Commit message
-        message: String,
+        /// JSON input spec for bulk operations.
+        /// Use "-" for stdin, "@file.json" for file, or inline JSON string.
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Component ID (non-JSON mode)
+        component_id: Option<String>,
+
+        /// Commit message (non-JSON mode)
+        message: Option<String>,
     },
     /// Push local commits to remote
     Push {
-        /// Component ID
-        component_id: String,
+        /// JSON input spec for bulk operations.
+        /// Use "-" for stdin, "@file.json" for file, or inline JSON string.
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Component ID (non-JSON mode)
+        component_id: Option<String>,
+
         /// Push tags as well
         #[arg(long)]
         tags: bool,
     },
     /// Pull remote changes
     Pull {
-        /// Component ID
-        component_id: String,
+        /// JSON input spec for bulk operations.
+        /// Use "-" for stdin, "@file.json" for file, or inline JSON string.
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Component ID (non-JSON mode)
+        component_id: Option<String>,
     },
     /// Create a git tag
     Tag {
@@ -67,15 +90,150 @@ pub struct GitOutput {
     stderr: String,
 }
 
-pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<GitOutput> {
+// Bulk input structs
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkCommitInput {
+    components: Vec<CommitSpec>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitSpec {
+    id: String,
+    message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkIdsInput {
+    component_ids: Vec<String>,
+    #[serde(default)]
+    tags: bool,
+}
+
+// Bulk output structs
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkOutput {
+    action: String,
+    results: Vec<GitOutput>,
+    summary: BulkSummary,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkSummary {
+    total: usize,
+    succeeded: usize,
+    failed: usize,
+}
+
+// Tagged union for output type
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum GitCommandOutput {
+    Single(GitOutput),
+    Bulk(BulkOutput),
+}
+
+pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<GitCommandOutput> {
     match args.command {
-        GitCommand::Status { component_id } => status(&component_id),
+        GitCommand::Status { json, component_id } => {
+            if let Some(spec) = json {
+                let raw = read_json_spec_to_string(&spec)?;
+                let input: BulkIdsInput = serde_json::from_str(&raw)
+                    .map_err(|e| homeboy_core::Error::validation_invalid_json(e, Some("parse bulk status input".to_string())))?;
+                return bulk_status(input);
+            }
+
+            let id = component_id.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "componentId",
+                    "Missing componentId (or use --json for bulk)",
+                    None,
+                    None,
+                )
+            })?;
+            let (output, code) = status(&id)?;
+            Ok((GitCommandOutput::Single(output), code))
+        }
         GitCommand::Commit {
+            json,
             component_id,
             message,
-        } => commit(&component_id, &message),
-        GitCommand::Push { component_id, tags } => push(&component_id, tags),
-        GitCommand::Pull { component_id } => pull(&component_id),
+        } => {
+            if let Some(spec) = json {
+                let raw = read_json_spec_to_string(&spec)?;
+                let input: BulkCommitInput = serde_json::from_str(&raw)
+                    .map_err(|e| homeboy_core::Error::validation_invalid_json(e, Some("parse bulk commit input".to_string())))?;
+                return bulk_commit(input);
+            }
+
+            let id = component_id.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "componentId",
+                    "Missing componentId (or use --json for bulk)",
+                    None,
+                    None,
+                )
+            })?;
+            let msg = message.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "message",
+                    "Missing message (or use --json for bulk)",
+                    None,
+                    None,
+                )
+            })?;
+            let (output, code) = commit(&id, &msg)?;
+            Ok((GitCommandOutput::Single(output), code))
+        }
+        GitCommand::Push {
+            json,
+            component_id,
+            tags,
+        } => {
+            if let Some(spec) = json {
+                let raw = read_json_spec_to_string(&spec)?;
+                let input: BulkIdsInput = serde_json::from_str(&raw)
+                    .map_err(|e| homeboy_core::Error::validation_invalid_json(e, Some("parse bulk push input".to_string())))?;
+                return bulk_push(input);
+            }
+
+            let id = component_id.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "componentId",
+                    "Missing componentId (or use --json for bulk)",
+                    None,
+                    None,
+                )
+            })?;
+            let (output, code) = push(&id, tags)?;
+            Ok((GitCommandOutput::Single(output), code))
+        }
+        GitCommand::Pull { json, component_id } => {
+            if let Some(spec) = json {
+                let raw = read_json_spec_to_string(&spec)?;
+                let input: BulkIdsInput = serde_json::from_str(&raw)
+                    .map_err(|e| homeboy_core::Error::validation_invalid_json(e, Some("parse bulk pull input".to_string())))?;
+                return bulk_pull(input);
+            }
+
+            let id = component_id.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "componentId",
+                    "Missing componentId (or use --json for bulk)",
+                    None,
+                    None,
+                )
+            })?;
+            let (output, code) = pull(&id)?;
+            Ok((GitCommandOutput::Single(output), code))
+        }
         GitCommand::Tag {
             component_id,
             tag_name,
@@ -89,7 +247,8 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
                 }
             };
 
-            tag(&component_id, &derived_tag_name, message.as_deref())
+            let (output, code) = tag(&component_id, &derived_tag_name, message.as_deref())?;
+            Ok((GitCommandOutput::Single(output), code))
         }
     }
 }
@@ -258,6 +417,153 @@ fn tag(component_id: &str, tag_name: &str, message: Option<&str>) -> CmdResult<G
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         },
+        exit_code,
+    ))
+}
+
+// Bulk handlers
+
+fn bulk_status(input: BulkIdsInput) -> CmdResult<GitCommandOutput> {
+    let mut results = Vec::new();
+
+    for id in &input.component_ids {
+        match status(id) {
+            Ok((output, _)) => results.push(output),
+            Err(e) => results.push(GitOutput {
+                component_id: id.clone(),
+                path: String::new(),
+                action: "status".to_string(),
+                success: false,
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+            }),
+        }
+    }
+
+    let succeeded = results.iter().filter(|r| r.success).count();
+    let failed = results.len() - succeeded;
+    let exit_code = if failed > 0 { 1 } else { 0 };
+
+    Ok((
+        GitCommandOutput::Bulk(BulkOutput {
+            action: "status".to_string(),
+            results,
+            summary: BulkSummary {
+                total: input.component_ids.len(),
+                succeeded,
+                failed,
+            },
+        }),
+        exit_code,
+    ))
+}
+
+fn bulk_commit(input: BulkCommitInput) -> CmdResult<GitCommandOutput> {
+    let mut results = Vec::new();
+
+    for spec in &input.components {
+        match commit(&spec.id, &spec.message) {
+            Ok((output, _)) => results.push(output),
+            Err(e) => results.push(GitOutput {
+                component_id: spec.id.clone(),
+                path: String::new(),
+                action: "commit".to_string(),
+                success: false,
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+            }),
+        }
+    }
+
+    let succeeded = results.iter().filter(|r| r.success).count();
+    let failed = results.len() - succeeded;
+    let exit_code = if failed > 0 { 1 } else { 0 };
+
+    Ok((
+        GitCommandOutput::Bulk(BulkOutput {
+            action: "commit".to_string(),
+            results,
+            summary: BulkSummary {
+                total: input.components.len(),
+                succeeded,
+                failed,
+            },
+        }),
+        exit_code,
+    ))
+}
+
+fn bulk_push(input: BulkIdsInput) -> CmdResult<GitCommandOutput> {
+    let mut results = Vec::new();
+    let push_tags = input.tags;
+
+    for id in &input.component_ids {
+        match push(id, push_tags) {
+            Ok((output, _)) => results.push(output),
+            Err(e) => results.push(GitOutput {
+                component_id: id.clone(),
+                path: String::new(),
+                action: "push".to_string(),
+                success: false,
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+            }),
+        }
+    }
+
+    let succeeded = results.iter().filter(|r| r.success).count();
+    let failed = results.len() - succeeded;
+    let exit_code = if failed > 0 { 1 } else { 0 };
+
+    Ok((
+        GitCommandOutput::Bulk(BulkOutput {
+            action: "push".to_string(),
+            results,
+            summary: BulkSummary {
+                total: input.component_ids.len(),
+                succeeded,
+                failed,
+            },
+        }),
+        exit_code,
+    ))
+}
+
+fn bulk_pull(input: BulkIdsInput) -> CmdResult<GitCommandOutput> {
+    let mut results = Vec::new();
+
+    for id in &input.component_ids {
+        match pull(id) {
+            Ok((output, _)) => results.push(output),
+            Err(e) => results.push(GitOutput {
+                component_id: id.clone(),
+                path: String::new(),
+                action: "pull".to_string(),
+                success: false,
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+            }),
+        }
+    }
+
+    let succeeded = results.iter().filter(|r| r.success).count();
+    let failed = results.len() - succeeded;
+    let exit_code = if failed > 0 { 1 } else { 0 };
+
+    Ok((
+        GitCommandOutput::Bulk(BulkOutput {
+            action: "pull".to_string(),
+            results,
+            summary: BulkSummary {
+                total: input.component_ids.len(),
+                succeeded,
+                failed,
+            },
+        }),
         exit_code,
     ))
 }

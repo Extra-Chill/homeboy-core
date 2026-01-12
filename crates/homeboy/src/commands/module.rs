@@ -194,6 +194,7 @@ pub struct ModuleEntry {
     pub ready: bool,
     pub configured: bool,
     pub linked: bool,
+    pub path: String,
 }
 
 fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
@@ -236,6 +237,7 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                 ready,
                 configured,
                 linked,
+                path: module.module_path.clone().unwrap_or_default(),
             }
         })
         .collect();

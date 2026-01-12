@@ -1,11 +1,14 @@
 pub mod base_path;
+pub mod build;
 pub mod changelog;
 pub mod config;
 pub mod context;
 pub mod deploy;
 pub mod doctor;
 pub mod git;
+pub mod http;
 pub mod json;
+pub mod keychain;
 pub mod module;
 pub mod module_settings;
 pub mod output;
@@ -16,8 +19,6 @@ pub mod template;
 pub mod token;
 pub mod tty;
 pub mod version;
-
-pub mod build;
 
 pub use homeboy_error::{Error, ErrorCode, Result};
 
