@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.2.14
+
+- Fix unused imports warnings
+
 ## 0.2.13
 
 - Project rewrite
