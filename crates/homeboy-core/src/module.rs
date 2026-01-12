@@ -265,6 +265,8 @@ pub struct ActionConfig {
     pub method: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_auth: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

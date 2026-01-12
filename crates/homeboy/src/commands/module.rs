@@ -1,5 +1,7 @@
+use arboard::Clipboard;
 use clap::{Args, Subcommand};
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -7,6 +9,7 @@ use std::process::{Command, Stdio};
 
 use homeboy_core::config::ModuleScope;
 use homeboy_core::config::{AppPaths, ConfigManager, InstalledModuleConfig, ProjectConfiguration};
+use homeboy_core::http::ApiClient;
 use homeboy_core::module::{load_all_modules, load_module, ModuleManifest};
 use homeboy_core::ssh::execute_local_command_interactive;
 use homeboy_core::template;
@@ -113,6 +116,19 @@ enum ModuleCommand {
         /// Module ID
         module_id: String,
     },
+    /// Execute a module action (API call or builtin)
+    Action {
+        /// Module ID
+        module_id: String,
+        /// Action ID
+        action_id: String,
+        /// Project ID (required for API actions)
+        #[arg(short, long)]
+        project: Option<String>,
+        /// JSON array of selected data rows
+        #[arg(long)]
+        data: Option<String>,
+    },
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
@@ -138,6 +154,12 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         ModuleCommand::Uninstall { module_id, force } => uninstall_module(&module_id, force),
         ModuleCommand::Link { path, id } => link_module(&path, id),
         ModuleCommand::Unlink { module_id } => unlink_module(&module_id),
+        ModuleCommand::Action {
+            module_id,
+            action_id,
+            project,
+            data,
+        } => run_action(&module_id, &action_id, project, data),
     }
 }
 
@@ -180,6 +202,14 @@ pub enum ModuleOutput {
     },
     #[serde(rename = "module.unlink")]
     Unlink { module_id: String, path: String },
+    #[serde(rename = "module.action")]
+    Action {
+        module_id: String,
+        action_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project_id: Option<String>,
+        response: serde_json::Value,
+    },
 }
 
 #[derive(Serialize)]
@@ -365,27 +395,20 @@ fn run_module(
 
     // Build template variables
     let entrypoint = runtime.entrypoint.clone().unwrap_or_default();
-    let local_domain: String;
-    let cli_path: String;
+    let domain: String;
     let site_path: String;
 
     let vars: Vec<(&str, &str)> = if let Some(ref proj) = project_config {
-        local_domain = if proj.local_environment.domain.is_empty() {
-            "localhost".to_string()
-        } else {
-            proj.local_environment.domain.clone()
-        };
-        cli_path = proj.local_environment.cli_path.clone().unwrap_or_default();
-        site_path = proj.local_environment.site_path.clone();
+        domain = proj.domain.clone();
+        site_path = proj.base_path.clone().unwrap_or_default();
 
         vec![
             ("modulePath", module_path.as_str()),
             ("entrypoint", entrypoint.as_str()),
             ("args", args_str.as_str()),
             ("projectId", resolved_project_id.as_deref().unwrap_or("")),
-            ("domain", local_domain.as_str()),
+            ("domain", domain.as_str()),
             ("sitePath", site_path.as_str()),
-            ("cliPath", cli_path.as_str()),
         ]
     } else {
         vec![
@@ -946,4 +969,323 @@ fn unlink_module(module_id: &str) -> CmdResult<ModuleOutput> {
         },
         0,
     ))
+}
+
+fn run_action(
+    module_id: &str,
+    action_id: &str,
+    project_id: Option<String>,
+    data: Option<String>,
+) -> CmdResult<ModuleOutput> {
+    let module = load_module(module_id)
+        .ok_or_else(|| homeboy_core::Error::other(format!("Module '{}' not found", module_id)))?;
+
+    // Find the action in the module manifest
+    if module.actions.is_empty() {
+        return Err(homeboy_core::Error::other(format!(
+            "Module '{}' has no actions defined",
+            module_id
+        )));
+    }
+
+    let action = module
+        .actions
+        .iter()
+        .find(|a| a.id == action_id)
+        .ok_or_else(|| {
+            homeboy_core::Error::other(format!(
+                "Action '{}' not found in module '{}'",
+                action_id, module_id
+            ))
+        })?;
+
+    // Parse the selected data
+    let selected: Vec<Value> = if let Some(data_str) = &data {
+        serde_json::from_str(data_str).map_err(|e| {
+            homeboy_core::Error::other(format!("Invalid JSON data: {}", e))
+        })?
+    } else {
+        Vec::new()
+    };
+
+    // Handle based on action type
+    match action.action_type.as_str() {
+        "api" => {
+            // API actions require a project
+            let project_id = project_id.ok_or_else(|| {
+                homeboy_core::Error::other("--project is required for API actions")
+            })?;
+
+            let project = ConfigManager::load_project(&project_id)?;
+            let client = ApiClient::new(&project_id, &project.api)?;
+
+            // Check auth if required
+            if action.requires_auth.unwrap_or(false) && !client.is_authenticated() {
+                return Err(homeboy_core::Error::other(
+                    "Not authenticated. Run 'homeboy auth login --project <id>' first.",
+                ));
+            }
+
+            // Build payload by interpolating templates
+            let endpoint = action.endpoint.as_ref().ok_or_else(|| {
+                homeboy_core::Error::other("API action missing 'endpoint'")
+            })?;
+
+            let method = action.method.as_deref().unwrap_or("POST");
+
+            // Get module settings for interpolation
+            let settings = get_module_settings(module_id, Some(&project_id), None)?;
+
+            // Interpolate payload
+            let payload = interpolate_action_payload(action, &selected, &settings)?;
+
+            // Make the request
+            let response = if method == "GET" {
+                client.get(endpoint)?
+            } else {
+                client.post(endpoint, &payload)?
+            };
+
+            Ok((
+                ModuleOutput::Action {
+                    module_id: module_id.to_string(),
+                    action_id: action_id.to_string(),
+                    project_id: Some(project_id),
+                    response,
+                },
+                0,
+            ))
+        }
+        "builtin" => {
+            let builtin = action.builtin.as_ref().ok_or_else(|| {
+                homeboy_core::Error::other("Builtin action missing 'builtin' field")
+            })?;
+
+            let response = match builtin.as_str() {
+                "copy-column" => {
+                    let column = action.column.as_ref().ok_or_else(|| {
+                        homeboy_core::Error::other("copy-column action missing 'column' field")
+                    })?;
+
+                    let values: Vec<String> = selected
+                        .iter()
+                        .filter_map(|row| {
+                            row.get(column).and_then(|v| match v {
+                                Value::String(s) => Some(s.clone()),
+                                _ => Some(v.to_string()),
+                            })
+                        })
+                        .collect();
+
+                    let text = values.join("\n");
+
+                    // Copy to clipboard
+                    let mut clipboard = Clipboard::new().map_err(|e| {
+                        homeboy_core::Error::other(format!("Failed to access clipboard: {}", e))
+                    })?;
+                    clipboard.set_text(&text).map_err(|e| {
+                        homeboy_core::Error::other(format!("Failed to copy to clipboard: {}", e))
+                    })?;
+
+                    serde_json::json!({
+                        "action": "copy-column",
+                        "column": column,
+                        "count": values.len(),
+                        "copied": true
+                    })
+                }
+                "export-csv" => {
+                    // Generate CSV and output to stdout
+                    let csv = generate_csv(&selected)?;
+                    print!("{}", csv);
+
+                    serde_json::json!({
+                        "action": "export-csv",
+                        "rows": selected.len()
+                    })
+                }
+                "copy-json" => {
+                    let json = serde_json::to_string_pretty(&selected).map_err(|e| {
+                        homeboy_core::Error::other(format!("Failed to serialize JSON: {}", e))
+                    })?;
+
+                    // Copy to clipboard
+                    let mut clipboard = Clipboard::new().map_err(|e| {
+                        homeboy_core::Error::other(format!("Failed to access clipboard: {}", e))
+                    })?;
+                    clipboard.set_text(&json).map_err(|e| {
+                        homeboy_core::Error::other(format!("Failed to copy to clipboard: {}", e))
+                    })?;
+
+                    serde_json::json!({
+                        "action": "copy-json",
+                        "count": selected.len(),
+                        "copied": true
+                    })
+                }
+                _ => {
+                    return Err(homeboy_core::Error::other(format!(
+                        "Unknown builtin action: {}",
+                        builtin
+                    )));
+                }
+            };
+
+            Ok((
+                ModuleOutput::Action {
+                    module_id: module_id.to_string(),
+                    action_id: action_id.to_string(),
+                    project_id,
+                    response,
+                },
+                0,
+            ))
+        }
+        other => Err(homeboy_core::Error::other(format!(
+            "Unknown action type: {}",
+            other
+        ))),
+    }
+}
+
+fn get_module_settings(
+    module_id: &str,
+    project_id: Option<&str>,
+    _component_id: Option<&str>,
+) -> homeboy_core::Result<HashMap<String, Value>> {
+    let mut settings = HashMap::new();
+
+    // Load from app config
+    let app_config = ConfigManager::load_app_config()?;
+    if let Some(installed) = app_config.installed_modules.as_ref() {
+        if let Some(module_config) = installed.get(module_id) {
+            for (k, v) in &module_config.settings {
+                settings.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    // Load from project config (overrides app settings)
+    if let Some(pid) = project_id {
+        if let Ok(project) = ConfigManager::load_project(pid) {
+            if let Some(scoped) = project.scoped_modules.as_ref() {
+                if let Some(module_scope) = scoped.get(module_id) {
+                    for (k, v) in &module_scope.settings {
+                        settings.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(settings)
+}
+
+fn interpolate_action_payload(
+    action: &homeboy_core::module::ActionConfig,
+    selected: &[Value],
+    settings: &HashMap<String, Value>,
+) -> homeboy_core::Result<Value> {
+    let payload_template = match &action.payload {
+        Some(p) => p,
+        None => return Ok(Value::Object(serde_json::Map::new())),
+    };
+
+    let mut result = serde_json::Map::new();
+
+    for (key, value) in payload_template {
+        let interpolated = interpolate_payload_value(value, selected, settings)?;
+        result.insert(key.clone(), interpolated);
+    }
+
+    Ok(Value::Object(result))
+}
+
+fn interpolate_payload_value(
+    value: &Value,
+    selected: &[Value],
+    settings: &HashMap<String, Value>,
+) -> homeboy_core::Result<Value> {
+    match value {
+        Value::String(template) => {
+            if template == "{{selected}}" {
+                // Return selected rows as array
+                Ok(Value::Array(selected.to_vec()))
+            } else if template.starts_with("{{settings.") && template.ends_with("}}") {
+                // Extract setting key
+                let key = &template[11..template.len() - 2];
+                Ok(settings
+                    .get(key)
+                    .cloned()
+                    .unwrap_or(Value::String(String::new())))
+            } else {
+                Ok(Value::String(template.clone()))
+            }
+        }
+        Value::Array(arr) => {
+            let interpolated: Result<Vec<Value>, _> = arr
+                .iter()
+                .map(|v| interpolate_payload_value(v, selected, settings))
+                .collect();
+            Ok(Value::Array(interpolated?))
+        }
+        Value::Object(obj) => {
+            let mut result = serde_json::Map::new();
+            for (k, v) in obj {
+                result.insert(k.clone(), interpolate_payload_value(v, selected, settings)?);
+            }
+            Ok(Value::Object(result))
+        }
+        _ => Ok(value.clone()),
+    }
+}
+
+fn generate_csv(rows: &[Value]) -> homeboy_core::Result<String> {
+    if rows.is_empty() {
+        return Ok(String::new());
+    }
+
+    // Get headers from first row
+    let headers: Vec<String> = match &rows[0] {
+        Value::Object(obj) => obj.keys().cloned().collect(),
+        _ => return Err(homeboy_core::Error::other("Expected array of objects")),
+    };
+
+    let mut csv = String::new();
+
+    // Header row
+    csv.push_str(&headers.join(","));
+    csv.push('\n');
+
+    // Data rows
+    for row in rows {
+        if let Value::Object(obj) = row {
+            let values: Vec<String> = headers
+                .iter()
+                .map(|h| {
+                    obj.get(h)
+                        .map(|v| escape_csv_field(v))
+                        .unwrap_or_default()
+                })
+                .collect();
+            csv.push_str(&values.join(","));
+            csv.push('\n');
+        }
+    }
+
+    Ok(csv)
+}
+
+fn escape_csv_field(value: &Value) -> String {
+    let s = match value {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        _ => value.to_string(),
+    };
+
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s
+    }
 }

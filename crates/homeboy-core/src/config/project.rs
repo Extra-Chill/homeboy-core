@@ -41,8 +41,6 @@ pub struct ProjectConfiguration {
     #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
-    pub local_environment: LocalEnvironmentConfig,
-    #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
     pub api: ApiConfig,
@@ -223,23 +221,6 @@ impl Default for DatabaseConfig {
             user: String::new(),
             use_ssh_tunnel: true,
         }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalEnvironmentConfig {
-    #[serde(default)]
-    pub site_path: String,
-    #[serde(default)]
-    pub domain: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cli_path: Option<String>,
-}
-
-impl LocalEnvironmentConfig {
-    pub fn is_configured(&self) -> bool {
-        !self.site_path.is_empty()
     }
 }
 

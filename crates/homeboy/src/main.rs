@@ -18,8 +18,8 @@ mod commands;
 mod docs;
 
 use commands::{
-    build, changelog, cli, component, config, context, db, deploy, doctor, error, file, git, init,
-    logs, module, project, server, ssh, version,
+    auth, build, changelog, cli, component, config, context, db, deploy, doctor, error, file, git,
+    init, logs, module, project, server, ssh, version,
 };
 use homeboy_core::module::load_all_modules;
 
@@ -78,6 +78,8 @@ enum Commands {
     Doctor(doctor::DoctorArgs),
     /// Error code registry and explanations
     Error(error::ErrorArgs),
+    /// Authenticate with a project's API
+    Auth(auth::AuthArgs),
     /// List available commands (alias for --help)
     List,
 }
@@ -103,7 +105,6 @@ fn response_mode(command: &Commands) -> ResponseMode {
 struct ModuleCliCommand {
     tool: String,
     project_id: String,
-    local: bool,
     args: Vec<String>,
 }
 
@@ -144,12 +145,6 @@ fn build_augmented_command(module_info: &[ModuleCliInfo]) -> Command {
                         .index(1),
                 )
                 .arg(
-                    clap::Arg::new("local")
-                        .long("local")
-                        .help("Execute locally instead of on remote server")
-                        .action(clap::ArgAction::SetTrue),
-                )
-                .arg(
                     clap::Arg::new("args")
                         .help("Command arguments")
                         .index(2)
@@ -175,7 +170,6 @@ fn try_parse_module_cli_command(
 
     let sub_matches = sub_matches;
     let project_id = sub_matches.get_one::<String>("project_id")?.clone();
-    let local = sub_matches.get_flag("local");
     let args: Vec<String> = sub_matches
         .get_many::<String>("args")
         .map(|vals| vals.cloned().collect())
@@ -184,7 +178,6 @@ fn try_parse_module_cli_command(
     Some(ModuleCliCommand {
         tool: tool.to_string(),
         project_id,
-        local,
         args,
     })
 }
@@ -202,7 +195,6 @@ fn main() -> std::process::ExitCode {
         let result = cli::run(
             &module_cmd.tool,
             &module_cmd.project_id,
-            module_cmd.local,
             module_cmd.args,
             &global,
         );

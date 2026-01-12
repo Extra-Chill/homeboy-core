@@ -1,6 +1,7 @@
 use homeboy_core::config::{
     ComponentConfiguration, ConfigManager, ProjectConfiguration, ProjectRecord, SlugIdentifiable,
 };
+use homeboy_core::ErrorCode;
 use homeboy_core::context::resolve_project_ssh;
 use homeboy_core::module::{find_module_by_tool, CliConfig, ModuleManifest};
 use homeboy_core::shell;
@@ -19,7 +20,6 @@ pub struct CliOutput {
     pub tool: String,
     pub module_id: String,
     pub project_id: String,
-    pub local: bool,
     pub args: Vec<String>,
     pub target_domain: Option<String>,
     pub executed_command: String,
@@ -31,7 +31,6 @@ pub struct CliOutput {
 pub fn run(
     tool: &str,
     identifier: &str,
-    local: bool,
     args: Vec<String>,
     _global: &crate::commands::GlobalArgs,
 ) -> CmdResult<CliOutput> {
@@ -44,7 +43,6 @@ pub fn run(
     run_with_loader_and_executor(
         tool,
         identifier,
-        local,
         args,
         ConfigManager::load_project_record,
         execute_local_command,
@@ -56,29 +54,33 @@ fn try_run_for_component(
     identifier: &str,
     args: Vec<String>,
 ) -> Option<CmdResult<CliOutput>> {
-    let component = ConfigManager::load_component(identifier).ok()?;
-    let module = find_module_by_tool(tool)?;
-    let cli_config = module.cli.as_ref()?;
+    match ConfigManager::load_component(identifier) {
+        Ok(component) => {
+            let module = find_module_by_tool(tool)?;
+            let cli_config = module.cli.as_ref()?;
 
-    let command = build_component_command(&component, cli_config, &args);
-    let output = execute_local_command(&command);
+            let command = build_component_command(&component, cli_config, &args);
+            let output = execute_local_command(&command);
 
-    Some(Ok((
-        CliOutput {
-            command: "cli.run".to_string(),
-            tool: tool.to_string(),
-            module_id: module.id.clone(),
-            project_id: identifier.to_string(),
-            local: true,
-            args,
-            target_domain: None,
-            executed_command: command,
-            stdout: output.stdout,
-            stderr: output.stderr,
-            exit_code: output.exit_code,
-        },
-        output.exit_code,
-    )))
+            Some(Ok((
+                CliOutput {
+                    command: "cli.run".to_string(),
+                    tool: tool.to_string(),
+                    module_id: module.id.clone(),
+                    project_id: identifier.to_string(),
+                    args,
+                    target_domain: None,
+                    executed_command: command,
+                    stdout: output.stdout,
+                    stderr: output.stderr,
+                    exit_code: output.exit_code,
+                },
+                output.exit_code,
+            )))
+        }
+        Err(e) if e.code == ErrorCode::ComponentNotFound => None,
+        Err(e) => Some(Err(e)),
+    }
 }
 
 fn build_component_command(
@@ -106,7 +108,6 @@ fn build_component_command(
 fn run_with_loader_and_executor(
     tool: &str,
     project_id: &str,
-    local: bool,
     args: Vec<String>,
     project_loader: fn(&str) -> homeboy_core::Result<ProjectRecord>,
     local_executor: fn(&str) -> CommandOutput,
@@ -136,16 +137,14 @@ fn run_with_loader_and_executor(
         )));
     }
 
-    let (output, target_domain, command) = if local {
-        let (target_domain, command) = build_command(&project, &module, cli_config, &args, true)?;
-        let output = local_executor(&command);
-        (output, Some(target_domain), command)
-    } else {
-        let (target_domain, command) = build_command(&project, &module, cli_config, &args, false)?;
+    let (target_domain, command) = build_command(&project, &module, cli_config, &args)?;
 
+    // Execute locally if no server configured, otherwise via SSH
+    let output = if project.config.server_id.as_ref().map_or(true, |s| s.is_empty()) {
+        local_executor(&command)
+    } else {
         let ctx = resolve_project_ssh(project_id)?;
-        let output = ctx.client.execute(&command);
-        (output, Some(target_domain), command)
+        ctx.client.execute(&command)
     };
 
     Ok((
@@ -154,9 +153,8 @@ fn run_with_loader_and_executor(
             tool: tool.to_string(),
             module_id: module.id,
             project_id: project_id.to_string(),
-            local,
             args,
-            target_domain,
+            target_domain: Some(target_domain),
             executed_command: command,
             stdout: output.stdout,
             stderr: output.stderr,
@@ -171,27 +169,15 @@ fn build_command(
     module: &ModuleManifest,
     cli_config: &CliConfig,
     args: &[String],
-    use_local: bool,
 ) -> homeboy_core::Result<(String, String)> {
-    let base_path = if use_local {
-        if !project.config.local_environment.is_configured() {
-            return Err(homeboy_core::Error::other(
-                "Local environment not configured for project".to_string(),
-            ));
-        }
-        project.config.local_environment.site_path.clone()
-    } else {
-        project
-            .config
-            .base_path
-            .clone()
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| {
-                homeboy_core::Error::config("Remote base path not configured".to_string())
-            })?
-    };
+    let base_path = project
+        .config
+        .base_path
+        .clone()
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| homeboy_core::Error::config("Base path not configured".to_string()))?;
 
-    let (target_domain, command_args) = resolve_subtarget(&project.config, args, use_local);
+    let (target_domain, command_args) = resolve_subtarget(&project.config, args);
 
     let command_args = inject_module_args(&project.config, module, command_args);
 
@@ -201,20 +187,10 @@ fn build_command(
         ));
     }
 
-    let cli_path = if use_local {
-        project
-            .config
-            .local_environment
-            .cli_path
-            .clone()
-            .or_else(|| cli_config.default_cli_path.clone())
-            .unwrap_or_else(|| cli_config.tool.clone())
-    } else {
-        cli_config
-            .default_cli_path
-            .clone()
-            .unwrap_or_else(|| cli_config.tool.clone())
-    };
+    let cli_path = cli_config
+        .default_cli_path
+        .clone()
+        .unwrap_or_else(|| cli_config.tool.clone());
 
     let mut variables = HashMap::new();
     variables.insert(TemplateVars::PROJECT_ID.to_string(), project.id.clone());
@@ -258,17 +234,8 @@ fn inject_module_args(
 fn resolve_subtarget(
     project: &ProjectConfiguration,
     args: &[String],
-    use_local: bool,
 ) -> (String, Vec<String>) {
-    let default_domain = if use_local {
-        if project.local_environment.domain.is_empty() {
-            "localhost".to_string()
-        } else {
-            project.local_environment.domain.clone()
-        }
-    } else {
-        project.domain.clone()
-    };
+    let default_domain = project.domain.clone();
 
     if project.sub_targets.is_empty() {
         return (default_domain, args.to_vec());
@@ -281,22 +248,7 @@ fn resolve_subtarget(
     if let Some(subtarget) = project.sub_targets.iter().find(|t| {
         t.slug_id().ok().as_deref() == Some(sub_id) || token::identifier_eq(&t.name, sub_id)
     }) {
-        let domain = if use_local {
-            let base_domain = if project.local_environment.domain.is_empty() {
-                "localhost"
-            } else {
-                &project.local_environment.domain
-            };
-            if subtarget.is_default {
-                base_domain.to_string()
-            } else {
-                let slug = subtarget.slug_id().unwrap_or_default();
-                format!("{}/{}", base_domain, slug)
-            }
-        } else {
-            subtarget.domain.clone()
-        };
-        return (domain, args[1..].to_vec());
+        return (subtarget.domain.clone(), args[1..].to_vec());
     }
 
     (default_domain, args.to_vec())

@@ -44,7 +44,6 @@ impl ProjectManager {
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),
-            local_environment: Default::default(),
             tools: Default::default(),
             api: Default::default(),
             changelog_next_section_label: None,

@@ -691,6 +691,7 @@ name = "homeboy"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "atty",
  "clap",
  "homeboy-core",

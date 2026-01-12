@@ -3,14 +3,17 @@
 ## Synopsis
 
 ```sh
-homeboy wp <projectId> [--local] <args...>
+homeboy wp <projectId> <args...>
 ```
 
 ## Arguments and flags
 
 - `projectId`: project ID
-- `--local`: execute locally instead of on the remote server
 - `<args...>`: CLI tool arguments (trailing var args; hyphen values allowed)
+
+## Execution
+
+Commands execute locally if the project has no `serverId` configured, or via SSH if `serverId` is set.
 
 ## JSON output
 
@@ -19,7 +22,6 @@ homeboy wp <projectId> [--local] <args...>
 ```json
 {
   "projectId": "<projectId>",
-  "local": false,
   "args": ["core", "version"],
   "targetDomain": "<domain>|null",
   "command": "<rendered command string>",
