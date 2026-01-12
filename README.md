@@ -4,7 +4,7 @@ Homeboy is a config-driven automation engine for repetitive discovery and AI cod
 
 It standardizes common operations (project/component discovery, remote execution, deployments) and typically produces machine-readable output via a stable JSON envelope.
 
-**Note:** This is experimental and still early in development. Breaking changes may be frequent before 0.4.0.
+**Note:** This is experimental and still early in development. Breaking changes may be frequent before 0.5.0.
 
 ## Installation
 
