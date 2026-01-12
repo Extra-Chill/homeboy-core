@@ -2,6 +2,7 @@ use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
 
+use super::CmdResult;
 use homeboy_core::config::ConfigManager;
 
 #[derive(Args)]
@@ -18,10 +19,7 @@ pub struct ContextOutput {
     pub suggestion: Option<String>,
 }
 
-pub fn run(
-    _args: ContextArgs,
-    _global: &crate::commands::GlobalArgs,
-) -> homeboy_core::Result<(serde_json::Value, i32)> {
+pub fn run(_args: ContextArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ContextOutput> {
     let cwd = std::env::current_dir()
         .map_err(|e| homeboy_core::Error::internal_io(e.to_string(), None))?;
 
@@ -48,19 +46,17 @@ pub fn run(
         )
     };
 
-    let output = ContextOutput {
-        command: "context".to_string(),
-        cwd: cwd_str,
-        git_root,
-        managed,
-        matched_components: matched,
-        suggestion,
-    };
-
-    let value = serde_json::to_value(output)
-        .map_err(|e| homeboy_core::Error::internal_json(e.to_string(), None))?;
-
-    Ok((value, 0))
+    Ok((
+        ContextOutput {
+            command: "context.show".to_string(),
+            cwd: cwd_str,
+            git_root,
+            managed,
+            matched_components: matched,
+            suggestion,
+        },
+        0,
+    ))
 }
 
 fn detect_git_root(cwd: &PathBuf) -> Option<String> {

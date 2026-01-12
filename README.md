@@ -4,7 +4,7 @@ Homeboy is a config-driven automation engine for repetitive discovery and AI cod
 
 It standardizes common operations (project/component discovery, remote execution, deployments) and typically produces machine-readable output via a stable JSON envelope.
 
-**Note:** This is experimental and still early in development. Breaking changes may be frequent before 0.5.0.
+**Note:** This is still early in development. Breaking changes may occur between releases.
 
 ## Installation
 
@@ -18,11 +18,11 @@ This installs the **Homeboy CLI** (`homeboy`). It does not install the macOS des
 
 ### Cargo (requires Rust)
 ```bash
-cargo install --path crates/homeboy
+cargo install --path .
 ```
 
 ### Direct Download
-Download from [GitHub Releases](https://github.com/Extra-Chill/homeboy-cli/releases).
+Download from [GitHub Releases](https://github.com/Extra-Chill/homeboy-cli/releases) (CLI only).
 
 ## Commands
 
@@ -82,7 +82,7 @@ See [CLI documentation](docs/index.md) for details.
 
 ## SSH
 
-Homeboy connects over SSH using server configuration stored under `homeboy/servers/`.
+Homeboy connects over SSH using server configuration stored under `servers/` inside the OS config directory.
 
 Key management commands (generate/import/use/unset/show) are documented in [server](docs/commands/server.md).
 

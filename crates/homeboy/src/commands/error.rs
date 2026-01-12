@@ -42,7 +42,9 @@ pub fn run(args: ErrorArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<
                 command: "error.codes".to_string(),
                 codes,
             };
-            Ok((serde_json::to_value(output).unwrap(), 0))
+            let value = serde_json::to_value(output)
+                .map_err(|e| homeboy_core::Error::internal_json(e.to_string(), None))?;
+            Ok((value, 0))
         }
         ErrorCommand::Explain { code } => {
             let Some(code_enum) = homeboy_error::parse_code(&code) else {
@@ -54,8 +56,9 @@ pub fn run(args: ErrorArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<
                 command: "error.explain".to_string(),
                 help,
             };
-
-            Ok((serde_json::to_value(output).unwrap(), 0))
+            let value = serde_json::to_value(output)
+                .map_err(|e| homeboy_core::Error::internal_json(e.to_string(), None))?;
+            Ok((value, 0))
         }
     }
 }

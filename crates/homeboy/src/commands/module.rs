@@ -21,18 +21,20 @@ struct ModuleExecContext {
 }
 
 fn module_exec_context_env(context: &ModuleExecContext) -> Vec<(&'static str, String)> {
+    use homeboy_core::module::exec_context;
+
     let mut env: Vec<(&'static str, String)> = vec![
-        ("HOMEBOY_EXEC_CONTEXT_VERSION", "1".to_string()),
-        ("HOMEBOY_MODULE_ID", context.module_id.clone()),
-        ("HOMEBOY_SETTINGS_JSON", context.settings_json.clone()),
+        (exec_context::VERSION, exec_context::CURRENT_VERSION.to_string()),
+        (exec_context::MODULE_ID, context.module_id.clone()),
+        (exec_context::SETTINGS_JSON, context.settings_json.clone()),
     ];
 
     if let Some(ref project_id) = context.project_id {
-        env.push(("HOMEBOY_PROJECT_ID", project_id.clone()));
+        env.push((exec_context::PROJECT_ID, project_id.clone()));
     }
 
     if let Some(ref component_id) = context.component_id {
-        env.push(("HOMEBOY_COMPONENT_ID", component_id.clone()));
+        env.push((exec_context::COMPONENT_ID, component_id.clone()));
     }
 
     env
@@ -140,60 +142,44 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleOutput {
-    pub command: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modules: Option<Vec<ModuleEntry>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub installed: Option<ModuleInstallOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated: Option<ModuleUpdateOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub uninstalled: Option<ModuleUninstallOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub linked: Option<ModuleLinkOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unlinked: Option<ModuleUnlinkOutput>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleInstallOutput {
-    pub url: String,
-    pub path: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleUpdateOutput {
-    pub url: String,
-    pub path: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleUninstallOutput {
-    pub path: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleLinkOutput {
-    pub source_path: String,
-    pub symlink_path: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleUnlinkOutput {
-    pub path: String,
+#[serde(tag = "command", rename_all = "camelCase")]
+pub enum ModuleOutput {
+    #[serde(rename = "module.list")]
+    List {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project_id: Option<String>,
+        modules: Vec<ModuleEntry>,
+    },
+    #[serde(rename = "module.run")]
+    Run {
+        module_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project_id: Option<String>,
+    },
+    #[serde(rename = "module.setup")]
+    Setup { module_id: String },
+    #[serde(rename = "module.install")]
+    Install {
+        module_id: String,
+        url: String,
+        path: String,
+    },
+    #[serde(rename = "module.update")]
+    Update {
+        module_id: String,
+        url: String,
+        path: String,
+    },
+    #[serde(rename = "module.uninstall")]
+    Uninstall { module_id: String, path: String },
+    #[serde(rename = "module.link")]
+    Link {
+        module_id: String,
+        source_path: String,
+        symlink_path: String,
+    },
+    #[serde(rename = "module.unlink")]
+    Unlink { module_id: String, path: String },
 }
 
 #[derive(Serialize)]
@@ -255,17 +241,9 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
         .collect();
 
     Ok((
-        ModuleOutput {
-            command: "module.list".to_string(),
+        ModuleOutput::List {
             project_id: project,
-            module_id: None,
-            modules: Some(entries),
-            runtime_type: None,
-            installed: None,
-            updated: None,
-            uninstalled: None,
-            linked: None,
-            unlinked: None,
+            modules: entries,
         },
         0,
     ))
@@ -431,17 +409,9 @@ fn run_module(
         execute_local_command_interactive(&command, Some(module_path), Some(&env_pairs));
 
     Ok((
-        ModuleOutput {
-            command: "module.run".to_string(),
+        ModuleOutput::Run {
+            module_id: module_id.to_string(),
             project_id: resolved_project_id,
-            module_id: Some(module_id.to_string()),
-            modules: None,
-            runtime_type: None,
-            installed: None,
-            updated: None,
-            uninstalled: None,
-            linked: None,
-            unlinked: None,
         },
         exit_code,
     ))
@@ -494,6 +464,7 @@ fn write_install_metadata(module_id: &str, url: &str) -> homeboy_core::Result<()
     let path = install_metadata_path(module_id)?;
     let content = serde_json::to_string_pretty(&ModuleInstallMetadata {
         source_url: url.to_string(),
+        linked: false,
     })
     .map_err(|err| {
         homeboy_core::Error::internal_json(
@@ -625,20 +596,10 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
     }
 
     Ok((
-        ModuleOutput {
-            command: "module.install".to_string(),
-            project_id: None,
-            module_id: Some(module_id.clone()),
-            modules: None,
-            runtime_type: None,
-            installed: Some(ModuleInstallOutput {
-                url: url.to_string(),
-                path: module_dir.to_string_lossy().to_string(),
-            }),
-            updated: None,
-            uninstalled: None,
-            linked: None,
-            unlinked: None,
+        ModuleOutput::Install {
+            module_id: module_id.clone(),
+            url: url.to_string(),
+            path: module_dir.to_string_lossy().to_string(),
         },
         0,
     ))
@@ -686,20 +647,10 @@ fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
     }
 
     Ok((
-        ModuleOutput {
-            command: "module.update".to_string(),
-            project_id: None,
-            module_id: Some(module_id.to_string()),
-            modules: None,
-            runtime_type: None,
-            installed: None,
-            updated: Some(ModuleUpdateOutput {
-                url: metadata.source_url,
-                path: module_dir.to_string_lossy().to_string(),
-            }),
-            uninstalled: None,
-            linked: None,
-            unlinked: None,
+        ModuleOutput::Update {
+            module_id: module_id.to_string(),
+            url: metadata.source_url,
+            path: module_dir.to_string_lossy().to_string(),
         },
         0,
     ))
@@ -723,19 +674,9 @@ fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
     })?;
 
     Ok((
-        ModuleOutput {
-            command: "module.uninstall".to_string(),
-            project_id: None,
-            module_id: Some(module_id.to_string()),
-            modules: None,
-            runtime_type: None,
-            installed: None,
-            updated: None,
-            uninstalled: Some(ModuleUninstallOutput {
-                path: module_dir.to_string_lossy().to_string(),
-            }),
-            linked: None,
-            unlinked: None,
+        ModuleOutput::Uninstall {
+            module_id: module_id.to_string(),
+            path: module_dir.to_string_lossy().to_string(),
         },
         0,
     ))
@@ -749,17 +690,8 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
         Some(r) => r,
         None => {
             return Ok((
-                ModuleOutput {
-                    command: "module.setup".to_string(),
-                    project_id: None,
-                    module_id: Some(module_id.to_string()),
-                    modules: None,
-                    runtime_type: None,
-                    installed: None,
-                    updated: None,
-                    uninstalled: None,
-                    linked: None,
-                    unlinked: None,
+                ModuleOutput::Setup {
+                    module_id: module_id.to_string(),
                 },
                 0,
             ));
@@ -769,19 +701,9 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
     let setup_command = match &runtime.setup_command {
         Some(cmd) => cmd,
         None => {
-            // No setup command defined - nothing to do
             return Ok((
-                ModuleOutput {
-                    command: "module.setup".to_string(),
-                    project_id: None,
-                    module_id: Some(module_id.to_string()),
-                    modules: None,
-                    runtime_type: None,
-                    installed: None,
-                    updated: None,
-                    uninstalled: None,
-                    linked: None,
-                    unlinked: None,
+                ModuleOutput::Setup {
+                    module_id: module_id.to_string(),
                 },
                 0,
             ));
@@ -793,7 +715,6 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
         .as_ref()
         .ok_or_else(|| homeboy_core::Error::other("module_path not set".to_string()))?;
 
-    // Build template variables
     let entrypoint = runtime.entrypoint.clone().unwrap_or_default();
     let vars: Vec<(&str, &str)> = vec![
         ("modulePath", module_path.as_str()),
@@ -812,17 +733,8 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
     }
 
     Ok((
-        ModuleOutput {
-            command: "module.setup".to_string(),
-            project_id: None,
-            module_id: Some(module_id.to_string()),
-            modules: None,
-            runtime_type: None,
-            installed: None,
-            updated: None,
-            uninstalled: None,
-            linked: None,
-            unlinked: None,
+        ModuleOutput::Setup {
+            module_id: module_id.to_string(),
         },
         0,
     ))
@@ -987,20 +899,10 @@ fn link_module(path: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
     ConfigManager::save_app_config(&app_config)?;
 
     Ok((
-        ModuleOutput {
-            command: "module.link".to_string(),
-            project_id: None,
-            module_id: Some(module_id),
-            modules: None,
-            runtime_type: None,
-            installed: None,
-            updated: None,
-            uninstalled: None,
-            linked: Some(ModuleLinkOutput {
-                source_path: source_path.to_string_lossy().to_string(),
-                symlink_path: module_dir.to_string_lossy().to_string(),
-            }),
-            unlinked: None,
+        ModuleOutput::Link {
+            module_id,
+            source_path: source_path.to_string_lossy().to_string(),
+            symlink_path: module_dir.to_string_lossy().to_string(),
         },
         0,
     ))
@@ -1036,19 +938,9 @@ fn unlink_module(module_id: &str) -> CmdResult<ModuleOutput> {
     ConfigManager::save_app_config(&app_config)?;
 
     Ok((
-        ModuleOutput {
-            command: "module.unlink".to_string(),
-            project_id: None,
-            module_id: Some(module_id.to_string()),
-            modules: None,
-            runtime_type: None,
-            installed: None,
-            updated: None,
-            uninstalled: None,
-            linked: None,
-            unlinked: Some(ModuleUnlinkOutput {
-                path: module_dir.to_string_lossy().to_string(),
-            }),
+        ModuleOutput::Unlink {
+            module_id: module_id.to_string(),
+            path: module_dir.to_string_lossy().to_string(),
         },
         0,
     ))

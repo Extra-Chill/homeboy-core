@@ -28,7 +28,6 @@ Set a known key.
 
 Examples:
 
-- `homeboy config set activeProjectId extrachill`
 - `homeboy config set defaultChangelogNextSectionLabel Unreleased`
 - `homeboy config set defaultChangelogNextSectionAliases "Unreleased,[Unreleased]"`
 

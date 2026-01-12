@@ -336,3 +336,21 @@ pub fn module_path(id: &str) -> PathBuf {
 pub fn available_module_ids() -> Vec<String> {
     load_all_modules().into_iter().map(|m| m.id).collect()
 }
+
+/// Environment variable names for module execution context.
+/// Modules receive these variables when executed via `homeboy module run`.
+pub mod exec_context {
+    /// Version of the exec context protocol. Modules can check this for compatibility.
+    pub const VERSION: &str = "HOMEBOY_EXEC_CONTEXT_VERSION";
+    /// ID of the module being executed.
+    pub const MODULE_ID: &str = "HOMEBOY_MODULE_ID";
+    /// JSON-serialized settings (merged from app, project, and component levels).
+    pub const SETTINGS_JSON: &str = "HOMEBOY_SETTINGS_JSON";
+    /// Project ID (only set when module requires project context).
+    pub const PROJECT_ID: &str = "HOMEBOY_PROJECT_ID";
+    /// Component ID (only set when module requires component context).
+    pub const COMPONENT_ID: &str = "HOMEBOY_COMPONENT_ID";
+
+    /// Current version of the exec context protocol.
+    pub const CURRENT_VERSION: &str = "1";
+}

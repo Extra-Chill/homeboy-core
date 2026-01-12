@@ -112,7 +112,7 @@ fn run_with_loader_and_executor(
 
     Ok((
         BuildOutput {
-            command: "build".to_string(),
+            command: "build.run".to_string(),
             component_id: args.component_id,
             build_command: build_cmd,
             stdout: output.stdout,

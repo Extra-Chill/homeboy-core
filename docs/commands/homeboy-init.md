@@ -82,4 +82,4 @@ Report what was initialized and suggest next steps:
 ### Suggested next steps
 
 - Project: `homeboy deploy <projectId> --dry-run --all`
-- Component: `homeboy version bump <componentId> patch --changelog-add "..."`
+- Component: `homeboy changelog add <componentId> "..."`, then `homeboy version bump <componentId> patch`

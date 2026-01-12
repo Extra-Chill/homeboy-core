@@ -139,10 +139,11 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 remote_version: remote_versions.get(&component.id).cloned(),
                 error: None,
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                remote_path: homeboy_core::base_path::join_remote_path(
                     Some(&base_path),
                     &component.remote_path,
-                )),
+                )
+                .ok(),
                 build_command: component.build_command.clone(),
                 build_exit_code: None,
                 deploy_exit_code: None,
@@ -188,10 +189,11 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 remote_version,
                 error: Some(error.clone()),
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                remote_path: homeboy_core::base_path::join_remote_path(
                     Some(&base_path),
                     &component.remote_path,
-                )),
+                )
+                .ok(),
                 build_command: component.build_command.clone(),
                 build_exit_code,
                 deploy_exit_code: None,
@@ -210,10 +212,11 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 remote_version,
                 error: Some(format!("Artifact not found: {}", component.build_artifact)),
                 artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
+                remote_path: homeboy_core::base_path::join_remote_path(
                     Some(&base_path),
                     &component.remote_path,
-                )),
+                )
+                .ok(),
                 build_command: component.build_command.clone(),
                 build_exit_code,
                 deploy_exit_code: None,
