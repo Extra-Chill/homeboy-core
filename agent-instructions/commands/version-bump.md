@@ -13,8 +13,8 @@ Use Homeboy to update the version and changelog together. Do not manually edit c
 
 1. `homeboy component show <componentId>`
 2. `homeboy version show <componentId>`
-3. Decide bump interval based on code-level changes and git logs since previous version bump: `patch|minor|major`
-4. Add changelog entries (preferred: JSON spec):
+3. Decide bump interval based on code-level local changes, git logs, git diffs, and git status, since previous version bump: `patch|minor|major`
+4. Add changelog entries:
 
 ```sh
 homeboy changelog add --json '{"componentId":"<componentId>","messages":["<change 1>","<change 2>"]}'
