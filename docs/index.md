@@ -19,19 +19,19 @@ Configuration and state live under the OS config directory (`dirs::config_dir()/
 - Linux: `$XDG_CONFIG_HOME/homeboy/` (fallback: `~/.config/homeboy/`)
 - Windows: `%APPDATA%\\homeboy\\`
 
-Common directories:
+Common paths:
 
-- `config.json`
+- `homeboy.json`
 - `projects/`
 - `servers/`
 - `components/`
 - `modules/`
 - `keys/`
 - `backups/`
-- `project-types/`
+- `plugins/`
 
-Additional (not created by default):
+Additional:
 
-- `playwright-browsers/` (used when running Python Playwright modules; see `PLAYWRIGHT_BROWSERS_PATH`)
-- `docs/` (reserved for cached/generated documentation)
+- `playwright-browsers/` (used when running Playwright-backed modules; see `PLAYWRIGHT_BROWSERS_PATH`)
+- `docs/` (reserved for cached/generated docs)
 

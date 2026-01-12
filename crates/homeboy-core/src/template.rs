@@ -16,6 +16,8 @@ impl TemplateVars {
     pub const TABLE: &'static str = "table";
     pub const QUERY: &'static str = "query";
     pub const FORMAT: &'static str = "format";
+    pub const TARGET_DIR: &'static str = "targetDir";
+    pub const SCRIPT: &'static str = "script";
 }
 
 pub fn render(template: &str, variables: &[(&str, &str)]) -> String {

@@ -167,11 +167,11 @@ fn resolve_target_full_path(component_local_path: &str, version_file: &str) -> S
     }
 }
 
-fn resolve_target_pattern(target: &VersionTarget) -> String {
+fn resolve_target_pattern(target: &VersionTarget, plugins: &[String]) -> String {
     target
         .pattern
         .clone()
-        .unwrap_or_else(|| default_pattern_for_file(&target.file).to_string())
+        .unwrap_or_else(|| default_pattern_for_file(&target.file, plugins))
 }
 
 fn extract_versions_from_content(
@@ -278,11 +278,12 @@ fn write_updated_version(
     version_pattern: &str,
     old_version: &str,
     new_version: &str,
+    plugins: &[String],
 ) -> homeboy_core::Result<usize> {
     if Path::new(full_path)
         .extension()
         .is_some_and(|ext| ext == "json")
-        && version_pattern == default_pattern_for_file(full_path)
+        && version_pattern == default_pattern_for_file(full_path, plugins)
     {
         let mut json = read_json_file(full_path)?;
         let Some(current) = json.get("version").and_then(|v| v.as_str()) else {
@@ -334,7 +335,7 @@ pub fn show_version_output(component_id: &str) -> homeboy_core::Result<(VersionS
     }
 
     let primary = &targets[0];
-    let primary_pattern = resolve_target_pattern(primary);
+    let primary_pattern = resolve_target_pattern(primary, &component.plugins);
     let primary_full_path = resolve_target_full_path(&component.local_path, &primary.file);
 
     let content = fs::read_to_string(&primary_full_path).map_err(|err| {
@@ -412,7 +413,7 @@ fn bump(
     }
 
     let primary = &targets[0];
-    let primary_pattern = resolve_target_pattern(primary);
+    let primary_pattern = resolve_target_pattern(primary, &component.plugins);
     let primary_full_path = resolve_target_full_path(&component.local_path, &primary.file);
 
     let primary_content = fs::read_to_string(&primary_full_path).map_err(|err| {
@@ -479,7 +480,7 @@ fn bump(
     let mut outputs = Vec::new();
 
     for target in targets {
-        let version_pattern = resolve_target_pattern(&target);
+        let version_pattern = resolve_target_pattern(&target, &component.plugins);
         let full_path = resolve_target_full_path(&component.local_path, &target.file);
         let content = fs::read_to_string(&full_path).map_err(|err| {
             Error::internal_io(err.to_string(), Some("read version file".to_string()))
@@ -491,7 +492,13 @@ fn bump(
         let replaced_count = if dry_run {
             match_count
         } else {
-            write_updated_version(&full_path, &version_pattern, &old_version, &new_version)?
+            write_updated_version(
+                &full_path,
+                &version_pattern,
+                &old_version,
+                &new_version,
+                &component.plugins,
+            )?
         };
 
         if replaced_count != match_count {
@@ -854,9 +861,11 @@ mod tests {
         fs::write(&version_file, "version = \"0.1.0\"\n").expect("write version");
 
         let content = fs::read_to_string(&version_file).expect("read before");
-        let versions =
-            extract_versions_from_content(&content, default_pattern_for_file("Cargo.toml"))
-                .expect("extract");
+        let versions = extract_versions_from_content(
+            &content,
+            &default_pattern_for_file("Cargo.toml", &[]),
+        )
+        .expect("extract");
         let (old_version, match_count) =
             validate_single_version(versions, "Cargo.toml", "0.1.0").expect("validate");
 

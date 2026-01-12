@@ -1,11 +1,11 @@
+use crate::plugin::{load_plugin, PluginManifest};
+use crate::template::{render, TemplateVars};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuildCommandSource {
-    BuildSh,
-    Npm,
-    Composer,
+    Plugin,
 }
 
 pub struct BuildCommandCandidate {
@@ -17,22 +17,57 @@ fn file_exists(path: &Path) -> bool {
     std::fs::metadata(path).is_ok()
 }
 
-fn artifact_is_zip(artifact_path: &str) -> bool {
-    artifact_path.to_ascii_lowercase().ends_with(".zip")
-}
-
+/// Detect build command using plugin configuration.
 pub fn detect_build_command(
     local_path: &str,
     build_artifact: &str,
+    plugins: &[String],
 ) -> Option<BuildCommandCandidate> {
     let root = PathBuf::from(local_path);
 
-    if artifact_is_zip(build_artifact) {
-        let root_build = root.join("build.sh");
-        if file_exists(&root_build) {
+    // Check plugins for matching build config
+    for plugin_id in plugins {
+        if let Some(plugin) = load_plugin(plugin_id) {
+            if let Some(candidate) = detect_build_from_plugin(&root, build_artifact, &plugin) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn detect_build_from_plugin(
+    root: &Path,
+    build_artifact: &str,
+    plugin: &PluginManifest,
+) -> Option<BuildCommandCandidate> {
+    let build_config = plugin.build.as_ref()?;
+
+    // Check if artifact matches any configured extension
+    let artifact_lower = build_artifact.to_ascii_lowercase();
+    let matches_artifact = build_config
+        .artifact_extensions
+        .iter()
+        .any(|ext| artifact_lower.ends_with(&ext.to_ascii_lowercase()));
+
+    if !matches_artifact {
+        return None;
+    }
+
+    // Look for any of the configured script names
+    for script_name in &build_config.script_names {
+        let script_path = root.join(script_name);
+        if file_exists(&script_path) {
+            let command = build_config
+                .command_template
+                .as_ref()
+                .map(|tpl| render(tpl, &[(TemplateVars::SCRIPT, script_name)]))
+                .unwrap_or_else(|| format!("sh {}", script_name));
+
             return Some(BuildCommandCandidate {
-                source: BuildCommandSource::BuildSh,
-                command: "sh build.sh".to_string(),
+                source: BuildCommandSource::Plugin,
+                command,
             });
         }
     }
@@ -79,22 +114,17 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn detects_build_sh_for_zip_artifacts() {
+    fn no_detection_without_plugins() {
         let temp_dir = tempfile::tempdir().unwrap();
         std::fs::write(temp_dir.path().join("build.sh"), "#!/bin/sh\necho ok\n").unwrap();
 
-        let candidate =
-            detect_build_command(temp_dir.path().to_str().unwrap(), "dist/plugin.zip").unwrap();
-        assert_eq!(candidate.source, BuildCommandSource::BuildSh);
-        assert_eq!(candidate.command, "sh build.sh");
-    }
-
-    #[test]
-    fn does_not_detect_build_sh_for_non_zip_artifacts() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        std::fs::write(temp_dir.path().join("build.sh"), "#!/bin/sh\necho ok\n").unwrap();
-
-        assert!(detect_build_command(temp_dir.path().to_str().unwrap(), "dist/app.js").is_none());
+        // Without plugins, no build command is detected (plugin-driven detection)
+        let candidate = detect_build_command(
+            temp_dir.path().to_str().unwrap(),
+            "dist/plugin.zip",
+            &[],
+        );
+        assert!(candidate.is_none());
     }
 
     #[test]

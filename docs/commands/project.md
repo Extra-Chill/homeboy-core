@@ -34,8 +34,8 @@ Arguments:
 
 
 ```sh
-homeboy project create [--json <spec>] [--skip-existing] [name] [domain] [project_type] \
-  [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--activate]
+homeboy project create [--json <spec>] [--skip-existing] [name] [domain] \
+  [--plugin <pluginId>]... [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--activate]
 ```
 
 Options:
@@ -44,14 +44,14 @@ Options:
 - `--skip-existing`: skip items that already exist (JSON mode only)
 - `--server-id <serverId>`: optional server ID (CLI mode)
 - `--base-path <path>`: optional remote base path (CLI mode)
-- `--table-prefix <prefix>`: optional WordPress table prefix (CLI mode)
+- `--table-prefix <prefix>`: optional table prefix (only used by plugins/modules that care about table naming)
 - `--activate`: switch active project after create (CLI mode only)
 
 Arguments (CLI mode):
 
 - `name`: project name
 - `domain`: public site domain
-- `project_type`: project type (e.g. `wordpress`)
+- `--plugin <pluginId>`: enable a plugin for the project (repeatable). Example: `--plugin wordpress`
 
 JSON mode:
 
@@ -61,7 +61,7 @@ JSON mode:
 ```json
 {
   "op": "project.create",
-  "data": { "name": "...", "domain": "...", "projectType": "wordpress" }
+  "data": { "name": "...", "domain": "...", "plugins": ["wordpress"] }
 }
 ```
 
@@ -99,7 +99,7 @@ JSON mode:
 ### `set`
 
 ```sh
-homeboy project set <projectId> [--name <name>] [--domain <domain>] [--project-type <type>] [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--component-ids <ids>]
+homeboy project set <projectId> [--name <name>] [--domain <domain>] [--plugin <pluginId>]... [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--plugin-setting <pluginId.key=value>]... [--component-ids <ids>]
 ```
 
 Arguments:
@@ -110,10 +110,11 @@ Options:
 
 - `--name <name>`: project name
 - `--domain <domain>`: public site domain
-- `--project-type <type>`: project type (e.g. `wordpress`)
+- `--plugin <pluginId>`: replace the `plugins` list (repeatable)
 - `--server-id <serverId>`: server ID
 - `--base-path <path>`: remote base path
-- `--table-prefix <prefix>`: WordPress table prefix
+- `--table-prefix <prefix>`: table prefix
+- `--plugin-setting <pluginId.key=value>`: set a plugin setting (repeatable)
 - `--component-ids <ids>`: replace component IDs (comma-separated)
 
 JSON output:
@@ -175,7 +176,7 @@ JSON output (`list`):
       "id": "<projectId>",
       "name": "<name>",
       "domain": "<domain>",
-      "projectType": "<type>",
+      "plugins": ["<pluginId>"] ,
       "active": true
     }
   ]

@@ -25,42 +25,23 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 - `--list`: return available embedded keys and exit (JSON output).
 
-## JSON output (success)
+## Output
 
-This section applies only when `--list` is not used.
+### Default (render topic)
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+When `--list` is **not** used, `homeboy docs` writes the embedded markdown topic **as-is** to stdout (no JSON envelope).
 
-```json
-{
-  "mode": "content",
-  "topic": "<original topic as a single space-joined string>",
-  "topicLabel": "<resolver topic label>",
-  "resolvedKey": "<resolved embedded key (e.g. commands/deploy)>",
-  "segments": ["<normalized>", "<segments>"],
-  "slug": "<last segment>",
-  "content": "<markdown content>",
-  "availableTopics": ["<embedded key>", "<embedded key>"]
-}
-```
+### `--list`
 
-### Fields
-
-- `mode`: response mode (`content` or `list`).
-- `topic`: raw user input joined by spaces.
-- `topicLabel`: label returned by the resolver.
-- `resolvedKey`: resolved embedded key.
-- `segments`: normalized key segments (lowercased; spaces/tabs become `-`).
-- `slug`: last segment of `segments` (defaults to `index` when empty).
-- `content`: embedded markdown content.
-- `availableTopics`: list of available embedded keys (sorted).
-
-## JSON output (list topics)
+When `--list` is used, output is JSON:
 
 ```json
 {
-  "mode": "list",
-  "availableTopics": ["<embedded key>", "<embedded key>"]
+  "success": true,
+  "data": {
+    "available_topics": ["index", "commands/deploy"],
+    "mode": "list"
+  }
 }
 ```
 

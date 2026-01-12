@@ -25,6 +25,12 @@ pub struct PluginManifest {
     pub cli: Option<CliConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovery: Option<DiscoveryConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deploy: Vec<DeployVerification>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub version_patterns: Vec<VersionPatternConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build: Option<BuildConfig>,
     #[serde(default)]
     pub commands: Vec<String>,
     #[serde(skip)]
@@ -134,4 +140,32 @@ impl DiscoveryConfig {
             _ => path.to_string(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeployVerification {
+    pub path_pattern: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionPatternConfig {
+    pub extension: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_extensions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub script_names: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_template: Option<String>,
 }

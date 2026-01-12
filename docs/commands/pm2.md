@@ -31,4 +31,4 @@ Exit code matches the executed PM2 command.
 
 ## Related
 
-- [wp](wp.md)
+- [plugin](plugin.md)

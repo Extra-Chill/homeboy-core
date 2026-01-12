@@ -1,3 +1,4 @@
+use crate::plugin::{load_plugin, PluginManifest};
 use regex::Regex;
 
 /// Parse version from content using regex pattern.
@@ -42,17 +43,39 @@ pub fn replace_versions(
     Some((replaced, count))
 }
 
-/// Get default version pattern based on file extension.
-pub fn default_pattern_for_file(filename: &str) -> &'static str {
+/// Get default version pattern based on file extension (built-in patterns only).
+fn builtin_pattern_for_file(filename: &str) -> &'static str {
     if filename.ends_with(".toml") {
         r#"version\s*=\s*"(\d+\.\d+\.\d+)""#
     } else if filename.ends_with(".json") {
         r#""version"\s*:\s*"(\d+\.\d+\.\d+)""#
-    } else if filename.ends_with(".php") {
-        r"Version:\s*(\d+\.\d+\.\d+)"
     } else {
         r"(\d+\.\d+\.\d+)"
     }
+}
+
+/// Get default version pattern, checking plugins first for platform-specific patterns.
+pub fn default_pattern_for_file(filename: &str, plugins: &[String]) -> String {
+    // Check plugins for matching extension pattern
+    for plugin_id in plugins {
+        if let Some(plugin) = load_plugin(plugin_id) {
+            if let Some(pattern) = find_version_pattern_in_plugin(&plugin, filename) {
+                return pattern;
+            }
+        }
+    }
+
+    // Fall back to built-in patterns
+    builtin_pattern_for_file(filename).to_string()
+}
+
+fn find_version_pattern_in_plugin(plugin: &PluginManifest, filename: &str) -> Option<String> {
+    for vp in &plugin.version_patterns {
+        if filename.ends_with(&vp.extension) {
+            return Some(vp.pattern.clone());
+        }
+    }
+    None
 }
 
 /// Increment semver version.

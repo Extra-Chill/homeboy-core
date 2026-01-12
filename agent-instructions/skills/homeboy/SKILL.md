@@ -1,12 +1,12 @@
 ---
 name: homeboy
-description: Use this skill when deploying code to production, executing WP-CLI or PM2 commands on remote servers, querying production databases, managing project/server configurations, performing component-scoped git operations, or when the user mentions Homeboy, deployment, or remote server operations.
-version: 0.1.10
+description: Use this skill when deploying code to production, executing plugin-provided CLI tools or remote process managers over SSH, querying production databases, managing project/server configurations, performing component-scoped git operations, or when the user mentions Homeboy, deployment, or remote server operations.
+version: 0.2.0
 ---
 
 # Homeboy CLI
 
-CLI for project development and deployment. Provides terminal access to project management, remote CLI operations (WP-CLI, PM2), database queries, deployments, and component-scoped git/build operations.
+CLI for project development and deployment. Provides terminal access to project management, remote CLI tool passthrough (via plugins), database queries, deployments, and component-scoped git/build operations.
 
 **CLI documentation**: run `homeboy docs` (and `homeboy docs <topic>`).
 
@@ -20,8 +20,8 @@ CLI for project development and deployment. Provides terminal access to project 
 | `git` | Component-scoped git operations (status, commit, push, pull, tag) |
 | `version` | Component-scoped version management (show, bump) |
 | `build` | Component-scoped builds |
-| `wp` | Execute WP-CLI commands on WordPress projects |
-| `pm2` | Execute PM2 commands on Node.js projects |
+| `plugin` | Inspect available plugins and their commands |
+| `<plugin cmd>` | Plugin-provided CLI tool passthrough (for example: `wp`, `pm2`) |
 | `db` | Database operations (tables, describe, query, delete-row, drop-table, tunnel) |
 | `deploy` | Deploy components to production |
 | `ssh` | Execute SSH commands or open interactive shell |
@@ -54,18 +54,25 @@ homeboy git push <component>             # Push to remote
 homeboy build <component>                # Run build command
 ```
 
-### Remote WordPress Operations
+### Remote CLI Tool Operations (Plugin-Provided)
+List available tools:
+
+```bash
+homeboy plugin list
+```
+
+Run a plugin-provided CLI tool command:
+
 ```bash
 homeboy wp <project> plugin list
-homeboy wp <project> cache flush
-homeboy wp <project> core version
+homeboy pm2 <project> status
 ```
 
 ### Database Queries (Read-Only)
 ```bash
 homeboy db tables <project>
 homeboy db describe <project> <table>
-homeboy db query <project> "SELECT * FROM wp_options LIMIT 10"
+homeboy db query <project> "SELECT * FROM some_table LIMIT 10"
 ```
 
 ### Deployment

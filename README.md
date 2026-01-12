@@ -2,9 +2,9 @@
 
 Homeboy is a config-driven automation engine for repetitive discovery and AI coding workflows.
 
-It standardizes common operations (project/component discovery, remote execution, deployments) and produces reliable machine-readable output via a stable JSON envelope.
+It standardizes common operations (project/component discovery, remote execution, deployments) and typically produces machine-readable output via a stable JSON envelope.
 
-Note: This is experimental and still early in development. Breaking changes may be frequent before 0.3.0
+**Note:** This is experimental and still early in development. Breaking changes may be frequent before 0.4.0.
 
 ## Installation
 
@@ -49,15 +49,16 @@ A few common entrypoints:
 
 ```bash
 homeboy project list
-homeboy project create "My Site" example.com wordpress --activate
+homeboy project create "My Project" example.com --plugin wordpress --activate
 homeboy project set <projectId> --domain example.com --server-id <serverId>
 homeboy project repair <projectId>
 homeboy project switch <projectId>
 homeboy wp <projectId> core version
 homeboy deploy <projectId> --dry-run --all
 homeboy ssh <projectId>
+homeboy plugin list
 homeboy docs --list
-homeboy docs deploy
+homeboy docs commands/deploy
 ```
 
 ## Configuration
@@ -70,14 +71,14 @@ Configuration and state live under the OS config directory (from `dirs::config_d
 
 Common paths:
 
-- `config.json`
+- `homeboy.json`
 - `projects/`
 - `servers/`
 - `components/`
 - `modules/`
 - `keys/`
 - `backups/`
-- `project-types/`
+- `plugins/`
 
 See [CLI documentation](docs/index.md) for details.
 

@@ -19,6 +19,7 @@ mod tests {
             local_path: "component".to_string(),
             remote_path: "/var/www/component".to_string(),
             build_artifact: "dist/plugin.zip".to_string(),
+            plugins: vec![],
             modules: None,
             version_targets: None,
             changelog_targets: None,
@@ -92,8 +93,12 @@ fn run_with_loader_and_executor(
     let component = component_loader(&args.component_id)?;
 
     let build_cmd = component.build_command.clone().or_else(|| {
-        homeboy_core::build::detect_build_command(&component.local_path, &component.build_artifact)
-            .map(|candidate| candidate.command)
+        homeboy_core::build::detect_build_command(
+            &component.local_path,
+            &component.build_artifact,
+            &component.plugins,
+        )
+        .map(|candidate| candidate.command)
     });
 
     let build_cmd = build_cmd.ok_or_else(|| {

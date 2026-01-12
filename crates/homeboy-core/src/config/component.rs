@@ -26,6 +26,9 @@ pub struct ComponentConfiguration {
     pub remote_path: String,
     pub build_artifact: String,
 
+    #[serde(default)]
+    pub plugins: Vec<String>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modules: Option<std::collections::HashMap<String, super::ScopedModuleConfig>>,
 
@@ -95,6 +98,7 @@ impl ComponentConfiguration {
             local_path,
             remote_path,
             build_artifact,
+            plugins: Vec::new(),
             modules: None,
             version_targets: None,
             changelog_targets: None,

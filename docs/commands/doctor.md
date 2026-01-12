@@ -13,7 +13,7 @@ Scan Homeboy configuration files and report issues (errors, warnings, info), or 
 
 `doctor` also validates module settings against each module's `module.json` manifest:
 
-- **App scope** (`config.json`): validates `installedModules.<moduleId>.settings`
+- **App scope** (`homeboy.json`): validates `installedModules.<moduleId>.settings`
 - **Project scope** (`projects/<projectId>.json`): validates `modules.<moduleId>.settings`
 - **Component scope** (`components/<componentId>.json`): validates `modules.<moduleId>.settings`
 

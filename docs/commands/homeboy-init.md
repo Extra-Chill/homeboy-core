@@ -34,16 +34,16 @@ For unmanaged repos, determine what to create:
 
 Based on the current repo structure:
 
-- **Project**: repo is a deployable environment (WordPress site, Node.js app) with associated components.
+- **Project**: repo is a deployable environment (for example: a web app) with associated components.
 - **Component**: repo (or subdirectory) is a build/version/deploy unit within a project.
 
 If unclear which scope applies, ask the user.
 
 ### Creating a new project
 
-1. Ask for: `name`, `domain`, `project_type` (e.g. `wordpress`), optional `serverId`
+1. Ask for: `name`, `domain`, plugin IDs to enable (e.g. `wordpress`), optional `serverId`
 2. Create (activate if desired):
-   - `homeboy project create "<name>" <domain> <project_type> --activate`
+   - `homeboy project create "<name>" <domain> --plugin <pluginId> --activate`
 3. Verify:
    - `homeboy project show <projectId>`
 

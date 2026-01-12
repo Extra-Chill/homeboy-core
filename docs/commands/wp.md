@@ -10,7 +10,7 @@ homeboy wp <projectId> [--local] <args...>
 
 - `projectId`: project ID
 - `--local`: execute locally instead of on the remote server
-- `<args...>`: WP-CLI command and arguments (trailing var args; hyphen values allowed)
+- `<args...>`: CLI tool arguments (trailing var args; hyphen values allowed)
 
 ## JSON output
 
@@ -36,9 +36,9 @@ Notes:
 
 ## Exit code
 
-Exit code matches the executed WP-CLI command.
+Exit code matches the executed CLI tool command.
 
 ## Related
 
-- [pm2](pm2.md)
+- [plugin](plugin.md)
 - [db](db.md)

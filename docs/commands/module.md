@@ -59,7 +59,7 @@ Uninstalls a module by deleting its directory. `--force` is required (no interac
 
 Homeboy builds an **effective settings** map for each module by merging settings across scopes, in order (later scopes override earlier ones):
 
-1. App (`config.json`): `installedModules.<moduleId>.settings`
+1. App (`homeboy.json`): `installedModules.<moduleId>.settings`
 2. Project (`projects/<projectId>.json`): `modules.<moduleId>.settings`
 3. Component (`components/<componentId>.json`): `modules.<moduleId>.settings`
 
@@ -96,7 +96,7 @@ Module entry (`modules[]`):
 - `runtime` (runtime type as lowercase string)
 - `compatible` (with optional `--project`)
 - `ready` (runtime readiness)
-- `configured` (whether the module is present in `config.json` under `installedModules`)
+- `configured` (whether the module is present in `homeboy.json` under `installedModules`)
 
 ## Exit code
 
