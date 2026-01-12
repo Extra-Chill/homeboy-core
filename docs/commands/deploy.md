@@ -3,17 +3,22 @@
 ## Synopsis
 
 ```sh
-homeboy deploy <projectId> [<componentIds...>] [--all] [--outdated] [--dry-run]
-# If no component IDs are provided, you must use --all or --outdated.
+homeboy deploy [OPTIONS] <PROJECT_ID> [COMPONENT_IDS]...
 ```
 
 ## Arguments and flags
 
-- `projectId`: project ID
-- `<componentIds...>` (optional): component IDs to deploy (trailing var args)
+Arguments:
+
+- `<PROJECT_ID>`: project ID
+- `[COMPONENT_IDS]...` (optional): component IDs to deploy
+
+Options:
+
 - `--all`: deploy all configured components
-- `--outdated`: deploy only outdated components (based on first configured version target)
-- `--dry-run`: compute what would be deployed without executing
+- `--outdated`: deploy only outdated components
+- `--build`: build components before deploying
+- `--dry-run`: show what would be deployed without executing
 
 If no component IDs are provided and neither `--all` nor `--outdated` is set, Homeboy returns an error.
 

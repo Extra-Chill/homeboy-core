@@ -3,17 +3,16 @@
 ## Synopsis
 
 ```sh
-homeboy docs [--list] [<topic>...]
+homeboy docs [OPTIONS] [TOPIC]...
 ```
 
 ## Description
 
-By default, this command prints raw markdown to stdout (no JSON envelope).
+When `--list` is not used, this command prints the embedded markdown topic to stdout (no JSON envelope).
 
-Use `--list` to return a JSON list of available topics (wrapped in the global JSON envelope).
+When `--list` is used, this command returns a JSON list of available topics (wrapped in the global JSON envelope).
 
 - Topic arguments are treated as a free-form trailing list.
-- If the topic contains a trailing `--format <value>`, Homeboy strips those two arguments before resolving the topic (compatibility behavior).
 - The resolved key must exist in embedded docs; otherwise the command errors.
 
 Topic resolution is documented in: [Embedded docs topic resolution](../embedded-docs/embedded-docs-topic-resolution.md).
@@ -24,9 +23,7 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 ## Options
 
-- `--list`: return available embedded keys and exit (JSON output).
-
-Note: `--list` is only supported in JSON mode. In markdown mode, `homeboy docs --list` returns an error.
+- `--list`: list available topics and exit
 
 ## Output
 

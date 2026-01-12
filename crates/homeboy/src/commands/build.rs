@@ -26,7 +26,6 @@ mod tests {
             changelog_next_section_label: None,
             changelog_next_section_aliases: None,
             build_command: Some("echo hello".to_string()),
-            is_network: None,
         })
     }
 

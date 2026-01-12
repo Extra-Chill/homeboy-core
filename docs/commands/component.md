@@ -1,41 +1,42 @@
 # `homeboy component`
 
+Manage standalone component configurations.
+
 ## Synopsis
 
 ```sh
-homeboy component <COMMAND>
+homeboy component [OPTIONS] <COMMAND>
 ```
+
+Global option:
+
+- `--dry-run`: show what would happen without writing
 
 ## Subcommands
 
-- `create <name> --local-path <path> --remote-path <path> --build-artifact <path> [--version-target <file|file::pattern>]... [--build-command <cmd>] [--is-network]`
-- `import <json> [--skip-existing]` (legacy bulk import; newer configs use `create --json`)
-- `show <componentId>`
-- `set <componentId> [--name <name>] [--local-path <path>] [--remote-path <path>] [--build-artifact <path>] [--version-target <file|file::pattern>]... [--build-command <cmd>] [--is-network] [--not-network]`
-- `delete <componentId> --force`
-- `list`
+- `create`: Create a new component configuration
+  - Usage: `homeboy component create [OPTIONS] [NAME]`
+  - Options: `--json <JSON>`, `--skip-existing`, `--local-path <LOCAL_PATH>`, `--remote-path <REMOTE_PATH>`, `--build-artifact <BUILD_ARTIFACT>`, `--version-target <TARGET>` (repeatable), `--build-command <BUILD_COMMAND>`
+- `show`: Display component configuration
+  - Usage: `homeboy component show [OPTIONS] <ID>`
+- `set`: Update component configuration fields
+  - Usage: `homeboy component set [OPTIONS] <ID>`
+  - Options: `--name <NAME>`, `--local-path <LOCAL_PATH>`, `--remote-path <REMOTE_PATH>`, `--build-artifact <BUILD_ARTIFACT>`, `--version-target <TARGET>` (repeatable, replaces list), `--build-command <BUILD_COMMAND>`
+- `delete`: Delete a component configuration
+  - Usage: `homeboy component delete [OPTIONS] <ID>`
+  - Options: `--force` (skip confirmation)
+- `list`: List all available components
+  - Usage: `homeboy component list [OPTIONS]`
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy component` returns a `ComponentOutput` object as the `data` payload.
+All `homeboy component` subcommands return JSON wrapped in the global envelope described in the [JSON output contract](../json-output/json-output-contract.md).
 
-`ComponentOutput`:
-
-- `action`: `create` | `import` | `show` | `set` | `delete` | `list`
-- `componentId` (present for single-component operations)
-- `component`: present for `create`, `show`, `set`
-- `components`: present for `list`
-- `updatedFields`: list of field names updated by `set`
-- `created`, `skipped`, `errors`: status lists (for `import`)
-- `success` (boolean): overall status flag
-
-## Exit code
-
-- `import` returns exit code `1` if any errors occur while importing.
-- Other subcommands return `0` on success.
+> Note: `homeboy component` does not include an `import` subcommand.
 
 ## Related
 
-- [deploy](deploy.md)
 - [build](build.md)
-- [version](version.md)
+- [deploy](deploy.md)
+- [project](project.md)
+- [JSON output contract](../json-output/json-output-contract.md)

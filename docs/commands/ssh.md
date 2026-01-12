@@ -3,13 +3,11 @@
 ## Synopsis
 
 ```sh
-# non-interactive discovery (JSON output):
+# Non-interactive discovery (JSON output):
 homeboy ssh list
 
-# connect (interactive when <command> is omitted):
-homeboy ssh <id> [command]
-homeboy ssh --project <projectId> [command]
-homeboy ssh --server <serverId> [command]
+# Connect (interactive when COMMAND is omitted):
+homeboy ssh [OPTIONS] [ID] [COMMAND]
 ```
 
 ## Subcommands
@@ -24,12 +22,12 @@ homeboy ssh list
 
 ## Arguments and flags
 
-- `<id>`: a project ID or server ID (the CLI resolves which one you mean). Required unless `--project` or `--server` is used.
-- `--project <projectId>`: force project resolution
-- `--server <serverId>`: force server resolution
-- `[command]` (optional): single command string token to execute. Omit for an interactive session.
+- `[ID]`: project ID or server ID (project wins when both exist). Optional when using `--project` or `--server`.
+- `--project <PROJECT>`: force project resolution
+- `--server <SERVER>`: force server resolution
+- `[COMMAND]` (optional): command to execute (omit for interactive shell)
 
-Note: `command` is a single positional argument (not `command...`). If you need to run complex commands, wrap them in a shell (for example: `homeboy ssh <id> "sh"`).
+Note: clap shows `Usage: homeboy ssh [OPTIONS] [ID] [COMMAND] [COMMAND]`, but the helper text describes a single `[COMMAND]` argument.
 
 ## JSON output
 

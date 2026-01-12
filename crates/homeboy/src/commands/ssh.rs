@@ -205,7 +205,7 @@ mod tests {
             config: ProjectConfiguration {
                 name: String::new(),
                 domain: String::new(),
-                modules: vec!["wordpress".to_string()],
+                modules: vec![],
                 scoped_modules: None,
                 server_id: server_id.map(|s| s.to_string()),
                 base_path: None,
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn resolves_server_when_project_missing() {
         let args = SshArgs {
-            id: Some("cloudways".to_string()),
+            id: Some("prod-server".to_string()),
             project: None,
             server: None,
             command: None,
@@ -279,7 +279,7 @@ mod tests {
             args,
             |_id| Err(homeboy_core::Error::project_not_found("missing")),
             |id| match id {
-                "cloudways" => Ok(server(id)),
+                "prod-server" => Ok(server(id)),
                 _ => Err(homeboy_core::Error::server_not_found("missing")),
             },
             noop_executor,
@@ -293,7 +293,7 @@ mod tests {
 
         assert_eq!(data.resolved_type, "server");
         assert!(data.project_id.is_none());
-        assert_eq!(data.server_id, "cloudways");
+        assert_eq!(data.server_id, "prod-server");
     }
 
     #[test]

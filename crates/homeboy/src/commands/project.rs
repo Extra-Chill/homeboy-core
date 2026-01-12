@@ -781,7 +781,7 @@ mod tests {
         homeboy_core::config::ProjectConfiguration {
             name: name.to_string(),
             domain: "example.com".to_string(),
-            modules: vec!["wordpress".to_string()],
+            modules: vec![],
             scoped_modules: None,
             server_id: None,
             base_path: None,

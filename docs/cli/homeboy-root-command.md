@@ -22,7 +22,7 @@ Homeboy also defines:
 - `--dry-run`: global dry-run mode.
   - Commands that support dry-run avoid writing local files and avoid remote side effects where applicable.
 
-Note: some subcommands also define their own `--dry-run` flag (for example `deploy`, and `doctor cleanup`). This is separate from the global flag.
+Note: `--dry-run` is a global option and also appears on many subcommands in help output.
 
 ## Subcommands
 

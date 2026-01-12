@@ -1,6 +1,10 @@
+use crate::build::detect_zip_single_root_dir;
+use crate::module::DeployVerification;
 use crate::shell;
 use crate::ssh::SshClient;
+use crate::template::{render_map, TemplateVars};
 use crate::Result;
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -34,11 +38,13 @@ pub fn deploy_artifact(
     ssh_client: &SshClient,
     local_path: &Path,
     remote_path: &str,
+    base_path: &str,
+    verification: Option<&DeployVerification>,
 ) -> Result<DeployResult> {
     if local_path.is_dir() {
         deploy_directory(ssh_client, local_path, remote_path)
     } else if local_path.extension().is_some_and(|e| e == "zip") {
-        deploy_zip(ssh_client, local_path, remote_path)
+        deploy_zip(ssh_client, local_path, remote_path, base_path, verification)
     } else if is_tarball(local_path, &[".tar.gz", ".tgz"]) {
         deploy_tarball(ssh_client, local_path, remote_path, "xzf")
     } else if is_tarball(local_path, &[".tar.bz2", ".tbz2"]) {
@@ -61,7 +67,6 @@ pub fn deploy_directory(
     local_path: &Path,
     remote_path: &str,
 ) -> Result<DeployResult> {
-    // Ensure parent directory exists on remote
     let parent = Path::new(remote_path)
         .parent()
         .and_then(|p| p.to_str())
@@ -76,15 +81,16 @@ pub fn deploy_directory(
         ));
     }
 
-    // Use scp -r for recursive directory copy
     scp_recursive(ssh_client, local_path, remote_path)
 }
 
-/// Deploy a ZIP archive (upload, extract, cleanup temp file)
+/// Deploy a ZIP archive with optional verification
 pub fn deploy_zip(
     ssh_client: &SshClient,
     local_path: &Path,
     remote_path: &str,
+    base_path: &str,
+    verification: Option<&DeployVerification>,
 ) -> Result<DeployResult> {
     let zip_filename = local_path
         .file_name()
@@ -92,8 +98,39 @@ pub fn deploy_zip(
         .map(|name| format!(".homeboy-{}", name))
         .unwrap_or_else(|| ".homeboy-archive.zip".to_string());
 
-    // Ensure target directory exists
-    let mkdir_cmd = format!("mkdir -p {}", shell::quote_path(remote_path));
+    // Detect if ZIP has a single root directory
+    let zip_root_dir = detect_zip_single_root_dir(local_path).ok().flatten();
+
+    let install_basename = Path::new(remote_path)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default();
+
+    // Smart extraction: if ZIP root matches install basename, unzip to parent
+    let (unzip_target_dir, final_install_dir) = if zip_root_dir
+        .as_deref()
+        .is_some_and(|root| root == install_basename)
+    {
+        let parent = Path::new(remote_path)
+            .parent()
+            .and_then(|v| v.to_str())
+            .unwrap_or(remote_path)
+            .to_string();
+        (parent, remote_path.to_string())
+    } else {
+        (remote_path.to_string(), remote_path.to_string())
+    };
+
+    let upload_dir = if unzip_target_dir != final_install_dir {
+        &unzip_target_dir
+    } else {
+        remote_path
+    };
+
+    let upload_path = format!("{}/{}", upload_dir, zip_filename);
+
+    // Create target directory
+    let mkdir_cmd = format!("mkdir -p {}", shell::quote_path(&unzip_target_dir));
     let mkdir_output = ssh_client.execute(&mkdir_cmd);
     if !mkdir_output.success {
         return Ok(DeployResult::failure(
@@ -102,27 +139,76 @@ pub fn deploy_zip(
         ));
     }
 
-    // Upload zip to temp location
-    let upload_path = format!("{}/{}", remote_path, zip_filename);
+    // Upload ZIP to temp location
     let upload_result = scp_file(ssh_client, local_path, &upload_path)?;
     if !upload_result.success {
         return Ok(upload_result);
     }
 
-    // Extract and cleanup
+    // Calculate cleanup target for verification
+    let cleanup_target_dir = if let Some(ref root) = zip_root_dir {
+        if unzip_target_dir != final_install_dir {
+            format!("{}/{}", unzip_target_dir, root)
+        } else {
+            final_install_dir.clone()
+        }
+    } else {
+        final_install_dir.clone()
+    };
+
+    // With verification: cleanup old files before extraction
+    if verification.is_some()
+        && cleanup_target_dir.starts_with(base_path)
+        && cleanup_target_dir != base_path
+    {
+        let cleanup_cmd = format!(
+            "rm -rf {} && mkdir -p {}",
+            shell::quote_path(&cleanup_target_dir),
+            shell::quote_path(&cleanup_target_dir)
+        );
+        let cleanup_output = ssh_client.execute(&cleanup_cmd);
+        if !cleanup_output.success {
+            return Ok(DeployResult::failure(
+                cleanup_output.exit_code,
+                format!("Failed to cleanup before extraction: {}", cleanup_output.stderr),
+            ));
+        }
+    }
+
+    // Extract and remove temp ZIP
     let extract_cmd = format!(
         "cd {} && unzip -o {} && rm {}",
-        shell::quote_path(remote_path),
+        shell::quote_path(&unzip_target_dir),
         shell::quote_path(&zip_filename),
         shell::quote_path(&zip_filename)
     );
-
     let extract_output = ssh_client.execute(&extract_cmd);
     if !extract_output.success {
         return Ok(DeployResult::failure(
             extract_output.exit_code,
             format!("Failed to extract ZIP: {}", extract_output.stderr),
         ));
+    }
+
+    // Run verification if configured
+    if let Some(v) = verification {
+        if let Some(ref verify_cmd_template) = v.verify_command {
+            let mut vars = HashMap::new();
+            vars.insert(TemplateVars::TARGET_DIR.to_string(), cleanup_target_dir.clone());
+            let verify_cmd = render_map(verify_cmd_template, &vars);
+
+            let verify_output = ssh_client.execute(&verify_cmd);
+            if !verify_output.success || verify_output.stdout.trim().is_empty() {
+                let error_msg = v
+                    .verify_error_message
+                    .as_ref()
+                    .map(|msg| render_map(msg, &vars))
+                    .unwrap_or_else(|| {
+                        format!("Deploy verification failed for {}", cleanup_target_dir)
+                    });
+                return Ok(DeployResult::failure(1, error_msg));
+            }
+        }
     }
 
     Ok(DeployResult::success(0))
@@ -141,7 +227,6 @@ pub fn deploy_tarball(
         .map(|name| format!(".homeboy-{}", name))
         .unwrap_or_else(|| ".homeboy-archive.tar.gz".to_string());
 
-    // Ensure target directory exists
     let mkdir_cmd = format!("mkdir -p {}", shell::quote_path(remote_path));
     let mkdir_output = ssh_client.execute(&mkdir_cmd);
     if !mkdir_output.success {
@@ -151,14 +236,12 @@ pub fn deploy_tarball(
         ));
     }
 
-    // Upload tarball to temp location
     let upload_path = format!("{}/{}", remote_path, tarball_filename);
     let upload_result = scp_file(ssh_client, local_path, &upload_path)?;
     if !upload_result.success {
         return Ok(upload_result);
     }
 
-    // Extract and cleanup
     let extract_cmd = format!(
         "cd {} && tar {} {} && rm {}",
         shell::quote_path(remote_path),
@@ -184,7 +267,6 @@ pub fn deploy_file(
     local_path: &Path,
     remote_path: &str,
 ) -> Result<DeployResult> {
-    // Ensure parent directory exists on remote
     let parent = Path::new(remote_path)
         .parent()
         .and_then(|p| p.to_str())
@@ -202,7 +284,6 @@ pub fn deploy_file(
     scp_file(ssh_client, local_path, remote_path)
 }
 
-/// SCP a single file to remote path
 fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Result<DeployResult> {
     let mut scp_args: Vec<String> = vec![];
 
@@ -236,7 +317,6 @@ fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Res
     }
 }
 
-/// SCP a directory recursively to remote path
 fn scp_recursive(
     ssh_client: &SshClient,
     local_path: &Path,

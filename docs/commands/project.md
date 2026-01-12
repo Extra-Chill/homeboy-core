@@ -3,7 +3,7 @@
 ## Synopsis
 
 ```sh
-homeboy project <COMMAND>
+homeboy project [OPTIONS] <COMMAND>
 ```
 
 This command accepts the global flag `--dry-run` (see [Root command](../cli/homeboy-root-command.md)).
@@ -30,8 +30,7 @@ Arguments:
 
 
 ```sh
-homeboy project create [--json <spec>] [--skip-existing] [name] [domain] \
-  [--module <moduleId>]... [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>]
+homeboy project create [OPTIONS] [NAME] [DOMAIN]
 ```
 
 Options:

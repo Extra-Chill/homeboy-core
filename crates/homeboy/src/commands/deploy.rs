@@ -3,25 +3,12 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
-
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-#[cfg(test)]
-static TEST_SCP_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-fn reset_test_scp_call_count() {
-    TEST_SCP_CALL_COUNT.store(0, Ordering::Relaxed);
-}
 
 use homeboy_core::config::{ConfigManager, ServerConfig};
 use homeboy_core::context::resolve_project_ssh_with_base_path;
+use homeboy_core::deploy::{deploy_artifact, DeployResult};
 use homeboy_core::module::{load_module, DeployVerification};
-use homeboy_core::shell;
 use homeboy_core::ssh::{execute_local_command_in_dir, CommandOutput, SshClient};
-use homeboy_core::template::{render_map, TemplateVars};
 use homeboy_core::version::{default_pattern_for_file, parse_version};
 
 use super::CmdResult;
@@ -42,10 +29,6 @@ pub struct DeployArgs {
     #[arg(long)]
     pub outdated: bool,
 
-    /// Build components before deploying
-    #[arg(long)]
-    pub build: bool,
-
     /// Show what would be deployed without executing
     #[arg(long)]
     pub dry_run: bool,
@@ -64,7 +47,7 @@ pub struct DeployComponentResult {
     pub remote_path: Option<String>,
     pub build_command: Option<String>,
     pub build_exit_code: Option<i32>,
-    pub scp_exit_code: Option<i32>,
+    pub deploy_exit_code: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -81,7 +64,6 @@ pub struct DeployOutput {
     pub project_id: String,
     pub all: bool,
     pub outdated: bool,
-    pub build: bool,
     pub dry_run: bool,
     pub components: Vec<DeployComponentResult>,
     pub summary: DeploySummary,
@@ -105,7 +87,6 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
 
     let project = ConfigManager::load_project_record(&args.project_id)?;
     let (ctx, base_path) = resolve_project_ssh_with_base_path(&args.project_id)?;
-    let server = ctx.server;
     let client = ctx.client;
 
     let all_components = load_components(&project.config.component_ids);
@@ -116,7 +97,7 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
     }
 
     let components_to_deploy =
-        plan_components_to_deploy(&args, &all_components, &server, &base_path, &client)?;
+        plan_components_to_deploy(&args, &all_components, &base_path, &client)?;
 
     if components_to_deploy.is_empty() {
         return Ok((
@@ -124,7 +105,6 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 project_id: args.project_id,
                 all: args.all,
                 outdated: args.outdated,
-                build: args.build,
                 dry_run: args.dry_run,
                 components: vec![],
                 summary: DeploySummary {
@@ -143,17 +123,10 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         .collect();
 
     let remote_versions = if args.dry_run || args.outdated {
-        fetch_remote_versions(
-            &components_to_deploy,
-            &server,
-            &base_path,
-            &client as &dyn RemoteExec,
-        )
+        fetch_remote_versions(&components_to_deploy, &base_path, &client)
     } else {
         HashMap::new()
     };
-
-    let skipped: u32 = 0;
 
     if args.dry_run {
         let results = components_to_deploy
@@ -172,7 +145,7 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 )),
                 build_command: component.build_command.clone(),
                 build_exit_code: None,
-                scp_exit_code: None,
+                deploy_exit_code: None,
             })
             .collect::<Vec<_>>();
 
@@ -183,13 +156,12 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 project_id: args.project_id,
                 all: args.all,
                 outdated: args.outdated,
-                build: args.build,
                 dry_run: true,
                 components: results,
                 summary: DeploySummary {
                     succeeded,
                     failed: 0,
-                    skipped,
+                    skipped: 0,
                 },
             },
             0,
@@ -199,17 +171,13 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
     let mut results: Vec<DeployComponentResult> = vec![];
     let mut succeeded: u32 = 0;
     let mut failed: u32 = 0;
-    let skipped: u32 = 0;
 
     for component in &components_to_deploy {
         let local_version = local_versions.get(&component.id).cloned();
         let remote_version = remote_versions.get(&component.id).cloned();
 
-        let (build_exit_code, build_error) = if args.build {
-            run_build_if_configured(component)
-        } else {
-            (None, None)
-        };
+        // Build is mandatory before deploy
+        let (build_exit_code, build_error) = run_build(component);
 
         if let Some(ref error) = build_error {
             results.push(DeployComponentResult {
@@ -226,12 +194,13 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 )),
                 build_command: component.build_command.clone(),
                 build_exit_code,
-                scp_exit_code: None,
+                deploy_exit_code: None,
             });
             failed += 1;
             continue;
         }
 
+        // Check artifact exists after build
         if !Path::new(&component.build_artifact).exists() {
             results.push(DeployComponentResult {
                 id: component.id.clone(),
@@ -247,87 +216,107 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                 )),
                 build_command: component.build_command.clone(),
                 build_exit_code,
-                scp_exit_code: None,
+                deploy_exit_code: None,
             });
             failed += 1;
             continue;
         }
 
-        let artifact_metadata = fs::metadata(&component.build_artifact);
-        if let Ok(ref metadata) = artifact_metadata {
-            if metadata.is_dir() {
+        // Calculate install directory
+        let install_dir = match homeboy_core::base_path::join_remote_path(
+            Some(&base_path),
+            &component.remote_path,
+        ) {
+            Ok(v) => v,
+            Err(err) => {
                 results.push(DeployComponentResult {
                     id: component.id.clone(),
                     name: component.name.clone(),
                     status: "failed".to_string(),
                     local_version,
                     remote_version,
-                    error: Some(format!(
-                        "Build artifact '{}' is a directory. Homeboy supports ZIP archives and regular files, not directories. \
-                         Configure a build command that produces a ZIP artifact (e.g., 'build/{}.zip')",
-                        component.build_artifact,
-                        component.id
-                    )),
+                    error: Some(err.to_string()),
                     artifact_path: Some(component.build_artifact.clone()),
-                    remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
-                        Some(&base_path),
-                        &component.remote_path,
-                    )),
+                    remote_path: None,
                     build_command: component.build_command.clone(),
                     build_exit_code,
-                    scp_exit_code: None,
+                    deploy_exit_code: None,
                 });
                 failed += 1;
                 continue;
             }
-        }
+        };
 
-        let (scp_exit_code, scp_error) = deploy_component_artifact(
-            &server,
+        // Look up verification from modules
+        let verification = find_deploy_verification(&project.config.modules, &install_dir);
+
+        // Deploy using core module
+        let deploy_result = deploy_artifact(
             &client,
+            Path::new(&component.build_artifact),
+            &install_dir,
             &base_path,
-            component,
-            &project.config.modules,
+            verification.as_ref(),
         );
 
-        if let Some(error) = scp_error {
-            results.push(DeployComponentResult {
-                id: component.id.clone(),
-                name: component.name.clone(),
-                status: "failed".to_string(),
-                local_version,
-                remote_version,
-                error: Some(error),
-                artifact_path: Some(component.build_artifact.clone()),
-                remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
-                    Some(&base_path),
-                    &component.remote_path,
-                )),
-                build_command: component.build_command.clone(),
-                build_exit_code,
-                scp_exit_code,
-            });
-            failed += 1;
-            continue;
+        match deploy_result {
+            Ok(DeployResult {
+                success: true,
+                exit_code,
+                ..
+            }) => {
+                results.push(DeployComponentResult {
+                    id: component.id.clone(),
+                    name: component.name.clone(),
+                    status: "deployed".to_string(),
+                    local_version: local_version.clone(),
+                    remote_version: local_version,
+                    error: None,
+                    artifact_path: Some(component.build_artifact.clone()),
+                    remote_path: Some(install_dir),
+                    build_command: component.build_command.clone(),
+                    build_exit_code,
+                    deploy_exit_code: Some(exit_code),
+                });
+                succeeded += 1;
+            }
+            Ok(DeployResult {
+                success: false,
+                exit_code,
+                error,
+            }) => {
+                results.push(DeployComponentResult {
+                    id: component.id.clone(),
+                    name: component.name.clone(),
+                    status: "failed".to_string(),
+                    local_version,
+                    remote_version,
+                    error,
+                    artifact_path: Some(component.build_artifact.clone()),
+                    remote_path: Some(install_dir),
+                    build_command: component.build_command.clone(),
+                    build_exit_code,
+                    deploy_exit_code: Some(exit_code),
+                });
+                failed += 1;
+            }
+            Err(err) => {
+                results.push(DeployComponentResult {
+                    id: component.id.clone(),
+                    name: component.name.clone(),
+                    status: "failed".to_string(),
+                    local_version,
+                    remote_version,
+                    error: Some(err.to_string()),
+                    artifact_path: Some(component.build_artifact.clone()),
+                    remote_path: Some(install_dir),
+                    build_command: component.build_command.clone(),
+                    build_exit_code,
+                    deploy_exit_code: None,
+                });
+                failed += 1;
+            }
         }
-
-        results.push(DeployComponentResult {
-            id: component.id.clone(),
-            name: component.name.clone(),
-            status: "deployed".to_string(),
-            local_version: local_version.clone(),
-            remote_version: local_version,
-            error: None,
-            artifact_path: Some(component.build_artifact.clone()),
-            remote_path: Some(homeboy_core::base_path::join_remote_path_or_fallback(
-                Some(&base_path),
-                &component.remote_path,
-            )),
-            build_command: component.build_command.clone(),
-            build_exit_code,
-            scp_exit_code,
-        });
-        succeeded += 1;
     }
 
     let exit_code = if failed > 0 { 1 } else { 0 };
@@ -337,13 +326,12 @@ pub fn run(args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             project_id: args.project_id,
             all: args.all,
             outdated: args.outdated,
-            build: args.build,
             dry_run: args.dry_run,
             components: results,
             summary: DeploySummary {
                 succeeded,
                 failed,
-                skipped,
+                skipped: 0,
             },
         },
         exit_code,
@@ -371,9 +359,8 @@ struct Component {
 fn plan_components_to_deploy(
     args: &DeployArgs,
     all_components: &[Component],
-    server: &ServerConfig,
     base_path: &str,
-    client: &dyn RemoteExec,
+    client: &SshClient,
 ) -> homeboy_core::Result<Vec<Component>> {
     if args.all {
         return Ok(all_components.to_vec());
@@ -389,7 +376,7 @@ fn plan_components_to_deploy(
     }
 
     if args.outdated {
-        let remote_versions = fetch_remote_versions(all_components, server, base_path, client);
+        let remote_versions = fetch_remote_versions(all_components, base_path, client);
 
         let selected: Vec<Component> = all_components
             .iter()
@@ -415,7 +402,8 @@ fn plan_components_to_deploy(
     ))
 }
 
-fn run_build_if_configured(component: &Component) -> (Option<i32>, Option<String>) {
+/// Build is mandatory before deploy. Returns error if no build command configured.
+fn run_build(component: &Component) -> (Option<i32>, Option<String>) {
     let build_cmd = component.build_command.clone().or_else(|| {
         homeboy_core::build::detect_build_command(
             &component.local_path,
@@ -426,7 +414,14 @@ fn run_build_if_configured(component: &Component) -> (Option<i32>, Option<String
     });
 
     let Some(build_cmd) = build_cmd else {
-        return (None, None);
+        return (
+            Some(1),
+            Some(format!(
+                "Component '{}' has no build command configured. Configure one with: homeboy component set {} --build-command '<command>'",
+                component.id,
+                component.id
+            )),
+        );
     };
 
     let output = execute_local_command_in_dir(&build_cmd, Some(&component.local_path));
@@ -436,7 +431,10 @@ fn run_build_if_configured(component: &Component) -> (Option<i32>, Option<String
     } else {
         (
             Some(output.exit_code),
-            Some(format!("Build failed for {}", component.id)),
+            Some(format!(
+                "Build failed for '{}'. Fix build errors before deploying.",
+                component.id
+            )),
         )
     }
 }
@@ -452,329 +450,6 @@ fn find_deploy_verification(modules: &[String], target_path: &str) -> Option<Dep
         }
     }
     None
-}
-
-fn deploy_component_artifact(
-    server: &ServerConfig,
-    client: &dyn RemoteExec,
-    base_path: &str,
-    component: &Component,
-    modules: &[String],
-) -> (Option<i32>, Option<String>) {
-    let install_dir =
-        match homeboy_core::base_path::join_remote_path(Some(base_path), &component.remote_path) {
-            Ok(value) => value,
-            Err(err) => return (Some(1), Some(err.to_string())),
-        };
-
-    if component.build_artifact.ends_with(".zip") {
-        let zip_filename = Path::new(&component.build_artifact)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| format!(".homeboy-{}", name))
-            .unwrap_or_else(|| format!(".homeboy-{}.zip", component.id));
-
-        let zip_root_dir =
-            homeboy_core::build::detect_zip_single_root_dir(Path::new(&component.build_artifact))
-                .ok()
-                .flatten();
-
-        let install_basename = Path::new(&install_dir)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-
-        let (unzip_target_dir, final_install_dir) = if zip_root_dir
-            .as_deref()
-            .is_some_and(|root| root == install_basename)
-        {
-            let parent = Path::new(&install_dir)
-                .parent()
-                .and_then(|value| value.to_str())
-                .unwrap_or(&install_dir)
-                .to_string();
-            (parent, install_dir.clone())
-        } else {
-            (install_dir.clone(), install_dir.clone())
-        };
-
-        let upload_dir = if unzip_target_dir != final_install_dir {
-            unzip_target_dir.clone()
-        } else {
-            install_dir.clone()
-        };
-
-        let upload_path = match homeboy_core::base_path::join_remote_child(
-            Some(base_path),
-            &upload_dir,
-            &zip_filename,
-        ) {
-            Ok(value) => value,
-            Err(err) => return (Some(1), Some(err.to_string())),
-        };
-
-        let mkdir_cmd = match homeboy_core::shell::cd_and(
-            "/",
-            &format!("mkdir -p {}", shell::quote_path(&unzip_target_dir)),
-        ) {
-            Ok(value) => value,
-            Err(err) => return (Some(1), Some(err.to_string())),
-        };
-
-        let mkdir_output = client.execute(&mkdir_cmd);
-        if !mkdir_output.success {
-            return (Some(mkdir_output.exit_code), Some(mkdir_output.stderr));
-        }
-
-        let (scp_exit_code, scp_error) =
-            upload_to_path(server, client, &component.build_artifact, &upload_path);
-        if scp_error.is_some() {
-            return (scp_exit_code, scp_error);
-        }
-
-        let cleanup_target_dir = if let Some(ref root) = zip_root_dir {
-            if unzip_target_dir != final_install_dir {
-                match homeboy_core::base_path::join_remote_child(None, &unzip_target_dir, root) {
-                    Ok(value) => value,
-                    Err(_) => final_install_dir.clone(),
-                }
-            } else {
-                final_install_dir.clone()
-            }
-        } else {
-            final_install_dir.clone()
-        };
-
-        // Find matching deploy verification from modules
-        let deploy_verification = find_deploy_verification(modules, &cleanup_target_dir);
-
-        if cleanup_target_dir.starts_with(base_path)
-            && deploy_verification.is_some()
-            && cleanup_target_dir != base_path
-        {
-            let cleanup_cmd = match homeboy_core::shell::cd_and(
-                "/",
-                &format!(
-                    "rm -rf {} && mkdir -p {}",
-                    shell::quote_path(&cleanup_target_dir),
-                    shell::quote_path(&cleanup_target_dir)
-                ),
-            ) {
-                Ok(value) => value,
-                Err(err) => return (Some(1), Some(err.to_string())),
-            };
-
-            let cleanup_output = client.execute(&cleanup_cmd);
-            if !cleanup_output.success {
-                return (Some(cleanup_output.exit_code), Some(cleanup_output.stderr));
-            }
-
-            let unzip_cmd = match homeboy_core::shell::cd_and(
-                &unzip_target_dir,
-                &format!(
-                    "unzip -o {} && rm {}",
-                    shell::quote_path(&upload_path),
-                    shell::quote_path(&upload_path)
-                ),
-            ) {
-                Ok(value) => value,
-                Err(err) => return (Some(1), Some(err.to_string())),
-            };
-
-            let unzip_output = client.execute(&unzip_cmd);
-            if !unzip_output.success {
-                return (Some(unzip_output.exit_code), Some(unzip_output.stderr));
-            }
-
-            // Run module-driven verification if configured
-            if let Some(verification) = deploy_verification {
-                if let Some(ref verify_cmd_template) = verification.verify_command {
-                    let mut vars = HashMap::new();
-                    vars.insert(
-                        TemplateVars::TARGET_DIR.to_string(),
-                        cleanup_target_dir.clone(),
-                    );
-                    let verify_cmd = render_map(verify_cmd_template, &vars);
-
-                    let verify_output = client.execute(&verify_cmd);
-                    if !verify_output.success || verify_output.stdout.trim().is_empty() {
-                        let error_msg = verification
-                            .verify_error_message
-                            .as_ref()
-                            .map(|msg| render_map(msg, &vars))
-                            .unwrap_or_else(|| {
-                                format!("Deploy verification failed for {}", cleanup_target_dir)
-                            });
-                        return (Some(1), Some(error_msg));
-                    }
-                }
-            }
-
-            return (Some(0), None);
-        } else {
-            return (
-                Some(1),
-                Some(format!(
-                    "Unsafe deploy cleanup target: {}",
-                    cleanup_target_dir
-                )),
-            );
-        }
-    }
-
-    upload_to_path(server, client, &component.build_artifact, &install_dir)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn make_test_zip_with_root_dir(root_dir: &str) -> tempfile::NamedTempFile {
-        let temp_file = tempfile::NamedTempFile::new().unwrap();
-        let file = std::fs::File::create(temp_file.path()).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::FileOptions::default();
-
-        zip.add_directory(format!("{}/", root_dir), options)
-            .unwrap();
-        zip.start_file(format!("{}/{}.php", root_dir, root_dir), options)
-            .unwrap();
-        zip.write_all(b"<?php\n/*\nPlugin Name: Test Plugin\n*/\n")
-            .unwrap();
-        zip.finish().unwrap();
-
-        temp_file
-    }
-
-    #[test]
-    fn zip_deploy_unzips_into_parent_when_zip_root_matches_install_dir() {
-        reset_test_scp_call_count();
-
-        let zip_file = make_test_zip_with_root_dir("sell-my-images");
-
-        assert_eq!(
-            homeboy_core::build::detect_zip_single_root_dir(zip_file.path())
-                .unwrap()
-                .as_deref(),
-            Some("sell-my-images")
-        );
-
-        let component = Component {
-            id: "sell-my-images".to_string(),
-            name: "Sell My Images".to_string(),
-            local_path: "/tmp".to_string(),
-            remote_path: "wp-content/plugins/sell-my-images".to_string(),
-            build_artifact: zip_file.path().to_string_lossy().to_string(),
-            build_command: None,
-            version_targets: None,
-            modules: vec![],
-        };
-
-        let client = TestRemoteExec::default();
-
-        let (exit_code, error) =
-            deploy_component_artifact_for_test(&client, "/var/www/site", &component);
-        assert_eq!(exit_code, Some(0));
-        assert!(error.is_none());
-
-        assert_eq!(
-            TEST_SCP_CALL_COUNT.load(Ordering::Relaxed),
-            1,
-            "expected exactly one upload attempt"
-        );
-    }
-}
-
-fn upload_to_path(
-    _server: &ServerConfig,
-    client: &dyn RemoteExec,
-    local_path: &str,
-    remote_path: &str,
-) -> (Option<i32>, Option<String>) {
-    #[cfg(test)]
-    {
-        TEST_SCP_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
-    }
-
-    // Safety belt: refuse to upload directories (prevents silent filesystem corruption)
-    let path = Path::new(local_path);
-    if path.is_dir() {
-        return (
-            Some(1),
-            Some(format!(
-                "Cannot upload directory '{}' as a file. Use a ZIP archive instead.",
-                local_path
-            )),
-        );
-    }
-
-    let Some(ssh_client) = client.as_ssh_client() else {
-        #[cfg(test)]
-        return (Some(0), None);
-
-        #[cfg(not(test))]
-        return (
-            Some(1),
-            Some("Upload requires SSH client configuration".to_string()),
-        );
-    };
-
-    let (scp_exit_code, scp_error) = scp_to_path(ssh_client, local_path, remote_path);
-    if scp_error.is_none() {
-        return (scp_exit_code, None);
-    }
-
-    let fallback_output = ssh_client.upload_file(local_path, remote_path);
-    if fallback_output.success {
-        (Some(fallback_output.exit_code), None)
-    } else {
-        (
-            scp_exit_code,
-            Some(format!(
-                "SCP failed, and SSH upload fallback failed. scp_error: {} fallback_error: {}",
-                scp_error.unwrap_or_default(),
-                fallback_output.stderr
-            )),
-        )
-    }
-}
-
-fn scp_to_path(
-    ssh_client: &SshClient,
-    local_path: &str,
-    remote_path: &str,
-) -> (Option<i32>, Option<String>) {
-    let mut scp_args: Vec<String> = vec![];
-
-    if let Some(identity_file) = &ssh_client.identity_file {
-        scp_args.push("-i".to_string());
-        scp_args.push(identity_file.clone());
-    }
-
-    if ssh_client.port != 22 {
-        scp_args.push("-P".to_string());
-        scp_args.push(ssh_client.port.to_string());
-    }
-
-    scp_args.push(local_path.to_string());
-    scp_args.push(format!(
-        "{}@{}:'{}'",
-        ssh_client.user,
-        ssh_client.host,
-        remote_path.replace("'", "'\\''")
-    ));
-
-    let output = Command::new("scp").args(&scp_args).output();
-
-    match output {
-        Ok(output) if output.status.success() => (Some(output.status.code().unwrap_or(0)), None),
-        Ok(output) => (
-            Some(output.status.code().unwrap_or(1)),
-            Some(String::from_utf8_lossy(&output.stderr).to_string()),
-        ),
-        Err(err) => (Some(1), Some(err.to_string())),
-    }
 }
 
 fn load_components(component_ids: &[String]) -> Vec<Component> {
@@ -842,71 +517,10 @@ fn fetch_local_version(component: &Component) -> Option<String> {
     )
 }
 
-trait RemoteExec {
-    fn execute(&self, command: &str) -> CommandOutput;
-    fn as_ssh_client(&self) -> Option<&SshClient>;
-}
-
-#[cfg(test)]
-fn deploy_component_artifact_for_test(
-    client: &dyn RemoteExec,
-    base_path: &str,
-    component: &Component,
-) -> (Option<i32>, Option<String>) {
-    let server = ServerConfig {
-        id: "test".to_string(),
-        name: "Test".to_string(),
-        host: "example.com".to_string(),
-        user: "user".to_string(),
-        port: 22,
-        identity_file: None,
-    };
-
-    deploy_component_artifact(&server, client, base_path, component, &[])
-}
-
-#[cfg(test)]
-#[derive(Default)]
-struct TestRemoteExec {
-    commands: std::sync::Mutex<Vec<String>>,
-}
-
-#[cfg(test)]
-impl RemoteExec for TestRemoteExec {
-    fn execute(&self, command: &str) -> CommandOutput {
-        {
-            let mut locked = self.commands.lock().unwrap();
-            locked.push(command.to_string());
-        }
-
-        CommandOutput {
-            stdout: "plugin.php".to_string(),
-            stderr: String::new(),
-            success: true,
-            exit_code: 0,
-        }
-    }
-
-    fn as_ssh_client(&self) -> Option<&SshClient> {
-        None
-    }
-}
-
-impl RemoteExec for SshClient {
-    fn execute(&self, command: &str) -> CommandOutput {
-        SshClient::execute(self, command)
-    }
-
-    fn as_ssh_client(&self) -> Option<&SshClient> {
-        Some(self)
-    }
-}
-
 fn fetch_remote_versions(
     components: &[Component],
-    _server: &ServerConfig,
     base_path: &str,
-    client: &dyn RemoteExec,
+    client: &SshClient,
 ) -> HashMap<String, String> {
     let mut versions = HashMap::new();
 
