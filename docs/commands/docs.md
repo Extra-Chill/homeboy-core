@@ -35,32 +35,32 @@ This section applies only when `--list` is not used.
 {
   "mode": "content",
   "topic": "<original topic as a single space-joined string>",
-  "topic_label": "<resolver topic label (\"index\" when no topic args; \"unknown\" when user input normalizes to empty)>",
-  "resolved_key": "<resolved embedded key (e.g. commands/deploy)>",
-  "segments": ["<normalized>", "<segments>"] ,
+  "topicLabel": "<resolver topic label>",
+  "resolvedKey": "<resolved embedded key (e.g. commands/deploy)>",
+  "segments": ["<normalized>", "<segments>"],
   "slug": "<last segment>",
   "content": "<markdown content>",
-  "available_topics": ["<embedded key>", "<embedded key>"]
+  "availableTopics": ["<embedded key>", "<embedded key>"]
 }
 ```
 
 ### Fields
 
-- `mode`: response mode (`content`).
+- `mode`: response mode (`content` or `list`).
 - `topic`: raw user input joined by spaces.
-- `topic_label`: label returned by the resolver (`index` when no topic args are provided; `unknown` when user input normalizes to empty).
-- `resolved_key`: resolved embedded key.
+- `topicLabel`: label returned by the resolver.
+- `resolvedKey`: resolved embedded key.
 - `segments`: normalized key segments (lowercased; spaces/tabs become `-`).
 - `slug`: last segment of `segments` (defaults to `index` when empty).
 - `content`: embedded markdown content.
-- `available_topics`: list of available embedded keys (sorted).
+- `availableTopics`: list of available embedded keys (sorted).
 
 ## JSON output (list topics)
 
 ```json
 {
   "mode": "list",
-  "available_topics": ["<embedded key>", "<embedded key>"]
+  "availableTopics": ["<embedded key>", "<embedded key>"]
 }
 ```
 

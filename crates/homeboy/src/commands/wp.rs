@@ -3,6 +3,7 @@ use homeboy_core::config::{
     ConfigManager, ProjectConfiguration, ProjectRecord, ProjectTypeManager, SlugIdentifiable,
 };
 use homeboy_core::context::resolve_project_ssh;
+use homeboy_core::shell;
 use homeboy_core::ssh::{execute_local_command, CommandOutput};
 use homeboy_core::template::{render_map, TemplateVars};
 use homeboy_core::token;
@@ -151,7 +152,10 @@ fn build_command(
     let mut variables = HashMap::new();
     variables.insert(TemplateVars::PROJECT_ID.to_string(), project.id.clone());
     variables.insert(TemplateVars::DOMAIN.to_string(), target_domain.clone());
-    variables.insert(TemplateVars::ARGS.to_string(), command_args.join(" "));
+    variables.insert(
+        TemplateVars::ARGS.to_string(),
+        shell::quote_args(&command_args),
+    );
     variables.insert(TemplateVars::SITE_PATH.to_string(), base_path);
     variables.insert(TemplateVars::CLI_PATH.to_string(), cli_path);
 

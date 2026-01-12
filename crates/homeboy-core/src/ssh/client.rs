@@ -1,11 +1,8 @@
 use crate::config::ServerConfig;
+use crate::shell;
 use crate::Result;
 use homeboy_error::{RemoteCommandFailedDetails, TargetDetails};
 use std::process::{Command, Stdio};
-
-fn shell_escape_single_quotes(value: &str) -> String {
-    value.replace("'", "'\\''")
-}
 
 pub struct SshClient {
     pub host: String,
@@ -68,8 +65,7 @@ impl SshClient {
     }
 
     pub fn upload_file(&self, local_path: &str, remote_path: &str) -> CommandOutput {
-        let escaped_remote_path = shell_escape_single_quotes(remote_path);
-        let remote_command = format!("cat > '{}'", escaped_remote_path);
+        let remote_command = format!("cat > {}", shell::quote_path(remote_path));
         self.execute_with_stdin(&remote_command, Some(local_path))
     }
 

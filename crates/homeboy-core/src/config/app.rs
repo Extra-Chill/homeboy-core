@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::{AppPaths, ConfigImportable, ConfigManager};
+use crate::Result;
+
 fn default_cli_path() -> String {
     "wp".to_string()
 }
@@ -70,6 +73,32 @@ impl Default for AppConfig {
             default_database_host: default_database_host(),
             default_local_db_port: default_local_db_port(),
         }
+    }
+}
+
+impl ConfigImportable for AppConfig {
+    fn op_name() -> &'static str {
+        "config.create"
+    }
+
+    fn type_name() -> &'static str {
+        "config"
+    }
+
+    fn config_id(&self) -> Result<String> {
+        Ok("global".to_string())
+    }
+
+    fn exists(_id: &str) -> bool {
+        AppPaths::config().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn load(_id: &str) -> Result<Self> {
+        ConfigManager::load_app_config()
+    }
+
+    fn save(_id: &str, config: &Self) -> Result<()> {
+        ConfigManager::save_app_config(config)
     }
 }
 

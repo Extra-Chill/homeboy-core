@@ -2,8 +2,8 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 
 use homeboy_core::config::{
-    ComponentConfiguration, ConfigManager, PinnedRemoteFile, PinnedRemoteLog, ProjectManager,
-    ProjectRecord,
+    create_from_json, ComponentConfiguration, ConfigManager, CreateSummary, PinnedRemoteFile,
+    PinnedRemoteLog, ProjectConfiguration, ProjectManager, ProjectRecord,
 };
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -29,12 +29,20 @@ enum ProjectCommand {
     },
     /// Create a new project
     Create {
-        /// Project name
-        name: String,
-        /// Public site domain
-        domain: String,
-        /// Project type (e.g. wordpress)
-        project_type: String,
+        /// JSON input spec for create/update (supports single or bulk)
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Skip items that already exist (JSON mode only)
+        #[arg(long)]
+        skip_existing: bool,
+
+        /// Project name (CLI mode)
+        name: Option<String>,
+        /// Public site domain (CLI mode)
+        domain: Option<String>,
+        /// Project type (e.g. wordpress) (CLI mode)
+        project_type: Option<String>,
         /// Optional server ID
         #[arg(long)]
         server_id: Option<String>,
@@ -44,7 +52,7 @@ enum ProjectCommand {
         /// Optional WordPress table prefix
         #[arg(long)]
         table_prefix: Option<String>,
-        /// Switch active project after create
+        /// Switch active project after create (CLI mode only)
         #[arg(long)]
         activate: bool,
     },
@@ -238,6 +246,8 @@ pub struct ProjectOutput {
     pin: Option<ProjectPinOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    import: Option<CreateSummary>,
 }
 
 pub fn run(
@@ -248,6 +258,8 @@ pub fn run(
         ProjectCommand::List { current } => list(current),
         ProjectCommand::Show { project_id } => show(project_id),
         ProjectCommand::Create {
+            json,
+            skip_existing,
             name,
             domain,
             project_type,
@@ -255,15 +267,46 @@ pub fn run(
             base_path,
             table_prefix,
             activate,
-        } => create(
-            &name,
-            &domain,
-            &project_type,
-            server_id,
-            base_path,
-            table_prefix,
-            activate,
-        ),
+        } => {
+            if let Some(spec) = json {
+                return create_json(&spec, skip_existing);
+            }
+
+            let name = name.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "name",
+                    "Missing required argument: name (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+            let domain = domain.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "domain",
+                    "Missing required argument: domain (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+            let project_type = project_type.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "projectType",
+                    "Missing required argument: project_type (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+
+            create(
+                &name,
+                &domain,
+                &project_type,
+                server_id,
+                base_path,
+                table_prefix,
+                activate,
+            )
+        }
         ProjectCommand::Set {
             project_id,
             name,
@@ -305,6 +348,7 @@ fn list(current: bool) -> homeboy_core::Result<(ProjectOutput, i32)> {
                 components: None,
                 pin: None,
                 updated: None,
+                import: None,
             },
             0,
         ));
@@ -333,6 +377,7 @@ fn list(current: bool) -> homeboy_core::Result<(ProjectOutput, i32)> {
             components: None,
             pin: None,
             updated: None,
+            import: None,
         },
         0,
     ))
@@ -354,8 +399,29 @@ fn show(project_id: Option<String>) -> homeboy_core::Result<(ProjectOutput, i32)
             components: None,
             pin: None,
             updated: None,
+            import: None,
         },
         0,
+    ))
+}
+
+fn create_json(spec: &str, skip_existing: bool) -> homeboy_core::Result<(ProjectOutput, i32)> {
+    let summary = create_from_json::<ProjectConfiguration>(spec, skip_existing)?;
+    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+
+    Ok((
+        ProjectOutput {
+            command: "project.create".to_string(),
+            project_id: None,
+            active_project_id: None,
+            project: None,
+            projects: None,
+            components: None,
+            pin: None,
+            updated: None,
+            import: Some(summary),
+        },
+        exit_code,
     ))
 }
 
@@ -393,6 +459,7 @@ fn create(
             components: None,
             pin: None,
             updated: None,
+            import: None,
         },
         0,
     ))
@@ -428,6 +495,7 @@ fn set(
                 components: None,
                 pin: None,
                 updated: Some(updated_fields),
+                import: None,
             },
             0,
         ));
@@ -486,6 +554,7 @@ fn set(
             components: None,
             pin: None,
             updated: Some(updated_fields),
+            import: None,
         },
         0,
     ))
@@ -506,6 +575,7 @@ fn switch(project_id: &str) -> homeboy_core::Result<(ProjectOutput, i32)> {
             components: None,
             pin: None,
             updated: None,
+            import: None,
         },
         0,
     ))
@@ -530,6 +600,7 @@ fn repair(project_id: &str) -> homeboy_core::Result<(ProjectOutput, i32)> {
             components: None,
             pin: None,
             updated,
+            import: None,
         },
         0,
     ))
@@ -578,6 +649,7 @@ fn components_list(project_id: &str) -> homeboy_core::Result<(ProjectOutput, i32
             }),
             pin: None,
             updated: None,
+            import: None,
         },
         0,
     ))
@@ -724,6 +796,7 @@ fn write_project_components(
             }),
             pin: None,
             updated: Some(vec!["componentIds".to_string()]),
+            import: None,
         },
         0,
     ))
@@ -1118,6 +1191,7 @@ fn pin_list(
                 removed: None,
             }),
             updated: None,
+            import: None,
         },
         0,
     ))
@@ -1204,6 +1278,7 @@ fn pin_add(
                 removed: None,
             }),
             updated: None,
+            import: None,
         },
         0,
     ))
@@ -1271,6 +1346,7 @@ fn pin_remove(
                 }),
             }),
             updated: None,
+            import: None,
         },
         0,
     ))

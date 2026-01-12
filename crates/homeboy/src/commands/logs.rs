@@ -4,6 +4,7 @@ use serde::Serialize;
 use homeboy_core::base_path;
 use homeboy_core::config::ConfigManager;
 use homeboy_core::context::resolve_project_ssh;
+use homeboy_core::shell;
 
 use crate::commands::CmdResult;
 
@@ -121,7 +122,7 @@ fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<Log
     let full_path = base_path::join_remote_path(ctx.base_path.as_deref(), path)?;
 
     if follow {
-        let tail_cmd = format!("tail -f '{}'", full_path);
+        let tail_cmd = format!("tail -f {}", shell::quote_path(&full_path));
         let code = ctx.client.execute_interactive(Some(&tail_cmd));
 
         Ok((
@@ -135,7 +136,7 @@ fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<Log
             code,
         ))
     } else {
-        let command = format!("tail -n {} '{}'", lines, full_path);
+        let command = format!("tail -n {} {}", lines, shell::quote_path(&full_path));
         let output = ctx.client.execute(&command);
 
         if !output.success {
@@ -164,7 +165,7 @@ fn clear(project_id: &str, path: &str) -> CmdResult<LogsOutput> {
 
     let full_path = base_path::join_remote_path(ctx.base_path.as_deref(), path)?;
 
-    let command = format!(": > '{}'", full_path);
+    let command = format!(": > {}", shell::quote_path(&full_path));
     let output = ctx.client.execute(&command);
 
     if !output.success {

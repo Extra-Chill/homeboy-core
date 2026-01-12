@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::{Record, SetName, SlugIdentifiable};
+use super::{AppPaths, ConfigImportable, ConfigManager, Record, SetName, SlugIdentifiable};
+use crate::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +52,32 @@ impl SlugIdentifiable for ComponentConfiguration {
 impl SetName for ComponentConfiguration {
     fn set_name(&mut self, name: String) {
         self.name = name;
+    }
+}
+
+impl ConfigImportable for ComponentConfiguration {
+    fn op_name() -> &'static str {
+        "component.create"
+    }
+
+    fn type_name() -> &'static str {
+        "component"
+    }
+
+    fn config_id(&self) -> Result<String> {
+        self.slug_id()
+    }
+
+    fn exists(id: &str) -> bool {
+        AppPaths::component(id).map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn load(id: &str) -> Result<Self> {
+        ConfigManager::load_component(id)
+    }
+
+    fn save(id: &str, config: &Self) -> Result<()> {
+        ConfigManager::save_component(id, config)
     }
 }
 

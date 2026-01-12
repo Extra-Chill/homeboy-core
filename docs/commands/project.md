@@ -6,7 +6,7 @@
 homeboy project <COMMAND>
 ```
 
-This command accepts the global flags `--json` and `--dry-run` (see [Root command](../cli/homeboy-root-command.md)).
+This command accepts the global flag `--dry-run` (see [Root command](../cli/homeboy-root-command.md)).
 
 ## Subcommands
 
@@ -34,33 +34,64 @@ Arguments:
 
 
 ```sh
-homeboy project create <name> <domain> <project_type> [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--activate]
+homeboy project create [--json <spec>] [--skip-existing] [name] [domain] [project_type] \
+  [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--activate]
 ```
-
-Arguments:
-
-- `<name>`: project name
-- `<domain>`: public site domain
-- `<project_type>`: project type (e.g. `wordpress`)
 
 Options:
 
-- `--server-id <serverId>`: optional server ID
-- `--base-path <path>`: optional remote base path
-- `--table-prefix <prefix>`: optional WordPress table prefix
-- `--activate`: switch active project after create
+- `--json <spec>`: JSON input spec for create/update (single object or array; see below)
+- `--skip-existing`: skip items that already exist (JSON mode only)
+- `--server-id <serverId>`: optional server ID (CLI mode)
+- `--base-path <path>`: optional remote base path (CLI mode)
+- `--table-prefix <prefix>`: optional WordPress table prefix (CLI mode)
+- `--activate`: switch active project after create (CLI mode only)
+
+Arguments (CLI mode):
+
+- `name`: project name
+- `domain`: public site domain
+- `project_type`: project type (e.g. `wordpress`)
+
+JSON mode:
+
+- `<spec>` accepts `-` (stdin), `@file.json`, or an inline JSON string.
+- Payload format:
+
+```json
+{
+  "op": "project.create",
+  "data": { "name": "...", "domain": "...", "projectType": "wordpress" }
+}
+```
+
+Bulk payload (`data` as an array) is also supported.
 
 JSON output:
 
 > Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
 
+CLI mode:
+
 ```json
 {
   "command": "project.create",
   "projectId": "<projectId>",
-  "project": {
-    "id": "<projectId>",
-    "config": { }
+  "project": { "id": "<projectId>", "config": {} }
+}
+```
+
+JSON mode:
+
+```json
+{
+  "command": "project.create",
+  "import": {
+    "results": [{ "id": "<projectId>", "action": "created|updated|skipped|error" }],
+    "created": 1,
+    "updated": 0,
+    "skipped": 0,
+    "errors": 0
   }
 }
 ```
@@ -97,7 +128,8 @@ JSON output:
     "id": "<projectId>",
     "config": { }
   },
-  "updated": ["domain", "serverId"]
+  "updated": ["domain", "serverId"],
+  "import": null
 }
 ```
 
@@ -125,7 +157,8 @@ JSON output:
     "id": "<projectId>",
     "config": { }
   },
-  "updated": ["id"]
+  "updated": ["id"],
+  "import": null
 }
 ```
 
@@ -170,7 +203,8 @@ JSON output:
   "project": {
     "id": "<projectId>",
     "config": { }
-  }
+  },
+  "import": null
 }
 ```
 
@@ -193,7 +227,8 @@ JSON output:
   "project": {
     "id": "<projectId>",
     "config": { }
-  }
+  },
+  "import": null
 }
 ```
 

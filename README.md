@@ -37,16 +37,6 @@ Homeboy includes agent-oriented instruction files under `agent-instructions/`.
 - `agent-instructions/skills/`: skills that can be added to LLM coding agents
 - `agent-instructions/commands/`: reusable command recipes (slash-command style)
 
-Recommended setup (optional): symlink the command recipes into your global agent commands directory so they are available everywhere:
-
-```bash
-ln -sf "/Users/chubes/Developer/Extra Chill Platform/homeboy/homeboy-cli/agent-instructions/commands/homeboy-init.md" \
-  "/Users/chubes/.claude/commands/homeboy-init.md"
-
-ln -sf "/Users/chubes/Developer/Extra Chill Platform/homeboy/homeboy-cli/agent-instructions/commands/version-bump.md" \
-  "/Users/chubes/.claude/commands/version-bump.md"
-```
-
 These files are not used by Homeboy at runtime; they are meant for humans and coding agents.
 
 ## Usage

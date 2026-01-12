@@ -196,6 +196,34 @@ pub fn set_json_value_in_file(
     write_json_file_pretty(path, &json)
 }
 
+/// RFC 7396 JSON Merge Patch: merge source into target.
+///
+/// - If source is an object, recursively merge each key into target
+/// - If a source value is null, remove that key from target
+/// - Otherwise, replace the target value with source value
+pub fn json_merge_patch(target: &mut Value, source: Value) {
+    if let Value::Object(source_map) = source {
+        if let Value::Object(target_map) = target {
+            for (key, value) in source_map {
+                if value.is_null() {
+                    target_map.remove(&key);
+                } else if value.is_object() {
+                    let entry = target_map
+                        .entry(key)
+                        .or_insert(Value::Object(serde_json::Map::new()));
+                    json_merge_patch(entry, value);
+                } else {
+                    target_map.insert(key, value);
+                }
+            }
+        } else {
+            *target = Value::Object(source_map);
+        }
+    } else {
+        *target = source;
+    }
+}
+
 fn write_file_atomic(path: &Path, content: &[u8]) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         Error::validation_invalid_argument(

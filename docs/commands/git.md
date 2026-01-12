@@ -6,7 +6,7 @@
 homeboy git <COMMAND>
 ```
 
-This command accepts the global flags `--json` and `--dry-run` (see [Root command](../cli/homeboy-root-command.md)).
+This command does not accept `--dry-run` (and has no `--json` root flag). Output is always JSON-wrapped (see [JSON output contract](../json-output/json-output-contract.md)).
 
 ## Subcommands
 

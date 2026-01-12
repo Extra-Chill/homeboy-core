@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use super::{AppPaths, ConfigImportable, ConfigManager, SlugIdentifiable};
+use crate::Result;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
@@ -17,9 +20,35 @@ fn default_port() -> u16 {
     22
 }
 
-impl super::SlugIdentifiable for ServerConfig {
+impl SlugIdentifiable for ServerConfig {
     fn name(&self) -> &str {
         &self.name
+    }
+}
+
+impl ConfigImportable for ServerConfig {
+    fn op_name() -> &'static str {
+        "server.create"
+    }
+
+    fn type_name() -> &'static str {
+        "server"
+    }
+
+    fn config_id(&self) -> Result<String> {
+        self.slug_id()
+    }
+
+    fn exists(id: &str) -> bool {
+        AppPaths::server(id).map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn load(id: &str) -> Result<Self> {
+        ConfigManager::load_server(id)
+    }
+
+    fn save(id: &str, config: &Self) -> Result<()> {
+        ConfigManager::save_server(id, config)
     }
 }
 

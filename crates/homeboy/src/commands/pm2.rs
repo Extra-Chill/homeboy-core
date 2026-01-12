@@ -3,6 +3,7 @@ use homeboy_core::config::{ConfigManager, ProjectRecord, ProjectTypeManager};
 use homeboy_core::context::resolve_project_ssh;
 use homeboy_core::ssh::execute_local_command;
 
+use homeboy_core::shell;
 use homeboy_core::template::{render_map, TemplateVars};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -127,7 +128,7 @@ fn build_command(
             project.config.domain.clone()
         },
     );
-    variables.insert(TemplateVars::ARGS.to_string(), args.join(" "));
+    variables.insert(TemplateVars::ARGS.to_string(), shell::quote_args(args));
     variables.insert(TemplateVars::SITE_PATH.to_string(), site_path);
     variables.insert(TemplateVars::CLI_PATH.to_string(), cli_path);
 

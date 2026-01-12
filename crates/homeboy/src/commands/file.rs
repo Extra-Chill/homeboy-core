@@ -1,5 +1,6 @@
 use clap::{Args, Subcommand};
 use homeboy_core::context::resolve_project_ssh;
+use homeboy_core::shell;
 use serde::Serialize;
 use std::io::{self, Read};
 
@@ -97,7 +98,7 @@ fn list(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)>
     let ctx = resolve_project_ssh(project_id)?;
 
     let full_path = homeboy_core::base_path::join_remote_path(ctx.base_path.as_deref(), path)?;
-    let command = format!("ls -la '{}'", full_path);
+    let command = format!("ls -la {}", shell::quote_path(&full_path));
     let output = ctx.client.execute(&command);
 
     if !output.success {
@@ -134,7 +135,7 @@ fn read(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)>
     let ctx = resolve_project_ssh(project_id)?;
 
     let full_path = homeboy_core::base_path::join_remote_path(ctx.base_path.as_deref(), path)?;
-    let command = format!("cat '{}'", full_path);
+    let command = format!("cat {}", shell::quote_path(&full_path));
     let output = ctx.client.execute(&command);
 
     if !output.success {
@@ -179,8 +180,9 @@ fn write(project_id: &str, path: &str) -> homeboy_core::Result<(FileOutput, i32)
 
     let full_path = homeboy_core::base_path::join_remote_path(ctx.base_path.as_deref(), path)?;
     let command = format!(
-        "cat > '{}' << 'HOMEBOYEOF'\n{}\nHOMEBOYEOF",
-        full_path, content
+        "cat > {} << 'HOMEBOYEOF'\n{}\nHOMEBOYEOF",
+        shell::quote_path(&full_path),
+        content
     );
     let output = ctx.client.execute(&command);
 
@@ -221,7 +223,7 @@ fn delete(
 
     let full_path = homeboy_core::base_path::join_remote_path(ctx.base_path.as_deref(), path)?;
     let flags = if recursive { "-rf" } else { "-f" };
-    let command = format!("rm {} '{}'", flags, full_path);
+    let command = format!("rm {} {}", flags, shell::quote_path(&full_path));
     let output = ctx.client.execute(&command);
 
     if !output.success {
@@ -261,7 +263,7 @@ fn rename(
 
     let full_old = homeboy_core::base_path::join_remote_path(ctx.base_path.as_deref(), old_path)?;
     let full_new = homeboy_core::base_path::join_remote_path(ctx.base_path.as_deref(), new_path)?;
-    let command = format!("mv '{}' '{}'", full_old, full_new);
+    let command = format!("mv {} {}", shell::quote_path(&full_old), shell::quote_path(&full_new));
     let output = ctx.client.execute(&command);
 
     if !output.success {

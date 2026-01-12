@@ -44,7 +44,3 @@ pub fn is_present(template: &str, key: &str) -> bool {
     let placeholder = format!("{{{{{}}}}}", key);
     template.contains(&placeholder)
 }
-
-pub fn shell_escape(value: &str) -> String {
-    value.replace('\'', "'\\''")
-}

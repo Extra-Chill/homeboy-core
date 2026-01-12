@@ -18,12 +18,9 @@ fn reset_test_scp_call_count() {
 
 use homeboy_core::config::{ConfigManager, ServerConfig};
 use homeboy_core::context::resolve_project_ssh_with_base_path;
+use homeboy_core::shell;
 use homeboy_core::ssh::{execute_local_command_in_dir, CommandOutput, SshClient};
 use homeboy_core::version::parse_version;
-
-fn sanitize_remote_single_quotes(value: &str) -> String {
-    value.replace("'", "'\\''")
-}
 
 use super::CmdResult;
 
@@ -448,10 +445,7 @@ fn deploy_component_artifact(
 
         let mkdir_cmd = match homeboy_core::shell::cd_and(
             "/",
-            &format!(
-                "mkdir -p '{}'",
-                sanitize_remote_single_quotes(&unzip_target_dir)
-            ),
+            &format!("mkdir -p {}", shell::quote_path(&unzip_target_dir)),
         ) {
             Ok(value) => value,
             Err(err) => return (Some(1), Some(err.to_string())),
@@ -488,9 +482,9 @@ fn deploy_component_artifact(
             let cleanup_cmd = match homeboy_core::shell::cd_and(
                 "/",
                 &format!(
-                    "rm -rf '{}' && mkdir -p '{}'",
-                    sanitize_remote_single_quotes(&cleanup_target_dir),
-                    sanitize_remote_single_quotes(&cleanup_target_dir)
+                    "rm -rf {} && mkdir -p {}",
+                    shell::quote_path(&cleanup_target_dir),
+                    shell::quote_path(&cleanup_target_dir)
                 ),
             ) {
                 Ok(value) => value,
@@ -505,9 +499,9 @@ fn deploy_component_artifact(
             let unzip_cmd = match homeboy_core::shell::cd_and(
                 &unzip_target_dir,
                 &format!(
-                    "unzip -o '{}' && rm '{}'",
-                    sanitize_remote_single_quotes(&upload_path),
-                    sanitize_remote_single_quotes(&upload_path)
+                    "unzip -o {} && rm {}",
+                    shell::quote_path(&upload_path),
+                    shell::quote_path(&upload_path)
                 ),
             ) {
                 Ok(value) => value,
@@ -522,8 +516,8 @@ fn deploy_component_artifact(
             let plugin_check_cmd = match homeboy_core::shell::cd_and(
                 "/",
                 &format!(
-                    "find '{}' -maxdepth 2 -type f -name '*.php' -exec grep -l 'Plugin Name:' {} + | head -n 1",
-                    sanitize_remote_single_quotes(&cleanup_target_dir),
+                    "find {} -maxdepth 2 -type f -name '*.php' -exec grep -l 'Plugin Name:' {} + | head -n 1",
+                    shell::quote_path(&cleanup_target_dir),
                     "\\{}"
                 ),
             ) {

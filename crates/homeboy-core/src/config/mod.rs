@@ -2,6 +2,7 @@ mod app;
 mod component;
 mod config_keys;
 mod identifiable;
+mod importable;
 mod module_config;
 mod paths;
 mod project;
@@ -17,6 +18,9 @@ pub use app::*;
 pub use component::*;
 pub use config_keys::*;
 pub use identifiable::{slugify_id, SetName, SlugIdentifiable};
+pub use importable::{
+    create_from_json, ConfigImportable, CreateAction, CreateResult, CreateSummary,
+};
 pub use module_config::*;
 pub use paths::AppPaths;
 pub use project::*;

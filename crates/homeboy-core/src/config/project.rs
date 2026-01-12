@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{SetName, SlugIdentifiable};
+use super::{slugify_id, AppPaths, ConfigImportable, ConfigManager, SetName, SlugIdentifiable};
+use crate::Result;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +72,32 @@ impl SlugIdentifiable for ProjectConfiguration {
 impl SetName for ProjectConfiguration {
     fn set_name(&mut self, name: String) {
         self.name = name;
+    }
+}
+
+impl ConfigImportable for ProjectConfiguration {
+    fn op_name() -> &'static str {
+        "project.create"
+    }
+
+    fn type_name() -> &'static str {
+        "project"
+    }
+
+    fn config_id(&self) -> Result<String> {
+        slugify_id(&self.name)
+    }
+
+    fn exists(id: &str) -> bool {
+        AppPaths::project(id).map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn load(id: &str) -> Result<Self> {
+        ConfigManager::load_project(id)
+    }
+
+    fn save(id: &str, config: &Self) -> Result<()> {
+        ConfigManager::save_project(id, config)
     }
 }
 
