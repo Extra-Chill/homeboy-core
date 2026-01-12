@@ -160,13 +160,29 @@ impl SshClient {
 }
 
 pub fn execute_local_command(command: &str) -> CommandOutput {
+    execute_local_command_in_dir(command, None)
+}
+
+pub fn execute_local_command_in_dir(command: &str, current_dir: Option<&str>) -> CommandOutput {
     #[cfg(windows)]
-    let output = Command::new("cmd").args(["/C", command]).output();
+    let mut cmd = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", command]);
+        cmd
+    };
 
     #[cfg(not(windows))]
-    let output = Command::new("sh").args(["-c", command]).output();
+    let mut cmd = {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", command]);
+        cmd
+    };
 
-    match output {
+    if let Some(dir) = current_dir {
+        cmd.current_dir(dir);
+    }
+
+    match cmd.output() {
         Ok(out) => CommandOutput {
             stdout: String::from_utf8_lossy(&out.stdout).to_string(),
             stderr: String::from_utf8_lossy(&out.stderr).to_string(),

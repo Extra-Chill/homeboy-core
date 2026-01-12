@@ -110,7 +110,7 @@ enum ProjectComponentsCommand {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectComponentsOutput {
     pub action: String,
@@ -119,7 +119,7 @@ pub struct ProjectComponentsOutput {
     pub components: Vec<ComponentConfiguration>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectListItem {
     id: String,
@@ -129,7 +129,7 @@ pub struct ProjectListItem {
     active: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPinOutput {
     pub action: String,
@@ -143,7 +143,7 @@ pub struct ProjectPinOutput {
     pub removed: Option<ProjectPinChange>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPinListItem {
     pub path: String,
@@ -154,7 +154,7 @@ pub struct ProjectPinListItem {
     pub tail_lines: Option<u32>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPinChange {
     pub path: String,
@@ -535,7 +535,7 @@ fn components_list(project_id: &str) -> homeboy_core::Result<(ProjectOutput, i32
             components: Some(ProjectComponentsOutput {
                 action: "list".to_string(),
                 project_id: project_id.to_string(),
-                component_ids: project.component_ids,
+                component_ids: project.component_ids.clone(),
                 components,
             }),
             pin: None,
@@ -602,7 +602,7 @@ fn components_set(
             components: Some(ProjectComponentsOutput {
                 action: "set".to_string(),
                 project_id: project_id.to_string(),
-                component_ids: project.component_ids,
+                component_ids: project.component_ids.clone(),
                 components,
             }),
             pin: None,
@@ -720,7 +720,7 @@ mod tests {
             vec!["alpha".to_string(), "missing".to_string()],
         )
         .unwrap_err();
-        assert!(err.to_string().contains("Unknown component IDs"));
+        assert_eq!(err.code, homeboy_core::ErrorCode::ValidationInvalidArgument);
 
         let _ = fs::remove_dir_all(&base);
     }
