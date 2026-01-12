@@ -117,7 +117,7 @@ pub struct SettingConfig {
 
 pub fn load_module(id: &str) -> Option<ModuleManifest> {
     let module_dir = AppPaths::module(id).ok()?;
-    let manifest_path = module_dir.join("module.json");
+    let manifest_path = module_dir.join("homeboy.json");
 
     if !manifest_path.exists() {
         return None;
@@ -145,7 +145,7 @@ pub fn load_all_modules() -> Vec<ModuleManifest> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            let manifest_path = path.join("module.json");
+            let manifest_path = path.join("homeboy.json");
             if let Ok(mut manifest) = read_json_file_typed::<ModuleManifest>(&manifest_path) {
                 manifest.module_path = Some(path.to_string_lossy().to_string());
                 modules.push(manifest);

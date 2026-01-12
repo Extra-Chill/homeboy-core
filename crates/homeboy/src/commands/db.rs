@@ -2,7 +2,8 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use std::process::{Command, Stdio};
 
-use homeboy_core::config::{ConfigManager, ProjectTypeManager, SlugIdentifiable};
+use homeboy_core::config::{ConfigManager, SlugIdentifiable};
+use homeboy_core::plugin::load_plugin;
 use homeboy_core::context::{resolve_project_ssh, resolve_project_ssh_with_base_path};
 use homeboy_core::shell;
 use homeboy_core::ssh::SshClient;
@@ -160,12 +161,16 @@ fn build_context(
     };
 
     let app_config = ConfigManager::load_app_config()?;
-    let type_def = ProjectTypeManager::resolve(&project.config.project_type);
-    let cli_path = type_def
-        .cli
-        .as_ref()
-        .and_then(|cli| cli.default_cli_path.clone())
-        .unwrap_or_else(|| app_config.default_cli_path.clone());
+
+    // Try to get CLI path from wordpress plugin if enabled
+    let cli_path = if project.config.has_plugin("wordpress") {
+        load_plugin("wordpress")
+            .and_then(|p| p.cli)
+            .and_then(|cli| cli.default_cli_path)
+            .unwrap_or_else(|| app_config.default_cli_path.clone())
+    } else {
+        app_config.default_cli_path.clone()
+    };
 
     Ok((
         DbContext {

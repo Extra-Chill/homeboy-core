@@ -92,13 +92,13 @@ impl ModuleScope {
             return Ok(());
         };
 
-        if let Some(project_type) = requires.project_type.as_deref() {
-            if project.project_type != project_type {
+        if let Some(required_plugin) = requires.project_type.as_deref() {
+            if !project.has_plugin(required_plugin) {
                 return Err(Error::validation_invalid_argument(
-                    "project.projectType",
+                    "project.plugins",
                     format!(
-                        "Module '{}' requires projectType '{}', but project is '{}'",
-                        module.id, project_type, project.project_type
+                        "Module '{}' requires plugin '{}', but project does not have it enabled",
+                        module.id, required_plugin
                     ),
                     None,
                     None,

@@ -16,7 +16,7 @@ impl ProjectManager {
     pub fn create_project(
         name: &str,
         domain: &str,
-        project_type: &str,
+        plugins: Vec<String>,
         server_id: Option<String>,
         base_path: Option<String>,
         table_prefix: Option<String>,
@@ -35,12 +35,12 @@ impl ProjectManager {
         let project = ProjectConfiguration {
             name: name.to_string(),
             domain: domain.to_string(),
-            project_type: project_type.to_string(),
+            plugins,
             modules: None,
             server_id,
             base_path,
             table_prefix,
-            wp_user: None,
+            plugin_settings: Default::default(),
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),

@@ -3,6 +3,7 @@ pub mod changelog;
 pub mod config;
 pub mod git;
 pub mod context;
+pub mod plugin;
 pub mod prompt;
 pub mod doctor;
 pub mod json;

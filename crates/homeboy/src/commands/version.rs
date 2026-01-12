@@ -10,6 +10,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use regex::Regex;
+
 use homeboy_core::config::{ConfigManager, VersionTarget};
 use homeboy_core::json::{read_json_file, set_json_pointer, write_json_file_pretty};
 use homeboy_core::version::{
@@ -186,6 +188,36 @@ fn extract_versions_from_content(
     })
 }
 
+fn build_version_parse_error(file: &str, pattern: &str, content: &str) -> Error {
+    let preview: String = content.chars().take(500).collect();
+    let escaped_pattern = pattern.replace('\\', "\\\\");
+
+    let mut hints = Vec::new();
+
+    if pattern.contains("\\\\s") || pattern.contains("\\\\d") {
+        hints.push("Pattern appears double-escaped. Use \\s for whitespace, \\d for digits.");
+    }
+
+    if content.contains("Version:")
+        && !Regex::new(pattern)
+            .map(|r| r.is_match(content))
+            .unwrap_or(false)
+    {
+        hints.push("File contains 'Version:' but pattern doesn't match. Check spacing and format.");
+    }
+
+    let hints_text = if hints.is_empty() {
+        String::new()
+    } else {
+        format!("\nHints:\n  - {}", hints.join("\n  - "))
+    };
+
+    Error::internal_unexpected(format!(
+        "Could not parse version from {} using pattern: {}{}\n\nFile preview (first 500 chars):\n{}",
+        file, escaped_pattern, hints_text, preview
+    ))
+}
+
 fn validate_single_version(
     versions: Vec<String>,
     version_file: &str,
@@ -314,10 +346,11 @@ pub fn show_version_output(component_id: &str) -> homeboy_core::Result<(VersionS
     let versions = extract_versions_from_content(&content, &primary_pattern)?;
 
     if versions.is_empty() {
-        return Err(Error::internal_unexpected(format!(
-            "Could not parse version from {} using pattern: {}",
-            primary.file, primary_pattern
-        )));
+        return Err(build_version_parse_error(
+            &primary.file,
+            &primary_pattern,
+            &content,
+        ));
     }
 
     let unique: BTreeSet<String> = versions.iter().cloned().collect();
@@ -391,10 +424,11 @@ fn bump(
     let primary_versions = extract_versions_from_content(&primary_content, &primary_pattern)?;
 
     if primary_versions.is_empty() {
-        return Err(Error::internal_unexpected(format!(
-            "Could not parse version from {} using pattern: {}",
-            primary.file, primary_pattern
-        )));
+        return Err(build_version_parse_error(
+            &primary.file,
+            &primary_pattern,
+            &primary_content,
+        ));
     }
 
     let unique_primary: BTreeSet<String> = primary_versions.iter().cloned().collect();

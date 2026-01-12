@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::{slugify_id, AppPaths, ConfigImportable, ConfigManager, SetName, SlugIdentifiable};
@@ -16,7 +18,8 @@ pub struct ProjectRecord {
 pub struct ProjectConfiguration {
     pub name: String,
     pub domain: String,
-    pub project_type: String,
+    #[serde(default)]
+    pub plugins: Vec<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modules: Option<std::collections::HashMap<String, super::ScopedModuleConfig>>,
@@ -27,8 +30,9 @@ pub struct ProjectConfiguration {
     pub base_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table_prefix: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wp_user: Option<String>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub plugin_settings: HashMap<String, HashMap<String, Value>>,
 
     #[serde(default)]
     pub remote_files: RemoteFileConfig,
@@ -104,8 +108,19 @@ impl ConfigImportable for ProjectConfiguration {
 }
 
 impl ProjectConfiguration {
-    pub fn is_wordpress(&self) -> bool {
-        self.project_type == "wordpress"
+    pub fn has_plugin(&self, plugin_id: &str) -> bool {
+        self.plugins.contains(&plugin_id.to_string())
+    }
+
+    pub fn get_plugin_setting(&self, plugin_id: &str, key: &str) -> Option<&Value> {
+        self.plugin_settings
+            .get(plugin_id)
+            .and_then(|settings| settings.get(key))
+    }
+
+    pub fn get_plugin_setting_str(&self, plugin_id: &str, key: &str) -> Option<&str> {
+        self.get_plugin_setting(plugin_id, key)
+            .and_then(|v| v.as_str())
     }
 
     pub fn has_sub_targets(&self) -> bool {

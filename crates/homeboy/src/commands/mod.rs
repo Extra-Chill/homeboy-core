@@ -6,6 +6,7 @@ pub(crate) struct GlobalArgs {
 
 pub mod build;
 pub mod changelog;
+pub mod cli;
 pub mod component;
 pub mod config;
 pub mod context;
@@ -19,12 +20,11 @@ pub mod git;
 pub mod init;
 pub mod logs;
 pub mod module;
-pub mod pm2;
+pub mod plugin;
 pub mod project;
 pub mod server;
 pub mod ssh;
 pub mod version;
-pub mod wp;
 
 pub(crate) fn run_markdown(
     command: crate::Commands,
@@ -55,12 +55,6 @@ pub(crate) fn run_json(
         crate::Commands::Ssh(args) => homeboy_core::output::map_cmd_result_to_json(
             ssh::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
-        crate::Commands::Wp(args) => homeboy_core::output::map_cmd_result_to_json(
-            wp::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
-        ),
-        crate::Commands::Pm2(args) => homeboy_core::output::map_cmd_result_to_json(
-            pm2::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
-        ),
         crate::Commands::Server(args) => homeboy_core::output::map_cmd_result_to_json(
             server::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
@@ -87,6 +81,9 @@ pub(crate) fn run_json(
         ),
         crate::Commands::Module(args) => homeboy_core::output::map_cmd_result_to_json(
             module::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
+        ),
+        crate::Commands::Plugin(args) => homeboy_core::output::map_cmd_result_to_json(
+            plugin::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         crate::Commands::Docs(args) => homeboy_core::output::map_cmd_result_to_json(
             docs::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),

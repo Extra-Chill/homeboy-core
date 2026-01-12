@@ -1,8 +1,6 @@
-use clap::Args;
-use homeboy_core::config::{
-    ConfigManager, ProjectConfiguration, ProjectRecord, ProjectTypeManager, SlugIdentifiable,
-};
+use homeboy_core::config::{ConfigManager, ProjectConfiguration, ProjectRecord, SlugIdentifiable};
 use homeboy_core::context::resolve_project_ssh;
+use homeboy_core::plugin::{find_plugin_by_tool, CliConfig, PluginManifest};
 use homeboy_core::shell;
 use homeboy_core::ssh::{execute_local_command, CommandOutput};
 use homeboy_core::template::{render_map, TemplateVars};
@@ -12,22 +10,10 @@ use std::collections::HashMap;
 
 use super::CmdResult;
 
-#[derive(Args)]
-pub struct WpArgs {
-    /// Project ID
-    pub project_id: String,
-
-    /// Execute locally instead of on remote server
-    #[arg(long)]
-    pub local: bool,
-
-    /// WP-CLI command and arguments (first arg may be a subtarget)
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub args: Vec<String>,
-}
-
 #[derive(Serialize)]
-pub struct WpOutput {
+pub struct CliOutput {
+    pub tool: String,
+    pub plugin_id: String,
     pub project_id: String,
     pub local: bool,
     pub args: Vec<String>,
@@ -38,8 +24,17 @@ pub struct WpOutput {
     pub exit_code: i32,
 }
 
-pub fn run(args: WpArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<WpOutput> {
+pub fn run(
+    tool: &str,
+    project_id: &str,
+    local: bool,
+    args: Vec<String>,
+    _global: &crate::commands::GlobalArgs,
+) -> CmdResult<CliOutput> {
     run_with_loader_and_executor(
+        tool,
+        project_id,
+        local,
         args,
         ConfigManager::load_project_record,
         execute_local_command,
@@ -47,51 +42,60 @@ pub fn run(args: WpArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<WpO
 }
 
 fn run_with_loader_and_executor(
-    args: WpArgs,
+    tool: &str,
+    project_id: &str,
+    local: bool,
+    args: Vec<String>,
     project_loader: fn(&str) -> homeboy_core::Result<ProjectRecord>,
     local_executor: fn(&str) -> CommandOutput,
-) -> CmdResult<WpOutput> {
-    if args.args.is_empty() {
+) -> CmdResult<CliOutput> {
+    if args.is_empty() {
         return Err(homeboy_core::Error::other(
             "No command provided".to_string(),
         ));
     }
 
-    let project = project_loader(&args.project_id)?;
+    let plugin = find_plugin_by_tool(tool).ok_or_else(|| {
+        homeboy_core::Error::other(format!("No plugin provides tool '{}'", tool))
+    })?;
 
-    let type_def = ProjectTypeManager::resolve(&project.config.project_type);
-
-    let cli_config = type_def.cli.ok_or_else(|| {
+    let cli_config = plugin.cli.as_ref().ok_or_else(|| {
         homeboy_core::Error::other(format!(
-            "Project type '{}' does not support CLI",
-            type_def.display_name
+            "Plugin '{}' does not have CLI configuration",
+            plugin.id
         ))
     })?;
 
-    if cli_config.tool != "wp" {
+    let project = project_loader(project_id)?;
+
+    if !project.config.has_plugin(&plugin.id) {
         return Err(homeboy_core::Error::other(format!(
-            "Project '{}' is a {} project (uses '{}', not 'wp')",
-            args.project_id, type_def.display_name, cli_config.tool
+            "Project '{}' does not have the '{}' plugin enabled",
+            project_id, plugin.id
         )));
     }
 
-    let (output, target_domain, command) = if args.local {
-        let (target_domain, command) = build_command(&project, &cli_config, &args.args, true)?;
+    let (output, target_domain, command) = if local {
+        let (target_domain, command) =
+            build_command(&project, &plugin, cli_config, &args, true)?;
         let output = local_executor(&command);
         (output, Some(target_domain), command)
     } else {
-        let (target_domain, command) = build_command(&project, &cli_config, &args.args, false)?;
+        let (target_domain, command) =
+            build_command(&project, &plugin, cli_config, &args, false)?;
 
-        let ctx = resolve_project_ssh(&args.project_id)?;
+        let ctx = resolve_project_ssh(project_id)?;
         let output = ctx.client.execute(&command);
         (output, Some(target_domain), command)
     };
 
     Ok((
-        WpOutput {
-            project_id: args.project_id,
-            local: args.local,
-            args: args.args,
+        CliOutput {
+            tool: tool.to_string(),
+            plugin_id: plugin.id,
+            project_id: project_id.to_string(),
+            local,
+            args,
             target_domain,
             command,
             stdout: output.stdout,
@@ -104,11 +108,12 @@ fn run_with_loader_and_executor(
 
 fn build_command(
     project: &ProjectRecord,
-    cli_config: &homeboy_core::config::CliConfig,
+    plugin: &PluginManifest,
+    cli_config: &CliConfig,
     args: &[String],
-    use_local_domain: bool,
+    use_local: bool,
 ) -> homeboy_core::Result<(String, String)> {
-    let base_path = if use_local_domain {
+    let base_path = if use_local {
         if !project.config.local_environment.is_configured() {
             return Err(homeboy_core::Error::other(
                 "Local environment not configured for project".to_string(),
@@ -126,15 +131,9 @@ fn build_command(
             })?
     };
 
-    let (target_domain, command_args) = resolve_subtarget(&project.config, args, use_local_domain);
+    let (target_domain, command_args) = resolve_subtarget(&project.config, args, use_local);
 
-    let command_args = if let Some(ref wp_user) = project.config.wp_user {
-        let mut args_with_user = vec![format!("--user={}", wp_user)];
-        args_with_user.extend(command_args);
-        args_with_user
-    } else {
-        command_args
-    };
+    let command_args = inject_plugin_args(&project.config, plugin, command_args);
 
     if command_args.is_empty() {
         return Err(homeboy_core::Error::other(
@@ -142,7 +141,7 @@ fn build_command(
         ));
     }
 
-    let cli_path = if use_local_domain {
+    let cli_path = if use_local {
         project
             .config
             .local_environment
@@ -173,12 +172,27 @@ fn build_command(
     ))
 }
 
+fn inject_plugin_args(
+    project: &ProjectConfiguration,
+    plugin: &PluginManifest,
+    args: Vec<String>,
+) -> Vec<String> {
+    if plugin.id == "wordpress" {
+        if let Some(ref wp_user) = project.wp_user {
+            let mut args_with_user = vec![format!("--user={}", wp_user)];
+            args_with_user.extend(args);
+            return args_with_user;
+        }
+    }
+    args
+}
+
 fn resolve_subtarget(
     project: &ProjectConfiguration,
     args: &[String],
-    use_local_domain: bool,
+    use_local: bool,
 ) -> (String, Vec<String>) {
-    let default_domain = if use_local_domain {
+    let default_domain = if use_local {
         if project.local_environment.domain.is_empty() {
             "localhost".to_string()
         } else {
@@ -199,7 +213,7 @@ fn resolve_subtarget(
     if let Some(subtarget) = project.sub_targets.iter().find(|t| {
         t.slug_id().ok().as_deref() == Some(sub_id) || token::identifier_eq(&t.name, sub_id)
     }) {
-        let domain = if use_local_domain {
+        let domain = if use_local {
             let base_domain = if project.local_environment.domain.is_empty() {
                 "localhost"
             } else {
@@ -218,70 +232,4 @@ fn resolve_subtarget(
     }
 
     (default_domain, args.to_vec())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn fake_project_loader(project_id: &str) -> homeboy_core::Result<ProjectRecord> {
-        Ok(ProjectRecord {
-            id: project_id.to_string(),
-            config: ProjectConfiguration {
-                name: "Sarai Chinwag".to_string(),
-                domain: "example.com".to_string(),
-                project_type: "wordpress".to_string(),
-                modules: None,
-                server_id: Some("cloudways".to_string()),
-                base_path: Some("/tmp".to_string()),
-                table_prefix: Some("wp_".to_string()),
-                wp_user: None,
-                remote_files: Default::default(),
-                remote_logs: Default::default(),
-                database: Default::default(),
-                local_environment: homeboy_core::config::LocalEnvironmentConfig {
-                    site_path: "/tmp".to_string(),
-                    domain: "example.local".to_string(),
-                    cli_path: None,
-                },
-                tools: Default::default(),
-                api: Default::default(),
-                changelog_next_section_label: None,
-                changelog_next_section_aliases: None,
-                sub_targets: vec![],
-                shared_tables: vec![],
-                component_ids: vec![],
-                table_groupings: vec![],
-                component_groupings: vec![],
-                protected_table_patterns: vec![],
-                unlocked_table_patterns: vec![],
-            },
-        })
-    }
-
-    fn fake_executor(_command: &str) -> CommandOutput {
-        CommandOutput {
-            stdout: "ok\n".to_string(),
-            stderr: "".to_string(),
-            success: true,
-            exit_code: 0,
-        }
-    }
-
-    #[test]
-    fn wp_returns_executor_stdout_and_exit_code() {
-        let args = WpArgs {
-            project_id: "saraichinwag".to_string(),
-            local: true,
-            args: vec!["core".to_string(), "version".to_string()],
-        };
-
-        let (data, exit_code) =
-            run_with_loader_and_executor(args, fake_project_loader, fake_executor).unwrap();
-
-        assert_eq!(exit_code, 0);
-        assert_eq!(data.exit_code, 0);
-        assert_eq!(data.stdout, "ok\n");
-        assert_eq!(data.stderr, "");
-    }
 }

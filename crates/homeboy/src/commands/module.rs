@@ -1071,9 +1071,9 @@ fn is_module_compatible(module: &ModuleManifest, project: Option<&ProjectConfigu
         return true;
     };
 
-    // Check project type
-    if let Some(ref required_type) = requires.project_type {
-        if *required_type != project.project_type {
+    // Check required plugin
+    if let Some(ref required_plugin) = requires.project_type {
+        if !project.has_plugin(required_plugin) {
             return false;
         }
     }

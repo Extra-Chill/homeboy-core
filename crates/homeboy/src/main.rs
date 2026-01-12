@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{ArgMatches, Command, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use commands::GlobalArgs;
 
@@ -18,9 +18,10 @@ mod commands;
 mod docs;
 
 use commands::{
-    build, changelog, component, config, context, db, deploy, doctor, error, file, git, init, logs,
-    module, pm2, project, server, ssh, version, wp,
+    build, changelog, cli, component, config, context, db, deploy, doctor, error, file, git, init,
+    logs, module, plugin, project, server, ssh, version,
 };
+use homeboy_core::plugin::load_all_plugins;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -43,10 +44,6 @@ enum Commands {
     Project(project::ProjectArgs),
     /// SSH into a project server or configured server
     Ssh(ssh::SshArgs),
-    /// Run WP-CLI commands on WordPress projects
-    Wp(wp::WpArgs),
-    /// Run PM2 commands on Node.js projects
-    Pm2(pm2::Pm2Args),
     /// Manage SSH server configurations
     Server(server::ServerArgs),
     /// Database operations
@@ -65,6 +62,8 @@ enum Commands {
     Context(context::ContextArgs),
     /// Execute CLI-compatible modules
     Module(module::ModuleArgs),
+    /// Manage platform plugins
+    Plugin(plugin::PluginArgs),
     /// Initialize a repo for use with Homeboy
     Init(init::InitArgs),
     /// Display CLI documentation
@@ -103,8 +102,120 @@ fn response_mode(command: &Commands) -> ResponseMode {
     }
 }
 
+struct PluginCommand {
+    tool: String,
+    project_id: String,
+    local: bool,
+    args: Vec<String>,
+}
+
+struct PluginCliInfo {
+    tool: String,
+    display_name: String,
+    plugin_name: String,
+}
+
+fn collect_plugin_cli_info() -> Vec<PluginCliInfo> {
+    load_all_plugins()
+        .into_iter()
+        .filter_map(|p| {
+            p.cli.map(|cli| PluginCliInfo {
+                tool: cli.tool,
+                display_name: cli.display_name,
+                plugin_name: p.name,
+            })
+        })
+        .collect()
+}
+
+fn build_augmented_command(plugin_info: &[PluginCliInfo]) -> Command {
+    let mut cmd = Cli::command();
+
+    for info in plugin_info {
+        let tool_name: &'static str = Box::leak(info.tool.clone().into_boxed_str());
+        cmd = cmd.subcommand(
+            Command::new(tool_name)
+                .about(format!("Run {} commands via {}", info.display_name, info.plugin_name))
+                .arg(
+                    clap::Arg::new("project_id")
+                        .help("Project ID")
+                        .required(true)
+                        .index(1),
+                )
+                .arg(
+                    clap::Arg::new("local")
+                        .long("local")
+                        .help("Execute locally instead of on remote server")
+                        .action(clap::ArgAction::SetTrue),
+                )
+                .arg(
+                    clap::Arg::new("args")
+                        .help("Command arguments")
+                        .index(2)
+                        .num_args(0..)
+                        .allow_hyphen_values(true),
+                )
+                .trailing_var_arg(true),
+        );
+    }
+
+    cmd
+}
+
+fn try_parse_plugin_command(matches: &ArgMatches, plugin_info: &[PluginCliInfo]) -> Option<PluginCommand> {
+    let (tool, sub_matches) = matches.subcommand()?;
+
+    if !plugin_info.iter().any(|p| p.tool == tool) {
+        return None;
+    }
+
+    let sub_matches = sub_matches;
+    let project_id = sub_matches.get_one::<String>("project_id")?.clone();
+    let local = sub_matches.get_flag("local");
+    let args: Vec<String> = sub_matches
+        .get_many::<String>("args")
+        .map(|vals| vals.cloned().collect())
+        .unwrap_or_default();
+
+    Some(PluginCommand {
+        tool: tool.to_string(),
+        project_id,
+        local,
+        args,
+    })
+}
+
 fn main() -> std::process::ExitCode {
-    let cli = Cli::parse();
+    let plugin_info = collect_plugin_cli_info();
+    let cmd = build_augmented_command(&plugin_info);
+    let matches = cmd.get_matches();
+
+    let global = GlobalArgs {
+        dry_run: matches.get_flag("dry_run"),
+    };
+
+    if let Some(plugin_cmd) = try_parse_plugin_command(&matches, &plugin_info) {
+        let result = cli::run(
+            &plugin_cmd.tool,
+            &plugin_cmd.project_id,
+            plugin_cmd.local,
+            plugin_cmd.args,
+            &global,
+        );
+
+        let (json_result, exit_code) = homeboy_core::output::map_cmd_result_to_json(
+            result.map(|(data, exit_code)| (data, vec![], exit_code)),
+        );
+        homeboy_core::output::print_json_result(json_result);
+        return std::process::ExitCode::from(exit_code_to_u8(exit_code));
+    }
+
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(e) => {
+            e.exit();
+        }
+    };
 
     let mode = response_mode(&cli.command);
 
@@ -125,12 +236,8 @@ fn main() -> std::process::ExitCode {
         ResponseMode::Raw(RawOutputMode::Markdown) => {}
     }
 
-    let global = GlobalArgs {
-        dry_run: cli.dry_run,
-    };
-
     if matches!(cli.command, Commands::List) {
-        let mut cmd = Cli::command();
+        let mut cmd = build_augmented_command(&plugin_info);
         cmd.print_help().expect("Failed to print help");
         println!();
         return std::process::ExitCode::SUCCESS;

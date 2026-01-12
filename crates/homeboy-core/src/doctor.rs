@@ -468,16 +468,7 @@ impl Scanner {
                 None,
             );
         }
-        if project.project_type.trim().is_empty() {
-            self.push_issue(
-                DoctorSeverity::Error,
-                "INVALID_VALUE",
-                "Project projectType is empty",
-                path,
-                Some("/projectType".to_string()),
-                None,
-            );
-        }
+        // plugins array can be empty - project is just a generic SSH target
         if let Some(prefix) = project.table_prefix.as_deref() {
             if !prefix.is_empty() && !prefix.ends_with('_') {
                 self.push_issue(

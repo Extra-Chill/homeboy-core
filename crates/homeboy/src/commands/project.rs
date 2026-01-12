@@ -41,15 +41,16 @@ enum ProjectCommand {
         name: Option<String>,
         /// Public site domain (CLI mode)
         domain: Option<String>,
-        /// Project type (e.g. wordpress) (CLI mode)
-        project_type: Option<String>,
+        /// Plugin to enable (can be specified multiple times)
+        #[arg(long = "plugin", value_name = "PLUGIN")]
+        plugins: Vec<String>,
         /// Optional server ID
         #[arg(long)]
         server_id: Option<String>,
         /// Optional remote base path
         #[arg(long)]
         base_path: Option<String>,
-        /// Optional WordPress table prefix
+        /// Optional table prefix
         #[arg(long)]
         table_prefix: Option<String>,
         /// Switch active project after create (CLI mode only)
@@ -66,21 +67,21 @@ enum ProjectCommand {
         /// Public site domain
         #[arg(long)]
         domain: Option<String>,
-        /// Project type (e.g. wordpress)
-        #[arg(long)]
-        project_type: Option<String>,
+        /// Replace plugins (can be specified multiple times)
+        #[arg(long = "plugin", value_name = "PLUGIN")]
+        plugins: Vec<String>,
         /// Server ID
         #[arg(long)]
         server_id: Option<String>,
         /// Remote base path
         #[arg(long)]
         base_path: Option<String>,
-        /// WordPress table prefix
+        /// Table prefix
         #[arg(long)]
         table_prefix: Option<String>,
-        /// WordPress CLI user for permission context
-        #[arg(long)]
-        wp_user: Option<String>,
+        /// Plugin setting in format plugin_id.key=value (can be specified multiple times)
+        #[arg(long = "plugin-setting", value_name = "SETTING")]
+        plugin_settings: Vec<String>,
         /// Replace project component IDs (comma-separated)
         #[arg(long, value_delimiter = ',')]
         component_ids: Vec<String>,
@@ -157,7 +158,7 @@ pub struct ProjectListItem {
     id: String,
     name: String,
     domain: String,
-    project_type: String,
+    plugins: Vec<String>,
     active: bool,
 }
 
@@ -265,7 +266,7 @@ pub fn run(
             skip_existing,
             name,
             domain,
-            project_type,
+            plugins,
             server_id,
             base_path,
             table_prefix,
@@ -291,19 +292,11 @@ pub fn run(
                     None,
                 )
             })?;
-            let project_type = project_type.ok_or_else(|| {
-                homeboy_core::Error::validation_invalid_argument(
-                    "projectType",
-                    "Missing required argument: project_type (or use --json)",
-                    None,
-                    None,
-                )
-            })?;
 
             create(
                 &name,
                 &domain,
-                &project_type,
+                plugins,
                 server_id,
                 base_path,
                 table_prefix,
@@ -314,21 +307,21 @@ pub fn run(
             project_id,
             name,
             domain,
-            project_type,
+            plugins,
             server_id,
             base_path,
             table_prefix,
-            wp_user,
+            plugin_settings,
             component_ids,
         } => set(
             &project_id,
             name,
             domain,
-            project_type,
+            plugins,
             server_id,
             base_path,
             table_prefix,
-            wp_user,
+            plugin_settings,
             component_ids,
         ),
         ProjectCommand::Switch { project_id } => switch(&project_id),
@@ -368,7 +361,7 @@ fn list(current: bool) -> homeboy_core::Result<(ProjectOutput, i32)> {
             id: record.id,
             name: record.config.name,
             domain: record.config.domain,
-            project_type: record.config.project_type,
+            plugins: record.config.plugins,
         })
         .collect();
 
@@ -433,7 +426,7 @@ fn create_json(spec: &str, skip_existing: bool) -> homeboy_core::Result<(Project
 fn create(
     name: &str,
     domain: &str,
-    project_type: &str,
+    plugins: Vec<String>,
     server_id: Option<String>,
     base_path: Option<String>,
     table_prefix: Option<String>,
@@ -442,7 +435,7 @@ fn create(
     let (created_project_id, _project) = ProjectManager::create_project(
         name,
         domain,
-        project_type,
+        plugins,
         server_id,
         base_path,
         table_prefix,
@@ -474,11 +467,11 @@ fn set(
     project_id: &str,
     name: Option<String>,
     domain: Option<String>,
-    project_type: Option<String>,
+    plugins: Vec<String>,
     server_id: Option<String>,
     base_path: Option<String>,
     table_prefix: Option<String>,
-    wp_user: Option<String>,
+    plugin_settings: Vec<String>,
     component_ids: Vec<String>,
 ) -> homeboy_core::Result<(ProjectOutput, i32)> {
     let mut updated_fields: Vec<String> = Vec::new();
@@ -514,9 +507,9 @@ fn set(
         updated_fields.push("domain".to_string());
     }
 
-    if let Some(project_type) = project_type {
-        project.project_type = project_type;
-        updated_fields.push("projectType".to_string());
+    if !plugins.is_empty() {
+        project.plugins = plugins;
+        updated_fields.push("plugins".to_string());
     }
 
     if let Some(server_id) = server_id {
@@ -534,9 +527,36 @@ fn set(
         updated_fields.push("tablePrefix".to_string());
     }
 
-    if let Some(wp_user) = wp_user {
-        project.wp_user = Some(wp_user);
-        updated_fields.push("wpUser".to_string());
+    for setting in &plugin_settings {
+        let (plugin_key, value) = setting
+            .split_once('=')
+            .ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "plugin-setting",
+                    "Plugin setting must be in format plugin_id.key=value",
+                    Some(setting.clone()),
+                    None,
+                )
+            })?;
+
+        let (plugin_id, key) = plugin_key
+            .split_once('.')
+            .ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "plugin-setting",
+                    "Plugin setting must be in format plugin_id.key=value",
+                    Some(setting.clone()),
+                    None,
+                )
+            })?;
+
+        project
+            .plugin_settings
+            .entry(plugin_id.to_string())
+            .or_default()
+            .insert(key.to_string(), serde_json::Value::String(value.to_string()));
+
+        updated_fields.push(format!("pluginSettings.{}.{}", plugin_id, key));
     }
 
     if !component_ids.is_empty() {
@@ -851,12 +871,12 @@ mod tests {
         homeboy_core::config::ProjectConfiguration {
             name: name.to_string(),
             domain: "example.com".to_string(),
-            project_type: "wordpress".to_string(),
+            plugins: vec!["wordpress".to_string()],
             modules: None,
             server_id: None,
             base_path: None,
             table_prefix: None,
-            wp_user: None,
+            plugin_settings: Default::default(),
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),
@@ -1042,7 +1062,7 @@ mod tests {
             &project_id,
             None,
             Some("example.com".to_string()),
-            None,
+            vec![],
             None,
             None,
             None,
