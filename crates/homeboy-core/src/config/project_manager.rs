@@ -40,6 +40,7 @@ impl ProjectManager {
             server_id,
             base_path,
             table_prefix,
+            wp_user: None,
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),

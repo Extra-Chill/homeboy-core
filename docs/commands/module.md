@@ -63,7 +63,15 @@ Homeboy builds an **effective settings** map for each module by merging settings
 2. Project (`projects/<projectId>.json`): `modules.<moduleId>.settings`
 3. Component (`components/<componentId>.json`): `modules.<moduleId>.settings`
 
-When modules are used with a project/component context (for example, CLI-type modules), the merged settings are serialized and passed to the module via the `HOMEBOY_SETTINGS_JSON` environment variable.
+When running a module, Homeboy passes an execution context via environment variables:
+
+- `HOMEBOY_EXEC_CONTEXT_VERSION`: currently `1`
+- `HOMEBOY_MODULE_ID`
+- `HOMEBOY_SETTINGS_JSON`: merged effective settings (JSON)
+- `HOMEBOY_PROJECT_ID` (optional; CLI modules when a project context is used)
+- `HOMEBOY_COMPONENT_ID` (optional; when a component context is resolved)
+
+Python modules also receive `PLAYWRIGHT_BROWSERS_PATH` (used when Playwright browsers are installed/configured).
 
 `homeboy doctor scan` validates each scope's `settings` object against the module's manifest.
 

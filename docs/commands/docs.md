@@ -19,7 +19,7 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 ## Arguments
 
-- `<topic>...` (optional): documentation topic (examples in CLI help: `deploy`, `project set`).
+- `<topic>...` (optional): documentation topic. This must resolve to an embedded docs key (path under `docs/` without `.md`). Examples: `commands/deploy`, `commands/project`, `index`.
 
 ## Options
 

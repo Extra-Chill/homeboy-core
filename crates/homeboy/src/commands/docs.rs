@@ -5,6 +5,24 @@ use crate::docs;
 
 use super::CmdResult;
 
+fn strip_format_flag(topic: &[String]) -> Vec<String> {
+    let mut cleaned = Vec::new();
+    let mut skip_next = false;
+
+    for arg in topic {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--format" {
+            skip_next = true;
+            continue;
+        }
+        cleaned.push(arg.clone());
+    }
+    cleaned
+}
+
 #[derive(Args)]
 pub struct DocsArgs {
     /// List available topics and exit
@@ -49,14 +67,15 @@ pub fn run_markdown(args: DocsArgs) -> CmdResult<String> {
         ));
     }
 
-    let resolved = docs::resolve(&args.topic);
+    let topic = strip_format_flag(&args.topic);
+    let resolved = docs::resolve(&topic);
 
     if resolved.content.is_empty() {
         let available_topics = docs::available_topics();
 
         return Err(homeboy_core::Error::other(format!(
             "No documentation found for '{}' (available: {})",
-            args.topic.join(" "),
+            topic.join(" "),
             available_topics.join("\n")
         )));
     }
@@ -74,19 +93,20 @@ pub fn run(args: DocsArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<D
         ));
     }
 
-    let resolved = docs::resolve(&args.topic);
+    let topic = strip_format_flag(&args.topic);
+    let resolved = docs::resolve(&topic);
 
     if resolved.content.is_empty() {
         let available_topics = docs::available_topics();
 
         return Err(homeboy_core::Error::other(format!(
             "No documentation found for '{}' (available: {})",
-            args.topic.join(" "),
+            topic.join(" "),
             available_topics.join("\n")
         )));
     }
 
-    let topic = args.topic.join(" ");
+    let topic_str = topic.join(" ");
     let slug = resolved
         .segments
         .last()
@@ -95,7 +115,7 @@ pub fn run(args: DocsArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<D
 
     Ok((
         DocsOutput::Content(DocsContentOutput {
-            topic,
+            topic: topic_str,
             topic_label: resolved.topic_label,
             resolved_key: resolved.key,
             segments: resolved.segments,

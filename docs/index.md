@@ -2,6 +2,8 @@
 
 This directory contains the markdown docs embedded into the `homeboy` binary and displayed via `homeboy docs`.
 
+Homeboy is a config-driven automation engine for repetitive discovery and AI coding workflows, with standardized patterns and a reliable JSON output envelope.
+
 ## CLI
 
 - Root command + global flags: [Root command](cli/homeboy-root-command.md)

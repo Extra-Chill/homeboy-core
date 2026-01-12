@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use commands::GlobalArgs;
 
@@ -81,6 +81,8 @@ enum Commands {
     Doctor(doctor::DoctorArgs),
     /// Error code registry and explanations
     Error(error::ErrorArgs),
+    /// List available commands (alias for --help)
+    List,
 }
 
 fn response_mode(command: &Commands) -> ResponseMode {
@@ -96,6 +98,7 @@ fn response_mode(command: &Commands) -> ResponseMode {
         Commands::Changelog(args) if changelog::is_show_markdown(args) => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
+        Commands::List => ResponseMode::Raw(RawOutputMode::Markdown),
         _ => ResponseMode::Json,
     }
 }
@@ -125,6 +128,13 @@ fn main() -> std::process::ExitCode {
     let global = GlobalArgs {
         dry_run: cli.dry_run,
     };
+
+    if matches!(cli.command, Commands::List) {
+        let mut cmd = Cli::command();
+        cmd.print_help().expect("Failed to print help");
+        println!();
+        return std::process::ExitCode::SUCCESS;
+    }
 
     if let ResponseMode::Raw(RawOutputMode::Markdown) = mode {
         let markdown_result = commands::run_markdown(cli.command, &global);

@@ -128,6 +128,14 @@ fn build_command(
 
     let (target_domain, command_args) = resolve_subtarget(&project.config, args, use_local_domain);
 
+    let command_args = if let Some(ref wp_user) = project.config.wp_user {
+        let mut args_with_user = vec![format!("--user={}", wp_user)];
+        args_with_user.extend(command_args);
+        args_with_user
+    } else {
+        command_args
+    };
+
     if command_args.is_empty() {
         return Err(homeboy_core::Error::other(
             "No command provided after subtarget".to_string(),
@@ -227,6 +235,7 @@ mod tests {
                 server_id: Some("cloudways".to_string()),
                 base_path: Some("/tmp".to_string()),
                 table_prefix: Some("wp_".to_string()),
+                wp_user: None,
                 remote_files: Default::default(),
                 remote_logs: Default::default(),
                 database: Default::default(),

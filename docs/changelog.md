@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.2.19
+
+- Fix inverted version validation condition to prevent gaps instead of blocking valid bumps
+
 ## 0.2.18
 
 - Fix shell argument escaping for wp and pm2 commands with special characters

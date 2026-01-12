@@ -27,6 +27,8 @@ pub struct ProjectConfiguration {
     pub base_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table_prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wp_user: Option<String>,
 
     #[serde(default)]
     pub remote_files: RemoteFileConfig,

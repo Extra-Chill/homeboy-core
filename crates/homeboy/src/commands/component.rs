@@ -2,7 +2,8 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy_core::config::{
-    slugify_id, ComponentConfiguration, ConfigManager, SlugIdentifiable, VersionTarget,
+    create_from_json, slugify_id, ComponentConfiguration, ConfigManager, CreateSummary,
+    VersionTarget,
 };
 
 use super::CmdResult;
@@ -39,17 +40,25 @@ pub struct ComponentArgs {
 enum ComponentCommand {
     /// Create a new component configuration
     Create {
-        /// Display name (ID derived from name)
-        name: String,
+        /// JSON input spec for create/update (supports single or bulk)
+        #[arg(long)]
+        json: Option<String>,
+
+        /// Skip items that already exist (JSON mode only)
+        #[arg(long)]
+        skip_existing: bool,
+
+        /// Display name (ID derived from name) - required in CLI mode
+        name: Option<String>,
         /// Absolute path to local source directory
         #[arg(long)]
-        local_path: String,
+        local_path: Option<String>,
         /// Remote path relative to project basePath
         #[arg(long)]
-        remote_path: String,
+        remote_path: Option<String>,
         /// Build artifact path relative to localPath
         #[arg(long)]
-        build_artifact: String,
+        build_artifact: Option<String>,
         /// Version targets in the form "file" or "file::pattern" (repeatable)
         #[arg(long = "version-target", value_name = "TARGET")]
         version_targets: Vec<String>,
@@ -59,14 +68,6 @@ enum ComponentCommand {
         /// WordPress multisite network-activated plugin
         #[arg(long)]
         is_network: bool,
-    },
-    /// Bulk create components from JSON
-    Import {
-        /// JSON array of component objects
-        json: String,
-        /// Skip components that already exist
-        #[arg(long)]
-        skip_existing: bool,
     },
     /// Display component configuration
     Show {
@@ -121,11 +122,10 @@ pub struct ComponentOutput {
     pub component_id: Option<String>,
     pub success: bool,
     pub updated_fields: Vec<String>,
-    pub created: Vec<String>,
-    pub skipped: Vec<String>,
-    pub errors: Vec<String>,
     pub component: Option<ComponentConfiguration>,
     pub components: Vec<ComponentConfiguration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import: Option<CreateSummary>,
 }
 
 pub fn run(
@@ -134,6 +134,8 @@ pub fn run(
 ) -> CmdResult<ComponentOutput> {
     match args.command {
         ComponentCommand::Create {
+            json,
+            skip_existing,
             name,
             local_path,
             remote_path,
@@ -141,19 +143,54 @@ pub fn run(
             version_targets,
             build_command,
             is_network,
-        } => create(
-            &name,
-            &local_path,
-            &remote_path,
-            &build_artifact,
-            version_targets,
-            build_command,
-            is_network,
-        ),
-        ComponentCommand::Import {
-            json,
-            skip_existing,
-        } => import(&json, skip_existing),
+        } => {
+            if let Some(spec) = json {
+                return create_json(&spec, skip_existing);
+            }
+
+            let name = name.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "name",
+                    "Missing required argument: name (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+            let local_path = local_path.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "localPath",
+                    "Missing required argument: --local-path (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+            let remote_path = remote_path.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "remotePath",
+                    "Missing required argument: --remote-path (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+            let build_artifact = build_artifact.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "buildArtifact",
+                    "Missing required argument: --build-artifact (or use --json)",
+                    None,
+                    None,
+                )
+            })?;
+
+            create(
+                &name,
+                &local_path,
+                &remote_path,
+                &build_artifact,
+                version_targets,
+                build_command,
+                is_network,
+            )
+        }
         ComponentCommand::Show { id } => show(&id),
         ComponentCommand::Set {
             id,
@@ -179,6 +216,24 @@ pub fn run(
         ComponentCommand::Delete { id, force } => delete(&id, force),
         ComponentCommand::List => list(),
     }
+}
+
+fn create_json(spec: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
+    let summary = create_from_json::<ComponentConfiguration>(spec, skip_existing)?;
+    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+
+    Ok((
+        ComponentOutput {
+            action: "component.create".to_string(),
+            component_id: None,
+            success: summary.errors == 0,
+            updated_fields: vec![],
+            component: None,
+            components: vec![],
+            import: Some(summary),
+        },
+        exit_code,
+    ))
 }
 
 fn create(
@@ -222,73 +277,11 @@ fn create(
             component_id: Some(id.to_string()),
             success: true,
             updated_fields: vec![],
-            created: vec![],
-            skipped: vec![],
-            errors: vec![],
             component: Some(component),
             components: vec![],
+            import: None,
         },
         0,
-    ))
-}
-
-fn import(json_str: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
-    let mut components: Vec<ComponentConfiguration> = serde_json::from_str(json_str)
-        .map_err(|e| homeboy_core::Error::other(format!("Failed to parse JSON - {}", e)))?;
-
-    if components.is_empty() {
-        return Err(homeboy_core::Error::other(
-            "No components in JSON array".to_string(),
-        ));
-    }
-
-    let mut created: Vec<String> = vec![];
-    let mut skipped: Vec<String> = vec![];
-    let mut errors: Vec<String> = vec![];
-
-    for component in components.iter_mut() {
-        component.local_path = shellexpand::tilde(&component.local_path).to_string();
-
-        let id: String = match component.slug_id() {
-            Ok(id) => id,
-            Err(e) => {
-                errors.push(format!("{}: {}", component.name, e));
-                continue;
-            }
-        };
-
-        if ConfigManager::load_component(&id).is_ok() {
-            if skip_existing {
-                skipped.push(id.clone());
-                continue;
-            }
-
-            errors.push(format!("{}: already exists", id));
-            continue;
-        }
-
-        if let Err(e) = ConfigManager::save_component(&id, component) {
-            errors.push(format!("{}: {}", id, e));
-        } else {
-            created.push(id.clone());
-        }
-    }
-
-    let exit_code = if errors.is_empty() { 0 } else { 1 };
-
-    Ok((
-        ComponentOutput {
-            action: "import".to_string(),
-            component_id: None,
-            success: errors.is_empty(),
-            updated_fields: vec![],
-            created,
-            skipped,
-            errors,
-            component: None,
-            components: vec![],
-        },
-        exit_code,
     ))
 }
 
@@ -301,11 +294,9 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
             component_id: Some(id.to_string()),
             success: true,
             updated_fields: vec![],
-            created: vec![],
-            skipped: vec![],
-            errors: vec![],
             component: Some(component),
             components: vec![],
+            import: None,
         },
         0,
     ))
@@ -394,11 +385,9 @@ fn set(args: SetComponentArgs) -> CmdResult<ComponentOutput> {
             component_id: Some(id.clone()),
             success: true,
             updated_fields,
-            created: vec![],
-            skipped: vec![],
-            errors: vec![],
             component: Some(component),
             components: vec![],
+            import: None,
         },
         0,
     ))
@@ -437,11 +426,9 @@ fn delete(id: &str, force: bool) -> CmdResult<ComponentOutput> {
             component_id: Some(id.to_string()),
             success: true,
             updated_fields: vec![],
-            created: vec![],
-            skipped: vec![],
-            errors: vec![],
             component: None,
             components: vec![],
+            import: None,
         },
         0,
     ))
@@ -456,11 +443,9 @@ fn list() -> CmdResult<ComponentOutput> {
             component_id: None,
             success: true,
             updated_fields: vec![],
-            created: vec![],
-            skipped: vec![],
-            errors: vec![],
             component: None,
             components,
+            import: None,
         },
         0,
     ))

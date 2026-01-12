@@ -1,7 +1,9 @@
 pub mod base_path;
 pub mod changelog;
 pub mod config;
+pub mod git;
 pub mod context;
+pub mod prompt;
 pub mod doctor;
 pub mod json;
 pub mod module;

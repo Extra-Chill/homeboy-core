@@ -1,8 +1,10 @@
 # Homeboy CLI
 
-LLM-first CLI for development and deployment automation. Designed for LLMs and developers using LLMs to iterate, debug, and ship fast.
+Homeboy is a config-driven automation engine for repetitive discovery and AI coding workflows.
 
-Note: This should be considered experimental and is still early in development. Breaking changes may be frequent before 0.3.0
+It standardizes common operations (project/component discovery, remote execution, deployments) and produces reliable machine-readable output via a stable JSON envelope.
+
+Note: This is experimental and still early in development. Breaking changes may be frequent before 0.3.0
 
 ## Installation
 

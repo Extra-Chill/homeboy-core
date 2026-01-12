@@ -2,8 +2,8 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy_core::config::{
-    find_config_key, parse_config_value, AppPaths, ConfigManager, ConfigValueType,
-    KNOWN_CONFIG_KEYS,
+    create_from_json, find_config_key, parse_config_value, AppConfig, AppPaths, ConfigManager,
+    ConfigValueType, CreateSummary, KNOWN_CONFIG_KEYS,
 };
 use homeboy_core::json::{
     read_json_file, remove_json_pointer, set_json_pointer, write_json_file_pretty,
@@ -19,6 +19,13 @@ pub struct ConfigArgs {
 
 #[derive(Subcommand)]
 enum ConfigCommand {
+    /// Create or update global config from JSON
+    Create {
+        /// JSON input spec for create/update
+        #[arg(long)]
+        json: Option<String>,
+    },
+
     /// Print the Homeboy config file path
     Path,
 
@@ -60,6 +67,9 @@ enum ConfigCommand {
 #[derive(Serialize)]
 #[serde(tag = "command", rename_all = "camelCase")]
 pub enum ConfigOutput {
+    Create {
+        import: CreateSummary,
+    },
     Path {
         path: String,
     },
@@ -100,6 +110,19 @@ pub struct ConfigKeyOutput {
 
 pub fn run(args: ConfigArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ConfigOutput> {
     match args.command {
+        ConfigCommand::Create { json } => {
+            let spec = json.ok_or_else(|| {
+                homeboy_core::Error::validation_invalid_argument(
+                    "json",
+                    "Missing required argument: --json",
+                    None,
+                    None,
+                )
+            })?;
+            let summary = create_from_json::<AppConfig>(&spec, false)?;
+            let exit_code = if summary.errors > 0 { 1 } else { 0 };
+            Ok((ConfigOutput::Create { import: summary }, exit_code))
+        }
         ConfigCommand::Path => {
             let path = AppPaths::config()?;
             Ok((

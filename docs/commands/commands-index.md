@@ -5,6 +5,7 @@
 - [component](component.md)
 - [error](error.md)
 - [config](config.md)
+- [context](context.md)
 - [db](db.md)
 
 - [deploy](deploy.md)

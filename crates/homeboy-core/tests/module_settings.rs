@@ -69,6 +69,7 @@ fn merges_with_precedence_and_defaults() {
         server_id: None,
         base_path: None,
         table_prefix: None,
+        wp_user: None,
         remote_files: Default::default(),
         remote_logs: Default::default(),
         database: Default::default(),

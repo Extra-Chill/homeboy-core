@@ -109,5 +109,9 @@ pub(crate) fn run_json(
         crate::Commands::Error(args) => homeboy_core::output::map_cmd_result_to_json(
             error::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
+        crate::Commands::List => {
+            let err = homeboy_core::Error::other("List uses raw output mode".to_string());
+            homeboy_core::output::map_cmd_result_to_json::<serde_json::Value>(Err(err))
+        }
     }
 }

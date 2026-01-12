@@ -78,6 +78,9 @@ enum ProjectCommand {
         /// WordPress table prefix
         #[arg(long)]
         table_prefix: Option<String>,
+        /// WordPress CLI user for permission context
+        #[arg(long)]
+        wp_user: Option<String>,
         /// Replace project component IDs (comma-separated)
         #[arg(long, value_delimiter = ',')]
         component_ids: Vec<String>,
@@ -315,6 +318,7 @@ pub fn run(
             server_id,
             base_path,
             table_prefix,
+            wp_user,
             component_ids,
         } => set(
             &project_id,
@@ -324,6 +328,7 @@ pub fn run(
             server_id,
             base_path,
             table_prefix,
+            wp_user,
             component_ids,
         ),
         ProjectCommand::Switch { project_id } => switch(&project_id),
@@ -473,6 +478,7 @@ fn set(
     server_id: Option<String>,
     base_path: Option<String>,
     table_prefix: Option<String>,
+    wp_user: Option<String>,
     component_ids: Vec<String>,
 ) -> homeboy_core::Result<(ProjectOutput, i32)> {
     let mut updated_fields: Vec<String> = Vec::new();
@@ -526,6 +532,11 @@ fn set(
     if let Some(table_prefix) = table_prefix {
         project.table_prefix = Some(table_prefix);
         updated_fields.push("tablePrefix".to_string());
+    }
+
+    if let Some(wp_user) = wp_user {
+        project.wp_user = Some(wp_user);
+        updated_fields.push("wpUser".to_string());
     }
 
     if !component_ids.is_empty() {
@@ -845,6 +856,7 @@ mod tests {
             server_id: None,
             base_path: None,
             table_prefix: None,
+            wp_user: None,
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),
@@ -1030,6 +1042,7 @@ mod tests {
             &project_id,
             None,
             Some("example.com".to_string()),
+            None,
             None,
             None,
             None,
