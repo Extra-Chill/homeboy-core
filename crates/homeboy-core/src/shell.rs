@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn quote_args_mixed() {
         let args = vec!["eval".to_string(), "echo 'test';".to_string()];
-        assert_eq!(quote_args(&args), "eval 'echo '\\''test'\\'';\\'");
+        assert_eq!(quote_args(&args), "eval 'echo '\\''test'\\'';'");
     }
 
     #[test]

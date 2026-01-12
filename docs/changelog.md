@@ -4,6 +4,13 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.2.18
+
+- Fix shell argument escaping for wp and pm2 commands with special characters
+- Centralize shell escaping in shell.rs module with quote_arg, quote_args, quote_path functions
+- Fix unescaped file paths in logs and file commands
+- Remove redundant escaping functions from template.rs, ssh/client.rs, and deploy.rs
+
 ## 0.2.17
 
 - Add project set --component-ids to replace component attachments
