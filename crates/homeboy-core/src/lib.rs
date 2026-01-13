@@ -5,7 +5,6 @@ pub mod changelog;
 pub mod config;
 pub mod context;
 pub mod deploy;
-pub mod doctor;
 pub mod git;
 pub mod http;
 pub mod json;

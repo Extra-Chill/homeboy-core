@@ -1,4 +1,3 @@
-use arboard::Clipboard;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
@@ -998,91 +997,6 @@ fn run_action(
                 0,
             ))
         }
-        "builtin" => {
-            let builtin = action.builtin.as_ref().ok_or_else(|| {
-                homeboy_core::Error::other("Builtin action missing 'builtin' field")
-            })?;
-
-            let response = match builtin.as_str() {
-                "copy-column" => {
-                    let column = action.column.as_ref().ok_or_else(|| {
-                        homeboy_core::Error::other("copy-column action missing 'column' field")
-                    })?;
-
-                    let values: Vec<String> = selected
-                        .iter()
-                        .filter_map(|row| {
-                            row.get(column).and_then(|v| match v {
-                                Value::String(s) => Some(s.clone()),
-                                _ => Some(v.to_string()),
-                            })
-                        })
-                        .collect();
-
-                    let text = values.join("\n");
-
-                    // Copy to clipboard
-                    let mut clipboard = Clipboard::new().map_err(|e| {
-                        homeboy_core::Error::other(format!("Failed to access clipboard: {}", e))
-                    })?;
-                    clipboard.set_text(&text).map_err(|e| {
-                        homeboy_core::Error::other(format!("Failed to copy to clipboard: {}", e))
-                    })?;
-
-                    serde_json::json!({
-                        "action": "copy-column",
-                        "column": column,
-                        "count": values.len(),
-                        "copied": true
-                    })
-                }
-                "export-csv" => {
-                    // Generate CSV and output to stdout
-                    let csv = generate_csv(&selected)?;
-                    print!("{}", csv);
-
-                    serde_json::json!({
-                        "action": "export-csv",
-                        "rows": selected.len()
-                    })
-                }
-                "copy-json" => {
-                    let json = serde_json::to_string_pretty(&selected).map_err(|e| {
-                        homeboy_core::Error::other(format!("Failed to serialize JSON: {}", e))
-                    })?;
-
-                    // Copy to clipboard
-                    let mut clipboard = Clipboard::new().map_err(|e| {
-                        homeboy_core::Error::other(format!("Failed to access clipboard: {}", e))
-                    })?;
-                    clipboard.set_text(&json).map_err(|e| {
-                        homeboy_core::Error::other(format!("Failed to copy to clipboard: {}", e))
-                    })?;
-
-                    serde_json::json!({
-                        "action": "copy-json",
-                        "count": selected.len(),
-                        "copied": true
-                    })
-                }
-                _ => {
-                    return Err(homeboy_core::Error::other(format!(
-                        "Unknown builtin action: {}",
-                        builtin
-                    )));
-                }
-            };
-
-            Ok((
-                ModuleOutput::Action {
-                    module_id: module_id.to_string(),
-                    action_id: action_id.to_string(),
-                    project_id,
-                    response,
-                },
-                0,
-            ))
-        }
         other => Err(homeboy_core::Error::other(format!(
             "Unknown action type: {}",
             other
@@ -1172,52 +1086,3 @@ fn interpolate_payload_value(
     }
 }
 
-fn generate_csv(rows: &[Value]) -> homeboy_core::Result<String> {
-    if rows.is_empty() {
-        return Ok(String::new());
-    }
-
-    // Get headers from first row
-    let headers: Vec<String> = match &rows[0] {
-        Value::Object(obj) => obj.keys().cloned().collect(),
-        _ => return Err(homeboy_core::Error::other("Expected array of objects")),
-    };
-
-    let mut csv = String::new();
-
-    // Header row
-    csv.push_str(&headers.join(","));
-    csv.push('\n');
-
-    // Data rows
-    for row in rows {
-        if let Value::Object(obj) = row {
-            let values: Vec<String> = headers
-                .iter()
-                .map(|h| {
-                    obj.get(h)
-                        .map(|v| escape_csv_field(v))
-                        .unwrap_or_default()
-                })
-                .collect();
-            csv.push_str(&values.join(","));
-            csv.push('\n');
-        }
-    }
-
-    Ok(csv)
-}
-
-fn escape_csv_field(value: &Value) -> String {
-    let s = match value {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        _ => value.to_string(),
-    };
-
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s
-    }
-}
