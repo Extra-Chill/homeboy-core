@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 pub fn slugify_project_id(name: &str) -> Result<String> {
     let trimmed = name.trim();

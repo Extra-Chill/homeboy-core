@@ -1,4 +1,4 @@
-use crate::{registry, ErrorCode, Hint};
+use super::{codes, ErrorCode, Hint};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -18,7 +18,7 @@ pub struct ErrorHelp {
 }
 
 pub fn list() -> Vec<ErrorHelpSummary> {
-    registry::all_codes()
+    codes::all_codes()
         .iter()
         .copied()
         .map(|code| {

@@ -5,6 +5,8 @@ pub mod changelog;
 pub mod config;
 pub mod context;
 pub mod deploy;
+pub mod error;
+pub(crate) mod files;
 pub mod git;
 pub mod http;
 pub(crate) mod json;
@@ -19,7 +21,3 @@ pub mod template;
 pub mod token;
 pub mod tty;
 pub mod version;
-
-pub use homeboy_error::{Error, ErrorCode, Result};
-
-pub use homeboy_error::{ErrorHelp, ErrorHelpSummary};

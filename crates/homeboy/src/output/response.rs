@@ -1,5 +1,5 @@
+use crate::error::{ErrorCode, Hint};
 use crate::Error;
-use homeboy_error::{ErrorCode, Hint};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]

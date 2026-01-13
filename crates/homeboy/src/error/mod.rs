@@ -1,8 +1,8 @@
+mod codes;
 mod help;
-mod registry;
 
+pub use codes::{all_codes, parse_code};
 pub use help::{explain, list, ErrorHelp, ErrorHelpSummary};
-pub use registry::{all_codes, parse_code};
 
 pub fn validation_unknown_error_code(code: impl Into<String>) -> Error {
     Error::validation_unknown_error_code(code)

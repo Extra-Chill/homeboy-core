@@ -1,7 +1,10 @@
-use crate::config::ComponentConfiguration;
-use crate::{Error, Result};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::config::{ComponentConfiguration, ConfigManager};
+use crate::json::read_json_spec_to_string;
+use crate::error::{Error, Result};
 
 const DEFAULT_NEXT_SECTION_LABEL: &str = "Unreleased";
 
@@ -404,6 +407,70 @@ fn append_item_to_next_section(
     }
 
     Ok((out, true))
+}
+
+// === Bulk Operations with JSON Spec ===
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddItemsOutput {
+    pub component_id: String,
+    pub changelog_path: String,
+    pub next_section_label: String,
+    pub messages: Vec<String>,
+    pub items_added: usize,
+    pub changed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpPayload<T> {
+    op: String,
+    data: T,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddItemsData {
+    component_id: String,
+    messages: Vec<String>,
+}
+
+/// Add changelog items from a JSON spec with op/data payload.
+pub fn add_items_bulk(json_spec: &str, expected_op: &str) -> Result<AddItemsOutput> {
+    let raw = read_json_spec_to_string(json_spec)?;
+
+    let payload: OpPayload<AddItemsData> = serde_json::from_str(&raw)
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse op payload".to_string())))?;
+
+    if payload.op != expected_op {
+        return Err(Error::validation_invalid_argument(
+            "op",
+            format!("Unexpected op '{}'", payload.op),
+            Some(expected_op.to_string()),
+            Some(vec![expected_op.to_string()]),
+        ));
+    }
+
+    add_items(&payload.data.component_id, &payload.data.messages)
+}
+
+/// Add changelog items to a component.
+pub fn add_items(component_id: &str, messages: &[String]) -> Result<AddItemsOutput> {
+    let component = ConfigManager::load_component(component_id)?;
+    let settings = resolve_effective_settings(Some(&component));
+
+    let (path, changed, items_added) =
+        read_and_add_next_section_items(&component, &settings, messages)?;
+
+    Ok(AddItemsOutput {
+        component_id: component_id.to_string(),
+        changelog_path: path.to_string_lossy().to_string(),
+        next_section_label: settings.next_section_label,
+        messages: messages.to_vec(),
+        items_added,
+        changed,
+    })
 }
 
 #[cfg(test)]

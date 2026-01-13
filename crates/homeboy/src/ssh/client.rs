@@ -1,7 +1,7 @@
 use crate::config::ServerConfig;
+use crate::error::{RemoteCommandFailedDetails, TargetDetails};
 use crate::shell;
 use crate::Result;
-use homeboy_error::{RemoteCommandFailedDetails, TargetDetails};
 use std::process::{Command, Stdio};
 
 pub struct SshClient {

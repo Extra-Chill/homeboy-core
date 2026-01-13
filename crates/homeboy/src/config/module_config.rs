@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::module::ModuleManifest;
 use crate::module_settings::ModuleSettingsValidator;
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 use super::{ComponentConfiguration, ProjectConfiguration};
 

@@ -693,7 +693,6 @@ dependencies = [
  "anyhow",
  "arboard",
  "dirs",
- "homeboy-error",
  "keyring",
  "regex",
  "reqwest",
@@ -714,7 +713,6 @@ dependencies = [
  "atty",
  "clap",
  "homeboy",
- "homeboy-error",
  "regex",
  "serde",
  "serde_json",
@@ -722,14 +720,6 @@ dependencies = [
  "tempfile",
  "uuid",
  "zip",
-]
-
-[[package]]
-name = "homeboy-error"
-version = "0.5.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]

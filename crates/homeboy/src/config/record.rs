@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::error::Result;
 
 use super::{SetName, SlugIdentifiable};
 

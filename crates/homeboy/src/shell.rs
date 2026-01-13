@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 /// Escape a value for use inside single quotes.
 /// Replaces `'` with `'\''` (end quote, escaped quote, start quote).

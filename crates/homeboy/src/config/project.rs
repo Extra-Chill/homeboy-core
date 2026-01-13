@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{slugify_id, AppPaths, ConfigImportable, ConfigManager, SetName, SlugIdentifiable};
-use crate::Result;
+use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

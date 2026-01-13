@@ -1,12 +1,10 @@
 use clap::{Args, Subcommand};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::docs;
-use crate::input::load_op_data;
 
 use super::CmdResult;
-use homeboy::changelog;
-use homeboy::config::ConfigManager;
+use homeboy::changelog::{self, AddItemsOutput};
 
 #[derive(Args)]
 pub struct ChangelogArgs {
@@ -40,43 +38,23 @@ pub struct ChangelogShowOutput {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangelogAddOutput {
-    pub component_id: String,
-    pub changelog_path: String,
-    pub next_section_label: String,
-    pub messages: Vec<String>,
-    pub items_added: usize,
-    pub changed: bool,
-}
-
-#[derive(Serialize)]
 #[serde(tag = "command", rename_all = "camelCase")]
 pub enum ChangelogOutput {
     #[serde(rename_all = "camelCase")]
     Show(ChangelogShowOutput),
     #[serde(rename_all = "camelCase")]
-    Add(ChangelogAddOutput),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ChangelogAddData {
-    pub component_id: String,
-    pub messages: Vec<String>,
+    Add(AddItemsOutput),
 }
 
 pub fn run_markdown(args: ChangelogArgs) -> CmdResult<String> {
     match args.command {
         None => show_markdown(),
-        Some(ChangelogCommand::Add { .. }) => {
-            Err(homeboy::Error::validation_invalid_argument(
-                "command",
-                "Markdown output is only supported for 'changelog'",
-                None,
-                None,
-            ))
-        }
+        Some(ChangelogCommand::Add { .. }) => Err(homeboy::Error::validation_invalid_argument(
+            "command",
+            "Markdown output is only supported for 'changelog'",
+            None,
+            None,
+        )),
     }
 }
 
@@ -99,11 +77,8 @@ pub fn run(
             message,
         }) => {
             if let Some(spec) = json.as_deref() {
-                let data: ChangelogAddData = load_op_data(spec, "changelog.add")?;
-
-                let (out, code) = add_next_items(&data.component_id, &data.messages)?;
-
-                return Ok((ChangelogOutput::Add(out), code));
+                let output = changelog::add_items_bulk(spec, "changelog.add")?;
+                return Ok((ChangelogOutput::Add(output), 0));
             }
 
             let component_id = component_id.ok_or_else(|| {
@@ -124,8 +99,8 @@ pub fn run(
                 )
             })?;
 
-            let (out, code) = add_next_items(&component_id, &[message])?;
-            Ok((ChangelogOutput::Add(out), code))
+            let output = changelog::add_items(&component_id, &[message])?;
+            Ok((ChangelogOutput::Add(output), 0))
         }
     }
 }
@@ -155,26 +130,6 @@ fn show_json() -> CmdResult<ChangelogShowOutput> {
         ChangelogShowOutput {
             topic_label: resolved.topic_label,
             content: resolved.content,
-        },
-        0,
-    ))
-}
-
-fn add_next_items(component_id: &str, messages: &[String]) -> CmdResult<ChangelogAddOutput> {
-    let component = ConfigManager::load_component(component_id)?;
-
-    let settings = changelog::resolve_effective_settings(Some(&component));
-    let (path, changed, items_added) =
-        changelog::read_and_add_next_section_items(&component, &settings, messages)?;
-
-    Ok((
-        ChangelogAddOutput {
-            component_id: component_id.to_string(),
-            changelog_path: path.to_string_lossy().to_string(),
-            next_section_label: settings.next_section_label,
-            messages: messages.to_vec(),
-            items_added,
-            changed,
         },
         0,
     ))

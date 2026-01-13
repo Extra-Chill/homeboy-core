@@ -1,11 +1,28 @@
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
+
+use crate::json::read_json_spec_to_string;
 use crate::module::DeployVerification;
 use crate::shell;
 use crate::ssh::SshClient;
 use crate::template::{render_map, TemplateVars};
-use crate::Result;
-use std::collections::HashMap;
-use std::path::Path;
-use std::process::Command;
+use crate::error::{Error, Result};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkComponentsInput {
+    component_ids: Vec<String>,
+}
+
+/// Parse bulk component IDs from a JSON spec.
+pub fn parse_bulk_component_ids(json_spec: &str) -> Result<Vec<String>> {
+    let raw = read_json_spec_to_string(json_spec)?;
+    let input: BulkComponentsInput = serde_json::from_str(&raw)
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk deploy input".to_string())))?;
+    Ok(input.component_ids)
+}
 
 pub struct DeployResult {
     pub success: bool,

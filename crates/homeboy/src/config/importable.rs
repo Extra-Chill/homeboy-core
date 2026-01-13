@@ -2,7 +2,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 use crate::json::{json_merge_patch, read_json_spec_to_string};
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 /// Trait for configuration types that support JSON input with merge-patch semantics.
 ///

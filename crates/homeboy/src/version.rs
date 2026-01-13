@@ -1,7 +1,9 @@
-use crate::json::{read_json_file, set_json_pointer, write_json_file_pretty};
+use crate::files::{self, FileSystem};
+use crate::json::{self, set_json_pointer};
 use crate::module::{load_module, ModuleManifest};
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use regex::Regex;
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
@@ -106,8 +108,9 @@ pub fn update_version_in_file(
         .is_some_and(|ext| ext == "json")
         && default_pattern_for_file(path, modules).as_deref() == Some(pattern)
     {
-        let mut json = read_json_file(path)?;
-        let Some(current) = json.get("version").and_then(|v| v.as_str()) else {
+        let content = files::local().read(Path::new(path))?;
+        let mut json: Value = json::from_str(&content)?;
+        let Some(current) = json.get("version").and_then(|v: &Value| v.as_str()) else {
             return Err(Error::config_missing_key("version", Some(path.to_string())));
         };
 
@@ -123,7 +126,8 @@ pub fn update_version_in_file(
             "/version",
             serde_json::Value::String(new_version.to_string()),
         )?;
-        write_json_file_pretty(path, &json)?;
+        let output = json::to_string_pretty(&json)?;
+        files::local().write(Path::new(path), &output)?;
         return Ok(1);
     }
 

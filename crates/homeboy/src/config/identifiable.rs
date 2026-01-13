@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 /// Trait for entities whose ID is derived from their name.
 pub trait SlugIdentifiable {

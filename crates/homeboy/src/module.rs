@@ -1,5 +1,6 @@
 use crate::config::AppPaths;
-use crate::json::read_json_file_typed;
+use crate::files::{self, FileSystem};
+use crate::json;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -279,7 +280,8 @@ pub fn load_module(id: &str) -> Option<ModuleManifest> {
         return None;
     }
 
-    let mut manifest: ModuleManifest = read_json_file_typed(&manifest_path).ok()?;
+    let content = files::local().read(&manifest_path).ok()?;
+    let mut manifest: ModuleManifest = json::from_str(&content).ok()?;
     manifest.module_path = Some(module_dir.to_string_lossy().to_string());
     Some(manifest)
 }
@@ -301,9 +303,11 @@ pub fn load_all_modules() -> Vec<ModuleManifest> {
         let path = entry.path();
         if path.is_dir() {
             let manifest_path = path.join("homeboy.json");
-            if let Ok(mut manifest) = read_json_file_typed::<ModuleManifest>(&manifest_path) {
-                manifest.module_path = Some(path.to_string_lossy().to_string());
-                modules.push(manifest);
+            if let Ok(content) = files::local().read(&manifest_path) {
+                if let Ok(mut manifest) = json::from_str::<ModuleManifest>(&content) {
+                    manifest.module_path = Some(path.to_string_lossy().to_string());
+                    modules.push(manifest);
+                }
             }
         }
     }

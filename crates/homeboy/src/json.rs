@@ -1,10 +1,32 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
+use crate::files::{self, FileSystem};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+// === Pure Formatting Functions ===
+
+/// Parse JSON string into typed value
+pub fn from_str<T: DeserializeOwned>(s: &str) -> Result<T> {
+    serde_json::from_str(s)
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse json".to_string())))
+}
+
+/// Serialize value to JSON string
+pub fn to_string<T: Serialize>(data: &T) -> Result<String> {
+    serde_json::to_string(data)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))
+}
+
+/// Serialize value to pretty-printed JSON string
+pub fn to_string_pretty<T: Serialize>(data: &T) -> Result<String> {
+    serde_json::to_string_pretty(data)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))
+}
+
+// === Payload Types ===
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,12 +65,7 @@ pub fn read_json_spec_to_string(spec: &str) -> Result<String> {
             ));
         }
 
-        return fs::read_to_string(path).map_err(|e| {
-            Error::internal_io(
-                e.to_string(),
-                Some(format!("read json file spec '{}'", path)),
-            )
-        });
+        return files::local().read(Path::new(path));
     }
 
     Ok(spec.to_string())
@@ -99,57 +116,7 @@ pub fn load_op_data<T: DeserializeOwned>(spec: &str, expected_op: &str) -> Resul
     Ok(payload.data)
 }
 
-pub fn read_json_file(path: impl AsRef<Path>) -> Result<Value> {
-    let content = fs::read_to_string(&path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("read json file".to_string())))?;
-    serde_json::from_str(&content)
-        .map_err(|e| Error::internal_json(e.to_string(), Some("parse json file".to_string())))
-}
-
-pub fn read_json_file_typed<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T> {
-    let content = fs::read_to_string(&path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("read json file".to_string())))?;
-    serde_json::from_str(&content)
-        .map_err(|e| Error::internal_json(e.to_string(), Some("parse json file".to_string())))
-}
-
-pub fn write_json_file_pretty(path: impl AsRef<Path>, value: &Value) -> Result<()> {
-    let path = path.as_ref();
-    let content = serde_json::to_string_pretty(value)
-        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))?;
-    write_file_atomic(path, content.as_bytes())
-}
-
-pub fn write_json_file_pretty_typed<T: Serialize>(path: impl AsRef<Path>, value: &T) -> Result<()> {
-    let path = path.as_ref();
-    let content = serde_json::to_string_pretty(value)
-        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))?;
-    write_file_atomic(path, content.as_bytes())
-}
-
-pub fn scan_json_dir<T: DeserializeOwned>(dir: impl AsRef<Path>) -> Vec<(PathBuf, T)> {
-    let dir = dir.as_ref();
-    if !dir.exists() {
-        return Vec::new();
-    }
-
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().is_none_or(|ext| ext != "json") {
-                return None;
-            }
-            let content = fs::read_to_string(&path).ok()?;
-            let parsed: T = serde_json::from_str(&content).ok()?;
-            Some((path, parsed))
-        })
-        .collect()
-}
+// === JSON Pointer Operations ===
 
 pub fn set_json_pointer(root: &mut Value, pointer: &str, new_value: Value) -> Result<()> {
     let pointer = normalize_pointer(pointer)?;
@@ -185,17 +152,6 @@ pub fn remove_json_pointer(root: &mut Value, pointer: &str) -> Result<()> {
     remove_child(parent, &token)
 }
 
-pub fn set_json_value_in_file(
-    path: impl AsRef<Path>,
-    pointer: &str,
-    new_value: Value,
-) -> Result<()> {
-    let path = path.as_ref();
-    let mut json = read_json_file(path)?;
-    set_json_pointer(&mut json, pointer, new_value)?;
-    write_json_file_pretty(path, &json)
-}
-
 /// RFC 7396 JSON Merge Patch: merge source into target.
 ///
 /// - If source is an object, recursively merge each key into target
@@ -222,35 +178,6 @@ pub fn json_merge_patch(target: &mut Value, source: Value) {
     } else {
         *target = source;
     }
-}
-
-fn write_file_atomic(path: &Path, content: &[u8]) -> Result<()> {
-    let parent = path.parent().ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "path",
-            format!("Invalid path: {}", path.display()),
-            None,
-            None,
-        )
-    })?;
-
-    let filename = path.file_name().ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "path",
-            format!("Invalid path: {}", path.display()),
-            None,
-            None,
-        )
-    })?;
-
-    let tmp_path: PathBuf = parent.join(format!("{}.tmp", filename.to_string_lossy()));
-
-    fs::write(&tmp_path, content)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("write tmp json".to_string())))?;
-    fs::rename(&tmp_path, path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("rename tmp json".to_string())))?;
-
-    Ok(())
 }
 
 fn normalize_pointer(pointer: &str) -> Result<String> {

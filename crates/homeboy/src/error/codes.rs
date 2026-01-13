@@ -1,4 +1,4 @@
-use crate::ErrorCode;
+use super::ErrorCode;
 
 pub fn all_codes() -> &'static [ErrorCode] {
     &[

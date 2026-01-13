@@ -1,7 +1,7 @@
 use std::fs;
 
 use super::{slugify_id, AppPaths, ConfigManager, ProjectConfiguration};
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct RenameResult {

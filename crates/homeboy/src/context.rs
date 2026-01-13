@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::config::{ConfigManager, ProjectConfiguration, ServerConfig};
 use crate::ssh::SshClient;
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 // === Local Context Detection (homeboy context command) ===
 

@@ -3,7 +3,7 @@
 //! Provides secure storage for authentication tokens and other sensitive values.
 //! Uses the system keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager).
 
-use crate::{Error, ErrorCode, Result};
+use crate::error::{Error, ErrorCode, Result};
 use keyring::Entry;
 use serde_json::Value;
 

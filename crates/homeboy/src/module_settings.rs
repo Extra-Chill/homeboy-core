@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

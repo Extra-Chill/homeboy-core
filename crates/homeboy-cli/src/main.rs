@@ -16,7 +16,6 @@ enum RawOutputMode {
 
 mod commands;
 mod docs;
-mod input;
 
 use commands::{
     api, auth, build, changelog, cli, component, context, db, deploy, file, git, init, logs,

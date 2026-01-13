@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{AppPaths, ConfigImportable, ConfigManager, Record, SetName, SlugIdentifiable};
-use crate::Result;
+use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

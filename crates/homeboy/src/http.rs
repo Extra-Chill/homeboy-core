@@ -5,7 +5,7 @@
 
 use crate::config::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use crate::keychain;
-use crate::{Error, ErrorCode, Result};
+use crate::error::{Error, ErrorCode, Result};
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
 use std::collections::HashMap;

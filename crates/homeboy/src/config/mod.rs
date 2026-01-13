@@ -26,8 +26,9 @@ pub use record::*;
 pub use scoped_module::*;
 pub use server::*;
 
-use crate::json::scan_json_dir;
-use crate::{Error, Result};
+use crate::files::{self, FileSystem};
+use crate::json;
+use crate::error::{Error, Result};
 use std::fs;
 
 pub struct ConfigManager;
@@ -94,10 +95,16 @@ impl ConfigManager {
 
     pub fn list_projects() -> Result<Vec<ProjectRecord>> {
         let dir = AppPaths::projects()?;
-        let mut projects: Vec<ProjectRecord> = scan_json_dir::<ProjectConfiguration>(&dir)
+        let fs = files::local();
+        let entries = fs.list(&dir)?;
+
+        let mut projects: Vec<ProjectRecord> = entries
             .into_iter()
-            .filter_map(|(path, config)| {
-                let id = path.file_stem()?.to_string_lossy().to_string();
+            .filter(|e| e.is_json() && !e.is_dir)
+            .filter_map(|e| {
+                let content = fs.read(&e.path).ok()?;
+                let config: ProjectConfiguration = json::from_str(&content).ok()?;
+                let id = e.path.file_stem()?.to_string_lossy().to_string();
                 let expected_id = slugify_id(&config.name).ok()?;
                 if expected_id != id {
                     return None;
@@ -122,9 +129,16 @@ impl ConfigManager {
 
     pub fn list_servers() -> Result<Vec<ServerConfig>> {
         let dir = AppPaths::servers()?;
-        let mut servers: Vec<ServerConfig> = scan_json_dir(&dir)
+        let fs = files::local();
+        let entries = fs.list(&dir)?;
+
+        let mut servers: Vec<ServerConfig> = entries
             .into_iter()
-            .map(|(_, server)| server)
+            .filter(|e| e.is_json() && !e.is_dir)
+            .filter_map(|e| {
+                let content = fs.read(&e.path).ok()?;
+                json::from_str(&content).ok()
+            })
             .collect();
         servers.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(servers)
@@ -219,9 +233,16 @@ impl ConfigManager {
 
     pub fn list_components() -> Result<Vec<ComponentConfiguration>> {
         let dir = AppPaths::components()?;
-        let mut components: Vec<ComponentConfiguration> = scan_json_dir(&dir)
+        let fs = files::local();
+        let entries = fs.list(&dir)?;
+
+        let mut components: Vec<ComponentConfiguration> = entries
             .into_iter()
-            .map(|(_, comp)| comp)
+            .filter(|e| e.is_json() && !e.is_dir)
+            .filter_map(|e| {
+                let content = fs.read(&e.path).ok()?;
+                json::from_str(&content).ok()
+            })
             .collect();
         components.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(components)

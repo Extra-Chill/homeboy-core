@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 pub fn resolve_optional_base_path(base_path: Option<&str>) -> Option<&str> {
     base_path.and_then(|value| (!value.trim().is_empty()).then_some(value.trim()))
