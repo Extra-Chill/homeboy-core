@@ -264,7 +264,10 @@ pub fn run(
         }
         ProjectCommand::Set { project_id, json } => set(&project_id, &json),
         ProjectCommand::Repair { project_id } => repair(&project_id),
-        ProjectCommand::Rename { project_id, new_name } => rename(&project_id, &new_name),
+        ProjectCommand::Rename {
+            project_id,
+            new_name,
+        } => rename(&project_id, &new_name),
         ProjectCommand::Components { command } => components(command),
         ProjectCommand::Pin { command } => pin(command),
     }
@@ -572,10 +575,7 @@ fn pin(command: ProjectPinCommand) -> homeboy::Result<(ProjectOutput, i32)> {
     }
 }
 
-fn pin_list(
-    project_id: &str,
-    pin_type: ProjectPinType,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+fn pin_list(project_id: &str, pin_type: ProjectPinType) -> homeboy::Result<(ProjectOutput, i32)> {
     let project = project::load(project_id)?;
 
     let (items, type_string) = match pin_type {

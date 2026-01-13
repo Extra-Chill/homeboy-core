@@ -113,8 +113,9 @@ impl FileSystem for LocalFs {
 
     fn ensure_dir(&self, dir: &Path) -> Result<()> {
         if !dir.exists() {
-            fs::create_dir_all(dir)
-                .map_err(|e| Error::internal_io(e.to_string(), Some("create directory".to_string())))?;
+            fs::create_dir_all(dir).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("create directory".to_string()))
+            })?;
         }
         Ok(())
     }

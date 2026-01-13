@@ -1,5 +1,5 @@
-use crate::server::Server;
 use crate::error::{Error, RemoteCommandFailedDetails, Result, TargetDetails};
+use crate::server::Server;
 use crate::shell;
 use std::process::{Command, Stdio};
 
@@ -23,15 +23,13 @@ impl CommandOutput {
             return Ok(self);
         }
 
-        Err(Error::remote_command_failed(
-            RemoteCommandFailedDetails {
-                command: command.to_string(),
-                exit_code: self.exit_code,
-                stdout: self.stdout,
-                stderr: self.stderr,
-                target,
-            },
-        ))
+        Err(Error::remote_command_failed(RemoteCommandFailedDetails {
+            command: command.to_string(),
+            exit_code: self.exit_code,
+            stdout: self.stdout,
+            stderr: self.stderr,
+            target,
+        }))
     }
 }
 

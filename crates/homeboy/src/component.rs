@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use crate::local_files::{self, FileSystem};
 use crate::json;
+use crate::local_files::{self, FileSystem};
 use crate::paths;
 use crate::project;
 use serde::{Deserialize, Serialize};
@@ -323,7 +323,8 @@ pub fn create_from_cli(
 
     let expanded_path = shellexpand::tilde(&local_path).to_string();
 
-    let mut component = Component::new(id.clone(), name, expanded_path, remote_path, build_artifact);
+    let mut component =
+        Component::new(id.clone(), name, expanded_path, remote_path, build_artifact);
     if !version_targets.is_empty() {
         component.version_targets = Some(parse_version_targets(&version_targets)?);
     }
@@ -430,9 +431,8 @@ pub fn rename(id: &str, new_name: &str) -> Result<CreateResult> {
     component.name = new_name.to_string();
 
     local_files::ensure_app_dirs()?;
-    std::fs::rename(&old_path, &new_path).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("rename component".to_string()))
-    })?;
+    std::fs::rename(&old_path, &new_path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("rename component".to_string())))?;
 
     if let Err(error) = save(&component) {
         let _ = std::fs::rename(&new_path, &old_path);

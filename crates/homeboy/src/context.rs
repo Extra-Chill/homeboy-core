@@ -2,10 +2,10 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 use crate::component;
+use crate::error::{Error, Result};
 use crate::project::{self, Project};
 use crate::server::{self, Server};
 use crate::ssh::SshClient;
-use crate::error::{Error, Result};
 
 // === Local Context Detection (homeboy context command) ===
 
@@ -25,8 +25,7 @@ pub struct ContextOutput {
 pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
     let cwd = match path {
         Some(p) => PathBuf::from(p),
-        None => std::env::current_dir()
-            .map_err(|e| Error::internal_io(e.to_string(), None))?,
+        None => std::env::current_dir().map_err(|e| Error::internal_io(e.to_string(), None))?,
     };
 
     let cwd_str = cwd.to_string_lossy().to_string();
@@ -104,10 +103,7 @@ pub struct ProjectServerContext {
 
 pub enum ResolvedTarget {
     Project(Box<ProjectServerContext>),
-    Server {
-        server_id: String,
-        server: Server,
-    },
+    Server { server_id: String, server: Server },
 }
 
 pub fn resolve_project_server(project_id: &str) -> Result<ProjectServerContext> {
@@ -117,8 +113,8 @@ pub fn resolve_project_server(project_id: &str) -> Result<ProjectServerContext> 
         Error::config_missing_key("project.serverId", Some(project_id.to_string()))
     })?;
 
-    let server = server::load(&server_id)
-        .map_err(|_| Error::server_not_found(server_id.clone()))?;
+    let server =
+        server::load(&server_id).map_err(|_| Error::server_not_found(server_id.clone()))?;
 
     Ok(ProjectServerContext {
         project,
@@ -127,10 +123,7 @@ pub fn resolve_project_server(project_id: &str) -> Result<ProjectServerContext> 
     })
 }
 
-pub fn require_project_base_path(
-    project_id: &str,
-    project: &Project,
-) -> Result<String> {
+pub fn require_project_base_path(project_id: &str, project: &Project) -> Result<String> {
     project
         .base_path
         .clone()
@@ -151,8 +144,7 @@ pub fn resolve_project_or_server_id(id: &str) -> Result<ResolvedTarget> {
         return Ok(ResolvedTarget::Project(Box::new(ctx)));
     }
 
-    let server =
-        server::load(id).map_err(|_| Error::server_not_found(id.to_string()))?;
+    let server = server::load(id).map_err(|_| Error::server_not_found(id.to_string()))?;
 
     Ok(ResolvedTarget::Server {
         server_id: id.to_string(),

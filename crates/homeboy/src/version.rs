@@ -1,9 +1,9 @@
-use crate::component::{Component, VersionTarget};
-use crate::local_files::{self, FileSystem};
-use crate::json::{self, set_json_pointer};
-use crate::module::{load_module, ModuleManifest};
-use crate::error::{Error, Result};
 use crate::changelog;
+use crate::component::{Component, VersionTarget};
+use crate::error::{Error, Result};
+use crate::json::{self, set_json_pointer};
+use crate::local_files::{self, FileSystem};
+use crate::module::{load_module, ModuleManifest};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
@@ -107,9 +107,7 @@ pub fn update_version_in_file(
     modules: &[String],
 ) -> Result<usize> {
     // JSON files with default pattern use structured update
-    if Path::new(path)
-        .extension()
-        .is_some_and(|ext| ext == "json")
+    if Path::new(path).extension().is_some_and(|ext| ext == "json")
         && default_pattern_for_file(path, modules).as_deref() == Some(pattern)
     {
         let content = local_files::local().read(Path::new(path))?;
@@ -199,7 +197,9 @@ pub fn read_local_version(
     let path = resolve_version_file_path(local_path, &version_target.file);
     let content = local_files::local().read(Path::new(&path)).ok()?;
 
-    let pattern: String = version_target.pattern.clone()
+    let pattern: String = version_target
+        .pattern
+        .clone()
         .or_else(|| default_pattern_for_file(&version_target.file, modules))?;
 
     parse_version(&content, &pattern)
@@ -246,7 +246,9 @@ pub struct BumpResult {
 
 /// Resolve pattern for a version target, using explicit pattern or module default.
 fn resolve_target_pattern(target: &VersionTarget, modules: &[String]) -> Result<String> {
-    target.pattern.clone()
+    target
+        .pattern
+        .clone()
         .or_else(|| default_pattern_for_file(&target.file, modules))
         .ok_or_else(|| {
             Error::validation_invalid_argument(
@@ -294,9 +296,10 @@ fn build_version_parse_error(file: &str, pattern: &str, content: &str) -> Error 
 
 /// Read the current version from a component's version targets.
 pub fn read_component_version(component: &Component) -> Result<ComponentVersionInfo> {
-    let targets = component.version_targets.as_ref().ok_or_else(|| {
-        Error::config_missing_key("versionTargets", Some(component.id.clone()))
-    })?;
+    let targets = component
+        .version_targets
+        .as_ref()
+        .ok_or_else(|| Error::config_missing_key("versionTargets", Some(component.id.clone())))?;
 
     if targets.is_empty() {
         return Err(Error::config_invalid_value(
@@ -321,7 +324,11 @@ pub fn read_component_version(component: &Component) -> Result<ComponentVersionI
     })?;
 
     if versions.is_empty() {
-        return Err(build_version_parse_error(&primary.file, &primary_pattern, &content));
+        return Err(build_version_parse_error(
+            &primary.file,
+            &primary_pattern,
+            &content,
+        ));
     }
 
     let unique: BTreeSet<String> = versions.iter().cloned().collect();
@@ -353,9 +360,10 @@ pub fn bump_component_version(
     bump_type: &str,
     dry_run: bool,
 ) -> Result<BumpResult> {
-    let targets = component.version_targets.as_ref().ok_or_else(|| {
-        Error::config_missing_key("versionTargets", Some(component.id.clone()))
-    })?;
+    let targets = component
+        .version_targets
+        .as_ref()
+        .ok_or_else(|| Error::config_missing_key("versionTargets", Some(component.id.clone())))?;
 
     if targets.is_empty() {
         return Err(Error::config_invalid_value(
@@ -381,7 +389,11 @@ pub fn bump_component_version(
     })?;
 
     if primary_versions.is_empty() {
-        return Err(build_version_parse_error(&primary.file, &primary_pattern, &primary_content));
+        return Err(build_version_parse_error(
+            &primary.file,
+            &primary_pattern,
+            &primary_content,
+        ));
     }
 
     let unique_primary: BTreeSet<String> = primary_versions.iter().cloned().collect();
@@ -585,7 +597,8 @@ pub fn detect_version_targets(base_path: &str) -> Result<Vec<(String, String, St
                     // Only match if it looks like a WordPress plugin header
                     if content.contains("Plugin Name:") || content.contains("Theme Name:") {
                         if parse_version(&content, php_pattern).is_some() {
-                            let filename = path.file_name()
+                            let filename = path
+                                .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown.php");
                             found.push((
@@ -694,7 +707,11 @@ pub fn bump_version_cwd(bump_type: &str, dry_run: bool) -> Result<BumpResult> {
     })?;
 
     if primary_versions.is_empty() {
-        return Err(build_version_parse_error(primary_file, primary_pattern, &primary_content));
+        return Err(build_version_parse_error(
+            primary_file,
+            primary_pattern,
+            &primary_content,
+        ));
     }
 
     let unique_primary: BTreeSet<String> = primary_versions.iter().cloned().collect();
@@ -718,33 +735,35 @@ pub fn bump_version_cwd(bump_type: &str, dry_run: bool) -> Result<BumpResult> {
 
     // Try to find and finalize changelog
     let changelog_path = changelog::detect_changelog_path(&cwd);
-    let (changelog_finalized, changelog_changed, changelog_path_str) = if let Some(cl_path) = &changelog_path {
-        let changelog_content = fs::read_to_string(cl_path).unwrap_or_default();
-        let settings = changelog::default_settings();
+    let (changelog_finalized, changelog_changed, changelog_path_str) =
+        if let Some(cl_path) = &changelog_path {
+            let changelog_content = fs::read_to_string(cl_path).unwrap_or_default();
+            let settings = changelog::default_settings();
 
-        if let Ok((finalized, changed)) = changelog::finalize_next_section(
-            &changelog_content,
-            &settings.next_section_aliases,
-            &new_version,
-            false,
-        ) {
-            if changed && !dry_run {
-                let _ = fs::write(cl_path, &finalized);
+            if let Ok((finalized, changed)) = changelog::finalize_next_section(
+                &changelog_content,
+                &settings.next_section_aliases,
+                &new_version,
+                false,
+            ) {
+                if changed && !dry_run {
+                    let _ = fs::write(cl_path, &finalized);
+                }
+                (true, changed, cl_path.to_string_lossy().to_string())
+            } else {
+                (false, false, cl_path.to_string_lossy().to_string())
             }
-            (true, changed, cl_path.to_string_lossy().to_string())
         } else {
-            (false, false, cl_path.to_string_lossy().to_string())
-        }
-    } else {
-        (false, false, String::new())
-    };
+            (false, false, String::new())
+        };
 
     // Update all detected version files
     let mut target_infos = Vec::new();
 
     for (file, pattern, full_path) in &detected {
-        let content = fs::read_to_string(full_path)
-            .map_err(|e| Error::internal_io(e.to_string(), Some("read version file".to_string())))?;
+        let content = fs::read_to_string(full_path).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("read version file".to_string()))
+        })?;
 
         let versions = parse_versions(&content, pattern).ok_or_else(|| {
             Error::validation_invalid_argument(
@@ -783,8 +802,8 @@ pub fn bump_version_cwd(bump_type: &str, dry_run: bool) -> Result<BumpResult> {
         let match_count = versions.len();
 
         if !dry_run {
-            let (new_content, _) = replace_versions(&content, pattern, &new_version)
-                .ok_or_else(|| {
+            let (new_content, _) =
+                replace_versions(&content, pattern, &new_version).ok_or_else(|| {
                     Error::validation_invalid_argument(
                         "versionPattern",
                         format!("Failed to replace version in {}", file),
@@ -793,8 +812,9 @@ pub fn bump_version_cwd(bump_type: &str, dry_run: bool) -> Result<BumpResult> {
                     )
                 })?;
 
-            fs::write(full_path, &new_content)
-                .map_err(|e| Error::internal_io(e.to_string(), Some("write version file".to_string())))?;
+            fs::write(full_path, &new_content).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("write version file".to_string()))
+            })?;
         }
 
         target_infos.push(VersionTargetInfo {

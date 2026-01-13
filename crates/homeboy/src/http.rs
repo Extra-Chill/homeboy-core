@@ -3,9 +3,9 @@
 //! Makes HTTP requests with auth headers resolved from project configuration.
 //! Homeboy doesn't know about specific auth types - it just templates strings.
 
-use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
-use crate::keychain;
 use crate::error::{Error, ErrorCode, Result};
+use crate::keychain;
+use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -139,7 +139,12 @@ impl ApiClient {
     /// Makes a POST request without auth (for login flows).
     pub fn post_unauthenticated(&self, endpoint: &str, body: &Value) -> Result<Value> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let response = self.client.post(&url).json(body).send().map_err(http_error)?;
+        let response = self
+            .client
+            .post(&url)
+            .json(body)
+            .send()
+            .map_err(http_error)?;
         parse_json_response(response)
     }
 
@@ -253,12 +258,7 @@ impl ApiClient {
 
     /// Clears all stored auth data for this project.
     pub fn logout(&self) -> Result<()> {
-        let common_vars = [
-            "access_token",
-            "refresh_token",
-            "expires_at",
-            "password",
-        ];
+        let common_vars = ["access_token", "refresh_token", "expires_at", "password"];
         keychain::clear_project(&self.project_id, &common_vars)?;
 
         // Also clear any custom variables from auth config
@@ -297,15 +297,15 @@ fn resolve_variable(project_id: &str, var_name: &str, source: &VariableSource) -
         "keychain" => keychain::get(project_id, var_name)?.ok_or_else(|| {
             not_found_error(format!("Variable '{}' not found in keychain", var_name))
         }),
-        "config" => source.value.clone().ok_or_else(|| {
-            config_error(format!("Variable '{}' has no config value", var_name))
-        }),
+        "config" => source
+            .value
+            .clone()
+            .ok_or_else(|| config_error(format!("Variable '{}' has no config value", var_name))),
         "env" => {
             let default_env = var_name.to_string();
             let env_var = source.env_var.as_ref().unwrap_or(&default_env);
-            std::env::var(env_var).map_err(|_| {
-                not_found_error(format!("Environment variable '{}' not set", env_var))
-            })
+            std::env::var(env_var)
+                .map_err(|_| not_found_error(format!("Environment variable '{}' not set", env_var)))
         }
         _ => Err(config_error(format!(
             "Unknown variable source: {}",
@@ -372,6 +372,5 @@ fn parse_json_response(response: Response) -> Result<Value> {
         return Err(api_error(status.as_u16(), &body));
     }
 
-    serde_json::from_str(&body)
-        .map_err(|e| parse_error(format!("Invalid JSON response: {}", e)))
+    serde_json::from_str(&body).map_err(|e| parse_error(format!("Invalid JSON response: {}", e)))
 }

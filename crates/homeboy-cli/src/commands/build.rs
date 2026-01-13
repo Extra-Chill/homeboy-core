@@ -13,7 +13,10 @@ pub struct BuildArgs {
     pub component_id: Option<String>,
 }
 
-pub fn run(args: BuildArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<build::BuildResult> {
+pub fn run(
+    args: BuildArgs,
+    _global: &crate::commands::GlobalArgs,
+) -> CmdResult<build::BuildResult> {
     let input = match (&args.json, &args.component_id) {
         (Some(json), _) => json.as_str(),
         (None, Some(id)) => id.as_str(),

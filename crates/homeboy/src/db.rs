@@ -59,10 +59,7 @@ struct DbContext {
     db_cli: DatabaseCliConfig,
 }
 
-fn build_context(
-    project_id: &str,
-    subtarget: Option<&str>,
-) -> Result<DbContext> {
+fn build_context(project_id: &str, subtarget: Option<&str>) -> Result<DbContext> {
     let project = project::load_record(project_id)?;
     let (ctx, base_path) = resolve_project_ssh_with_base_path(project_id)?;
 
@@ -155,11 +152,7 @@ pub fn list_tables(project_id: &str, subtarget: Option<&str>) -> Result<DbResult
     })
 }
 
-pub fn describe_table(
-    project_id: &str,
-    table: &str,
-    subtarget: Option<&str>,
-) -> Result<DbResult> {
+pub fn describe_table(project_id: &str, table: &str, subtarget: Option<&str>) -> Result<DbResult> {
     let ctx = build_context(project_id, subtarget)?;
 
     let mut vars = HashMap::new();
@@ -185,11 +178,7 @@ pub fn describe_table(
     })
 }
 
-pub fn query(
-    project_id: &str,
-    sql: &str,
-    subtarget: Option<&str>,
-) -> Result<DbResult> {
+pub fn query(project_id: &str, sql: &str, subtarget: Option<&str>) -> Result<DbResult> {
     let ctx = build_context(project_id, subtarget)?;
 
     if sql.trim().is_empty() {
@@ -275,11 +264,7 @@ pub fn delete_row(
     })
 }
 
-pub fn drop_table(
-    project_id: &str,
-    table: &str,
-    subtarget: Option<&str>,
-) -> Result<DbResult> {
+pub fn drop_table(project_id: &str, table: &str, subtarget: Option<&str>) -> Result<DbResult> {
     let ctx = build_context(project_id, subtarget)?;
 
     let drop_sql = format!("DROP TABLE {}", table);
@@ -309,10 +294,7 @@ pub fn drop_table(
     })
 }
 
-pub fn create_tunnel(
-    project_id: &str,
-    local_port: Option<u16>,
-) -> Result<DbTunnelResult> {
+pub fn create_tunnel(project_id: &str, local_port: Option<u16>) -> Result<DbTunnelResult> {
     let project = project::load_record(project_id)?;
     let ctx = resolve_project_ssh(project_id)?;
     let server = ctx.server;

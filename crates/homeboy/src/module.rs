@@ -1,6 +1,6 @@
-use crate::paths;
-use crate::local_files::{self, FileSystem};
 use crate::json;
+use crate::local_files::{self, FileSystem};
+use crate::paths;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -355,11 +355,11 @@ pub mod exec_context {
 // ============================================================================
 
 use crate::component::{self, Component};
-use crate::project::{self, Project};
+use crate::error::{Error, Result};
 use crate::http::ApiClient;
+use crate::project::{self, Project};
 use crate::ssh::execute_local_command_interactive;
 use crate::template;
-use crate::error::{Error, Result};
 use std::collections::HashMap;
 
 /// Result of executing a module.
@@ -548,7 +548,8 @@ pub fn run_module(
     }
     let env_pairs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
-    let exit_code = execute_local_command_interactive(&command, Some(module_path), Some(&env_pairs));
+    let exit_code =
+        execute_local_command_interactive(&command, Some(module_path), Some(&env_pairs));
 
     Ok(ModuleRunResult {
         exit_code,
@@ -593,8 +594,8 @@ pub fn run_action(
 
     match action.action_type.as_str() {
         "api" => {
-            let pid = project_id
-                .ok_or_else(|| Error::other("--project is required for API actions"))?;
+            let pid =
+                project_id.ok_or_else(|| Error::other("--project is required for API actions"))?;
 
             let project = project::load(pid)?;
             let client = ApiClient::new(pid, &project.api)?;
@@ -654,9 +655,15 @@ pub fn build_exec_env(
     settings_json: &str,
 ) -> Vec<(String, String)> {
     let mut env = vec![
-        (exec_context::VERSION.to_string(), exec_context::CURRENT_VERSION.to_string()),
+        (
+            exec_context::VERSION.to_string(),
+            exec_context::CURRENT_VERSION.to_string(),
+        ),
         (exec_context::MODULE_ID.to_string(), module_id.to_string()),
-        (exec_context::SETTINGS_JSON.to_string(), settings_json.to_string()),
+        (
+            exec_context::SETTINGS_JSON.to_string(),
+            settings_json.to_string(),
+        ),
     ];
 
     if let Some(pid) = project_id {
@@ -1050,7 +1057,11 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
 
     // Auto-run setup if module defines a setup_command
     if let Some(module) = load_module(&module_id) {
-        if module.runtime.as_ref().is_some_and(|r| r.setup_command.is_some()) {
+        if module
+            .runtime
+            .as_ref()
+            .is_some_and(|r| r.setup_command.is_some())
+        {
             let _ = run_setup(&module_id);
         }
     }
@@ -1117,7 +1128,11 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
     if module_dir.exists() {
         return Err(Error::validation_invalid_argument(
             "module_id",
-            format!("Module '{}' already exists at {}", module_id, module_dir.display()),
+            format!(
+                "Module '{}' already exists at {}",
+                module_id,
+                module_dir.display()
+            ),
             Some(module_id),
             None,
         ));
@@ -1127,14 +1142,12 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
 
     // Create symlink
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, &module_dir).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("create symlink".to_string()))
-    })?;
+    std::os::unix::fs::symlink(&source, &module_dir)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create symlink".to_string())))?;
 
     #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&source, &module_dir).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("create symlink".to_string()))
-    })?;
+    std::os::windows::fs::symlink_dir(&source, &module_dir)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create symlink".to_string())))?;
 
     Ok(InstallResult {
         module_id,
@@ -1154,7 +1167,10 @@ pub fn update(module_id: &str, force: bool) -> Result<UpdateResult> {
     if is_module_linked(module_id) {
         return Err(Error::validation_invalid_argument(
             "module_id",
-            format!("Module '{}' is linked. Update the source directory directly.", module_id),
+            format!(
+                "Module '{}' is linked. Update the source directory directly.",
+                module_id
+            ),
             Some(module_id.to_string()),
             None,
         ));
@@ -1169,14 +1185,16 @@ pub fn update(module_id: &str, force: bool) -> Result<UpdateResult> {
         ));
     }
 
-    let module = load_module(module_id).ok_or_else(|| {
-        Error::module_not_found(module_id.to_string())
-    })?;
+    let module =
+        load_module(module_id).ok_or_else(|| Error::module_not_found(module_id.to_string()))?;
 
     let source_url = module.source_url.ok_or_else(|| {
         Error::validation_invalid_argument(
             "module_id",
-            format!("Module '{}' has no sourceUrl. Reinstall with 'homeboy module install <url>'.", module_id),
+            format!(
+                "Module '{}' has no sourceUrl. Reinstall with 'homeboy module install <url>'.",
+                module_id
+            ),
             Some(module_id.to_string()),
             None,
         )
@@ -1186,7 +1204,11 @@ pub fn update(module_id: &str, force: bool) -> Result<UpdateResult> {
 
     // Auto-run setup if module defines a setup_command
     if let Some(module) = load_module(module_id) {
-        if module.runtime.as_ref().is_some_and(|r| r.setup_command.is_some()) {
+        if module
+            .runtime
+            .as_ref()
+            .is_some_and(|r| r.setup_command.is_some())
+        {
             let _ = run_setup(module_id);
         }
     }
@@ -1209,9 +1231,8 @@ pub fn uninstall(module_id: &str) -> Result<PathBuf> {
 
     if module_dir.is_symlink() {
         // Symlinked module: just remove the symlink, source directory is preserved
-        std::fs::remove_file(&module_dir).map_err(|e| {
-            Error::internal_io(e.to_string(), Some("remove symlink".to_string()))
-        })?;
+        std::fs::remove_file(&module_dir)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("remove symlink".to_string())))?;
     } else {
         // Cloned module: remove the directory
         std::fs::remove_dir_all(&module_dir).map_err(|e| {
@@ -1221,4 +1242,3 @@ pub fn uninstall(module_id: &str) -> Result<PathBuf> {
 
     Ok(module_dir)
 }
-

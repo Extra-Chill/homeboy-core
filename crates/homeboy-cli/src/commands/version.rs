@@ -79,10 +79,7 @@ pub struct VersionBumpOutput {
     changelog_changed: bool,
 }
 
-pub fn run(
-    args: VersionArgs,
-    global: &crate::commands::GlobalArgs,
-) -> CmdResult {
+pub fn run(args: VersionArgs, global: &crate::commands::GlobalArgs) -> CmdResult {
     match args.command {
         VersionCommand::Show { cwd, component_id } => {
             // Priority: --cwd > component_id

@@ -2,8 +2,8 @@
 //!
 //! Provides JSON envelope, printing, and exit code mapping.
 
-use homeboy::{Error, ErrorCode, Result};
 use homeboy::error::Hint;
+use homeboy::{Error, ErrorCode, Result};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]

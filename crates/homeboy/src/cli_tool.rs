@@ -84,12 +84,14 @@ fn build_component_command(
     render_map(&cli_config.command_template, &variables)
 }
 
-fn run_for_project(
-    tool: &str,
-    project_id: &str,
-    args: &[String],
-) -> Result<CliToolResult> {
-    run_for_project_with_executor(tool, project_id, args, project::load_record, execute_local_command)
+fn run_for_project(tool: &str, project_id: &str, args: &[String]) -> Result<CliToolResult> {
+    run_for_project_with_executor(
+        tool,
+        project_id,
+        args,
+        project::load_record,
+        execute_local_command,
+    )
 }
 
 fn run_for_project_with_executor(
@@ -124,7 +126,12 @@ fn run_for_project_with_executor(
 
     let (target_domain, command) = build_project_command(&project, cli_config, args)?;
 
-    let output = if project.config.server_id.as_ref().map_or(true, |s| s.is_empty()) {
+    let output = if project
+        .config
+        .server_id
+        .as_ref()
+        .map_or(true, |s| s.is_empty())
+    {
         local_executor(&command)
     } else {
         let ctx = resolve_project_ssh(project_id)?;

@@ -108,7 +108,11 @@ pub enum GitCommandOutput {
 
 pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<GitCommandOutput> {
     match args.command {
-        GitCommand::Status { cwd, json, component_id } => {
+        GitCommand::Status {
+            cwd,
+            json,
+            component_id,
+        } => {
             // Priority: --cwd > --json > component_id
             if cwd {
                 let output = git::status_cwd()?;
@@ -212,7 +216,11 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
             let exit_code = output.exit_code;
             Ok((GitCommandOutput::Single(output), exit_code))
         }
-        GitCommand::Pull { cwd, json, component_id } => {
+        GitCommand::Pull {
+            cwd,
+            json,
+            component_id,
+        } => {
             // Priority: --cwd > --json > component_id
             if cwd {
                 let output = git::pull_cwd()?;

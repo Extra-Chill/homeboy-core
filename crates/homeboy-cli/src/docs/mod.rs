@@ -58,7 +58,9 @@ fn load_module_doc(topic: &str) -> Option<(String, String)> {
         let Some(module_path) = &module.module_path else {
             continue;
         };
-        let doc_file = Path::new(module_path).join("docs").join(format!("{}.md", topic));
+        let doc_file = Path::new(module_path)
+            .join("docs")
+            .join(format!("{}.md", topic));
         if let Ok(content) = std::fs::read_to_string(&doc_file) {
             return Some((content, module.id));
         }

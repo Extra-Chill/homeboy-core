@@ -38,7 +38,10 @@ pub enum ChangesCommandOutput {
     Bulk(BulkChangesOutput),
 }
 
-pub fn run(args: ChangesArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ChangesCommandOutput> {
+pub fn run(
+    args: ChangesArgs,
+    _global: &crate::commands::GlobalArgs,
+) -> CmdResult<ChangesCommandOutput> {
     // Priority: --cwd > --json > --project > component_id
     if args.cwd {
         let output = git::changes_cwd(args.include_diff)?;

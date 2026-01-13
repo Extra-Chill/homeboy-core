@@ -45,8 +45,12 @@ pub fn run(input: &str) -> Result<(BuildResult, i32)> {
 /// Returns (exit_code, error_message) - None error means success.
 pub fn build_component(component: &component::Component) -> (Option<i32>, Option<String>) {
     let build_cmd = component.build_command.clone().or_else(|| {
-        detect_build_command(&component.local_path, &component.build_artifact, &component.modules)
-            .map(|c| c.command)
+        detect_build_command(
+            &component.local_path,
+            &component.build_artifact,
+            &component.modules,
+        )
+        .map(|c| c.command)
     });
 
     let Some(build_cmd) = build_cmd else {

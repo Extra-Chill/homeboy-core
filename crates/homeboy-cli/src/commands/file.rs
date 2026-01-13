@@ -166,11 +166,7 @@ fn write(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
     ))
 }
 
-fn delete(
-    project_id: &str,
-    path: &str,
-    recursive: bool,
-) -> homeboy::Result<(FileOutput, i32)> {
+fn delete(project_id: &str, path: &str, recursive: bool) -> homeboy::Result<(FileOutput, i32)> {
     let result = remote_files::delete(project_id, path, recursive)?;
 
     Ok((
@@ -194,11 +190,7 @@ fn delete(
     ))
 }
 
-fn rename(
-    project_id: &str,
-    old_path: &str,
-    new_path: &str,
-) -> homeboy::Result<(FileOutput, i32)> {
+fn rename(project_id: &str, old_path: &str, new_path: &str) -> homeboy::Result<(FileOutput, i32)> {
     let result = remote_files::rename(project_id, old_path, new_path)?;
 
     Ok((

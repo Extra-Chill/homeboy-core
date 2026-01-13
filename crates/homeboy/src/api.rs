@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::project;
 use crate::error::{Error, Result};
 use crate::http::ApiClient;
+use crate::project;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +27,9 @@ pub fn run(input: &str) -> Result<(ApiOutput, i32)> {
     let proj = project::load(&parsed.project_id)?;
     let client = ApiClient::new(&parsed.project_id, &proj.api)?;
 
-    let body = parsed.body.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let body = parsed
+        .body
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
 
     let response = match parsed.method.to_uppercase().as_str() {
         "GET" => client.get(&parsed.endpoint)?,
@@ -40,7 +42,13 @@ pub fn run(input: &str) -> Result<(ApiOutput, i32)> {
                 "method",
                 &format!("Invalid HTTP method: {}", parsed.method),
                 None,
-                Some(vec!["GET".into(), "POST".into(), "PUT".into(), "PATCH".into(), "DELETE".into()]),
+                Some(vec![
+                    "GET".into(),
+                    "POST".into(),
+                    "PUT".into(),
+                    "PATCH".into(),
+                    "DELETE".into(),
+                ]),
             ));
         }
     };

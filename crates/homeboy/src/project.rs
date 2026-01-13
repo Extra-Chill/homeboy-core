@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use crate::local_files::{self, FileSystem};
 use crate::json;
+use crate::local_files::{self, FileSystem};
 use crate::paths;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -456,12 +456,7 @@ pub fn create_from_cli(
     table_prefix: Option<String>,
 ) -> Result<CreateResult> {
     let name = name.ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "name",
-            "Missing required argument: name",
-            None,
-            None,
-        )
+        Error::validation_invalid_argument("name", "Missing required argument: name", None, None)
     })?;
 
     let domain = domain.ok_or_else(|| {
@@ -601,9 +596,8 @@ pub fn rename(id: &str, new_name: &str) -> Result<RenameResult> {
     }
 
     local_files::ensure_app_dirs()?;
-    std::fs::rename(&old_path, &new_path).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("rename project".to_string()))
-    })?;
+    std::fs::rename(&old_path, &new_path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("rename project".to_string())))?;
 
     if let Err(error) = save(&new_id, &project) {
         let _ = std::fs::rename(&new_path, &old_path);
@@ -660,10 +654,7 @@ pub fn repair(id: &str) -> Result<RenameResult> {
     })
 }
 
-pub fn validate_component_ids(
-    component_ids: Vec<String>,
-    project_id: &str,
-) -> Result<Vec<String>> {
+pub fn validate_component_ids(component_ids: Vec<String>, project_id: &str) -> Result<Vec<String>> {
     use crate::component;
     use std::collections::HashSet;
 
@@ -721,7 +712,9 @@ pub fn add_components(project_id: &str, component_ids: Vec<String>) -> Result<Ve
 
 pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
     let mut project = load(project_id)?;
-    project.component_ids.retain(|id| !component_ids.contains(id));
+    project
+        .component_ids
+        .retain(|id| !component_ids.contains(id));
     save(project_id, &project)?;
     Ok(project.component_ids)
 }
@@ -757,7 +750,9 @@ pub fn remove_components_validated(
         ));
     }
 
-    project.component_ids.retain(|id| !component_ids.contains(id));
+    project
+        .component_ids
+        .retain(|id| !component_ids.contains(id));
     save(project_id, &project)?;
     Ok(project.component_ids)
 }

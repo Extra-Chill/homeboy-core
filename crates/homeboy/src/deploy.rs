@@ -7,6 +7,7 @@ use crate::base_path;
 use crate::build;
 use crate::component::{self, Component};
 use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
+use crate::error::{Error, Result};
 use crate::json::read_json_spec_to_string;
 use crate::module::{load_module, DeployVerification};
 use crate::project::{self, ProjectRecord};
@@ -14,7 +15,6 @@ use crate::shell;
 use crate::ssh::SshClient;
 use crate::template::{render_map, TemplateVars};
 use crate::version;
-use crate::error::{Error, Result};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,8 +25,9 @@ struct BulkComponentsInput {
 /// Parse bulk component IDs from a JSON spec.
 pub fn parse_bulk_component_ids(json_spec: &str) -> Result<Vec<String>> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let input: BulkComponentsInput = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk deploy input".to_string())))?;
+    let input: BulkComponentsInput = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(e, Some("parse bulk deploy input".to_string()))
+    })?;
     Ok(input.component_ids)
 }
 
@@ -366,7 +367,9 @@ pub fn deploy_components(
 ) -> Result<DeployOrchestrationResult> {
     let all_components = load_project_components(&project.config.component_ids);
     if all_components.is_empty() {
-        return Err(Error::other("No components configured for project".to_string()));
+        return Err(Error::other(
+            "No components configured for project".to_string(),
+        ));
     }
 
     let components_to_deploy = plan_components(config, &all_components, base_path, &ctx.client)?;
@@ -648,12 +651,9 @@ fn fetch_remote_versions(
                 .and_then(|targets| targets.first())
                 .and_then(|t| t.pattern.as_deref());
 
-            if let Some(ver) = parse_component_version(
-                &output.stdout,
-                pattern,
-                version_file,
-                &component.modules,
-            ) {
+            if let Some(ver) =
+                parse_component_version(&output.stdout, pattern, version_file, &component.modules)
+            {
                 versions.insert(component.id.clone(), ver);
             }
         }

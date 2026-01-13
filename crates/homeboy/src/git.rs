@@ -3,8 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::component;
-use crate::json::read_json_spec_to_string;
 use crate::error::{Error, Result};
+use crate::json::read_json_spec_to_string;
 use crate::project;
 
 // ============================================================================
@@ -20,7 +20,10 @@ pub fn clone_repo(url: &str, target_dir: &Path) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_command_failed(format!("git clone failed: {}", stderr)));
+        return Err(Error::git_command_failed(format!(
+            "git clone failed: {}",
+            stderr
+        )));
     }
 
     Ok(())
@@ -36,7 +39,10 @@ pub fn pull_repo(repo_dir: &Path) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_command_failed(format!("git pull failed: {}", stderr)));
+        return Err(Error::git_command_failed(format!(
+            "git pull failed: {}",
+            stderr
+        )));
     }
 
     Ok(())
@@ -69,7 +75,9 @@ pub fn pull_ff_only_interactive(path: &Path) -> Result<()> {
         .map_err(|e| Error::git_command_failed(format!("Failed to run git pull: {}", e)))?;
 
     if !status.success() {
-        return Err(Error::git_command_failed("git pull --ff-only failed".to_string()));
+        return Err(Error::git_command_failed(
+            "git pull --ff-only failed".to_string(),
+        ));
     }
 
     Ok(())
@@ -141,10 +149,7 @@ pub fn get_latest_tag(path: &str) -> Result<Option<String>> {
         if stderr.contains("No names found") || stderr.contains("No tags can describe") {
             return Ok(None);
         }
-        return Err(Error::other(format!(
-            "git describe failed: {}",
-            stderr
-        )));
+        return Err(Error::other(format!("git describe failed: {}", stderr)));
     }
 
     let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -358,8 +363,9 @@ pub fn status(component_id: &str) -> Result<GitOutput> {
 /// Get git status for multiple components from JSON spec.
 pub fn status_bulk(json_spec: &str) -> Result<BulkGitOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let input: BulkIdsInput = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk status input".to_string())))?;
+    let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(e, Some("parse bulk status input".to_string()))
+    })?;
 
     let mut results = Vec::new();
     for id in &input.component_ids {
@@ -412,8 +418,7 @@ pub fn commit(component_id: &str, message: &str) -> Result<GitOutput> {
         });
     }
 
-    let add_output = execute_git(&path, &["add", "."])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let add_output = execute_git(&path, &["add", "."]).map_err(|e| Error::other(e.to_string()))?;
 
     if !add_output.status.success() {
         let exit_code = to_exit_code(add_output.status);
@@ -428,8 +433,8 @@ pub fn commit(component_id: &str, message: &str) -> Result<GitOutput> {
         });
     }
 
-    let commit_output = execute_git(&path, &["commit", "-m", message])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let commit_output =
+        execute_git(&path, &["commit", "-m", message]).map_err(|e| Error::other(e.to_string()))?;
 
     let exit_code = to_exit_code(commit_output.status);
 
@@ -447,8 +452,9 @@ pub fn commit(component_id: &str, message: &str) -> Result<GitOutput> {
 /// Commit multiple components from JSON spec.
 pub fn commit_bulk(json_spec: &str) -> Result<BulkGitOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let input: BulkCommitInput = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk commit input".to_string())))?;
+    let input: BulkCommitInput = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(e, Some("parse bulk commit input".to_string()))
+    })?;
 
     let mut results = Vec::new();
     for spec in &input.components {
@@ -490,8 +496,7 @@ pub fn push(component_id: &str, tags: bool) -> Result<GitOutput> {
         vec!["push"]
     };
 
-    let output = execute_git(&path, &push_args)
-        .map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &push_args).map_err(|e| Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok(GitOutput {
@@ -508,8 +513,9 @@ pub fn push(component_id: &str, tags: bool) -> Result<GitOutput> {
 /// Push multiple components from JSON spec.
 pub fn push_bulk(json_spec: &str) -> Result<BulkGitOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let input: BulkIdsInput = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk push input".to_string())))?;
+    let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(e, Some("parse bulk push input".to_string()))
+    })?;
 
     let mut results = Vec::new();
     let push_tags = input.tags;
@@ -547,8 +553,7 @@ pub fn push_bulk(json_spec: &str) -> Result<BulkGitOutput> {
 pub fn pull(component_id: &str) -> Result<GitOutput> {
     let path = get_component_path(component_id)?;
 
-    let output = execute_git(&path, &["pull"])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &["pull"]).map_err(|e| Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok(GitOutput {
@@ -565,8 +570,9 @@ pub fn pull(component_id: &str) -> Result<GitOutput> {
 /// Pull multiple components from JSON spec.
 pub fn pull_bulk(json_spec: &str) -> Result<BulkGitOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let input: BulkIdsInput = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk pull input".to_string())))?;
+    let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(e, Some("parse bulk pull input".to_string()))
+    })?;
 
     let mut results = Vec::new();
     for id in &input.component_ids {
@@ -607,8 +613,7 @@ pub fn tag(component_id: &str, tag_name: &str, message: Option<&str>) -> Result<
         None => vec!["tag", tag_name],
     };
 
-    let output = execute_git(&path, &tag_args)
-        .map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &tag_args).map_err(|e| Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok(GitOutput {
@@ -673,10 +678,9 @@ pub fn get_uncommitted_changes(path: &str) -> Result<UncommittedChanges> {
 /// Get diff of uncommitted changes.
 pub fn get_diff(path: &str) -> Result<String> {
     // Get both staged and unstaged diff
-    let staged = execute_git(path, &["diff", "--cached"])
-        .map_err(|e| Error::other(e.to_string()))?;
-    let unstaged = execute_git(path, &["diff"])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let staged =
+        execute_git(path, &["diff", "--cached"]).map_err(|e| Error::other(e.to_string()))?;
+    let unstaged = execute_git(path, &["diff"]).map_err(|e| Error::other(e.to_string()))?;
 
     let staged_diff = String::from_utf8_lossy(&staged.stdout);
     let unstaged_diff = String::from_utf8_lossy(&unstaged.stdout);
@@ -791,10 +795,14 @@ fn build_bulk_changes_output(component_ids: &[String], include_diff: bool) -> Bu
 /// Get changes for multiple components from JSON spec.
 pub fn changes_bulk(json_spec: &str, include_diff: bool) -> Result<BulkChangesOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let input: BulkIdsInput = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk changes input".to_string())))?;
+    let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(e, Some("parse bulk changes input".to_string()))
+    })?;
 
-    Ok(build_bulk_changes_output(&input.component_ids, include_diff))
+    Ok(build_bulk_changes_output(
+        &input.component_ids,
+        include_diff,
+    ))
 }
 
 /// Get changes for all components in a project.
@@ -878,8 +886,7 @@ pub fn commit_cwd(message: &str) -> Result<GitOutput> {
         });
     }
 
-    let add_output = execute_git(&path, &["add", "."])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let add_output = execute_git(&path, &["add", "."]).map_err(|e| Error::other(e.to_string()))?;
 
     if !add_output.status.success() {
         let exit_code = to_exit_code(add_output.status);
@@ -894,8 +901,8 @@ pub fn commit_cwd(message: &str) -> Result<GitOutput> {
         });
     }
 
-    let commit_output = execute_git(&path, &["commit", "-m", message])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let commit_output =
+        execute_git(&path, &["commit", "-m", message]).map_err(|e| Error::other(e.to_string()))?;
 
     let exit_code = to_exit_code(commit_output.status);
 
@@ -920,8 +927,7 @@ pub fn push_cwd(tags: bool) -> Result<GitOutput> {
         vec!["push"]
     };
 
-    let output = execute_git(&path, &push_args)
-        .map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &push_args).map_err(|e| Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok(GitOutput {
@@ -939,8 +945,7 @@ pub fn push_cwd(tags: bool) -> Result<GitOutput> {
 pub fn pull_cwd() -> Result<GitOutput> {
     let path = get_cwd_path()?;
 
-    let output = execute_git(&path, &["pull"])
-        .map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &["pull"]).map_err(|e| Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok(GitOutput {
@@ -963,8 +968,7 @@ pub fn tag_cwd(tag_name: &str, message: Option<&str>) -> Result<GitOutput> {
         None => vec!["tag", tag_name],
     };
 
-    let output = execute_git(&path, &tag_args)
-        .map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &tag_args).map_err(|e| Error::other(e.to_string()))?;
     let exit_code = to_exit_code(output.status);
 
     Ok(GitOutput {

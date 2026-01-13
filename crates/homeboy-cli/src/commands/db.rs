@@ -95,7 +95,10 @@ pub fn run(
     }
 }
 
-fn parse_subtarget(project_id: &str, args: &[String]) -> homeboy::Result<(Option<String>, Vec<String>)> {
+fn parse_subtarget(
+    project_id: &str,
+    args: &[String],
+) -> homeboy::Result<(Option<String>, Vec<String>)> {
     let project = project::load_record(project_id)?;
 
     if project.config.sub_targets.is_empty() {

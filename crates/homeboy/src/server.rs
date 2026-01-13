@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use crate::local_files::{self, FileSystem};
 use crate::json;
+use crate::local_files::{self, FileSystem};
 use crate::paths;
 use crate::project;
 use serde::{Deserialize, Serialize};
@@ -279,10 +279,7 @@ pub fn rename(id: &str, new_name: &str) -> Result<CreateResult> {
     if new_id == id {
         server.name = new_name.to_string();
         save(&server)?;
-        return Ok(CreateResult {
-            id: new_id,
-            server,
-        });
+        return Ok(CreateResult { id: new_id, server });
     }
 
     let old_path = paths::server(id)?;
@@ -304,19 +301,15 @@ pub fn rename(id: &str, new_name: &str) -> Result<CreateResult> {
     server.name = new_name.to_string();
 
     local_files::ensure_app_dirs()?;
-    std::fs::rename(&old_path, &new_path).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("rename server".to_string()))
-    })?;
+    std::fs::rename(&old_path, &new_path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("rename server".to_string())))?;
 
     if let Err(error) = save(&server) {
         let _ = std::fs::rename(&new_path, &old_path);
         return Err(error);
     }
 
-    Ok(CreateResult {
-        id: new_id,
-        server,
-    })
+    Ok(CreateResult { id: new_id, server })
 }
 
 pub fn delete_safe(id: &str) -> Result<()> {
@@ -504,18 +497,26 @@ pub fn generate_key(server_id: &str) -> Result<KeyGenerateResult> {
 
     let output = Command::new("ssh-keygen")
         .args([
-            "-t", "rsa",
-            "-b", "4096",
-            "-f", &key_path_str,
-            "-N", "",
-            "-C", &format!("homeboy-{}", server_id),
+            "-t",
+            "rsa",
+            "-b",
+            "4096",
+            "-f",
+            &key_path_str,
+            "-N",
+            "",
+            "-C",
+            &format!("homeboy-{}", server_id),
         ])
         .output()
         .map_err(|e| Error::internal_io(e.to_string(), Some("run ssh-keygen".to_string())))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::internal_unexpected(format!("ssh-keygen failed: {}", stderr)));
+        return Err(Error::internal_unexpected(format!(
+            "ssh-keygen failed: {}",
+            stderr
+        )));
     }
 
     let server = set_identity_file(server_id, Some(key_path_str.clone()))?;
@@ -554,9 +555,8 @@ pub fn import_key(server_id: &str, source_path: &str) -> Result<KeyImportResult>
 
     let expanded_path = shellexpand::tilde(source_path).to_string();
 
-    let private_key = std::fs::read_to_string(&expanded_path).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("read ssh private key".to_string()))
-    })?;
+    let private_key = std::fs::read_to_string(&expanded_path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read ssh private key".to_string())))?;
 
     if !private_key.contains("-----BEGIN") || !private_key.contains("PRIVATE KEY-----") {
         return Err(Error::validation_invalid_argument(
@@ -594,13 +594,13 @@ pub fn import_key(server_id: &str, source_path: &str) -> Result<KeyImportResult>
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| Error::internal_io(e.to_string(), Some("set ssh key permissions".to_string())))?;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |e| Error::internal_io(e.to_string(), Some("set ssh key permissions".to_string())),
+        )?;
     }
 
-    std::fs::write(format!("{}.pub", key_path_str), &public_key).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("write ssh public key".to_string()))
-    })?;
+    std::fs::write(format!("{}.pub", key_path_str), &public_key)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("write ssh public key".to_string())))?;
 
     let server = set_identity_file(server_id, Some(key_path_str.clone()))?;
 

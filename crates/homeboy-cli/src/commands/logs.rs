@@ -70,7 +70,6 @@ pub struct LogsOutput {
     pub cleared_path: Option<String>,
 }
 
-
 fn list(project_id: &str) -> CmdResult<LogsOutput> {
     let entries = logs::list(project_id)?;
 

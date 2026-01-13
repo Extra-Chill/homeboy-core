@@ -173,9 +173,7 @@ pub struct ModuleEntry {
 fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
     let modules = load_all_modules();
 
-    let project_config: Option<Project> = project
-        .as_ref()
-        .and_then(|id| project::load(id).ok());
+    let project_config: Option<Project> = project.as_ref().and_then(|id| project::load(id).ok());
 
     let entries: Vec<ModuleEntry> = modules
         .iter()
@@ -272,15 +270,11 @@ fn update_module(module_id: &str) -> CmdResult<ModuleOutput> {
     }
 
     // Load module to get sourceUrl from manifest
-    let module = load_module(module_id).ok_or_else(|| {
-        homeboy::Error::module_not_found(module_id)
-    })?;
+    let module =
+        load_module(module_id).ok_or_else(|| homeboy::Error::module_not_found(module_id))?;
 
     let source_url = module.source_url.ok_or_else(|| {
-        homeboy::Error::config_missing_key(
-            "sourceUrl",
-            Some(format!("module:{}", module_id)),
-        )
+        homeboy::Error::config_missing_key("sourceUrl", Some(format!("module:{}", module_id)))
     })?;
 
     git::pull_ff_only_interactive(&module_dir)?;
@@ -337,12 +331,8 @@ fn run_action(
     project_id: Option<String>,
     data: Option<String>,
 ) -> CmdResult<ModuleOutput> {
-    let response = homeboy::module::run_action(
-        module_id,
-        action_id,
-        project_id.as_deref(),
-        data.as_deref(),
-    )?;
+    let response =
+        homeboy::module::run_action(module_id, action_id, project_id.as_deref(), data.as_deref())?;
 
     Ok((
         ModuleOutput::Action {
@@ -354,4 +344,3 @@ fn run_action(
         0,
     ))
 }
-

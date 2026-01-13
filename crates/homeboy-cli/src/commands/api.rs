@@ -64,14 +64,14 @@ fn build_api_json(args: &ApiArgs) -> String {
         ApiCommand::Delete { endpoint } => ("DELETE", endpoint.clone(), None),
     };
 
-    let body_value: Option<serde_json::Value> = body
-        .as_ref()
-        .and_then(|b| serde_json::from_str(b).ok());
+    let body_value: Option<serde_json::Value> =
+        body.as_ref().and_then(|b| serde_json::from_str(b).ok());
 
     serde_json::json!({
         "projectId": args.project_id,
         "method": method,
         "endpoint": endpoint,
         "body": body_value,
-    }).to_string()
+    })
+    .to_string()
 }

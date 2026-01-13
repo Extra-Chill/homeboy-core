@@ -365,10 +365,7 @@ fn key_unset(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn key_import(
-    server_id: &str,
-    private_key_path: &str,
-) -> homeboy::Result<(ServerOutput, i32)> {
+fn key_import(server_id: &str, private_key_path: &str) -> homeboy::Result<(ServerOutput, i32)> {
     let result = server::import_key(server_id, private_key_path)?;
 
     Ok((

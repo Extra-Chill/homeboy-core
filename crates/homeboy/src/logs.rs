@@ -54,7 +54,10 @@ pub fn show(project_id: &str, path: &str, lines: u32) -> Result<LogContent> {
         server_id: Some(ctx.server_id.clone()),
         host: Some(ctx.client.host.clone()),
     };
-    let output = ctx.client.execute(&command).into_remote_result(&command, target)?;
+    let output = ctx
+        .client
+        .execute(&command)
+        .into_remote_result(&command, target)?;
 
     Ok(LogContent {
         path: full_path,
@@ -88,7 +91,10 @@ pub fn clear(project_id: &str, path: &str) -> Result<String> {
         server_id: Some(ctx.server_id.clone()),
         host: Some(ctx.client.host.clone()),
     };
-    let _output = ctx.client.execute(&command).into_remote_result(&command, target)?;
+    let _output = ctx
+        .client
+        .execute(&command)
+        .into_remote_result(&command, target)?;
 
     Ok(full_path)
 }

@@ -38,7 +38,8 @@ pub fn explain(code: ErrorCode) -> ErrorHelp {
             summary: "Missing required configuration key".to_string(),
             details_schema: serde_json::json!({"key":"string","path":"string?"}),
             hints: vec![Hint {
-                message: "Check your project/server/component JSON files for missing required keys".to_string(),
+                message: "Check your project/server/component JSON files for missing required keys"
+                    .to_string(),
             }],
         },
         ErrorCode::ConfigInvalidJson => ErrorHelp {
@@ -134,7 +135,9 @@ pub fn explain(code: ErrorCode) -> ErrorHelp {
             summary: "Server configuration is invalid".to_string(),
             details_schema: serde_json::json!({"serverId":"string","missingFields":"string[]"}),
             hints: vec![Hint {
-                message: "Ensure the server config includes host/user/port and optional identityFile".to_string(),
+                message:
+                    "Ensure the server config includes host/user/port and optional identityFile"
+                        .to_string(),
             }],
         },
         ErrorCode::SshIdentityFileNotFound => ErrorHelp {
@@ -166,7 +169,8 @@ pub fn explain(code: ErrorCode) -> ErrorHelp {
             summary: "Remote command returned non-zero".to_string(),
             details_schema: serde_json::json!({"command":"string","exitCode":"number","stdout":"string","stderr":"string","target":"object"}),
             hints: vec![Hint {
-                message: "Inspect stdout/stderr in error.details for the underlying failure".to_string(),
+                message: "Inspect stdout/stderr in error.details for the underlying failure"
+                    .to_string(),
             }],
         },
         ErrorCode::RemoteCommandTimeout => ErrorHelp {

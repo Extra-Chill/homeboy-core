@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::component::{self, Component};
-use crate::json::read_json_spec_to_string;
 use crate::error::{Error, Result};
+use crate::json::read_json_spec_to_string;
 
 const DEFAULT_NEXT_SECTION_LABEL: &str = "Unreleased";
 
@@ -14,9 +14,7 @@ pub struct EffectiveChangelogSettings {
     pub next_section_aliases: Vec<String>,
 }
 
-pub fn resolve_effective_settings(
-    component: Option<&Component>,
-) -> EffectiveChangelogSettings {
+pub fn resolve_effective_settings(component: Option<&Component>) -> EffectiveChangelogSettings {
     let next_section_label = component
         .and_then(|c| c.changelog_next_section_label.clone())
         .unwrap_or_else(|| DEFAULT_NEXT_SECTION_LABEL.to_string());
@@ -543,11 +541,8 @@ pub fn add_items_cwd(messages: &[String]) -> Result<AddItemsOutput> {
     let content = fs::read_to_string(&changelog_path)
         .map_err(|e| Error::internal_io(e.to_string(), Some("read changelog".to_string())))?;
 
-    let (updated, changed, items_added) = add_next_section_items(
-        &content,
-        &settings.next_section_aliases,
-        messages,
-    )?;
+    let (updated, changed, items_added) =
+        add_next_section_items(&content, &settings.next_section_aliases, messages)?;
 
     if changed {
         fs::write(&changelog_path, &updated)
