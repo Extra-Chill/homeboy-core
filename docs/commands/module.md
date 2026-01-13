@@ -128,17 +128,19 @@ Executable modules define their runtime behavior in their module manifest (`modu
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy module` returns a `ModuleOutput` object as `data`.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy module` returns a tagged `ModuleOutput` object as `data`.
 
-`ModuleOutput`:
+Top-level variants (`data.command`):
 
-- `command`: `module.list` | `module.run` | `module.setup` | `module.install` | `module.update` | `module.uninstall`
-- `projectId` (only used for `module.list` filter)
-- `moduleId`
-- `modules`: list output for `module.list`
-- `installed`: `{ url, path }` for `module.install`
-- `updated`: `{ url, path }` for `module.update`
-- `uninstalled`: `{ path }` for `module.uninstall`
+- `module.list`: `{ projectId?, modules: ModuleEntry[] }`
+- `module.run`: `{ moduleId, projectId? }`
+- `module.setup`: `{ moduleId }`
+- `module.install`: `{ moduleId, url, path }`
+- `module.update`: `{ moduleId, url, path }`
+- `module.uninstall`: `{ moduleId, path }`
+- `module.link`: `{ moduleId, sourcePath, symlinkPath }`
+- `module.unlink`: `{ moduleId, path }`
+- `module.action`: `{ moduleId, actionId, projectId?, response }`
 
 Module entry (`modules[]`):
 
@@ -147,6 +149,8 @@ Module entry (`modules[]`):
 - `compatible` (with optional `--project`)
 - `ready` (runtime readiness based on `readyCheck`)
 - `configured`: currently always `true` for discovered modules (reserved for future richer config state)
+- `linked`: whether the module is symlinked
+- `path`: module directory path (may be empty if unknown)
 
 ## Exit code
 

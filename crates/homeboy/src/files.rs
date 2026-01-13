@@ -125,6 +125,11 @@ pub fn local() -> LocalFs {
     LocalFs::new()
 }
 
+/// Check if a path exists on the local filesystem
+pub fn path_exists(path: &Path) -> bool {
+    path.exists()
+}
+
 /// Ensure all app directories exist
 pub fn ensure_app_dirs() -> Result<()> {
     use crate::paths;

@@ -1,12 +1,11 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
-use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use homeboy::module::{
     is_module_compatible, is_module_linked, is_module_ready, load_all_modules, load_module,
-    module_path, run_setup, ModuleManifest,
+    module_path, run_setup,
 };
 use homeboy::project::{self, Project};
 
@@ -48,11 +47,11 @@ enum ModuleCommand {
         /// Module ID
         module_id: String,
     },
-    /// Install a module from a git repository URL
+    /// Install a module from a git URL or local path
     Install {
-        /// Git repository URL
-        url: String,
-        /// Override module id (directory name)
+        /// Git URL or local path to module directory
+        source: String,
+        /// Override module id
         #[arg(long)]
         id: Option<String>,
     },
@@ -64,26 +63,13 @@ enum ModuleCommand {
         #[arg(long)]
         force: bool,
     },
-    /// Uninstall a module (remove its directory)
+    /// Uninstall a module
     Uninstall {
         /// Module ID
         module_id: String,
-        /// Delete without confirmation
+        /// Force deletion for git-cloned modules (not needed for symlinked modules)
         #[arg(long)]
         force: bool,
-    },
-    /// Symlink a local module for development
-    Link {
-        /// Path to local module directory
-        path: String,
-        /// Override module id (defaults to manifest id)
-        #[arg(long)]
-        id: Option<String>,
-    },
-    /// Remove a symlinked module (preserves source directory)
-    Unlink {
-        /// Module ID
-        module_id: String,
     },
     /// Execute a module action (API call or builtin)
     Action {
@@ -118,11 +104,9 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             args,
         } => run_module(&module_id, project, component, input, args),
         ModuleCommand::Setup { module_id } => setup_module(&module_id),
-        ModuleCommand::Install { url, id } => install_module(&url, id),
+        ModuleCommand::Install { source, id } => install_module(&source, id),
         ModuleCommand::Update { module_id, force } => update_module(&module_id, force),
         ModuleCommand::Uninstall { module_id, force } => uninstall_module(&module_id, force),
-        ModuleCommand::Link { path, id } => link_module(&path, id),
-        ModuleCommand::Unlink { module_id } => unlink_module(&module_id),
         ModuleCommand::Action {
             module_id,
             action_id,
@@ -152,8 +136,9 @@ pub enum ModuleOutput {
     #[serde(rename = "module.install")]
     Install {
         module_id: String,
-        url: String,
+        source: String,
         path: String,
+        linked: bool,
     },
     #[serde(rename = "module.update")]
     Update {
@@ -162,15 +147,11 @@ pub enum ModuleOutput {
         path: String,
     },
     #[serde(rename = "module.uninstall")]
-    Uninstall { module_id: String, path: String },
-    #[serde(rename = "module.link")]
-    Link {
+    Uninstall {
         module_id: String,
-        source_path: String,
-        symlink_path: String,
+        path: String,
+        was_linked: bool,
     },
-    #[serde(rename = "module.unlink")]
-    Unlink { module_id: String, path: String },
     #[serde(rename = "module.action")]
     Action {
         module_id: String,
@@ -267,48 +248,6 @@ fn run_module(
     ))
 }
 
-fn slugify_module_id(value: &str) -> homeboy::Result<String> {
-    let mut output = String::new();
-    let mut last_was_dash = false;
-
-    for ch in value.chars() {
-        let lower = ch.to_ascii_lowercase();
-        if lower.is_ascii_alphanumeric() {
-            output.push(lower);
-            last_was_dash = false;
-            continue;
-        }
-
-        if !last_was_dash && !output.is_empty() {
-            output.push('-');
-            last_was_dash = true;
-        }
-    }
-
-    while output.ends_with('-') {
-        output.pop();
-    }
-
-    if output.is_empty() {
-        return Err(homeboy::Error::other(
-            "Unable to derive module id".to_string(),
-        ));
-    }
-
-    Ok(output)
-}
-
-fn derive_module_id_from_url(url: &str) -> homeboy::Result<String> {
-    let trimmed = url.trim_end_matches('/');
-    let segment = trimmed
-        .split('/')
-        .next_back()
-        .unwrap_or(trimmed)
-        .trim_end_matches(".git");
-
-    slugify_module_id(segment)
-}
-
 fn confirm_dangerous_action(force: bool, message: &str) -> homeboy::Result<()> {
     if force {
         return Ok(());
@@ -331,75 +270,16 @@ fn is_git_workdir_clean(path: &Path) -> bool {
     }
 }
 
-fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
-    let module_id = match id {
-        Some(id) => slugify_module_id(&id)?,
-        None => derive_module_id_from_url(url)?,
-    };
-
-    let module_dir = module_path(&module_id);
-    if module_dir.exists() {
-        return Err(homeboy::Error::other(format!(
-            "Module '{module_id}' already exists",
-        )));
-    }
-
-    if let Some(parent) = module_dir.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            homeboy::Error::internal_io(e.to_string(), Some("create modules directory".to_string()))
-        })?;
-    }
-
-    let status = Command::new("git")
-        .args(["clone", url, module_dir.to_string_lossy().as_ref()])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .map_err(|e| homeboy::Error::other(e.to_string()))?;
-
-    if !status.success() {
-        return Err(homeboy::Error::other("git clone failed".to_string()));
-    }
-
-    // Write sourceUrl to the module's homeboy.json
-    let manifest_path = module_dir.join("homeboy.json");
-    if manifest_path.exists() {
-        let content = fs::read_to_string(&manifest_path).map_err(|e| {
-            homeboy::Error::internal_io(e.to_string(), Some("read module manifest".to_string()))
-        })?;
-
-        let mut manifest: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-            homeboy::Error::config_invalid_json(manifest_path.to_string_lossy().to_string(), e)
-        })?;
-
-        manifest["sourceUrl"] = serde_json::Value::String(url.to_string());
-
-        let updated = serde_json::to_string_pretty(&manifest).map_err(|e| {
-            homeboy::Error::internal_json(e.to_string(), Some("serialize manifest".to_string()))
-        })?;
-
-        fs::write(&manifest_path, updated).map_err(|e| {
-            homeboy::Error::internal_io(e.to_string(), Some("write module manifest".to_string()))
-        })?;
-    }
-
-    // Auto-run setup if module defines a setup_command
-    if let Some(module) = load_module(&module_id) {
-        if module
-            .runtime
-            .as_ref()
-            .is_some_and(|r| r.setup_command.is_some())
-        {
-            let _ = setup_module(&module_id)?;
-        }
-    }
+fn install_module(source: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
+    let result = homeboy::module::install(source, id.as_deref())?;
+    let linked = is_module_linked(&result.module_id);
 
     Ok((
         ModuleOutput::Install {
-            module_id: module_id.clone(),
-            url: url.to_string(),
-            path: module_dir.to_string_lossy().to_string(),
+            module_id: result.module_id,
+            source: result.url,
+            path: result.path.to_string_lossy().to_string(),
+            linked,
         },
         0,
     ))
@@ -475,26 +355,14 @@ fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
 }
 
 fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
-    let module_dir = module_path(module_id);
-    if !module_dir.exists() {
-        return Err(homeboy::Error::other(format!(
-            "Module '{module_id}' not found",
-        )));
-    }
-
-    confirm_dangerous_action(force, "This will permanently remove the module")?;
-
-    fs::remove_dir_all(&module_dir).map_err(|err| {
-        homeboy::Error::internal_io(
-            err.to_string(),
-            Some("remove module directory".to_string()),
-        )
-    })?;
+    let was_linked = is_module_linked(module_id);
+    let path = homeboy::module::uninstall(module_id, force)?;
 
     Ok((
         ModuleOutput::Uninstall {
             module_id: module_id.to_string(),
-            path: module_dir.to_string_lossy().to_string(),
+            path: path.to_string_lossy().to_string(),
+            was_linked,
         },
         0,
     ))
@@ -508,120 +376,6 @@ fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
             module_id: module_id.to_string(),
         },
         result.exit_code,
-    ))
-}
-
-fn link_module(path: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
-    let source_path = Path::new(path);
-
-    // Resolve to absolute path
-    let source_path = if source_path.is_absolute() {
-        source_path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| homeboy::Error::other(e.to_string()))?
-            .join(source_path)
-    };
-
-    if !source_path.exists() {
-        return Err(homeboy::Error::other(format!(
-            "Source path does not exist: {}",
-            source_path.display()
-        )));
-    }
-
-    // Validate homeboy.json exists
-    let manifest_path = source_path.join("homeboy.json");
-    if !manifest_path.exists() {
-        return Err(homeboy::Error::other(format!(
-            "No homeboy.json found at {}",
-            source_path.display()
-        )));
-    }
-
-    // Read manifest to get module id if not provided
-    let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
-        homeboy::Error::internal_io(e.to_string(), Some("read module manifest".to_string()))
-    })?;
-    let manifest: ModuleManifest = serde_json::from_str(&manifest_content).map_err(|e| {
-        homeboy::Error::config_invalid_json(manifest_path.to_string_lossy().to_string(), e)
-    })?;
-
-    let module_id = match id {
-        Some(id) => slugify_module_id(&id)?,
-        None => manifest.id.clone(),
-    };
-
-    if module_id.is_empty() {
-        return Err(homeboy::Error::other(
-            "Module id is empty. Provide --id or ensure manifest has an id field.".to_string(),
-        ));
-    }
-
-    let module_dir = module_path(&module_id);
-    if module_dir.exists() {
-        return Err(homeboy::Error::other(format!(
-            "Module '{}' already exists at {}",
-            module_id,
-            module_dir.display()
-        )));
-    }
-
-    if let Some(parent) = module_dir.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            homeboy::Error::internal_io(e.to_string(), Some("create modules directory".to_string()))
-        })?;
-    }
-
-    // Create symlink
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&source_path, &module_dir).map_err(|e| {
-        homeboy::Error::internal_io(e.to_string(), Some("create symlink".to_string()))
-    })?;
-
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&source_path, &module_dir).map_err(|e| {
-        homeboy::Error::internal_io(e.to_string(), Some("create symlink".to_string()))
-    })?;
-
-    Ok((
-        ModuleOutput::Link {
-            module_id,
-            source_path: source_path.to_string_lossy().to_string(),
-            symlink_path: module_dir.to_string_lossy().to_string(),
-        },
-        0,
-    ))
-}
-
-fn unlink_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    let module_dir = module_path(module_id);
-
-    if !module_dir.exists() {
-        return Err(homeboy::Error::other(format!(
-            "Module '{}' not found",
-            module_id
-        )));
-    }
-
-    if !module_dir.is_symlink() {
-        return Err(homeboy::Error::other(format!(
-            "Module '{}' is not a symlink. Use `uninstall` to remove git-cloned modules.",
-            module_id
-        )));
-    }
-
-    // Remove the symlink (this does not delete the source directory)
-    fs::remove_file(&module_dir).map_err(|e| {
-        homeboy::Error::internal_io(e.to_string(), Some("remove symlink".to_string()))
-    })?;
-
-    Ok((
-        ModuleOutput::Unlink {
-            module_id: module_id.to_string(),
-            path: module_dir.to_string_lossy().to_string(),
-        },
-        0,
     ))
 }
 

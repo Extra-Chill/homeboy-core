@@ -1,7 +1,5 @@
 # Commands index
 
-- [api](api.md)
-- [auth](auth.md)
 - [build](build.md)
 - [changelog](changelog.md)
 - [component](component.md)
@@ -21,7 +19,7 @@
 - [ssh](ssh.md)
 - [version](version.md)
 
-This list covers built-in CLI commands. Locally installed modules can also provide additional top-level commands.
+This list covers built-in CLI commands.
 
 Related:
 

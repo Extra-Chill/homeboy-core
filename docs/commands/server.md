@@ -78,7 +78,7 @@ Key payload (`key`):
 - `serverId`
 - `publicKey` (when available)
 - `identityFile` (when set/known)
-- `imported` (path used for import)
+- `imported` (original path used for import; `~` is expanded)
 
 ## Related
 

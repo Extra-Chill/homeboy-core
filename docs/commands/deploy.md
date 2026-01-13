@@ -3,7 +3,7 @@
 ## Synopsis
 
 ```sh
-homeboy deploy <projectId> [<componentIds...>] [--all] [--outdated] [--dry-run]
+homeboy deploy <projectId> [<componentIds...>] [--all] [--outdated] [--dry-run] [--json '<spec>']
 # If no component IDs are provided, you must use --all or --outdated.
 ```
 
@@ -18,15 +18,17 @@ Options:
 - `--outdated`: deploy only outdated components
   - Determined from the first version target for each component.
 - `--dry-run`: show what would be deployed without executing
+- `--json`: JSON input spec for bulk operations (`[{"id":"component-id"}, ...]`)
 
 If no component IDs are provided and neither `--all` nor `--outdated` is set, Homeboy returns an error.
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is `data.payload`.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is `data`.
 
 ```json
 {
+  "command": "deploy.run",
   "projectId": "<projectId>",
   "all": false,
   "outdated": false,

@@ -1,10 +1,10 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
 
 use homeboy::project;
 use homeboy::http::ApiClient;
+use homeboy::tty::{prompt, prompt_password};
 
 use super::{CmdResult, GlobalArgs};
 
@@ -131,37 +131,3 @@ fn run_status(project_id: &str) -> CmdResult<AuthOutput> {
     ))
 }
 
-fn prompt(message: &str) -> homeboy::Result<String> {
-    eprint!("{}", message);
-    io::stderr().flush().ok();
-
-    let stdin = io::stdin();
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line).map_err(|e| {
-        homeboy::Error::new(
-            homeboy::ErrorCode::InternalIoError,
-            format!("Failed to read input: {}", e),
-            serde_json::Value::Null,
-        )
-    })?;
-
-    Ok(line.trim().to_string())
-}
-
-fn prompt_password(message: &str) -> homeboy::Result<String> {
-    eprint!("{}", message);
-    io::stderr().flush().ok();
-
-    // For now, just read from stdin (could use rpassword for hidden input)
-    let stdin = io::stdin();
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line).map_err(|e| {
-        homeboy::Error::new(
-            homeboy::ErrorCode::InternalIoError,
-            format!("Failed to read input: {}", e),
-            serde_json::Value::Null,
-        )
-    })?;
-
-    Ok(line.trim().to_string())
-}

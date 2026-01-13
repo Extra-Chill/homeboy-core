@@ -21,11 +21,12 @@ Options:
 
 - `--json <spec>`: JSON input spec for create/update (supports single or bulk)
 - `--skip-existing`: skip items that already exist (JSON mode only)
-- `--local-path <path>`: absolute path to local source directory (required in CLI mode)
+- `--local-path <path>`: absolute path to local source directory (required in CLI mode; `~` is expanded)
 - `--remote-path <path>`: remote path relative to project `basePath` (required in CLI mode)
 - `--build-artifact <path>`: build artifact path relative to `localPath` (required in CLI mode)
 - `--version-target <TARGET>`: version target in format `file` or `file::pattern` (repeatable)
 - `--build-command <command>`: build command to run in `localPath`
+- `--extract-command <command>`: command to run after upload (optional)
 
 ### `show`
 
@@ -47,11 +48,12 @@ Options:
 - `--build-artifact <path>`: update build artifact path
 - `--version-target <TARGET>`: replace version targets (repeatable `file` or `file::pattern`)
 - `--build-command <command>`: update build command
+- `--extract-command <command>`: update extract command
 
 ### `delete`
 
 ```sh
-homeboy component delete <id> [--force]
+homeboy component delete <id> --force
 ```
 
 ### `list`
@@ -68,7 +70,7 @@ homeboy component list
 
 ```json
 {
-  "action": "create|show|set|delete|list|component.create",
+  "action": "component.create|component.show|component.set|component.delete|component.list",
   "componentId": "<id>|null",
   "success": true,
   "updatedFields": ["name", "localPath"],

@@ -1,16 +1,15 @@
 use clap::Args;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 
-use homeboy::component;
+use homeboy::component::{self, Component};
 use homeboy::project::{self, ProjectRecord};
 use homeboy::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
 use homeboy::deploy::{deploy_artifact, parse_bulk_component_ids, DeployResult};
 use homeboy::module::{load_module, DeployVerification};
 use homeboy::ssh::{execute_local_command_in_dir, SshClient};
-use homeboy::version::{default_pattern_for_file, parse_version};
+use homeboy::version::{default_pattern_for_file, parse_version, read_local_version};
 
 use super::CmdResult;
 
@@ -378,25 +377,6 @@ fn run_with_loaders(
     ))
 }
 
-#[derive(Clone)]
-struct VersionTarget {
-    file: String,
-    pattern: Option<String>,
-}
-
-#[derive(Clone)]
-struct Component {
-    id: String,
-    name: String,
-    local_path: String,
-    remote_path: String,
-    build_artifact: String,
-    build_command: Option<String>,
-    extract_command: Option<String>,
-    version_targets: Option<Vec<VersionTarget>>,
-    modules: Vec<String>,
-}
-
 fn plan_components_to_deploy(
     args: &DeployArgs,
     all_components: &[Component],
@@ -497,36 +477,12 @@ fn load_components(component_ids: &[String]) -> Vec<Component> {
     let mut components = Vec::new();
 
     for id in component_ids {
-        if let Ok(loaded) = component::load(id) {
-            let local_path = loaded.local_path;
-
-            let build_artifact = if loaded.build_artifact.starts_with('/') {
-                loaded.build_artifact
-            } else {
-                format!("{}/{}", local_path, loaded.build_artifact)
-            };
-
-            let version_targets = loaded.version_targets.map(|targets| {
-                targets
-                    .into_iter()
-                    .map(|target| VersionTarget {
-                        file: target.file,
-                        pattern: target.pattern,
-                    })
-                    .collect::<Vec<_>>()
-            });
-
-            components.push(Component {
-                id: id.clone(),
-                name: loaded.name,
-                local_path,
-                remote_path: loaded.remote_path,
-                build_artifact,
-                build_command: loaded.build_command,
-                extract_command: loaded.extract_command,
-                version_targets,
-                modules: loaded.modules,
-            });
+        if let Ok(mut loaded) = component::load(id) {
+            // Resolve relative build artifact path
+            if !loaded.build_artifact.starts_with('/') {
+                loaded.build_artifact = format!("{}/{}", loaded.local_path, loaded.build_artifact);
+            }
+            components.push(loaded);
         }
     }
 
@@ -549,14 +505,7 @@ fn parse_component_version(
 
 fn fetch_local_version(component: &Component) -> Option<String> {
     let target = component.version_targets.as_ref()?.first()?;
-    let path = format!("{}/{}", component.local_path, target.file);
-    let content = fs::read_to_string(&path).ok()?;
-    parse_component_version(
-        &content,
-        target.pattern.as_deref(),
-        &target.file,
-        &component.modules,
-    )
+    read_local_version(&component.local_path, target, &component.modules)
 }
 
 fn fetch_remote_versions(

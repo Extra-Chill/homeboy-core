@@ -3,7 +3,7 @@
 ## Synopsis
 
 ```sh
-homeboy [--dry-run] <COMMAND>
+homeboy [OPTIONS] <COMMAND>
 ```
 
 ## Description
@@ -20,9 +20,8 @@ These are provided by clap:
 Homeboy also defines:
 
 - `--dry-run`: global dry-run mode.
-  - Commands that support dry-run avoid writing local files and avoid remote side effects where applicable.
 
-Note: `--dry-run` is a global option and also appears on many subcommands in help output.
+`--dry-run` is a global option.
 
 ## Subcommands
 

@@ -27,7 +27,9 @@ Fields:
 - `recursive`: present for delete
 - `entries`: for `list` (parsed from `ls -la`)
 - `content`: for `read`
-- `bytesWritten`: for `write`
+- `bytesWritten`: for `write` (length after stripping one trailing `\n` if present)
+- `bytesWritten`: number of bytes written (trailing newline stripped)
+- `stdout`, `stderr`: included for error context when applicable
 - `exitCode`, `success`
 
 List entries (`entries[]`):

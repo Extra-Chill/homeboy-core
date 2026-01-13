@@ -38,11 +38,13 @@ homeboy auth status --project <projectId>
 
 JSON output is wrapped in the global envelope.
 
-The `data.payload` is one of:
+`data` is one of:
 
 - `{ "command": "login", "projectId": "...", "success": true }`
 - `{ "command": "logout", "projectId": "..." }`
 - `{ "command": "status", "projectId": "...", "authenticated": true }`
+
+Note: `command` is a tagged enum value (`login|logout|status`), and fields are camelCase (`projectId`).
 
 ## Related
 

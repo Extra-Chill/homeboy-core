@@ -14,7 +14,7 @@ This command does not accept `--dry-run` (and has no `--json` root flag). Output
 
 - `status <componentId>`
 - `commit <componentId> <message>`
-- `push <componentId> [--tags]`
+- `push <componentId> --tags` (optional flag)
 - `pull <componentId>`
 - `tag <componentId> [tagName] [-m <message>]`
   - If `tagName` is omitted, Homeboy tags `v<component version>` (from `homeboy version show`).

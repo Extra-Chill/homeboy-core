@@ -29,7 +29,9 @@ Common paths:
 - `keys/`
 - `backups/`
 
-Additional:
+Notes:
 
-- `docs/` exists under the config root, but is not currently written by the CLI for documentation topics (embedded topics live in the CLI binary; module topics load from `modules/<moduleId>/docs/`).
+- Embedded CLI docs ship inside the binary (see [Embedded docs topic resolution](embedded-docs/embedded-docs-topic-resolution.md)).
+- Module docs load from `<config dir>/homeboy/modules/<moduleId>/docs/`.
+- The CLI does not write documentation into `<config dir>/homeboy/docs/`.
 

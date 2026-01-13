@@ -8,25 +8,12 @@ It standardizes common operations (project/component discovery, remote execution
 
 ## Installation
 
-### Homebrew
+See the monorepo-level documentation for installation options:
 
-```bash
-brew tap extra-chill/tap
-brew install homeboy
-```
+- [Root README](../README.md)
+- [Homebrew tap](../homebrew-tap/README.md)
 
-This installs the **Homeboy CLI** (`homeboy`). It does not install the macOS desktop app.
-
-For details on the tap and formulae, see `homebrew-tap/README.md`.
-
-### Cargo (requires Rust)
-```bash
-cargo install --path .
-```
-
-### Direct Download
-Download from [GitHub Releases](https://github.com/Extra-Chill/homeboy-cli/releases) (CLI only).
-
+This README stays focused on the CLI codebase layout and links to the canonical CLI reference docs under `docs/`.
 ## Commands
 
 See:
@@ -56,6 +43,8 @@ homeboy docs --list
 homeboy docs commands/project
 homeboy project list
 homeboy module list
+homeboy pm2 <projectId> status
+homeboy wp <projectId> plugin list
 homeboy ssh <projectId>   # interactive passthrough
 homeboy logs show <projectId> <path> --follow   # interactive passthrough
 ```

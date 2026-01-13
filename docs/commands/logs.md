@@ -16,7 +16,7 @@ homeboy logs <COMMAND>
 
 ### Non-follow subcommands
 
-> Note: `logs list`, `logs show` (without `--follow`), and `logs clear` output JSON wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below refers to `data.payload`.
+> Note: `logs list`, `logs show` (without `--follow`), and `logs clear` output JSON wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below refers to `data`.
 
 - `command`: `logs.list` | `logs.show` | `logs.follow` | `logs.clear`
 - `projectId`

@@ -176,7 +176,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - **Component configuration**: Support `versionTargets` (multiple version targets) and optional `buildCommand` in component config.
 - **Version bumping**: `homeboy version bump` validates that all matches in each target are the same version before replacing.
 - **Deploy JSON output**: Deploy results include `artifactPath`, `remotePath`, `buildCommand`, `buildExitCode`, and an upload exit code for clearer automation.
-- **Docs refresh**: Updated command docs + JSON output contract; removed outdated `docs/homeboy-cli-commands-and-json-contract.md`.
+- **Docs refresh**: Updated command docs + JSON output contract; removed outdated command/contract doc.
 
 ## 0.1.6
 

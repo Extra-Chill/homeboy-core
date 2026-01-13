@@ -12,6 +12,8 @@ When `--list` is not used, this command prints the embedded markdown topic to st
 
 When `--list` is used, this command returns a JSON list of available topics (wrapped in the global JSON envelope).
 
+`homeboy docs` also supports the global `--dry-run` flag (it has no effect for docs output).
+
 - Topic arguments are treated as a free-form trailing list.
 - The resolved key is checked against:
   1) embedded core docs in the CLI binary, then
@@ -21,7 +23,7 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 ## Arguments
 
-- `<topic>...` (optional): documentation topic. This must resolve to an embedded docs key (path under `docs/` without `.md`). Examples: `commands/deploy`, `commands/project`, `index`.
+- `[TOPIC]...` (optional): documentation topic. This resolves to an embedded docs key (path under `docs/` without `.md`). Examples: `commands/deploy`, `commands/project`, `index`.
 
 ## Options
 
@@ -37,12 +39,12 @@ When `--list` is **not** used, `homeboy docs` writes the embedded markdown topic
 
 When `--list` is used, output is JSON.
 
-> Note: all JSON output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is `data.payload`.
+> Note: all JSON output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the top-level `data` value.
 
 ```json
 {
   "mode": "list",
-  "availableTopics": ["index", "commands/deploy"]
+  "available_topics": ["index", "commands/deploy"]
 }
 ```
 

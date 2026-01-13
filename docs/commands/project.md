@@ -95,7 +95,7 @@ JSON mode:
 ### `set`
 
 ```sh
-homeboy project set <projectId> [--name <name>] [--domain <domain>] [--module <moduleId>]... [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--module-setting <moduleId.key=value>]... [--component-ids <componentId,componentId,...>]
+homeboy project set <projectId> [--name <name>] [--domain <domain>] [--module <moduleId>]... [--server-id <serverId>] [--base-path <path>] [--table-prefix <prefix>] [--component-ids <componentId,componentId,...>]
 ```
 
 Arguments:
@@ -110,7 +110,6 @@ Options:
 - `--server-id <serverId>`: server ID
 - `--base-path <path>`: remote base path
 - `--table-prefix <prefix>`: table prefix
-- `--module-setting <moduleId.key=value>`: set a module setting (repeatable)
 - `--component-ids <componentId,componentId,...>`: replace component IDs (comma-separated)
 
 JSON output:

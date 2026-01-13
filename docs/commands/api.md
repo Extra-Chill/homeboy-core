@@ -48,10 +48,11 @@ homeboy api <projectId> delete <endpoint>
 
 - `<endpoint>` is passed through as provided (example: `/wp/v2/posts`).
 - `--body` is parsed as JSON. If parsing fails, the request is sent with `body: null`.
+- If `--body` is omitted, `body` is `null`.
 
 ## Output
 
-JSON output is wrapped in the global envelope. The `data.payload` is the `homeboy::api::ApiOutput` struct.
+JSON output is wrapped in the global envelope. `data` is the `homeboy::api::ApiOutput` struct.
 
 ## Related
 

@@ -25,14 +25,14 @@ homeboy ssh list
 - `[ID]`: project ID or server ID (project wins when both exist). Optional when using `--project` or `--server`.
 - `--project <PROJECT>`: force project resolution
 - `--server <SERVER>`: force server resolution
-- `[COMMAND]` (optional): command to execute (omit for interactive shell)
+- `[COMMAND]` (optional): command to execute (omit for interactive shell). Note: currently parsed as a single argument; multiple words may require shell quoting.
 
 
 ## JSON output
 
 ### `ssh list`
 
-> Note: output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is `data.payload`.
+> Note: output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is `data`.
 
 ```json
 {

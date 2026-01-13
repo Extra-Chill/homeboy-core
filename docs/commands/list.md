@@ -14,7 +14,7 @@ This command exists as a convenience entrypoint (for example when you want a qui
 
 ## Output
 
-This command prints clap-generated help text to stdout.
+This command prints clap-generated `homeboy --help` output to stdout.
 
 - Output is plain text (no JSON envelope).
 

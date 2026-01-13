@@ -939,13 +939,6 @@ pub struct UpdateResult {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone)]
-pub struct LinkResult {
-    pub module_id: String,
-    pub source_path: PathBuf,
-    pub symlink_path: PathBuf,
-}
-
 /// Slugify a string into a valid module ID.
 pub fn slugify_id(value: &str) -> Result<String> {
     let mut output = String::new();
@@ -993,6 +986,15 @@ pub fn derive_id_from_url(url: &str) -> Result<String> {
     slugify_id(segment)
 }
 
+/// Check if a string looks like a git URL (vs a local path).
+pub fn is_git_url(source: &str) -> bool {
+    source.starts_with("http://")
+        || source.starts_with("https://")
+        || source.starts_with("git@")
+        || source.starts_with("ssh://")
+        || source.ends_with(".git")
+}
+
 /// Check if a git working directory is clean (no uncommitted changes).
 fn is_workdir_clean(path: &Path) -> bool {
     let output = Command::new("git")
@@ -1006,8 +1008,18 @@ fn is_workdir_clean(path: &Path) -> bool {
     }
 }
 
-/// Install a module from a git repository URL.
-pub fn install(url: &str, id_override: Option<&str>) -> Result<InstallResult> {
+/// Install a module from a git URL or link a local directory.
+/// Automatically detects whether source is a URL (git clone) or local path (symlink).
+pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult> {
+    if is_git_url(source) {
+        install_from_url(source, id_override)
+    } else {
+        install_from_path(source, id_override)
+    }
+}
+
+/// Install a module by cloning from a git repository URL.
+fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResult> {
     let module_id = match id_override {
         Some(id) => slugify_id(id)?,
         None => derive_id_from_url(url)?,
@@ -1046,6 +1058,87 @@ pub fn install(url: &str, id_override: Option<&str>) -> Result<InstallResult> {
     Ok(InstallResult {
         module_id,
         url: url.to_string(),
+        path: module_dir,
+    })
+}
+
+/// Install a module by symlinking a local directory.
+fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<InstallResult> {
+    let source = Path::new(source_path);
+
+    // Resolve to absolute path
+    let source = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| Error::internal_io(e.to_string(), Some("get current dir".to_string())))?
+            .join(source)
+    };
+
+    if !source.exists() {
+        return Err(Error::validation_invalid_argument(
+            "source",
+            format!("Path does not exist: {}", source.display()),
+            Some(source_path.to_string()),
+            None,
+        ));
+    }
+
+    // Validate homeboy.json exists
+    let manifest_path = source.join("homeboy.json");
+    if !manifest_path.exists() {
+        return Err(Error::validation_invalid_argument(
+            "source",
+            format!("No homeboy.json found at {}", source.display()),
+            Some(source_path.to_string()),
+            None,
+        ));
+    }
+
+    // Read manifest to get module id if not provided
+    let manifest_content = files::local().read(&manifest_path)?;
+    let manifest: ModuleManifest = json::from_str(&manifest_content)?;
+
+    let module_id = match id_override {
+        Some(id) => slugify_id(id)?,
+        None => manifest.id.clone(),
+    };
+
+    if module_id.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "module_id",
+            "Module id is empty. Provide --id or ensure manifest has an id field.",
+            None,
+            None,
+        ));
+    }
+
+    let module_dir = paths::module(&module_id)?;
+    if module_dir.exists() {
+        return Err(Error::validation_invalid_argument(
+            "module_id",
+            format!("Module '{}' already exists at {}", module_id, module_dir.display()),
+            Some(module_id),
+            None,
+        ));
+    }
+
+    files::ensure_app_dirs()?;
+
+    // Create symlink
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source, &module_dir).map_err(|e| {
+        Error::internal_io(e.to_string(), Some("create symlink".to_string()))
+    })?;
+
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&source, &module_dir).map_err(|e| {
+        Error::internal_io(e.to_string(), Some("create symlink".to_string()))
+    })?;
+
+    Ok(InstallResult {
+        module_id,
+        url: source.to_string_lossy().to_string(),
         path: module_dir,
     })
 }
@@ -1105,131 +1198,36 @@ pub fn update(module_id: &str, force: bool) -> Result<UpdateResult> {
     })
 }
 
-/// Uninstall a module by removing its directory.
+/// Uninstall a module. Automatically detects symlinks vs cloned directories.
+/// - Symlinked modules: removes symlink only (source preserved), no --force needed
+/// - Cloned modules: removes directory entirely, requires --force
 pub fn uninstall(module_id: &str, force: bool) -> Result<PathBuf> {
     let module_dir = paths::module(module_id)?;
     if !module_dir.exists() {
         return Err(Error::module_not_found(module_id.to_string()));
     }
 
-    if !force {
-        return Err(Error::validation_invalid_argument(
-            "force",
-            "This will permanently remove the module. Use --force to confirm.",
-            None,
-            None,
-        ));
-    }
-
-    std::fs::remove_dir_all(&module_dir).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("remove module directory".to_string()))
-    })?;
-
-    Ok(module_dir)
-}
-
-/// Link a local module directory for development.
-pub fn link(source_path: &str, id_override: Option<&str>) -> Result<LinkResult> {
-    let source = Path::new(source_path);
-
-    // Resolve to absolute path
-    let source = if source.is_absolute() {
-        source.to_path_buf()
+    if module_dir.is_symlink() {
+        // Symlinked module: just remove the symlink, source directory is preserved
+        std::fs::remove_file(&module_dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("remove symlink".to_string()))
+        })?;
     } else {
-        std::env::current_dir()
-            .map_err(|e| Error::internal_io(e.to_string(), Some("get current dir".to_string())))?
-            .join(source)
-    };
+        // Cloned module: requires --force since we're deleting actual files
+        if !force {
+            return Err(Error::validation_invalid_argument(
+                "force",
+                "This will permanently delete the module. Use --force to confirm.",
+                None,
+                None,
+            ));
+        }
 
-    if !source.exists() {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            format!("Source path does not exist: {}", source.display()),
-            Some(source_path.to_string()),
-            None,
-        ));
+        std::fs::remove_dir_all(&module_dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("remove module directory".to_string()))
+        })?;
     }
-
-    // Validate homeboy.json exists
-    let manifest_path = source.join("homeboy.json");
-    if !manifest_path.exists() {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            format!("No homeboy.json found at {}", source.display()),
-            Some(source_path.to_string()),
-            None,
-        ));
-    }
-
-    // Read manifest to get module id if not provided
-    let manifest_content = files::local().read(&manifest_path)?;
-    let manifest: ModuleManifest = json::from_str(&manifest_content)?;
-
-    let module_id = match id_override {
-        Some(id) => slugify_id(id)?,
-        None => manifest.id.clone(),
-    };
-
-    if module_id.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "module_id",
-            "Module id is empty. Provide --id or ensure manifest has an id field.",
-            None,
-            None,
-        ));
-    }
-
-    let module_dir = paths::module(&module_id)?;
-    if module_dir.exists() {
-        return Err(Error::validation_invalid_argument(
-            "module_id",
-            format!("Module '{}' already exists at {}", module_id, module_dir.display()),
-            Some(module_id),
-            None,
-        ));
-    }
-
-    files::ensure_app_dirs()?;
-
-    // Create symlink
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, &module_dir).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("create symlink".to_string()))
-    })?;
-
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&source, &module_dir).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("create symlink".to_string()))
-    })?;
-
-    Ok(LinkResult {
-        module_id,
-        source_path: source,
-        symlink_path: module_dir,
-    })
-}
-
-/// Unlink a symlinked module (preserves source directory).
-pub fn unlink(module_id: &str) -> Result<PathBuf> {
-    let module_dir = paths::module(module_id)?;
-
-    if !module_dir.exists() {
-        return Err(Error::module_not_found(module_id.to_string()));
-    }
-
-    if !module_dir.is_symlink() {
-        return Err(Error::validation_invalid_argument(
-            "module_id",
-            format!("Module '{}' is not a symlink. Use `uninstall` to remove git-cloned modules.", module_id),
-            Some(module_id.to_string()),
-            None,
-        ));
-    }
-
-    // Remove the symlink (this does not delete the source directory)
-    std::fs::remove_file(&module_dir).map_err(|e| {
-        Error::internal_io(e.to_string(), Some("remove symlink".to_string()))
-    })?;
 
     Ok(module_dir)
 }
+
