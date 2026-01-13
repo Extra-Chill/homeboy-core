@@ -31,9 +31,6 @@ pub struct ProjectConfiguration {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table_prefix: Option<String>,
 
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub module_settings: HashMap<String, HashMap<String, Value>>,
-
     #[serde(default)]
     pub remote_files: RemoteFileConfig,
     #[serde(default)]

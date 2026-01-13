@@ -13,6 +13,7 @@
 - [doctor](doctor.md)
 - [file](file.md)
 - [git](git.md)
+- [list](list.md)
 - [logs](logs.md)
 - [module](module.md)
 - [homeboy-init](homeboy-init.md)
@@ -21,9 +22,6 @@
 - [ssh](ssh.md)
 - [version](version.md)
 
-Module-provided CLI commands (from installed modules that define `cli.tool`) also appear as top-level commands (for example: `wp`, `pm2`).
-
-These commands are generated at runtime from installed module manifests (loaded via `homeboy_core::module::load_all_modules`).
 
 Related:
 

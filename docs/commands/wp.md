@@ -1,1 +1,0 @@
-../../../homeboy-modules/wordpress/docs/commands/wp.md

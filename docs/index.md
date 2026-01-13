@@ -31,5 +31,5 @@ Common paths:
 
 Additional:
 
-- `docs/` (reserved for cached/generated docs)
+- `docs/` is reserved for cached/generated docs (not used for embedded documentation topics).
 

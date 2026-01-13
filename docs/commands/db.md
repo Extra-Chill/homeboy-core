@@ -84,4 +84,3 @@ Action-specific fields:
 ## Related
 
 - [module](module.md)
-- [wp](wp.md) (module-provided CLI tool example)

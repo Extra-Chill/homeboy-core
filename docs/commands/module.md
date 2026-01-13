@@ -75,11 +75,11 @@ Modules can define additional environment variables via `runtime.env` in their m
 
 `homeboy doctor scan` validates each scope's `settings` object against the module's manifest.
 
-`homeboy module run` requires the module to be present in app config (`homeboy.json`) under `installedModules`.
+`homeboy module run` requires the module to be present in app config (`homeboy.json`) under `installedModules` (i.e., installed/linked and recorded).
 
 ## Runtime Configuration
 
-Modules define their runtime behavior in `homeboy.json`:
+Executable modules define their runtime behavior in their module manifest (`modules/<moduleId>/homeboy.json`):
 
 ```json
 {
@@ -127,6 +127,25 @@ Module entry (`modules[]`):
 - `module.run`: exit code of the executed module's `runCommand`.
 - `module.setup`: `0` on success; if no `setupCommand` defined, returns `0` without action.
 
+## Module-provided commands and docs
+
+Modules can provide their own top-level CLI commands and documentation topics.
+
+Discover what’s available on your machine:
+
+```sh
+homeboy docs --list
+```
+
+Render a module-provided topic:
+
+```sh
+homeboy docs <topic>
+```
+
+Because module commands and docs are installed locally, the core CLI documentation stays focused on the module system rather than any specific module-provided commands.
+
 ## Related
 
+- [docs](docs.md)
 - [project](project.md)

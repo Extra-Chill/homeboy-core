@@ -13,7 +13,9 @@ When `--list` is not used, this command prints the embedded markdown topic to st
 When `--list` is used, this command returns a JSON list of available topics (wrapped in the global JSON envelope).
 
 - Topic arguments are treated as a free-form trailing list.
-- The resolved key must exist in embedded docs; otherwise the command errors.
+- The resolved key is checked against:
+  1) embedded core docs in the CLI binary, then
+  2) installed module docs under `<config dir>/homeboy/modules/<moduleId>/docs/`.
 
 Topic resolution is documented in: [Embedded docs topic resolution](../embedded-docs/embedded-docs-topic-resolution.md).
 

@@ -9,12 +9,15 @@ It standardizes common operations (project/component discovery, remote execution
 ## Installation
 
 ### Homebrew
+
 ```bash
 brew tap extra-chill/tap
 brew install homeboy
 ```
 
 This installs the **Homeboy CLI** (`homeboy`). It does not install the macOS desktop app.
+
+For details on the tap and formulae, see `homebrew-tap/README.md`.
 
 ### Cargo (requires Rust)
 ```bash
@@ -52,7 +55,7 @@ homeboy project list
 homeboy project create "My Project" example.com --module wordpress
 homeboy project set <projectId> --domain example.com --server-id <serverId>
 homeboy project repair <projectId>
-homeboy wp <projectId> core version
+homeboy module list
 homeboy deploy <projectId> --dry-run --all
 homeboy ssh <projectId>
 homeboy module list

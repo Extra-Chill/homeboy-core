@@ -1,1 +1,0 @@
-../../../homeboy-modules/nodejs/docs/commands/pm2.md

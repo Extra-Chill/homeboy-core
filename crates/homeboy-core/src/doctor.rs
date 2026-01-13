@@ -1,16 +1,167 @@
-use crate::config::{
-    AppConfig, AppPaths, ComponentConfiguration, ProjectConfiguration, ServerConfig,
-};
-use crate::json::{read_json_file, write_json_file_pretty};
-use crate::module::ModuleManifest;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-
-use crate::module_settings::ModuleSettingsValidator;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::config::{
+    AppConfig, AppPaths, ComponentConfiguration, ProjectConfiguration, ServerConfig,
+};
+use crate::json::{is_json_input, read_json_file, write_json_file_pretty};
+use crate::module::ModuleManifest;
+use crate::module_settings::ModuleSettingsValidator;
+
+// === Public API ===
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum DoctorResult {
+    Scan(DoctorScanOutput),
+    Cleanup(DoctorCleanupOutput),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorScanOutput {
+    #[serde(flatten)]
+    pub report: DoctorReport,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorCleanupOutput {
+    pub cleanup: DoctorCleanupReport,
+    pub scan: DoctorReport,
+}
+
+/// Single entry point for doctor command.
+///
+/// Accepts:
+/// - `"scan"` - scan all scopes
+/// - `{"scan": {"scope": "all", "file": null, "failOn": "error"}}`
+/// - `{"cleanup": {"scope": "all", "dryRun": false, "failOn": "error"}}`
+pub fn run(input: &str) -> crate::Result<(DoctorResult, i32)> {
+    if !is_json_input(input) {
+        // Simple string input - only "scan" supported
+        if input.trim() == "scan" {
+            return run_scan(ScanInput::default());
+        }
+        return Err(crate::Error::validation_invalid_argument(
+            "input",
+            "Expected 'scan' or JSON spec",
+            None,
+            Some(vec!["scan".to_string(), r#"{"scan": {...}}"#.to_string(), r#"{"cleanup": {...}}"#.to_string()]),
+        ));
+    }
+
+    // JSON input
+    let parsed: DoctorInput = serde_json::from_str(input)
+        .map_err(|e| crate::Error::validation_invalid_json(e, Some("parse doctor input".to_string())))?;
+
+    match parsed {
+        DoctorInput::Scan { scan } => run_scan(scan),
+        DoctorInput::Cleanup { cleanup } => run_cleanup(cleanup),
+    }
+}
+
+fn run_scan(input: ScanInput) -> crate::Result<(DoctorResult, i32)> {
+    let scope = input.scope.as_deref().map(parse_scope).transpose()?.unwrap_or(DoctorScope::All);
+    let fail_on = input.fail_on.as_deref().map(parse_fail_on).transpose()?.unwrap_or(FailOn::Error);
+
+    let scan_result = if let Some(file_path) = input.file.as_deref() {
+        Doctor::scan_file(Path::new(file_path))?
+    } else {
+        Doctor::scan(scope)?
+    };
+
+    let exit_code = Doctor::exit_code(&scan_result, fail_on);
+
+    Ok((
+        DoctorResult::Scan(DoctorScanOutput {
+            report: scan_result.report,
+        }),
+        exit_code,
+    ))
+}
+
+fn run_cleanup(input: CleanupInput) -> crate::Result<(DoctorResult, i32)> {
+    let scope = input.scope.as_deref().map(parse_scope).transpose()?.unwrap_or(DoctorScope::All);
+    let fail_on = input.fail_on.as_deref().map(parse_fail_on).transpose()?.unwrap_or(FailOn::Error);
+    let dry_run = input.dry_run.unwrap_or(false);
+
+    let result = if let Some(file_path) = input.file.as_deref() {
+        Doctor::cleanup_file(Path::new(file_path), dry_run)?
+    } else {
+        Doctor::cleanup(scope, dry_run)?
+    };
+
+    let exit_code = Doctor::exit_code_from_report(&result.scan, fail_on);
+
+    Ok((
+        DoctorResult::Cleanup(DoctorCleanupOutput {
+            cleanup: result.cleanup,
+            scan: result.scan,
+        }),
+        exit_code,
+    ))
+}
+
+fn parse_scope(s: &str) -> crate::Result<DoctorScope> {
+    match s.to_lowercase().as_str() {
+        "all" => Ok(DoctorScope::All),
+        "app" => Ok(DoctorScope::App),
+        "projects" => Ok(DoctorScope::Projects),
+        "servers" => Ok(DoctorScope::Servers),
+        "components" => Ok(DoctorScope::Components),
+        "modules" => Ok(DoctorScope::Modules),
+        _ => Err(crate::Error::validation_invalid_argument(
+            "scope",
+            &format!("Invalid scope: {}", s),
+            None,
+            Some(vec!["all".into(), "app".into(), "projects".into(), "servers".into(), "components".into(), "modules".into()]),
+        )),
+    }
+}
+
+fn parse_fail_on(s: &str) -> crate::Result<FailOn> {
+    match s.to_lowercase().as_str() {
+        "error" => Ok(FailOn::Error),
+        "warning" => Ok(FailOn::Warning),
+        _ => Err(crate::Error::validation_invalid_argument(
+            "failOn",
+            &format!("Invalid failOn: {}", s),
+            None,
+            Some(vec!["error".into(), "warning".into()]),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum DoctorInput {
+    Scan { scan: ScanInput },
+    Cleanup { cleanup: CleanupInput },
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScanInput {
+    scope: Option<String>,
+    file: Option<String>,
+    fail_on: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CleanupInput {
+    scope: Option<String>,
+    file: Option<String>,
+    dry_run: Option<bool>,
+    fail_on: Option<String>,
+}
+
+// === Types ===
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

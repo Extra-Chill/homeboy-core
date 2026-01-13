@@ -60,11 +60,10 @@ List available tools:
 homeboy module list
 ```
 
-Run a module-provided CLI tool command:
+Run a module-provided tool via the module system:
 
 ```bash
-homeboy wp <project> core version
-homeboy pm2 <project> status
+homeboy module run <moduleId> --project <projectId>
 ```
 
 ### Database Queries (Read-Only)

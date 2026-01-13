@@ -11,7 +11,10 @@ Exceptions:
 
 Homeboy prints a `homeboy_core::output::CliResponse<T>` object.
 
-In JSON mode, `T` is `homeboy_core::output::CmdSuccess` with a `payload` field containing the command-specific output.
+In JSON mode, `T` is `homeboy_core::output::CmdSuccess` with:
+
+- `payload`: the command-specific output
+- `warnings`: command-scoped warnings (omitted when empty)
 
 Success:
 
@@ -33,6 +36,10 @@ Success:
 }
 ```
 
+Notes:
+
+- Top-level `warnings` is reserved for process-level warnings, but the CLI currently emits command warnings in `data.warnings` via the `CmdSuccess` wrapper.
+
 Failure:
 
 ```json
@@ -52,7 +59,8 @@ Notes:
 
 - `data` is omitted on failure.
 - `error` is omitted on success.
-- `data.warnings` is omitted when there are no warnings.
+- `data.warnings` (the `CmdSuccess.warnings` field) is omitted when empty.
+- Top-level `warnings` is omitted when there are no process-level warnings.
 - `error.hints`/`error.retryable` and `data.warnings[*].hints`/`data.warnings[*].retryable` are omitted when not set.
 
 ## Error fields
@@ -61,7 +69,7 @@ Notes:
 
 ## Warning fields
 
-Each item in `data.warnings` is a `homeboy_core::output::CliWarning`.
+Each item in top-level `warnings` is a `homeboy_core::output::CliWarning`.
 
 - `code` (string): stable error code (see `homeboy_error::ErrorCode::as_str()`).
 - `message` (string): human-readable message.
@@ -88,7 +96,9 @@ Each item in `data.warnings` is a `homeboy_core::output::CliWarning`.
 On success, `data` is a `CmdSuccess` wrapper:
 
 - `data.payload`: the command-specific output struct (varies by command)
-- `data.warnings`: command warnings (separate from process-level errors)
+- `data.warnings`: command warnings (omitted when empty)
+
+Process-level warnings also exist at the top level (`warnings`), but most Homeboy commands only emit warnings in `data.warnings` via the `CmdSuccess` wrapper.
 
 ## Command payload conventions
 

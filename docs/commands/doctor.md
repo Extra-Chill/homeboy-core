@@ -11,7 +11,7 @@ homeboy doctor cleanup [OPTIONS]
 
 Scan Homeboy configuration files and report issues (errors, warnings, info), or safely clean up unknown top-level keys.
 
-`doctor` also validates module settings against each module's `module.json` manifest:
+`doctor` also validates module settings against each module's `homeboy.json` manifest:
 
 - **App scope** (`homeboy.json`): validates `installedModules.<moduleId>.settings`
 - **Project scope** (`projects/<projectId>.json`): validates `modules.<moduleId>.settings`
