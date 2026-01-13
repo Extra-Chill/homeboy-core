@@ -1,8 +1,8 @@
 # Homeboy CLI
 
-Homeboy is a config-driven automation engine for repetitive discovery and AI coding workflows.
+Homeboy is a config-driven automation engine for development and deployment automation.
 
-It standardizes common operations (project/component discovery, remote execution, deployments) and typically produces machine-readable output via a stable JSON envelope.
+It standardizes common operations (project/component discovery, remote execution, deployments) and produces machine-readable output via a stable JSON envelope for most commands.
 
 **Note:** This is still early in development. Breaking changes may occur between releases.
 
@@ -46,7 +46,7 @@ These files are not used by Homeboy at runtime; they are meant for humans and co
 
 ## Usage
 
-See [CLI documentation](docs/index.md) for the authoritative command list and JSON contracts.
+See [CLI documentation](docs/index.md) for the authoritative command list, topic docs (`homeboy docs ...`), and JSON contracts.
 
 A few common entrypoints:
 

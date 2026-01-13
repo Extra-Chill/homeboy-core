@@ -72,9 +72,6 @@ enum ProjectCommand {
         /// Table prefix
         #[arg(long)]
         table_prefix: Option<String>,
-        /// Module setting in format module_id.key=value (can be specified multiple times)
-        #[arg(long = "module-setting", value_name = "SETTING")]
-        module_settings: Vec<String>,
         /// Replace project component IDs (comma-separated)
         #[arg(long, value_delimiter = ',')]
         component_ids: Vec<String>,
@@ -288,7 +285,6 @@ pub fn run(
             server_id,
             base_path,
             table_prefix,
-            module_settings,
             component_ids,
         } => set(
             &project_id,
@@ -298,7 +294,6 @@ pub fn run(
             server_id,
             base_path,
             table_prefix,
-            module_settings,
             component_ids,
         ),
         ProjectCommand::Repair { project_id } => repair(&project_id),
@@ -408,7 +403,6 @@ fn set(
     server_id: Option<String>,
     base_path: Option<String>,
     table_prefix: Option<String>,
-    module_settings: Vec<String>,
     component_ids: Vec<String>,
 ) -> homeboy_core::Result<(ProjectOutput, i32)> {
     let mut updated_fields: Vec<String> = Vec::new();
@@ -461,37 +455,6 @@ fn set(
     if let Some(table_prefix) = table_prefix {
         project.table_prefix = Some(table_prefix);
         updated_fields.push("tablePrefix".to_string());
-    }
-
-    for setting in &module_settings {
-        let (module_key, value) = setting.split_once('=').ok_or_else(|| {
-            homeboy_core::Error::validation_invalid_argument(
-                "module-setting",
-                "Module setting must be in format module_id.key=value",
-                Some(setting.clone()),
-                None,
-            )
-        })?;
-
-        let (module_id, key) = module_key.split_once('.').ok_or_else(|| {
-            homeboy_core::Error::validation_invalid_argument(
-                "module-setting",
-                "Module setting must be in format module_id.key=value",
-                Some(setting.clone()),
-                None,
-            )
-        })?;
-
-        project
-            .module_settings
-            .entry(module_id.to_string())
-            .or_default()
-            .insert(
-                key.to_string(),
-                serde_json::Value::String(value.to_string()),
-            );
-
-        updated_fields.push(format!("moduleSettings.{}.{}", module_id, key));
     }
 
     if !component_ids.is_empty() {
@@ -786,7 +749,6 @@ mod tests {
             server_id: None,
             base_path: None,
             table_prefix: None,
-            module_settings: Default::default(),
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),
@@ -971,7 +933,6 @@ mod tests {
             None,
             None,
             None,
-            vec![],
             vec!["beta".to_string(), "beta".to_string(), "alpha".to_string()],
         )
         .unwrap();

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use homeboy_core::config::ModuleScope;
-use homeboy_core::config::{AppPaths, ConfigManager, InstalledModuleConfig, ProjectConfiguration};
+use homeboy_core::config::{AppPaths, ConfigManager, ProjectConfiguration};
 use homeboy_core::http::ApiClient;
 use homeboy_core::module::{load_all_modules, load_module, ModuleManifest};
 use homeboy_core::ssh::execute_local_command_interactive;
@@ -230,7 +230,6 @@ pub struct ModuleEntry {
 fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
     let modules = load_all_modules();
 
-    let app_config = ConfigManager::load_app_config().ok();
     let project_config: Option<ProjectConfiguration> = project
         .as_ref()
         .and_then(|id| ConfigManager::load_project(id).ok());
@@ -240,12 +239,6 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
         .map(|module| {
             let ready = is_module_ready(module);
             let compatible = is_module_compatible(module, project_config.as_ref());
-
-            let configured = app_config
-                .as_ref()
-                .and_then(|app| app.installed_modules.as_ref())
-                .is_some_and(|installed| installed.contains_key(&module.id));
-
             let linked = is_module_linked(&module.id);
 
             ModuleEntry {
@@ -265,7 +258,7 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                 },
                 compatible,
                 ready,
-                configured,
+                configured: true,
                 linked,
                 path: module.module_path.clone().unwrap_or_default(),
             }
@@ -304,19 +297,6 @@ fn run_module(
             module_id
         ))
     })?;
-
-    let app_config = ConfigManager::load_app_config()?;
-    let installed_module = app_config
-        .installed_modules
-        .as_ref()
-        .and_then(|m| m.get(module_id));
-
-    if installed_module.is_none() {
-        return Err(homeboy_core::Error::config(format!(
-            "Module '{}' is not configured. Install it with `homeboy module install <git-url>`.",
-            module_id
-        )));
-    }
 
     let module_path = module
         .module_path
@@ -378,7 +358,6 @@ fn run_module(
 
     let effective_settings = ModuleScope::effective_settings(
         module_id,
-        installed_module,
         project_config.as_ref(),
         component_config.as_ref(),
     );
@@ -591,23 +570,6 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
     }
 
     write_install_metadata(&module_id, url)?;
-
-    let mut app_config = ConfigManager::load_app_config()?;
-    let installed_modules = app_config
-        .installed_modules
-        .get_or_insert_with(Default::default);
-    installed_modules
-        .entry(module_id.clone())
-        .and_modify(|existing| {
-            if existing.source_url.is_none() {
-                existing.source_url = Some(url.to_string());
-            }
-        })
-        .or_insert_with(|| InstalledModuleConfig {
-            settings: Default::default(),
-            source_url: Some(url.to_string()),
-        });
-    ConfigManager::save_app_config(&app_config)?;
 
     // Auto-run setup if module defines a setup_command
     if let Some(module) = load_module(&module_id) {
@@ -910,19 +872,6 @@ fn link_module(path: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
         )
     })?;
 
-    // Register in app config
-    let mut app_config = ConfigManager::load_app_config()?;
-    let installed_modules = app_config
-        .installed_modules
-        .get_or_insert_with(Default::default);
-    installed_modules
-        .entry(module_id.clone())
-        .or_insert_with(|| InstalledModuleConfig {
-            settings: Default::default(),
-            source_url: Some(source_path.to_string_lossy().to_string()),
-        });
-    ConfigManager::save_app_config(&app_config)?;
-
     Ok((
         ModuleOutput::Link {
             module_id,
@@ -954,13 +903,6 @@ fn unlink_module(module_id: &str) -> CmdResult<ModuleOutput> {
     fs::remove_file(&module_dir).map_err(|e| {
         homeboy_core::Error::internal_io(e.to_string(), Some("remove symlink".to_string()))
     })?;
-
-    // Remove from app config
-    let mut app_config = ConfigManager::load_app_config()?;
-    if let Some(ref mut installed_modules) = app_config.installed_modules {
-        installed_modules.remove(module_id);
-    }
-    ConfigManager::save_app_config(&app_config)?;
 
     Ok((
         ModuleOutput::Unlink {
@@ -1155,17 +1097,7 @@ fn get_module_settings(
 ) -> homeboy_core::Result<HashMap<String, Value>> {
     let mut settings = HashMap::new();
 
-    // Load from app config
-    let app_config = ConfigManager::load_app_config()?;
-    if let Some(installed) = app_config.installed_modules.as_ref() {
-        if let Some(module_config) = installed.get(module_id) {
-            for (k, v) in &module_config.settings {
-                settings.insert(k.clone(), v.clone());
-            }
-        }
-    }
-
-    // Load from project config (overrides app settings)
+    // Load from project config
     if let Some(pid) = project_id {
         if let Ok(project) = ConfigManager::load_project(pid) {
             if let Some(scoped) = project.scoped_modules.as_ref() {

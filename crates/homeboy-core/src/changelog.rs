@@ -1,7 +1,9 @@
-use crate::config::{ComponentConfiguration, ConfigManager};
+use crate::config::ComponentConfiguration;
 use crate::{Error, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const DEFAULT_NEXT_SECTION_LABEL: &str = "Unreleased";
 
 #[derive(Debug, Clone)]
 pub struct EffectiveChangelogSettings {
@@ -11,17 +13,13 @@ pub struct EffectiveChangelogSettings {
 
 pub fn resolve_effective_settings(
     component: Option<&ComponentConfiguration>,
-) -> Result<EffectiveChangelogSettings> {
-    let app = ConfigManager::load_app_config()?;
-
+) -> EffectiveChangelogSettings {
     let next_section_label = component
         .and_then(|c| c.changelog_next_section_label.clone())
-        .or_else(|| app.default_changelog_next_section_label.clone())
-        .unwrap_or_else(|| "Unreleased".to_string());
+        .unwrap_or_else(|| DEFAULT_NEXT_SECTION_LABEL.to_string());
 
     let mut next_section_aliases = component
         .and_then(|c| c.changelog_next_section_aliases.clone())
-        .or_else(|| app.default_changelog_next_section_aliases.clone())
         .unwrap_or_default();
 
     if next_section_aliases.is_empty() {
@@ -31,10 +29,10 @@ pub fn resolve_effective_settings(
         ]);
     }
 
-    Ok(EffectiveChangelogSettings {
+    EffectiveChangelogSettings {
         next_section_label,
         next_section_aliases,
-    })
+    }
 }
 
 pub fn resolve_changelog_path(component: &ComponentConfiguration) -> Result<PathBuf> {

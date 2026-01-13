@@ -163,7 +163,7 @@ fn show_json() -> CmdResult<ChangelogShowOutput> {
 fn add_next_items(component_id: &str, messages: &[String]) -> CmdResult<ChangelogAddOutput> {
     let component = ConfigManager::load_component(component_id)?;
 
-    let settings = changelog::resolve_effective_settings(Some(&component))?;
+    let settings = changelog::resolve_effective_settings(Some(&component));
     let (path, changed, items_added) =
         changelog::read_and_add_next_section_items(&component, &settings, messages)?;
 

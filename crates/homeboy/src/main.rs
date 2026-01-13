@@ -18,8 +18,8 @@ mod commands;
 mod docs;
 
 use commands::{
-    api, auth, build, changelog, cli, component, config, context, db, deploy, doctor, file, git,
-    init, logs, module, project, server, ssh, version,
+    api, auth, build, changelog, cli, component, context, db, deploy, doctor, file, git, init,
+    logs, module, project, server, ssh, version,
 };
 use homeboy_core::module::load_all_modules;
 
@@ -56,8 +56,6 @@ enum Commands {
     Deploy(deploy::DeployArgs),
     /// Manage standalone component configurations
     Component(component::ComponentArgs),
-    /// Manage global config.json
-    Config(config::ConfigArgs),
     /// Show context for current working directory
     Context(context::ContextArgs),
     /// Execute CLI-compatible modules

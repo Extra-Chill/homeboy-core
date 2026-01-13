@@ -3,7 +3,7 @@ use homeboy_core::config::{
 };
 use homeboy_core::ErrorCode;
 use homeboy_core::context::resolve_project_ssh;
-use homeboy_core::module::{find_module_by_tool, CliConfig, ModuleManifest};
+use homeboy_core::module::{find_module_by_tool, CliConfig};
 use homeboy_core::shell;
 use homeboy_core::ssh::{execute_local_command, CommandOutput};
 use homeboy_core::template::{render_map, TemplateVars};
@@ -137,7 +137,7 @@ fn run_with_loader_and_executor(
         )));
     }
 
-    let (target_domain, command) = build_command(&project, &module, cli_config, &args)?;
+    let (target_domain, command) = build_command(&project, cli_config, &args)?;
 
     // Execute locally if no server configured, otherwise via SSH
     let output = if project.config.server_id.as_ref().map_or(true, |s| s.is_empty()) {
@@ -166,7 +166,6 @@ fn run_with_loader_and_executor(
 
 fn build_command(
     project: &ProjectRecord,
-    module: &ModuleManifest,
     cli_config: &CliConfig,
     args: &[String],
 ) -> homeboy_core::Result<(String, String)> {
@@ -178,8 +177,6 @@ fn build_command(
         .ok_or_else(|| homeboy_core::Error::config("Base path not configured".to_string()))?;
 
     let (target_domain, command_args) = resolve_subtarget(&project.config, args);
-
-    let command_args = inject_module_args(&project.config, module, command_args);
 
     if command_args.is_empty() {
         return Err(homeboy_core::Error::other(
@@ -206,29 +203,6 @@ fn build_command(
         target_domain,
         render_map(&cli_config.command_template, &variables),
     ))
-}
-
-fn inject_module_args(
-    project: &ProjectConfiguration,
-    module: &ModuleManifest,
-    args: Vec<String>,
-) -> Vec<String> {
-    let cli_config = match &module.cli {
-        Some(cli) => cli,
-        None => return args,
-    };
-
-    let mut injected_args = Vec::new();
-
-    for injection in &cli_config.arg_injections {
-        if let Some(value) = project.get_module_setting_str(&module.id, &injection.setting_key) {
-            let arg = injection.arg_template.replace("{{value}}", value);
-            injected_args.push(arg);
-        }
-    }
-
-    injected_args.extend(args);
-    injected_args
 }
 
 fn resolve_subtarget(

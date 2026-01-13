@@ -2,7 +2,7 @@
 
 This directory contains the markdown docs embedded into the `homeboy` binary and displayed via `homeboy docs`.
 
-Homeboy is a config-driven automation engine for repetitive discovery and AI coding workflows, with standardized patterns and a reliable JSON output envelope.
+Homeboy is a config-driven automation engine for development and deployment automation, with standardized patterns and a stable JSON output envelope for most commands.
 
 ## CLI
 
@@ -31,5 +31,5 @@ Common paths:
 
 Additional:
 
-- `docs/` is reserved for cached/generated docs (not used for embedded documentation topics).
+- `docs/` exists under the config root, but is not currently written by the CLI for documentation topics (embedded topics live in the CLI binary; module topics load from `modules/<moduleId>/docs/`).
 

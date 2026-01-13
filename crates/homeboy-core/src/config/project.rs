@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::{slugify_id, AppPaths, ConfigImportable, ConfigManager, SetName, SlugIdentifiable};
@@ -97,17 +95,6 @@ impl ConfigImportable for ProjectConfiguration {
 impl ProjectConfiguration {
     pub fn has_module(&self, module_id: &str) -> bool {
         self.modules.contains(&module_id.to_string())
-    }
-
-    pub fn get_module_setting(&self, module_id: &str, key: &str) -> Option<&Value> {
-        self.module_settings
-            .get(module_id)
-            .and_then(|settings| settings.get(key))
-    }
-
-    pub fn get_module_setting_str(&self, module_id: &str, key: &str) -> Option<&str> {
-        self.get_module_setting(module_id, key)
-            .and_then(|v| v.as_str())
     }
 
     pub fn has_sub_targets(&self) -> bool {

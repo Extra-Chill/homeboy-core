@@ -210,7 +210,6 @@ mod tests {
                 server_id: server_id.map(|s| s.to_string()),
                 base_path: None,
                 table_prefix: None,
-                module_settings: Default::default(),
                 remote_files: homeboy_core::config::RemoteFileConfig::default(),
                 remote_logs: homeboy_core::config::RemoteLogConfig::default(),
                 database: homeboy_core::config::DatabaseConfig::default(),

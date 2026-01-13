@@ -111,15 +111,6 @@ pub struct CliConfig {
     pub command_template: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cli_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub arg_injections: Vec<ArgInjectionConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArgInjectionConfig {
-    pub setting_key: String,
-    pub arg_template: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

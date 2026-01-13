@@ -1,6 +1,5 @@
 use homeboy_core::config::{
-    ComponentConfiguration, InstalledModuleConfig, ModuleScope, ProjectConfiguration,
-    ScopedModuleConfig,
+    ComponentConfiguration, ModuleScope, ProjectConfiguration, ScopedModuleConfig,
 };
 use homeboy_core::module::{ModuleManifest, SettingConfig};
 use serde_json::json;
@@ -69,9 +68,6 @@ fn module_manifest() -> ModuleManifest {
 fn merges_with_precedence_and_defaults() {
     let module = module_manifest();
 
-    let mut installed = InstalledModuleConfig::default();
-    installed.settings.insert("a".to_string(), json!("app"));
-
     let mut project = ProjectConfiguration {
         name: "p".to_string(),
         domain: "d".to_string(),
@@ -80,7 +76,6 @@ fn merges_with_precedence_and_defaults() {
         server_id: None,
         base_path: None,
         table_prefix: None,
-        module_settings: Default::default(),
         remote_files: Default::default(),
         remote_logs: Default::default(),
         database: Default::default(),
@@ -117,15 +112,13 @@ fn merges_with_precedence_and_defaults() {
     component_scoped_modules.insert("m".to_string(), component_scoped);
     component.scoped_modules = Some(component_scoped_modules);
 
-    let out = ModuleScope::effective_settings_validated(
-        &module,
-        Some(&installed),
-        Some(&project),
-        Some(&component),
-    )
-    .unwrap();
+    let out =
+        ModuleScope::effective_settings_validated(&module, Some(&project), Some(&component))
+            .unwrap();
 
+    // Component settings take precedence over project settings
     assert_eq!(out.get("a"), Some(&json!("component")));
+    // Default value is used when no setting is provided
     assert_eq!(out.get("n"), Some(&json!(1)));
 }
 
@@ -133,11 +126,35 @@ fn merges_with_precedence_and_defaults() {
 fn rejects_unknown_setting_key() {
     let module = module_manifest();
 
-    let mut installed = InstalledModuleConfig::default();
-    installed.settings.insert("nope".to_string(), json!("x"));
+    let mut project = ProjectConfiguration {
+        name: "p".to_string(),
+        domain: "d".to_string(),
+        modules: vec![],
+        scoped_modules: None,
+        server_id: None,
+        base_path: None,
+        table_prefix: None,
+        remote_files: Default::default(),
+        remote_logs: Default::default(),
+        database: Default::default(),
+        tools: Default::default(),
+        api: Default::default(),
+        changelog_next_section_label: None,
+        changelog_next_section_aliases: None,
+        sub_targets: Vec::new(),
+        shared_tables: Vec::new(),
+        component_ids: Vec::new(),
+    };
 
-    let err = ModuleScope::effective_settings_validated(&module, Some(&installed), None, None)
-        .unwrap_err();
+    let mut project_scoped_modules = HashMap::new();
+    let mut project_scoped = ScopedModuleConfig::default();
+    project_scoped
+        .settings
+        .insert("nope".to_string(), json!("x"));
+    project_scoped_modules.insert("m".to_string(), project_scoped);
+    project.scoped_modules = Some(project_scoped_modules);
+
+    let err = ModuleScope::effective_settings_validated(&module, Some(&project), None).unwrap_err();
 
     assert_eq!(err.code.as_str(), "config.invalid_value");
 }
@@ -146,13 +163,35 @@ fn rejects_unknown_setting_key() {
 fn rejects_invalid_type() {
     let module = module_manifest();
 
-    let mut installed = InstalledModuleConfig::default();
-    installed
+    let mut project = ProjectConfiguration {
+        name: "p".to_string(),
+        domain: "d".to_string(),
+        modules: vec![],
+        scoped_modules: None,
+        server_id: None,
+        base_path: None,
+        table_prefix: None,
+        remote_files: Default::default(),
+        remote_logs: Default::default(),
+        database: Default::default(),
+        tools: Default::default(),
+        api: Default::default(),
+        changelog_next_section_label: None,
+        changelog_next_section_aliases: None,
+        sub_targets: Vec::new(),
+        shared_tables: Vec::new(),
+        component_ids: Vec::new(),
+    };
+
+    let mut project_scoped_modules = HashMap::new();
+    let mut project_scoped = ScopedModuleConfig::default();
+    project_scoped
         .settings
         .insert("n".to_string(), json!("not-a-number"));
+    project_scoped_modules.insert("m".to_string(), project_scoped);
+    project.scoped_modules = Some(project_scoped_modules);
 
-    let err = ModuleScope::effective_settings_validated(&module, Some(&installed), None, None)
-        .unwrap_err();
+    let err = ModuleScope::effective_settings_validated(&module, Some(&project), None).unwrap_err();
 
     assert_eq!(err.code.as_str(), "config.invalid_value");
 }

@@ -405,7 +405,7 @@ fn bump(component_id: &str, bump_type: BumpType, dry_run: bool) -> homeboy_core:
         )
     })?;
 
-    let settings = changelog::resolve_effective_settings(Some(&component))?;
+    let settings = changelog::resolve_effective_settings(Some(&component));
     let changelog_path = changelog::resolve_changelog_path(&component)?;
 
     let changelog_content = fs::read_to_string(&changelog_path)

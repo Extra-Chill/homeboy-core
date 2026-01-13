@@ -5,9 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{
-    AppConfig, AppPaths, ComponentConfiguration, ProjectConfiguration, ServerConfig,
-};
+use crate::config::{AppPaths, ComponentConfiguration, ProjectConfiguration, ServerConfig};
 use crate::json::{is_json_input, read_json_file, write_json_file_pretty};
 use crate::module::ModuleManifest;
 use crate::module_settings::ModuleSettingsValidator;
@@ -110,7 +108,6 @@ fn run_cleanup(input: CleanupInput) -> crate::Result<(DoctorResult, i32)> {
 fn parse_scope(s: &str) -> crate::Result<DoctorScope> {
     match s.to_lowercase().as_str() {
         "all" => Ok(DoctorScope::All),
-        "app" => Ok(DoctorScope::App),
         "projects" => Ok(DoctorScope::Projects),
         "servers" => Ok(DoctorScope::Servers),
         "components" => Ok(DoctorScope::Components),
@@ -119,7 +116,7 @@ fn parse_scope(s: &str) -> crate::Result<DoctorScope> {
             "scope",
             &format!("Invalid scope: {}", s),
             None,
-            Some(vec!["all".into(), "app".into(), "projects".into(), "servers".into(), "components".into(), "modules".into()]),
+            Some(vec!["all".into(), "projects".into(), "servers".into(), "components".into(), "modules".into()]),
         )),
     }
 }
@@ -212,7 +209,6 @@ pub struct DoctorReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DoctorScope {
     All,
-    App,
     Projects,
     Servers,
     Components,
@@ -337,7 +333,6 @@ struct Scanner {
     command: String,
     issues: Vec<DoctorIssue>,
     files_scanned: Vec<String>,
-    app_config: Option<AppConfig>,
     projects: BTreeMap<String, ProjectConfiguration>,
     servers: BTreeMap<String, ServerConfig>,
     components: BTreeMap<String, ComponentConfiguration>,
@@ -350,7 +345,6 @@ impl Scanner {
             command: command.to_string(),
             issues: Vec::new(),
             files_scanned: Vec::new(),
-            app_config: None,
             projects: BTreeMap::new(),
             servers: BTreeMap::new(),
             components: BTreeMap::new(),
@@ -361,20 +355,11 @@ impl Scanner {
     fn scan(&mut self, scope: DoctorScope) {
         match scope {
             DoctorScope::All => {
-                self.scan(DoctorScope::App);
                 self.scan(DoctorScope::Projects);
                 self.scan(DoctorScope::Servers);
                 self.scan(DoctorScope::Components);
                 self.scan(DoctorScope::Modules);
                 self.validate_cross_refs();
-            }
-            DoctorScope::App => {
-                let Ok(path) = AppPaths::config() else {
-                    return;
-                };
-                if path.exists() {
-                    self.scan_app_config(&path);
-                }
             }
             DoctorScope::Projects => {
                 let Ok(dir) = AppPaths::projects() else {
@@ -401,7 +386,6 @@ impl Scanner {
     fn scan_file(&mut self, path: &Path) {
         if let Some(kind) = classify_file(path) {
             match kind {
-                FileKind::App => self.scan_app_config(path),
                 FileKind::Project => {
                     let path_buf = path.to_path_buf();
                     if let Some((raw, typed)) = self.read_typed_json_file::<ProjectConfiguration>(
@@ -442,15 +426,6 @@ impl Scanner {
         }
 
         self.scan_generic_json(path);
-    }
-
-    fn scan_app_config(&mut self, path: &Path) {
-        let path_buf = path.to_path_buf();
-        if let Some((raw, typed)) = self.read_typed_json_file::<AppConfig>(&path_buf, "AppConfig") {
-            self.emit_unknown_keys(&path_buf, "AppConfig", &raw, &typed);
-            self.emit_app_installed_module_settings_issues(&path_buf, raw.get("installedModules"));
-            self.app_config = Some(typed);
-        }
     }
 
     fn scan_modules(&mut self) {
@@ -765,86 +740,6 @@ impl Scanner {
         }
     }
 
-    fn emit_app_installed_module_settings_issues(
-        &mut self,
-        path: &Path,
-        raw_installed: Option<&Value>,
-    ) {
-        let Some(raw_installed) = raw_installed else {
-            return;
-        };
-
-        let Some(installed_obj) = raw_installed.as_object() else {
-            self.push_issue(
-                DoctorSeverity::Error,
-                "INVALID_VALUE",
-                "installedModules must be an object",
-                path,
-                Some("/installedModules".to_string()),
-                None,
-            );
-            return;
-        };
-
-        for (module_id, config) in installed_obj {
-            let validator = if let Some(manifest) = self.modules.get(module_id) {
-                ModuleSettingsValidator::new(manifest)
-            } else {
-                self.push_issue(
-                    DoctorSeverity::Error,
-                    "BROKEN_REFERENCE",
-                    "installedModules references missing module manifest",
-                    path,
-                    Some(format!("/installedModules/{module_id}")),
-                    Some(serde_json::json!({"id": module_id})),
-                );
-                continue;
-            };
-
-            let Some(config_obj) = config.as_object() else {
-                self.push_issue(
-                    DoctorSeverity::Error,
-                    "INVALID_VALUE",
-                    "installedModules entry must be an object",
-                    path,
-                    Some(format!("/installedModules/{module_id}")),
-                    None,
-                );
-                continue;
-            };
-
-            let Some(settings_val) = config_obj.get("settings") else {
-                continue;
-            };
-
-            let Some(settings_obj) = settings_val.as_object() else {
-                self.push_issue(
-                    DoctorSeverity::Error,
-                    "INVALID_VALUE",
-                    "installedModules.settings must be an object",
-                    path,
-                    Some(format!("/installedModules/{module_id}/settings")),
-                    None,
-                );
-                continue;
-            };
-
-            if let Err(err) = validator.validate_json_object("app", settings_obj) {
-                self.push_issue(
-                    DoctorSeverity::Error,
-                    "INVALID_VALUE",
-                    &err.to_string(),
-                    path,
-                    Some(format!("/installedModules/{module_id}/settings")),
-                    Some(serde_json::json!({
-                        "scope": "app",
-                        "moduleId": module_id,
-                    })),
-                );
-            }
-        }
-    }
-
     fn emit_module_settings_issues(
         &mut self,
         path: &Path,
@@ -1067,7 +962,6 @@ impl Scanner {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileKind {
-    App,
     Project,
     Server,
     Component,
@@ -1075,10 +969,6 @@ enum FileKind {
 }
 
 fn classify_file(path: &Path) -> Option<FileKind> {
-    if path.file_name().is_some_and(|n| n == "config.json") {
-        return Some(FileKind::App);
-    }
-
     let parent = path.parent().and_then(|p| p.file_name())?;
 
     match parent.to_string_lossy().as_ref() {
@@ -1156,17 +1046,10 @@ impl CleanerState {
     fn cleanup_scope(&mut self, scope: DoctorScope) -> crate::Result<()> {
         match scope {
             DoctorScope::All => {
-                self.cleanup_scope(DoctorScope::App)?;
                 self.cleanup_scope(DoctorScope::Projects)?;
                 self.cleanup_scope(DoctorScope::Servers)?;
                 self.cleanup_scope(DoctorScope::Components)?;
                 self.cleanup_scope(DoctorScope::Modules)?;
-            }
-            DoctorScope::App => {
-                let path = AppPaths::config()?;
-                if path.exists() {
-                    self.cleanup_typed_file::<AppConfig>(&path, "AppConfig")?;
-                }
             }
             DoctorScope::Projects => {
                 let dir = AppPaths::projects()?;
@@ -1214,7 +1097,6 @@ impl CleanerState {
                 "Path is not a recognized Homeboy config JSON file kind",
                 None,
                 Some(vec![
-                    "config.json".to_string(),
                     "projects/*.json".to_string(),
                     "servers/*.json".to_string(),
                     "components/*.json".to_string(),
@@ -1224,7 +1106,6 @@ impl CleanerState {
         };
 
         match kind {
-            FileKind::App => self.cleanup_typed_file::<AppConfig>(path, "AppConfig"),
             FileKind::Project => {
                 self.cleanup_typed_file::<ProjectConfiguration>(path, "ProjectConfiguration")
             }
@@ -1331,12 +1212,20 @@ mod tests {
     fn unknown_keys_are_detected() {
         let mut scanner = Scanner::new("doctor.scan");
         let raw = serde_json::json!({
-            "defaultDatabaseHost": "127.0.0.1",
+            "host": "example.com",
+            "user": "admin",
             "unknownField": 123
         });
-        let typed = AppConfig::default();
-        let path = Path::new("/tmp/config.json");
-        scanner.emit_unknown_keys(path, "AppConfig", &raw, &typed);
+        let typed = ServerConfig {
+            id: "test".to_string(),
+            name: "Test Server".to_string(),
+            host: "example.com".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            identity_file: None,
+        };
+        let path = Path::new("/tmp/servers/test.json");
+        scanner.emit_unknown_keys(path, "ServerConfig", &raw, &typed);
 
         assert!(scanner
             .issues
@@ -1361,12 +1250,16 @@ mod tests {
     #[test]
     fn cleanup_dry_run_reports_changes_without_writing() {
         let dir = std::env::temp_dir().join("homeboy-doctor-cleanup-test");
+        let servers_dir = dir.join("servers");
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&servers_dir).unwrap();
 
-        let path = dir.join("config.json");
+        let path = servers_dir.join("test.json");
         let original = serde_json::json!({
-            "defaultDatabaseHost": "192.168.1.1",
+            "id": "test",
+            "name": "Test Server",
+            "host": "example.com",
+            "user": "admin",
             "extra": 1
         });
         write_json_file_pretty(&path, &original).unwrap();

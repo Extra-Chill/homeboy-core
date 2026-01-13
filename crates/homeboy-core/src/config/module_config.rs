@@ -5,22 +5,17 @@ use crate::module::ModuleManifest;
 use crate::module_settings::ModuleSettingsValidator;
 use crate::{Error, Result};
 
-use super::{ComponentConfiguration, InstalledModuleConfig, ProjectConfiguration};
+use super::{ComponentConfiguration, ProjectConfiguration};
 
 pub struct ModuleScope;
 
 impl ModuleScope {
     pub fn effective_settings(
         module_id: &str,
-        app: Option<&InstalledModuleConfig>,
         project: Option<&ProjectConfiguration>,
         component: Option<&ComponentConfiguration>,
     ) -> HashMap<String, Value> {
         let mut settings = HashMap::new();
-
-        if let Some(app) = app {
-            settings.extend(app.settings.clone());
-        }
 
         if let Some(project) = project {
             if let Some(project_modules) = project.scoped_modules.as_ref() {
@@ -43,7 +38,6 @@ impl ModuleScope {
 
     pub fn effective_settings_validated(
         module: &ModuleManifest,
-        app: Option<&InstalledModuleConfig>,
         project: Option<&ProjectConfiguration>,
         component: Option<&ComponentConfiguration>,
     ) -> Result<HashMap<String, Value>> {
@@ -58,7 +52,6 @@ impl ModuleScope {
             out.insert(setting.id.clone(), default_value);
         }
 
-        let app_settings = app.map(|a| a.settings.clone()).unwrap_or_default();
         let project_settings = project
             .and_then(|p| p.scoped_modules.as_ref())
             .and_then(|m| m.get(module_id))
@@ -71,11 +64,10 @@ impl ModuleScope {
             .unwrap_or_default();
 
         let validator = ModuleSettingsValidator::new(module);
-        validator.validate_settings_map("app", &app_settings)?;
         validator.validate_settings_map("project", &project_settings)?;
         validator.validate_settings_map("component", &component_settings)?;
 
-        for settings in [&app_settings, &project_settings, &component_settings] {
+        for settings in [&project_settings, &component_settings] {
             for (key, value) in settings {
                 out.insert(key.clone(), value.clone());
             }

@@ -40,7 +40,6 @@ impl ProjectManager {
             server_id,
             base_path,
             table_prefix,
-            module_settings: Default::default(),
             remote_files: Default::default(),
             remote_logs: Default::default(),
             database: Default::default(),

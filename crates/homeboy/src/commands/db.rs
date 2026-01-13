@@ -6,6 +6,9 @@ use std::process::{Command, Stdio};
 use homeboy_core::config::{ConfigManager, SlugIdentifiable};
 use homeboy_core::context::{resolve_project_ssh, resolve_project_ssh_with_base_path};
 use homeboy_core::module::{load_module, DatabaseCliConfig};
+
+const DEFAULT_DATABASE_HOST: &str = "127.0.0.1";
+const DEFAULT_LOCAL_DB_PORT: u16 = 33306;
 use homeboy_core::ssh::SshClient;
 use homeboy_core::template::{render_map, TemplateVars};
 use homeboy_core::token;
@@ -162,8 +165,6 @@ fn build_context(
         project.config.domain.clone()
     };
 
-    let app_config = ConfigManager::load_app_config()?;
-
     // Find first module with database CLI config
     let db_cli = project
         .config
@@ -189,7 +190,6 @@ fn build_context(
                 .and_then(|m| m.cli)
                 .and_then(|cli| cli.default_cli_path)
         })
-        .or_else(|| app_config.default_cli_path.clone())
         .unwrap_or_default();
 
     Ok((
@@ -457,16 +457,14 @@ fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy_core::Result<(Db
     let server = ctx.server;
     let client = ctx.client;
 
-    let app_config = ConfigManager::load_app_config()?;
-
     let remote_host = if project.config.database.host.is_empty() {
-        app_config.default_database_host.clone()
+        DEFAULT_DATABASE_HOST.to_string()
     } else {
         project.config.database.host.clone()
     };
 
     let remote_port = project.config.database.port;
-    let bind_port = local_port.unwrap_or(app_config.default_local_db_port);
+    let bind_port = local_port.unwrap_or(DEFAULT_LOCAL_DB_PORT);
 
     let tunnel_info = DbTunnelInfo {
         local_port: bind_port,

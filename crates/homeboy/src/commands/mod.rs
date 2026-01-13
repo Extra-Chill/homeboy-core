@@ -10,7 +10,6 @@ pub mod build;
 pub mod changelog;
 pub mod cli;
 pub mod component;
-pub mod config;
 pub mod context;
 pub mod db;
 pub mod deploy;
@@ -72,9 +71,6 @@ pub(crate) fn run_json(
         ),
         crate::Commands::Component(args) => homeboy_core::output::map_cmd_result_to_json(
             component::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
-        ),
-        crate::Commands::Config(args) => homeboy_core::output::map_cmd_result_to_json(
-            config::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),
         ),
         crate::Commands::Context(args) => homeboy_core::output::map_cmd_result_to_json(
             context::run(args, global).map(|(data, exit_code)| (data, vec![], exit_code)),

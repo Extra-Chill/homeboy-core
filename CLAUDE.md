@@ -1,6 +1,8 @@
-# CLAUDE.md
+# Agent Instructions (homeboy-cli)
 
-This repository embeds its CLI documentation from `docs/` into the `homeboy` binary.
+> **Note**: For project-wide architecture and future refactor plans, see the root [`../CLAUDE.md`](../CLAUDE.md).
+
+This crate embeds its CLI documentation from `docs/` into the `homeboy` binary.
 
 Key references:
 

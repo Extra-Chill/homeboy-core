@@ -1,6 +1,4 @@
-mod app;
 mod component;
-mod config_keys;
 mod identifiable;
 mod importable;
 mod module_config;
@@ -13,9 +11,7 @@ mod record;
 mod scoped_module;
 mod server;
 
-pub use app::*;
 pub use component::*;
-pub use config_keys::*;
 pub use identifiable::{slugify_id, SetName, SlugIdentifiable};
 pub use importable::{
     create_from_json, ConfigImportable, CreateAction, CreateResult, CreateSummary,
@@ -37,28 +33,6 @@ use std::fs;
 pub struct ConfigManager;
 
 impl ConfigManager {
-    pub fn load_app_config() -> Result<AppConfig> {
-        let path = AppPaths::config()?;
-        if !path.exists() {
-            return Ok(AppConfig::default());
-        }
-        let content = fs::read_to_string(&path)
-            .map_err(|e| Error::internal_io(e.to_string(), Some("read app config".to_string())))?;
-        serde_json::from_str(&content)
-            .map_err(|e| Error::config_invalid_json(path.to_string_lossy().to_string(), e))
-    }
-
-    pub fn save_app_config(config: &AppConfig) -> Result<()> {
-        let path = AppPaths::config()?;
-        AppPaths::ensure_directories()?;
-        let content = serde_json::to_string_pretty(config).map_err(|e| {
-            Error::internal_json(e.to_string(), Some("serialize app config".to_string()))
-        })?;
-        fs::write(&path, content)
-            .map_err(|e| Error::internal_io(e.to_string(), Some("write app config".to_string())))?;
-        Ok(())
-    }
-
     pub fn load_project(id: &str) -> Result<ProjectConfiguration> {
         Ok(Self::load_project_record(id)?.config)
     }
