@@ -83,8 +83,8 @@ pub fn run(args: SshArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Ss
 fn run_with_loaders_and_executor(
     args: SshArgs,
     project_loader: fn(&str) -> homeboy::Result<ProjectRecord>,
-    server_loader: fn(&str) -> homeboy::Result<ServerConfig>,
-    executor: fn(&ServerConfig, &str, Option<&str>) -> homeboy::Result<i32>,
+    server_loader: fn(&str) -> homeboy::Result<Server>,
+    executor: fn(&Server, &str, Option<&str>) -> homeboy::Result<i32>,
 ) -> CmdResult<SshOutput> {
     let (resolved_type, project_id, server_id, server) =
         resolve_context(&args, project_loader, server_loader)?;
@@ -118,7 +118,7 @@ fn run_with_loaders_and_executor(
 }
 
 fn execute_interactive(
-    server: &ServerConfig,
+    server: &Server,
     server_id: &str,
     command: Option<&str>,
 ) -> homeboy::Result<i32> {
@@ -129,8 +129,8 @@ fn execute_interactive(
 fn resolve_context(
     args: &SshArgs,
     project_loader: fn(&str) -> homeboy::Result<ProjectRecord>,
-    server_loader: fn(&str) -> homeboy::Result<ServerConfig>,
-) -> homeboy::Result<(String, Option<String>, String, ServerConfig)> {
+    server_loader: fn(&str) -> homeboy::Result<Server>,
+) -> homeboy::Result<(String, Option<String>, String, Server)> {
     if let Some(project_id) = &args.project {
         let record = project_loader(project_id)?;
         let (server_id, server) = resolve_from_loaded_project(&record.config, server_loader)?;
@@ -168,9 +168,9 @@ fn resolve_context(
 }
 
 fn resolve_from_loaded_project(
-    project: &ProjectConfiguration,
-    server_loader: fn(&str) -> homeboy::Result<ServerConfig>,
-) -> homeboy::Result<(String, ServerConfig)> {
+    project: &Project,
+    server_loader: fn(&str) -> homeboy::Result<Server>,
+) -> homeboy::Result<(String, Server)> {
     let server_id = project.server_id.clone().ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
             "project.serverId",
@@ -189,8 +189,8 @@ fn resolve_from_loaded_project(
 mod tests {
     use super::*;
 
-    fn server(id: &str) -> ServerConfig {
-        ServerConfig {
+    fn server(id: &str) -> Server {
+        Server {
             id: id.to_string(),
             name: "Test".to_string(),
             host: "example.com".to_string(),
@@ -203,7 +203,7 @@ mod tests {
     fn project(id: &str, server_id: Option<&str>) -> ProjectRecord {
         ProjectRecord {
             id: id.to_string(),
-            config: ProjectConfiguration {
+            config: Project {
                 name: String::new(),
                 domain: String::new(),
                 modules: vec![],
@@ -211,11 +211,11 @@ mod tests {
                 server_id: server_id.map(|s| s.to_string()),
                 base_path: None,
                 table_prefix: None,
-                remote_files: homeboy::config::RemoteFileConfig::default(),
-                remote_logs: homeboy::config::RemoteLogConfig::default(),
-                database: homeboy::config::DatabaseConfig::default(),
-                tools: homeboy::config::ToolsConfig::default(),
-                api: homeboy::config::ApiConfig::default(),
+                remote_files: homeboy::project::RemoteFileConfig::default(),
+                remote_logs: homeboy::project::RemoteLogConfig::default(),
+                database: homeboy::project::DatabaseConfig::default(),
+                tools: homeboy::project::ToolsConfig::default(),
+                api: homeboy::project::ApiConfig::default(),
                 changelog_next_section_label: None,
                 changelog_next_section_aliases: None,
                 sub_targets: vec![],
@@ -226,7 +226,7 @@ mod tests {
     }
 
     fn noop_executor(
-        _server: &ServerConfig,
+        _server: &Server,
         _server_id: &str,
         _command: Option<&str>,
     ) -> homeboy::Result<i32> {

@@ -373,15 +373,22 @@ fn create(
     base_path: Option<String>,
     table_prefix: Option<String>,
 ) -> homeboy::Result<(ProjectOutput, i32)> {
-    let (created_project_id, _project) =
-        project::create_from_cli(name, domain, modules, server_id, base_path, table_prefix)?;
+    let result = project::create_from_cli(
+        Some(name.to_string()),
+        Some(domain.to_string()),
+        modules,
+        server_id,
+        base_path,
+        table_prefix,
+    )?;
 
-    let project = project::load_record(&created_project_id)?;
+    let created_id = result.id;
+    let project = project::load_record(&created_id)?;
 
     Ok((
         ProjectOutput {
             command: "project.create".to_string(),
-            project_id: Some(created_project_id),
+            project_id: Some(created_id),
             project: Some(project),
             projects: None,
             components: None,

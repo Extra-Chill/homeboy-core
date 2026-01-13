@@ -1,9 +1,8 @@
-use homeboy::config::{
-    ComponentConfiguration, ConfigManager, ProjectConfiguration, ProjectRecord, SlugIdentifiable,
-};
-use homeboy::error::ErrorCode;
+use homeboy::component::{self, Component};
 use homeboy::context::resolve_project_ssh;
+use homeboy::error::ErrorCode;
 use homeboy::module::{find_module_by_tool, CliConfig};
+use homeboy::project::{self, Project, ProjectRecord};
 use homeboy::shell;
 use homeboy::ssh::{execute_local_command, CommandOutput};
 use homeboy::template::{render_map, TemplateVars};
@@ -44,7 +43,7 @@ pub fn run(
         tool,
         identifier,
         args,
-        ConfigManager::load_project_record,
+        project::load_record,
         execute_local_command,
     )
 }
@@ -54,7 +53,7 @@ fn try_run_for_component(
     identifier: &str,
     args: Vec<String>,
 ) -> Option<CmdResult<CliOutput>> {
-    match ConfigManager::load_component(identifier) {
+    match component::load(identifier) {
         Ok(component) => {
             let module = find_module_by_tool(tool)?;
             let cli_config = module.cli.as_ref()?;
@@ -84,7 +83,7 @@ fn try_run_for_component(
 }
 
 fn build_component_command(
-    component: &ComponentConfiguration,
+    component: &Component,
     cli_config: &CliConfig,
     args: &[String],
 ) -> String {
@@ -206,7 +205,7 @@ fn build_command(
 }
 
 fn resolve_subtarget(
-    project: &ProjectConfiguration,
+    project: &Project,
     args: &[String],
 ) -> (String, Vec<String>) {
     let default_domain = project.domain.clone();
@@ -220,7 +219,7 @@ fn resolve_subtarget(
     };
 
     if let Some(subtarget) = project.sub_targets.iter().find(|t| {
-        t.slug_id().ok().as_deref() == Some(sub_id) || token::identifier_eq(&t.name, sub_id)
+        project::slugify_id(&t.name).ok().as_deref() == Some(sub_id) || token::identifier_eq(&t.name, sub_id)
     }) {
         return (subtarget.domain.clone(), args[1..].to_vec());
     }

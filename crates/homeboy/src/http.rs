@@ -6,7 +6,6 @@
 use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use crate::keychain;
 use crate::error::{Error, ErrorCode, Result};
-use uuid::Uuid;
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -156,15 +155,7 @@ impl ApiClient {
             .as_ref()
             .ok_or_else(|| config_error("No login flow configured for this project"))?;
 
-        // Handle device_id internally - get from keychain or generate new
-        let device_id = keychain::get(&self.project_id, "device_id")?
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        keychain::store(&self.project_id, "device_id", &device_id)?;
-
-        let mut creds = credentials.clone();
-        creds.insert("device_id".to_string(), device_id);
-
-        self.execute_auth_flow(login, &creds)
+        self.execute_auth_flow(login, credentials)
     }
 
     /// Executes the refresh flow if configured and tokens are expired.
@@ -201,11 +192,6 @@ impl ApiClient {
 
         let mut credentials = HashMap::new();
         credentials.insert("refresh_token".to_string(), refresh_token);
-
-        // Add device_id if we have one stored
-        if let Some(device_id) = keychain::get(&self.project_id, "device_id")? {
-            credentials.insert("device_id".to_string(), device_id);
-        }
 
         self.execute_auth_flow(refresh, &credentials)?;
         Ok(true)
@@ -271,7 +257,6 @@ impl ApiClient {
             "access_token",
             "refresh_token",
             "expires_at",
-            "device_id",
             "password",
         ];
         keychain::clear_project(&self.project_id, &common_vars)?;

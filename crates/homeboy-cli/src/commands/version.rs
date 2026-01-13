@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs;
 
-use homeboy::config::{ConfigManager, VersionTarget};
+use homeboy::component::{self, VersionTarget};
 use homeboy::version::{
     default_pattern_for_file, increment_version, parse_versions, update_version_in_file,
 };
@@ -219,7 +219,7 @@ fn write_updated_version(
 }
 
 pub fn show_version_output(component_id: &str) -> homeboy::Result<(VersionShowOutput, i32)> {
-    let component = ConfigManager::load_component(component_id)?;
+    let component = component::load(component_id)?;
     let targets = component.version_targets.ok_or_else(|| {
         Error::config_missing_key("versionTargets", Some(component_id.to_string()))
     })?;
@@ -292,7 +292,7 @@ fn bump(component_id: &str, bump_type: BumpType, dry_run: bool) -> homeboy::outp
         });
     }
 
-    let component = ConfigManager::load_component(component_id)?;
+    let component = component::load(component_id)?;
     let targets = component.version_targets.clone().ok_or_else(|| {
         Error::config_missing_key("versionTargets", Some(component_id.to_string()))
     })?;

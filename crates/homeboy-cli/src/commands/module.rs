@@ -4,11 +4,11 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use homeboy::config::{AppPaths, ConfigManager, ProjectConfiguration};
 use homeboy::module::{
     is_module_compatible, is_module_linked, is_module_ready, load_all_modules, load_module,
-    ModuleManifest,
+    module_path, ModuleManifest,
 };
+use homeboy::project::{self, Project};
 use homeboy::ssh::execute_local_command_interactive;
 use homeboy::template;
 
@@ -201,9 +201,9 @@ pub struct ModuleEntry {
 fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
     let modules = load_all_modules();
 
-    let project_config: Option<ProjectConfiguration> = project
+    let project_config: Option<Project> = project
         .as_ref()
-        .and_then(|id| ConfigManager::load_project(id).ok());
+        .and_then(|id| project::load(id).ok());
 
     let entries: Vec<ModuleEntry> = modules
         .iter()
@@ -308,12 +308,12 @@ struct ModuleInstallMetadata {
     linked: bool,
 }
 
-fn install_metadata_path(module_id: &str) -> homeboy::Result<std::path::PathBuf> {
-    Ok(AppPaths::module(module_id)?.join(".install.json"))
+fn install_metadata_path(module_id: &str) -> std::path::PathBuf {
+    module_path(module_id).join(".install.json")
 }
 
 fn write_install_metadata(module_id: &str, url: &str) -> homeboy::Result<()> {
-    let path = install_metadata_path(module_id)?;
+    let path = install_metadata_path(module_id);
     let content = serde_json::to_string_pretty(&ModuleInstallMetadata {
         source_url: url.to_string(),
         linked: false,
@@ -335,7 +335,7 @@ fn write_install_metadata(module_id: &str, url: &str) -> homeboy::Result<()> {
 }
 
 fn read_install_metadata(module_id: &str) -> homeboy::Result<ModuleInstallMetadata> {
-    let path = install_metadata_path(module_id)?;
+    let path = install_metadata_path(module_id);
     if !path.exists() {
         return Err(homeboy::Error::other(format!(
             "No .install.json found for module '{module_id}'. Reinstall it with `homeboy module install`.",
@@ -396,14 +396,18 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
         None => derive_module_id_from_url(url)?,
     };
 
-    let module_dir = AppPaths::module(&module_id)?;
+    let module_dir = module_path(&module_id);
     if module_dir.exists() {
         return Err(homeboy::Error::other(format!(
             "Module '{module_id}' already exists",
         )));
     }
 
-    AppPaths::ensure_directories()?;
+    if let Some(parent) = module_dir.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            homeboy::Error::internal_io(e.to_string(), Some("create modules directory".to_string()))
+        })?;
+    }
 
     let status = Command::new("git")
         .args(["clone", url, module_dir.to_string_lossy().as_ref()])
@@ -441,7 +445,7 @@ fn install_module(url: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
 }
 
 fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
-    let module_dir = AppPaths::module(module_id)?;
+    let module_dir = module_path(module_id);
     if !module_dir.exists() {
         return Err(homeboy::Error::other(format!(
             "Module '{module_id}' not found",
@@ -492,7 +496,7 @@ fn update_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
 }
 
 fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
-    let module_dir = AppPaths::module(module_id)?;
+    let module_dir = module_path(module_id);
     if !module_dir.exists() {
         return Err(homeboy::Error::other(format!(
             "Module '{module_id}' not found",
@@ -622,7 +626,7 @@ fn link_module(path: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
         ));
     }
 
-    let module_dir = AppPaths::module(&module_id)?;
+    let module_dir = module_path(&module_id);
     if module_dir.exists() {
         return Err(homeboy::Error::other(format!(
             "Module '{}' already exists at {}",
@@ -631,7 +635,11 @@ fn link_module(path: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
         )));
     }
 
-    AppPaths::ensure_directories()?;
+    if let Some(parent) = module_dir.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            homeboy::Error::internal_io(e.to_string(), Some("create modules directory".to_string()))
+        })?;
+    }
 
     // Create symlink
     #[cfg(unix)]
@@ -674,7 +682,7 @@ fn link_module(path: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
 }
 
 fn unlink_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    let module_dir = AppPaths::module(module_id)?;
+    let module_dir = module_path(module_id);
 
     if !module_dir.exists() {
         return Err(homeboy::Error::other(format!(

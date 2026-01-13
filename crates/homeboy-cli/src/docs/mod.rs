@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use homeboy::config::AppPaths;
+use homeboy::module::load_all_modules;
 use homeboy::token;
 
 include!(concat!(env!("OUT_DIR"), "/generated_docs.rs"));
@@ -58,14 +58,13 @@ pub fn resolve(topic: &[String]) -> ResolvedDoc {
 }
 
 fn load_module_doc(topic: &str) -> Option<(String, String)> {
-    let modules_dir = AppPaths::modules().ok()?;
-    let entries = std::fs::read_dir(&modules_dir).ok()?;
-
-    for entry in entries.flatten() {
-        let module_id = entry.file_name().to_string_lossy().to_string();
-        let doc_file = entry.path().join("docs").join(format!("{}.md", topic));
+    for module in load_all_modules() {
+        let Some(module_path) = &module.module_path else {
+            continue;
+        };
+        let doc_file = Path::new(module_path).join("docs").join(format!("{}.md", topic));
         if let Ok(content) = std::fs::read_to_string(&doc_file) {
-            return Some((content, module_id));
+            return Some((content, module.id));
         }
     }
     None
@@ -116,13 +115,11 @@ pub fn available_topics() -> Vec<String> {
         .collect();
 
     // Add module docs (integrated namespace)
-    if let Ok(modules_dir) = AppPaths::modules() {
-        if let Ok(entries) = std::fs::read_dir(&modules_dir) {
-            for entry in entries.flatten() {
-                let docs_dir = entry.path().join("docs");
-                if docs_dir.exists() {
-                    collect_doc_topics(&docs_dir, "", &mut topics);
-                }
+    for module in load_all_modules() {
+        if let Some(module_path) = &module.module_path {
+            let docs_dir = Path::new(module_path).join("docs");
+            if docs_dir.exists() {
+                collect_doc_topics(&docs_dir, "", &mut topics);
             }
         }
     }

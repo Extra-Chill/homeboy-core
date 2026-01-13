@@ -19,7 +19,7 @@ pub struct ChangelogTarget {
     pub file: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ScopedModuleConfig {
     #[serde(default)]

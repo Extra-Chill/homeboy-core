@@ -1,7 +1,6 @@
-use homeboy::config::{
-    ComponentConfiguration, ModuleScope, ProjectConfiguration, ScopedModuleConfig,
-};
-use homeboy::module::{ModuleManifest, SettingConfig};
+use homeboy::component::{Component, ScopedModuleConfig};
+use homeboy::module::{ModuleManifest, ModuleScope, SettingConfig};
+use homeboy::project::Project;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -68,7 +67,7 @@ fn module_manifest() -> ModuleManifest {
 fn merges_with_precedence_and_defaults() {
     let module = module_manifest();
 
-    let mut project = ProjectConfiguration {
+    let mut project = Project {
         name: "p".to_string(),
         domain: "d".to_string(),
         modules: vec![],
@@ -96,7 +95,7 @@ fn merges_with_precedence_and_defaults() {
     project_scoped_modules.insert("m".to_string(), project_scoped);
     project.scoped_modules = Some(project_scoped_modules);
 
-    let mut component = ComponentConfiguration::new(
+    let mut component = Component::new(
         "c".to_string(),
         "C".to_string(),
         ".".to_string(),
@@ -126,7 +125,7 @@ fn merges_with_precedence_and_defaults() {
 fn rejects_unknown_setting_key() {
     let module = module_manifest();
 
-    let mut project = ProjectConfiguration {
+    let mut project = Project {
         name: "p".to_string(),
         domain: "d".to_string(),
         modules: vec![],
@@ -163,7 +162,7 @@ fn rejects_unknown_setting_key() {
 fn rejects_invalid_type() {
     let module = module_manifest();
 
-    let mut project = ProjectConfiguration {
+    let mut project = Project {
         name: "p".to_string(),
         domain: "d".to_string(),
         modules: vec![],
