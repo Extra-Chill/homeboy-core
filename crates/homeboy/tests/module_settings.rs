@@ -1,6 +1,6 @@
-use homeboy::component::{Component, ScopedModuleConfig};
+use homeboy::component::{Component, ScopedModuleConfig as ComponentScopedModuleConfig};
 use homeboy::module::{ModuleManifest, ModuleScope, SettingConfig};
-use homeboy::project::Project;
+use homeboy::project::{Project, ScopedModuleConfig as ProjectScopedModuleConfig};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -88,7 +88,7 @@ fn merges_with_precedence_and_defaults() {
     };
 
     let mut project_scoped_modules = HashMap::new();
-    let mut project_scoped = ScopedModuleConfig::default();
+    let mut project_scoped = ProjectScopedModuleConfig::default();
     project_scoped
         .settings
         .insert("a".to_string(), json!("project"));
@@ -104,7 +104,7 @@ fn merges_with_precedence_and_defaults() {
     );
 
     let mut component_scoped_modules = HashMap::new();
-    let mut component_scoped = ScopedModuleConfig::default();
+    let mut component_scoped = ComponentScopedModuleConfig::default();
     component_scoped
         .settings
         .insert("a".to_string(), json!("component"));
@@ -146,7 +146,7 @@ fn rejects_unknown_setting_key() {
     };
 
     let mut project_scoped_modules = HashMap::new();
-    let mut project_scoped = ScopedModuleConfig::default();
+    let mut project_scoped = ProjectScopedModuleConfig::default();
     project_scoped
         .settings
         .insert("nope".to_string(), json!("x"));
@@ -183,7 +183,7 @@ fn rejects_invalid_type() {
     };
 
     let mut project_scoped_modules = HashMap::new();
-    let mut project_scoped = ScopedModuleConfig::default();
+    let mut project_scoped = ProjectScopedModuleConfig::default();
     project_scoped
         .settings
         .insert("n".to_string(), json!("not-a-number"));

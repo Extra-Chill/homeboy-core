@@ -6,7 +6,6 @@ use crate::error::{Error, Result};
 /// Entry returned from directory listing
 #[derive(Debug, Clone)]
 pub struct Entry {
-    pub name: String,
     pub path: PathBuf,
     pub is_dir: bool,
 }
@@ -23,7 +22,6 @@ pub trait FileSystem {
     fn write(&self, path: &Path, content: &str) -> Result<()>;
     fn list(&self, dir: &Path) -> Result<Vec<Entry>>;
     fn delete(&self, path: &Path) -> Result<()>;
-    fn exists(&self, path: &Path) -> bool;
     fn ensure_dir(&self, dir: &Path) -> Result<()>;
 }
 
@@ -94,9 +92,8 @@ impl FileSystem for LocalFs {
         let mut result = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
             let is_dir = path.is_dir();
-            result.push(Entry { name, path, is_dir });
+            result.push(Entry { path, is_dir });
         }
 
         Ok(result)
@@ -112,10 +109,6 @@ impl FileSystem for LocalFs {
 
         fs::remove_file(path)
             .map_err(|e| Error::internal_io(e.to_string(), Some("delete file".to_string())))
-    }
-
-    fn exists(&self, path: &Path) -> bool {
-        path.exists()
     }
 
     fn ensure_dir(&self, dir: &Path) -> Result<()> {

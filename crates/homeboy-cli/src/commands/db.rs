@@ -1,16 +1,8 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
-use std::collections::HashMap;
-use std::process::{Command, Stdio};
 
+use homeboy::db::{self, DbResult, DbTunnelResult};
 use homeboy::project;
-use homeboy::context::{resolve_project_ssh, resolve_project_ssh_with_base_path};
-use homeboy::module::{load_module, DatabaseCliConfig};
-
-const DEFAULT_DATABASE_HOST: &str = "127.0.0.1";
-const DEFAULT_LOCAL_DB_PORT: u16 = 33306;
-use homeboy::ssh::SshClient;
-use homeboy::template::{render_map, TemplateVars};
 use homeboy::token;
 
 #[derive(Args)]
@@ -25,7 +17,7 @@ enum DbCommand {
     Tables {
         /// Project ID
         project_id: String,
-        /// Optional subtarget followed by other args
+        /// Optional subtarget
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
@@ -81,28 +73,15 @@ enum DbCommand {
 #[serde(rename_all = "camelCase")]
 pub struct DbOutput {
     pub command: String,
-    pub project_id: String,
-    pub base_path: Option<String>,
-    pub domain: Option<String>,
-    pub cli_path: Option<String>,
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
-    pub exit_code: i32,
-    pub success: bool,
-    pub tables: Option<Vec<String>>,
-    pub table: Option<String>,
-    pub sql: Option<String>,
-    pub tunnel: Option<DbTunnelInfo>,
+    #[serde(flatten)]
+    pub result: DbResultVariant,
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DbTunnelInfo {
-    pub local_port: u16,
-    pub remote_host: String,
-    pub remote_port: u16,
-    pub database: String,
-    pub user: String,
+#[serde(untagged)]
+pub enum DbResultVariant {
+    Query(DbResult),
+    Tunnel(DbTunnelResult),
 }
 
 pub fn run(
@@ -130,213 +109,69 @@ pub fn run(
     }
 }
 
-struct DbContext {
-    project_id: String,
-    client: SshClient,
-    base_path: String,
-    domain: String,
-    cli_path: String,
-    db_cli: DatabaseCliConfig,
-}
-
-fn build_context(
-    project_id: &str,
-    args: &[String],
-) -> homeboy::Result<(DbContext, Vec<String>)> {
+fn parse_subtarget(project_id: &str, args: &[String]) -> homeboy::Result<(Option<String>, Vec<String>)> {
     let project = project::load_record(project_id)?;
-    let (ctx, base_path) = resolve_project_ssh_with_base_path(project_id)?;
 
-    let mut remaining_args = args.to_vec();
-    let domain = if !project.config.sub_targets.is_empty() {
-        if let Some(sub_id) = args.first() {
-            if let Some(subtarget) = project.config.sub_targets.iter().find(|target| {
-                project::slugify_id(&target.name).ok().as_deref() == Some(sub_id)
-                    || token::identifier_eq(&target.name, sub_id)
-            }) {
-                remaining_args.remove(0);
-                subtarget.domain.clone()
-            } else {
-                project.config.domain.clone()
-            }
-        } else {
-            project.config.domain.clone()
+    if project.config.sub_targets.is_empty() {
+        return Ok((None, args.to_vec()));
+    }
+
+    if let Some(sub_id) = args.first() {
+        if project.config.sub_targets.iter().any(|target| {
+            project::slugify_id(&target.name).ok().as_deref() == Some(sub_id)
+                || token::identifier_eq(&target.name, sub_id)
+        }) {
+            return Ok((Some(sub_id.clone()), args[1..].to_vec()));
         }
-    } else {
-        project.config.domain.clone()
-    };
+    }
 
-    // Find first module with database CLI config
-    let db_cli = project
-        .config
-        .modules
-        .iter()
-        .find_map(|module_id| {
-            load_module(module_id)
-                .and_then(|m| m.database)
-                .and_then(|db| db.cli)
-        })
-        .ok_or_else(|| {
-            homeboy::Error::config(
-                "No module with database CLI configuration found".to_string(),
-            )
-        })?;
-
-    let cli_path = project
-        .config
-        .modules
-        .iter()
-        .find_map(|module_id| {
-            load_module(module_id)
-                .and_then(|m| m.cli)
-                .and_then(|cli| cli.default_cli_path)
-        })
-        .unwrap_or_default();
-
-    Ok((
-        DbContext {
-            project_id: project_id.to_string(),
-            client: ctx.client,
-            base_path,
-            domain,
-            cli_path,
-            db_cli,
-        },
-        remaining_args,
-    ))
-}
-
-fn parse_json_tables(json: &str) -> Vec<String> {
-    serde_json::from_str::<Vec<String>>(json).unwrap_or_default()
+    Ok((None, args.to_vec()))
 }
 
 fn tables(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
-    let (ctx, _) = build_context(project_id, args)?;
-
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
-    let command = render_map(&ctx.db_cli.tables_command, &vars);
-
-    let output = ctx.client.execute(&command);
-    let exit_code = output.exit_code;
-    let success = output.success;
-    let tables = if success {
-        Some(parse_json_tables(&output.stdout))
-    } else {
-        None
-    };
+    let (subtarget, _) = parse_subtarget(project_id, args)?;
+    let result = db::list_tables(project_id, subtarget.as_deref())?;
+    let exit_code = result.exit_code;
 
     Ok((
         DbOutput {
             command: "db.tables".to_string(),
-            project_id: ctx.project_id,
-            base_path: Some(ctx.base_path),
-            domain: Some(ctx.domain),
-            cli_path: Some(ctx.cli_path),
-            stdout: Some(output.stdout),
-            stderr: Some(output.stderr),
-            exit_code,
-            success,
-            tables,
-            table: None,
-            sql: None,
-            tunnel: None,
+            result: DbResultVariant::Query(result),
         },
         exit_code,
     ))
 }
 
 fn describe(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
-    let (ctx, remaining) = build_context(project_id, args)?;
+    let (subtarget, remaining) = parse_subtarget(project_id, args)?;
 
     let table_name = remaining
         .first()
         .ok_or_else(|| homeboy::Error::config("Table name required".to_string()))?;
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
-    vars.insert(TemplateVars::TABLE.to_string(), table_name.clone());
-    let command = render_map(&ctx.db_cli.describe_command, &vars);
-
-    let output = ctx.client.execute(&command);
-    let exit_code = output.exit_code;
+    let result = db::describe_table(project_id, table_name, subtarget.as_deref())?;
+    let exit_code = result.exit_code;
 
     Ok((
         DbOutput {
             command: "db.describe".to_string(),
-            project_id: ctx.project_id,
-            base_path: Some(ctx.base_path),
-            domain: Some(ctx.domain),
-            cli_path: Some(ctx.cli_path),
-            stdout: Some(output.stdout),
-            stderr: Some(output.stderr),
-            exit_code,
-            success: output.success,
-            tables: None,
-            table: Some(table_name.to_string()),
-            sql: None,
-            tunnel: None,
+            result: DbResultVariant::Query(result),
         },
         exit_code,
     ))
 }
 
 fn query(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
-    let (ctx, remaining) = build_context(project_id, args)?;
-
+    let (subtarget, remaining) = parse_subtarget(project_id, args)?;
     let sql = remaining.join(" ");
-    if sql.trim().is_empty() {
-        return Err(homeboy::Error::config(
-            "SQL query required".to_string(),
-        ));
-    }
 
-    let forbidden_prefixes = [
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "REPLACE", "GRANT",
-        "REVOKE",
-    ];
-
-    let upper_sql = sql.to_uppercase();
-    let trimmed_sql = upper_sql.trim_start();
-    if forbidden_prefixes
-        .iter()
-        .any(|keyword| trimmed_sql.starts_with(keyword))
-    {
-        return Err(homeboy::Error::config(
-            "Write operations not allowed via 'db query'. Use the module CLI directly for writes."
-                .to_string(),
-        ));
-    }
-
-    let escaped_sql = sql.replace('\'', "''");
-
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
-    vars.insert(TemplateVars::QUERY.to_string(), escaped_sql);
-    vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
-    vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    let command = render_map(&ctx.db_cli.query_command, &vars);
-
-    let output = ctx.client.execute(&command);
-    let exit_code = output.exit_code;
+    let result = db::query(project_id, &sql, subtarget.as_deref())?;
+    let exit_code = result.exit_code;
 
     Ok((
         DbOutput {
             command: "db.query".to_string(),
-            project_id: ctx.project_id,
-            base_path: Some(ctx.base_path),
-            domain: Some(ctx.domain),
-            cli_path: Some(ctx.cli_path),
-            stdout: Some(output.stdout),
-            stderr: Some(output.stderr),
-            exit_code,
-            success: output.success,
-            tables: None,
-            table: None,
-            sql: Some(sql),
-            tunnel: None,
+            result: DbResultVariant::Query(result),
         },
         exit_code,
     ))
@@ -353,7 +188,7 @@ fn delete_row(
         ));
     }
 
-    let (ctx, remaining) = build_context(project_id, args)?;
+    let (subtarget, remaining) = parse_subtarget(project_id, args)?;
 
     if remaining.len() < 2 {
         return Err(homeboy::Error::config(
@@ -362,40 +197,17 @@ fn delete_row(
     }
 
     let table_name = &remaining[0];
-    let row_id = &remaining[1];
-
-    row_id
-        .parse::<i64>()
+    let row_id: i64 = remaining[1]
+        .parse()
         .map_err(|_| homeboy::Error::config("Row ID must be numeric".to_string()))?;
 
-    let delete_sql = format!("DELETE FROM {} WHERE ID = {} LIMIT 1", table_name, row_id);
-
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
-    vars.insert(TemplateVars::QUERY.to_string(), delete_sql.clone());
-    vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
-    vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    let command = render_map(&ctx.db_cli.query_command, &vars);
-
-    let output = ctx.client.execute(&command);
-    let exit_code = output.exit_code;
+    let result = db::delete_row(project_id, table_name, row_id, subtarget.as_deref())?;
+    let exit_code = result.exit_code;
 
     Ok((
         DbOutput {
             command: "db.deleteRow".to_string(),
-            project_id: ctx.project_id,
-            base_path: Some(ctx.base_path),
-            domain: Some(ctx.domain),
-            cli_path: Some(ctx.cli_path),
-            stdout: Some(output.stdout),
-            stderr: Some(output.stderr),
-            exit_code,
-            success: output.success,
-            tables: None,
-            table: Some(table_name.to_string()),
-            sql: Some(delete_sql),
-            tunnel: None,
+            result: DbResultVariant::Query(result),
         },
         exit_code,
     ))
@@ -412,134 +224,33 @@ fn drop_table(
         ));
     }
 
-    let (ctx, remaining) = build_context(project_id, args)?;
+    let (subtarget, remaining) = parse_subtarget(project_id, args)?;
 
     let table_name = remaining
         .first()
         .ok_or_else(|| homeboy::Error::config("Table name required".to_string()))?;
 
-    let drop_sql = format!("DROP TABLE {}", table_name);
-
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
-    vars.insert(TemplateVars::QUERY.to_string(), drop_sql.clone());
-    vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
-    vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    let command = render_map(&ctx.db_cli.query_command, &vars);
-
-    let output = ctx.client.execute(&command);
-    let exit_code = output.exit_code;
+    let result = db::drop_table(project_id, table_name, subtarget.as_deref())?;
+    let exit_code = result.exit_code;
 
     Ok((
         DbOutput {
             command: "db.dropTable".to_string(),
-            project_id: ctx.project_id,
-            base_path: Some(ctx.base_path),
-            domain: Some(ctx.domain),
-            cli_path: Some(ctx.cli_path),
-            stdout: Some(output.stdout),
-            stderr: Some(output.stderr),
-            exit_code,
-            success: output.success,
-            tables: None,
-            table: Some(table_name.to_string()),
-            sql: Some(drop_sql),
-            tunnel: None,
+            result: DbResultVariant::Query(result),
         },
         exit_code,
     ))
 }
 
 fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy::Result<(DbOutput, i32)> {
-    let project = project::load_record(project_id)?;
-    let ctx = resolve_project_ssh(project_id)?;
-    let server = ctx.server;
-    let client = ctx.client;
-
-    let remote_host = if project.config.database.host.is_empty() {
-        DEFAULT_DATABASE_HOST.to_string()
-    } else {
-        project.config.database.host.clone()
-    };
-
-    let remote_port = project.config.database.port;
-    let bind_port = local_port.unwrap_or(DEFAULT_LOCAL_DB_PORT);
-
-    let tunnel_info = DbTunnelInfo {
-        local_port: bind_port,
-        remote_host: remote_host.clone(),
-        remote_port,
-        database: project.config.database.name.clone(),
-        user: project.config.database.user.clone(),
-    };
-
-    let mut ssh_args = Vec::new();
-
-    if let Some(identity_file) = &client.identity_file {
-        ssh_args.push("-i".to_string());
-        ssh_args.push(identity_file.clone());
-    }
-
-    if server.port != 22 {
-        ssh_args.push("-p".to_string());
-        ssh_args.push(server.port.to_string());
-    }
-
-    ssh_args.push("-N".to_string());
-    ssh_args.push("-L".to_string());
-    ssh_args.push(format!("{}:{}:{}", bind_port, remote_host, remote_port));
-    ssh_args.push(format!("{}@{}", server.user, server.host));
-
-    let status = Command::new("ssh")
-        .args(&ssh_args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status();
-
-    let exit_code = match status {
-        Ok(s) => s.code().unwrap_or(0),
-        Err(e) => return Err(homeboy::Error::other(e.to_string())),
-    };
-
-    let success = exit_code == 0 || exit_code == 130;
+    let result = db::create_tunnel(project_id, local_port)?;
+    let exit_code = result.exit_code;
 
     Ok((
         DbOutput {
             command: "db.tunnel".to_string(),
-            project_id: project_id.to_string(),
-            base_path: project.config.base_path.clone(),
-            domain: Some(project.config.domain.clone()),
-            cli_path: None,
-            stdout: None,
-            stderr: None,
-            exit_code,
-            success,
-            tables: None,
-            table: None,
-            sql: None,
-            tunnel: Some(tunnel_info),
+            result: DbResultVariant::Tunnel(result),
         },
         exit_code,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_json_tables_handles_array() {
-        let json = r#"["wp_posts", "wp_options", "wp_users"]"#;
-        let tables = parse_json_tables(json);
-        assert_eq!(tables, vec!["wp_posts", "wp_options", "wp_users"]);
-    }
-
-    #[test]
-    fn parse_json_tables_returns_empty_on_invalid() {
-        let invalid = "not json";
-        let tables = parse_json_tables(invalid);
-        assert!(tables.is_empty());
-    }
 }

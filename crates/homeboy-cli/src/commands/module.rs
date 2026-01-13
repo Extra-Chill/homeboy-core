@@ -6,11 +6,9 @@ use std::process::{Command, Stdio};
 
 use homeboy::module::{
     is_module_compatible, is_module_linked, is_module_ready, load_all_modules, load_module,
-    module_path, ModuleManifest,
+    module_path, run_setup, ModuleManifest,
 };
 use homeboy::project::{self, Project};
-use homeboy::ssh::execute_local_command_interactive;
-use homeboy::template;
 
 use crate::commands::CmdResult;
 
@@ -522,60 +520,13 @@ fn uninstall_module(module_id: &str, force: bool) -> CmdResult<ModuleOutput> {
 }
 
 fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    let module = load_module(module_id)
-        .ok_or_else(|| homeboy::Error::other(format!("Module '{}' not found", module_id)))?;
-
-    let runtime = match module.runtime.as_ref() {
-        Some(r) => r,
-        None => {
-            return Ok((
-                ModuleOutput::Setup {
-                    module_id: module_id.to_string(),
-                },
-                0,
-            ));
-        }
-    };
-
-    let setup_command = match &runtime.setup_command {
-        Some(cmd) => cmd,
-        None => {
-            return Ok((
-                ModuleOutput::Setup {
-                    module_id: module_id.to_string(),
-                },
-                0,
-            ));
-        }
-    };
-
-    let module_path = module
-        .module_path
-        .as_ref()
-        .ok_or_else(|| homeboy::Error::other("module_path not set".to_string()))?;
-
-    let entrypoint = runtime.entrypoint.clone().unwrap_or_default();
-    let vars: Vec<(&str, &str)> = vec![
-        ("modulePath", module_path.as_str()),
-        ("entrypoint", entrypoint.as_str()),
-    ];
-
-    let command = template::render(setup_command, &vars);
-
-    let exit_code = execute_local_command_interactive(&command, Some(module_path), None);
-
-    if exit_code != 0 {
-        return Err(homeboy::Error::other(format!(
-            "Setup command failed with exit code {}",
-            exit_code
-        )));
-    }
+    let result = run_setup(module_id)?;
 
     Ok((
         ModuleOutput::Setup {
             module_id: module_id.to_string(),
         },
-        0,
+        result.exit_code,
     ))
 }
 
