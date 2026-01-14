@@ -33,7 +33,7 @@ If no component IDs are provided and neither `--all` nor `--outdated` is set, Ho
   "all": false,
   "outdated": false,
   "dryRun": false,
-  "components": [
+  "results": [
     {
       "id": "<componentId>",
       "name": "<name>",

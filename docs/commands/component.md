@@ -27,7 +27,7 @@ Options:
 - `--remote-path <path>`: remote path relative to project `basePath` (required)
 - `--build-artifact <path>`: build artifact path relative to `localPath` (required)
 - `--version-target <TARGET>`: version target in format `file` or `file::pattern` (repeatable)
-- `--build-command <command>`: build command to run in `localPath`
+- `--build-command <command>`: build command to run in `localPath` (required for `homeboy build`)
 - `--extract-command <command>`: command to run after upload (optional; supports `{artifact}` and `{targetDir}`)
 
 ### `show`
@@ -68,12 +68,17 @@ Deletion is safety-checked:
 homeboy component rename <id> <new-id>
 ```
 
-Renames a component by changing its ID directly and rewriting any project files that reference the old ID. Use this to migrate components to match their repository directory names.
+Renames a component by changing its ID and rewriting any project files that reference the old ID.
+
+Notes:
+
+- `new-id` is lowercased before writing.
+- The component is moved from `components/<old-id>.json` to `components/<new-id>.json`.
+- Project references are updated by rewriting each project config that uses the component.
 
 Example:
 
 ```sh
-# Rename to match repository directory name
 homeboy component rename extra-chill-api extrachill-api
 ```
 
@@ -91,20 +96,21 @@ homeboy component list
 
 ```json
 {
-  "action": "create|show|set|delete|rename|list|component.create",
+  "command": "component.create|component.show|component.set|component.delete|component.rename|component.list",
   "componentId": "<id>|null",
   "success": true,
   "updatedFields": ["localPath", "remotePath"],
-  "component": { },
-  "components": [ ],
+  "component": {},
+  "components": [],
   "import": null
 }
 ```
 
 Notes:
 
-- `action` is `component.create` only for JSON import mode (`homeboy component create --json ...`).
-- Other subcommands use `create`, `show`, `set`, `delete`, `rename`, or `list`.
+- In JSON import mode (`homeboy component create --json ...`), `command` is still `component.create` and `import` is populated.
+- `updatedFields` is empty for all actions except `set`/`rename`.
+- `rename` does not include the old ID; capture it from your input if needed.
 
 
 ## Related

@@ -6,6 +6,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.11.0
+
+- Add universal fuzzy matching for entity not-found errors
+- Align changes output examples with implementation
+
 ## 0.10.0
 
 - Refactor ID resolution and standardize resolving IDs from directory names

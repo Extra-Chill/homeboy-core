@@ -26,11 +26,11 @@ Note: some subcommands accept a `--json` flag for bulk operations.
 All subcommands support `--cwd` for ad-hoc operations in any git directory without requiring component registration:
 
 - `status --cwd`
-- `commit --cwd <message>`
-- `push --cwd [--tags]`
-- `pull --cwd`
+- `commit --cwd <message>` (or omit `--cwd` and omit `<componentId>`)
+- `push --cwd [--tags]` (or omit `--cwd` and omit `<componentId>`)
+- `pull --cwd` (or omit `--cwd` and omit `<componentId>`)
 - `tag --cwd <tagName> [-m <message>]`
-  - Tag name is **required** when using `--cwd` (no auto-derivation from version).
+  - Tag name is **required** when using `--cwd` (or when omitting `<componentId>`), since there is no component version to derive from.
 
 ### Bulk Mode (--json)
 

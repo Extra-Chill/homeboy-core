@@ -319,6 +319,84 @@ pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
     Ok(MergeFields { updated_fields })
 }
 
+/// Result of a config remove operation (public API)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveResult {
+    pub id: String,
+    pub removed_from: Vec<String>,
+}
+
+/// Internal result from remove_config (no ID, caller adds it)
+pub(crate) struct RemoveFields {
+    pub removed_from: Vec<String>,
+}
+
+/// Remove items from arrays in any serializable config type.
+pub(crate) fn remove_config<T: Serialize + DeserializeOwned>(
+    existing: &mut T,
+    spec: Value,
+) -> Result<RemoveFields> {
+    let spec_obj = match &spec {
+        Value::Object(obj) => obj,
+        _ => {
+            return Err(Error::validation_invalid_argument(
+                "remove",
+                "Remove spec must be a JSON object",
+                None,
+                None,
+            ))
+        }
+    };
+
+    let fields: Vec<String> = spec_obj.keys().cloned().collect();
+
+    if fields.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "remove",
+            "Remove spec cannot be empty",
+            None,
+            None,
+        ));
+    }
+
+    let mut base = serde_json::to_value(&*existing)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize config".to_string())))?;
+
+    let mut removed_from = Vec::new();
+    deep_remove(&mut base, spec, &mut removed_from, String::new());
+
+    *existing = serde_json::from_value(base)
+        .map_err(|e| Error::validation_invalid_json(e, Some("remove config".to_string())))?;
+
+    Ok(RemoveFields { removed_from })
+}
+
+fn deep_remove(base: &mut Value, spec: Value, removed_from: &mut Vec<String>, path: String) {
+    match (base, spec) {
+        (Value::Object(base_obj), Value::Object(spec_obj)) => {
+            for (key, value) in spec_obj {
+                let field_path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{}.{}", path, key)
+                };
+                if let Some(base_value) = base_obj.get_mut(&key) {
+                    deep_remove(base_value, value, removed_from, field_path);
+                }
+            }
+        }
+        (Value::Array(base_arr), Value::Array(spec_arr)) => {
+            let original_len = base_arr.len();
+            base_arr.retain(|item| !spec_arr.contains(item));
+            if base_arr.len() < original_len {
+                removed_from.push(path);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn deep_merge(base: &mut Value, patch: Value) {
     match (base, patch) {
         (Value::Object(base_obj), Value::Object(patch_obj)) => {
@@ -330,6 +408,17 @@ fn deep_merge(base: &mut Value, patch: Value) {
                 }
             }
         }
+        (Value::Array(base_arr), Value::Array(patch_arr)) => {
+            array_union(base_arr, patch_arr);
+        }
         (base, patch) => *base = patch,
+    }
+}
+
+fn array_union(base: &mut Vec<Value>, patch: Vec<Value>) {
+    for item in patch {
+        if !base.contains(&item) {
+            base.push(item);
+        }
     }
 }

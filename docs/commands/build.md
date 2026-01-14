@@ -9,7 +9,9 @@ homeboy build --json <spec>
 
 ## Description
 
-Runs a build command for the component (either the component’s configured `build_command`, or an auto-detected default) in the component’s `local_path`.
+Runs a build command for the component in the component's `localPath`.
+
+Requires `buildCommand` to be configured on the component. If not set, the command errors.
 
 ## JSON output
 

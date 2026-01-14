@@ -50,6 +50,8 @@ homeboy ssh list
 }
 ```
 
+Note: `action` is produced by the tagged enum output (`SshOutput`).
+
 ### Connect (`homeboy ssh [OPTIONS] [ID] [COMMAND]`)
 
 The connect action uses an interactive SSH session and does not print the JSON envelope (it is treated as passthrough output).

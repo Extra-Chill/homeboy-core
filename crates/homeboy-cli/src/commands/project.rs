@@ -52,6 +52,14 @@ enum ProjectCommand {
         #[arg(long, value_name = "JSON")]
         json: String,
     },
+    /// Remove items from project configuration arrays
+    Remove {
+        /// Project ID (optional if provided in JSON body)
+        project_id: Option<String>,
+        /// JSON object specifying items to remove from arrays (supports @file and - for stdin)
+        #[arg(long, value_name = "JSON")]
+        json: String,
+    },
     /// Rename a project (changes ID)
     Rename {
         /// Current project ID
@@ -216,6 +224,8 @@ pub struct ProjectOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     updated: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    removed: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     deleted: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     import: Option<project::CreateSummary>,
@@ -244,6 +254,7 @@ pub fn run(
             create(id, domain, server_id, base_path, table_prefix)
         }
         ProjectCommand::Set { project_id, json } => set(project_id.as_deref(), &json),
+        ProjectCommand::Remove { project_id, json } => remove(project_id.as_deref(), &json),
         ProjectCommand::Rename { project_id, new_id } => rename(&project_id, &new_id),
         ProjectCommand::Components { command } => components(command),
         ProjectCommand::Pin { command } => pin(command),
@@ -271,6 +282,7 @@ fn list() -> homeboy::Result<(ProjectOutput, i32)> {
             components: None,
             pin: None,
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -290,6 +302,7 @@ fn show(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
             components: None,
             pin: None,
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -310,6 +323,7 @@ fn create_json(spec: &str, skip_existing: bool) -> homeboy::Result<(ProjectOutpu
             components: None,
             pin: None,
             updated: None,
+            removed: None,
             deleted: None,
             import: Some(summary),
         },
@@ -338,6 +352,7 @@ fn create(
             components: None,
             pin: None,
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -356,6 +371,26 @@ fn set(project_id: Option<&str>, json: &str) -> homeboy::Result<(ProjectOutput, 
             components: None,
             pin: None,
             updated: Some(result.updated_fields),
+            removed: None,
+            deleted: None,
+            import: None,
+        },
+        0,
+    ))
+}
+
+fn remove(project_id: Option<&str>, json: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+    let result = project::remove_from_json(project_id, json)?;
+    Ok((
+        ProjectOutput {
+            command: "project.remove".to_string(),
+            project_id: Some(result.id.clone()),
+            project: Some(project::load(&result.id)?),
+            projects: None,
+            components: None,
+            pin: None,
+            updated: None,
+            removed: Some(result.removed_from),
             deleted: None,
             import: None,
         },
@@ -375,6 +410,7 @@ fn rename(project_id: &str, new_id: &str) -> homeboy::Result<(ProjectOutput, i32
             components: None,
             pin: None,
             updated: Some(vec!["id".to_string()]),
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -394,6 +430,7 @@ fn delete(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
             components: None,
             pin: None,
             updated: None,
+            removed: None,
             deleted: Some(vec![project_id.to_string()]),
             import: None,
         },
@@ -443,6 +480,7 @@ fn components_list(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
             }),
             pin: None,
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -511,6 +549,7 @@ fn write_project_components(
             }),
             pin: None,
             updated: Some(vec!["componentIds".to_string()]),
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -586,6 +625,7 @@ fn pin_list(project_id: &str, pin_type: ProjectPinType) -> homeboy::Result<(Proj
                 removed: None,
             }),
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -634,6 +674,7 @@ fn pin_add(
                 removed: None,
             }),
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
@@ -672,6 +713,7 @@ fn pin_remove(
                 }),
             }),
             updated: None,
+            removed: None,
             deleted: None,
             import: None,
         },
