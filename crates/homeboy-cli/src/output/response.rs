@@ -103,8 +103,7 @@ fn exit_code_for_error(code: ErrorCode) -> i32 {
         | ErrorCode::ConfigIdCollision
         | ErrorCode::ValidationMissingArgument
         | ErrorCode::ValidationInvalidArgument
-        | ErrorCode::ValidationInvalidJson
-        | ErrorCode::ValidationUnknownErrorCode => 2,
+        | ErrorCode::ValidationInvalidJson => 2,
 
         ErrorCode::ProjectNotFound
         | ErrorCode::ServerNotFound

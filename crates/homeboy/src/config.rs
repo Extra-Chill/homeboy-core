@@ -265,3 +265,43 @@ pub(crate) fn merge_from_json<T: ConfigEntity>(
         updated_fields: result.updated_fields,
     })
 }
+
+pub(crate) fn rename<T: ConfigEntity>(id: &str, new_id: &str) -> Result<()> {
+    let new_id = new_id.to_lowercase();
+    slugify::validate_component_id(&new_id)?;
+
+    if new_id == id {
+        return Ok(());
+    }
+
+    let old_path = T::config_path(id)?;
+    let new_path = T::config_path(&new_id)?;
+
+    if new_path.exists() {
+        return Err(Error::validation_invalid_argument(
+            &format!("{}.id", T::entity_type()),
+            format!(
+                "Cannot rename {} '{}' to '{}': destination already exists",
+                T::entity_type(),
+                id,
+                new_id
+            ),
+            Some(new_id),
+            None,
+        ));
+    }
+
+    let mut entity: T = load(id)?;
+    entity.set_id(new_id.clone());
+
+    local_files::ensure_app_dirs()?;
+    std::fs::rename(&old_path, &new_path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some(format!("rename {}", T::entity_type()))))?;
+
+    if let Err(error) = save(&entity) {
+        let _ = std::fs::rename(&new_path, &old_path);
+        return Err(error);
+    }
+
+    Ok(())
+}

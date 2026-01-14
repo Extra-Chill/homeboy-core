@@ -184,47 +184,10 @@ pub fn update(
 }
 
 pub fn rename(id: &str, new_id: &str) -> Result<CreateResult> {
-    let mut server = load(id)?;
-
-    slugify::validate_component_id(new_id)?;
-
-    if new_id == id {
-        return Ok(CreateResult {
-            id: new_id.to_string(),
-            server,
-        });
-    }
-
-    let old_path = paths::server(id)?;
-    let new_path = paths::server(new_id)?;
-
-    if new_path.exists() {
-        return Err(Error::validation_invalid_argument(
-            "server.id",
-            format!(
-                "Cannot rename server '{}' to '{}': destination already exists",
-                id, new_id
-            ),
-            Some(new_id.to_string()),
-            None,
-        ));
-    }
-
-    server.id = new_id.to_string();
-
-    local_files::ensure_app_dirs()?;
-    std::fs::rename(&old_path, &new_path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("rename server".to_string())))?;
-
-    if let Err(error) = save(&server) {
-        let _ = std::fs::rename(&new_path, &old_path);
-        return Err(error);
-    }
-
-    Ok(CreateResult {
-        id: new_id.to_string(),
-        server,
-    })
+    let new_id = new_id.to_lowercase();
+    config::rename::<Server>(id, &new_id)?;
+    let server = load(&new_id)?;
+    Ok(CreateResult { id: new_id, server })
 }
 
 pub fn delete_safe(id: &str) -> Result<()> {

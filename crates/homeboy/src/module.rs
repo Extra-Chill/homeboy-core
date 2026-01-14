@@ -387,6 +387,16 @@ pub fn available_module_ids() -> Vec<String> {
     load_all_modules().into_iter().map(|m| m.id).collect()
 }
 
+// Module config operations (via ConfigEntity trait)
+
+pub fn save_manifest(manifest: &ModuleManifest) -> Result<()> {
+    config::save(manifest)
+}
+
+pub fn merge_manifest_from_json(id: Option<&str>, json_spec: &str) -> Result<json::MergeResult> {
+    config::merge_from_json::<ModuleManifest>(id, json_spec)
+}
+
 /// Environment variable names for module execution context.
 /// Modules receive these variables when executed via `homeboy module run`.
 pub mod exec_context {

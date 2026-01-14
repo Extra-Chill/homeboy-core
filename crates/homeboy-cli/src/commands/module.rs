@@ -75,6 +75,15 @@ enum ModuleCommand {
         #[arg(long)]
         data: Option<String>,
     },
+    /// Update module manifest fields
+    #[command(visible_aliases = ["edit", "merge"])]
+    Set {
+        /// Module ID (optional if provided in JSON body)
+        module_id: Option<String>,
+        /// JSON object to merge into manifest (supports @file and - for stdin)
+        #[arg(long, value_name = "JSON")]
+        json: String,
+    },
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
@@ -104,6 +113,7 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             project,
             data,
         } => run_action(&module_id, &action_id, project, data),
+        ModuleCommand::Set { module_id, json } => set_module(module_id.as_deref(), &json),
     }
 }
 
@@ -150,6 +160,11 @@ pub enum ModuleOutput {
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
         response: serde_json::Value,
+    },
+    #[serde(rename = "module.set")]
+    Set {
+        module_id: String,
+        updated_fields: Vec<String>,
     },
 }
 
@@ -306,6 +321,17 @@ fn run_action(
             action_id: action_id.to_string(),
             project_id,
             response,
+        },
+        0,
+    ))
+}
+
+fn set_module(module_id: Option<&str>, json: &str) -> CmdResult<ModuleOutput> {
+    let result = homeboy::module::merge_manifest_from_json(module_id, json)?;
+    Ok((
+        ModuleOutput::Set {
+            module_id: result.id,
+            updated_fields: result.updated_fields,
         },
         0,
     ))

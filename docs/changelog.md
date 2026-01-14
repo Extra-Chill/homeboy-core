@@ -6,6 +6,13 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.10.0
+
+- Refactor ID resolution and standardize resolving IDs from directory names
+- Add `homeboy module set` to merge module manifest JSON
+- Centralize config entity rename logic
+- Refactor project pin/unpin API with unified options
+
 ## 0.9.0
 
 - Add remote find and grep commands for server file search

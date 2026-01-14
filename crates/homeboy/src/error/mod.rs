@@ -1,13 +1,3 @@
-mod codes;
-mod help;
-
-pub use codes::{all_codes, parse_code};
-pub use help::{explain, list, ErrorHelp, ErrorHelpSummary};
-
-pub fn validation_unknown_error_code(code: impl Into<String>) -> Error {
-    Error::validation_unknown_error_code(code)
-}
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -21,7 +11,6 @@ pub enum ErrorCode {
     ValidationMissingArgument,
     ValidationInvalidArgument,
     ValidationInvalidJson,
-    ValidationUnknownErrorCode,
 
     ProjectNotFound,
     ProjectNoActive,
@@ -59,7 +48,6 @@ impl ErrorCode {
             ErrorCode::ValidationMissingArgument => "validation.missing_argument",
             ErrorCode::ValidationInvalidArgument => "validation.invalid_argument",
             ErrorCode::ValidationInvalidJson => "validation.invalid_json",
-            ErrorCode::ValidationUnknownErrorCode => "validation.unknown_error_code",
 
             ErrorCode::ProjectNotFound => "project.not_found",
             ErrorCode::ProjectNoActive => "project.no_active",
@@ -177,12 +165,6 @@ pub struct InvalidArgumentDetails {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UnknownErrorCodeDetails {
-    pub code: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct InternalIoErrorDetails {
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -281,17 +263,6 @@ impl Error {
         });
 
         Self::new(ErrorCode::ValidationInvalidJson, "Invalid JSON", details)
-    }
-
-    pub fn validation_unknown_error_code(code: impl Into<String>) -> Self {
-        let details = serde_json::to_value(UnknownErrorCodeDetails { code: code.into() })
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-
-        Self::new(
-            ErrorCode::ValidationUnknownErrorCode,
-            "Unknown error code",
-            details,
-        )
     }
 
     pub fn project_not_found(id: impl Into<String>) -> Self {

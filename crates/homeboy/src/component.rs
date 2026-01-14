@@ -1,7 +1,6 @@
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::json;
-use crate::local_files;
 use crate::paths;
 use crate::project;
 use crate::slugify;
@@ -288,52 +287,11 @@ pub fn update(
 }
 
 pub fn rename(id: &str, new_id: &str) -> Result<CreateResult> {
-    let mut component = load(id)?;
     let new_id = new_id.to_lowercase();
-
-    slugify::validate_component_id(&new_id)?;
-
-    if new_id == id {
-        // Same ID, nothing to do
-        return Ok(CreateResult {
-            id: new_id,
-            component,
-        });
-    }
-
-    let old_path = paths::component(id)?;
-    let new_path = paths::component(&new_id)?;
-
-    if new_path.exists() {
-        return Err(Error::validation_invalid_argument(
-            "component.id",
-            format!(
-                "Cannot rename component '{}' to '{}': destination already exists",
-                id, new_id
-            ),
-            Some(new_id),
-            None,
-        ));
-    }
-
-    component.id = new_id.clone();
-
-    local_files::ensure_app_dirs()?;
-    std::fs::rename(&old_path, &new_path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("rename component".to_string())))?;
-
-    if let Err(error) = save(&component) {
-        let _ = std::fs::rename(&new_path, &old_path);
-        return Err(error);
-    }
-
-    // Update project references to use the new component ID
+    config::rename::<Component>(id, &new_id)?;
     update_project_references(id, &new_id)?;
-
-    Ok(CreateResult {
-        id: new_id,
-        component,
-    })
+    let component = load(&new_id)?;
+    Ok(CreateResult { id: new_id, component })
 }
 
 /// Update all projects that reference the old component ID to use the new ID.

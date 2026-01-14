@@ -1,7 +1,6 @@
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::json;
-use crate::local_files;
 use crate::paths;
 use crate::slugify;
 use serde::{Deserialize, Serialize};
@@ -151,6 +150,26 @@ impl PinnedRemoteLog {
         self.label
             .as_deref()
             .unwrap_or_else(|| self.path.rsplit('/').next().unwrap_or(&self.path))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinType {
+    File,
+    Log,
+}
+
+pub struct PinOptions {
+    pub label: Option<String>,
+    pub tail_lines: u32,
+}
+
+impl Default for PinOptions {
+    fn default() -> Self {
+        Self {
+            label: None,
+            tail_lines: 100,
+        }
     }
 }
 
@@ -435,87 +454,14 @@ pub fn update(
 }
 
 pub fn rename(id: &str, new_id: &str) -> Result<RenameResult> {
-    let mut project = load(id)?;
-
-    slugify::validate_component_id(new_id)?;
-
-    if new_id == id {
-        return Ok(RenameResult {
-            old_id: id.to_string(),
-            new_id: new_id.to_string(),
-            project,
-        });
-    }
-
-    let old_path = paths::project(id)?;
-    let new_path = paths::project(new_id)?;
-
-    if new_path.exists() {
-        return Err(Error::validation_invalid_argument(
-            "project.id",
-            format!(
-                "Cannot rename project '{}' to '{}': destination already exists",
-                id, new_id
-            ),
-            Some(new_id.to_string()),
-            None,
-        ));
-    }
-
-    project.id = new_id.to_string();
-
-    local_files::ensure_app_dirs()?;
-    std::fs::rename(&old_path, &new_path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("rename project".to_string())))?;
-
-    if let Err(error) = save(&project) {
-        let _ = std::fs::rename(&new_path, &old_path);
-        return Err(error);
-    }
-
+    let new_id = new_id.to_lowercase();
+    config::rename::<Project>(id, &new_id)?;
+    let project = load(&new_id)?;
     Ok(RenameResult {
         old_id: id.to_string(),
-        new_id: new_id.to_string(),
+        new_id,
         project,
     })
-}
-
-pub fn validate_component_ids(component_ids: Vec<String>, project_id: &str) -> Result<Vec<String>> {
-    use crate::component;
-    use std::collections::HashSet;
-
-    if component_ids.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "componentIds",
-            "At least one component ID is required",
-            Some(project_id.to_string()),
-            None,
-        ));
-    }
-
-    let mut missing = Vec::new();
-    for component_id in &component_ids {
-        if !component::exists(component_id) {
-            missing.push(component_id.clone());
-        }
-    }
-
-    if !missing.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "componentIds",
-            "Unknown component IDs (must exist in `homeboy component list`)",
-            Some(project_id.to_string()),
-            Some(missing),
-        ));
-    }
-
-    let mut seen = HashSet::new();
-    let deduped: Vec<String> = component_ids
-        .into_iter()
-        .filter(|id| seen.insert(id.clone()))
-        .collect();
-
-    Ok(deduped)
 }
 
 pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
@@ -560,8 +506,42 @@ pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Ve
 }
 
 pub fn add_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
+    use crate::component;
+    use std::collections::HashSet;
+
+    if component_ids.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "componentIds",
+            "At least one component ID is required",
+            Some(project_id.to_string()),
+            None,
+        ));
+    }
+
+    let mut missing = Vec::new();
+    for component_id in &component_ids {
+        if !component::exists(component_id) {
+            missing.push(component_id.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "componentIds",
+            "Unknown component IDs (must exist in `homeboy component list`)",
+            Some(project_id.to_string()),
+            Some(missing),
+        ));
+    }
+
+    let mut seen = HashSet::new();
+    let deduped: Vec<String> = component_ids
+        .into_iter()
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
+
     let mut project = load(project_id)?;
-    for id in component_ids {
+    for id in deduped {
         if !project.component_ids.contains(&id) {
             project.component_ids.push(id);
         }
@@ -612,147 +592,67 @@ pub fn clear_components(project_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn pin_file(project_id: &str, path: &str, label: Option<String>) -> Result<PinnedRemoteFile> {
+pub fn pin(project_id: &str, pin_type: PinType, path: &str, options: PinOptions) -> Result<()> {
     let mut project = load(project_id)?;
 
-    if project
-        .remote_files
-        .pinned_files
-        .iter()
-        .any(|f| f.path == path)
-    {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            "File is already pinned",
-            Some(project_id.to_string()),
-            Some(vec![path.to_string()]),
-        ));
+    match pin_type {
+        PinType::File => {
+            if project.remote_files.pinned_files.iter().any(|f| f.path == path) {
+                return Err(Error::validation_invalid_argument(
+                    "path",
+                    "File is already pinned",
+                    Some(project_id.to_string()),
+                    Some(vec![path.to_string()]),
+                ));
+            }
+            project.remote_files.pinned_files.push(PinnedRemoteFile {
+                id: Uuid::new_v4(),
+                path: path.to_string(),
+                label: options.label,
+            });
+        }
+        PinType::Log => {
+            if project.remote_logs.pinned_logs.iter().any(|l| l.path == path) {
+                return Err(Error::validation_invalid_argument(
+                    "path",
+                    "Log is already pinned",
+                    Some(project_id.to_string()),
+                    Some(vec![path.to_string()]),
+                ));
+            }
+            project.remote_logs.pinned_logs.push(PinnedRemoteLog {
+                id: Uuid::new_v4(),
+                path: path.to_string(),
+                label: options.label,
+                tail_lines: options.tail_lines,
+            });
+        }
     }
 
-    let pinned = PinnedRemoteFile {
-        id: Uuid::new_v4(),
-        path: path.to_string(),
-        label,
+    save(&project)?;
+    Ok(())
+}
+
+pub fn unpin(project_id: &str, pin_type: PinType, path: &str) -> Result<()> {
+    let mut project = load(project_id)?;
+
+    let (before, after, type_name) = match pin_type {
+        PinType::File => {
+            let before = project.remote_files.pinned_files.len();
+            project.remote_files.pinned_files.retain(|f| f.path != path);
+            (before, project.remote_files.pinned_files.len(), "file")
+        }
+        PinType::Log => {
+            let before = project.remote_logs.pinned_logs.len();
+            project.remote_logs.pinned_logs.retain(|l| l.path != path);
+            (before, project.remote_logs.pinned_logs.len(), "log")
+        }
     };
-    project.remote_files.pinned_files.push(pinned.clone());
-    save(&project)?;
-    Ok(pinned)
-}
 
-pub fn pin_log(
-    project_id: &str,
-    path: &str,
-    label: Option<String>,
-    tail_lines: u32,
-) -> Result<PinnedRemoteLog> {
-    let mut project = load(project_id)?;
-
-    if project
-        .remote_logs
-        .pinned_logs
-        .iter()
-        .any(|l| l.path == path)
-    {
+    if after == before {
         return Err(Error::validation_invalid_argument(
             "path",
-            "Log is already pinned",
-            Some(project_id.to_string()),
-            Some(vec![path.to_string()]),
-        ));
-    }
-
-    let pinned = PinnedRemoteLog {
-        id: Uuid::new_v4(),
-        path: path.to_string(),
-        label,
-        tail_lines,
-    };
-    project.remote_logs.pinned_logs.push(pinned.clone());
-    save(&project)?;
-    Ok(pinned)
-}
-
-pub fn unpin_file(project_id: &str, file_id: &str) -> Result<()> {
-    let uuid = Uuid::parse_str(file_id).map_err(|_| {
-        Error::validation_invalid_argument(
-            "file_id",
-            "Invalid file ID format",
-            Some(file_id.to_string()),
-            None,
-        )
-    })?;
-
-    let mut project = load(project_id)?;
-    let before = project.remote_files.pinned_files.len();
-    project.remote_files.pinned_files.retain(|f| f.id != uuid);
-
-    if project.remote_files.pinned_files.len() == before {
-        return Err(Error::validation_invalid_argument(
-            "file_id",
-            "Pinned file not found",
-            Some(file_id.to_string()),
-            None,
-        ));
-    }
-
-    save(&project)?;
-    Ok(())
-}
-
-pub fn unpin_log(project_id: &str, log_id: &str) -> Result<()> {
-    let uuid = Uuid::parse_str(log_id).map_err(|_| {
-        Error::validation_invalid_argument(
-            "log_id",
-            "Invalid log ID format",
-            Some(log_id.to_string()),
-            None,
-        )
-    })?;
-
-    let mut project = load(project_id)?;
-    let before = project.remote_logs.pinned_logs.len();
-    project.remote_logs.pinned_logs.retain(|l| l.id != uuid);
-
-    if project.remote_logs.pinned_logs.len() == before {
-        return Err(Error::validation_invalid_argument(
-            "log_id",
-            "Pinned log not found",
-            Some(log_id.to_string()),
-            None,
-        ));
-    }
-
-    save(&project)?;
-    Ok(())
-}
-
-pub fn unpin_file_by_path(project_id: &str, path: &str) -> Result<()> {
-    let mut project = load(project_id)?;
-    let before = project.remote_files.pinned_files.len();
-    project.remote_files.pinned_files.retain(|f| f.path != path);
-
-    if project.remote_files.pinned_files.len() == before {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            "file is not pinned",
-            Some(project_id.to_string()),
-            Some(vec![path.to_string()]),
-        ));
-    }
-
-    save(&project)?;
-    Ok(())
-}
-
-pub fn unpin_log_by_path(project_id: &str, path: &str) -> Result<()> {
-    let mut project = load(project_id)?;
-    let before = project.remote_logs.pinned_logs.len();
-    project.remote_logs.pinned_logs.retain(|l| l.path != path);
-
-    if project.remote_logs.pinned_logs.len() == before {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            "log is not pinned",
+            &format!("{} is not pinned", type_name),
             Some(project_id.to_string()),
             Some(vec![path.to_string()]),
         ));

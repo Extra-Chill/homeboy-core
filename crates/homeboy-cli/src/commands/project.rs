@@ -454,11 +454,8 @@ fn components_set(
     project_id: &str,
     component_ids: Vec<String>,
 ) -> homeboy::Result<(ProjectOutput, i32)> {
-    let deduped = project::validate_component_ids(component_ids, project_id)?;
-
-    let mut project = project::load(project_id)?;
-    project.component_ids = deduped.clone();
-
+    project::set_components(project_id, component_ids)?;
+    let project = project::load(project_id)?;
     write_project_components(project_id, "set", &project)
 }
 
@@ -466,15 +463,8 @@ fn components_add(
     project_id: &str,
     component_ids: Vec<String>,
 ) -> homeboy::Result<(ProjectOutput, i32)> {
-    let deduped = project::validate_component_ids(component_ids, project_id)?;
-
-    let mut project = project::load(project_id)?;
-    for id in deduped {
-        if !project.component_ids.contains(&id) {
-            project.component_ids.push(id);
-        }
-    }
-
+    project::add_components(project_id, component_ids)?;
+    let project = project::load(project_id)?;
     write_project_components(project_id, "add", &project)
 }
 
@@ -482,7 +472,7 @@ fn components_remove(
     project_id: &str,
     component_ids: Vec<String>,
 ) -> homeboy::Result<(ProjectOutput, i32)> {
-    project::remove_components_validated(project_id, component_ids)?;
+    project::remove_components(project_id, component_ids)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "remove", &project)
 }
@@ -610,16 +600,20 @@ fn pin_add(
     label: Option<String>,
     tail: u32,
 ) -> homeboy::Result<(ProjectOutput, i32)> {
-    let type_string = match pin_type {
-        ProjectPinType::File => {
-            project::pin_file(project_id, path, label)?;
-            "file"
-        }
-        ProjectPinType::Log => {
-            project::pin_log(project_id, path, label, tail)?;
-            "log"
-        }
+    let (core_type, type_string) = match pin_type {
+        ProjectPinType::File => (project::PinType::File, "file"),
+        ProjectPinType::Log => (project::PinType::Log, "log"),
     };
+
+    project::pin(
+        project_id,
+        core_type,
+        path,
+        project::PinOptions {
+            label,
+            tail_lines: tail,
+        },
+    )?;
 
     Ok((
         ProjectOutput {
@@ -652,16 +646,12 @@ fn pin_remove(
     path: &str,
     pin_type: ProjectPinType,
 ) -> homeboy::Result<(ProjectOutput, i32)> {
-    let type_string = match pin_type {
-        ProjectPinType::File => {
-            project::unpin_file_by_path(project_id, path)?;
-            "file"
-        }
-        ProjectPinType::Log => {
-            project::unpin_log_by_path(project_id, path)?;
-            "log"
-        }
+    let (core_type, type_string) = match pin_type {
+        ProjectPinType::File => (project::PinType::File, "file"),
+        ProjectPinType::Log => (project::PinType::Log, "log"),
     };
+
+    project::unpin(project_id, core_type, path)?;
 
     Ok((
         ProjectOutput {
