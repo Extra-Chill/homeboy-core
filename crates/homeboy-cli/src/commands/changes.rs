@@ -7,14 +7,17 @@ use super::CmdResult;
 
 #[derive(Args)]
 pub struct ChangesArgs {
-    /// Component ID (single mode)
-    pub component_id: Option<String>,
+    /// Target ID: component ID (single mode) or project ID (if followed by component IDs)
+    pub target_id: Option<String>,
+
+    /// Component IDs to filter (when target_id is a project)
+    pub component_ids: Vec<String>,
 
     /// Use current working directory (ad-hoc mode, no component registration required)
     #[arg(long)]
     pub cwd: bool,
 
-    /// Show changes for all components in a project
+    /// Show changes for all components in a project (alternative to positional project mode)
     #[arg(long)]
     pub project: Option<String>,
 
@@ -42,7 +45,7 @@ pub fn run(
     args: ChangesArgs,
     _global: &crate::commands::GlobalArgs,
 ) -> CmdResult<ChangesCommandOutput> {
-    // Priority: --cwd > --json > --project > component_id
+    // Priority: --cwd > --json > --project flag > positional args
     if args.cwd {
         let output = git::changes_cwd(args.include_diff)?;
         return Ok((ChangesCommandOutput::Single(output), 0));
@@ -50,29 +53,38 @@ pub fn run(
 
     if let Some(json) = &args.json {
         let output = git::changes_bulk(json, args.include_diff)?;
-        let exit_code = if output.summary.with_commits > 0 || output.summary.with_uncommitted > 0 {
-            0
-        } else {
-            0
-        };
-        return Ok((ChangesCommandOutput::Bulk(output), exit_code));
+        return Ok((ChangesCommandOutput::Bulk(output), 0));
     }
 
+    // --project flag mode (with optional component filter from positional args)
     if let Some(project_id) = &args.project {
-        let output = git::changes_project(project_id, args.include_diff)?;
-        let exit_code = 0;
-        return Ok((ChangesCommandOutput::Bulk(output), exit_code));
+        if args.component_ids.is_empty() {
+            let output = git::changes_project(project_id, args.include_diff)?;
+            return Ok((ChangesCommandOutput::Bulk(output), 0));
+        } else {
+            let output =
+                git::changes_project_filtered(project_id, &args.component_ids, args.include_diff)?;
+            return Ok((ChangesCommandOutput::Bulk(output), 0));
+        }
     }
 
-    if let Some(component_id) = &args.component_id {
-        let output = git::changes(component_id, args.since.as_deref(), args.include_diff)?;
-        let exit_code = 0;
-        return Ok((ChangesCommandOutput::Single(output), exit_code));
+    // Positional args mode
+    if let Some(target_id) = &args.target_id {
+        // If additional component_ids provided, treat target_id as project_id
+        if !args.component_ids.is_empty() {
+            let output =
+                git::changes_project_filtered(target_id, &args.component_ids, args.include_diff)?;
+            return Ok((ChangesCommandOutput::Bulk(output), 0));
+        }
+
+        // Single target_id: try as component first
+        let output = git::changes(target_id, args.since.as_deref(), args.include_diff)?;
+        return Ok((ChangesCommandOutput::Single(output), 0));
     }
 
     Err(homeboy::Error::validation_invalid_argument(
         "input",
-        "Provide component ID, --project, or --json spec",
+        "Provide component ID, <project> <components...>, --project, or --json spec",
         None,
         None,
     ))

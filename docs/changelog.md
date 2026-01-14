@@ -6,6 +6,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.7.4
+
+- Update skill documentation with changelog ops, version set, and bulk JSON syntax
+- Support positional component filtering in changes command
+
 ## 0.7.3
 
 - Support positional message argument for changelog add and git commit commands

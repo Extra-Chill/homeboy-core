@@ -942,6 +942,37 @@ pub fn changes_project(project_id: &str, include_diff: bool) -> Result<BulkChang
     Ok(build_bulk_changes_output(&proj.component_ids, include_diff))
 }
 
+/// Get changes for specific components in a project (filtered).
+pub fn changes_project_filtered(
+    project_id: &str,
+    component_ids: &[String],
+    include_diff: bool,
+) -> Result<BulkChangesOutput> {
+    let proj = project::load(project_id)?;
+
+    // Filter to only components that are in the project
+    let filtered: Vec<String> = component_ids
+        .iter()
+        .filter(|id| proj.component_ids.contains(id))
+        .cloned()
+        .collect();
+
+    if filtered.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "component_ids",
+            format!(
+                "None of the specified components are in project '{}'. Available: {}",
+                project_id,
+                proj.component_ids.join(", ")
+            ),
+            None,
+            None,
+        ));
+    }
+
+    Ok(build_bulk_changes_output(&filtered, include_diff))
+}
+
 /// Get changes for the current working directory (ad-hoc mode).
 pub fn changes_cwd(include_diff: bool) -> Result<ChangesOutput> {
     let path = std::env::current_dir()

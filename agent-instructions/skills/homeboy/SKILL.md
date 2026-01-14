@@ -1,7 +1,7 @@
 ---
 name: homeboy
 description: Use this skill when deploying code to production, executing module-provided CLI tools or remote process managers over SSH, querying production databases, managing project/server configurations, performing component-scoped git operations, or when the user mentions Homeboy, deployment, or remote server operations.
-version: 0.2.1
+version: 0.2.3
 ---
 
 # Homeboy CLI
@@ -19,7 +19,8 @@ CLI for project development and deployment. Provides terminal access to project 
 | `server` | Manage server configurations (create, show, set, delete, list, key) |
 | `changes` | View uncommitted/unreleased changes for components or projects |
 | `git` | Component-scoped git operations (status, commit, push, pull, tag) |
-| `version` | Component-scoped version management (show, bump) |
+| `version` | Component-scoped version management (show, bump, set) |
+| `changelog` | Changelog operations (add entries, bulk add) |
 | `build` | Component-scoped builds |
 | `<module cmd>` | Module-provided CLI tool passthrough (for example: `wp`, `pm2`) |
 | `db` | Database operations (tables, describe, query, delete-row, drop-table, tunnel) |
@@ -83,11 +84,12 @@ homeboy deploy <project> <component-id>     # Deploy specific component
 ### Changes (View Uncommitted/Unreleased)
 View changes since last tag or version commit:
 ```bash
-homeboy changes <component>                 # Show changes for single component
-homeboy changes --project <project>         # Show changes for all project components
-homeboy changes --cwd                       # Show changes for current directory
-homeboy changes <component> --include-diff  # Include full diff output
-homeboy changes --project <project> --include-diff  # Bulk with diffs
+homeboy changes <component>                       # Show changes for single component
+homeboy changes <project> <component_ids...>      # Show changes for specific components in project
+homeboy changes --project <project>               # Show changes for all project components
+homeboy changes --project <project> <components>  # Alternative filter syntax
+homeboy changes --cwd                             # Show changes for current directory
+homeboy changes <component> --include-diff        # Include full diff output
 ```
 
 Output includes:
@@ -130,12 +132,22 @@ JSON input supports:
 - `-` for stdin
 - `@file.json` to read from file
 
+### Changelog Operations
+```bash
+homeboy changelog add <component> "message"  # Add single entry
+homeboy changelog add --cwd "message"        # Add to cwd changelog
+
+# Bulk add with JSON
+homeboy changelog add --json '{"componentId":"comp1","messages":["Change 1","Change 2"]}'
+```
+
 ### Version Management (Component-Scoped)
 ```bash
 homeboy version show <component>            # Display current version
 homeboy version bump <component> patch      # 0.1.2 → 0.1.3
 homeboy version bump <component> minor      # 0.1.2 → 0.2.0
 homeboy version bump <component> major      # 0.1.2 → 1.0.0
+homeboy version set <component> 1.2.3       # Set version directly
 ```
 
 ### Build (Component-Scoped)
