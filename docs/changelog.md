@@ -6,6 +6,13 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.13.0
+
+- Add --staged-only flag to git commit for committing only pre-staged changes
+- Add --files flag to git commit for staging and committing specific files
+- Add commit_from_json() for unified JSON input with auto-detect single vs bulk format
+- Align git commit JSON input pattern with component set (positional spec, stdin, @file support)
+
 ## 0.12.0
 
 - Add `homeboy upgrade` command for self-updates
