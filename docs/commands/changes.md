@@ -78,8 +78,9 @@ This command reports:
 
 ## Exit code
 
-- `0` when all requested change checks succeed.
-- `1` when any requested check fails (bulk/project modes).
+- `0` when the command runs successfully.
+
+> Note: the per-component outputs include `success` plus optional `warning`/`error` fields. Bulk/project modes return a summary but do not currently change the process exit code when some components fail.
 
 ## Related
 

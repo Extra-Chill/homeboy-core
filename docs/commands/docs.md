@@ -46,6 +46,26 @@ When `--list` is used, output is JSON.
 }
 ```
 
+### JSON content mode
+
+When rendering a topic in JSON mode (for example: `homeboy docs commands/deploy`), the `data` payload includes resolved metadata and `content`.
+
+Example (formatted as plain text since embedded docs are Rust raw strings):
+
+    {
+      "mode": "content",
+      "topic": "commands/deploy",
+      "topic_label": "commands/deploy",
+      "resolved_key": "commands/deploy",
+      "segments": ["commands", "deploy"],
+      "slug": "deploy",
+      "content": "(markdown omitted)",
+      "source": "core",
+      "available_topics": ["index", "commands/deploy"]
+    }
+
+Note: embedded docs are compiled into Rust raw strings, so a specific quote-plus-hash byte sequence cannot appear in any embedded doc.
+
 ## Errors
 
 If the topic does not exist in embedded core docs or installed module docs, the command fails with a missing-key style error:

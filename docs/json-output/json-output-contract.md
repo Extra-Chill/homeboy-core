@@ -37,6 +37,8 @@ Notes:
 - The CLI emits command-scoped warnings at the **top level** (`warnings`).
 - `data` is the serialized command output (not a `payload` wrapper).
 
+Note: internally, the CLI uses an intermediate `CmdSuccess { payload, warnings }`, but it is converted into the final JSON envelope where `payload` becomes `data`.
+
 Failure:
 
 ```json

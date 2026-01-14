@@ -24,6 +24,14 @@ homeboy version bump <componentId> <patch|minor|major>
 homeboy version bump --cwd <patch|minor|major>
 ```
 
+### `set`
+
+```sh
+homeboy version set <componentId> <newVersion>
+```
+
+`set` writes the version targets directly without incrementing and does not finalize the changelog.
+
 ### CWD Mode (--cwd)
 
 Both subcommands support `--cwd` for ad-hoc operations in any directory without requiring component registration. When using `--cwd`, Homeboy auto-detects version files by checking for:
@@ -69,12 +77,20 @@ homeboy --dry-run version bump <componentId> <patch|minor|major>
 
 - `command`: `version.bump`
 - `componentId`
-- `version` (detected current version before bump)
+- `oldVersion` (version before bump)
 - `newVersion` (version after bump)
 - `targets`: array of `{ file, pattern, fullPath, matchCount }`
 - `changelogPath` (resolved changelog path)
 - `changelogFinalized` (always `true` on success)
 - `changelogChanged` (whether the changelog file was modified)
+
+`homeboy version set` data payload:
+
+- `command`: `version.set`
+- `componentId`
+- `oldVersion`
+- `newVersion`
+- `targets`: array of `{ file, pattern, fullPath, matchCount }`
 
 Errors:
 

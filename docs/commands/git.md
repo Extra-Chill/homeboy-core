@@ -6,14 +6,16 @@
 homeboy git <COMMAND>
 ```
 
-This command does not accept `--dry-run` (and has no `--json` root flag). Output is always JSON-wrapped (see [JSON output contract](../json-output/json-output-contract.md)).
+This command does not accept `--dry-run` and output is always JSON-wrapped (see [JSON output contract](../json-output/json-output-contract.md)).
+
+Note: some subcommands accept a `--json` flag for bulk operations.
 
 ## Subcommands
 
 ### Single Component Mode
 
 - `status <componentId>`
-- `commit <componentId> -m <message>`
+- `commit <componentId> <message>`
 - `push <componentId> [--tags]`
 - `pull <componentId>`
 - `tag <componentId> [tagName] [-m <message>]`
@@ -24,7 +26,7 @@ This command does not accept `--dry-run` (and has no `--json` root flag). Output
 All subcommands support `--cwd` for ad-hoc operations in any git directory without requiring component registration:
 
 - `status --cwd`
-- `commit --cwd -m <message>`
+- `commit --cwd <message>`
 - `push --cwd [--tags]`
 - `pull --cwd`
 - `tag --cwd <tagName> [-m <message>]`
@@ -124,11 +126,12 @@ Notes:
 
 - `commit` returns a successful result with `stdout` set to `Nothing to commit, working tree clean` when there are no changes.
 - Bulk operations continue processing all components even if some fail; the summary reports total/succeeded/failed counts.
+- Bulk outputs are `BulkGitOutput { action, results, summary }` where `results` is a list of `GitOutput` objects (not the generic bulk envelope used by some other commands).
 
 ## Exit code
 
-- Single mode: Exit code matches the underlying `git` command.
-- Bulk mode: Exit code is 0 if all components succeeded, 1 if any failed.
+- Single mode: exit code matches the underlying `git` command.
+- Bulk mode (`--json`): `0` if all components succeeded; `1` if any failed.
 
 ## Examples
 
@@ -136,7 +139,7 @@ Notes:
 
 ```sh
 homeboy git status extra-chill-multisite
-homeboy git commit extra-chill-multisite "Update docs"
+homeboy git commit extra-chill-multisite "Update docs"  # message is positional
 homeboy git push extra-chill-multisite --tags
 homeboy git pull extra-chill-multisite
 homeboy git tag extra-chill-multisite v1.0.0 -m "Release 1.0.0"

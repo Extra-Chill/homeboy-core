@@ -56,6 +56,8 @@ The connect action uses an interactive SSH session and does not print the JSON e
 
 When `command` is provided, it is passed to the remote shell via the interactive session.
 
+Note: the CLI still computes a JSON `data` object internally for this action, but it is not printed in interactive passthrough mode.
+
 ## Exit code
 
 Exit code matches the underlying SSH session/command exit code.

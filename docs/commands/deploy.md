@@ -18,7 +18,7 @@ Options:
 - `--outdated`: deploy only outdated components
   - Determined from the first version target for each component.
 - `--dry-run`: show what would be deployed without executing
-- `--json`: JSON input spec for bulk operations (`[{"id":"component-id"}, ...]`)
+- `--json`: JSON input spec for bulk operations (`{"componentIds": ["component-id", ...]}`)
 
 If no component IDs are provided and neither `--all` nor `--outdated` is set, Homeboy returns an error.
 
@@ -37,7 +37,8 @@ If no component IDs are provided and neither `--all` nor `--outdated` is set, Ho
     {
       "id": "<componentId>",
       "name": "<name>",
-      "status": "would_deploy|deployed|failed",
+      "status": "would_deploy|deployed|failed|skipped",
+      "deployReason": "explicitly_selected|all_selected|version_mismatch|unknown_local_version|unknown_remote_version",
       "localVersion": "<v>|null",
       "remoteVersion": "<v>|null",
       "error": "<string>|null",
@@ -52,7 +53,17 @@ If no component IDs are provided and neither `--all` nor `--outdated` is set, Ho
 }
 ```
 
+Notes:
+
+- `deployReason` is omitted when not applicable.
+- `artifactPath` is the component build artifact path as configured; it may be relative.
+
+}
+```
+
 Note: `buildExitCode`/`deployExitCode` are numbers when present (not strings).
+
+Exit code is `0` when `summary.failed == 0`, otherwise `1`.
 
 ## Exit code
 
