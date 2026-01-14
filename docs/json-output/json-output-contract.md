@@ -19,25 +19,9 @@ Success:
 ```json
 {
   "success": true,
-  "data": { "...": "..." },
-  "warnings": [
-    {
-      "code": "validation.invalid_argument",
-      "message": "Human-readable message",
-      "details": {},
-      "hints": [{ "message": "..." }],
-      "retryable": false
-    }
-  ]
+  "data": { "...": "..." }
 }
 ```
-
-Notes:
-
-- The CLI emits command-scoped warnings at the **top level** (`warnings`).
-- `data` is the serialized command output (not a `payload` wrapper).
-
-Note: internally, the CLI uses an intermediate `CmdSuccess { payload, warnings }`, but it is converted into the final JSON envelope where `payload` becomes `data`.
 
 Failure:
 
@@ -47,9 +31,7 @@ Failure:
   "error": {
     "code": "internal.unexpected",
     "message": "Human-readable message",
-    "details": {},
-    "hints": [{ "message": "..." }],
-    "retryable": false
+    "details": {}
   }
 }
 ```
@@ -58,16 +40,11 @@ Notes:
 
 - `data` is omitted on failure.
 - `error` is omitted on success.
-- `warnings` is omitted when empty.
-- `error.hints`/`error.retryable` and `warnings[*].hints`/`warnings[*].retryable` are omitted when not set.
+- `error.hints`/`error.retryable` are omitted when not set.
 
 ## Error fields
 
 `error` is a `CliError` (implemented in the `homeboy-cli` crate).
-
-## Warning fields
-
-Each item in top-level `warnings` is a `CliWarning` (implemented in the `homeboy-cli` crate).
 
 - `code` (string): stable error code (see `homeboy::error::ErrorCode::as_str()`).
 - `message` (string): human-readable message.
@@ -78,7 +55,7 @@ Each item in top-level `warnings` is a `CliWarning` (implemented in the `homeboy
 ## Exit codes
 
 - Each subcommand returns `Result<(T, i32)>` where `T` is the success payload and `i32` is the intended process exit code.
-- On success, the process exit code is the returned `i32`, clamped to `0..=255`.
+- On success, the process exit code is the returned `i32`.
 - On error, Homeboy maps error codes to exit codes:
 
 | Exit code | Meaning (by error code group) |
@@ -92,8 +69,6 @@ Each item in top-level `warnings` is a `CliWarning` (implemented in the `homeboy
 ## Success payload
 
 On success, `data` is the command-specific output struct (varies by command).
-
-Warnings are emitted at the top level (`warnings`).
 
 ## Command payload conventions
 
