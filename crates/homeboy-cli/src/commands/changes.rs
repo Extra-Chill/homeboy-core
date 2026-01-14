@@ -38,7 +38,7 @@ pub struct ChangesArgs {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum ChangesCommandOutput {
-    Single(ChangesOutput),
+    Single(Box<ChangesOutput>),
     Bulk(BulkResult<ChangesOutput>),
 }
 
@@ -49,7 +49,7 @@ pub fn run(
     // Priority: --cwd > --json > --project flag > positional args
     if args.cwd {
         let output = git::changes(None, None, args.git_diffs)?;
-        return Ok((ChangesCommandOutput::Single(output), 0));
+        return Ok((ChangesCommandOutput::Single(Box::new(output)), 0));
     }
 
     if let Some(json) = &args.json {
@@ -84,7 +84,7 @@ pub fn run(
 
         // Single target_id: try as component first
         let output = git::changes(Some(target_id), args.since.as_deref(), args.git_diffs)?;
-        return Ok((ChangesCommandOutput::Single(output), 0));
+        return Ok((ChangesCommandOutput::Single(Box::new(output)), 0));
     }
 
     Err(homeboy::Error::validation_invalid_argument(
