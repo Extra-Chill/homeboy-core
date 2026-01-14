@@ -6,6 +6,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.7.5
+
+- Fix Homebrew formula name: cargo-dist now generates homeboy.rb instead of homeboy-cli.rb
+
 ## 0.7.4
 
 - Update skill documentation with changelog ops, version set, and bulk JSON syntax

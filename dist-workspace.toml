@@ -9,6 +9,8 @@ cargo-dist-version = "0.30.3"
 ci = "github"
 # The installers to generate for each app
 installers = ["homebrew"]
+# Override formula name (CLI package is homeboy-cli, but formula should be homeboy)
+formula = "homeboy"
 # A GitHub repo to push Homebrew formulas to
 tap = "Extra-Chill/homebrew-tap"
 # Publish jobs to run in CI
