@@ -6,6 +6,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.15.0
+
+- Added bulk merge support for component/project/server set commands
+- Improved coding-agent UX: auto-detect commit message vs JSON, better fuzzy matching, and fixed --cwd parsing
+- Refactored create flow into a single unified function
+- Removed dry-run mode and related behavior
+- Improved auto-detection tests
+- Included pending context and documentation changes
+
 ## 0.14.0
 
 - Merge workspace into single crate for crates.io publishing
