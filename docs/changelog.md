@@ -6,6 +6,13 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## 0.17.0
+
+- Agnostic local/remote command execution - db, logs, files now work for local projects
+- Init command returns structured JSON with context, servers, projects, components, and modules
+- New executor.rs provides unified command routing based on project config
+- Renamed remote_files module to files (environment-agnostic)
+
 ## 0.16.0
 
 - **BREAKING**: JSON output now uses native snake_case field names (e.g., project_id, server_id, base_path)
