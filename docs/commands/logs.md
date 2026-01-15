@@ -46,7 +46,7 @@ Note: `logs show` accepts `--lines` even in follow mode, but it is ignored when 
 
 > Note: `logs list`, `logs show` (without `--follow`), `logs clear`, and `logs search` output JSON wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below refers to `data`.
 
-- `command`: `logs.list` | `logs.show` | `logs.follow` | `logs.clear` | `logs.search`
+- `command`: `logs.list` | `logs.show` | `logs.clear` | `logs.search`
 - `project_id`
 - `entries`: present for `list`
 - `log`: present for `show` (non-follow)

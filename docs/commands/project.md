@@ -137,7 +137,7 @@ All commands execute locally when no `server_id` is configured:
 - **CLI tools** (`homeboy wp`, `homeboy composer`) - execute in local shell
 - **Database** (`homeboy db`) - uses module templates, executes locally
 - **Logs** (`homeboy logs`) - reads files from `base_path`
-- **Files** (`homeboy files`) - browses/edits files at `base_path`
+- **Files** (`homeboy file`) - browses/edits files at `base_path`
 - **Module platform behaviors** - project discovery, version patterns, etc.
 
 ### What Requires a Server

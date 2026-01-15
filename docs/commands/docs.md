@@ -3,10 +3,11 @@
 ## Synopsis
 
 ```sh
-homeboy docs [OPTIONS] [TOPIC]...
+homeboy docs [TOPIC]...
+homeboy docs list
 ```
 
-> Note: `--list` is a flag and must appear before topic arguments. Because topics are parsed as trailing args, putting `--list` after a topic will be treated as part of the topic and likely result in a missing-docs-key error.
+`homeboy docs list` is the only built-in way to list available topics. There is no `--list` flag; `list` is a topic argument.
 
 ## Description
 
@@ -25,39 +26,19 @@ Topic resolution is documented in: [Embedded docs topic resolution](../embedded-
 
 - `[TOPIC]...` (optional): documentation topic. This resolves to an embedded docs key (path under `docs/` without `.md`). Examples: `commands/deploy`, `commands/project`, `index`.
 
-## Options
-
-- `--list`: list available topics and exit
-
 ## Output
 
 ### Default (render topic)
 
 `homeboy docs` prints the resolved markdown content to stdout.
 
-### `--list`
+### `list`
 
-When `--list` is used, output is JSON.
-
-> Note: all JSON output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the top-level `data` value.
-
-```json
-{
-  "mode": "list",
-  "available_topics": ["index", "commands/deploy"]
-}
-```
+`homeboy docs list` prints the available topics as newline-delimited plain text (not JSON).
 
 ### JSON content mode
 
-`homeboy docs` supports two output shapes:
-
-- Without `--list`: prints raw markdown by default.
-- With JSON output enabled:
-  - `--list` returns JSON.
-  - Without `--list`, the command returns a JSON payload that includes the resolved markdown content.
-
-If you need *only* raw markdown, avoid JSON mode for `homeboy docs`.
+`homeboy docs` always runs in raw markdown mode. JSON output mode is not supported for this command.
 
 ## Errors
 

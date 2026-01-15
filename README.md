@@ -8,14 +8,14 @@ Homeboy is intended to make it easier to iterate quickly across many projects at
 
 **Note:** This is still early in development. Breaking changes may occur between releases.
 
-## Getting started (recommended: use the Homeboy agent skill)
+## Agent usage (recommended)
 
-Homeboy works best when your coding agent is explicitly instructed to use it.
+Homeboy works best when a coding agent is instructed to use it.
 
 - Add the Homeboy skill file at `agent-instructions/skills/homeboy/SKILL.md` to your agent’s skill set (whatever your agent framework calls this: “skills”, “tools”, or “system prompt attachments”).
 - In your agent instructions, tell the agent: “Use Homeboy for deploy, server/ssh, db, and project/component tasks.”
 
-If you are using this repo with an agent, this is the “best path” because it keeps your agent’s actions consistent, safe, and fast.
+This keeps agent actions consistent, safe, and fast.
 
 ## `homeboy init`
 

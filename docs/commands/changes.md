@@ -33,7 +33,7 @@ Release workflow note:
 - `--json <spec>`: bulk mode input
   - Priority: `--cwd > --json > --project > positional`
   - `<spec>` supports `-` (stdin), `@file.json`, or an inline JSON string
-  - Spec format: `{ "component_ids": ["id1", "id2"] }`
+  - Spec format: `{ "componentIds": ["id1", "id2"] }`
 - `--project <projectId>`: show changes for all components attached to a project
   - If you also pass positional `<componentIds...>`, Homeboy only returns changes for those components
 - `--since <tag>`: tag name to compare against (single-component mode only)

@@ -4,7 +4,7 @@ Homeboy prints JSON to stdout for most commands.
 
 Exceptions:
 
-- `homeboy docs` prints raw markdown content by default, but in JSON mode it returns a JSON content payload (unless `--list` is used, which returns a list payload).
+- `homeboy docs` prints raw markdown (or newline-delimited topic names for `homeboy docs list`).
 - `homeboy init` prints raw markdown.
 - `homeboy changelog` (default show) prints raw markdown by default; in JSON mode it returns JSON with a `content` field containing the markdown.
 - `homeboy list` prints clap help text (raw; not JSON-wrapped).

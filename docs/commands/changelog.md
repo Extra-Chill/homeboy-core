@@ -26,14 +26,14 @@ This prints raw markdown to stdout.
 ### `add`
 
 ```sh
-homeboy changelog add <componentId> -m <message>
-homeboy changelog add --cwd -m <message>
+homeboy changelog add <componentId> <message>
+homeboy changelog add --cwd <message>
 homeboy changelog add --json <spec>
 ```
 
 Notes:
 
-- Use `-m` or `--message` to provide the changelog entry.
+- The changelog entry is the positional `<message>` value. Use `--json` for multiple messages in one run.
 - Changelog messages are intended to be user-facing release notes (capture anything impacting user or developer experience), not a 1:1 copy of commit subjects.
 - When `--cwd` is used, Homeboy auto-detects the changelog file (see CWD Mode below).
 - When `--json` is provided, other args are ignored and the payload's `messages` array is applied in order.
@@ -125,6 +125,12 @@ This section applies only when JSON output is used.
   "items_added": 2,
   "changed": true
 }
+```
+
+Bulk JSON input uses a single object (not an array):
+
+```json
+{ "component_id": "<componentId>", "messages": ["<message>"] }
 ```
 
 ### JSON output (init)

@@ -4,7 +4,7 @@
 
 ```sh
 homeboy build <componentId>
-homeboy build --json <spec>
+homeboy build --json '<spec>'
 ```
 
 ## Description
@@ -51,6 +51,12 @@ Requires `build_command` to be configured on the component. If not set, the comm
   ],
   "summary": { "total": 1, "succeeded": 1, "failed": 0 }
 }
+```
+
+Bulk JSON input uses `componentIds`:
+
+```json
+{ "componentIds": ["component-a", "component-b"] }
 ```
 
 ## Exit code

@@ -21,6 +21,12 @@ Options:
 - `--dry-run`: preview what would be deployed without executing (no build, no upload)
 - `--json`: JSON input spec for bulk operations (`{"component_ids": ["component-id", ...]}`)
 
+Bulk JSON input uses `component_ids` (snake_case):
+
+```json
+{ "component_ids": ["component-a", "component-b"] }
+```
+
 Positional and flag component IDs can be mixed; both are merged into the deployment list.
 
 If no component IDs are provided and neither `--all` nor `--outdated` is set, Homeboy returns an error.

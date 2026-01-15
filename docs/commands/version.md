@@ -32,13 +32,7 @@ homeboy version set [<componentId>] <newVersion>
 
 ### CWD Mode (--cwd)
 
-Both subcommands support `--cwd` for ad-hoc operations in any directory without requiring component registration. When using `--cwd`, Homeboy auto-detects version files by checking for:
-
-1. `Cargo.toml` (Rust)
-2. `package.json` (Node.js)
-3. `composer.json` (PHP)
-4. `style.css` (WordPress themes)
-5. `*.php` with WordPress plugin/theme header
+Both subcommands support `--cwd` for ad-hoc operations in any directory without requiring component registration. When using `--cwd`, Homeboy auto-detects version files by checking the configured `version_candidates` list (defaults include `Cargo.toml`, `package.json`, `composer.json`, and `style.css`), then scanning `*.php` files that contain a WordPress plugin or theme header.
 
 This command:
 
@@ -109,7 +103,7 @@ Notes:
 ## Notes
 
 - Components must have `version_targets` configured (non-empty). Homeboy uses the first target as the primary version source.
-- Each `version_targets[]` entry has `file` and optional `pattern`. When `pattern` is omitted, a default pattern is selected based on the `file` name.
+- Each `version_targets[]` entry has `file` and optional `pattern`. When `pattern` is omitted, Homeboy checks module-provided version patterns for that file type; if none are provided, the command errors.
 
 ## Related
 

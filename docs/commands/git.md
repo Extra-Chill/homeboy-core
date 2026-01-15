@@ -76,6 +76,8 @@ All subcommands except `tag` support a `--json` flag for bulk operations across 
 - `push --json '<BulkIdsInput>'`
 - `pull --json '<BulkIdsInput>'`
 
+`BulkIdsInput` uses `component_ids` (snake_case).
+
 ## Bulk JSON Input Schemas
 
 ### SingleCommitSpec (for commit JSON spec)

@@ -27,7 +27,7 @@ Homeboy detects how it was installed and uses the appropriate upgrade method:
 |--------|-----------|-----------------|
 | Homebrew | Binary path contains `/Cellar/` or `/homebrew/`, or `brew list homeboy` succeeds | `brew update && brew upgrade homeboy` |
 | Cargo | Binary path contains `/.cargo/bin/` | `cargo install homeboy` |
-| Source | Binary path contains `/target/release/` or `/target/debug/` | `git pull && cargo build --release -p homeboy-cli` |
+| Source | Binary path contains `/target/release/` or `/target/debug/` | `git pull && cargo build --release` |
 
 If the installation method cannot be detected, an error is returned with manual upgrade instructions.
 
@@ -88,8 +88,8 @@ homeboy upgrade --force
 
 - The `update` command is an alias for `upgrade` with identical behavior.
 - Version checking queries the crates.io API. Network failures are handled gracefully.
-- On macOS/Linux, successful upgrades automatically restart into the new binary.
-- On Windows, a message prompts the user to restart manually.
+- On Unix platforms, successful upgrades automatically restart into the new binary.
+- On non-Unix platforms, Homeboy prints a message to restart manually.
 
 ## Related
 
