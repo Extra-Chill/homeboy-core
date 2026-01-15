@@ -5,12 +5,36 @@ use crate::defaults;
 use crate::error::{Error, Result};
 use crate::local_files::{self, FileSystem};
 use crate::module::{load_all_modules, ModuleManifest};
+use crate::ssh::execute_local_command_in_dir;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
+
+fn run_post_bump_commands(commands: &[String], working_dir: &str) -> Result<()> {
+    if commands.is_empty() {
+        return Ok(());
+    }
+
+    for command in commands {
+        let output = execute_local_command_in_dir(command, Some(working_dir));
+        if !output.success {
+            let error_text = if output.stderr.trim().is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            };
+            return Err(Error::internal_unexpected(format!(
+                "Post version bump command failed: {}\n{}",
+                command, error_text
+            )));
+        }
+    }
+
+    Ok(())
+}
 
 /// Parse version from content using regex pattern.
 /// Pattern must contain a capture group for the version string.
@@ -661,6 +685,8 @@ pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<
         });
     }
 
+    run_post_bump_commands(&component.post_version_bump_commands, &component.local_path)?;
+
     Ok(BumpResult {
         old_version,
         new_version,
@@ -945,6 +971,9 @@ pub fn bump_version_cwd(bump_type: &str) -> Result<BumpResult> {
             match_count,
         });
     }
+
+    let commands = defaults::load_config().defaults.post_version_bump_commands;
+    run_post_bump_commands(&commands, &cwd)?;
 
     Ok(BumpResult {
         old_version,

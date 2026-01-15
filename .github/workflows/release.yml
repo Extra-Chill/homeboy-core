@@ -341,7 +341,7 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --package homeboy
+        run: cargo publish --package homeboy --locked
 
   announce:
     needs:

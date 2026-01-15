@@ -38,6 +38,7 @@ This command:
 
 - Bumps all configured `version_targets` using semantic versioning (X.Y.Z).
 - Finalizes the component changelog by moving the current "next" section (usually `Unreleased`) into a new `## [<new_version>] - YYYY-MM-DD` section.
+- Runs any `post_version_bump_commands` configured on the component.
 
 Changelog entries must be added *before* running this command (recommended: `homeboy changelog add --json ...`).
 
@@ -93,6 +94,7 @@ Errors:
 Notes:
 
 - Homeboy does not auto-fix existing changelogs. If the next section is missing or empty, follow the hints in the error to fix it manually.
+- Configure `post_version_bump_commands` on a component to run extra tasks (for example, `cargo generate-lockfile`) after the bump.
 
 ## Exit code
 

@@ -6,6 +6,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## [0.19.2] - 2026-01-15
+
+- Add post_version_bump_commands hook to run commands after version bumps
+- Run cargo publish with --locked to prevent lockfile drift in releases
+
 ## [0.19.1] - 2026-01-15
 
 - fix: `homeboy changes` surfaces noisy untracked hints and respects `.gitignore`
