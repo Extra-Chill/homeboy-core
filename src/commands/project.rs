@@ -237,9 +237,9 @@ pub struct ProjectOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     deleted: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    import: Option<project::CreateSummary>,
+    import: Option<homeboy::BatchResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    batch: Option<project::CreateSummary>,
+    batch: Option<homeboy::BatchResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hint: Option<String>,
 }
@@ -260,36 +260,48 @@ pub fn run(
             base_path,
             table_prefix,
         } => {
-            // Pass all args to unified core function - it handles auto-detection
-            match project::create(
-                json.as_deref().or(id.as_deref()),
-                domain.as_deref(),
-                server_id.as_deref(),
-                base_path.as_deref(),
-                table_prefix.as_deref(),
-                skip_existing,
-            )? {
-                project::CreateOutput::Single(result) => Ok((
+            if let Some(spec) = json.as_deref() {
+                let summary = project::create_batch(spec, skip_existing)?;
+                let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                return Ok((
                     ProjectOutput {
                         command: "project.create".to_string(),
-                        project_id: Some(result.id),
-                        project: Some(result.project),
+                        import: Some(summary),
                         ..Default::default()
                     },
-                    0,
-                )),
-                project::CreateOutput::Bulk(summary) => {
-                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
-                    Ok((
-                        ProjectOutput {
-                            command: "project.create".to_string(),
-                            import: Some(summary),
-                            ..Default::default()
-                        },
-                        exit_code,
-                    ))
-                }
+                    exit_code,
+                ));
             }
+
+            let id = id.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "id",
+                    "Missing required argument: id",
+                    None,
+                    None,
+                )
+            })?;
+
+            let new_project = project::Project {
+                id: id.clone(),
+                domain,
+                server_id,
+                base_path,
+                table_prefix,
+                ..Default::default()
+            };
+
+            let result = project::create(new_project)?;
+
+            Ok((
+                ProjectOutput {
+                    command: "project.create".to_string(),
+                    project_id: Some(result.id),
+                    project: Some(result.entity),
+                    ..Default::default()
+                },
+                0,
+            ))
         }
         ProjectCommand::Set {
             project_id,

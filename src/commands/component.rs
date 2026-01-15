@@ -1,8 +1,10 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
+use std::path::Path;
 
-use homeboy::component::{self, Component, CreateSummary};
+use homeboy::component::{self, Component};
 use homeboy::project::{self, Project};
+use homeboy::BatchResult;
 
 use super::CmdResult;
 
@@ -90,9 +92,9 @@ pub struct ComponentOutput {
     pub component: Option<Component>,
     pub components: Vec<Component>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub import: Option<CreateSummary>,
+    pub import: Option<BatchResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub batch: Option<CreateSummary>,
+    pub batch: Option<BatchResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,23 +117,76 @@ pub fn run(
             extract_command,
         } => {
             if let Some(spec) = json {
-                return create_json(&spec, skip_existing);
+                let summary = component::create_batch(&spec, skip_existing)?;
+                let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                return Ok((
+                    ComponentOutput {
+                        command: "component.create".to_string(),
+                        success: summary.errors == 0,
+                        import: Some(summary),
+                        ..Default::default()
+                    },
+                    exit_code,
+                ));
             }
 
-            let result = component::create_from_cli(
-                local_path,
-                remote_path,
-                build_artifact,
-                version_targets,
-                build_command,
-                extract_command,
-            )?;
+            let local_path = local_path.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "local_path",
+                    "Missing required argument: --local-path",
+                    None,
+                    None,
+                )
+            })?;
+
+            let remote_path = remote_path.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "remote_path",
+                    "Missing required argument: --remote-path",
+                    None,
+                    None,
+                )
+            })?;
+
+            let build_artifact = build_artifact.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "build_artifact",
+                    "Missing required argument: --build-artifact",
+                    None,
+                    None,
+                )
+            })?;
+
+            let dir_name = Path::new(&local_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "local_path",
+                        "Could not derive component ID from local path",
+                        Some(local_path.clone()),
+                        None,
+                    )
+                })?;
+
+            let id = component::slugify_id(dir_name)?;
+
+            let mut new_component = Component::new(id.clone(), local_path, remote_path, build_artifact);
+
+            if !version_targets.is_empty() {
+                new_component.version_targets = Some(component::parse_version_targets(&version_targets)?);
+            }
+
+            new_component.build_command = build_command;
+            new_component.extract_command = extract_command;
+
+            let result = component::create(new_component)?;
 
             Ok((
                 ComponentOutput {
                     command: "component.create".to_string(),
                     component_id: Some(result.id),
-                    component: Some(result.component),
+                    component: Some(result.entity),
                     ..Default::default()
                 },
                 0,
@@ -154,21 +209,6 @@ pub fn run(
         ComponentCommand::List => list(),
         ComponentCommand::Projects { id } => projects(&id),
     }
-}
-
-fn create_json(spec: &str, skip_existing: bool) -> CmdResult<ComponentOutput> {
-    let summary = component::create_from_json(spec, skip_existing)?;
-    let exit_code = if summary.errors > 0 { 1 } else { 0 };
-
-    Ok((
-        ComponentOutput {
-            command: "component.create".to_string(),
-            success: summary.errors == 0,
-            import: Some(summary),
-            ..Default::default()
-        },
-        exit_code,
-    ))
 }
 
 fn show(id: &str) -> CmdResult<ComponentOutput> {
@@ -229,14 +269,14 @@ fn delete(id: &str) -> CmdResult<ComponentOutput> {
 }
 
 fn rename(id: &str, new_id: &str) -> CmdResult<ComponentOutput> {
-    let result = component::rename(id, new_id)?;
+    let component = component::rename(id, new_id)?;
 
     Ok((
         ComponentOutput {
             command: "component.rename".to_string(),
-            component_id: Some(result.id.clone()),
+            component_id: Some(component.id.clone()),
             updated_fields: vec!["id".to_string()],
-            component: Some(result.component),
+            component: Some(component),
             ..Default::default()
         },
         0,

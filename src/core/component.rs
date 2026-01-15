@@ -105,6 +105,10 @@ pub struct ComponentRecord {
     pub config: Component,
 }
 
+// ============================================================================
+// Core CRUD - Thin wrappers around config module
+// ============================================================================
+
 pub fn load(id: &str) -> Result<Component> {
     config::load::<Component>(id)
 }
@@ -119,6 +123,14 @@ pub fn list_ids() -> Result<Vec<String>> {
 
 pub fn save(component: &Component) -> Result<()> {
     config::save(component)
+}
+
+pub fn delete(id: &str) -> Result<()> {
+    config::delete::<Component>(id)
+}
+
+pub fn exists(id: &str) -> bool {
+    config::exists::<Component>(id)
 }
 
 /// Unified merge that auto-detects single vs bulk operations.
@@ -154,18 +166,16 @@ fn merge_from_json(id: Option<&str>, json_spec: &str) -> Result<json::MergeResul
     config::merge_from_json::<Component>(id, json_spec)
 }
 
-/// Remove items from component config arrays. Accepts JSON string, @file, or - for stdin.
-/// ID can be provided as argument or extracted from JSON body.
 pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::RemoveResult> {
     config::remove_from_json::<Component>(id, json_spec)
 }
 
-pub fn delete(id: &str) -> Result<()> {
-    config::delete::<Component>(id)
+pub fn create(component: Component) -> Result<config::CreateResult<Component>> {
+    config::create(component)
 }
 
-pub fn exists(id: &str) -> bool {
-    config::exists::<Component>(id)
+pub fn create_batch(json_spec: &str, skip_existing: bool) -> Result<config::BatchResult> {
+    config::create_batch::<Component>(json_spec, skip_existing)
 }
 
 pub fn parse_version_targets(targets: &[String]) -> Result<Vec<VersionTarget>> {
@@ -198,14 +208,8 @@ pub fn slugify_id(name: &str) -> Result<String> {
 }
 
 // ============================================================================
-// CLI Entry Points - Accept Option<T> and handle validation
+// Operations
 // ============================================================================
-
-#[derive(Debug, Clone)]
-pub struct CreateResult {
-    pub id: String,
-    pub component: Component,
-}
 
 #[derive(Debug, Clone)]
 pub struct UpdateResult {
@@ -219,66 +223,6 @@ pub struct RenameResult {
     pub old_id: String,
     pub new_id: String,
     pub component: Component,
-}
-
-pub fn create_from_cli(
-    local_path: Option<String>,
-    remote_path: Option<String>,
-    build_artifact: Option<String>,
-    version_targets: Vec<String>,
-    build_command: Option<String>,
-    extract_command: Option<String>,
-) -> Result<CreateResult> {
-    let local_path = local_path.ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "local_path",
-            "Missing required argument: --local-path (or use --json)",
-            None,
-            None,
-        )
-    })?;
-
-    let remote_path = remote_path.ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "remote_path",
-            "Missing required argument: --remote-path (or use --json)",
-            None,
-            None,
-        )
-    })?;
-
-    let build_artifact = build_artifact.ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "build_artifact",
-            "Missing required argument: --build-artifact (or use --json)",
-            None,
-            None,
-        )
-    })?;
-
-    // ID is derived from local_path basename (lowercased)
-    let id = slugify::extract_component_id(&local_path)?;
-    if exists(&id) {
-        return Err(Error::validation_invalid_argument(
-            "component.local_path",
-            format!("Component '{}' already exists", id),
-            Some(id),
-            None,
-        ));
-    }
-
-    let expanded_path = shellexpand::tilde(&local_path).to_string();
-
-    let mut component = Component::new(id.clone(), expanded_path, remote_path, build_artifact);
-    if !version_targets.is_empty() {
-        component.version_targets = Some(parse_version_targets(&version_targets)?);
-    }
-    component.build_command = build_command;
-    component.extract_command = extract_command;
-
-    save(&component)?;
-
-    Ok(CreateResult { id, component })
 }
 
 pub fn update(
@@ -326,18 +270,13 @@ pub fn update(
     })
 }
 
-pub fn rename(id: &str, new_id: &str) -> Result<CreateResult> {
+pub fn rename(id: &str, new_id: &str) -> Result<Component> {
     let new_id = new_id.to_lowercase();
     config::rename::<Component>(id, &new_id)?;
     update_project_references(id, &new_id)?;
-    let component = load(&new_id)?;
-    Ok(CreateResult {
-        id: new_id,
-        component,
-    })
+    load(&new_id)
 }
 
-/// Update all projects that reference the old component ID to use the new ID.
 fn update_project_references(old_id: &str, new_id: &str) -> Result<()> {
     let projects = project::list().unwrap_or_default();
     for proj in projects {
@@ -359,7 +298,6 @@ fn update_project_references(old_id: &str, new_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Returns list of project IDs that reference the given component.
 pub fn projects_using(component_id: &str) -> Result<Vec<String>> {
     let projects = project::list().unwrap_or_default();
     Ok(projects
@@ -391,15 +329,4 @@ pub fn delete_safe(id: &str) -> Result<()> {
     }
 
     delete(id)
-}
-
-// ============================================================================
-// JSON Import
-// ============================================================================
-
-pub use config::BatchResult as CreateSummary;
-pub use config::BatchResultItem as CreateSummaryItem;
-
-pub fn create_from_json(spec: &str, skip_existing: bool) -> Result<CreateSummary> {
-    config::create_batch::<Component>(spec, skip_existing)
 }

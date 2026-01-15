@@ -64,24 +64,6 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-pub(crate) fn extract_component_id(local_path: &str) -> Result<String> {
-    let expanded = shellexpand::tilde(local_path).to_string();
-    let path = std::path::Path::new(&expanded);
-
-    let basename = path.file_name().and_then(|s| s.to_str()).ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "local_path",
-            "Could not extract directory name from path",
-            Some(local_path.to_string()),
-            None,
-        )
-    })?;
-
-    let id = basename.to_lowercase();
-    validate_component_id(&id)?;
-    Ok(id)
-}
-
 pub(crate) fn validate_component_id(id: &str) -> Result<()> {
     if id.is_empty() {
         return Err(Error::validation_invalid_argument(
@@ -146,36 +128,6 @@ mod tests {
     #[test]
     fn slugify_whitespace_only_fails() {
         assert!(slugify_id("   ", "name").is_err());
-    }
-
-    #[test]
-    fn extract_component_id_basic() {
-        assert_eq!(
-            extract_component_id("/path/to/extrachill-api").unwrap(),
-            "extrachill-api"
-        );
-    }
-
-    #[test]
-    fn extract_component_id_lowercases() {
-        assert_eq!(
-            extract_component_id("/path/to/MyPlugin").unwrap(),
-            "myplugin"
-        );
-    }
-
-    #[test]
-    fn extract_component_id_preserves_hyphens() {
-        assert_eq!(
-            extract_component_id("/path/to/my-plugin").unwrap(),
-            "my-plugin"
-        );
-    }
-
-    #[test]
-    fn extract_component_id_with_tilde() {
-        let result = extract_component_id("~/projects/homeboy").unwrap();
-        assert_eq!(result, "homeboy");
     }
 
     #[test]

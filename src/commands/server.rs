@@ -2,6 +2,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::server::{self, Server};
+use homeboy::{BatchResult, MergeOutput};
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,9 +21,9 @@ pub struct ServerOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     key: Option<ServerKeyOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    import: Option<server::CreateSummary>,
+    import: Option<BatchResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    batch: Option<server::CreateSummary>,
+    batch: Option<BatchResult>,
 }
 
 #[derive(Serialize)]
@@ -144,36 +145,66 @@ pub fn run(
             user,
             port,
         } => {
-            // Pass all args to unified core function - it handles auto-detection
-            match server::create(
-                json.as_deref().or(id.as_deref()),
-                host.as_deref(),
-                user.as_deref(),
-                port,
-                skip_existing,
-            )? {
-                server::CreateOutput::Single(result) => Ok((
+            if let Some(spec) = json.as_deref() {
+                let summary = server::create_batch(spec, skip_existing)?;
+                let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                return Ok((
                     ServerOutput {
                         command: "server.create".to_string(),
-                        server_id: Some(result.id),
-                        server: Some(result.server),
-                        updated: Some(vec!["created".to_string()]),
+                        import: Some(summary),
                         ..Default::default()
                     },
-                    0,
-                )),
-                server::CreateOutput::Bulk(summary) => {
-                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
-                    Ok((
-                        ServerOutput {
-                            command: "server.create".to_string(),
-                            import: Some(summary),
-                            ..Default::default()
-                        },
-                        exit_code,
-                    ))
-                }
+                    exit_code,
+                ));
             }
+
+            let id = id.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "id",
+                    "Missing required argument: id",
+                    None,
+                    None,
+                )
+            })?;
+
+            let host = host.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "host",
+                    "Missing required argument: --host",
+                    None,
+                    None,
+                )
+            })?;
+
+            let user = user.ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "user",
+                    "Missing required argument: --user",
+                    None,
+                    None,
+                )
+            })?;
+
+            let new_server = server::Server {
+                id: id.clone(),
+                host,
+                user,
+                port: port.unwrap_or(22),
+                identity_file: None,
+            };
+
+            let result = server::create(new_server)?;
+
+            Ok((
+                ServerOutput {
+                    command: "server.create".to_string(),
+                    server_id: Some(result.id),
+                    server: Some(result.entity),
+                    updated: Some(vec!["created".to_string()]),
+                    ..Default::default()
+                },
+                0,
+            ))
         }
         ServerCommand::Show { server_id } => show(&server_id),
         ServerCommand::Set {
@@ -230,7 +261,7 @@ fn show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
 
 fn set(server_id: Option<&str>, json: &str) -> homeboy::Result<(ServerOutput, i32)> {
     match server::merge(server_id, json)? {
-        homeboy::MergeOutput::Single(result) => {
+        MergeOutput::Single(result) => {
             let svr = server::load(&result.id)?;
             Ok((
                 ServerOutput {
@@ -243,7 +274,7 @@ fn set(server_id: Option<&str>, json: &str) -> homeboy::Result<(ServerOutput, i3
                 0,
             ))
         }
-        homeboy::MergeOutput::Bulk(summary) => {
+        MergeOutput::Bulk(summary) => {
             let exit_code = if summary.errors > 0 { 1 } else { 0 };
             Ok((
                 ServerOutput {

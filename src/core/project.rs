@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     #[serde(skip)]
@@ -89,6 +89,16 @@ impl ConfigEntity for Project {
     }
     fn entity_type() -> &'static str {
         "project"
+    }
+
+    fn validate(&self) -> Result<()> {
+        if let Some(ref sid) = self.server_id {
+            if !server::exists(sid) {
+                let suggestions = config::find_similar_ids::<server::Server>(sid);
+                return Err(Error::server_not_found(sid.clone(), suggestions));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -302,6 +312,10 @@ pub struct NewsletterConfig {
     pub sendy_list_id: String,
 }
 
+// ============================================================================
+// Core CRUD - Thin wrappers around config module
+// ============================================================================
+
 pub fn load(id: &str) -> Result<Project> {
     config::load::<Project>(id)
 }
@@ -334,19 +348,21 @@ pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::Remov
     config::remove_from_json::<Project>(id, json_spec)
 }
 
+pub fn create(project: Project) -> Result<config::CreateResult<Project>> {
+    config::create(project)
+}
+
+pub fn create_batch(json_spec: &str, skip_existing: bool) -> Result<config::BatchResult> {
+    config::create_batch::<Project>(json_spec, skip_existing)
+}
+
 pub fn slugify_id(name: &str) -> Result<String> {
     slugify::slugify_id(name, "name")
 }
 
 // ============================================================================
-// CLI Entry Points - Accept Option<T> and handle validation
+// Operations
 // ============================================================================
-
-#[derive(Debug, Clone)]
-pub struct CreateResult {
-    pub id: String,
-    pub project: Project,
-}
 
 #[derive(Debug, Clone)]
 pub struct UpdateResult {
@@ -360,91 +376,6 @@ pub struct RenameResult {
     pub old_id: String,
     pub new_id: String,
     pub project: Project,
-}
-
-/// Unified create output - can be single or bulk
-#[derive(Debug)]
-pub enum CreateOutput {
-    Single(CreateResult),
-    Bulk(CreateSummary),
-}
-
-/// Unified create - auto-detects JSON in spec_or_id
-pub fn create(
-    spec_or_id: Option<&str>,
-    domain: Option<&str>,
-    server_id: Option<&str>,
-    base_path: Option<&str>,
-    table_prefix: Option<&str>,
-    skip_existing: bool,
-) -> Result<CreateOutput> {
-    // Auto-detect JSON
-    if let Some(input) = spec_or_id {
-        if json::is_json_input(input) {
-            return Ok(CreateOutput::Bulk(create_from_json(input, skip_existing)?));
-        }
-    }
-    // Fall through to CLI mode
-    Ok(CreateOutput::Single(create_from_cli(
-        spec_or_id.map(String::from),
-        domain.map(String::from),
-        server_id.map(String::from),
-        base_path.map(String::from),
-        table_prefix.map(String::from),
-    )?))
-}
-
-pub fn create_from_cli(
-    id: Option<String>,
-    domain: Option<String>,
-    server_id: Option<String>,
-    base_path: Option<String>,
-    table_prefix: Option<String>,
-) -> Result<CreateResult> {
-    let id = id.ok_or_else(|| {
-        Error::validation_invalid_argument("id", "Missing required argument: id", None, None)
-    })?;
-
-    slugify::validate_component_id(&id)?;
-
-    if exists(&id) {
-        return Err(Error::validation_invalid_argument(
-            "project.id",
-            format!("Project '{}' already exists", id),
-            Some(id),
-            None,
-        ));
-    }
-
-    if let Some(ref sid) = server_id {
-        if !server::exists(sid) {
-            let suggestions = config::find_similar_ids::<crate::server::Server>(sid);
-            return Err(Error::server_not_found(sid.clone(), suggestions));
-        }
-    }
-
-    let project = Project {
-        id: id.clone(),
-        domain,
-        scoped_modules: None,
-        server_id,
-        base_path,
-        table_prefix,
-        remote_files: Default::default(),
-        remote_logs: Default::default(),
-        database: Default::default(),
-        tools: Default::default(),
-        api: Default::default(),
-        changelog_next_section_label: None,
-        changelog_next_section_aliases: None,
-        sub_targets: Default::default(),
-        shared_tables: Default::default(),
-        component_ids: Default::default(),
-    };
-
-    save(&project)?;
-
-    Ok(CreateResult { id, project })
 }
 
 pub fn update(
@@ -466,7 +397,7 @@ pub fn update(
     if let Some(new_server_id) = server_id {
         if let Some(ref sid) = new_server_id {
             if !server::exists(sid) {
-                let suggestions = config::find_similar_ids::<crate::server::Server>(sid);
+                let suggestions = config::find_similar_ids::<server::Server>(sid);
                 return Err(Error::server_not_found(sid.clone(), suggestions));
             }
         }
@@ -713,15 +644,4 @@ pub fn unpin(project_id: &str, pin_type: PinType, path: &str) -> Result<()> {
 
     save(&project)?;
     Ok(())
-}
-
-// ============================================================================
-// JSON Import
-// ============================================================================
-
-pub use config::BatchResult as CreateSummary;
-pub use config::BatchResultItem as CreateSummaryItem;
-
-pub fn create_from_json(spec: &str, skip_existing: bool) -> Result<CreateSummary> {
-    config::create_batch::<Project>(spec, skip_existing)
 }
