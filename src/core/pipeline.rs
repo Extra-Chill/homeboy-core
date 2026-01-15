@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,12 @@ pub struct PipelineStepResult {
     pub missing: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hints: Vec<crate::error::Hint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +94,8 @@ pub struct PipelineStepResult {
 pub struct PipelineRunResult {
     pub steps: Vec<PipelineStepResult>,
     pub status: PipelineRunStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -248,11 +256,15 @@ pub fn run(
                 status: PipelineRunStatus::Skipped,
                 missing: Vec::new(),
                 warnings: Vec::new(),
+                hints: Vec::new(),
+                data: None,
+                error: None,
             })
             .collect();
         return Ok(PipelineRunResult {
             steps: results,
             status: PipelineRunStatus::Skipped,
+            warnings: Vec::new(),
         });
     }
 
@@ -271,14 +283,22 @@ pub fn run(
                 status: PipelineRunStatus::Missing,
                 missing: resolver.missing(&step.step_type),
                 warnings: Vec::new(),
+                hints: Vec::new(),
+                data: None,
+                error: None,
             });
             overall_status = PipelineRunStatus::Missing;
         }
     }
 
     while !pending_steps.is_empty() {
-        let (ready, blocked) = split_ready_steps(&pending_steps, &results);
+        let (ready, blocked, skipped) = split_ready_steps(&pending_steps, &results);
+        results.extend(skipped);
+
         if ready.is_empty() {
+            if blocked.is_empty() {
+                break;
+            }
             return Err(Error::validation_invalid_argument(
                 field,
                 "Steps blocked by missing dependencies".to_string(),
@@ -295,41 +315,98 @@ pub fn run(
             results.push(result);
         }
 
-        if matches!(overall_status, PipelineRunStatus::Failed) {
-            break;
-        }
-
         pending_steps = blocked;
     }
 
+    let final_status = derive_overall_status(&results, overall_status);
+
     Ok(PipelineRunResult {
         steps: results,
-        status: overall_status,
+        status: final_status,
+        warnings: plan.warnings,
     })
 }
 
 fn split_ready_steps(
     pending: &[PipelineStep],
     results: &[PipelineStepResult],
-) -> (Vec<PipelineStep>, Vec<PipelineStep>) {
-    let completed: HashSet<String> = results
-        .iter()
-        .filter(|result| matches!(result.status, PipelineRunStatus::Success))
-        .map(|result| result.id.clone())
-        .collect();
-
+) -> (
+    Vec<PipelineStep>,
+    Vec<PipelineStep>,
+    Vec<PipelineStepResult>,
+) {
     let mut ready = Vec::new();
     let mut blocked = Vec::new();
+    let mut skipped = Vec::new();
+
+    let status_map: HashMap<String, PipelineRunStatus> = results
+        .iter()
+        .map(|result| (result.id.clone(), result.status.clone()))
+        .collect();
 
     for step in pending {
-        if step.needs.iter().all(|need| completed.contains(need)) {
-            ready.push(step.clone());
-        } else {
+        let mut unmet = false;
+        let mut failed_dependency: Option<String> = None;
+
+        for need in &step.needs {
+            match status_map.get(need) {
+                Some(PipelineRunStatus::Success) => {}
+                Some(PipelineRunStatus::Failed)
+                | Some(PipelineRunStatus::Missing)
+                | Some(PipelineRunStatus::Skipped) => {
+                    failed_dependency = Some(need.clone());
+                    break;
+                }
+                None => {
+                    unmet = true;
+                }
+            }
+        }
+
+        if let Some(dep) = failed_dependency {
+            skipped.push(PipelineStepResult {
+                id: step.id.clone(),
+                step_type: step.step_type.clone(),
+                status: PipelineRunStatus::Skipped,
+                missing: Vec::new(),
+                warnings: vec![format!("Skipped because '{}' did not succeed", dep)],
+                hints: Vec::new(),
+                data: None,
+                error: None,
+            });
+            continue;
+        }
+
+        if unmet {
             blocked.push(step.clone());
+        } else {
+            ready.push(step.clone());
         }
     }
 
-    (ready, blocked)
+    (ready, blocked, skipped)
+}
+
+fn derive_overall_status(
+    results: &[PipelineStepResult],
+    current: PipelineRunStatus,
+) -> PipelineRunStatus {
+    if results
+        .iter()
+        .any(|result| matches!(result.status, PipelineRunStatus::Failed))
+    {
+        return PipelineRunStatus::Failed;
+    }
+    if results
+        .iter()
+        .any(|result| matches!(result.status, PipelineRunStatus::Missing))
+    {
+        return PipelineRunStatus::Missing;
+    }
+    if matches!(current, PipelineRunStatus::Skipped) {
+        return PipelineRunStatus::Skipped;
+    }
+    PipelineRunStatus::Success
 }
 
 fn execute_batch(
@@ -389,12 +466,29 @@ fn execute_single_step(
             status: PipelineRunStatus::Missing,
             missing,
             warnings: Vec::new(),
+            hints: Vec::new(),
+            data: None,
+            error: None,
         });
     }
 
-    let mut result = executor.execute_step(&step)?;
-    if result.status == PipelineRunStatus::Success {
-        result.missing = Vec::new();
+    match executor.execute_step(&step) {
+        Ok(mut result) => {
+            if result.status == PipelineRunStatus::Success {
+                result.missing = Vec::new();
+                result.error = None;
+            }
+            Ok(result)
+        }
+        Err(err) => Ok(PipelineStepResult {
+            id: step.id,
+            step_type: step.step_type,
+            status: PipelineRunStatus::Failed,
+            missing: Vec::new(),
+            warnings: Vec::new(),
+            hints: err.hints.clone(),
+            data: None,
+            error: Some(err.message.clone()),
+        }),
     }
-    Ok(result)
 }

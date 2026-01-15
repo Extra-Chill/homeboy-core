@@ -265,7 +265,7 @@ fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
         homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
     })?;
 
-    match server::merge(args.id.as_deref(), &json_string)? {
+    match server::merge(args.id.as_deref(), &json_string, &args.replace)? {
         MergeOutput::Single(result) => {
             let svr = server::load(&result.id)?;
             Ok((

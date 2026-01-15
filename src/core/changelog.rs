@@ -658,13 +658,13 @@ pub fn add_items_cwd(messages: &[String]) -> Result<AddItemsOutput> {
 // === Changelog Init Operations ===
 
 #[derive(Debug, Clone, Serialize)]
-
 pub struct InitOutput {
     pub component_id: String,
     pub changelog_path: String,
     pub initial_version: String,
     pub next_section_label: String,
     pub created: bool,
+    pub changed: bool,
     pub configured: bool,
 }
 
@@ -677,6 +677,8 @@ fn generate_template(initial_version: &str, next_label: &str) -> String {
 }
 
 /// Initialize a changelog for a component.
+/// If the changelog file doesn't exist, creates a new one with Keep a Changelog template.
+/// If the changelog file exists, ensures it has an Unreleased section.
 pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<InitOutput> {
     let component = component::load(component_id)?;
     let settings = resolve_effective_settings(Some(&component));
@@ -685,34 +687,7 @@ pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<I
     let relative_path = path.unwrap_or("CHANGELOG.md");
     let changelog_path = resolve_target_path(&component.local_path, relative_path)?;
 
-    // Check if file already exists
-    if changelog_path.exists() {
-        return Err(Error::validation_invalid_argument(
-            "changelog",
-            format!(
-                "Changelog already exists at {}. View with: cat {}",
-                changelog_path.display(),
-                changelog_path.display()
-            ),
-            None,
-            None,
-        ));
-    }
-
-    // Get current version from component (errors if no version targets)
-    let version_info = version::read_version(Some(component_id))?;
-    let initial_version = version_info.version;
-
-    // Ensure parent directory exists
-    if let Some(parent) = changelog_path.parent() {
-        local_files::local().ensure_dir(parent)?;
-    }
-
-    // Generate and write template
-    let content = generate_template(&initial_version, &settings.next_section_label);
-    local_files::local().write(&changelog_path, &content)?;
-
-    // Configure component if requested
+    // Configure component if requested (do this regardless of file state)
     let configured = if configure {
         component::set_changelog_target(component_id, relative_path)?;
         true
@@ -720,12 +695,47 @@ pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<I
         false
     };
 
+    // Handle existing file: ensure Unreleased section exists
+    if changelog_path.exists() {
+        let content = fs::read_to_string(&changelog_path)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read changelog".to_string())))?;
+
+        let (new_content, changed) =
+            ensure_next_section(&content, &settings.next_section_aliases)?;
+
+        if changed {
+            local_files::local().write(&changelog_path, &new_content)?;
+        }
+
+        return Ok(InitOutput {
+            component_id: component_id.to_string(),
+            changelog_path: changelog_path.to_string_lossy().to_string(),
+            initial_version: String::new(),
+            next_section_label: settings.next_section_label,
+            created: false,
+            changed,
+            configured,
+        });
+    }
+
+    // File doesn't exist: create new changelog with template
+    let version_info = version::read_version(Some(component_id))?;
+    let initial_version = version_info.version;
+
+    if let Some(parent) = changelog_path.parent() {
+        local_files::local().ensure_dir(parent)?;
+    }
+
+    let content = generate_template(&initial_version, &settings.next_section_label);
+    local_files::local().write(&changelog_path, &content)?;
+
     Ok(InitOutput {
         component_id: component_id.to_string(),
         changelog_path: changelog_path.to_string_lossy().to_string(),
         initial_version,
         next_section_label: settings.next_section_label,
         created: true,
+        changed: true,
         configured,
     })
 }

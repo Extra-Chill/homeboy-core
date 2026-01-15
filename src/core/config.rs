@@ -247,6 +247,7 @@ pub(crate) struct MergeFields {
 pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
     existing: &mut T,
     patch: Value,
+    replace_fields: &[String],
 ) -> Result<MergeFields> {
     let patch_obj = match &patch {
         Value::Object(obj) => obj,
@@ -274,7 +275,7 @@ pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
     let mut base = serde_json::to_value(&*existing)
         .map_err(|e| Error::internal_json(e.to_string(), Some("serialize config".to_string())))?;
 
-    deep_merge(&mut base, patch);
+    deep_merge(&mut base, patch, replace_fields, String::new());
 
     *existing = serde_json::from_value(base)
         .map_err(|e| Error::validation_invalid_json(e, Some("merge config".to_string())))?;
@@ -352,19 +353,29 @@ fn deep_remove(base: &mut Value, spec: Value, removed_from: &mut Vec<String>, pa
     }
 }
 
-fn deep_merge(base: &mut Value, patch: Value) {
+fn deep_merge(base: &mut Value, patch: Value, replace_fields: &[String], path: String) {
     match (base, patch) {
         (Value::Object(base_obj), Value::Object(patch_obj)) => {
             for (key, value) in patch_obj {
+                let field_path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{}.{}", path, key)
+                };
                 if value.is_null() {
                     base_obj.remove(&key);
                 } else {
-                    deep_merge(base_obj.entry(key).or_insert(Value::Null), value);
+                    let entry = base_obj.entry(key).or_insert(Value::Null);
+                    deep_merge(entry, value, replace_fields, field_path);
                 }
             }
         }
         (Value::Array(base_arr), Value::Array(patch_arr)) => {
-            array_union(base_arr, patch_arr);
+            if replace_fields.contains(&path) {
+                *base_arr = patch_arr;
+            } else {
+                array_union(base_arr, patch_arr);
+            }
         }
         (base, patch) => *base = patch,
     }
@@ -576,14 +587,22 @@ pub(crate) fn list_ids<T: ConfigEntity>() -> Result<Vec<String>> {
 
 /// Unified merge that auto-detects single vs bulk operations.
 /// Array input triggers batch merge, object input triggers single merge.
-pub fn merge<T: ConfigEntity>(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
+pub fn merge<T: ConfigEntity>(
+    id: Option<&str>,
+    json_spec: &str,
+    replace_fields: &[String],
+) -> Result<MergeOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
 
     if is_json_array(&raw) {
         return Ok(MergeOutput::Bulk(merge_batch_from_json::<T>(&raw)?));
     }
 
-    Ok(MergeOutput::Single(merge_from_json::<T>(id, &raw)?))
+    Ok(MergeOutput::Single(merge_from_json::<T>(
+        id,
+        &raw,
+        replace_fields,
+    )?))
 }
 
 // ============================================================================
@@ -663,6 +682,7 @@ pub(crate) fn create_batch<T: ConfigEntity>(
 pub(crate) fn merge_from_json<T: ConfigEntity>(
     id: Option<&str>,
     json_spec: &str,
+    replace_fields: &[String],
 ) -> Result<MergeResult> {
     let raw = read_json_spec_to_string(json_spec)?;
     let mut parsed: serde_json::Value = from_str(&raw)?;
@@ -687,7 +707,7 @@ pub(crate) fn merge_from_json<T: ConfigEntity>(
     }
 
     let mut entity = load::<T>(&effective_id)?;
-    let result = merge_config(&mut entity, parsed)?;
+    let result = merge_config(&mut entity, parsed, replace_fields)?;
     entity.set_id(effective_id.clone());
     save(&entity)?;
 
@@ -726,7 +746,7 @@ pub(crate) fn merge_batch_from_json<T: ConfigEntity>(raw_json: &str) -> Result<B
         }
 
         match load::<T>(&id) {
-            Ok(mut entity) => match merge_config(&mut entity, patch) {
+            Ok(mut entity) => match merge_config(&mut entity, patch, &[]) {
                 Ok(_) => {
                     entity.set_id(id.clone());
                     if let Err(e) = save(&entity) {

@@ -88,8 +88,8 @@ pub fn find_by_host(host: &str) -> Option<Server> {
     list().ok()?.into_iter().find(|s| s.host == host)
 }
 
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
-    config::merge::<Server>(id, json_spec)
+pub fn merge(id: Option<&str>, json_spec: &str, replace_fields: &[String]) -> Result<MergeOutput> {
+    config::merge::<Server>(id, json_spec, replace_fields)
 }
 
 pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<RemoveResult> {

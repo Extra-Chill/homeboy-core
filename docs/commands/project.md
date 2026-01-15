@@ -162,10 +162,12 @@ Updates a project by merging a JSON object into `projects/<id>.json`.
 Options:
 
 - `--json <JSON>`: JSON object to merge into config (supports `@file` and `-` for stdin)
+- `--replace <field>`: replace array fields instead of union (repeatable)
 
 Notes:
 
 - `set` no longer supports individual field flags; use `--json` and provide the fields you want to update.
+- Use `null` in JSON to clear a field (for example, `{"component_ids": null}`).
 
 JSON output:
 

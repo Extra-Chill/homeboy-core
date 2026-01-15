@@ -25,6 +25,24 @@ homeboy module run <module_id> [-p|--project <project_id>] [-c|--component <comp
 - `--input` repeats; each value must be in `KEY=value` form.
 - Trailing `<args...>` are passed to CLI-type modules.
 
+### `set`
+
+```sh
+homeboy module set --json <JSON>
+homeboy module set --json '<JSON>'
+```
+
+Updates a module manifest by merging a JSON object into the module config.
+
+Options:
+
+- `--json <JSON>`: JSON object to merge into config (supports `@file` and `-` for stdin)
+- `--replace <field>`: replace array fields instead of union (repeatable)
+
+Notes:
+
+- Use `null` in JSON to clear a field (for example, `{"commands": null}`).
+
 ### `setup`
 
 ```sh

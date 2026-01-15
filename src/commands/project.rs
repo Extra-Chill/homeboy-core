@@ -54,6 +54,9 @@ enum ProjectCommand {
         /// Explicit JSON spec (takes precedence over positional)
         #[arg(long, value_name = "JSON")]
         json: Option<String>,
+        /// Replace these fields instead of merging arrays
+        #[arg(long, value_name = "FIELD")]
+        replace: Vec<String>,
     },
     /// Remove items from project configuration arrays
     Remove {
@@ -318,6 +321,7 @@ pub fn run(
             project_id,
             spec,
             json,
+            replace,
         } => {
             let json_spec = json.or(spec).ok_or_else(|| {
                 homeboy::Error::validation_invalid_argument(
@@ -327,7 +331,7 @@ pub fn run(
                     None,
                 )
             })?;
-            set(project_id.as_deref(), &json_spec)
+            set(project_id.as_deref(), &json_spec, &replace)
         }
         ProjectCommand::Remove {
             project_id,
@@ -455,8 +459,12 @@ fn calculate_deploy_readiness(project: &Project) -> (bool, Vec<String>) {
     (deploy_ready, blockers)
 }
 
-fn set(project_id: Option<&str>, json: &str) -> homeboy::Result<(ProjectOutput, i32)> {
-    match project::merge(project_id, json)? {
+fn set(
+    project_id: Option<&str>,
+    json: &str,
+    replace_fields: &[String],
+) -> homeboy::Result<(ProjectOutput, i32)> {
+    match project::merge(project_id, json, replace_fields)? {
         homeboy::MergeOutput::Single(result) => Ok((
             ProjectOutput {
                 command: "project.set".to_string(),

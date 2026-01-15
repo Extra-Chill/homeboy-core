@@ -234,7 +234,7 @@ fn set(args: DynamicSetArgs) -> CmdResult<ComponentOutput> {
         homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
     })?;
 
-    match component::merge(args.id.as_deref(), &json_string)? {
+    match component::merge(args.id.as_deref(), &json_string, &args.replace)? {
         homeboy::MergeOutput::Single(result) => {
             let comp = component::load(&result.id)?;
             Ok((

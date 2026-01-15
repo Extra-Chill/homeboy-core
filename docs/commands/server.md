@@ -36,9 +36,12 @@ homeboy server set --json <JSON>   # server_id may be provided in JSON body
 
 Updates a server by merging a JSON object into `servers/<id>.json`.
 
+Use `null` in JSON to clear a field (for example, `{"identity_file": null}`).
+
 Options:
 
 - `--json <JSON>`: JSON object to merge into config (supports `@file` and `-` for stdin)
+- `--replace <field>`: replace array fields instead of union (repeatable)
 
 ### `delete`
 

@@ -83,6 +83,9 @@ enum ModuleCommand {
         /// JSON object to merge into manifest (supports @file and - for stdin)
         #[arg(long, value_name = "JSON")]
         json: String,
+        /// Replace these fields instead of merging arrays
+        #[arg(long, value_name = "FIELD")]
+        replace: Vec<String>,
     },
 }
 
@@ -113,7 +116,11 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             project,
             data,
         } => run_action(&module_id, &action_id, project, data),
-        ModuleCommand::Set { module_id, json } => set_module(module_id.as_deref(), &json),
+        ModuleCommand::Set {
+            module_id,
+            json,
+            replace,
+        } => set_module(module_id.as_deref(), &json, &replace),
     }
 }
 
@@ -328,8 +335,12 @@ fn run_action(
     ))
 }
 
-fn set_module(module_id: Option<&str>, json: &str) -> CmdResult<ModuleOutput> {
-    match homeboy::module::merge(module_id, json)? {
+fn set_module(
+    module_id: Option<&str>,
+    json: &str,
+    replace_fields: &[String],
+) -> CmdResult<ModuleOutput> {
+    match homeboy::module::merge(module_id, json, replace_fields)? {
         homeboy::MergeOutput::Single(result) => Ok((
             ModuleOutput::Set {
                 module_id: result.id,

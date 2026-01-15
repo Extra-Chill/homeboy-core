@@ -64,11 +64,13 @@ Updates a component by merging a JSON object into `components/<id>.json`.
 Options:
 
 - `--json <JSON>`: JSON object to merge into config (supports `@file` and `-` for stdin)
+- `--replace <field>`: replace array fields instead of union (repeatable)
 - `--key value`: Dynamic flags that map directly to JSON keys (e.g., `--changelog-target "CHANGELOG.md"`)
 
 Notes:
 
 - If the JSON contains an `id` field that differs from `<id>`, the component is automatically renamed first (equivalent to calling `rename`), then the remaining fields are merged. Project references are updated automatically.
+- Use `null` in JSON to clear a field (for example, `{"post_version_bump_commands": null}`).
 
 #### Release configuration
 

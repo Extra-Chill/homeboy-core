@@ -397,8 +397,8 @@ pub fn save_manifest(manifest: &ModuleManifest) -> Result<()> {
     config::save(manifest)
 }
 
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
-    config::merge::<ModuleManifest>(id, json_spec)
+pub fn merge(id: Option<&str>, json_spec: &str, replace_fields: &[String]) -> Result<MergeOutput> {
+    config::merge::<ModuleManifest>(id, json_spec, replace_fields)
 }
 
 /// Environment variable names for module execution context.

@@ -23,6 +23,10 @@ pub struct DynamicSetArgs {
     #[arg(long, value_name = "JSON")]
     pub json: Option<String>,
 
+    /// Replace these fields instead of merging arrays
+    #[arg(long, value_name = "FIELD")]
+    pub replace: Vec<String>,
+
     /// Additional key=value flags (e.g., --remote-path /var/www)
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub extra: Vec<String>,

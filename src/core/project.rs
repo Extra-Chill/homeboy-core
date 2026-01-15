@@ -340,8 +340,8 @@ pub fn exists(id: &str) -> bool {
     config::exists::<Project>(id)
 }
 
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
-    config::merge::<Project>(id, json_spec)
+pub fn merge(id: Option<&str>, json_spec: &str, replace_fields: &[String]) -> Result<MergeOutput> {
+    config::merge::<Project>(id, json_spec, replace_fields)
 }
 
 pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<RemoveResult> {
