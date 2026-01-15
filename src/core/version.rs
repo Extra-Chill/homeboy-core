@@ -1,7 +1,8 @@
 use crate::changelog;
 use crate::component::{self, Component, VersionTarget};
-use crate::error::{Error, Result};
 use crate::config::{from_str, set_json_pointer, to_string_pretty};
+use crate::defaults;
+use crate::error::{Error, Result};
 use crate::local_files::{self, FileSystem};
 use crate::module::{load_all_modules, ModuleManifest};
 use regex::Regex;
@@ -685,46 +686,23 @@ pub fn bump_version(component_id: Option<&str>, bump_type: &str) -> Result<BumpR
 
 // === CWD Version Operations ===
 
-/// Version file detection candidate
-struct VersionCandidate {
-    file: &'static str,
-    pattern: &'static str,
-}
-
-/// Well-known version file patterns for auto-detection
-const VERSION_CANDIDATES: &[VersionCandidate] = &[
-    VersionCandidate {
-        file: "Cargo.toml",
-        pattern: r#"version\s*=\s*"(\d+\.\d+\.\d+)""#,
-    },
-    VersionCandidate {
-        file: "package.json",
-        pattern: r#""version"\s*:\s*"(\d+\.\d+\.\d+)""#,
-    },
-    VersionCandidate {
-        file: "composer.json",
-        pattern: r#""version"\s*:\s*"(\d+\.\d+\.\d+)""#,
-    },
-    VersionCandidate {
-        file: "style.css",
-        pattern: r"Version:\s*(\d+\.\d+\.\d+)",
-    },
-];
-
 /// Detect version targets in a directory by checking for well-known version files.
 pub fn detect_version_targets(base_path: &str) -> Result<Vec<(String, String, String)>> {
     let mut found = Vec::new();
 
+    // Load version candidates from configurable defaults
+    let version_candidates = defaults::load_defaults().version_candidates;
+
     // Check well-known files first
-    for candidate in VERSION_CANDIDATES {
+    for candidate in &version_candidates {
         let full_path = format!("{}/{}", base_path, candidate.file);
         if Path::new(&full_path).exists() {
             let content = fs::read_to_string(&full_path).ok();
             if let Some(content) = content {
-                if parse_version(&content, candidate.pattern).is_some() {
+                if parse_version(&content, &candidate.pattern).is_some() {
                     found.push((
-                        candidate.file.to_string(),
-                        candidate.pattern.to_string(),
+                        candidate.file.clone(),
+                        candidate.pattern.clone(),
                         full_path,
                     ));
                 }

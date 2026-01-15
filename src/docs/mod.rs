@@ -47,10 +47,7 @@ pub fn resolve(topic: &[String]) -> homeboy::Result<ResolvedDoc> {
         });
     }
 
-    Err(homeboy::Error::config_missing_key(
-        format!("docs.{}", key),
-        None,
-    ))
+    Err(homeboy::Error::docs_topic_not_found(&key))
 }
 
 fn load_module_doc(topic: &str) -> Option<(String, String)> {

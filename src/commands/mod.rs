@@ -154,6 +154,7 @@ pub mod changelog;
 pub mod changes;
 pub mod cli;
 pub mod component;
+pub mod config;
 pub mod context;
 pub mod db;
 pub mod deploy;
@@ -174,7 +175,7 @@ pub(crate) fn run_markdown(
     _global: &GlobalArgs,
 ) -> homeboy::Result<(String, i32)> {
     match command {
-        crate::Commands::Docs(args) => docs::run_markdown(args),
+        crate::Commands::Docs(args) => docs::run(args),
         crate::Commands::Changelog(args) => changelog::run_markdown(args),
         _ => Err(homeboy::Error::validation_invalid_argument(
             "output_mode",
@@ -213,14 +214,23 @@ pub(crate) fn run_json(
         crate::Commands::Component(args) => {
             crate::output::map_cmd_result_to_json(component::run(args, global))
         }
+        crate::Commands::Config(args) => {
+            crate::output::map_cmd_result_to_json(config::run(args, global))
+        }
         crate::Commands::Context(args) => {
             crate::output::map_cmd_result_to_json(context::run(args, global))
         }
         crate::Commands::Module(args) => {
             crate::output::map_cmd_result_to_json(module::run(args, global))
         }
-        crate::Commands::Docs(args) => {
-            crate::output::map_cmd_result_to_json(docs::run(args, global))
+        crate::Commands::Docs(_) => {
+            let err = homeboy::Error::validation_invalid_argument(
+                "output_mode",
+                "Docs command uses raw output mode",
+                None,
+                None,
+            );
+            crate::output::map_cmd_result_to_json::<serde_json::Value>(Err(err))
         }
         crate::Commands::Changelog(args) => {
             crate::output::map_cmd_result_to_json(changelog::run(args, global))

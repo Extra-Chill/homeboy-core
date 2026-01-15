@@ -305,6 +305,16 @@ impl Error {
         err.with_hint("Run 'homeboy module list' to see available modules")
     }
 
+    pub fn docs_topic_not_found(topic: impl Into<String>) -> Self {
+        Self::new(
+            ErrorCode::ConfigMissingKey,
+            "Documentation topic not found",
+            serde_json::json!({ "topic": topic.into() }),
+        )
+        .with_hint("Run 'homeboy docs list' to see available topics")
+        .with_hint("Topics use path format: 'commands/deploy', 'commands/changes'")
+    }
+
     fn not_found(code: ErrorCode, message: &str, id: impl Into<String>) -> Self {
         let details = serde_json::to_value(NotFoundDetails { id: id.into() })
             .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));

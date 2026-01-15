@@ -34,6 +34,9 @@ pub(crate) mod permissions;
 pub(crate) mod slugify;
 pub(crate) mod template;
 
+// Public modules for CLI access
+pub mod defaults;
+
 // Re-export common types for convenience
 pub use error::{Error, ErrorCode, Result};
 pub use output::{

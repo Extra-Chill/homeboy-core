@@ -6,9 +6,10 @@ use std::process::Command;
 use crate::base_path;
 use crate::build;
 use crate::component::{self, Component};
-use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
-use crate::error::{Error, Result};
 use crate::config::read_json_spec_to_string;
+use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
+use crate::defaults;
+use crate::error::{Error, Result};
 use crate::module::{load_all_modules, DeployVerification};
 use crate::permissions;
 use crate::project::{self, Project};
@@ -90,11 +91,13 @@ pub fn deploy_artifact(
         }
 
         // For archives, upload to temp location in target directory
+        let deploy_defaults = defaults::load_defaults().deploy;
+        let artifact_prefix = &deploy_defaults.artifact_prefix;
         let artifact_filename = local_path
             .file_name()
             .and_then(|name| name.to_str())
-            .map(|name| format!(".homeboy-{}", name))
-            .unwrap_or_else(|| ".homeboy-artifact".to_string());
+            .map(|name| format!("{}{}", artifact_prefix, name))
+            .unwrap_or_else(|| format!("{}artifact", artifact_prefix));
 
         let upload_path = if extract_command.is_some() {
             format!("{}/{}", remote_path, artifact_filename)
@@ -208,15 +211,16 @@ fn upload_file(
 }
 
 fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Result<DeployResult> {
-    // Force legacy SCP protocol (-O) for compatibility with servers that have issues with SFTP
-    let mut scp_args: Vec<String> = vec!["-O".to_string()];
+    // Load SCP flags from configurable defaults
+    let deploy_defaults = defaults::load_defaults().deploy;
+    let mut scp_args: Vec<String> = deploy_defaults.scp_flags.clone();
 
     if let Some(identity_file) = &ssh_client.identity_file {
         scp_args.push("-i".to_string());
         scp_args.push(identity_file.clone());
     }
 
-    if ssh_client.port != 22 {
+    if ssh_client.port != deploy_defaults.default_ssh_port {
         scp_args.push("-P".to_string());
         scp_args.push(ssh_client.port.to_string());
     }
@@ -252,15 +256,17 @@ fn scp_recursive(
     local_path: &Path,
     remote_path: &str,
 ) -> Result<DeployResult> {
-    // Force legacy SCP protocol (-O) for compatibility, -r for recursive
-    let mut scp_args: Vec<String> = vec!["-O".to_string(), "-r".to_string()];
+    // Load SCP flags from configurable defaults, add -r for recursive
+    let deploy_defaults = defaults::load_defaults().deploy;
+    let mut scp_args: Vec<String> = deploy_defaults.scp_flags.clone();
+    scp_args.push("-r".to_string());
 
     if let Some(identity_file) = &ssh_client.identity_file {
         scp_args.push("-i".to_string());
         scp_args.push(identity_file.clone());
     }
 
-    if ssh_client.port != 22 {
+    if ssh_client.port != deploy_defaults.default_ssh_port {
         scp_args.push("-P".to_string());
         scp_args.push(ssh_client.port.to_string());
     }

@@ -12,6 +12,11 @@ pub fn homeboy() -> Result<PathBuf> {
     Ok(config_dir.join("homeboy"))
 }
 
+/// Global homeboy.json config file path
+pub fn homeboy_json() -> Result<PathBuf> {
+    Ok(homeboy()?.join("homeboy.json"))
+}
+
 /// Projects directory
 pub fn projects() -> Result<PathBuf> {
     Ok(homeboy()?.join("projects"))

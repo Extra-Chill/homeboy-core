@@ -20,8 +20,8 @@ mod output;
 mod tty;
 
 use commands::{
-    api, auth, build, changelog, changes, cli, component, context, db, deploy, file, git, init,
-    logs, module, project, server, ssh, upgrade, version,
+    api, auth, build, changelog, changes, cli, component, config, context, db, deploy, file, git,
+    init, logs, module, project, server, ssh, upgrade, version,
 };
 use homeboy::module::load_all_modules;
 
@@ -55,6 +55,8 @@ enum Commands {
     Deploy(deploy::DeployArgs),
     /// Manage standalone component configurations
     Component(component::ComponentArgs),
+    /// Manage global Homeboy configuration
+    Config(config::ConfigArgs),
     /// Show context for current working directory
     Context(context::ContextArgs),
     /// Execute CLI-compatible modules
@@ -94,7 +96,7 @@ fn response_mode(command: &Commands) -> ResponseMode {
         Commands::Logs(args) if logs::is_interactive(args) => {
             ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
         }
-        Commands::Docs(args) if !args.list => ResponseMode::Raw(RawOutputMode::Markdown),
+        Commands::Docs(_) => ResponseMode::Raw(RawOutputMode::Markdown),
         Commands::Changelog(args) if changelog::is_show_markdown(args) => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }

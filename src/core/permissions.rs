@@ -1,5 +1,6 @@
 use std::process::Command;
 
+use crate::defaults;
 use crate::shell;
 use crate::ssh::SshClient;
 
@@ -11,18 +12,19 @@ pub fn fix_local_permissions(local_path: &str) {
     eprintln!("[build] Fixing local file permissions");
 
     let quoted_path = shell::quote_path(local_path);
+    let perms = defaults::load_defaults().permissions.local;
 
-    // Fix files (rw for group)
+    // Fix files (configurable mode, default: g+rw)
     let file_cmd = format!(
-        "find {} -type f -exec chmod g+rw {{}} + 2>/dev/null || true",
-        quoted_path
+        "find {} -type f -exec chmod {} {{}} + 2>/dev/null || true",
+        quoted_path, perms.file_mode
     );
     Command::new("sh").args(["-c", &file_cmd]).output().ok();
 
-    // Fix directories (rwx for group)
+    // Fix directories (configurable mode, default: g+rwx)
     let dir_cmd = format!(
-        "find {} -type d -exec chmod g+rwx {{}} + 2>/dev/null || true",
-        quoted_path
+        "find {} -type d -exec chmod {} {{}} + 2>/dev/null || true",
+        quoted_path, perms.dir_mode
     );
     Command::new("sh").args(["-c", &dir_cmd]).output().ok();
 }
@@ -38,18 +40,19 @@ pub fn fix_local_permissions(local_path: &str) {
 /// even if some files/directories can't be modified.
 pub fn fix_deployed_permissions(ssh_client: &SshClient, remote_path: &str) {
     let quoted_path = shell::quote_path(remote_path);
+    let perms = defaults::load_defaults().permissions.remote;
 
     // Try directories first (may fail on some hosts like Cloudways)
     let dir_cmd = format!(
-        "find {} -type d -exec chmod g+w {{}} + 2>/dev/null || true",
-        quoted_path
+        "find {} -type d -exec chmod {} {{}} + 2>/dev/null || true",
+        quoted_path, perms.dir_mode
     );
     ssh_client.execute(&dir_cmd);
 
     // Then files (should always work)
     let file_cmd = format!(
-        "find {} -type f -exec chmod g+w {{}} + 2>/dev/null || true",
-        quoted_path
+        "find {} -type f -exec chmod {} {{}} + 2>/dev/null || true",
+        quoted_path, perms.file_mode
     );
     ssh_client.execute(&file_cmd);
 }

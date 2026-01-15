@@ -1,3 +1,4 @@
+use crate::defaults;
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -25,12 +26,13 @@ impl InstallMethod {
         }
     }
 
-    pub fn upgrade_instructions(&self) -> &'static str {
+    pub fn upgrade_instructions(&self) -> String {
+        let defaults = defaults::load_defaults();
         match self {
-            InstallMethod::Homebrew => "brew update && brew upgrade homeboy",
-            InstallMethod::Cargo => "cargo install homeboy",
-            InstallMethod::Source => "git pull && cargo build --release",
-            InstallMethod::Unknown => "Please reinstall using Homebrew or Cargo",
+            InstallMethod::Homebrew => defaults.install_methods.homebrew.upgrade_command.clone(),
+            InstallMethod::Cargo => defaults.install_methods.cargo.upgrade_command.clone(),
+            InstallMethod::Source => defaults.install_methods.source.upgrade_command.clone(),
+            InstallMethod::Unknown => "Please reinstall using Homebrew or Cargo".to_string(),
         }
     }
 }
@@ -128,30 +130,42 @@ pub fn detect_install_method() -> InstallMethod {
         Err(_) => return InstallMethod::Unknown,
     };
 
-    // Check for Homebrew installation
-    if exe_path.contains("/Cellar/") || exe_path.contains("/homebrew/") {
-        return InstallMethod::Homebrew;
+    let defaults = defaults::load_defaults();
+
+    // Check for Homebrew installation via path patterns
+    for pattern in &defaults.install_methods.homebrew.path_patterns {
+        if exe_path.contains(pattern) {
+            return InstallMethod::Homebrew;
+        }
     }
 
-    // Alternative Homebrew check: brew list
-    if Command::new("brew")
-        .args(["list", "homeboy"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return InstallMethod::Homebrew;
+    // Alternative Homebrew check: brew list (if list_command configured)
+    if let Some(list_cmd) = &defaults.install_methods.homebrew.list_command {
+        let parts: Vec<&str> = list_cmd.split_whitespace().collect();
+        if let Some((cmd, args)) = parts.split_first() {
+            if Command::new(cmd)
+                .args(args)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+            {
+                return InstallMethod::Homebrew;
+            }
+        }
     }
 
-    // Check for Cargo installation
-    if exe_path.contains("/.cargo/bin/") {
-        return InstallMethod::Cargo;
+    // Check for Cargo installation via path patterns
+    for pattern in &defaults.install_methods.cargo.path_patterns {
+        if exe_path.contains(pattern) {
+            return InstallMethod::Cargo;
+        }
     }
 
-    // Check for source installation (development build)
-    // Look for target/release in the path
-    if exe_path.contains("/target/release/") || exe_path.contains("/target/debug/") {
-        return InstallMethod::Source;
+    // Check for source installation via path patterns
+    for pattern in &defaults.install_methods.source.path_patterns {
+        if exe_path.contains(pattern) {
+            return InstallMethod::Source;
+        }
     }
 
     InstallMethod::Unknown
@@ -246,20 +260,24 @@ pub fn run_upgrade(force: bool) -> Result<UpgradeResult> {
 }
 
 fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
+    let defaults = defaults::load_defaults();
+
     let (shell_cmd, success) = match method {
         InstallMethod::Homebrew => {
+            let cmd = &defaults.install_methods.homebrew.upgrade_command;
             let status = Command::new("sh")
-                .args(["-c", "brew update && brew upgrade homeboy"])
+                .args(["-c", cmd])
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run brew: {}", e)))?;
-            ("brew upgrade homeboy", status.success())
+                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
+            (cmd.clone(), status.success())
         }
         InstallMethod::Cargo => {
-            let status = Command::new("cargo")
-                .args(["install", "homeboy"])
+            let cmd = &defaults.install_methods.cargo.upgrade_command;
+            let status = Command::new("sh")
+                .args(["-c", cmd])
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run cargo: {}", e)))?;
-            ("cargo install homeboy", status.success())
+                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
+            (cmd.clone(), status.success())
         }
         InstallMethod::Source => {
             // For source builds, we need to find the git root
@@ -286,24 +304,15 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
                 ));
             }
 
-            // Pull and rebuild
-            let pull_status = Command::new("git")
-                .args(["pull"])
+            // Execute the upgrade command from defaults
+            let cmd = &defaults.install_methods.source.upgrade_command;
+            let status = Command::new("sh")
+                .args(["-c", cmd])
                 .current_dir(&workspace_root)
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run git pull: {}", e)))?;
+                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
 
-            if !pull_status.success() {
-                return Err(Error::git_command_failed("git pull failed"));
-            }
-
-            let build_status = Command::new("cargo")
-                .args(["build", "--release"])
-                .current_dir(&workspace_root)
-                .status()
-                .map_err(|e| Error::other(format!("Failed to run cargo build: {}", e)))?;
-
-            ("cargo build --release", build_status.success())
+            (cmd.clone(), status.success())
         }
         InstallMethod::Unknown => {
             return Err(Error::validation_invalid_argument(
