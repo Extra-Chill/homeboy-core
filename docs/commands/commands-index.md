@@ -18,7 +18,9 @@
 - [logs](logs.md)
 - [module](module.md)
 - [project](project.md)
+- [release](release.md)
 - [server](server.md)
+
 - [ssh](ssh.md)
 - [version](version.md)
 

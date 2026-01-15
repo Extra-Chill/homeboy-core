@@ -72,7 +72,11 @@ Notes:
 
 #### Release configuration
 
-Components may define a `release` block for component-scoped release planning:
+Components may define a `release` block for component-scoped release planning. You can set it with:
+
+```sh
+homeboy component set <id> --json '{"release": {"enabled": true, "steps": []}}'
+```
 
 ```json
 {

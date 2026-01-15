@@ -21,7 +21,7 @@ mod tty;
 
 use commands::{
     api, auth, build, changelog, changes, cli, component, config, context, db, deploy, file, git,
-    init, logs, module, project, server, ssh, upgrade, version,
+    init, logs, module, project, release, server, ssh, upgrade, version,
 };
 use homeboy::module::load_all_modules;
 
@@ -75,6 +75,8 @@ enum Commands {
     Build(build::BuildArgs),
     /// Show changes since last version tag
     Changes(changes::ChangesArgs),
+    /// Plan release workflows
+    Release(release::ReleaseArgs),
     /// Authenticate with a project's API
     Auth(auth::AuthArgs),
     /// Make API requests to a project

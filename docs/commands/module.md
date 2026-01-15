@@ -99,6 +99,10 @@ Module settings validation currently happens during module execution (and may al
 
 ## Runtime Configuration
 
+## Release configuration
+
+Release steps can be backed by module actions named `release.<step_type>`.
+
 Executable modules define their runtime behavior in their module manifest (`modules/<module_id>/<module_id>.json`):
 
 ```json

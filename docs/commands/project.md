@@ -117,6 +117,7 @@ JSON mode:
 
 Projects without a `--server-id` execute commands locally instead of via SSH. Homeboy is environment-agnostic - it works the same way regardless of whether your local environment uses Docker, native installs, or any other setup.
 
+
 ### Creating a Local Project
 
 ```sh
