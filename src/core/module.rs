@@ -1,7 +1,7 @@
-use crate::config::{self, ConfigEntity};
+use crate::config::{self, ConfigEntity, from_str, to_string_pretty};
 use crate::error::{Error, Result};
-use crate::json;
 use crate::local_files::{self, FileSystem};
+use crate::output::MergeOutput;
 use crate::paths;
 use crate::slugify;
 use serde::{Deserialize, Serialize};
@@ -334,7 +334,7 @@ pub fn load_module(id: &str) -> Option<ModuleManifest> {
     let manifest_path = find_manifest_path(&module_dir, id)?;
 
     let content = local_files::local().read(&manifest_path).ok()?;
-    let mut manifest: ModuleManifest = json::from_str(&content).ok()?;
+    let mut manifest: ModuleManifest = from_str(&content).ok()?;
     manifest.id = id.to_string();
     manifest.module_path = Some(module_dir.to_string_lossy().to_string());
     Some(manifest)
@@ -364,7 +364,7 @@ pub fn load_all_modules() -> Vec<ModuleManifest> {
                 continue;
             };
             if let Ok(content) = local_files::local().read(&manifest_path) {
-                if let Ok(mut manifest) = json::from_str::<ModuleManifest>(&content) {
+                if let Ok(mut manifest) = from_str::<ModuleManifest>(&content) {
                     manifest.id = id.to_string();
                     manifest.module_path = Some(path.to_string_lossy().to_string());
                     modules.push(manifest);
@@ -397,7 +397,7 @@ pub fn save_manifest(manifest: &ModuleManifest) -> Result<()> {
     config::save(manifest)
 }
 
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<config::MergeOutput> {
+pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
     config::merge::<ModuleManifest>(id, json_spec)
 }
 
@@ -1090,7 +1090,7 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
 
     if old_manifest_path.exists() {
         let content = local_files::local().read(&old_manifest_path)?;
-        let mut manifest: serde_json::Value = json::from_str(&content)?;
+        let mut manifest: serde_json::Value = from_str(&content)?;
 
         // Add sourceUrl for update tracking
         manifest["sourceUrl"] = serde_json::Value::String(url.to_string());
@@ -1100,7 +1100,7 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
             obj.remove("id");
         }
 
-        let updated = json::to_string_pretty(&manifest)?;
+        let updated = to_string_pretty(&manifest)?;
         local_files::local().write(&new_manifest_path, &updated)?;
 
         // Remove old homeboy.json
@@ -1178,7 +1178,7 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
 
     // Validate manifest is parseable
     let manifest_content = local_files::local().read(&manifest_path)?;
-    let _manifest: ModuleManifest = json::from_str(&manifest_content)?;
+    let _manifest: ModuleManifest = from_str(&manifest_content)?;
 
     let module_dir = paths::module(&module_id)?;
     if module_dir.exists() {

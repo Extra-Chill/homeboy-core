@@ -3,7 +3,6 @@ use serde::Serialize;
 use std::path::Path;
 
 use homeboy::component::{self, Component};
-use homeboy::json;
 use homeboy::project::{self, Project};
 use homeboy::BatchResult;
 
@@ -229,7 +228,7 @@ fn set(args: DynamicSetArgs) -> CmdResult<ComponentOutput> {
         ));
     }
 
-    let merged = json::merge_json_sources(args.json_spec(), &args.extra)?;
+    let merged = super::merge_json_sources(args.json_spec(), &args.extra)?;
     let json_string = serde_json::to_string(&merged).map_err(|e| {
         homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
     })?;

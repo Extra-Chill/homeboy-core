@@ -1,7 +1,7 @@
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
-use crate::json;
 use crate::local_files::{self, FileSystem};
+use crate::output::{CreateOutput, MergeOutput, RemoveResult};
 use crate::paths;
 use crate::project;
 use serde::{Deserialize, Serialize};
@@ -88,15 +88,15 @@ pub fn find_by_host(host: &str) -> Option<Server> {
     list().ok()?.into_iter().find(|s| s.host == host)
 }
 
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<config::MergeOutput> {
+pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
     config::merge::<Server>(id, json_spec)
 }
 
-pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::RemoveResult> {
+pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<RemoveResult> {
     config::remove_from_json::<Server>(id, json_spec)
 }
 
-pub fn create(json_spec: &str, skip_existing: bool) -> Result<config::CreateOutput<Server>> {
+pub fn create(json_spec: &str, skip_existing: bool) -> Result<CreateOutput<Server>> {
     config::create::<Server>(json_spec, skip_existing)
 }
 

@@ -5,7 +5,8 @@ use std::process::Command;
 
 use crate::component;
 use crate::error::{Error, Result};
-use crate::json::{read_json_spec_to_string, BulkResult, BulkSummary, ItemOutcome};
+use crate::config::read_json_spec_to_string;
+use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::project;
 
 // ============================================================================

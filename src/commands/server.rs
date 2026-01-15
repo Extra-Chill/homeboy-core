@@ -1,7 +1,6 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use homeboy::json;
 use homeboy::server::{self, Server};
 use homeboy::{BatchResult, MergeOutput};
 
@@ -261,7 +260,7 @@ fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
         ));
     }
 
-    let merged = json::merge_json_sources(args.json_spec(), &args.extra)?;
+    let merged = super::merge_json_sources(args.json_spec(), &args.extra)?;
     let json_string = serde_json::to_string(&merged).map_err(|e| {
         homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
     })?;

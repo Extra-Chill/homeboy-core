@@ -1,7 +1,7 @@
 use crate::changelog;
 use crate::component::{self, Component, VersionTarget};
 use crate::error::{Error, Result};
-use crate::json::{self, set_json_pointer};
+use crate::config::{from_str, set_json_pointer, to_string_pretty};
 use crate::local_files::{self, FileSystem};
 use crate::module::{load_all_modules, ModuleManifest};
 use regex::Regex;
@@ -108,7 +108,7 @@ pub fn update_version_in_file(
         && default_pattern_for_file(path).as_deref() == Some(pattern)
     {
         let content = local_files::local().read(Path::new(path))?;
-        let mut json: Value = json::from_str(&content)?;
+        let mut json: Value = from_str(&content)?;
         let Some(current) = json.get("version").and_then(|v: &Value| v.as_str()) else {
             return Err(Error::config_missing_key("version", Some(path.to_string())));
         };
@@ -125,7 +125,7 @@ pub fn update_version_in_file(
             "/version",
             serde_json::Value::String(new_version.to_string()),
         )?;
-        let output = json::to_string_pretty(&json)?;
+        let output = to_string_pretty(&json)?;
         local_files::local().write(Path::new(path), &output)?;
         return Ok(1);
     }

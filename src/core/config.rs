@@ -1,11 +1,402 @@
 use crate::error::Error;
-use crate::json;
 use crate::local_files::{self, FileSystem};
+use crate::output::{BatchResult, CreateOutput, CreateResult, MergeOutput, MergeResult, RemoveResult};
 use crate::paths;
 use crate::slugify;
 use crate::Result;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::path::PathBuf;
+use serde_json::Value;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+// ============================================================================
+// JSON Parsing Utilities (internal)
+// ============================================================================
+
+/// Parse JSON string into typed value.
+pub(crate) fn from_str<T: DeserializeOwned>(s: &str) -> Result<T> {
+    serde_json::from_str(s)
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse json".to_string())))
+}
+
+/// Serialize value to pretty-printed JSON string.
+pub(crate) fn to_string_pretty<T: Serialize>(data: &T) -> Result<String> {
+    serde_json::to_string_pretty(data)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))
+}
+
+/// Read JSON spec from string, file (@path), or stdin (-).
+pub(crate) fn read_json_spec_to_string(spec: &str) -> Result<String> {
+    use std::io::IsTerminal;
+
+    if spec.trim() == "-" {
+        let mut buf = String::new();
+        let mut stdin = std::io::stdin();
+        if stdin.is_terminal() {
+            return Err(Error::validation_invalid_argument(
+                "json",
+                "Cannot read JSON from stdin when stdin is a TTY",
+                None,
+                None,
+            ));
+        }
+        stdin
+            .read_to_string(&mut buf)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read stdin".to_string())))?;
+        return Ok(buf);
+    }
+
+    if let Some(path) = spec.strip_prefix('@') {
+        if path.trim().is_empty() {
+            return Err(Error::validation_invalid_argument(
+                "json",
+                "Invalid JSON spec '@' (missing file path)",
+                None,
+                None,
+            ));
+        }
+
+        return local_files::local().read(Path::new(path));
+    }
+
+    Ok(spec.to_string())
+}
+
+/// Detect if input is JSON object (starts with '{').
+pub(crate) fn is_json_input(input: &str) -> bool {
+    input.trim_start().starts_with('{')
+}
+
+/// Detect if input is JSON array (starts with '[').
+pub(crate) fn is_json_array(input: &str) -> bool {
+    input.trim_start().starts_with('[')
+}
+
+// ============================================================================
+// JSON Pointer Operations (internal)
+// ============================================================================
+
+pub(crate) fn set_json_pointer(root: &mut Value, pointer: &str, new_value: Value) -> Result<()> {
+    let pointer = normalize_pointer(pointer)?;
+    let Some((parent_ptr, token)) = split_parent_pointer(&pointer) else {
+        *root = new_value;
+        return Ok(());
+    };
+
+    let parent = ensure_pointer_container(root, &parent_ptr)?;
+    set_child(parent, &token, new_value)
+}
+
+fn normalize_pointer(pointer: &str) -> Result<String> {
+    if pointer.is_empty() {
+        return Ok(String::new());
+    }
+
+    if pointer == "/" {
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            "Invalid JSON pointer '/'",
+            None,
+            None,
+        ));
+    }
+
+    if !pointer.starts_with('/') {
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            format!("JSON pointer must start with '/': {}", pointer),
+            None,
+            None,
+        ));
+    }
+
+    Ok(pointer.to_string())
+}
+
+fn split_parent_pointer(pointer: &str) -> Option<(String, String)> {
+    if pointer.is_empty() {
+        return None;
+    }
+
+    let mut parts = pointer.rsplitn(2, '/');
+    let token = parts.next()?.to_string();
+    let parent = parts.next().unwrap_or("");
+
+    let parent_ptr = if parent.is_empty() {
+        String::new()
+    } else {
+        parent.to_string()
+    };
+
+    Some((parent_ptr, unescape_token(&token)))
+}
+
+fn ensure_pointer_container<'a>(root: &'a mut Value, pointer: &str) -> Result<&'a mut Value> {
+    if pointer.is_empty() {
+        return Ok(root);
+    }
+
+    let tokens: Vec<String> = pointer.split('/').skip(1).map(unescape_token).collect();
+
+    let mut current = root;
+
+    for token in tokens {
+        let next = match current {
+            Value::Object(map) => map
+                .entry(token)
+                .or_insert_with(|| Value::Object(serde_json::Map::new())),
+            Value::Null => {
+                *current = Value::Object(serde_json::Map::new());
+                if let Value::Object(map) = current {
+                    map.entry(token)
+                        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                } else {
+                    unreachable!()
+                }
+            }
+            Value::Array(arr) => {
+                let index = parse_array_index(&token)?;
+                if index >= arr.len() {
+                    return Err(Error::config_invalid_value(
+                        pointer,
+                        None,
+                        "Array index out of bounds while creating path",
+                    ));
+                }
+                &mut arr[index]
+            }
+            _ => {
+                return Err(Error::config_invalid_value(
+                    pointer,
+                    Some(value_type_name(current).to_string()),
+                    "Expected object/array at pointer",
+                ))
+            }
+        };
+
+        current = next;
+    }
+
+    Ok(current)
+}
+
+fn set_child(parent: &mut Value, token: &str, value: Value) -> Result<()> {
+    match parent {
+        Value::Object(map) => {
+            map.insert(token.to_string(), value);
+            Ok(())
+        }
+        Value::Array(arr) => {
+            let index = parse_array_index(token)?;
+            if index >= arr.len() {
+                return Err(Error::config_invalid_value(
+                    "arrayIndex",
+                    Some(index.to_string()),
+                    "Array index out of bounds",
+                ));
+            }
+            arr[index] = value;
+            Ok(())
+        }
+        _ => Err(Error::config_invalid_value(
+            "jsonPointer",
+            Some(value_type_name(parent).to_string()),
+            "Cannot set child on non-container",
+        )),
+    }
+}
+
+fn parse_array_index(token: &str) -> Result<usize> {
+    token.parse::<usize>().map_err(|_| {
+        Error::validation_invalid_argument(
+            "arrayIndex",
+            "Invalid array index token",
+            Some(token.to_string()),
+            None,
+        )
+    })
+}
+
+fn unescape_token(token: &str) -> String {
+    token.replace("~1", "/").replace("~0", "~")
+}
+
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+// ============================================================================
+// Config Merge/Remove Operations (internal)
+// ============================================================================
+
+/// Internal result from merge_config (no ID, caller adds it).
+pub(crate) struct MergeFields {
+    pub updated_fields: Vec<String>,
+}
+
+/// Merge a JSON patch into any serializable config type.
+pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
+    existing: &mut T,
+    patch: Value,
+) -> Result<MergeFields> {
+    let patch_obj = match &patch {
+        Value::Object(obj) => obj,
+        _ => {
+            return Err(Error::validation_invalid_argument(
+                "merge",
+                "Merge patch must be a JSON object",
+                None,
+                None,
+            ))
+        }
+    };
+
+    let updated_fields: Vec<String> = patch_obj.keys().cloned().collect();
+
+    if updated_fields.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "merge",
+            "Merge patch cannot be empty",
+            None,
+            None,
+        ));
+    }
+
+    let mut base = serde_json::to_value(&*existing)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize config".to_string())))?;
+
+    deep_merge(&mut base, patch);
+
+    *existing = serde_json::from_value(base)
+        .map_err(|e| Error::validation_invalid_json(e, Some("merge config".to_string())))?;
+
+    Ok(MergeFields { updated_fields })
+}
+
+/// Internal result from remove_config (no ID, caller adds it).
+pub(crate) struct RemoveFields {
+    pub removed_from: Vec<String>,
+}
+
+/// Remove items from arrays in any serializable config type.
+pub(crate) fn remove_config<T: Serialize + DeserializeOwned>(
+    existing: &mut T,
+    spec: Value,
+) -> Result<RemoveFields> {
+    let spec_obj = match &spec {
+        Value::Object(obj) => obj,
+        _ => {
+            return Err(Error::validation_invalid_argument(
+                "remove",
+                "Remove spec must be a JSON object",
+                None,
+                None,
+            ))
+        }
+    };
+
+    let fields: Vec<String> = spec_obj.keys().cloned().collect();
+
+    if fields.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "remove",
+            "Remove spec cannot be empty",
+            None,
+            None,
+        ));
+    }
+
+    let mut base = serde_json::to_value(&*existing)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize config".to_string())))?;
+
+    let mut removed_from = Vec::new();
+    deep_remove(&mut base, spec, &mut removed_from, String::new());
+
+    *existing = serde_json::from_value(base)
+        .map_err(|e| Error::validation_invalid_json(e, Some("remove config".to_string())))?;
+
+    Ok(RemoveFields { removed_from })
+}
+
+fn deep_remove(base: &mut Value, spec: Value, removed_from: &mut Vec<String>, path: String) {
+    match (base, spec) {
+        (Value::Object(base_obj), Value::Object(spec_obj)) => {
+            for (key, value) in spec_obj {
+                let field_path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{}.{}", path, key)
+                };
+                if let Some(base_value) = base_obj.get_mut(&key) {
+                    deep_remove(base_value, value, removed_from, field_path);
+                }
+            }
+        }
+        (Value::Array(base_arr), Value::Array(spec_arr)) => {
+            let original_len = base_arr.len();
+            base_arr.retain(|item| !spec_arr.contains(item));
+            if base_arr.len() < original_len {
+                removed_from.push(path);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn deep_merge(base: &mut Value, patch: Value) {
+    match (base, patch) {
+        (Value::Object(base_obj), Value::Object(patch_obj)) => {
+            for (key, value) in patch_obj {
+                if value.is_null() {
+                    base_obj.remove(&key);
+                } else {
+                    deep_merge(base_obj.entry(key).or_insert(Value::Null), value);
+                }
+            }
+        }
+        (Value::Array(base_arr), Value::Array(patch_arr)) => {
+            array_union(base_arr, patch_arr);
+        }
+        (base, patch) => *base = patch,
+    }
+}
+
+fn array_union(base: &mut Vec<Value>, patch: Vec<Value>) {
+    for item in patch {
+        if !base.contains(&item) {
+            base.push(item);
+        }
+    }
+}
+
+// ============================================================================
+// Bulk Input Parsing
+// ============================================================================
+
+/// Simple bulk input with just component IDs.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BulkIdsInput {
+    pub component_ids: Vec<String>,
+}
+
+/// Parse JSON spec into a BulkIdsInput.
+pub(crate) fn parse_bulk_ids(json_spec: &str) -> Result<BulkIdsInput> {
+    let raw = read_json_spec_to_string(json_spec)?;
+    serde_json::from_str(&raw)
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk IDs input".to_string())))
+}
+
+// ============================================================================
+// Config Entity Trait
+// ============================================================================
 
 pub(crate) trait ConfigEntity: Serialize + DeserializeOwned {
     fn id(&self) -> &str;
@@ -29,7 +420,7 @@ pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
         return Err(T::not_found_error(id.to_string(), suggestions));
     }
     let content = local_files::local().read(&path)?;
-    let mut entity: T = json::from_str(&content)?;
+    let mut entity: T = from_str(&content)?;
     entity.set_id(id.to_string());
     Ok(entity)
 }
@@ -44,7 +435,7 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
         .filter_map(|e| {
             let id = e.path.file_stem()?.to_string_lossy().to_string();
             let content = local_files::local().read(&e.path).ok()?;
-            let mut entity: T = json::from_str(&content).ok()?;
+            let mut entity: T = from_str(&content).ok()?;
             entity.set_id(id);
             Some(entity)
         })
@@ -80,22 +471,9 @@ pub(crate) fn save<T: ConfigEntity>(entity: &T) -> Result<()> {
 
     let path = T::config_path(entity.id())?;
     local_files::ensure_app_dirs()?;
-    let content = json::to_string_pretty(entity)?;
+    let content = to_string_pretty(entity)?;
     local_files::local().write(&path, &content)?;
     Ok(())
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateResult<T> {
-    pub id: String,
-    pub entity: T,
-}
-
-/// Unified output for create operations (single or bulk).
-#[derive(Debug, Clone)]
-pub enum CreateOutput<T> {
-    Single(CreateResult<T>),
-    Bulk(BatchResult),
 }
 
 /// Internal: create a single entity from a constructed struct.
@@ -117,7 +495,7 @@ fn create_single<T: ConfigEntity>(entity: T) -> Result<CreateResult<T>> {
 
     let path = T::config_path(entity.id())?;
     local_files::ensure_app_dirs()?;
-    let content = json::to_string_pretty(&entity)?;
+    let content = to_string_pretty(&entity)?;
     local_files::local().write(&path, &content)?;
 
     Ok(CreateResult {
@@ -128,7 +506,7 @@ fn create_single<T: ConfigEntity>(entity: T) -> Result<CreateResult<T>> {
 
 /// Internal: create a single entity from JSON string.
 fn create_single_from_json<T: ConfigEntity>(json_spec: &str) -> Result<CreateResult<T>> {
-    let value: serde_json::Value = json::from_str(json_spec)?;
+    let value: serde_json::Value = from_str(json_spec)?;
 
     let id = value
         .get("id")
@@ -156,9 +534,9 @@ pub(crate) fn create<T: ConfigEntity>(
     json_spec: &str,
     skip_existing: bool,
 ) -> Result<CreateOutput<T>> {
-    let raw = json::read_json_spec_to_string(json_spec)?;
+    let raw = read_json_spec_to_string(json_spec)?;
 
-    if json::is_json_array(&raw) {
+    if is_json_array(&raw) {
         return Ok(CreateOutput::Bulk(create_batch::<T>(&raw, skip_existing)?));
     }
 
@@ -196,100 +574,15 @@ pub(crate) fn list_ids<T: ConfigEntity>() -> Result<Vec<String>> {
 }
 
 // ============================================================================
-// Batch Operations
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchResult {
-    pub created: u32,
-    pub updated: u32,
-    pub skipped: u32,
-    pub errors: u32,
-    pub items: Vec<BatchResultItem>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchResultItem {
-    pub id: String,
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-impl BatchResult {
-    pub fn new() -> Self {
-        Self {
-            created: 0,
-            updated: 0,
-            skipped: 0,
-            errors: 0,
-            items: Vec::new(),
-        }
-    }
-
-    pub fn record_created(&mut self, id: String) {
-        self.created += 1;
-        self.items.push(BatchResultItem {
-            id,
-            status: "created".to_string(),
-            error: None,
-        });
-    }
-
-    pub fn record_updated(&mut self, id: String) {
-        self.updated += 1;
-        self.items.push(BatchResultItem {
-            id,
-            status: "updated".to_string(),
-            error: None,
-        });
-    }
-
-    pub fn record_skipped(&mut self, id: String) {
-        self.skipped += 1;
-        self.items.push(BatchResultItem {
-            id,
-            status: "skipped".to_string(),
-            error: None,
-        });
-    }
-
-    pub fn record_error(&mut self, id: String, error: String) {
-        self.errors += 1;
-        self.items.push(BatchResultItem {
-            id,
-            status: "error".to_string(),
-            error: Some(error),
-        });
-    }
-}
-
-impl Default for BatchResult {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
 // Merge Operations
 // ============================================================================
-
-/// Unified output for merge operations (single or bulk).
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-pub enum MergeOutput {
-    Single(json::MergeResult),
-    Bulk(BatchResult),
-}
 
 /// Unified merge that auto-detects single vs bulk operations.
 /// Array input triggers batch merge, object input triggers single merge.
 pub fn merge<T: ConfigEntity>(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
-    let raw = json::read_json_spec_to_string(json_spec)?;
+    let raw = read_json_spec_to_string(json_spec)?;
 
-    if json::is_json_array(&raw) {
+    if is_json_array(&raw) {
         return Ok(MergeOutput::Bulk(merge_batch_from_json::<T>(&raw)?));
     }
 
@@ -306,7 +599,7 @@ pub(crate) fn create_batch<T: ConfigEntity>(
     spec: &str,
     skip_existing: bool,
 ) -> Result<BatchResult> {
-    let value: serde_json::Value = json::from_str(spec)?;
+    let value: serde_json::Value = from_str(spec)?;
     let items: Vec<serde_json::Value> = if value.is_array() {
         value.as_array().unwrap().clone()
     } else {
@@ -373,9 +666,9 @@ pub(crate) fn create_batch<T: ConfigEntity>(
 pub(crate) fn merge_from_json<T: ConfigEntity>(
     id: Option<&str>,
     json_spec: &str,
-) -> Result<json::MergeResult> {
-    let raw = json::read_json_spec_to_string(json_spec)?;
-    let mut parsed: serde_json::Value = json::from_str(&raw)?;
+) -> Result<MergeResult> {
+    let raw = read_json_spec_to_string(json_spec)?;
+    let mut parsed: serde_json::Value = from_str(&raw)?;
 
     let effective_id = id
         .map(String::from)
@@ -397,18 +690,18 @@ pub(crate) fn merge_from_json<T: ConfigEntity>(
     }
 
     let mut entity = load::<T>(&effective_id)?;
-    let result = json::merge_config(&mut entity, parsed)?;
+    let result = merge_config(&mut entity, parsed)?;
     entity.set_id(effective_id.clone());
     save(&entity)?;
 
-    Ok(json::MergeResult {
+    Ok(MergeResult {
         id: effective_id,
         updated_fields: result.updated_fields,
     })
 }
 
 pub(crate) fn merge_batch_from_json<T: ConfigEntity>(raw_json: &str) -> Result<BatchResult> {
-    let value: serde_json::Value = json::from_str(raw_json)?;
+    let value: serde_json::Value = from_str(raw_json)?;
 
     let items: Vec<serde_json::Value> = if value.is_array() {
         value.as_array().unwrap().clone()
@@ -436,7 +729,7 @@ pub(crate) fn merge_batch_from_json<T: ConfigEntity>(raw_json: &str) -> Result<B
         }
 
         match load::<T>(&id) {
-            Ok(mut entity) => match json::merge_config(&mut entity, patch) {
+            Ok(mut entity) => match merge_config(&mut entity, patch) {
                 Ok(_) => {
                     entity.set_id(id.clone());
                     if let Err(e) = save(&entity) {
@@ -462,9 +755,9 @@ pub(crate) fn merge_batch_from_json<T: ConfigEntity>(raw_json: &str) -> Result<B
 pub(crate) fn remove_from_json<T: ConfigEntity>(
     id: Option<&str>,
     json_spec: &str,
-) -> Result<json::RemoveResult> {
-    let raw = json::read_json_spec_to_string(json_spec)?;
-    let mut parsed: serde_json::Value = json::from_str(&raw)?;
+) -> Result<RemoveResult> {
+    let raw = read_json_spec_to_string(json_spec)?;
+    let mut parsed: serde_json::Value = from_str(&raw)?;
 
     let effective_id = id
         .map(String::from)
@@ -486,10 +779,10 @@ pub(crate) fn remove_from_json<T: ConfigEntity>(
     }
 
     let mut entity = load::<T>(&effective_id)?;
-    let result = json::remove_config(&mut entity, parsed)?;
+    let result = remove_config(&mut entity, parsed)?;
     save(&entity)?;
 
-    Ok(json::RemoveResult {
+    Ok(RemoveResult {
         id: effective_id,
         removed_from: result.removed_from,
     })

@@ -1,6 +1,6 @@
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
-use crate::json;
+use crate::output::{CreateOutput, MergeOutput, MergeResult, RemoveResult};
 use crate::paths;
 use crate::project;
 use crate::slugify;
@@ -136,23 +136,23 @@ pub fn exists(id: &str) -> bool {
 /// Unified merge that auto-detects single vs bulk operations.
 /// Array input triggers batch merge, object input triggers single merge.
 /// Single merge supports auto-rename if JSON contains a different `id` field.
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<config::MergeOutput> {
-    let raw = json::read_json_spec_to_string(json_spec)?;
+pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
+    let raw = config::read_json_spec_to_string(json_spec)?;
 
-    if json::is_json_array(&raw) {
-        return Ok(config::MergeOutput::Bulk(config::merge_batch_from_json::<
+    if config::is_json_array(&raw) {
+        return Ok(MergeOutput::Bulk(config::merge_batch_from_json::<
             Component,
         >(&raw)?));
     }
 
-    Ok(config::MergeOutput::Single(merge_from_json(id, &raw)?))
+    Ok(MergeOutput::Single(merge_from_json(id, &raw)?))
 }
 
 /// Merge JSON into component config with auto-rename support.
 /// If JSON contains an `id` field that differs from the target, automatically renames the component.
-fn merge_from_json(id: Option<&str>, json_spec: &str) -> Result<json::MergeResult> {
-    let raw = json::read_json_spec_to_string(json_spec)?;
-    let parsed: serde_json::Value = json::from_str(&raw)?;
+fn merge_from_json(id: Option<&str>, json_spec: &str) -> Result<MergeResult> {
+    let raw = config::read_json_spec_to_string(json_spec)?;
+    let parsed: serde_json::Value = config::from_str(&raw)?;
 
     if let Some(json_id) = parsed.get("id").and_then(|v| v.as_str()) {
         if let Some(current_id) = id {
@@ -166,11 +166,11 @@ fn merge_from_json(id: Option<&str>, json_spec: &str) -> Result<json::MergeResul
     config::merge_from_json::<Component>(id, json_spec)
 }
 
-pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::RemoveResult> {
+pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<RemoveResult> {
     config::remove_from_json::<Component>(id, json_spec)
 }
 
-pub fn create(json_spec: &str, skip_existing: bool) -> Result<config::CreateOutput<Component>> {
+pub fn create(json_spec: &str, skip_existing: bool) -> Result<CreateOutput<Component>> {
     config::create::<Component>(json_spec, skip_existing)
 }
 

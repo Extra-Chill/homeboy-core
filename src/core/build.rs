@@ -2,7 +2,8 @@ use serde::Serialize;
 
 use crate::component;
 use crate::error::{Error, Result};
-use crate::json::{is_json_input, parse_bulk_ids, BulkResult, BulkSummary, ItemOutcome};
+use crate::config::{is_json_input, parse_bulk_ids};
+use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::ssh::execute_local_command_in_dir;
 
 // === Public API ===

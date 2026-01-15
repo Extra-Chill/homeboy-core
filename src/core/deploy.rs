@@ -8,7 +8,7 @@ use crate::build;
 use crate::component::{self, Component};
 use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
 use crate::error::{Error, Result};
-use crate::json::read_json_spec_to_string;
+use crate::config::read_json_spec_to_string;
 use crate::module::{load_all_modules, DeployVerification};
 use crate::project::{self, Project};
 use crate::shell;

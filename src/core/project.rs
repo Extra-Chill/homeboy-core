@@ -1,6 +1,6 @@
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
-use crate::json;
+use crate::output::{CreateOutput, MergeOutput, RemoveResult};
 use crate::paths;
 use crate::server;
 use crate::slugify;
@@ -340,15 +340,15 @@ pub fn exists(id: &str) -> bool {
     config::exists::<Project>(id)
 }
 
-pub fn merge(id: Option<&str>, json_spec: &str) -> Result<config::MergeOutput> {
+pub fn merge(id: Option<&str>, json_spec: &str) -> Result<MergeOutput> {
     config::merge::<Project>(id, json_spec)
 }
 
-pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::RemoveResult> {
+pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<RemoveResult> {
     config::remove_from_json::<Project>(id, json_spec)
 }
 
-pub fn create(json_spec: &str, skip_existing: bool) -> Result<config::CreateOutput<Project>> {
+pub fn create(json_spec: &str, skip_existing: bool) -> Result<CreateOutput<Project>> {
     config::create::<Project>(json_spec, skip_existing)
 }
 

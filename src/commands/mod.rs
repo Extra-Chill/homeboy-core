@@ -1,4 +1,7 @@
 use clap::Args;
+use serde_json::{json, Map, Value};
+use std::io::Read;
+use std::path::Path;
 
 pub type CmdResult<T> = homeboy::Result<(T, i32)>;
 
@@ -30,6 +33,118 @@ impl DynamicSetArgs {
     pub fn json_spec(&self) -> Option<&str> {
         self.json.as_deref().or(self.spec.as_deref())
     }
+}
+
+// ============================================================================
+// JSON Input Parsing (CLI layer)
+// ============================================================================
+
+/// Parse --key value pairs into a JSON object.
+fn parse_kv_flags(extra: &[String]) -> homeboy::Result<Value> {
+    let mut obj = Map::new();
+    let mut iter = extra.iter().peekable();
+
+    while let Some(arg) = iter.next() {
+        if let Some(key) = arg.strip_prefix("--") {
+            let value = iter.next().ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    key,
+                    format!("Missing value for flag --{}", key),
+                    None,
+                    None,
+                )
+            })?;
+            let parsed = parse_value(value);
+            obj.insert(key.to_string(), parsed);
+        }
+    }
+
+    Ok(Value::Object(obj))
+}
+
+/// Parse a string value into appropriate JSON type.
+/// Order: JSON literal → bool → number → string
+fn parse_value(s: &str) -> Value {
+    // Try JSON first (handles arrays, objects, quoted strings)
+    if let Ok(v) = serde_json::from_str(s) {
+        return v;
+    }
+    // Try bool
+    if s == "true" {
+        return json!(true);
+    }
+    if s == "false" {
+        return json!(false);
+    }
+    // Try number
+    if let Ok(n) = s.parse::<i64>() {
+        return json!(n);
+    }
+    if let Ok(n) = s.parse::<f64>() {
+        return json!(n);
+    }
+    // Default to string
+    json!(s)
+}
+
+/// Read JSON spec from string, file (@path), or stdin (-).
+fn read_json_spec_to_string(spec: &str) -> homeboy::Result<String> {
+    use std::io::IsTerminal;
+
+    if spec.trim() == "-" {
+        let mut buf = String::new();
+        let mut stdin = std::io::stdin();
+        if stdin.is_terminal() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "json",
+                "Cannot read JSON from stdin when stdin is a TTY",
+                None,
+                None,
+            ));
+        }
+        stdin
+            .read_to_string(&mut buf)
+            .map_err(|e| homeboy::Error::internal_io(e.to_string(), Some("read stdin".to_string())))?;
+        return Ok(buf);
+    }
+
+    if let Some(path) = spec.strip_prefix('@') {
+        if path.trim().is_empty() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "json",
+                "Invalid JSON spec '@' (missing file path)",
+                None,
+                None,
+            ));
+        }
+        return std::fs::read_to_string(Path::new(path))
+            .map_err(|e| homeboy::Error::internal_io(e.to_string(), Some(format!("read {}", path))));
+    }
+
+    Ok(spec.to_string())
+}
+
+/// Merge JSON spec with --key value flags. Flags override spec values.
+pub fn merge_json_sources(spec: Option<&str>, extra: &[String]) -> homeboy::Result<Value> {
+    let mut base = if let Some(spec) = spec {
+        let raw = read_json_spec_to_string(spec)?;
+        serde_json::from_str(&raw).map_err(|e| {
+            homeboy::Error::validation_invalid_json(e, Some("parse JSON spec".to_string()))
+        })?
+    } else {
+        Value::Object(Map::new())
+    };
+
+    if !extra.is_empty() {
+        let flags = parse_kv_flags(extra)?;
+        if let (Value::Object(base_obj), Value::Object(flags_obj)) = (&mut base, flags) {
+            for (k, v) in flags_obj {
+                base_obj.insert(k, v);
+            }
+        }
+    }
+
+    Ok(base)
 }
 
 pub mod api;

@@ -7,7 +7,7 @@ use crate::component::{self, Component};
 use crate::core::local_files::{self, FileSystem};
 use crate::core::version;
 use crate::error::{Error, Result};
-use crate::json::read_json_spec_to_string;
+use crate::config::read_json_spec_to_string;
 
 const DEFAULT_NEXT_SECTION_LABEL: &str = "Unreleased";
 
@@ -484,7 +484,7 @@ pub fn add_items_bulk(json_spec: &str) -> Result<AddItemsOutput> {
 pub fn add_items(component_id: Option<&str>, messages: &[String]) -> Result<AddItemsOutput> {
     // Auto-detect JSON in component_id
     if let Some(input) = component_id {
-        if crate::json::is_json_input(input) {
+        if crate::config::is_json_input(input) {
             return add_items_bulk(input);
         }
     }
