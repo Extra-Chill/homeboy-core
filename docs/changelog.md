@@ -6,6 +6,8 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## Unreleased
 
+## [0.19.1] - 2026-01-15
+
 - fix: `homeboy changes` surfaces noisy untracked hints and respects `.gitignore`
 
 ## [0.19.0] - 2026-01-15
