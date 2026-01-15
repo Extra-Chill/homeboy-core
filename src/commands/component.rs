@@ -116,81 +116,87 @@ pub fn run(
             build_command,
             extract_command,
         } => {
-            if let Some(spec) = json {
-                let summary = component::create_batch(&spec, skip_existing)?;
-                let exit_code = if summary.errors > 0 { 1 } else { 0 };
-                return Ok((
-                    ComponentOutput {
-                        command: "component.create".to_string(),
-                        success: summary.errors == 0,
-                        import: Some(summary),
-                        ..Default::default()
-                    },
-                    exit_code,
-                ));
-            }
-
-            let local_path = local_path.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "local_path",
-                    "Missing required argument: --local-path",
-                    None,
-                    None,
-                )
-            })?;
-
-            let remote_path = remote_path.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "remote_path",
-                    "Missing required argument: --remote-path",
-                    None,
-                    None,
-                )
-            })?;
-
-            let build_artifact = build_artifact.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "build_artifact",
-                    "Missing required argument: --build-artifact",
-                    None,
-                    None,
-                )
-            })?;
-
-            let dir_name = Path::new(&local_path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| {
+            let json_spec = if let Some(spec) = json {
+                spec
+            } else {
+                let local_path = local_path.ok_or_else(|| {
                     homeboy::Error::validation_invalid_argument(
                         "local_path",
-                        "Could not derive component ID from local path",
-                        Some(local_path.clone()),
+                        "Missing required argument: --local-path",
+                        None,
                         None,
                     )
                 })?;
 
-            let id = component::slugify_id(dir_name)?;
+                let remote_path = remote_path.ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "remote_path",
+                        "Missing required argument: --remote-path",
+                        None,
+                        None,
+                    )
+                })?;
 
-            let mut new_component = Component::new(id.clone(), local_path, remote_path, build_artifact);
+                let build_artifact = build_artifact.ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "build_artifact",
+                        "Missing required argument: --build-artifact",
+                        None,
+                        None,
+                    )
+                })?;
 
-            if !version_targets.is_empty() {
-                new_component.version_targets = Some(component::parse_version_targets(&version_targets)?);
+                let dir_name = Path::new(&local_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or_else(|| {
+                        homeboy::Error::validation_invalid_argument(
+                            "local_path",
+                            "Could not derive component ID from local path",
+                            Some(local_path.clone()),
+                            None,
+                        )
+                    })?;
+
+                let id = component::slugify_id(dir_name)?;
+
+                let mut new_component = Component::new(id, local_path, remote_path, build_artifact);
+
+                if !version_targets.is_empty() {
+                    new_component.version_targets = Some(component::parse_version_targets(&version_targets)?);
+                }
+
+                new_component.build_command = build_command;
+                new_component.extract_command = extract_command;
+
+                serde_json::to_string(&new_component).map_err(|e| {
+                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
+                })?
+            };
+
+            match component::create(&json_spec, skip_existing)? {
+                homeboy::CreateOutput::Single(result) => Ok((
+                    ComponentOutput {
+                        command: "component.create".to_string(),
+                        component_id: Some(result.id),
+                        component: Some(result.entity),
+                        ..Default::default()
+                    },
+                    0,
+                )),
+                homeboy::CreateOutput::Bulk(summary) => {
+                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                    Ok((
+                        ComponentOutput {
+                            command: "component.create".to_string(),
+                            success: summary.errors == 0,
+                            import: Some(summary),
+                            ..Default::default()
+                        },
+                        exit_code,
+                    ))
+                }
             }
-
-            new_component.build_command = build_command;
-            new_component.extract_command = extract_command;
-
-            let result = component::create(new_component)?;
-
-            Ok((
-                ComponentOutput {
-                    command: "component.create".to_string(),
-                    component_id: Some(result.id),
-                    component: Some(result.entity),
-                    ..Default::default()
-                },
-                0,
-            ))
         }
         ComponentCommand::Show { id } => show(&id),
         ComponentCommand::Set { id, spec, json } => {

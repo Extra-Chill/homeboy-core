@@ -260,48 +260,54 @@ pub fn run(
             base_path,
             table_prefix,
         } => {
-            if let Some(spec) = json.as_deref() {
-                let summary = project::create_batch(spec, skip_existing)?;
-                let exit_code = if summary.errors > 0 { 1 } else { 0 };
-                return Ok((
-                    ProjectOutput {
-                        command: "project.create".to_string(),
-                        import: Some(summary),
-                        ..Default::default()
-                    },
-                    exit_code,
-                ));
-            }
+            let json_spec = if let Some(spec) = json {
+                spec
+            } else {
+                let id = id.ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "id",
+                        "Missing required argument: id",
+                        None,
+                        None,
+                    )
+                })?;
 
-            let id = id.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "id",
-                    "Missing required argument: id",
-                    None,
-                    None,
-                )
-            })?;
+                let new_project = project::Project {
+                    id,
+                    domain,
+                    server_id,
+                    base_path,
+                    table_prefix,
+                    ..Default::default()
+                };
 
-            let new_project = project::Project {
-                id: id.clone(),
-                domain,
-                server_id,
-                base_path,
-                table_prefix,
-                ..Default::default()
+                serde_json::to_string(&new_project).map_err(|e| {
+                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
+                })?
             };
 
-            let result = project::create(new_project)?;
-
-            Ok((
-                ProjectOutput {
-                    command: "project.create".to_string(),
-                    project_id: Some(result.id),
-                    project: Some(result.entity),
-                    ..Default::default()
-                },
-                0,
-            ))
+            match project::create(&json_spec, skip_existing)? {
+                homeboy::CreateOutput::Single(result) => Ok((
+                    ProjectOutput {
+                        command: "project.create".to_string(),
+                        project_id: Some(result.id),
+                        project: Some(result.entity),
+                        ..Default::default()
+                    },
+                    0,
+                )),
+                homeboy::CreateOutput::Bulk(summary) => {
+                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                    Ok((
+                        ProjectOutput {
+                            command: "project.create".to_string(),
+                            import: Some(summary),
+                            ..Default::default()
+                        },
+                        exit_code,
+                    ))
+                }
+            }
         }
         ProjectCommand::Set {
             project_id,

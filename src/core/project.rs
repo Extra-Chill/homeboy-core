@@ -348,12 +348,8 @@ pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::Remov
     config::remove_from_json::<Project>(id, json_spec)
 }
 
-pub fn create(project: Project) -> Result<config::CreateResult<Project>> {
-    config::create(project)
-}
-
-pub fn create_batch(json_spec: &str, skip_existing: bool) -> Result<config::BatchResult> {
-    config::create_batch::<Project>(json_spec, skip_existing)
+pub fn create(json_spec: &str, skip_existing: bool) -> Result<config::CreateOutput<Project>> {
+    config::create::<Project>(json_spec, skip_existing)
 }
 
 pub fn slugify_id(name: &str) -> Result<String> {

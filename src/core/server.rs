@@ -96,12 +96,8 @@ pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<json::Remov
     config::remove_from_json::<Server>(id, json_spec)
 }
 
-pub fn create(server: Server) -> Result<config::CreateResult<Server>> {
-    config::create(server)
-}
-
-pub fn create_batch(json_spec: &str, skip_existing: bool) -> Result<config::BatchResult> {
-    config::create_batch::<Server>(json_spec, skip_existing)
+pub fn create(json_spec: &str, skip_existing: bool) -> Result<config::CreateOutput<Server>> {
+    config::create::<Server>(json_spec, skip_existing)
 }
 
 pub fn key_path(id: &str) -> Result<std::path::PathBuf> {

@@ -91,9 +91,16 @@ pub struct CreateResult<T> {
     pub entity: T,
 }
 
-/// Universal create function for any ConfigEntity.
+/// Unified output for create operations (single or bulk).
+#[derive(Debug, Clone)]
+pub enum CreateOutput<T> {
+    Single(CreateResult<T>),
+    Bulk(BatchResult),
+}
+
+/// Internal: create a single entity from a constructed struct.
 /// Validates ID, checks for existence, runs entity-specific validation, then saves.
-pub(crate) fn create<T: ConfigEntity>(entity: T) -> Result<CreateResult<T>> {
+fn create_single<T: ConfigEntity>(entity: T) -> Result<CreateResult<T>> {
     slugify::validate_component_id(entity.id())?;
     entity.validate()?;
 
@@ -117,6 +124,45 @@ pub(crate) fn create<T: ConfigEntity>(entity: T) -> Result<CreateResult<T>> {
         id: entity.id().to_string(),
         entity,
     })
+}
+
+/// Internal: create a single entity from JSON string.
+fn create_single_from_json<T: ConfigEntity>(json_spec: &str) -> Result<CreateResult<T>> {
+    let value: serde_json::Value = json::from_str(json_spec)?;
+
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "id",
+                "Missing required field: id",
+                None,
+                None,
+            )
+        })?
+        .to_string();
+
+    let mut entity: T = serde_json::from_value(value)
+        .map_err(|e| Error::validation_invalid_argument("json", e.to_string(), None, None))?;
+    entity.set_id(id);
+
+    create_single(entity)
+}
+
+/// Unified create that auto-detects single vs bulk operations.
+/// Array input triggers batch create, object input triggers single create.
+pub(crate) fn create<T: ConfigEntity>(
+    json_spec: &str,
+    skip_existing: bool,
+) -> Result<CreateOutput<T>> {
+    let raw = json::read_json_spec_to_string(json_spec)?;
+
+    if json::is_json_array(&raw) {
+        return Ok(CreateOutput::Bulk(create_batch::<T>(&raw, skip_existing)?));
+    }
+
+    Ok(CreateOutput::Single(create_single_from_json::<T>(&raw)?))
 }
 
 pub(crate) fn delete<T: ConfigEntity>(id: &str) -> Result<()> {

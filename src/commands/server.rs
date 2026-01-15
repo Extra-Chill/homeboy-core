@@ -145,66 +145,72 @@ pub fn run(
             user,
             port,
         } => {
-            if let Some(spec) = json.as_deref() {
-                let summary = server::create_batch(spec, skip_existing)?;
-                let exit_code = if summary.errors > 0 { 1 } else { 0 };
-                return Ok((
-                    ServerOutput {
-                        command: "server.create".to_string(),
-                        import: Some(summary),
-                        ..Default::default()
-                    },
-                    exit_code,
-                ));
-            }
+            let json_spec = if let Some(spec) = json {
+                spec
+            } else {
+                let id = id.ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "id",
+                        "Missing required argument: id",
+                        None,
+                        None,
+                    )
+                })?;
 
-            let id = id.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "id",
-                    "Missing required argument: id",
-                    None,
-                    None,
-                )
-            })?;
+                let host = host.ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "host",
+                        "Missing required argument: --host",
+                        None,
+                        None,
+                    )
+                })?;
 
-            let host = host.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "host",
-                    "Missing required argument: --host",
-                    None,
-                    None,
-                )
-            })?;
+                let user = user.ok_or_else(|| {
+                    homeboy::Error::validation_invalid_argument(
+                        "user",
+                        "Missing required argument: --user",
+                        None,
+                        None,
+                    )
+                })?;
 
-            let user = user.ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "user",
-                    "Missing required argument: --user",
-                    None,
-                    None,
-                )
-            })?;
+                let new_server = server::Server {
+                    id,
+                    host,
+                    user,
+                    port: port.unwrap_or(22),
+                    identity_file: None,
+                };
 
-            let new_server = server::Server {
-                id: id.clone(),
-                host,
-                user,
-                port: port.unwrap_or(22),
-                identity_file: None,
+                serde_json::to_string(&new_server).map_err(|e| {
+                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
+                })?
             };
 
-            let result = server::create(new_server)?;
-
-            Ok((
-                ServerOutput {
-                    command: "server.create".to_string(),
-                    server_id: Some(result.id),
-                    server: Some(result.entity),
-                    updated: Some(vec!["created".to_string()]),
-                    ..Default::default()
-                },
-                0,
-            ))
+            match server::create(&json_spec, skip_existing)? {
+                homeboy::CreateOutput::Single(result) => Ok((
+                    ServerOutput {
+                        command: "server.create".to_string(),
+                        server_id: Some(result.id),
+                        server: Some(result.entity),
+                        updated: Some(vec!["created".to_string()]),
+                        ..Default::default()
+                    },
+                    0,
+                )),
+                homeboy::CreateOutput::Bulk(summary) => {
+                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                    Ok((
+                        ServerOutput {
+                            command: "server.create".to_string(),
+                            import: Some(summary),
+                            ..Default::default()
+                        },
+                        exit_code,
+                    ))
+                }
+            }
         }
         ServerCommand::Show { server_id } => show(&server_id),
         ServerCommand::Set {
