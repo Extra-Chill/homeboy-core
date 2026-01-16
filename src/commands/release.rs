@@ -6,10 +6,14 @@ use homeboy::release::{self, ReleasePlan, ReleaseRun};
 use super::CmdResult;
 
 #[derive(Args)]
-
+#[command(args_conflicts_with_subcommands = true)]
 pub struct ReleaseArgs {
+    /// Component ID for direct release run (shorthand for `release run <component>`)
+    #[arg(value_name = "COMPONENT")]
+    component_id: Option<String>,
+
     #[command(subcommand)]
-    command: ReleaseCommand,
+    command: Option<ReleaseCommand>,
 }
 
 #[derive(Subcommand)]
@@ -38,14 +42,26 @@ pub enum ReleaseOutput {
 }
 
 pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ReleaseOutput> {
-    match args.command {
-        ReleaseCommand::Plan { component_id } => {
-            let plan = release::plan(&component_id, None)?;
-            Ok((ReleaseOutput::Plan { plan }, 0))
+    if let Some(command) = args.command {
+        match command {
+            ReleaseCommand::Plan { component_id } => {
+                let plan = release::plan(&component_id, None)?;
+                Ok((ReleaseOutput::Plan { plan }, 0))
+            }
+            ReleaseCommand::Run { component_id } => {
+                let run = release::run(&component_id, None)?;
+                Ok((ReleaseOutput::Run { run }, 0))
+            }
         }
-        ReleaseCommand::Run { component_id } => {
-            let run = release::run(&component_id, None)?;
-            Ok((ReleaseOutput::Run { run }, 0))
-        }
+    } else if let Some(component_id) = args.component_id {
+        let run = release::run(&component_id, None)?;
+        Ok((ReleaseOutput::Run { run }, 0))
+    } else {
+        Err(homeboy::Error::validation_invalid_argument(
+            "input",
+            "Provide component ID or use `release plan|run <component>`",
+            None,
+            None,
+        ))
     }
 }
