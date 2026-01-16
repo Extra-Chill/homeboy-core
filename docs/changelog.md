@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.22.10] - 2026-01-16
+
+- fix: Release pipeline always creates annotated tags ensuring git push --follow-tags works correctly
+
 ## [0.22.9] - 2026-01-16
 
 ### Fixed
