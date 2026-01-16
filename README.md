@@ -92,7 +92,8 @@ Common paths:
 
 Notes:
 
-- Homeboy does not use a global project config file like `./homeboy.json`.
+- Homeboy does not use a repo-local config file like `./homeboy.json`.
+- Global defaults live in the OS config directory as `homeboy/homeboy.json`.
 - Persistent configuration is stored as JSON records under `projects/`, `servers/`, and `components/`.
 - Homeboy stores persistent SSH keys under `keys/`.
 
