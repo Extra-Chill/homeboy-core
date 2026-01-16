@@ -4,10 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.20.9] - 2026-01-15
+
+- Omit empty Unreleased section when finalizing releases
+
+## [0.20.8] - 2026-01-15
 
 - Add init snapshots for version, git status, last release, and changelog preview
 - Surface module readiness details with failure reason and output
+- Omit empty Unreleased section when finalizing releases
 
 ## [0.20.7] - 2026-01-15
 

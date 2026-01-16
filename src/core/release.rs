@@ -839,7 +839,10 @@ pub fn plan(component_id: &str, module_id: Option<&str>) -> Result<ReleasePlan> 
 
     let mut hints = build_plan_hints(component_id, &steps, &modules);
     if commit_auto_inserted {
-        hints.insert(0, "git.commit step auto-inserted before git.tag".to_string());
+        hints.insert(
+            0,
+            "git.commit step auto-inserted before git.tag".to_string(),
+        );
     }
     hints.push(format!(
         "Review changes first with: homeboy changes {}",

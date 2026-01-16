@@ -270,13 +270,6 @@ pub fn finalize_next_section(
         ));
     }
 
-    // Preserve the exact next-section heading label we found.
-    let next_label = lines[start]
-        .trim()
-        .trim_start_matches('#')
-        .trim()
-        .to_string();
-
     let mut out_lines: Vec<String> = Vec::new();
 
     // Copy everything before ## Unreleased.
@@ -284,14 +277,10 @@ pub fn finalize_next_section(
         out_lines.push((*line).to_string());
     }
 
-    // Add new empty ## Unreleased at the top.
+    // Replace old ## Unreleased with ## [new_version] - date (Keep a Changelog format).
     if out_lines.last().is_some_and(|l| !l.trim().is_empty()) {
         out_lines.push(String::new());
     }
-    out_lines.push(format!("## {}", next_label));
-    out_lines.push(String::new());
-
-    // Replace old ## Unreleased with ## [new_version] - date (Keep a Changelog format).
     let today = Local::now().format("%Y-%m-%d");
     out_lines.push(format!("## [{}] - {}", new_version.trim(), today));
     out_lines.push(String::new());
@@ -832,17 +821,12 @@ mod tests {
     }
 
     #[test]
-    fn finalize_moves_body_to_new_version_and_resets_next_section() {
+    fn finalize_moves_body_to_new_version_and_omits_empty_next_section() {
         let content = "# Changelog\n\n## Unreleased\n\n- First\n- Second\n\n## 0.1.0\n\n- Old\n";
         let aliases = vec!["Unreleased".to_string(), "[Unreleased]".to_string()];
         let (out, changed) = finalize_next_section(content, &aliases, "0.2.0", false).unwrap();
         assert!(changed);
-        let unreleased_pos = out.find("## Unreleased").unwrap();
-        let version_pos = out.find("## [0.2.0]").unwrap();
-        assert!(
-            unreleased_pos < version_pos,
-            "## Unreleased should come before ## [0.2.0]"
-        );
+        assert!(!out.contains("## Unreleased\n\n## [0.2.0]"));
         // Check for Keep a Changelog format: ## [X.Y.Z] - YYYY-MM-DD
         assert!(out.contains("## [0.2.0] - "));
         assert!(out.contains("- First\n- Second"));
@@ -856,15 +840,6 @@ mod tests {
         let err = finalize_next_section(content, &aliases, "0.2.0", false).unwrap_err();
         assert_eq!(err.code.as_str(), "validation.invalid_argument");
         assert!(err.message.contains("Invalid"));
-    }
-
-    #[test]
-    fn finalize_noops_on_empty_when_allowed() {
-        let content = "# Changelog\n\n## Unreleased\n\n\n## 0.1.0\n\n- Old\n";
-        let aliases = vec!["Unreleased".to_string(), "[Unreleased]".to_string()];
-        let (out, changed) = finalize_next_section(content, &aliases, "0.2.0", true).unwrap();
-        assert!(!changed);
-        assert_eq!(out, content);
     }
 
     #[test]
