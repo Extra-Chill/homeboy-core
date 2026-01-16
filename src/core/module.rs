@@ -432,14 +432,19 @@ pub struct ModuleRunResult {
     pub project_id: Option<String>,
 }
 
-pub struct ModuleExecutionResult {
+pub(crate) struct ModuleExecutionResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
     pub success: bool,
 }
 
-pub enum ModuleExecutionMode {
+pub(crate) struct ModuleExecutionOutcome {
+    pub project_id: Option<String>,
+    pub result: ModuleExecutionResult,
+}
+
+pub(crate) enum ModuleExecutionMode {
     Interactive,
     Captured,
 }
@@ -447,6 +452,14 @@ pub enum ModuleExecutionMode {
 /// Result of running module setup.
 pub struct ModuleSetupResult {
     pub exit_code: i32,
+}
+
+struct ModuleExecutionContext {
+    module_id: String,
+    project_id: Option<String>,
+    component_id: Option<String>,
+    project: Option<Project>,
+    settings: HashMap<String, serde_json::Value>,
 }
 
 /// Run a module's setup command (if defined).
@@ -500,136 +513,20 @@ pub fn run_module(
     inputs: Vec<(String, String)>,
     args: Vec<String>,
 ) -> Result<ModuleRunResult> {
-    let module = load_module(module_id)
-        .ok_or_else(|| Error::other(format!("Module '{}' not found", module_id)))?;
-
-    let runtime = module.runtime.as_ref().ok_or_else(|| {
-        Error::other(format!(
-            "Module '{}' does not have a runtime configuration and cannot be executed",
-            module_id
-        ))
-    })?;
-
-    let run_command = runtime.run_command.as_ref().ok_or_else(|| {
-        Error::other(format!(
-            "Module '{}' does not have a runCommand defined",
-            module_id
-        ))
-    })?;
-
-    let module_path = module
-        .module_path
-        .as_ref()
-        .ok_or_else(|| Error::other("module_path not set".to_string()))?;
-
-    let input_values: HashMap<String, String> = inputs.into_iter().collect();
-
-    // Build args string from inputs and trailing args
-    let mut argv = Vec::new();
-    for input in &module.inputs {
-        if let Some(value) = input_values.get(&input.id) {
-            if !value.is_empty() {
-                argv.push(input.arg.clone());
-                argv.push(value.clone());
-            }
-        }
-    }
-    argv.extend(args);
-    let args_str = argv.join(" ");
-
-    // Check if project context is required
-    let requires_project = module.requires.is_some()
-        || template::is_present(run_command, "projectId")
-        || template::is_present(run_command, "sitePath")
-        || template::is_present(run_command, "cliPath")
-        || template::is_present(run_command, "domain");
-
-    let mut resolved_project_id: Option<String> = None;
-    let mut resolved_component_id: Option<String> = None;
-    let mut project_config: Option<Project> = None;
-    let mut component_config = None;
-
-    if requires_project {
-        let pid = project_id.ok_or_else(|| {
-            Error::other("This module requires a project; pass --project <id>".to_string())
-        })?;
-
-        let loaded_project = project::load(pid)?;
-        ModuleScope::validate_project_compatibility(&module, &loaded_project)?;
-
-        resolved_component_id =
-            ModuleScope::resolve_component_scope(&module, &loaded_project, component_id)?;
-
-        if let Some(ref comp_id) = resolved_component_id {
-            component_config = Some(component::load(comp_id).map_err(|_| {
-                Error::config(format!(
-                    "Component '{}' required by module '{}' is not configured",
-                    comp_id, module.id
-                ))
-            })?);
-        }
-
-        resolved_project_id = Some(pid.to_string());
-        project_config = Some(loaded_project);
-    }
-
-    let effective_settings = ModuleScope::effective_settings(
+    let execution = execute_module_runtime(
         module_id,
-        project_config.as_ref(),
-        component_config.as_ref(),
-    );
-
-    let settings_json =
-        serde_json::to_string(&effective_settings).map_err(|e| Error::other(e.to_string()))?;
-
-    // Build template variables
-    let entrypoint = runtime.entrypoint.clone().unwrap_or_default();
-    let domain: String;
-    let site_path: String;
-
-    let vars: Vec<(&str, &str)> = if let Some(ref proj) = project_config {
-        domain = proj.domain.clone().unwrap_or_default();
-        site_path = proj.base_path.clone().unwrap_or_default();
-
-        vec![
-            ("modulePath", module_path.as_str()),
-            ("entrypoint", entrypoint.as_str()),
-            ("args", args_str.as_str()),
-            ("projectId", resolved_project_id.as_deref().unwrap_or("")),
-            ("domain", domain.as_str()),
-            ("sitePath", site_path.as_str()),
-        ]
-    } else {
-        vec![
-            ("modulePath", module_path.as_str()),
-            ("entrypoint", entrypoint.as_str()),
-            ("args", args_str.as_str()),
-        ]
-    };
-
-    let command = template::render(run_command, &vars);
-
-    // Build environment with module-defined env vars + exec context
-    let mut env = build_exec_env(
-        module_id,
-        resolved_project_id.as_deref(),
-        resolved_component_id.as_deref(),
-        &settings_json,
-    );
-    if let Some(ref module_env) = runtime.env {
-        for (key, value) in module_env {
-            let rendered_value = template::render(value, &vars);
-            env.push((key.clone(), rendered_value));
-        }
-    }
-    let env_pairs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-
-    let exit_code =
-        execute_local_command_interactive(&command, Some(module_path), Some(&env_pairs));
+        project_id,
+        component_id,
+        inputs,
+        args,
+        None,
+        None,
+        ModuleExecutionMode::Interactive,
+    )?;
 
     Ok(ModuleRunResult {
-        exit_code,
-        project_id: resolved_project_id,
+        exit_code: execution.result.exit_code,
+        project_id: execution.project_id,
     })
 }
 
@@ -640,10 +537,10 @@ pub fn run_action(
     project_id: Option<&str>,
     data: Option<&str>,
 ) -> Result<serde_json::Value> {
-    run_action_with_payload(module_id, action_id, project_id, data, None)
+    execute_action(module_id, action_id, project_id, data, None)
 }
 
-pub fn run_action_with_payload(
+pub(crate) fn execute_action(
     module_id: &str,
     action_id: &str,
     project_id: Option<&str>,
@@ -714,31 +611,27 @@ pub fn run_action_with_payload(
                 .ok_or_else(|| Error::other("Command action missing 'command'"))?;
             let settings = get_module_settings(module_id, project_id)?;
             let payload = interpolate_action_payload(action, &selected, &settings, payload)?;
-            let env = build_exec_env(module_id, project_id, None, &payload.to_string());
-            let env_pairs: Vec<(&str, &str)> =
-                env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-
-            // Template the command with module_path
             let module_path = module.module_path.as_deref().unwrap_or(".");
-            let command = template::render(command_template, &[("module_path", module_path)]);
+            let vars = vec![("modulePath", module_path)];
 
-            // Use local_path from release payload if available, otherwise fall back to module_path
             let working_dir = payload
                 .get("release")
                 .and_then(|r| r.get("local_path"))
                 .and_then(|p| p.as_str())
                 .unwrap_or(module_path);
 
-            let output = crate::ssh::execute_local_command_in_dir(
-                &command,
+            let execution = execute_module_command(
+                command_template,
+                &vars,
                 Some(working_dir),
-                Some(&env_pairs),
-            );
+                &build_action_env(module_id, project_id, &payload),
+                ModuleExecutionMode::Captured,
+            )?;
             Ok(serde_json::json!({
-                "stdout": output.stdout,
-                "stderr": output.stderr,
-                "exitCode": output.exit_code,
-                "success": output.success,
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+                "exitCode": execution.exit_code,
+                "success": execution.success,
                 "payload": payload
             }))
         }
@@ -766,6 +659,266 @@ pub fn get_module_settings(
     }
 
     Ok(settings)
+}
+
+fn module_runtime(module: &ModuleManifest) -> Result<&RuntimeConfig> {
+    module.runtime.as_ref().ok_or_else(|| {
+        Error::other(format!(
+            "Module '{}' does not have a runtime configuration and cannot be executed",
+            module.id
+        ))
+    })
+}
+
+fn build_args_string(
+    module: &ModuleManifest,
+    inputs: Vec<(String, String)>,
+    args: Vec<String>,
+) -> String {
+    let input_values: HashMap<String, String> = inputs.into_iter().collect();
+    let mut argv = Vec::new();
+    for input in &module.inputs {
+        if let Some(value) = input_values.get(&input.id) {
+            if !value.is_empty() {
+                argv.push(input.arg.clone());
+                argv.push(value.clone());
+            }
+        }
+    }
+    argv.extend(args);
+    argv.join(" ")
+}
+
+fn resolve_module_context(
+    module: &ModuleManifest,
+    module_id: &str,
+    project_id: Option<&str>,
+    component_id: Option<&str>,
+    run_command: &str,
+) -> Result<ModuleExecutionContext> {
+    let requires_project = module.requires.is_some()
+        || template::is_present(run_command, "projectId")
+        || template::is_present(run_command, "sitePath")
+        || template::is_present(run_command, "cliPath")
+        || template::is_present(run_command, "domain");
+
+    let mut project = None;
+    let mut component = None;
+    let mut resolved_project_id = None;
+    let mut resolved_component_id = None;
+
+    if requires_project {
+        let pid = project_id.ok_or_else(|| {
+            Error::other("This module requires a project; pass --project <id>".to_string())
+        })?;
+
+        let loaded_project = project::load(pid)?;
+        ModuleScope::validate_project_compatibility(module, &loaded_project)?;
+
+        resolved_component_id =
+            ModuleScope::resolve_component_scope(module, &loaded_project, component_id)?;
+
+        if let Some(ref comp_id) = resolved_component_id {
+            component = Some(component::load(comp_id).map_err(|_| {
+                Error::config(format!(
+                    "Component '{}' required by module '{}' is not configured",
+                    comp_id, module.id
+                ))
+            })?);
+        }
+
+        resolved_project_id = Some(pid.to_string());
+        project = Some(loaded_project);
+    }
+
+    let settings = ModuleScope::effective_settings(module_id, project.as_ref(), component.as_ref());
+
+    Ok(ModuleExecutionContext {
+        module_id: module_id.to_string(),
+        project_id: resolved_project_id,
+        component_id: resolved_component_id,
+        project,
+        settings,
+    })
+}
+
+fn serialize_settings(settings: &HashMap<String, serde_json::Value>) -> Result<String> {
+    serde_json::to_string(settings).map_err(|e| Error::other(e.to_string()))
+}
+
+fn build_template_vars<'a>(
+    module_path: &'a str,
+    args_str: &'a str,
+    runtime: &'a RuntimeConfig,
+    project: Option<&'a Project>,
+    project_id: &'a Option<String>,
+) -> Vec<(&'a str, &'a str)> {
+    let entrypoint = runtime.entrypoint.as_deref().unwrap_or("");
+
+    if let Some(proj) = project {
+        let domain = proj.domain.as_deref().unwrap_or("");
+        let site_path = proj.base_path.as_deref().unwrap_or("");
+        vec![
+            ("modulePath", module_path),
+            ("entrypoint", entrypoint),
+            ("args", args_str),
+            ("projectId", project_id.as_deref().unwrap_or("")),
+            ("domain", domain),
+            ("sitePath", site_path),
+        ]
+    } else {
+        vec![
+            ("modulePath", module_path),
+            ("entrypoint", entrypoint),
+            ("args", args_str),
+        ]
+    }
+}
+
+fn build_runtime_env(
+    runtime: &RuntimeConfig,
+    context: &ModuleExecutionContext,
+    vars: &[(&str, &str)],
+    settings_json: &str,
+) -> Vec<(String, String)> {
+    let mut env = build_exec_env(
+        &context.module_id,
+        context.project_id.as_deref(),
+        context.component_id.as_deref(),
+        settings_json,
+    );
+
+    if let Some(ref module_env) = runtime.env {
+        for (key, value) in module_env {
+            let rendered_value = template::render(value, vars);
+            env.push((key.clone(), rendered_value));
+        }
+    }
+
+    env
+}
+
+fn build_action_env(
+    module_id: &str,
+    project_id: Option<&str>,
+    payload: &serde_json::Value,
+) -> Vec<(String, String)> {
+    let settings_json = payload.to_string();
+    build_exec_env(module_id, project_id, None, &settings_json)
+}
+
+fn execute_module_command(
+    command_template: &str,
+    vars: &[(&str, &str)],
+    working_dir: Option<&str>,
+    env_pairs: &[(String, String)],
+    mode: ModuleExecutionMode,
+) -> Result<ModuleExecutionResult> {
+    let command = template::render(command_template, vars);
+    let env_refs: Vec<(&str, &str)> = env_pairs
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    match mode {
+        ModuleExecutionMode::Interactive => {
+            let exit_code =
+                execute_local_command_interactive(&command, working_dir, Some(&env_refs));
+            Ok(ModuleExecutionResult {
+                exit_code,
+                stdout: String::new(),
+                stderr: String::new(),
+                success: exit_code == 0,
+            })
+        }
+        ModuleExecutionMode::Captured => {
+            let output = execute_local_command_in_dir(&command, working_dir, Some(&env_refs));
+            Ok(ModuleExecutionResult {
+                exit_code: output.exit_code,
+                stdout: output.stdout,
+                stderr: output.stderr,
+                success: output.success,
+            })
+        }
+    }
+}
+
+fn execute_module_runtime(
+    module_id: &str,
+    project_id: Option<&str>,
+    component_id: Option<&str>,
+    inputs: Vec<(String, String)>,
+    args: Vec<String>,
+    payload: Option<&serde_json::Value>,
+    working_dir: Option<&str>,
+    mode: ModuleExecutionMode,
+) -> Result<ModuleExecutionOutcome> {
+    let module = load_module(module_id)
+        .ok_or_else(|| Error::other(format!("Module '{}' not found", module_id)))?;
+    let runtime = module_runtime(&module)?;
+    let run_command = runtime.run_command.as_ref().ok_or_else(|| {
+        Error::other(format!(
+            "Module '{}' does not have a runCommand defined",
+            module_id
+        ))
+    })?;
+
+    let module_path = module
+        .module_path
+        .as_ref()
+        .ok_or_else(|| Error::other("module_path not set".to_string()))?;
+
+    let args_str = build_args_string(&module, inputs, args);
+    let context =
+        resolve_module_context(&module, module_id, project_id, component_id, run_command)?;
+
+    let settings_json = if let Some(payload) = payload {
+        payload.to_string()
+    } else {
+        serialize_settings(&context.settings)?
+    };
+
+    let vars = build_template_vars(
+        module_path,
+        &args_str,
+        runtime,
+        context.project.as_ref(),
+        &context.project_id,
+    );
+    let env_pairs = build_runtime_env(runtime, &context, &vars, &settings_json);
+
+    let execution = execute_module_command(
+        run_command,
+        &vars,
+        working_dir.or(Some(module_path.as_str())),
+        &env_pairs,
+        mode,
+    )?;
+
+    Ok(ModuleExecutionOutcome {
+        project_id: context.project_id,
+        result: execution,
+    })
+}
+
+pub(crate) fn run_module_runtime(
+    module_id: &str,
+    project_id: Option<&str>,
+    component_id: Option<&str>,
+    inputs: Vec<(String, String)>,
+    args: Vec<String>,
+    payload: Option<&serde_json::Value>,
+    working_dir: Option<&str>,
+) -> Result<ModuleExecutionOutcome> {
+    execute_module_runtime(
+        module_id,
+        project_id,
+        component_id,
+        inputs,
+        args,
+        payload,
+        working_dir,
+        ModuleExecutionMode::Captured,
+    )
 }
 
 /// Build execution environment variables for a module.

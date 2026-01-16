@@ -561,13 +561,13 @@ impl ReleaseStepExecutor {
             .config
             .get("inputs")
             .and_then(|v| v.as_array())
-            .map(parse_module_inputs)
+            .map(|values| parse_module_inputs(values))
             .unwrap_or_else(|| Ok(Vec::new()))?;
         let args = step
             .config
             .get("args")
             .and_then(|v| v.as_array())
-            .map(parse_module_args)
+            .map(|values| parse_module_args(values))
             .unwrap_or_else(|| Ok(Vec::new()))?;
 
         let payload = self.build_release_payload(step)?;
