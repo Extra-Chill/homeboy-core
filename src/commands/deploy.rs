@@ -62,6 +62,21 @@ pub fn run(mut args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdRe
         ));
     }
 
+    // Check if user provided component ID where project ID expected (reversed argument order)
+    let available_components = homeboy::component::list_ids().unwrap_or_default();
+    if available_components.contains(&args.project_id) {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "project_id",
+            format!(
+                "'{}' is a component, not a project. \
+                 Did you mean: homeboy deploy <project> {}",
+                args.project_id, args.project_id
+            ),
+            None,
+            Some(vec!["Argument order: homeboy deploy <project_id> [component_ids...]".to_string()]),
+        ));
+    }
+
     // Parse JSON input if provided
     if let Some(ref spec) = args.json {
         args.component_ids = deploy::parse_bulk_component_ids(spec)?;

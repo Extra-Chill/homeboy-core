@@ -28,14 +28,22 @@ This prints raw markdown to stdout.
 ```sh
 homeboy changelog add <component_id> <message>
 homeboy changelog add <component_id> -m "first" -m "second"
+homeboy changelog add <component_id> -m "Bug fix" --type fixed
+homeboy changelog add <component_id> -m "New feature" -t added
 homeboy changelog add --json <spec>
 ```
+
+Options:
+
+- `-m, --message <message>`: Changelog message (repeatable)
+- `-t, --type <type>`: Changelog subsection type for Keep a Changelog format. Valid values: `added`, `changed`, `deprecated`, `removed`, `fixed`, `security` (case-insensitive)
 
 Notes:
 
 - The changelog entry is the positional `<message>` value. Use `--json` for multiple messages in one run.
 - Changelog messages are intended to be user-facing release notes (capture anything impacting user or developer experience), not a 1:1 copy of commit subjects.
 - When `--json` is provided, other args are ignored and the payload's `messages` array is applied in order.
+- When `--type` is provided, items are placed under the corresponding Keep a Changelog subsection (e.g., `### Fixed`). If the subsection doesn't exist, it's created in canonical order.
 
 ### `init`
 
@@ -113,9 +121,12 @@ This section applies only when JSON output is used.
   "next_section_label": "<label>",
   "messages": ["<message>", "<message>"],
   "items_added": 2,
-  "changed": true
+  "changed": true,
+  "subsection_type": "fixed"
 }
 ```
+
+Note: `subsection_type` is only present when `--type` was specified.
 
 Bulk JSON input uses a single object (not an array):
 

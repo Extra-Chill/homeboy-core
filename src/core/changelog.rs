@@ -21,6 +21,39 @@ const KEEP_A_CHANGELOG_SUBSECTIONS: &[&str] = &[
     "### Security",
 ];
 
+const VALID_ENTRY_TYPES: &[&str] = &["added", "changed", "deprecated", "removed", "fixed", "security"];
+
+fn validate_entry_type(entry_type: &str) -> Result<String> {
+    let normalized = entry_type.to_lowercase();
+    if VALID_ENTRY_TYPES.contains(&normalized.as_str()) {
+        Ok(normalized)
+    } else {
+        Err(Error::validation_invalid_argument(
+            "type",
+            format!(
+                "Invalid changelog entry type '{}'. Valid types: Added, Changed, Deprecated, Removed, Fixed, Security",
+                entry_type
+            ),
+            None,
+            Some(vec![
+                "Use --type added for new features".to_string(),
+                "Use --type fixed for bug fixes".to_string(),
+                "Use --type changed for modifications".to_string(),
+            ]),
+        ))
+    }
+}
+
+fn subsection_header_from_type(entry_type: &str) -> String {
+    let capitalized = entry_type
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>())
+        .unwrap_or_default()
+        + &entry_type[1..];
+    format!("### {}", capitalized)
+}
+
 #[derive(Debug, Clone)]
 pub struct EffectiveChangelogSettings {
     pub next_section_label: String,
@@ -218,6 +251,53 @@ pub fn read_and_add_next_section_items(
 
     if changed {
         fs::write(&path, new_content)
+            .map_err(|e| Error::internal_io(e.to_string(), Some("write changelog".to_string())))?;
+    }
+
+    Ok((path, changed, items_added))
+}
+
+pub fn read_and_add_next_section_items_typed(
+    component: &Component,
+    settings: &EffectiveChangelogSettings,
+    messages: &[String],
+    entry_type: &str,
+) -> Result<(PathBuf, bool, usize)> {
+    let path = resolve_changelog_path(component)?;
+    let content = fs::read_to_string(&path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read changelog".to_string())))?;
+
+    let (with_section, _) = ensure_next_section(&content, &settings.next_section_aliases)?;
+    let mut current_content = with_section;
+    let mut items_added = 0;
+    let mut changed = false;
+
+    for message in messages {
+        let trimmed_message = message.trim();
+        if trimmed_message.is_empty() {
+            return Err(Error::validation_invalid_argument(
+                "messages",
+                "Changelog messages cannot include empty values",
+                None,
+                None,
+            ));
+        }
+
+        let (new_content, item_changed) = append_item_to_subsection(
+            &current_content,
+            &settings.next_section_aliases,
+            trimmed_message,
+            entry_type,
+        )?;
+        if item_changed {
+            items_added += 1;
+            changed = true;
+        }
+        current_content = new_content;
+    }
+
+    if changed {
+        fs::write(&path, &current_content)
             .map_err(|e| Error::internal_io(e.to_string(), Some("write changelog".to_string())))?;
     }
 
@@ -610,6 +690,153 @@ fn append_item_to_next_section(
     Ok((out, true))
 }
 
+fn append_item_to_subsection(
+    content: &str,
+    aliases: &[String],
+    message: &str,
+    entry_type: &str,
+) -> Result<(String, bool)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = find_next_section_start(&lines, aliases).ok_or_else(|| {
+        Error::internal_unexpected("Next changelog section not found (unexpected)".to_string())
+    })?;
+
+    let section_end = find_section_end(&lines, start);
+    let bullet = format!("- {}", message);
+    let target_header = subsection_header_from_type(entry_type);
+
+    // Check for duplicates across entire next section
+    for line in &lines[start + 1..section_end] {
+        if line.trim() == bullet {
+            return Ok((content.to_string(), false));
+        }
+    }
+
+    // Find target subsection or determine where to insert a new one
+    let mut target_subsection_idx: Option<usize> = None;
+    let mut target_subsection_end: Option<usize> = None;
+    let mut insert_new_subsection_at: Option<usize> = None;
+    let mut found_any_subsection = false;
+
+    // Map of subsection positions for canonical ordering
+    let mut subsection_positions: Vec<(usize, &str)> = Vec::new();
+
+    for (i, line) in lines.iter().enumerate().take(section_end).skip(start + 1) {
+        let trimmed = line.trim();
+        for header in KEEP_A_CHANGELOG_SUBSECTIONS {
+            if trimmed.starts_with(header) {
+                found_any_subsection = true;
+                subsection_positions.push((i, *header));
+                if trimmed.starts_with(&target_header) {
+                    target_subsection_idx = Some(i);
+                }
+                break;
+            }
+        }
+    }
+
+    // If target subsection exists, find its end
+    if let Some(target_idx) = target_subsection_idx {
+        // Find the next subsection or section end
+        target_subsection_end = Some(section_end);
+        for (i, line) in lines.iter().enumerate().take(section_end).skip(target_idx + 1) {
+            let trimmed = line.trim();
+            if KEEP_A_CHANGELOG_SUBSECTIONS.iter().any(|h| trimmed.starts_with(h)) {
+                target_subsection_end = Some(i);
+                break;
+            }
+        }
+    } else if found_any_subsection {
+        // Need to create subsection in canonical order
+        let target_order = KEEP_A_CHANGELOG_SUBSECTIONS
+            .iter()
+            .position(|h| h.starts_with(&target_header))
+            .unwrap_or(0);
+
+        // Find where to insert based on canonical order
+        for (pos, header) in &subsection_positions {
+            let header_order = KEEP_A_CHANGELOG_SUBSECTIONS
+                .iter()
+                .position(|h| header.starts_with(h))
+                .unwrap_or(0);
+            if header_order > target_order {
+                insert_new_subsection_at = Some(*pos);
+                break;
+            }
+        }
+        // If all existing subsections come before, insert at section end
+        if insert_new_subsection_at.is_none() {
+            insert_new_subsection_at = Some(section_end);
+        }
+    }
+
+    let mut out = String::new();
+
+    if let Some(target_idx) = target_subsection_idx {
+        // Target subsection exists - insert bullet at the end of its content
+        let subsection_end = target_subsection_end.unwrap_or(section_end);
+        let mut insert_after = target_idx;
+
+        // Find the last bullet in this subsection
+        for i in (target_idx + 1)..subsection_end {
+            let trimmed = lines[i].trim();
+            if trimmed.starts_with('-') || trimmed.starts_with('*') {
+                insert_after = i;
+            }
+        }
+
+        for (idx, line) in lines.iter().enumerate() {
+            out.push_str(line);
+            out.push('\n');
+            if idx == insert_after {
+                out.push_str(&bullet);
+                out.push('\n');
+            }
+        }
+    } else if let Some(insert_at) = insert_new_subsection_at {
+        // Need to create new subsection
+        for (idx, line) in lines.iter().enumerate() {
+            if idx == insert_at {
+                // Ensure blank line before new subsection
+                if !out.ends_with("\n\n") && !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&target_header);
+                out.push('\n');
+                out.push_str(&bullet);
+                out.push_str("\n\n");
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        // Handle insertion at end of section
+        if insert_at >= lines.len() {
+            if !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+            out.push_str(&target_header);
+            out.push('\n');
+            out.push_str(&bullet);
+            out.push('\n');
+        }
+    } else {
+        // No subsections exist yet - create the first one after section header
+        for (idx, line) in lines.iter().enumerate() {
+            out.push_str(line);
+            out.push('\n');
+            if idx == start {
+                out.push('\n');
+                out.push_str(&target_header);
+                out.push('\n');
+                out.push_str(&bullet);
+                out.push('\n');
+            }
+        }
+    }
+
+    Ok((out, true))
+}
+
 // === Bulk Operations with JSON Spec ===
 
 #[derive(Debug, Clone, Serialize)]
@@ -621,6 +848,8 @@ pub struct AddItemsOutput {
     pub messages: Vec<String>,
     pub items_added: usize,
     pub changed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subsection_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -663,11 +892,12 @@ pub fn add_items_bulk(json_spec: &str) -> Result<AddItemsOutput> {
     })?;
 
     let normalized: NormalizedAddItemsInput = input.into();
-    add_items(Some(&normalized.component_id), &normalized.messages)
+    add_items(Some(&normalized.component_id), &normalized.messages, None)
 }
 
 /// Add changelog items to a component. Auto-detects JSON in component_id.
-pub fn add_items(component_id: Option<&str>, messages: &[String]) -> Result<AddItemsOutput> {
+/// If entry_type is provided, items are placed under the corresponding Keep a Changelog subsection.
+pub fn add_items(component_id: Option<&str>, messages: &[String], entry_type: Option<&str>) -> Result<AddItemsOutput> {
     // Auto-detect JSON in component_id
     if let Some(input) = component_id {
         if crate::config::is_json_input(input) {
@@ -696,11 +926,17 @@ pub fn add_items(component_id: Option<&str>, messages: &[String]) -> Result<AddI
         ));
     }
 
+    // Validate entry type if provided
+    let validated_type = entry_type.map(validate_entry_type).transpose()?;
+
     let component = component::load(id)?;
     let settings = resolve_effective_settings(Some(&component));
 
-    let (path, changed, items_added) =
-        read_and_add_next_section_items(&component, &settings, messages)?;
+    let (path, changed, items_added) = if let Some(ref entry_type_val) = validated_type {
+        read_and_add_next_section_items_typed(&component, &settings, messages, entry_type_val)?
+    } else {
+        read_and_add_next_section_items(&component, &settings, messages)?
+    };
 
     Ok(AddItemsOutput {
         component_id: id.to_string(),
@@ -709,6 +945,7 @@ pub fn add_items(component_id: Option<&str>, messages: &[String]) -> Result<AddI
         messages: messages.to_vec(),
         items_added,
         changed,
+        subsection_type: validated_type,
     })
 }
 
@@ -1004,5 +1241,98 @@ mod tests {
         assert!(out.contains("### Fixed"));
         assert!(out.contains("- Feature 1"));
         assert!(out.contains("- Bug 1"));
+    }
+
+    // === Typed Subsection Tests (--type flag) ===
+
+    #[test]
+    fn validate_entry_type_accepts_valid_types() {
+        assert!(validate_entry_type("added").is_ok());
+        assert!(validate_entry_type("Added").is_ok());
+        assert!(validate_entry_type("FIXED").is_ok());
+        assert!(validate_entry_type("changed").is_ok());
+        assert!(validate_entry_type("deprecated").is_ok());
+        assert!(validate_entry_type("removed").is_ok());
+        assert!(validate_entry_type("security").is_ok());
+    }
+
+    #[test]
+    fn validate_entry_type_rejects_invalid_types() {
+        assert!(validate_entry_type("invalid").is_err());
+        assert!(validate_entry_type("feature").is_err());
+        assert!(validate_entry_type("bugfix").is_err());
+    }
+
+    #[test]
+    fn append_item_to_subsection_adds_to_existing() {
+        let content = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n- Existing fix\n\n## 0.1.0\n";
+        let aliases = vec!["Unreleased".to_string()];
+        let (out, changed) =
+            append_item_to_subsection(content, &aliases, "New bug fix", "fixed").unwrap();
+
+        assert!(changed);
+        assert!(out.contains("- Existing fix"));
+        assert!(out.contains("- New bug fix"));
+        // New item should be after existing
+        assert!(out.contains("- Existing fix\n- New bug fix"));
+    }
+
+    #[test]
+    fn append_item_to_subsection_creates_new_subsection() {
+        let content = "# Changelog\n\n## Unreleased\n\n### Added\n\n- Feature\n\n## 0.1.0\n";
+        let aliases = vec!["Unreleased".to_string()];
+        let (out, changed) =
+            append_item_to_subsection(content, &aliases, "Bug fix", "fixed").unwrap();
+
+        assert!(changed);
+        assert!(out.contains("### Fixed"));
+        assert!(out.contains("- Bug fix"));
+        // Should preserve existing subsection
+        assert!(out.contains("### Added"));
+        assert!(out.contains("- Feature"));
+    }
+
+    #[test]
+    fn append_item_to_subsection_creates_first_subsection() {
+        let content = "# Changelog\n\n## Unreleased\n\n## 0.1.0\n";
+        let aliases = vec!["Unreleased".to_string()];
+        let (out, changed) =
+            append_item_to_subsection(content, &aliases, "New feature", "added").unwrap();
+
+        assert!(changed);
+        assert!(out.contains("### Added"));
+        assert!(out.contains("- New feature"));
+    }
+
+    #[test]
+    fn append_item_to_subsection_maintains_canonical_order() {
+        // Fixed comes after Added in canonical order
+        let content =
+            "# Changelog\n\n## Unreleased\n\n### Fixed\n\n- Bug fix\n\n## 0.1.0\n";
+        let aliases = vec!["Unreleased".to_string()];
+        let (out, changed) =
+            append_item_to_subsection(content, &aliases, "New feature", "added").unwrap();
+
+        assert!(changed);
+        assert!(out.contains("### Added"));
+        assert!(out.contains("- New feature"));
+        // Added should appear before Fixed (canonical order)
+        let added_pos = out.find("### Added").unwrap();
+        let fixed_pos = out.find("### Fixed").unwrap();
+        assert!(
+            added_pos < fixed_pos,
+            "Added should come before Fixed in canonical order"
+        );
+    }
+
+    #[test]
+    fn append_item_to_subsection_dedupes_existing() {
+        let content = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n- Bug fix\n\n## 0.1.0\n";
+        let aliases = vec!["Unreleased".to_string()];
+        let (out, changed) =
+            append_item_to_subsection(content, &aliases, "Bug fix", "fixed").unwrap();
+
+        assert!(!changed);
+        assert_eq!(out.matches("- Bug fix").count(), 1);
     }
 }

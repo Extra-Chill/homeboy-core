@@ -33,6 +33,10 @@ pub enum ChangelogCommand {
         /// Changelog message (repeatable: -m "first" -m "second")
         #[arg(short = 'm', long = "message", action = clap::ArgAction::Append)]
         messages: Vec<String>,
+
+        /// Changelog subsection type (Added, Changed, Deprecated, Removed, Fixed, Security)
+        #[arg(short = 't', long = "type")]
+        entry_type: Option<String>,
     },
 
     /// Initialize a new changelog file
@@ -119,6 +123,7 @@ pub fn run(
             component_id,
             positional_message,
             messages,
+            entry_type,
         }), _) => {
             // Priority: --json > component_id (auto-detects JSON)
             // Merge positional message with -m flags (positional goes first)
@@ -135,7 +140,7 @@ pub fn run(
             }
 
             // Core handles auto-detection of JSON in component_id
-            let output = changelog::add_items(component_id.as_deref(), &all_messages)?;
+            let output = changelog::add_items(component_id.as_deref(), &all_messages, entry_type.as_deref())?;
             Ok((ChangelogOutput::Add(output), 0))
         }
         (Some(ChangelogCommand::Init {
