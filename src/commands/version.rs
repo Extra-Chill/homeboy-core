@@ -201,6 +201,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     staged_only: false,
                     files: Some(files_to_stage.clone()),
                     exclude: None,
+                    amend: false,
                 };
 
                 // Attempt commit - graceful failure (version files already updated)

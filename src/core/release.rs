@@ -452,6 +452,8 @@ impl ReleaseStepExecutor {
             ));
         }
 
+        let should_amend = self.should_amend_release_commit()?;
+
         let message = step
             .config
             .get("message")
@@ -463,12 +465,17 @@ impl ReleaseStepExecutor {
             staged_only: false,
             files: None,
             exclude: None,
+            amend: should_amend,
         };
 
         let output = crate::git::commit(Some(&self.component_id), Some(&message), options)?;
-        let data = serde_json::to_value(&output).map_err(|e| {
+        let mut data = serde_json::to_value(&output).map_err(|e| {
             Error::internal_json(e.to_string(), Some("git commit output".to_string()))
         })?;
+
+        if should_amend {
+            data["amended"] = serde_json::json!(true);
+        }
 
         let status = if output.success {
             PipelineRunStatus::Success
@@ -487,6 +494,37 @@ impl ReleaseStepExecutor {
             .map(|v| v.as_str())
             .unwrap_or("unknown");
         format!("release: v{}", version)
+    }
+
+    fn should_amend_release_commit(&self) -> Result<bool> {
+        let component = component::load(&self.component_id)?;
+
+        let log_output = crate::git::execute_git_for_release(
+            &component.local_path,
+            &["log", "-1", "--format=%s"],
+        )
+        .map_err(|e| Error::other(e.to_string()))?;
+        if !log_output.status.success() {
+            return Ok(false);
+        }
+        let last_message = String::from_utf8_lossy(&log_output.stdout)
+            .trim()
+            .to_string();
+
+        if !last_message.starts_with("release: v") {
+            return Ok(false);
+        }
+
+        let status_output =
+            crate::git::execute_git_for_release(&component.local_path, &["status", "-sb"])
+                .map_err(|e| Error::other(e.to_string()))?;
+        if !status_output.status.success() {
+            return Ok(false);
+        }
+        let status_str = String::from_utf8_lossy(&status_output.stdout);
+        let is_ahead = status_str.contains("[ahead");
+
+        Ok(is_ahead)
     }
 
     fn build_release_payload(&self, step: &PipelineStep) -> Result<serde_json::Value> {

@@ -192,6 +192,7 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
                 staged_only,
                 files: resolved_files,
                 exclude,
+                amend: false,
             };
             let output = git::commit(component_id.as_deref(), final_message.as_deref(), options)?;
             let exit_code = output.exit_code;

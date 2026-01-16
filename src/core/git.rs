@@ -491,6 +491,8 @@ pub struct CommitOptions {
     pub files: Option<Vec<String>>,
     /// Stage all except these files (mutually exclusive with `files`)
     pub exclude: Option<Vec<String>>,
+    /// Amend the previous commit instead of creating a new one
+    pub amend: bool,
 }
 
 fn get_component_path(component_id: &str) -> Result<String> {
@@ -500,6 +502,10 @@ fn get_component_path(component_id: &str) -> Result<String> {
 
 fn execute_git(path: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
     Command::new("git").args(args).current_dir(path).output()
+}
+
+pub fn execute_git_for_release(path: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+    execute_git(path, args)
 }
 
 pub fn get_repo_snapshot(path: &str) -> Result<RepoSnapshot> {
@@ -781,8 +787,12 @@ pub fn commit(
         }
     }
 
-    let output =
-        execute_git(&path, &["commit", "-m", msg]).map_err(|e| Error::other(e.to_string()))?;
+    let args: Vec<&str> = if options.amend {
+        vec!["commit", "--amend", "-m", msg]
+    } else {
+        vec!["commit", "-m", msg]
+    };
+    let output = execute_git(&path, &args).map_err(|e| Error::other(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "commit", output))
 }
 
@@ -813,6 +823,7 @@ fn commit_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
             staged_only: spec.staged_only,
             files: spec.files.clone(),
             exclude: spec.exclude_files.clone(),
+            amend: false,
         };
         match commit(Some(&id), Some(&spec.message), options) {
             Ok(output) => {
@@ -882,6 +893,7 @@ pub fn commit_from_json(id: Option<&str>, json_spec: &str) -> Result<CommitJsonO
         staged_only: spec.staged_only,
         files: spec.files,
         exclude: spec.exclude_files,
+        amend: false,
     };
 
     let output = commit(target_id.as_deref(), Some(&spec.message), options)?;
