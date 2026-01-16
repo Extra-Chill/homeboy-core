@@ -353,6 +353,12 @@ fn deep_remove(base: &mut Value, spec: Value, removed_from: &mut Vec<String>, pa
     }
 }
 
+fn should_replace(path: &str, replace_fields: &[String]) -> bool {
+    replace_fields
+        .iter()
+        .any(|field| path == field || path.starts_with(&format!("{}.", field)))
+}
+
 fn deep_merge(base: &mut Value, patch: Value, replace_fields: &[String], path: String) {
     match (base, patch) {
         (Value::Object(base_obj), Value::Object(patch_obj)) => {
@@ -371,7 +377,7 @@ fn deep_merge(base: &mut Value, patch: Value, replace_fields: &[String], path: S
             }
         }
         (Value::Array(base_arr), Value::Array(patch_arr)) => {
-            if replace_fields.contains(&path) {
+            if should_replace(&path, replace_fields) {
                 *base_arr = patch_arr;
             } else {
                 array_union(base_arr, patch_arr);
