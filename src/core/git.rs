@@ -1198,6 +1198,28 @@ fn is_git_repo(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Check if a tag exists on the remote.
+pub fn tag_exists_on_remote(path: &str, tag_name: &str) -> Result<bool> {
+    let output = execute_git(path, &["ls-remote", "--tags", "origin", &format!("refs/tags/{}", tag_name)])
+        .map_err(|e| Error::other(e.to_string()))?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(!stdout.trim().is_empty())
+}
+
+/// Check if a tag exists locally.
+pub fn tag_exists_locally(path: &str, tag_name: &str) -> Result<bool> {
+    let output = execute_git(path, &["tag", "-l", tag_name])
+        .map_err(|e| Error::other(e.to_string()))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(!stdout.trim().is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

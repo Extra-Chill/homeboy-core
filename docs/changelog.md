@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.22.2] - 2026-01-16
+
+- Add --changelog-target flag to component create command
+- Make build_artifact and remote_path optional in component create for library projects
+- Improve git.tag error handling with contextual hints for tag conflicts
+
 ## [0.22.1] - 2026-01-16
 
 - Update documentation to remove all --cwd references

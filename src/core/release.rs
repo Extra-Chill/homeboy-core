@@ -366,8 +366,45 @@ impl ReleaseStepExecutor {
         };
 
         let output = crate::git::tag(Some(&self.component_id), Some(&tag_name), message)?;
-        let data = serde_json::to_value(output)
+        let data = serde_json::to_value(&output)
             .map_err(|e| Error::internal_json(e.to_string(), Some("git tag output".to_string())))?;
+
+        if !output.success {
+            let mut hints = Vec::new();
+
+            if output.stderr.contains("already exists") {
+                let component = component::load(&self.component_id)?;
+                let local_exists =
+                    crate::git::tag_exists_locally(&component.local_path, &tag_name).unwrap_or(false);
+                let remote_exists =
+                    crate::git::tag_exists_on_remote(&component.local_path, &tag_name).unwrap_or(false);
+
+                if local_exists && !remote_exists {
+                    hints.push(crate::error::Hint {
+                        message: format!(
+                            "Tag '{}' exists locally but not on remote. Push it with: git push origin {}",
+                            tag_name, tag_name
+                        ),
+                    });
+                } else if local_exists && remote_exists {
+                    hints.push(crate::error::Hint {
+                        message: format!(
+                            "Tag '{}' already exists locally and on remote. Delete local tag first: git tag -d {}",
+                            tag_name, tag_name
+                        ),
+                    });
+                }
+            }
+
+            return Ok(self.step_result(
+                step,
+                PipelineRunStatus::Failed,
+                Some(data),
+                Some(output.stderr),
+                hints,
+            ));
+        }
+
         self.store_tag_context(&tag_name)?;
         Ok(self.step_result(
             step,

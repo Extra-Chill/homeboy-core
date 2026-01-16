@@ -44,6 +44,9 @@ enum ComponentCommand {
         /// Extract command to run after upload (e.g., "unzip -o {artifact} && rm {artifact}")
         #[arg(long)]
         extract_command: Option<String>,
+        /// Path to changelog file relative to localPath
+        #[arg(long)]
+        changelog_target: Option<String>,
     },
     /// Display component configuration
     Show {
@@ -110,6 +113,7 @@ pub fn run(
             version_targets,
             build_command,
             extract_command,
+            changelog_target,
         } => {
             let json_spec = if let Some(spec) = json {
                 spec
@@ -123,23 +127,8 @@ pub fn run(
                     )
                 })?;
 
-                let remote_path = remote_path.ok_or_else(|| {
-                    homeboy::Error::validation_invalid_argument(
-                        "remote_path",
-                        "Missing required argument: --remote-path",
-                        None,
-                        None,
-                    )
-                })?;
-
-                let build_artifact = build_artifact.ok_or_else(|| {
-                    homeboy::Error::validation_invalid_argument(
-                        "build_artifact",
-                        "Missing required argument: --build-artifact",
-                        None,
-                        None,
-                    )
-                })?;
+                let remote_path = remote_path.unwrap_or_default();
+                let build_artifact = build_artifact.unwrap_or_default();
 
                 let dir_name = Path::new(&local_path)
                     .file_name()
@@ -164,6 +153,7 @@ pub fn run(
 
                 new_component.build_command = build_command;
                 new_component.extract_command = extract_command;
+                new_component.changelog_target = changelog_target;
 
                 serde_json::to_string(&new_component).map_err(|e| {
                     homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
