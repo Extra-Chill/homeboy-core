@@ -177,7 +177,8 @@ fn build_project_command(
                     if let Some(value) = module_config.settings.get(setting_key) {
                         if let Some(value_str) = value.as_str() {
                             if !value_str.is_empty() {
-                                let flag = flag_template.replace("{{value}}", &shell::quote_arg(value_str));
+                                let flag = flag_template
+                                    .replace("{{value}}", &shell::quote_arg(value_str));
                                 rendered.push(' ');
                                 rendered.push_str(&flag);
                             }

@@ -1,6 +1,7 @@
 use clap::Args;
 use serde::Serialize;
 
+use homeboy::context;
 use homeboy::git::{self, ChangesOutput};
 use homeboy::project;
 use homeboy::BulkResult;
@@ -88,10 +89,22 @@ pub fn run(
         }
     }
 
-    Err(homeboy::Error::validation_invalid_argument(
+    let (ctx, _) = context::run(None)?;
+
+    let mut err = homeboy::Error::validation_invalid_argument(
         "input",
-        "Provide component ID, <project> <components...>, --project, or --json spec",
+        "No component ID provided",
         None,
         None,
-    ))
+    );
+
+    if ctx.managed && ctx.matched_components.len() == 1 {
+        err = err.with_hint(format!("Detected component: {}", ctx.matched_components[0]));
+    }
+
+    err =
+        err.with_hint("Run 'homeboy init' to see available components, or specify one explicitly:");
+    err = err.with_hint("  homeboy changes <component-id>");
+
+    Err(err)
 }

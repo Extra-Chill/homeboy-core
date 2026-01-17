@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.24.1] - 2026-01-17
+
+- fix: Improve error message when `homeboy changes` runs without component ID
+
 ## [0.24.0] - 2026-01-17
 
 - feat: Add module-provided build script support with priority-based command resolution

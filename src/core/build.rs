@@ -16,8 +16,14 @@ use crate::ssh::execute_local_command_in_dir;
 #[derive(Debug, Clone)]
 pub enum ResolvedBuildCommand {
     ComponentDefined(String),
-    ModuleProvided { command: String, source: String },
-    LocalScript { command: String, script_name: String },
+    ModuleProvided {
+        command: String,
+        source: String,
+    },
+    LocalScript {
+        command: String,
+        script_name: String,
+    },
 }
 
 impl ResolvedBuildCommand {
