@@ -208,8 +208,24 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
     }
 
     let Some(sub_id) = args.first() else {
-        let domain = project.domain.clone().ok_or_else(require_domain)?;
-        return Ok((domain, args.to_vec()));
+        let subtarget_list = project
+            .sub_targets
+            .iter()
+            .map(|t| {
+                let slug = project::slugify_id(&t.name).unwrap_or_else(|_| t.name.clone());
+                format!("- {} (use: {})", t.name, slug)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(Error::validation_invalid_argument(
+            "subtarget",
+            &format!(
+                "This project has subtargets configured. You must specify which subtarget to use.\n\nAvailable subtargets for project '{}':\n{}",
+                project.id, subtarget_list
+            ),
+            Some(project.id.clone()),
+            None,
+        ));
     };
 
     if let Some(subtarget) = project.sub_targets.iter().find(|t| {
@@ -219,6 +235,22 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
         return Ok((subtarget.domain.clone(), args[1..].to_vec()));
     }
 
-    let domain = project.domain.clone().ok_or_else(require_domain)?;
-    Ok((domain, args.to_vec()))
+    let subtarget_list = project
+        .sub_targets
+        .iter()
+        .map(|t| {
+            let slug = project::slugify_id(&t.name).unwrap_or_else(|_| t.name.clone());
+            format!("- {} (use: {})", t.name, slug)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(Error::validation_invalid_argument(
+        "subtarget",
+        &format!(
+            "Subtarget '{}' not found. Available subtargets for project '{}':\n{}",
+            sub_id, project.id, subtarget_list
+        ),
+        Some(project.id.clone()),
+        None,
+    ))
 }

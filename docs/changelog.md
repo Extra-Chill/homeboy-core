@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.24.4] - 2026-01-17
+
+### Fixed
+- Require explicit subtarget when project has subtargets configured, preventing unintended main site operations in multisite networks
+
 ## [0.24.3] - 2026-01-17
 
 - feat: homeboy version show defaults to binary version when no component_id provided

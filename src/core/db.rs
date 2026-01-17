@@ -102,7 +102,24 @@ fn resolve_domain(project: &Project, subtarget: Option<&str>, project_id: &str) 
     }
 
     let Some(sub_id) = subtarget else {
-        return project.domain.clone().ok_or_else(require_domain);
+        let subtarget_list = project
+            .sub_targets
+            .iter()
+            .map(|t| {
+                let slug = project::slugify_id(&t.name).unwrap_or_else(|_| t.name.clone());
+                format!("- {} (use: {})", t.name, slug)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(Error::validation_invalid_argument(
+            "subtarget",
+            &format!(
+                "This project has subtargets configured. You must specify which subtarget to use.\n\nAvailable subtargets for project '{}':\n{}",
+                project_id, subtarget_list
+            ),
+            Some(project_id.to_string()),
+            None,
+        ));
     };
 
     if let Some(target) = project.sub_targets.iter().find(|t| {
@@ -112,7 +129,24 @@ fn resolve_domain(project: &Project, subtarget: Option<&str>, project_id: &str) 
         return Ok(target.domain.clone());
     }
 
-    project.domain.clone().ok_or_else(require_domain)
+    let subtarget_list = project
+        .sub_targets
+        .iter()
+        .map(|t| {
+            let slug = project::slugify_id(&t.name).unwrap_or_else(|_| t.name.clone());
+            format!("- {} (use: {})", t.name, slug)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(Error::validation_invalid_argument(
+        "subtarget",
+        &format!(
+            "Subtarget '{}' not found. Available subtargets for project '{}':\n{}",
+            sub_id, project_id, subtarget_list
+        ),
+        Some(project_id.to_string()),
+        None,
+    ))
 }
 
 fn parse_json_tables(json: &str) -> Vec<String> {
