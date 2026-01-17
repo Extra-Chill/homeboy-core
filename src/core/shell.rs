@@ -34,6 +34,13 @@ pub fn quote_args(args: &[String]) -> String {
         .join(" ")
 }
 
+/// Escape an entire command string for sh -c execution.
+/// Use this when passing a complete command (with operators) to sh -c.
+/// Wraps entire command in single quotes and escapes embedded quotes.
+pub fn escape_command_for_shell(command: &str) -> String {
+    format!("'{}'", escape_single_quote_content(command))
+}
+
 /// Quote a path for shell execution (always quotes).
 pub fn quote_path(path: &str) -> String {
     format!("'{}'", escape_single_quote_content(path))

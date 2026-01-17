@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- Add direct execution for CLI tools to bypass shell escaping issues
+
 ## [0.24.4] - 2026-01-17
 
 ### Fixed

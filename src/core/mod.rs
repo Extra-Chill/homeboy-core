@@ -5,6 +5,7 @@ pub mod build;
 pub mod changelog;
 pub mod cli_tool;
 pub mod component;
+pub mod config;
 pub mod context;
 pub mod db;
 pub mod deploy;
@@ -28,7 +29,6 @@ pub mod version;
 
 // Internal modules - not part of public API
 pub(crate) mod base_path;
-pub(crate) mod config;
 pub(crate) mod http;
 pub(crate) mod keychain;
 pub(crate) mod local_files;

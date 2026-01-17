@@ -150,6 +150,8 @@ pub struct CliConfig {
     pub command_template: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_cli_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_dir_template: Option<String>,
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub settings_flags: std::collections::HashMap<String, String>,
 }

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use crate::component::{self, Component};
 use crate::context::resolve_project_ssh;
 use crate::error::ErrorCode;
+use crate::executor;
 use crate::module::{find_module_by_tool, CliConfig};
 use crate::project::{self, Project};
 use crate::shell;
@@ -111,13 +112,38 @@ fn run_for_project_with_executor(
 
     let project = project_loader(project_id)?;
 
-    let (target_domain, command) = build_project_command(&project, cli_config, &module.id, args)?;
+    let (target_domain, command_args) = resolve_subtarget(&project, args)?;
 
-    let output = if project.server_id.as_ref().is_none_or(|s| s.is_empty()) {
-        local_executor(&command)
+    if command_args.is_empty() {
+        return Err(Error::other(
+            "No command provided after subtarget".to_string(),
+        ));
+    }
+
+    // Try direct execution first (bypasses shell escaping issues)
+    let (output, executed_command) = if project.server_id.as_ref().is_none_or(|s| s.is_empty()) {
+        let result = executor::execute_for_project_direct(
+            &project,
+            cli_config,
+            &command_args,
+            &target_domain,
+        );
+        match result {
+            Ok(cmd_output) => (
+                cmd_output,
+                format!("{} {}", cli_config.tool, command_args.join(" ")),
+            ),
+            Err(_) => {
+                // Fallback to shell execution if direct fails
+                let (_, rendered_cmd) = build_project_command(&project, cli_config, &module.id, args)?;
+                (local_executor(&rendered_cmd), rendered_cmd)
+            }
+        }
     } else {
         let ctx = resolve_project_ssh(project_id)?;
-        ctx.client.execute(&command)
+        let (_, rendered_cmd) = build_project_command(&project, cli_config, &module.id, args)?;
+        let cmd_output = ctx.client.execute(&rendered_cmd);
+        (cmd_output, rendered_cmd)
     };
 
     Ok(CliToolResult {
@@ -125,7 +151,7 @@ fn run_for_project_with_executor(
         module_id: module.id,
         identifier: project_id.to_string(),
         target_domain: Some(target_domain),
-        executed_command: command,
+        executed_command,
         stdout: output.stdout,
         stderr: output.stderr,
         exit_code: output.exit_code,
