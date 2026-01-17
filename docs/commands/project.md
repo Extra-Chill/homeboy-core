@@ -381,6 +381,70 @@ JSON output:
 }
 ```
 
+### `rename`
+
+```sh
+homeboy project rename <project_id> <new_id>
+```
+
+Renames a project by changing its ID.
+
+Notes:
+
+- `new_id` is lowercased before writing.
+- The project is moved from `projects/<old-id>.json` to `projects/<new-id>.json`.
+- Component references are updated automatically.
+
+Example:
+
+```sh
+homeboy project rename my-project my-new-project
+```
+
+JSON output:
+
+```json
+{
+  "command": "project.rename",
+  "project_id": "<project_id>",
+  "new_id": "<new_id>",
+  "renamed": true
+}
+```
+
+### `remove`
+
+```sh
+homeboy project remove <project_id> --json '<JSON>'
+homeboy project remove <project_id> '<JSON>'
+```
+
+Removes items from project configuration arrays.
+
+Options:
+
+- `--json <JSON>`: JSON object to remove from config (supports `@file` and `-` for stdin)
+
+Note: Use this to remove specific fields or array items from project configuration.
+
+Example:
+
+```sh
+# Remove a component
+homeboy project remove my-project --json '{"component_ids": ["component-id"]}'
+```
+
+JSON output:
+
+```json
+{
+  "command": "project.remove",
+  "project_id": "<project_id>",
+  "removed": ["component_ids"],
+  "project": {}
+}
+```
+
 ## Related
 
 - [JSON output contract](../json-output/json-output-contract.md)

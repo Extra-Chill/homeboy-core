@@ -11,14 +11,16 @@ homeboy version <COMMAND>
 ### `show`
 
 ```sh
-homeboy version show <component_id>
+homeboy version show [<component_id>]
 ```
+
+Shows the current version for the specified component, or the Homeboy binary version if omitted.
 
 ### `bump`
 
 ```sh
-homeboy version bump <component_id> <patch|minor|major>
-homeboy version bump <component_id> <patch|minor|major> --no-commit
+homeboy version bump [<component_id>] <patch|minor|major>
+homeboy version bump [<component_id>] <patch|minor|major> --no-commit
 ```
 
 Flags:
@@ -29,7 +31,7 @@ Flags:
 ### `set`
 
 ```sh
-homeboy version set <component_id> <new_version>
+homeboy version set [<component_id>] <new_version>
 ```
 
 `set` writes the version targets directly without incrementing and does not finalize the changelog.
@@ -60,7 +62,7 @@ Note: `--json` for changelog entries is on `homeboy changelog add` (not `homeboy
 
 Arguments:
 
-- `<component_id>`: component ID
+- `[<component_id>]`: component ID (optional, shows Homeboy binary version when omitted)
 - `<patch|minor|major>`: version bump type
 
 ## JSON output

@@ -14,12 +14,18 @@ In JSON output mode, the default `show` output is returned as JSON (with a `cont
 
 ## Subcommands
 
+### Default (show)
 
 ```sh
 homeboy changelog
+homeboy changelog --self
 ```
 
 Shows the embedded Homeboy CLI changelog documentation (from `docs/changelog.md`).
+
+Options:
+
+- `--self`: Show Homeboy's own changelog (release notes) instead of a component's changelog
 
 This prints raw markdown to stdout.
 

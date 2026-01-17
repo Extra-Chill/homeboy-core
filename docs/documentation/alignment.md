@@ -4,7 +4,9 @@ Instructions for keeping existing `.md` documentation synchronized with current 
 
 ## Scope
 
-Alignment covers ALL existing `.md` files:
+Alignment covers documentation that describes current implementation only. Planning documents (describing future work, architectural plans, etc.) are excluded.
+
+This includes:
 - CLAUDE.md / AGENTS.md files
 - README.md files
 - `/docs` directory contents
