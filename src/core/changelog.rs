@@ -1032,6 +1032,53 @@ pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<I
     let relative_path = path.unwrap_or("CHANGELOG.md");
     let changelog_path = resolve_target_path(&component.local_path, relative_path)?;
 
+    // Check for existing changelog_target configuration
+    if let Some(ref configured_target) = component.changelog_target {
+        let configured_path = resolve_target_path(&component.local_path, configured_target)?;
+        
+        // If user didn't specify a custom path, or specified the same path, check for existing changelog
+        if path.is_none() || path == Some(configured_target) {
+            if configured_path.exists() {
+                return Err(Error::validation_invalid_argument(
+                    "changelog",
+                    "Changelog already exists for this component",
+                    None,
+                    Some(vec![
+                        format!("Existing changelog at: {}", configured_path.display()),
+                        format!("View with: homeboy changelog show {}", component_id),
+                        format!("Or use --path to specify a different location"),
+                    ]),
+                ));
+            }
+        }
+    } else {
+        // No changelog_target configured - scan for common changelog filenames
+        let changelog_candidates = [
+            "CHANGELOG.md",
+            "changelog.md",
+            "docs/CHANGELOG.md",
+            "docs/changelog.md",
+            "HISTORY.md",
+        ];
+
+        let local_path = Path::new(&component.local_path);
+        for candidate in &changelog_candidates {
+            let candidate_path = local_path.join(candidate);
+            if candidate_path.exists() {
+                return Err(Error::validation_invalid_argument(
+                    "changelog",
+                    "Found existing changelog file",
+                    None,
+                    Some(vec![
+                        format!("Existing changelog at: {}", candidate_path.display()),
+                        format!("Configure and use it: homeboy changelog init {} --path \"{}\" --configure", component_id, candidate),
+                        format!("View with: homeboy changelog show {}", component_id),
+                    ]),
+                ));
+            }
+        }
+    }
+
     // Configure component if requested (do this regardless of file state)
     let configured = if configure {
         component::set_changelog_target(component_id, relative_path)?;

@@ -710,14 +710,13 @@ dependencies = [
 
 [[package]]
 name = "homeboy"
-version = "0.25.3"
+version = "0.25.4"
 dependencies = [
  "anyhow",
  "arboard",
  "atty",
  "chrono",
  "clap",
- "dirs",
  "heck",
  "keyring",
  "regex",

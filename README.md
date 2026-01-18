@@ -77,13 +77,11 @@ See `docs/commands/release.md` for release step configuration details.
 
 ## Configuration
 
-Configuration and state live under the OS config directory (from `dirs::config_dir()`), under a `homeboy/` folder.
+Configuration and state live under universal directory `~/.config/homeboy/` (all platforms).
 
 Common defaults:
 
-- **macOS**: `~/Library/Application Support/homeboy/`
-- **Linux**: `$XDG_CONFIG_HOME/homeboy/` (fallback: `~/.config/homeboy/`)
-- **Windows**: `%APPDATA%\\homeboy\\`
+- **All platforms**: `~/.config/homeboy/` (Windows: `%APPDATA%\homeboy\`)
 
 Common paths:
 
@@ -93,7 +91,7 @@ Common paths:
 Notes:
 
 - Homeboy does not use a repo-local config file like `./homeboy.json`.
-- Global defaults live in the OS config directory as `homeboy/homeboy.json`.
+- Global defaults live in the config directory as `homeboy/homeboy.json`.
 - Persistent configuration is stored as JSON records under `projects/`, `servers/`, and `components/`.
 - Homeboy stores persistent SSH keys under `keys/`.
 

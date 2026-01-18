@@ -26,11 +26,11 @@ Homeboy provides tooling for AI-assisted documentation generation and maintenanc
 
 ## Configuration
 
-Configuration and state live under the OS config directory (`dirs::config_dir()/homeboy/`).
+Configuration and state live under universal directory `~/.config/homeboy/` (all platforms).
 
-- macOS: `~/Library/Application Support/homeboy/`
-- Linux: `$XDG_CONFIG_HOME/homeboy/` (fallback: `~/.config/homeboy/`)
-- Windows: `%APPDATA%\\homeboy\\`
+- macOS: `~/.config/homeboy/`
+- Linux: `~/.config/homeboy/`
+- Windows: `%APPDATA%\homeboy\`
 
 Common paths:
 
@@ -44,6 +44,6 @@ Common paths:
 Notes:
 
 - Embedded CLI docs ship inside the binary (see [Embedded docs topic resolution](embedded-docs/embedded-docs-topic-resolution.md)).
-- Module docs load from each installed module’s `docs/` folder under the Homeboy config root: `dirs::config_dir()/homeboy/modules/<module_id>/docs/` (same topic-key rules as core docs).
-- The CLI does not write documentation into `<config dir>/homeboy/docs/`.
+- Module docs load from each installed module’s `docs/` folder under the Homeboy config root: `~/.config/homeboy/modules/<module_id>/docs/` (same topic-key rules as core docs).
+- The CLI does not write documentation into `~/.config/homeboy/docs/`.
 

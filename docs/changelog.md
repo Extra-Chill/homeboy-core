@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.25.4] - 2026-01-18
+
+- Fixed: changelog init now checks for existing changelog files before creating new ones, preventing duplicates
+
 ## [0.25.1] - 2026-01-17
 
 - Enforce changelog hygiene: version set/bump require clean changelog, release rejects unreleased content

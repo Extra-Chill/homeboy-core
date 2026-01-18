@@ -1,15 +1,28 @@
 use crate::error::{Error, Result};
+use std::env;
 use std::path::PathBuf;
 
-/// Base homeboy config directory.
+/// Base homeboy config directory (universal ~/.config/homeboy/ on all platforms)
 pub fn homeboy() -> Result<PathBuf> {
-    let config_dir = dirs::config_dir().ok_or_else(|| {
-        Error::internal_unexpected(
-            "Unable to resolve a config directory for this OS. This likely indicates a broken environment (missing HOME/USERPROFILE/APPDATA/XDG_CONFIG_HOME) or a bug in the config path resolver."
-                .to_string(),
-        )
-    })?;
-    Ok(config_dir.join("homeboy"))
+    #[cfg(windows)]
+    {
+        let appdata = env::var("APPDATA").map_err(|_| {
+            Error::internal_unexpected(
+                "APPDATA environment variable not set on Windows".to_string(),
+            )
+        })?;
+        Ok(PathBuf::from(appdata).join("homeboy"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let home = env::var("HOME").map_err(|_| {
+            Error::internal_unexpected(
+                "HOME environment variable not set on Unix-like system".to_string(),
+            )
+        })?;
+        Ok(PathBuf::from(home).join(".config").join("homeboy"))
+    }
 }
 
 /// Global homeboy.json config file path
