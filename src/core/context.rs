@@ -120,7 +120,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
         }
     } else {
         Some(
-            "This directory is not managed by Homeboy. To initialize, create a project or component."
+            "This directory is not managed by Homeboy. Run 'homeboy init' to see project context and available components."
                 .to_string(),
         )
     };

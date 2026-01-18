@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.26.3] - 2026-01-18
+
+- feat: enhanced module list JSON output with CLI tool info, available actions, and runtime status flags
+- feat: added context-aware error hints suggesting 'homeboy init' when project context is missing
+
 ## [0.26.2] - 2026-01-18
 
 - Test dry-run validation
