@@ -178,6 +178,14 @@ pub enum ModuleOutput {
 }
 
 #[derive(Serialize)]
+pub struct ActionSummary {
+    pub id: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub action_type: String,
+}
+
+#[derive(Serialize)]
 
 pub struct ModuleEntry {
     pub id: String,
@@ -194,6 +202,16 @@ pub struct ModuleEntry {
     pub configured: bool,
     pub linked: bool,
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_tool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_setup: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_ready_check: Option<bool>,
 }
 
 fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
