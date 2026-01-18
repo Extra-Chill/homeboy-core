@@ -289,6 +289,66 @@ pub struct ChangelogValidationResult {
     pub changelog_changed: bool,
 }
 
+/// Read-only changelog validation for version bump operations.
+/// Validates that changelog can be finalized without making any changes.
+/// Returns the same validation results as validate_and_finalize_changelog but without modifying files.
+pub fn validate_changelog_for_bump(
+    component: &Component,
+    current_version: &str,
+    new_version: &str,
+) -> Result<ChangelogValidationResult> {
+    let settings = changelog::resolve_effective_settings(Some(component));
+    let changelog_path = changelog::resolve_changelog_path(component)?;
+
+    let changelog_content = local_files::local().read(&changelog_path)?;
+
+    let latest_changelog_version = changelog::get_latest_finalized_version(&changelog_content)
+        .ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "changelog",
+                "Changelog has no finalized versions".to_string(),
+                None,
+                Some(vec![
+                    "Add at least one finalized version section like '## [0.1.0] - YYYY-MM-DD'"
+                        .to_string(),
+                ]),
+            )
+        })?;
+
+    // Reject if changelog is ahead of files (version gap)
+    let changelog_ver = semver::Version::parse(&latest_changelog_version);
+    let file_ver = semver::Version::parse(current_version);
+    match (changelog_ver, file_ver) {
+        (Ok(clv), Ok(fv)) if clv > fv => {
+            return Err(Error::validation_invalid_argument(
+                "version",
+                format!(
+                    "Version mismatch: changelog is at {} but files are at {}. Setting version would create a version gap.",
+                    latest_changelog_version, current_version
+                ),
+                None,
+                Some(vec![
+                    "Ensure changelog and version files are in sync before updating version.".to_string(),
+                ]),
+            ));
+        }
+        _ => {}
+    }
+
+    let (_, changelog_changed) = changelog::finalize_next_section(
+        &changelog_content,
+        &settings.next_section_aliases,
+        new_version,
+        false,
+    )?;
+
+    Ok(ChangelogValidationResult {
+        changelog_path: changelog_path.to_string_lossy().to_string(),
+        changelog_finalized: true,
+        changelog_changed,
+    })
+}
+
 /// Validate and finalize changelog for a version operation.
 /// Ensures changelog is in sync with current version and has valid unreleased content.
 /// Finalizes the next section to the new version.

@@ -214,7 +214,7 @@ pub fn run(
 }
 
 fn show(id: &str) -> CmdResult<ComponentOutput> {
-    let component = component::load(id)?;
+    let component = component::load(id).map_err(|e| e.with_contextual_hint())?;
 
     Ok((
         ComponentOutput {

@@ -74,7 +74,7 @@ pub fn run(mut args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdRe
             "project_id",
             format!(
                 "'{}' is a component, not a project. \
-                 Did you mean: homeboy deploy <project> {}",
+                  Did you mean: homeboy deploy <project> {}",
                 args.project_id, args.project_id
             ),
             None,
@@ -102,7 +102,18 @@ pub fn run(mut args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdRe
         check: args.check,
     };
 
-    let result = deploy::run(&args.project_id, &config)?;
+    let result = deploy::run(&args.project_id, &config).map_err(|e| {
+        if e.message.contains("No components configured for project") {
+            e.with_hint(format!(
+                "Run 'homeboy project components add {} <component-id>' to add components",
+                args.project_id
+            ))
+            .with_hint("Run 'homeboy init' to see project context and available components")
+        } else {
+            e
+        }
+    })?;
+
     let exit_code = if result.summary.failed > 0 { 1 } else { 0 };
 
     Ok((

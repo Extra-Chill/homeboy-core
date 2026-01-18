@@ -366,10 +366,20 @@ fn list() -> homeboy::Result<(ProjectOutput, i32)> {
         })
         .collect();
 
+    let hint = if items.is_empty() {
+        Some(
+            "No projects configured. Run 'homeboy init' to see project context"
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
     Ok((
         ProjectOutput {
             command: "project.list".to_string(),
             projects: Some(items),
+            hint,
             ..Default::default()
         },
         0,

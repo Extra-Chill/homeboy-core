@@ -393,11 +393,11 @@ pub fn finalize_next_section(
     let start = find_next_section_start(&lines, next_section_aliases).ok_or_else(|| {
         Error::validation_invalid_argument(
             "changelog",
-            "Next changelog section not found (cannot finalize)",
+            "No changelog items found (cannot finalize)",
             None,
             Some(vec![
-                "Add a next section heading like '## Unreleased' (or configure changelogNextSectionLabel/aliases).".to_string(),
-                "Run `homeboy changelog init <component_id>` to add an Unreleased section or create a Keep a Changelog template.".to_string(),
+                "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
+                "Ensure changelog contains all changes since the last version update.".to_string(),
             ]),
         )
     })?;
@@ -413,17 +413,17 @@ pub fn finalize_next_section(
 
         let (message, hints) = match content_status {
             SectionContentStatus::SubsectionsOnly => (
-                "Next changelog section has subsection headers but no bullet items",
+                "Changelog has subsection headers but no bullet items",
                 vec![
-                    "Add bullet items under subsections (e.g., `- Description of change`).".to_string(),
-                    "Keep a Changelog subsections (### Added, ### Fixed, etc.) require content.".to_string(),
+                    "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
+                    "Ensure changelog contains all changes since the last version update.".to_string(),
                 ],
             ),
             SectionContentStatus::Empty => (
-                "Next changelog section is empty",
+                "Changelog has no items",
                 vec![
-                    "Add changelog items before bumping (e.g., `homeboy changelog add <componentId> -m \"...\"`).".to_string(),
-                    "Ensure the section contains at least one bullet item.".to_string(),
+                    "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
+                    "Ensure changelog contains all changes since the last version update.".to_string(),
                 ],
             ),
             _ => unreachable!(),

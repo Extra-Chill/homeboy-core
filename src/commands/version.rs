@@ -3,7 +3,8 @@ use serde::Serialize;
 
 use homeboy::git::{commit, CommitOptions};
 use homeboy::version::{
-    bump_version, increment_version, read_version, set_version, VersionTargetInfo,
+    bump_version, increment_version, read_version, set_version, validate_changelog_for_bump,
+    VersionTargetInfo,
 };
 
 use super::CmdResult;
@@ -167,6 +168,35 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     info.version, new_version
                 );
 
+                // Validate changelog without making changes
+                let changelog_validation = if let Some(ref id) = component_id {
+                    match homeboy::component::load(id) {
+                        Ok(component) => {
+                            match validate_changelog_for_bump(&component, &info.version, &new_version) {
+                                Ok(validation) => validation,
+                                Err(e) => {
+                                    eprintln!(
+                                        "[version] [dry-run] Changelog validation would fail: {}",
+                                        e.message
+                                    );
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[version] [dry-run] Could not validate changelog: {}", e);
+                            return Err(e);
+                        }
+                    }
+                } else {
+                    return Err(homeboy::error::Error::validation_invalid_argument(
+                        "componentId",
+                        "Missing componentId for changelog validation",
+                        None,
+                        None,
+                    ));
+                };
+
                 return Ok((
                     VersionOutput::Bump(VersionBumpOutput {
                         command: "version.bump".to_string(),
@@ -174,9 +204,9 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                         old_version: info.version,
                         new_version,
                         targets: info.targets,
-                        changelog_path: String::new(),
-                        changelog_finalized: false,
-                        changelog_changed: false,
+                        changelog_path: changelog_validation.changelog_path,
+                        changelog_finalized: changelog_validation.changelog_finalized,
+                        changelog_changed: changelog_validation.changelog_changed,
                         dry_run: Some(true),
                         git_commit: None,
                     }),

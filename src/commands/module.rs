@@ -226,6 +226,33 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
             let compatible = is_module_compatible(module, project_config.as_ref());
             let linked = is_module_linked(&module.id);
 
+            let (cli_tool, cli_display_name) = module
+                .cli
+                .as_ref()
+                .map(|cli| (Some(cli.tool.clone()), Some(cli.display_name.clone())))
+                .unwrap_or((None, None));
+
+            let actions: Vec<ActionSummary> = module
+                .actions
+                .iter()
+                .map(|a| ActionSummary {
+                    id: a.id.clone(),
+                    label: a.label.clone(),
+                    action_type: a.action_type.clone(),
+                })
+                .collect();
+
+            let has_setup = module
+                .runtime
+                .as_ref()
+                .and_then(|r| r.setup_command.as_ref())
+                .map(|_| true);
+            let has_ready_check = module
+                .runtime
+                .as_ref()
+                .and_then(|r| r.ready_check.as_ref())
+                .map(|_| true);
+
             ModuleEntry {
                 id: module.id.clone(),
                 name: module.name.clone(),
@@ -248,6 +275,11 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                 configured: true,
                 linked,
                 path: module.module_path.clone().unwrap_or_default(),
+                cli_tool,
+                cli_display_name,
+                actions,
+                has_setup,
+                has_ready_check,
             }
         })
         .collect();

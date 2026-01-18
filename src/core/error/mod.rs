@@ -500,4 +500,15 @@ impl Error {
         });
         self
     }
+
+    pub fn with_contextual_hint(self) -> Self {
+        match self.code {
+            ErrorCode::ComponentNotFound
+            | ErrorCode::ProjectNotFound
+            | ErrorCode::ProjectNoActive => {
+                self.with_hint("Run 'homeboy init' to see project context and available components")
+            }
+            _ => self,
+        }
+    }
 }
