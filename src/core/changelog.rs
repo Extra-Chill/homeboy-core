@@ -902,8 +902,12 @@ pub fn add_items_bulk(json_spec: &str) -> Result<AddItemsOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
 
     let input: AddItemsInput = serde_json::from_str(&raw).map_err(|e| {
-        Error::validation_invalid_json(e, Some("parse changelog add input".to_string()))
-            .with_hint(r#"Example: {"component_id": "my-component", "messages": ["Fixed: bug"]}"#)
+        Error::validation_invalid_json(
+            e,
+            Some("parse changelog add input".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
+        .with_hint(r#"Example: {"component_id": "my-component", "messages": ["Fixed: bug"]}"#)
     })?;
 
     let normalized: NormalizedAddItemsInput = input.into();

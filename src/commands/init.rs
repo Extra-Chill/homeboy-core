@@ -40,6 +40,8 @@ pub struct InitOutput {
     pub last_release: Option<ReleaseSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub changelog: Option<ChangelogSnapshot>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -246,6 +248,7 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
     let version_snapshot = resolve_version_snapshot(&components);
     let git_snapshot = resolve_git_snapshot(context_output.git_root.as_ref());
     let (last_release, changelog_snapshot) = resolve_changelog_snapshots(&components);
+    let warnings = validate_version_targets(&components);
 
     Ok((
         InitOutput {
@@ -260,6 +263,7 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
             git: git_snapshot,
             last_release,
             changelog: changelog_snapshot,
+            warnings,
         },
         0,
     ))
@@ -424,4 +428,23 @@ fn parse_version_label(label: &str) -> Option<String> {
 fn parse_date_label(label: &str) -> Option<String> {
     let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").ok()?;
     re.find(label).map(|m| m.as_str().to_string())
+}
+
+fn validate_version_targets(components: &[Component]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for comp in components {
+        if let Some(targets) = &comp.version_targets {
+            for target in targets {
+                if target.pattern.is_none()
+                    && version::default_pattern_for_file(&target.file).is_none()
+                {
+                    warnings.push(format!(
+                        "Component '{}' has version target '{}' with no pattern and no module default. Run: homeboy component set {} --version-targets @file.json",
+                        comp.id, target.file, comp.id
+                    ));
+                }
+            }
+        }
+    }
+    warnings
 }

@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 /// Parse JSON string into typed value.
 pub(crate) fn from_str<T: DeserializeOwned>(s: &str) -> Result<T> {
     serde_json::from_str(s)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse json".to_string())))
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse json".to_string()), None))
 }
 
 /// Serialize value to pretty-printed JSON string.
@@ -29,7 +29,7 @@ pub(crate) fn to_string_pretty<T: Serialize>(data: &T) -> Result<String> {
 }
 
 /// Read JSON spec from string, file (@path), or stdin (-).
-pub(crate) fn read_json_spec_to_string(spec: &str) -> Result<String> {
+pub fn read_json_spec_to_string(spec: &str) -> Result<String> {
     use std::io::IsTerminal;
 
     if spec.trim() == "-" {
@@ -300,7 +300,7 @@ pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
     deep_merge(&mut base, patch, replace_fields, String::new());
 
     *existing = serde_json::from_value(base)
-        .map_err(|e| Error::validation_invalid_json(e, Some("merge config".to_string())))?;
+        .map_err(|e| Error::validation_invalid_json(e, Some("merge config".to_string()), None))?;
 
     Ok(MergeFields { updated_fields })
 }
@@ -345,7 +345,7 @@ pub(crate) fn remove_config<T: Serialize + DeserializeOwned>(
     deep_remove(&mut base, spec, &mut removed_from, String::new());
 
     *existing = serde_json::from_value(base)
-        .map_err(|e| Error::validation_invalid_json(e, Some("remove config".to_string())))?;
+        .map_err(|e| Error::validation_invalid_json(e, Some("remove config".to_string()), None))?;
 
     Ok(RemoveFields { removed_from })
 }
@@ -431,8 +431,13 @@ pub(crate) struct BulkIdsInput {
 /// Parse JSON spec into a BulkIdsInput.
 pub(crate) fn parse_bulk_ids(json_spec: &str) -> Result<BulkIdsInput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse bulk IDs input".to_string())))
+    serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some("parse bulk IDs input".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
+    })
 }
 
 // ============================================================================

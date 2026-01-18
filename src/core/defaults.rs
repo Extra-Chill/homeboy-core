@@ -224,7 +224,11 @@ fn load_config_from_file() -> crate::Result<HomeboyConfig> {
     })?;
 
     let config: HomeboyConfig = serde_json::from_str(&content).map_err(|e| {
-        crate::Error::validation_invalid_json(e, Some("parse homeboy.json".to_string()))
+        crate::Error::validation_invalid_json(
+            e,
+            Some("parse homeboy.json".to_string()),
+            Some(content.chars().take(200).collect::<String>()),
+        )
     })?;
 
     Ok(config)
@@ -242,7 +246,7 @@ pub fn save_config(config: &HomeboyConfig) -> crate::Result<()> {
     }
 
     let content = serde_json::to_string_pretty(config).map_err(|e| {
-        crate::Error::validation_invalid_json(e, Some("serialize homeboy.json".to_string()))
+        crate::Error::validation_invalid_json(e, Some("serialize homeboy.json".to_string()), None)
     })?;
 
     fs::write(&path, content).map_err(|e| {

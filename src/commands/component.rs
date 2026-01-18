@@ -35,9 +35,16 @@ enum ComponentCommand {
         /// Build artifact path relative to localPath
         #[arg(long)]
         build_artifact: Option<String>,
-        /// Version targets in the form "file" or "file::pattern" (repeatable)
+        /// Version targets in the form "file" or "file::pattern" (repeatable). For complex patterns, use --version-targets @file.json to avoid shell escaping
         #[arg(long = "version-target", value_name = "TARGET")]
         version_targets: Vec<String>,
+        /// Version targets as JSON array (supports @file.json and - for stdin)
+        #[arg(
+            long = "version-targets",
+            value_name = "JSON",
+            conflicts_with = "version_targets"
+        )]
+        version_targets_json: Option<String>,
         /// Build command to run in localPath
         #[arg(long)]
         build_command: Option<String>,
@@ -111,6 +118,7 @@ pub fn run(
             remote_path,
             build_artifact,
             version_targets,
+            version_targets_json,
             build_command,
             extract_command,
             changelog_target,
@@ -146,10 +154,22 @@ pub fn run(
 
                 let mut new_component = Component::new(id, local_path, remote_path, build_artifact);
 
-                if !version_targets.is_empty() {
-                    new_component.version_targets =
-                        Some(component::parse_version_targets(&version_targets)?);
-                }
+                new_component.version_targets = if let Some(json_spec) = version_targets_json {
+                    let raw = homeboy::config::read_json_spec_to_string(&json_spec)?;
+                    serde_json::from_str::<Vec<homeboy::component::VersionTarget>>(&raw)
+                        .map_err(|e| {
+                            homeboy::Error::validation_invalid_json(
+                                e,
+                                Some("parse version targets JSON".to_string()),
+                                Some(raw.chars().take(200).collect::<String>()),
+                            )
+                        })?
+                        .into()
+                } else if !version_targets.is_empty() {
+                    Some(component::parse_version_targets(&version_targets)?)
+                } else {
+                    None
+                };
 
                 new_component.build_command = build_command;
                 new_component.extract_command = extract_command;

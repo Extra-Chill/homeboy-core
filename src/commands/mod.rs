@@ -134,7 +134,11 @@ pub fn merge_json_sources(spec: Option<&str>, extra: &[String]) -> homeboy::Resu
     let mut base = if let Some(spec) = spec {
         let raw = read_json_spec_to_string(spec)?;
         serde_json::from_str(&raw).map_err(|e| {
-            homeboy::Error::validation_invalid_json(e, Some("parse JSON spec".to_string()))
+            homeboy::Error::validation_invalid_json(
+                e,
+                Some("parse JSON spec".to_string()),
+                Some(raw.chars().take(200).collect::<String>()),
+            )
         })?
     } else {
         Value::Object(Map::new())

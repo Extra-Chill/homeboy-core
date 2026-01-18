@@ -293,7 +293,7 @@ fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
     // Handle stdin and @file patterns
     let json_content = super::merge_json_sources(Some(spec_str), &[])?;
     let spec: GenerateSpec = serde_json::from_value(json_content).map_err(|e| {
-        homeboy::Error::validation_invalid_json(e, Some("parse generate spec".to_string()))
+        homeboy::Error::validation_invalid_json(e, Some("parse generate spec".to_string()), None)
     })?;
 
     let output_path = Path::new(&spec.output_dir);

@@ -680,7 +680,11 @@ where
 pub fn status_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
     let raw = read_json_spec_to_string(json_spec)?;
     let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
-        Error::validation_invalid_json(e, Some("parse bulk status input".to_string()))
+        Error::validation_invalid_json(
+            e,
+            Some("parse bulk status input".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
     })?;
     Ok(run_bulk_ids(&input.component_ids, "status", |id| {
         status(Some(id))
@@ -798,7 +802,11 @@ pub fn commit(
 /// Commit multiple components from JSON spec (bulk format).
 fn commit_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
     let input: BulkCommitInput = serde_json::from_str(json_spec).map_err(|e| {
-        Error::validation_invalid_json(e, Some("parse bulk commit input".to_string()))
+        Error::validation_invalid_json(
+            e,
+            Some("parse bulk commit input".to_string()),
+            Some(json_spec.chars().take(200).collect::<String>()),
+        )
     })?;
 
     let mut results = Vec::new();
@@ -873,8 +881,13 @@ pub enum CommitJsonOutput {
 /// Bulk format: `{"components":[{"id":"x","message":"m"},...]}`
 pub fn commit_from_json(id: Option<&str>, json_spec: &str) -> Result<CommitJsonOutput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse commit json".to_string())))?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some("parse commit json".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
+    })?;
 
     // Auto-detect: bulk if has "components" array
     if parsed.get("components").is_some() {
@@ -883,8 +896,13 @@ pub fn commit_from_json(id: Option<&str>, json_spec: &str) -> Result<CommitJsonO
     }
 
     // Single spec - parse and extract fields
-    let spec: CommitSpec = serde_json::from_str(&raw)
-        .map_err(|e| Error::validation_invalid_json(e, Some("parse commit spec".to_string())))?;
+    let spec: CommitSpec = serde_json::from_str(&raw).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some("parse commit spec".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
+    })?;
 
     // ID priority: positional arg > JSON body
     let target_id = id.map(|s| s.to_string()).or(spec.id);
@@ -915,7 +933,11 @@ pub fn push(component_id: Option<&str>, tags: bool) -> Result<GitOutput> {
 pub fn push_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
     let raw = read_json_spec_to_string(json_spec)?;
     let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
-        Error::validation_invalid_json(e, Some("parse bulk push input".to_string()))
+        Error::validation_invalid_json(
+            e,
+            Some("parse bulk push input".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
     })?;
     let push_tags = input.tags;
     Ok(run_bulk_ids(&input.component_ids, "push", |id| {
@@ -934,7 +956,11 @@ pub fn pull(component_id: Option<&str>) -> Result<GitOutput> {
 pub fn pull_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
     let raw = read_json_spec_to_string(json_spec)?;
     let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
-        Error::validation_invalid_json(e, Some("parse bulk pull input".to_string()))
+        Error::validation_invalid_json(
+            e,
+            Some("parse bulk pull input".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
     })?;
     Ok(run_bulk_ids(&input.component_ids, "pull", |id| {
         pull(Some(id))
@@ -1155,7 +1181,11 @@ fn build_bulk_changes_output(
 pub fn changes_bulk(json_spec: &str, include_diff: bool) -> Result<BulkResult<ChangesOutput>> {
     let raw = read_json_spec_to_string(json_spec)?;
     let input: BulkIdsInput = serde_json::from_str(&raw).map_err(|e| {
-        Error::validation_invalid_json(e, Some("parse bulk changes input".to_string()))
+        Error::validation_invalid_json(
+            e,
+            Some("parse bulk changes input".to_string()),
+            Some(raw.chars().take(200).collect::<String>()),
+        )
     })?;
 
     Ok(build_bulk_changes_output(

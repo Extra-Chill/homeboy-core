@@ -112,8 +112,13 @@ fn set(pointer: &str, value_str: &str) -> CmdResult<ConfigOutput> {
     }
 
     // Parse the value as JSON
-    let value: Value = serde_json::from_str(value_str)
-        .map_err(|e| homeboy::Error::validation_invalid_json(e, Some("parse value".to_string())))?;
+    let value: Value = serde_json::from_str(value_str).map_err(|e| {
+        homeboy::Error::validation_invalid_json(
+            e,
+            Some("parse value".to_string()),
+            Some(value_str.chars().take(200).collect::<String>()),
+        )
+    })?;
 
     // Load current config (or create default)
     let mut config = defaults::load_config();
@@ -128,7 +133,7 @@ fn set(pointer: &str, value_str: &str) -> CmdResult<ConfigOutput> {
 
     // Convert back to HomeboyConfig
     config = serde_json::from_value(config_json).map_err(|e| {
-        homeboy::Error::validation_invalid_json(e, Some("deserialize config".to_string()))
+        homeboy::Error::validation_invalid_json(e, Some("deserialize config".to_string()), None)
     })?;
 
     // Save the config
@@ -173,7 +178,7 @@ fn remove(pointer: &str) -> CmdResult<ConfigOutput> {
 
     // Convert back to HomeboyConfig
     config = serde_json::from_value(config_json).map_err(|e| {
-        homeboy::Error::validation_invalid_json(e, Some("deserialize config".to_string()))
+        homeboy::Error::validation_invalid_json(e, Some("deserialize config".to_string()), None)
     })?;
 
     // Save the config

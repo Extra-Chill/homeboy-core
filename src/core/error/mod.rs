@@ -264,11 +264,19 @@ impl Error {
         )
     }
 
-    pub fn validation_invalid_json(err: serde_json::Error, context: Option<String>) -> Self {
-        let details = serde_json::json!({
+    pub fn validation_invalid_json(
+        err: serde_json::Error,
+        context: Option<String>,
+        received: Option<String>,
+    ) -> Self {
+        let mut details = serde_json::json!({
             "error": err.to_string(),
             "context": context,
         });
+        if let Some(received_json) = received {
+            details["received"] =
+                serde_json::json!(received_json.chars().take(200).collect::<String>());
+        }
 
         Self::new(ErrorCode::ValidationInvalidJson, "Invalid JSON", details)
     }
