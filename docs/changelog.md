@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Fixed
+- version bump command now accepts bump type as positional argument without requiring -- separator
+
 ## [0.26.0] - 2026-01-18
 
 ### Added

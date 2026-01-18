@@ -54,7 +54,6 @@ enum VersionCommand {
         component_id: Option<String>,
 
         /// Version bump type (patch, minor, major)
-        #[arg(last = true)]
         bump_type: BumpType,
     },
     /// Set version directly (without incrementing or changelog finalization)
