@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.10] - 2026-01-19
+
+### Added
+- Add --level flag as alternative to positional bump type in version bump command
+
+### Fixed
+- Make --changed-only flag language-agnostic (removes hardcoded .php filter)
+
 ## [0.27.9] - 2026-01-19
 
 ### Added
