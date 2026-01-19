@@ -1,10 +1,11 @@
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
+use crate::module;
 use crate::output::{CreateOutput, MergeOutput, MergeResult, RemoveResult};
 use crate::paths;
 use crate::project::{self, NullableUpdate};
 use crate::slugify;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -30,7 +31,12 @@ pub struct Component {
     pub id: String,
     pub local_path: String,
     pub remote_path: String,
-    pub build_artifact: String,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "deserialize_empty_as_none"
+    )]
+    pub build_artifact: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modules: Option<HashMap<String, ScopedModuleConfig>>,
@@ -58,7 +64,7 @@ impl Component {
         id: String,
         local_path: String,
         remote_path: String,
-        build_artifact: String,
+        build_artifact: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -76,6 +82,15 @@ impl Component {
             extract_command: None,
         }
     }
+}
+
+/// Deserialize empty strings as None for backward compatibility.
+fn deserialize_empty_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.filter(|s| !s.is_empty()))
 }
 
 impl ConfigEntity for Component {
@@ -255,7 +270,7 @@ pub fn update(
     }
 
     if let Some(new_build_artifact) = build_artifact {
-        component.build_artifact = new_build_artifact;
+        component.build_artifact = Some(new_build_artifact);
         updated.push("buildArtifact".to_string());
     }
 
@@ -344,4 +359,50 @@ pub fn delete_safe(id: &str) -> Result<()> {
     }
 
     delete(id)
+}
+
+/// Resolve effective artifact path for a component.
+/// Returns the component's explicit artifact OR the module's pattern (with substitution).
+pub fn resolve_artifact(component: &Component) -> Option<String> {
+    // 1. Component has explicit artifact
+    if let Some(ref artifact) = component.build_artifact {
+        return Some(artifact.clone());
+    }
+
+    // 2. Check if any linked module provides an artifact pattern
+    if let Some(ref modules) = component.modules {
+        for module_id in modules.keys() {
+            if let Ok(manifest) = module::load_module(module_id) {
+                if let Some(ref build) = manifest.build {
+                    if let Some(ref pattern) = build.artifact_pattern {
+                        // Substitute template variables
+                        let resolved = pattern
+                            .replace("{component_id}", &component.id)
+                            .replace("{local_path}", &component.local_path);
+                        return Some(resolved);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. No artifact configured and no module pattern
+    None
+}
+
+/// Check if any linked module provides an artifact pattern.
+pub fn module_provides_artifact_pattern(component: &Component) -> bool {
+    component
+        .modules
+        .as_ref()
+        .map(|modules| {
+            modules.keys().any(|module_id| {
+                module::load_module(module_id)
+                    .ok()
+                    .and_then(|m| m.build)
+                    .and_then(|b| b.artifact_pattern)
+                    .is_some()
+            })
+        })
+        .unwrap_or(false)
 }

@@ -89,3 +89,21 @@ pub fn is_module_linked(module_id: &str) -> bool {
 fn manifest_path_for_module(module_dir: &Path, id: &str) -> PathBuf {
     module_dir.join(format!("{}.json", id))
 }
+
+/// Check if any of the component's linked modules provide build configuration.
+/// When true, the component's explicit build_command becomes optional.
+pub fn module_provides_build(component: &crate::component::Component) -> bool {
+    let modules = match &component.modules {
+        Some(m) => m,
+        None => return false,
+    };
+
+    for module_id in modules.keys() {
+        if let Ok(module) = load_module(module_id) {
+            if module.has_build() {
+                return true;
+            }
+        }
+    }
+    false
+}

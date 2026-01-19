@@ -354,7 +354,7 @@ impl ComponentDeployResult {
             local_version: None,
             remote_version: None,
             error: None,
-            artifact_path: Some(component.build_artifact.clone()),
+            artifact_path: component.build_artifact.clone(),
             remote_path: base_path::join_remote_path(Some(base_path), &component.remote_path).ok(),
             build_command: component.build_command.clone(),
             build_exit_code: None,
@@ -555,12 +555,17 @@ pub fn deploy_components(
         }
 
         // Check artifact exists after build
-        if !Path::new(&component.build_artifact).exists() {
+        // build_artifact is guaranteed to be Some at this point (filtered in load_project_components)
+        let artifact_path = component.build_artifact.as_ref().unwrap();
+        if !Path::new(artifact_path).exists() {
             results.push(
                 ComponentDeployResult::new(component, base_path)
                     .with_status("failed")
                     .with_versions(local_version, remote_version)
-                    .with_error(format!("Artifact not found: {}", component.build_artifact))
+                    .with_error(format!(
+                        "Artifact not found: {}. Run build first: homeboy build {}",
+                        artifact_path, component.id
+                    ))
                     .with_build_exit_code(build_exit_code),
             );
             failed += 1;
@@ -592,7 +597,7 @@ pub fn deploy_components(
             if let Some((override_config, module)) = find_deploy_override(&install_dir) {
                 deploy_with_override(
                     &ctx.client,
-                    Path::new(&component.build_artifact),
+                    Path::new(artifact_path),
                     &install_dir,
                     &override_config,
                     &module,
@@ -604,7 +609,7 @@ pub fn deploy_components(
                 // Standard deploy
                 deploy_artifact(
                     &ctx.client,
-                    Path::new(&component.build_artifact),
+                    Path::new(artifact_path),
                     &install_dir,
                     component.extract_command.as_deref(),
                     verification.as_ref(),
@@ -781,16 +786,33 @@ fn calculate_component_status(
     }
 }
 
-/// Load components by ID and normalize artifact paths.
+/// Load components by ID, resolve artifact paths via module patterns, and filter non-deployable.
 fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
     let mut components = Vec::new();
 
     for id in component_ids {
         let mut loaded = component::load(id)?;
-        // Resolve relative build artifact path
-        if !loaded.build_artifact.starts_with('/') {
-            loaded.build_artifact = format!("{}/{}", loaded.local_path, loaded.build_artifact);
-        }
+
+        // Resolve effective artifact (component value OR module pattern)
+        let effective_artifact = component::resolve_artifact(&loaded);
+
+        let Some(artifact) = effective_artifact else {
+            // Skip - component is intentionally non-deployable
+            eprintln!(
+                "[deploy] Skipping '{}': no artifact configured (non-deployable component)",
+                loaded.id
+            );
+            continue;
+        };
+
+        // Resolve relative path
+        let resolved_artifact = if artifact.starts_with('/') {
+            artifact
+        } else {
+            format!("{}/{}", loaded.local_path, artifact)
+        };
+
+        loaded.build_artifact = Some(resolved_artifact);
         components.push(loaded);
     }
 

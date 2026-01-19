@@ -88,6 +88,10 @@ impl ModuleManifest {
     pub fn has_runtime(&self) -> bool {
         self.runtime.is_some()
     }
+
+    pub fn has_build(&self) -> bool {
+        self.build.is_some()
+    }
 }
 
 impl ConfigEntity for ModuleManifest {
@@ -217,6 +221,10 @@ pub struct BuildConfig {
     pub module_script: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pre_build_script: Option<String>,
+    /// Default artifact path pattern with template support.
+    /// Supports: {component_id}, {local_path}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

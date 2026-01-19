@@ -232,6 +232,22 @@ fn build_component_info(component: &component::Component) -> ContainedComponentI
         }
     }
 
+    // Check for missing build artifact when component appears deployable
+    if component.build_artifact.is_none() && !component.remote_path.is_empty() {
+        // Check if module provides a pattern (would be resolved at deploy time)
+        if !component::module_provides_artifact_pattern(component) {
+            // Component has remote_path but no artifact source
+            gaps.push(ComponentGap {
+                field: "buildArtifact".to_string(),
+                reason: "Component has remotePath but no buildArtifact or module pattern".to_string(),
+                command: format!(
+                    "homeboy component set {} --build-artifact \"build/{}.zip\"",
+                    component.id, component.id
+                ),
+            });
+        }
+    }
+
     // Check for changelog without changelogTarget
     if component.changelog_target.is_none() {
         let changelog_candidates = [
@@ -259,7 +275,7 @@ fn build_component_info(component: &component::Component) -> ContainedComponentI
 
     ContainedComponentInfo {
         id: component.id.clone(),
-        build_artifact: component.build_artifact.clone(),
+        build_artifact: component.build_artifact.clone().unwrap_or_default(),
         build_command: component.build_command.clone(),
         remote_path: component.remote_path.clone(),
         gaps,

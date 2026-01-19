@@ -38,18 +38,23 @@ fn run_post_bump_commands(commands: &[String], working_dir: &str) -> Result<()> 
 
 /// Parse version from content using regex pattern.
 /// Pattern must contain a capture group for the version string.
+/// Content is trimmed to handle trailing newlines in VERSION files.
 pub fn parse_version(content: &str, pattern: &str) -> Option<String> {
     let re = Regex::new(pattern).ok()?;
-    re.captures(content)
+    let trimmed = content.trim();
+    re.captures(trimmed)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
 }
 
+/// Parse all versions from content using regex pattern.
+/// Content is trimmed to handle trailing newlines in VERSION files.
 pub fn parse_versions(content: &str, pattern: &str) -> Option<Vec<String>> {
     let re = Regex::new(pattern).ok()?;
+    let trimmed = content.trim();
     let mut versions = Vec::new();
 
-    for caps in re.captures_iter(content) {
+    for caps in re.captures_iter(trimmed) {
         if let Some(m) = caps.get(1) {
             versions.push(m.as_str().to_string());
         }

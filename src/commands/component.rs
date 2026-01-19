@@ -136,7 +136,6 @@ pub fn run(
                 })?;
 
                 let remote_path = remote_path.unwrap_or_default();
-                let build_artifact = build_artifact.unwrap_or_default();
 
                 let dir_name = Path::new(&local_path)
                     .file_name()

@@ -1,12 +1,25 @@
 # Homeboy CLI
 
-Homeboy is a config-driven automation CLI designed to be used during agentic coding sessions.
+Homeboy is a development and deployment automation CLI designed for agentic coding sessions and rapid iteration across multiple projects.
 
-It standardizes the “plumbing” work that slows iteration down—project/component discovery, reusable module tools, SSH passthrough, deployments, database operations—while keeping output machine-oriented (most commands return a stable JSON envelope).
-
-Homeboy is intended to make it easier to iterate quickly across many projects at once, with deep automation capabilities provided by modules and CLI tools.
+It standardizes configuration-driven workflows for projects, servers, and components while providing extensible automation through modules. Most commands return stable JSON output for machine parsing alongside human-readable output.
 
 **Note:** This is still early in development. Breaking changes may occur between releases.
+
+## Capabilities
+
+Homeboy provides these core capabilities:
+
+- **Configuration & Context**: Manage projects, components, servers, and modules with `homeboy init` for environment discovery
+- **Deployment**: Version-aware deployment with pre-flight checks, dry-run mode, and version comparison
+- **Release Pipelines**: Local orchestration replacing CI/CD with configurable steps and module-backed actions
+- **SSH & Remote Operations**: Managed SSH connections, remote file operations, log management, and database access
+- **Git Integration**: Status, commit (with granular file control), push/pull, and automatic tagging
+- **Database Operations**: Table management, querying, search, and SSH tunneling
+- **API Operations**: HTTP requests with keychain authentication per project
+- **Version & Changelog**: Semantic versioning, changelog management, and changelog finalization
+- **Documentation**: Embedded docs, codebase analysis, and bulk documentation generation
+- **Module System**: Extensible runtime tools, platform behaviors, and custom release steps
 
 ## Agent usage (recommended)
 
@@ -35,73 +48,343 @@ See the monorepo-level documentation for installation options:
 
 See [CLI documentation](docs/index.md) for the authoritative command list, embedded docs topics (`homeboy docs ...`), and JSON contracts.
 
-A few common entrypoints:
+### Initial Setup Workflow
+
+Start with `homeboy init` to understand your environment and get context. Based on the output:
+
+1. **Create server**: `homeboy server create <id> --host <host> --user <user>`
+2. **Create project**: `homeboy project create <id> <domain> --server <server-id>`
+3. **Create component**: `homeboy component create <name> --local-path <path> --remote-path <path> --build-artifact <path>`
+4. **Link components**: `homeboy project components add <project> <component>`
+5. **Verify**: `homeboy context`
+
+### Getting Started
 
 ```bash
-homeboy docs
-homeboy docs list
-homeboy docs commands/project
+# Initialize and explore
+homeboy init                            # Get context and next steps
+homeboy docs list                       # List all available topics
+homeboy docs commands/commands-index     # Browse all commands
 
-homeboy list
+# Discovery commands
 homeboy project list
 homeboy component list
+homeboy server list
 homeboy module list
+homeboy context                        # Show current working context
+```
 
-homeboy pm2 <project_id> status
-homeboy wp <project_id> plugin list
+### Component and Project Setup Workflow
 
+```bash
+# Create a component (buildable/deployable unit)
+homeboy component create <name> --local-path . --remote-path <path> --build-artifact <path>
+homeboy component set <id> --build-command "./build.sh"
+homeboy component set <id> --changelog-target "CHANGELOG.md"
+
+# Create a project (deployable environment)
+homeboy project create <name> <domain> --server <server_id>
+homeboy project create <name> <domain> --base-path <local-path>  # Local project
+
+# Link components to a project
+homeboy project components add <project> <component>
+homeboy project components set <project> <component-1> <component-2>
+```
+
+### Deployment Workflow
+
+```bash
+# Check component status without deploying
+homeboy deploy <project> --check
+homeboy deploy <project> --check --outdated
+
+# Preview what would be deployed
+homeboy deploy <project> --all --dry-run
+
+# Deploy components
+homeboy deploy <project> component-a component-b
+homeboy deploy <project> --all
+homeboy deploy <project> --outdated
+```
+
+### Release Workflow
+
+```bash
+# Review changes since last release
 homeboy changes <component_id>
 
-homeboy ssh <project_id>                 # interactive passthrough
-homeboy logs show <project_id> <path> --follow   # interactive passthrough
+# Add changelog entries
+homeboy changelog add <component_id> "Added: new feature"
+homeboy changelog add <component_id> -m "Fixed: bug" -t fixed
+
+# Plan and run release pipeline
+homeboy release plan <component_id>
+homeboy release run <component_id>
+```
+
+### Module Workflow
+
+```bash
+# List and install modules
+homeboy module list
+homeboy module install <git-url>
+homeboy module update <module-id>
+homeboy module uninstall <module-id>
+
+# Run modules with context
+homeboy module run <module-id> --project <project-id>
+homeboy module run <module-id> --project <project-id> --component <component-id>
+homeboy module run <module-id> --input key=value
+
+# Execute module actions
+homeboy module action <module-id> <action-id> --project <project-id>
+
+# Configure module settings
+homeboy project set <project-id> --json '{"modules": {"<module-id>": {"settings": {"key": "value"}}}}'
+homeboy component set <id> --json '{"modules": {"<module-id>": {"settings": {"key": "value"}}}}'
+```
+
+### Git Workflow
+
+```bash
+# Git operations
+homeboy git status <component_id>
+homeboy git commit <component_id> -m "Update docs" --files README.md
+homeboy git commit <component_id> -m "Release prep" --staged-only
+homeboy git push <component_id> --tags
+homeboy git pull <component_id>
+
+# Bulk operations
+homeboy git status --json '{"component_ids": ["id1", "id2"]}'
+homeboy git commit --json '{"components": [{"id": "id1", "message": "msg"}]}'
+
+# Version management
+homeboy version show <component_id>
+homeboy version bump <component_id> patch
+homeboy version set <component_id> 1.2.3
+```
+
+### Remote Operations Workflow
+
+```bash
+# SSH access
+homeboy ssh <project_id>               # Interactive shell
+homeboy ssh <project_id> "ls -la"      # Execute command
+homeboy ssh list                        # List available servers
+
+# File operations
+homeboy file list <project_id> <path>
+homeboy file read <project_id> <path>
+homeboy file write <project_id> <path> < stdin
+homeboy file find <project_id> <path> --name "*.php" --type f --max-depth 3
+homeboy file grep <project_id> <path> "TODO" --name "*.php" -i
+
+# Log operations
+homeboy logs list <project_id>
+homeboy logs show <project_id> <path> --lines 100
+homeboy logs show <project_id> <path> --follow
+homeboy logs search <project_id> <path> "error" -i -C 3
+
+# Database operations
+homeboy db tables <project_id>
+homeboy db describe <project_id> <table>
+homeboy db query <project_id> "SELECT * FROM wp_posts LIMIT 10"
+homeboy db search <project_id> <table> --column user_email --pattern "gmail" --exact
+homeboy db delete-row <project_id> <table> <row_id>
+homeboy db drop-table <project_id> <table>
+homeboy db tunnel <project_id>
+```
+
+### Platform-Specific Tools (via modules)
+
+```bash
+# WordPress (via wordpress module)
+homeboy wp <project_id> plugin list
+homeboy wp <project_id> db export
+
+# Node.js (via nodejs module)
+homeboy pm2 <project_id> status
+homeboy pm2 <project_id> restart
+
+# GitHub (via github module)
+homeboy gh <project_id> issue list
+
+# Cargo (via rust module)
+homeboy cargo <component_id> test
 ```
 
 ## Docs
 
-- [Docs index](docs/index.md)
-- [Commands index](docs/commands/commands-index.md)
-- [JSON output contract](docs/json-output/json-output-contract.md)
-
-## Release workflow
-
-Homeboy replaces the need for GitHub Actions by running a local release pipeline defined per component.
-
-Recommended flow:
-
-- Review changes: `homeboy changes <component_id>`
-- Add release notes: `homeboy changelog add <component_id> "message"`
-- Bump version: `homeboy version bump <component_id> <patch|minor|major>`
-- Run release pipeline: `homeboy release run <component_id>`
-
-See `docs/commands/release.md` for release step configuration details.
+- [CLI docs index](docs/index.md) - Command reference, embedded docs topics, and JSON contracts
+- [Commands index](docs/commands/commands-index.md) - Complete list of built-in commands
+- [JSON output contract](docs/json-output/json-output-contract.md) - Stable JSON envelope format
+- [homeboy-modules repository](../homeboy-modules/) - Public modules and module creation guide
 
 ## Configuration
 
-Configuration and state live under universal directory `~/.config/homeboy/` (all platforms).
-
-Common defaults:
+Configuration and state live under universal directory `~/.config/homeboy/` (all platforms):
 
 - **All platforms**: `~/.config/homeboy/` (Windows: `%APPDATA%\homeboy\`)
+- `projects/<id>.json`, `servers/<id>.json`, `components/<id>.json` - Persistent configuration
+- `modules/<module_id>/<module_id>.json` - Module manifests
+- `keys/` - SSH keys
+- `homeboy/homeboy.json` - Global defaults
 
-Common paths:
+Homeboy does not use repo-local config files. All configuration is managed in the OS config directory.
 
-- `projects/<id>.json`, `servers/<id>.json`, and `components/<id>.json` under the Homeboy config root
-- `modules/<module_id>/<module_id>.json` (module manifest; used by the module system)
+## Module System
 
-Notes:
+Homeboy modules extend functionality with platform-specific tools and behaviors. Modules can provide CLI tools, define platform behaviors, implement release steps, and include their own documentation.
 
-- Homeboy does not use a repo-local config file like `./homeboy.json`.
-- Global defaults live in the config directory as `homeboy/homeboy.json`.
-- Persistent configuration is stored as JSON records under `projects/`, `servers/`, and `components/`.
-- Homeboy stores persistent SSH keys under `keys/`.
+### Extensibility Model
 
-See [CLI documentation](docs/index.md) for details.
+The module system enables deep extensibility without modifying the core CLI:
 
-## SSH
+- **Runtime Tools**: Integrate any CLI tool (WP-CLI, PM2, Cargo, GitHub CLI, etc.) as a first-class command
+- **Platform Behaviors**: Define database schemas, deployment patterns, and version detection rules
+- **Release Steps**: Implement custom pipeline steps that integrate with the core release workflow
+- **Documentation**: Modules provide their own embedded documentation that integrates with `homeboy docs`
+- **Commands**: Modules can register top-level CLI commands alongside built-in commands
 
-Homeboy connects over SSH using server configuration stored under `servers/` inside the OS config directory.
+Modules are JSON manifests that define configuration and runtime behavior. See the [homeboy-modules repository](../homeboy-modules/) for available modules, examples, and implementation details.
 
-Key management commands (generate/import/use/unset/show) are documented in [server](docs/commands/server.md).
+### Public Module Repository
+
+The official [homeboy-modules](../homeboy-modules/) repository contains publicly available modules:
+
+- **wordpress**: WP-CLI integration with database discovery
+- **nodejs**: PM2 process management
+- **rust**: Cargo CLI integration
+- **github**: GitHub CLI for issues, PRs, and repos
+- **homebrew**: Homebrew tap publishing
+
+Install modules from this repository or create your own to extend Homeboy for your specific workflows.
+
+### Creating Modules
+
+To create a custom module:
+
+1. Create a directory structure with a JSON manifest
+2. Define runtime behavior, platform behaviors, and/or release actions
+3. Install locally via symlink for development: `homeboy module install <local-path>`
+4. Publish to a git repository for sharing
+
+See the [homeboy-modules README](../homeboy-modules/README.md) for detailed module creation guidelines.
+
+### Installing Modules
+
+```bash
+# From git repository
+homeboy module install <git-url>
+
+# From local path (creates symlink for development)
+homeboy module install <local-path>
+
+# Update a git-cloned module
+homeboy module update <module-id>
+
+# Uninstall a module
+homeboy module uninstall <module-id>
+```
+
+### Module Manifest
+
+Each module includes a JSON manifest (`<module_id>/<module_id>.json`) defining:
+
+- **Runtime**: `run_command`, `setup_command`, `ready_check`, `entrypoint`, `env`
+- **Platform**: Database CLI templates, version patterns, deployment behaviors
+- **Release Actions**: Custom pipeline steps (e.g., `release.publish`)
+- **Commands**: Additional top-level CLI commands provided by the module
+- **Docs**: Embedded documentation topics
+
+Example runtime configuration:
+
+```json
+{
+  "runtime": {
+    "run_command": "./venv/bin/python3 {{entrypoint}} {{args}}",
+    "setup_command": "python3 -m venv venv && ./venv/bin/pip install -r requirements.txt",
+    "ready_check": "test -f ./venv/bin/python3",
+    "entrypoint": "main.py",
+    "env": {
+      "MY_VAR": "{{modulePath}}/data"
+    }
+  }
+}
+```
+
+### Module Settings
+
+Module settings are merged across scopes (later scopes override earlier ones):
+
+1. Project (`projects/<project_id>.json`): `modules.<module_id>.settings`
+2. Component (`components/<component_id>.json`): `modules.<module_id>.settings`
+
+Effective settings are passed to modules via environment variables:
+
+- `HOMEBOY_SETTINGS_JSON`: Merged effective settings (JSON)
+- `HOMEBOY_PROJECT_ID`: Project ID (when project context is used)
+- `HOMEBOY_COMPONENT_ID`: Component ID (when component context is resolved)
+- `HOMEBOY_COMPONENT_PATH`: Absolute path to component directory
+
+Configure module settings:
+
+```bash
+# At project level
+homeboy project set <project-id> --json '{"modules": {"<module-id>": {"settings": {"key": "value"}}}}'
+
+# At component level
+homeboy component set <component-id> --json '{"modules": {"<module-id>": {"settings": {"key": "value"}}}}'
+```
+
+### Module Runtime
+
+Modules can define their own top-level CLI commands and documentation topics. Discover what's available:
+
+```bash
+homeboy docs list                    # List all topics (core + modules)
+homeboy docs <module-topic>          # Render module-provided docs
+```
+
+Executable modules define runtime behavior:
+
+- **run_command**: Shell command to execute the module (supports template variables)
+- **setup_command**: Optional command run during install/update
+- **ready_check**: Optional command to verify module readiness
+- **env**: Optional environment variables to set
+
+Template variables available in run_command:
+- `{{modulePath}}`: Module directory path
+- `{{entrypoint}}`: Module entrypoint file
+- `{{args}}`: Command-line arguments passed to module
+- Project context variables (when available)
+
+### Module Actions
+
+Modules can define actions for execution via `homeboy module action`:
+
+```bash
+homeboy module action <module-id> <action-id> --project <project-id> --data '<json>'
+```
+
+Actions can be:
+- **CLI type**: Execute module runtime commands
+- **API type**: Make HTTP requests to project APIs
+
+Actions are also used in release pipelines as custom steps:
+
+```json
+{
+  "id": "publish",
+  "type": "module.run",
+  "config": {
+    "module": "github",
+    "inputs": [
+      {"id": "create_release", "value": "true"}
+    ]
+  }
+}
+```
 
 ## License
 

@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.0] - 2026-01-18
+
+- feat: make build_artifact optional—modules can provide artifact_pattern for automatic resolution
+- feat: deploy command supports --project flag as alternative to positional argument
+- feat: context gaps now detect missing buildArtifact when remotePath is configured
+- fix: version parsing now trims content for VERSION files with trailing newlines
+- docs: comprehensive README overhaul with workflow examples and module system documentation
+
 ## [0.26.7] - 2026-01-18
 
 - Add `homeboy lint` command for standalone code linting via module scripts
