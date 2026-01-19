@@ -54,8 +54,12 @@ enum VersionCommand {
         /// Component ID
         component_id: Option<String>,
 
-        /// Version bump type (patch, minor, major)
-        bump_type: BumpType,
+        /// Version bump type (positional: patch, minor, major)
+        bump_type: Option<BumpType>,
+
+        /// Version bump type (alternative to positional)
+        #[arg(long, value_enum)]
+        level: Option<BumpType>,
     },
     /// Set version directly (without incrementing or changelog finalization)
     #[command(visible_aliases = ["edit", "merge"])]
@@ -148,13 +152,26 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             dry_run,
             no_commit,
             bump_type,
+            level,
             component_id,
         } => {
+            let effective_bump = bump_type.or(level).ok_or_else(|| {
+                homeboy::error::Error::validation_invalid_argument(
+                    "bump_type",
+                    "Missing bump type",
+                    None,
+                    Some(vec![
+                        "Use positional: homeboy version bump <component> patch".to_string(),
+                        "Or use flag: homeboy version bump <component> --level=patch".to_string(),
+                    ]),
+                )
+            })?;
+
             if dry_run {
                 let info = read_version(component_id.as_deref())?;
 
                 let new_version =
-                    increment_version(&info.version, bump_type.as_str()).ok_or_else(|| {
+                    increment_version(&info.version, effective_bump.as_str()).ok_or_else(|| {
                         homeboy::error::Error::validation_invalid_argument(
                             "version",
                             format!("Invalid version format: {}", info.version),
@@ -214,7 +231,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                 ));
             }
 
-            let result = bump_version(component_id.as_deref(), bump_type.as_str())?;
+            let result = bump_version(component_id.as_deref(), effective_bump.as_str())?;
 
             // Auto-commit unless --no-commit
             let git_commit = if no_commit {

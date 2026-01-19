@@ -21,7 +21,7 @@ The `lint` command runs code style validation for a component using the linting 
 - `--fix`: Auto-fix formatting issues before validating (uses PHPCBF for WordPress)
 - `--file <path>`: Lint only a single file (path relative to component root)
 - `--glob <pattern>`: Lint only files matching glob pattern (e.g., "inc/**/*.php")
-- `--changed-only`: Lint only PHP files modified in the working tree (staged, unstaged, untracked)
+- `--changed-only`: Lint only files modified in the working tree (staged, unstaged, untracked)
 - `--errors-only`: Show only errors, suppress warnings
 - `--summary`: Show compact summary instead of full output
 - `--setting <key=value>`: Override module settings (can be used multiple times)

@@ -71,20 +71,12 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
         changed_files.extend(uncommitted.unstaged);
         changed_files.extend(uncommitted.untracked);
 
-        // Filter to only .php files
-        let php_files: Vec<&str> = changed_files
-            .iter()
-            .filter(|f| f.ends_with(".php"))
-            .map(|s| s.as_str())
-            .collect();
-
-        if php_files.is_empty() {
-            // No PHP files changed - return early with success
+        if changed_files.is_empty() {
             return Ok((
                 LintOutput {
                     status: "passed".to_string(),
                     component: args.component,
-                    stdout: "No PHP files in working tree changes".to_string(),
+                    stdout: "No files in working tree changes".to_string(),
                     stderr: String::new(),
                     exit_code: 0,
                     hints: None,
@@ -93,11 +85,11 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
             ));
         }
 
-        // Build brace expansion glob: {file1.php,file2.php,...}
-        if php_files.len() == 1 {
-            Some(php_files[0].to_string())
+        // Pass ALL files to module - let lint runner filter to relevant types
+        if changed_files.len() == 1 {
+            Some(changed_files[0].clone())
         } else {
-            Some(format!("{{{}}}", php_files.join(",")))
+            Some(format!("{{{}}}", changed_files.join(",")))
         }
     } else {
         args.glob.clone()
