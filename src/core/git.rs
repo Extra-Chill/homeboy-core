@@ -405,11 +405,17 @@ pub struct ChangesOutput {
     pub error: Option<String>,
 }
 
-struct BaselineInfo {
-    latest_tag: Option<String>,
-    source: Option<BaselineSource>,
-    reference: Option<String>,
-    warning: Option<String>,
+pub struct BaselineInfo {
+    pub latest_tag: Option<String>,
+    pub source: Option<BaselineSource>,
+    pub reference: Option<String>,
+    pub warning: Option<String>,
+}
+
+/// Detect baseline for a path (public wrapper).
+/// Used by init and deploy commands to get release state info.
+pub fn detect_baseline_for_path(path: &str) -> Result<BaselineInfo> {
+    detect_baseline(path, None)
 }
 
 fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> {

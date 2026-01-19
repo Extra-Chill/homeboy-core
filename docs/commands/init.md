@@ -74,7 +74,9 @@ Then read workspace docs (CLAUDE.md, README.md) for project context.
       "branch": "main",
       "clean": true,
       "ahead": 0,
-      "behind": 0
+      "behind": 0,
+      "commits_since_version": 5,
+      "version_baseline": "v0.20.7"
     },
     "last_release": {
       "tag": "v0.20.7",
@@ -102,7 +104,9 @@ Then read workspace docs (CLAUDE.md, README.md) for project context.
 | `servers`, `projects`, `components` | Available resources for reference |
 | `modules` | Available Homeboy modules |
 | `version` | Current component version snapshot (first matched component) |
-| `git` | Branch + clean state + ahead/behind snapshot |
+| `git` | Branch + clean state + ahead/behind snapshot + release state |
+| `git.commits_since_version` | Number of commits since last version tag (indicates unreleased work) |
+| `git.version_baseline` | Tag or commit hash used as baseline for commit count |
 | `last_release` | Latest changelog release summary |
 | `changelog` | Unreleased preview from component changelog |
 

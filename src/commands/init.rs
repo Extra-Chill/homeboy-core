@@ -98,6 +98,10 @@ pub struct GitSnapshot {
     pub ahead: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commits_since_version: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_baseline: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -306,11 +310,22 @@ fn resolve_version_snapshot(components: &[Component]) -> Option<VersionSnapshot>
 fn resolve_git_snapshot(git_root: Option<&String>) -> Option<GitSnapshot> {
     let root = git_root?;
     let snapshot = git::get_repo_snapshot(root).ok()?;
+
+    // Get release state info (commits since last version tag)
+    let baseline = git::detect_baseline_for_path(root).ok();
+    let commits_since = baseline.as_ref().and_then(|b| {
+        git::get_commits_since_tag(root, b.reference.as_deref())
+            .ok()
+            .map(|c| c.len() as u32)
+    });
+
     Some(GitSnapshot {
         branch: snapshot.branch,
         clean: snapshot.clean,
         ahead: snapshot.ahead,
         behind: snapshot.behind,
+        commits_since_version: commits_since,
+        version_baseline: baseline.and_then(|b| b.reference),
     })
 }
 

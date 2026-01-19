@@ -17,6 +17,7 @@ use crate::shell;
 use crate::ssh::SshClient;
 use crate::template::{render_map, TemplateVars};
 use crate::version;
+use crate::git;
 
 /// Parse bulk component IDs from a JSON spec.
 pub fn parse_bulk_component_ids(json_spec: &str) -> Result<Vec<String>> {
@@ -324,6 +325,19 @@ pub enum ComponentStatus {
     Unknown,
 }
 
+/// Release state tracking for deployment decisions.
+/// Captures git state relative to the last version tag.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReleaseState {
+    /// Number of commits since the last version tag
+    pub commits_since_version: u32,
+    /// Whether there are uncommitted changes in the working directory
+    pub has_uncommitted_changes: bool,
+    /// The baseline reference (tag or commit hash) used for comparison
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_ref: Option<String>,
+}
+
 /// Result for a single component deployment.
 #[derive(Debug, Clone, Serialize)]
 
@@ -342,6 +356,8 @@ pub struct ComponentDeployResult {
     pub build_command: Option<String>,
     pub build_exit_code: Option<i32>,
     pub deploy_exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_state: Option<ReleaseState>,
 }
 
 impl ComponentDeployResult {
@@ -359,6 +375,7 @@ impl ComponentDeployResult {
             build_command: component.build_command.clone(),
             build_exit_code: None,
             deploy_exit_code: None,
+            release_state: None,
         }
     }
 
@@ -395,6 +412,11 @@ impl ComponentDeployResult {
 
     fn with_remote_path(mut self, path: String) -> Self {
         self.remote_path = Some(path);
+        self
+    }
+
+    fn with_release_state(mut self, state: ReleaseState) -> Self {
+        self.release_state = Some(state);
         self
     }
 }
@@ -477,10 +499,17 @@ pub fn deploy_components(
                 let local_version = local_versions.get(&c.id).cloned();
                 let remote_version = remote_versions.get(&c.id).cloned();
                 let status = calculate_component_status(c, &remote_versions);
-                ComponentDeployResult::new(c, base_path)
+                let release_state = calculate_release_state(c);
+
+                let mut result = ComponentDeployResult::new(c, base_path)
                     .with_status("checked")
                     .with_versions(local_version, remote_version)
-                    .with_component_status(status)
+                    .with_component_status(status);
+
+                if let Some(state) = release_state {
+                    result = result.with_release_state(state);
+                }
+                result
             })
             .collect();
 
@@ -784,6 +813,30 @@ fn calculate_component_status(
             }
         }
     }
+}
+
+/// Calculate release state for a component.
+/// Returns commit count since last version tag and uncommitted changes status.
+fn calculate_release_state(component: &Component) -> Option<ReleaseState> {
+    let path = &component.local_path;
+
+    let baseline = git::detect_baseline_for_path(path).ok()?;
+
+    let commits = git::get_commits_since_tag(path, baseline.reference.as_deref())
+        .ok()
+        .map(|c| c.len() as u32)
+        .unwrap_or(0);
+
+    let uncommitted = git::get_uncommitted_changes(path)
+        .ok()
+        .map(|u| u.has_changes)
+        .unwrap_or(false);
+
+    Some(ReleaseState {
+        commits_since_version: commits,
+        has_uncommitted_changes: uncommitted,
+        baseline_ref: baseline.reference,
+    })
 }
 
 /// Load components by ID, resolve artifact paths via module patterns, and filter non-deployable.

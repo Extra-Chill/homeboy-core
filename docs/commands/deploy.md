@@ -60,7 +60,12 @@ If no component IDs are provided and neither `--all` nor `--outdated` is set, Ho
       "remote_path": "<path>|null",
       "build_command": "<cmd>|null",
       "build_exit_code": "<int>|null",
-      "deploy_exit_code": "<int>|null"
+      "deploy_exit_code": "<int>|null",
+      "release_state": {
+        "commits_since_version": 5,
+        "has_uncommitted_changes": false,
+        "baseline_ref": "v0.9.15"
+      }
     }
   ],
   "summary": { "succeeded": 0, "failed": 0, "skipped": 0 }
@@ -83,6 +88,16 @@ When using `--check`, each component result includes a `component_status` field:
 - `needs_update`: local version ahead of remote (needs deployment)
 - `behind_remote`: remote version ahead of local (local is behind)
 - `unknown`: cannot determine status (missing version information)
+
+### Release state
+
+When using `--check`, each component result includes a `release_state` field that tracks unreleased changes:
+
+- `commits_since_version`: number of commits since the last version tag
+- `has_uncommitted_changes`: whether there are uncommitted changes in the working directory
+- `baseline_ref`: the tag or commit hash used as baseline for comparison
+
+This helps identify components where `component_status` is `up_to_date` but work has been done since the last version bump (commits_since_version > 0), indicating a version bump may be needed before deployment.
 
 Exit code is `0` when `summary.failed == 0`, otherwise `1`.
 
