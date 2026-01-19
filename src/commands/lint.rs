@@ -21,6 +21,18 @@ pub struct LintArgs {
     #[arg(long)]
     summary: bool,
 
+    /// Lint only a single file (path relative to component root)
+    #[arg(long)]
+    file: Option<String>,
+
+    /// Lint only files matching glob pattern (e.g., "inc/**/*.php")
+    #[arg(long)]
+    glob: Option<String>,
+
+    /// Show only errors, suppress warnings
+    #[arg(long)]
+    errors_only: bool,
+
     /// Override settings as key=value pairs
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
@@ -54,7 +66,17 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
     let manifest = load_module_manifest(&module_path)?;
     let settings_json = merge_settings(&manifest, &module_settings, &args.setting)?;
     let project_path = PathBuf::from(&component.local_path);
-    let env_vars = prepare_env_vars(&module_path, &project_path, &settings_json, &args.component, args.fix, args.summary)?;
+    let env_vars = prepare_env_vars(
+        &module_path,
+        &project_path,
+        &settings_json,
+        &args.component,
+        args.fix,
+        args.summary,
+        &args.file,
+        &args.glob,
+        args.errors_only,
+    )?;
 
     let output = execute_lint_runner(&module_path, &env_vars)?;
 
@@ -227,6 +249,9 @@ fn prepare_env_vars(
     component_id: &str,
     auto_fix: bool,
     summary: bool,
+    file: &Option<String>,
+    glob: &Option<String>,
+    errors_only: bool,
 ) -> homeboy::Result<Vec<(String, String)>> {
     let module_name = module_path.file_name().unwrap().to_string_lossy();
 
@@ -255,6 +280,18 @@ fn prepare_env_vars(
 
     if summary {
         env_vars.push(("HOMEBOY_SUMMARY_MODE".to_string(), "1".to_string()));
+    }
+
+    if let Some(f) = file {
+        env_vars.push(("HOMEBOY_LINT_FILE".to_string(), f.clone()));
+    }
+
+    if let Some(g) = glob {
+        env_vars.push(("HOMEBOY_LINT_GLOB".to_string(), g.clone()));
+    }
+
+    if errors_only {
+        env_vars.push(("HOMEBOY_ERRORS_ONLY".to_string(), "1".to_string()));
     }
 
     Ok(env_vars)

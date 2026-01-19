@@ -12,6 +12,7 @@ enum ResponseMode {
 enum RawOutputMode {
     InteractivePassthrough,
     Markdown,
+    PlainText,
 }
 
 mod commands;
@@ -101,6 +102,9 @@ fn response_mode(command: &Commands) -> ResponseMode {
         }
         Commands::Logs(args) if logs::is_interactive(args) => {
             ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
+        }
+        Commands::File(args) if file::is_raw_read(args) => {
+            ResponseMode::Raw(RawOutputMode::PlainText)
         }
         Commands::Docs(args) if crate::commands::docs::is_json_mode(args) => ResponseMode::Json,
         Commands::Docs(_) => ResponseMode::Raw(RawOutputMode::Markdown),
@@ -307,6 +311,27 @@ fn main() -> std::process::ExitCode {
         }
     }
 
+    if let ResponseMode::Raw(RawOutputMode::PlainText) = mode {
+        if let crate::Commands::File(args) = cli.command {
+            let result = file::run(args, &global);
+            match result {
+                Ok((file::FileCommandOutput::Raw(content), exit_code)) => {
+                    print!("{}", content);
+                    return std::process::ExitCode::from(exit_code_to_u8(exit_code));
+                }
+                Ok(_) => {
+                    let err = homeboy::Error::other("Unexpected output type for raw mode");
+                    output::print_result::<serde_json::Value>(Err(err)).ok();
+                    return std::process::ExitCode::from(exit_code_to_u8(1));
+                }
+                Err(err) => {
+                    output::print_result::<serde_json::Value>(Err(err)).ok();
+                    return std::process::ExitCode::from(exit_code_to_u8(1));
+                }
+            }
+        }
+    }
+
     let (json_result, exit_code) = commands::run_json(cli.command, &global);
 
     match mode {
@@ -315,6 +340,7 @@ fn main() -> std::process::ExitCode {
         }
         ResponseMode::Raw(RawOutputMode::InteractivePassthrough) => {}
         ResponseMode::Raw(RawOutputMode::Markdown) => {}
+        ResponseMode::Raw(RawOutputMode::PlainText) => {}
     }
 
     std::process::ExitCode::from(exit_code_to_u8(exit_code))

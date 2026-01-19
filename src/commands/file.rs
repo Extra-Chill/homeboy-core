@@ -24,6 +24,9 @@ enum FileCommand {
         project_id: String,
         /// Remote file path
         path: String,
+        /// Output raw content only (no JSON wrapper)
+        #[arg(long)]
+        raw: bool,
     },
     /// Write content to file (from stdin)
     Write {
@@ -214,6 +217,11 @@ pub enum FileCommandOutput {
     Find(FileFindOutput),
     Grep(FileGrepOutput),
     Edit(FileEditOutput),
+    Raw(String),
+}
+
+pub fn is_raw_read(args: &FileArgs) -> bool {
+    matches!(&args.command, FileCommand::Read { raw: true, .. })
 }
 
 pub fn run(
@@ -225,9 +233,14 @@ pub fn run(
             let (out, code) = list(&project_id, &path)?;
             Ok((FileCommandOutput::Standard(out), code))
         }
-        FileCommand::Read { project_id, path } => {
-            let (out, code) = read(&project_id, &path)?;
-            Ok((FileCommandOutput::Standard(out), code))
+        FileCommand::Read { project_id, path, raw } => {
+            if raw {
+                let result = files::read(&project_id, &path)?;
+                Ok((FileCommandOutput::Raw(result.content), 0))
+            } else {
+                let (out, code) = read(&project_id, &path)?;
+                Ok((FileCommandOutput::Standard(out), code))
+            }
         }
         FileCommand::Write { project_id, path } => {
             let (out, code) = write(&project_id, &path)?;

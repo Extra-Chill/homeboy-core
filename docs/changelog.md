@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.2] - 2026-01-18
+
+- Add granular lint options: --file, --glob, and --errors-only flags for targeted linting
+
 ## [0.27.1] - 2026-01-18
 
 - Add --summary flag to lint command for compact output

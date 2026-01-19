@@ -165,15 +165,29 @@ pub fn read(project_id: &str, path: &str) -> Result<ReadResult> {
     })
 }
 
+/// Generate a unique heredoc delimiter that doesn't appear in content.
+fn generate_unique_delimiter(content: &str) -> String {
+    let mut delimiter = "HOMEBOYEOF".to_string();
+    let mut counter = 0;
+    while content.contains(&delimiter) {
+        counter += 1;
+        delimiter = format!("HOMEBOYEOF_{}", counter);
+    }
+    delimiter
+}
+
 /// Write content to file.
 pub fn write(project_id: &str, path: &str, content: &str) -> Result<WriteResult> {
     let project = project::load(project_id)?;
     let project_base_path = require_project_base_path(project_id, &project)?;
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
+    let delimiter = generate_unique_delimiter(content);
     let command = format!(
-        "cat > {} << 'HOMEBOYEOF'\n{}\nHOMEBOYEOF",
+        "cat > {} << '{}'\n{}\n{}",
         shell::quote_path(&full_path),
-        content
+        delimiter,
+        content,
+        delimiter
     );
     let output = execute_for_project(&project, &command)?;
 
@@ -379,25 +393,55 @@ pub fn grep(
         return Err(Error::other("Search pattern required".to_string()));
     }
 
-    let flags = if case_insensitive { "-rni" } else { "-rn" };
-
-    let mut cmd = format!(
-        "grep {} {} {}",
-        flags,
-        shell::quote_path(pattern),
+    // Check if path is a file or directory
+    let is_dir_cmd = format!(
+        "test -d {} && echo dir || echo file",
         shell::quote_path(&full_path)
     );
+    let check_output = execute_for_project(&project, &is_dir_cmd)?;
+    let is_directory = check_output.stdout.trim() == "dir";
 
-    if let Some(name) = name_filter {
-        cmd.push_str(&format!(" --include={}", shell::quote_path(name)));
-    }
+    // Build grep command based on path type and options
+    let cmd = if is_directory && (max_depth.is_some() || name_filter.is_some()) {
+        // Use find + xargs for portable depth limiting and name filtering
+        let case_flag = if case_insensitive { "-i" } else { "" };
+        let mut find_cmd = format!("find {}", shell::quote_path(&full_path));
 
-    if let Some(depth) = max_depth {
-        cmd.push_str(&format!(" --max-depth={}", depth));
-    }
+        if let Some(depth) = max_depth {
+            find_cmd.push_str(&format!(" -maxdepth {}", depth));
+        }
 
-    // Suppress error messages for unreadable files
-    cmd.push_str(" 2>/dev/null");
+        find_cmd.push_str(" -type f");
+
+        if let Some(name) = name_filter {
+            find_cmd.push_str(&format!(" -name {}", shell::quote_path(name)));
+        }
+
+        format!(
+            "{} -print0 2>/dev/null | xargs -0 grep -n {} {} 2>/dev/null",
+            find_cmd,
+            case_flag,
+            shell::quote_path(pattern)
+        )
+    } else if is_directory {
+        // Simple recursive grep for directories without depth/name filters
+        let flags = if case_insensitive { "-rni" } else { "-rn" };
+        format!(
+            "grep {} {} {} 2>/dev/null",
+            flags,
+            shell::quote_path(pattern),
+            shell::quote_path(&full_path)
+        )
+    } else {
+        // Single file grep (no -r flag)
+        let flags = if case_insensitive { "-ni" } else { "-n" };
+        format!(
+            "grep {} {} {} 2>/dev/null",
+            flags,
+            shell::quote_path(pattern),
+            shell::quote_path(&full_path)
+        )
+    };
 
     let output = execute_for_project(&project, &cmd)?;
 
@@ -686,11 +730,7 @@ pub fn edit_replace_pattern(
         .collect();
 
     let modified_content = if all {
-        let mut result = read_result.content.clone();
-        while result.contains(pattern) {
-            result = result.replacen(pattern, replacement, 1);
-        }
-        result
+        read_result.content.replace(pattern, replacement)
     } else {
         read_result.content.replacen(pattern, replacement, 1)
     };
@@ -788,7 +828,7 @@ pub fn edit_append(project_id: &str, path: &str, content: &str) -> Result<EditRe
         .collect();
 
     let command = format!(
-        "echo {} >> {}",
+        "printf '%s\\n' {} >> {}",
         shell::quote_arg(content),
         shell::quote_path(&full_path)
     );
@@ -833,7 +873,7 @@ pub fn edit_prepend(project_id: &str, path: &str, content: &str) -> Result<EditR
         .collect();
 
     let command = format!(
-        "echo {} | cat - {} > /tmp/prepend.$$ && mv /tmp/prepend.$$ {}",
+        "tmp=$(mktemp) && printf '%s\\n' {} | cat - {} > \"$tmp\" && mv \"$tmp\" {}",
         shell::quote_arg(content),
         shell::quote_path(&full_path),
         shell::quote_path(&full_path)
