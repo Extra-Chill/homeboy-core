@@ -1,0 +1,91 @@
+mod manifest;
+mod execution;
+mod scope;
+mod lifecycle;
+
+pub mod exec_context;
+
+// Re-export manifest types
+pub use manifest::{
+    ActionConfig, BuildConfig, CliConfig, DatabaseCliConfig, DatabaseConfig, DeployOverride,
+    DeployVerification, DiscoveryConfig, InputConfig, ModuleManifest, OutputConfig, OutputSchema,
+    RequirementsConfig, RuntimeConfig, SelectOption, SettingConfig, VersionPatternConfig,
+};
+
+// Re-export execution types and functions
+pub use execution::{
+    build_exec_env, is_module_compatible, is_module_ready, module_ready_status,
+    ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult, ModuleSetupResult,
+    run_action, run_module, run_setup,
+};
+pub(crate) use execution::{execute_action, run_module_runtime};
+
+// Re-export scope types
+pub use scope::ModuleScope;
+
+// Re-export lifecycle types and functions
+pub use lifecycle::{
+    derive_id_from_url, install, is_git_url, slugify_id, uninstall, update,
+    InstallResult, UpdateResult,
+};
+
+// Module loader functions
+
+use crate::config;
+use crate::error::Result;
+use crate::output::MergeOutput;
+use crate::paths;
+use std::path::{Path, PathBuf};
+
+pub fn load_module(id: &str) -> Result<ModuleManifest> {
+    let mut manifest = config::load::<ModuleManifest>(id)?;
+    let module_dir = paths::module(id)?;
+    manifest.module_path = Some(module_dir.to_string_lossy().to_string());
+    Ok(manifest)
+}
+
+pub fn load_all_modules() -> Result<Vec<ModuleManifest>> {
+    let modules = config::list::<ModuleManifest>()?;
+    let mut modules_with_paths = Vec::new();
+    for mut module in modules {
+        let module_dir = paths::module(&module.id)?;
+        module.module_path = Some(module_dir.to_string_lossy().to_string());
+        modules_with_paths.push(module);
+    }
+    Ok(modules_with_paths)
+}
+
+pub fn find_module_by_tool(tool: &str) -> Option<ModuleManifest> {
+    load_all_modules()
+        .ok()
+        .and_then(|modules| modules.into_iter().find(|m| m.cli.as_ref().is_some_and(|c| c.tool == tool)))
+}
+
+pub fn module_path(id: &str) -> PathBuf {
+    paths::module(id).unwrap_or_else(|_| PathBuf::from(id))
+}
+
+pub fn available_module_ids() -> Vec<String> {
+    config::list_ids::<ModuleManifest>().unwrap_or_default()
+}
+
+pub fn save_manifest(manifest: &ModuleManifest) -> Result<()> {
+    config::save(manifest)
+}
+
+pub fn merge(id: Option<&str>, json_spec: &str, replace_fields: &[String]) -> Result<MergeOutput> {
+    config::merge::<ModuleManifest>(id, json_spec, replace_fields)
+}
+
+/// Check if a module is a symlink (linked, not installed).
+pub fn is_module_linked(module_id: &str) -> bool {
+    paths::module(module_id)
+        .map(|p| p.is_symlink())
+        .unwrap_or(false)
+}
+
+/// Returns the path to a module's manifest file: {module_dir}/{id}.json
+#[allow(dead_code)]
+fn manifest_path_for_module(module_dir: &Path, id: &str) -> PathBuf {
+    module_dir.join(format!("{}.json", id))
+}

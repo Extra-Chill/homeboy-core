@@ -480,8 +480,20 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
         .filter(|e| e.is_json() && !e.is_dir)
         .filter_map(|e| {
             let id = e.path.file_stem()?.to_string_lossy().to_string();
-            let content = local_files::local().read(&e.path).ok()?;
-            let mut entity: T = from_str(&content).ok()?;
+            let content = match local_files::local().read(&e.path) {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("[config] Warning: failed to read {}: {}", e.path.display(), err);
+                    return None;
+                }
+            };
+            let mut entity: T = match from_str(&content) {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("[config] Warning: failed to parse {}: {}", e.path.display(), err);
+                    return None;
+                }
+            };
             entity.set_id(id);
             Some(entity)
         })
@@ -650,7 +662,7 @@ pub(crate) fn create_batch<T: ConfigEntity>(
 ) -> Result<BatchResult> {
     let value: serde_json::Value = from_str(spec)?;
     let items: Vec<serde_json::Value> = if value.is_array() {
-        value.as_array().unwrap().clone()
+        value.as_array().expect("is_array() returned true").clone()
     } else {
         vec![value]
     };
@@ -754,7 +766,7 @@ pub(crate) fn merge_batch_from_json<T: ConfigEntity>(raw_json: &str) -> Result<B
     let value: serde_json::Value = from_str(raw_json)?;
 
     let items: Vec<serde_json::Value> = if value.is_array() {
-        value.as_array().unwrap().clone()
+        value.as_array().expect("is_array() returned true").clone()
     } else {
         vec![value]
     };

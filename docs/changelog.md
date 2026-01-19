@@ -4,6 +4,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- NullableUpdate<T> type alias for three-state update semantics in CLI commands
+
+### Changed
+- refactor module.rs into module/ directory with focused submodules (manifest, execution, scope, lifecycle, exec_context)
+- replace .unwrap() calls with .expect() for safer error handling across codebase
+- extract duplicate template variable building into DbContext::base_template_vars()
+- unify scp_file and scp_recursive into shared scp_transfer() function
+- use OnceLock for lazy regex compilation in template resolution
+
+### Fixed
+- load_all_modules() calls now use unwrap_or_default() to handle errors gracefully
+
 ## [0.26.5] - 2026-01-18
 
 - feat: add --stream and --no-stream flags to module run command for explicit output control

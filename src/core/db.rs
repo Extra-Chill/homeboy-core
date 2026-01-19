@@ -58,13 +58,28 @@ struct DbContext {
     db_cli: DatabaseCliConfig,
 }
 
+impl DbContext {
+    /// Build base template variables for database commands.
+    fn base_template_vars(&self) -> HashMap<String, String> {
+        let mut vars = HashMap::with_capacity(8);
+        vars.insert(TemplateVars::SITE_PATH.to_string(), self.base_path.clone());
+        vars.insert(TemplateVars::CLI_PATH.to_string(), self.cli_path.clone());
+        vars.insert(TemplateVars::DB_HOST.to_string(), self.project.database.host.clone());
+        vars.insert(TemplateVars::DB_PORT.to_string(), self.project.database.port.to_string());
+        vars.insert(TemplateVars::DB_NAME.to_string(), self.project.database.name.clone());
+        vars.insert(TemplateVars::DB_USER.to_string(), self.project.database.user.clone());
+        vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
+        vars
+    }
+}
+
 fn build_context(project_id: &str, subtarget: Option<&str>) -> Result<DbContext> {
     let project = project::load(project_id)?;
     let base_path = require_project_base_path(project_id, &project)?;
 
     let domain = resolve_domain(&project, subtarget, project_id)?;
 
-    let modules = load_all_modules();
+    let modules = load_all_modules().unwrap_or_default();
 
     let db_cli = modules
         .iter()
@@ -156,26 +171,7 @@ fn parse_json_tables(json: &str) -> Vec<String> {
 pub fn list_tables(project_id: &str, subtarget: Option<&str>) -> Result<DbResult> {
     let ctx = build_context(project_id, subtarget)?;
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
-    vars.insert(
-        TemplateVars::DB_HOST.to_string(),
-        ctx.project.database.host.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_PORT.to_string(),
-        ctx.project.database.port.to_string(),
-    );
-    vars.insert(
-        TemplateVars::DB_NAME.to_string(),
-        ctx.project.database.name.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_USER.to_string(),
-        ctx.project.database.user.clone(),
-    );
-    vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
+    let vars = ctx.base_template_vars();
     let command = render_map(&ctx.db_cli.tables_command, &vars);
 
     let output = execute_for_project(&ctx.project, &command)?;
@@ -208,27 +204,8 @@ pub fn describe_table(
     let table = table.ok_or_else(|| Error::config("Table name required".to_string()))?;
     let ctx = build_context(project_id, subtarget)?;
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
+    let mut vars = ctx.base_template_vars();
     vars.insert(TemplateVars::TABLE.to_string(), table.to_string());
-    vars.insert(
-        TemplateVars::DB_HOST.to_string(),
-        ctx.project.database.host.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_PORT.to_string(),
-        ctx.project.database.port.to_string(),
-    );
-    vars.insert(
-        TemplateVars::DB_NAME.to_string(),
-        ctx.project.database.name.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_USER.to_string(),
-        ctx.project.database.user.clone(),
-    );
-    vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
     let command = render_map(&ctx.db_cli.describe_command, &vars);
 
     let output = execute_for_project(&ctx.project, &command)?;
@@ -274,29 +251,10 @@ pub fn query(project_id: &str, sql: &str, subtarget: Option<&str>) -> Result<DbR
 
     let escaped_sql = sql.replace('\'', "''");
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
+    let mut vars = ctx.base_template_vars();
     vars.insert(TemplateVars::QUERY.to_string(), escaped_sql);
     vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
     vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    vars.insert(
-        TemplateVars::DB_HOST.to_string(),
-        ctx.project.database.host.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_PORT.to_string(),
-        ctx.project.database.port.to_string(),
-    );
-    vars.insert(
-        TemplateVars::DB_NAME.to_string(),
-        ctx.project.database.name.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_USER.to_string(),
-        ctx.project.database.user.clone(),
-    );
-    vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
     let command = render_map(&ctx.db_cli.query_command, &vars);
 
     let output = execute_for_project(&ctx.project, &command)?;
@@ -354,29 +312,10 @@ pub fn search(
         )
     };
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
+    let mut vars = ctx.base_template_vars();
     vars.insert(TemplateVars::QUERY.to_string(), search_sql.clone());
     vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
     vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    vars.insert(
-        TemplateVars::DB_HOST.to_string(),
-        ctx.project.database.host.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_PORT.to_string(),
-        ctx.project.database.port.to_string(),
-    );
-    vars.insert(
-        TemplateVars::DB_NAME.to_string(),
-        ctx.project.database.name.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_USER.to_string(),
-        ctx.project.database.user.clone(),
-    );
-    vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
     let command = render_map(&ctx.db_cli.query_command, &vars);
 
     let output = execute_for_project(&ctx.project, &command)?;
@@ -411,29 +350,10 @@ pub fn delete_row(
 
     let delete_sql = format!("DELETE FROM {} WHERE ID = {} LIMIT 1", table, row_id);
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
+    let mut vars = ctx.base_template_vars();
     vars.insert(TemplateVars::QUERY.to_string(), delete_sql.clone());
     vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
     vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    vars.insert(
-        TemplateVars::DB_HOST.to_string(),
-        ctx.project.database.host.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_PORT.to_string(),
-        ctx.project.database.port.to_string(),
-    );
-    vars.insert(
-        TemplateVars::DB_NAME.to_string(),
-        ctx.project.database.name.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_USER.to_string(),
-        ctx.project.database.user.clone(),
-    );
-    vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
     let command = render_map(&ctx.db_cli.query_command, &vars);
 
     let output = execute_for_project(&ctx.project, &command)?;
@@ -463,29 +383,10 @@ pub fn drop_table(
 
     let drop_sql = format!("DROP TABLE {}", table);
 
-    let mut vars = HashMap::new();
-    vars.insert(TemplateVars::SITE_PATH.to_string(), ctx.base_path.clone());
-    vars.insert(TemplateVars::CLI_PATH.to_string(), ctx.cli_path.clone());
+    let mut vars = ctx.base_template_vars();
     vars.insert(TemplateVars::QUERY.to_string(), drop_sql.clone());
     vars.insert(TemplateVars::FORMAT.to_string(), "json".to_string());
     vars.insert(TemplateVars::DOMAIN.to_string(), ctx.domain.clone());
-    vars.insert(
-        TemplateVars::DB_HOST.to_string(),
-        ctx.project.database.host.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_PORT.to_string(),
-        ctx.project.database.port.to_string(),
-    );
-    vars.insert(
-        TemplateVars::DB_NAME.to_string(),
-        ctx.project.database.name.clone(),
-    );
-    vars.insert(
-        TemplateVars::DB_USER.to_string(),
-        ctx.project.database.user.clone(),
-    );
-    vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
     let command = render_map(&ctx.db_cli.query_command, &vars);
 
     let output = execute_for_project(&ctx.project, &command)?;

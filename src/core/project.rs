@@ -8,6 +8,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Represents a nullable optional field in update operations.
+///
+/// Three-state semantics for CLI update commands:
+/// - `None`: Field unchanged (flag not provided by user)
+/// - `Some(None)`: Explicitly clear the field (user passed empty value)
+/// - `Some(Some(T))`: Set to new value (user provided value)
+///
+/// Example: `--server-id ""` passes `Some(None)` to clear the association.
+pub type NullableUpdate<T> = Option<Option<T>>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 
 pub struct Project {
@@ -336,6 +346,16 @@ pub fn delete(id: &str) -> Result<()> {
     config::delete::<Project>(id)
 }
 
+/// Delete a project with existence check.
+/// Unlike server/component, projects have no dependents to check.
+pub fn delete_safe(id: &str) -> Result<()> {
+    if !exists(id) {
+        let suggestions = config::find_similar_ids::<Project>(id);
+        return Err(Error::project_not_found(id.to_string(), suggestions));
+    }
+    delete(id)
+}
+
 pub fn exists(id: &str) -> bool {
     config::exists::<Project>(id)
 }
@@ -377,9 +397,9 @@ pub struct RenameResult {
 pub fn update(
     project_id: &str,
     domain: Option<String>,
-    server_id: Option<Option<String>>,
-    base_path: Option<Option<String>>,
-    table_prefix: Option<Option<String>>,
+    server_id: NullableUpdate<String>,
+    base_path: NullableUpdate<String>,
+    table_prefix: NullableUpdate<String>,
     component_ids: Option<Vec<String>>,
 ) -> Result<UpdateResult> {
     let mut project = load(project_id)?;

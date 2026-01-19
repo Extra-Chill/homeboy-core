@@ -296,7 +296,7 @@ fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) -> homeboy::R
                     if !map.contains_key(&key) {
                         map.insert(key.clone(), Value::Object(serde_json::Map::new()));
                     }
-                    current = map.get_mut(&key).unwrap();
+                    current = map.get_mut(&key).expect("key just inserted or already exists");
                 }
                 Value::Array(arr) => {
                     let index: usize = key.parse().map_err(|_| {

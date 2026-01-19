@@ -216,6 +216,7 @@ pub fn generate_key(server_id: &str) -> Result<KeyGenerateResult> {
         local_files::local().ensure_dir(parent)?;
     }
 
+    // Best effort cleanup: files may not exist, ignore removal errors
     let _ = std::fs::remove_file(&key_path);
     let _ = std::fs::remove_file(format!("{}.pub", key_path_str));
 

@@ -217,19 +217,26 @@ fn upload_file(
     scp_file(ssh_client, local_path, remote_path)
 }
 
-fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Result<DeployResult> {
-    // Load SCP flags from configurable defaults
+/// Core SCP transfer function.
+fn scp_transfer(
+    ssh_client: &SshClient,
+    local_path: &Path,
+    remote_path: &str,
+    recursive: bool,
+) -> Result<DeployResult> {
     let deploy_defaults = defaults::load_defaults().deploy;
     let mut scp_args: Vec<String> = deploy_defaults.scp_flags.clone();
 
+    if recursive {
+        scp_args.push("-r".to_string());
+    }
+
     if let Some(identity_file) = &ssh_client.identity_file {
-        scp_args.push("-i".to_string());
-        scp_args.push(identity_file.clone());
+        scp_args.extend(["-i".to_string(), identity_file.clone()]);
     }
 
     if ssh_client.port != deploy_defaults.default_ssh_port {
-        scp_args.push("-P".to_string());
-        scp_args.push(ssh_client.port.to_string());
+        scp_args.extend(["-P".to_string(), ssh_client.port.to_string()]);
     }
 
     scp_args.push(local_path.to_string_lossy().to_string());
@@ -240,8 +247,10 @@ fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Res
         shell::quote_path(remote_path)
     ));
 
+    let label = if recursive { "directory" } else { "file" };
     eprintln!(
-        "[deploy] Uploading: {} -> {}@{}:{}",
+        "[deploy] Uploading {}: {} -> {}@{}:{}",
+        label,
         local_path.display(),
         ssh_client.user,
         ssh_client.host,
@@ -249,7 +258,6 @@ fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Res
     );
 
     let output = Command::new("scp").args(&scp_args).output();
-
     match output {
         Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
         Ok(output) => Ok(DeployResult::failure(
@@ -260,52 +268,16 @@ fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Res
     }
 }
 
+fn scp_file(ssh_client: &SshClient, local_path: &Path, remote_path: &str) -> Result<DeployResult> {
+    scp_transfer(ssh_client, local_path, remote_path, false)
+}
+
 fn scp_recursive(
     ssh_client: &SshClient,
     local_path: &Path,
     remote_path: &str,
 ) -> Result<DeployResult> {
-    // Load SCP flags from configurable defaults, add -r for recursive
-    let deploy_defaults = defaults::load_defaults().deploy;
-    let mut scp_args: Vec<String> = deploy_defaults.scp_flags.clone();
-    scp_args.push("-r".to_string());
-
-    if let Some(identity_file) = &ssh_client.identity_file {
-        scp_args.push("-i".to_string());
-        scp_args.push(identity_file.clone());
-    }
-
-    if ssh_client.port != deploy_defaults.default_ssh_port {
-        scp_args.push("-P".to_string());
-        scp_args.push(ssh_client.port.to_string());
-    }
-
-    scp_args.push(local_path.to_string_lossy().to_string());
-    scp_args.push(format!(
-        "{}@{}:{}",
-        ssh_client.user,
-        ssh_client.host,
-        shell::quote_path(remote_path)
-    ));
-
-    eprintln!(
-        "[deploy] Uploading directory: {} -> {}@{}:{}",
-        local_path.display(),
-        ssh_client.user,
-        ssh_client.host,
-        remote_path
-    );
-
-    let output = Command::new("scp").args(&scp_args).output();
-
-    match output {
-        Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
-        Ok(output) => Ok(DeployResult::failure(
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        )),
-        Err(err) => Ok(DeployResult::failure(1, err.to_string())),
-    }
+    scp_transfer(ssh_client, local_path, remote_path, true)
 }
 
 // =============================================================================
@@ -882,7 +854,7 @@ fn parse_component_version(content: &str, pattern: Option<&str>, filename: &str)
 
 /// Find deploy verification config from modules.
 fn find_deploy_verification(target_path: &str) -> Option<DeployVerification> {
-    for module in load_all_modules() {
+    for module in load_all_modules().unwrap_or_default() {
         for verification in &module.deploy {
             if target_path.contains(&verification.path_pattern) {
                 return Some(verification.clone());
@@ -894,7 +866,7 @@ fn find_deploy_verification(target_path: &str) -> Option<DeployVerification> {
 
 /// Find deploy override config from modules.
 fn find_deploy_override(target_path: &str) -> Option<(DeployOverride, ModuleManifest)> {
-    for module in load_all_modules() {
+    for module in load_all_modules().unwrap_or_default() {
         for override_config in &module.deploy_override {
             if target_path.contains(&override_config.path_pattern) {
                 return Some((override_config.clone(), module));

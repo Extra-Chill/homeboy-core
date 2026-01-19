@@ -126,7 +126,7 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
     let all_components = component::list().unwrap_or_default();
     let all_projects = project::list().unwrap_or_default();
     let all_servers = server::list().unwrap_or_default();
-    let all_modules = load_all_modules();
+    let all_modules = load_all_modules().unwrap_or_default();
 
     // Determine if we should show focused output
     let show_all = args.all || relevant_ids.is_empty();

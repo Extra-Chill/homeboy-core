@@ -84,7 +84,7 @@ fn determine_test_module(component: &homeboy::component::Component) -> homeboy::
     if let Some(modules) = &component.modules {
         // For now, prefer wordpress module if available, otherwise use first available
         if modules.contains_key("wordpress") {
-            let settings = extract_module_settings(modules.get("wordpress").unwrap());
+            let settings = extract_module_settings(modules.get("wordpress").expect("wordpress module checked above"));
             return Ok(("wordpress".to_string(), settings));
         }
 

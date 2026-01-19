@@ -56,7 +56,7 @@ pub fn resolve(topic: &[String]) -> homeboy::Result<ResolvedDoc> {
 }
 
 fn load_module_doc(topic: &str) -> Option<(String, String)> {
-    for module in load_all_modules() {
+    for module in load_all_modules().unwrap_or_default() {
         let Some(module_path) = &module.module_path else {
             continue;
         };
@@ -115,7 +115,7 @@ pub fn available_topics() -> Vec<String> {
         .collect();
 
     // Add module docs (integrated namespace)
-    for module in load_all_modules() {
+    for module in load_all_modules().unwrap_or_default() {
         if let Some(module_path) = &module.module_path {
             let docs_dir = Path::new(module_path).join("docs");
             if docs_dir.exists() {
@@ -132,7 +132,10 @@ fn collect_doc_topics(dir: &Path, prefix: &str, topics: &mut BTreeSet<String>) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let name = path.file_name().unwrap().to_string_lossy();
+                let Some(name) = path.file_name() else {
+                    continue;
+                };
+                let name = name.to_string_lossy();
                 let new_prefix = if prefix.is_empty() {
                     name.to_string()
                 } else {
@@ -140,7 +143,10 @@ fn collect_doc_topics(dir: &Path, prefix: &str, topics: &mut BTreeSet<String>) {
                 };
                 collect_doc_topics(&path, &new_prefix, topics);
             } else if path.extension().is_some_and(|ext| ext == "md") {
-                let stem = path.file_stem().unwrap().to_string_lossy();
+                let Some(stem) = path.file_stem() else {
+                    continue;
+                };
+                let stem = stem.to_string_lossy();
                 let topic = if prefix.is_empty() {
                     stem.to_string()
                 } else {

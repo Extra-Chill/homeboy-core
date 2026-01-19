@@ -49,7 +49,7 @@ pub fn resolve_build_command(component: &Component) -> Result<ResolvedBuildComma
     // 2. Check module for bundled script or local script patterns
     if let Some(modules) = &component.modules {
         for module_id in modules.keys() {
-            if let Some(module) = module::load_module(module_id) {
+            if let Ok(module) = module::load_module(module_id) {
                 if let Some(build) = &module.build {
                     // Check for module's bundled script
                     if let Some(module_script) = &build.module_script {

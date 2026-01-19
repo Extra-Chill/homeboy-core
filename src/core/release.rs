@@ -773,7 +773,7 @@ fn resolve_modules(component: &Component, module_id: Option<&str>) -> Result<Vec
         module_ids.sort();
         let suggestions = module::available_module_ids();
         for module_id in module_ids {
-            let manifest = module::load_module(&module_id).ok_or_else(|| {
+            let manifest = module::load_module(&module_id).map_err(|_| {
                 Error::module_not_found(module_id.to_string(), suggestions.clone())
             })?;
             modules.push(manifest);

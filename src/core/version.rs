@@ -81,7 +81,7 @@ pub fn replace_versions(
 /// Get version pattern from module configuration.
 /// Returns None if no module defines a pattern for this file type.
 pub fn default_pattern_for_file(filename: &str) -> Option<String> {
-    for module in load_all_modules() {
+    for module in load_all_modules().unwrap_or_default() {
         if let Some(pattern) = find_version_pattern_in_module(&module, filename) {
             return Some(pattern);
         }

@@ -2,7 +2,7 @@ use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::output::{CreateOutput, MergeOutput, MergeResult, RemoveResult};
 use crate::paths;
-use crate::project;
+use crate::project::{self, NullableUpdate};
 use crate::slugify;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -238,8 +238,8 @@ pub fn update(
     local_path: Option<String>,
     remote_path: Option<String>,
     build_artifact: Option<String>,
-    build_command: Option<Option<String>>,
-    extract_command: Option<Option<String>>,
+    build_command: NullableUpdate<String>,
+    extract_command: NullableUpdate<String>,
 ) -> Result<UpdateResult> {
     let mut component = load(component_id)?;
     let mut updated = Vec::new();

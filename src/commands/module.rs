@@ -223,7 +223,7 @@ pub struct ModuleEntry {
 }
 
 fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
-    let modules = load_all_modules();
+    let modules = load_all_modules().unwrap_or_default();
 
     let project_config: Option<Project> = project.as_ref().and_then(|id| project::load(id).ok());
 

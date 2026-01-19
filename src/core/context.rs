@@ -206,6 +206,7 @@ fn build_component_info(component: &component::Component) -> ContainedComponentI
             .map(|modules| {
                 modules.keys().any(|module_id| {
                     module::load_module(module_id)
+                        .ok()
                         .and_then(|m| m.build)
                         .and_then(|b| b.module_script)
                         .and_then(|script| {

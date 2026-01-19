@@ -124,6 +124,7 @@ struct ModuleCliInfo {
 
 fn collect_module_cli_info() -> Vec<ModuleCliInfo> {
     load_all_modules()
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|m| {
             m.cli.map(|cli| ModuleCliInfo {

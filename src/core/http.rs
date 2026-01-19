@@ -9,6 +9,7 @@ use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn config_error(msg: impl Into<String>) -> Error {
@@ -184,7 +185,7 @@ impl ApiClient {
         // Check if expired (with 60 second buffer)
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock before Unix epoch")
             .as_secs() as i64;
 
         if now < expires_at - 60 {
@@ -262,6 +263,7 @@ impl ApiClient {
         keychain::clear_project(&self.project_id, &common_vars)?;
 
         // Also clear any custom variables from auth config
+        // Auth cleanup is best-effort: logout succeeds even if some vars fail to delete
         if let Some(auth) = &self.auth {
             for var_name in auth.variables.keys() {
                 let _ = keychain::delete(&self.project_id, var_name);
@@ -312,6 +314,11 @@ fn resolve_variable(project_id: &str, var_name: &str, source: &VariableSource) -
     }
 }
 
+fn template_regex() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"\{\{(\w+)\}\}").expect("hardcoded regex"))
+}
+
 /// Resolves a template string with credential values.
 fn resolve_template(
     template: &str,
@@ -327,7 +334,7 @@ fn resolve_template(
     }
 
     // Then, try keychain for any remaining placeholders
-    let re = regex::Regex::new(r"\{\{(\w+)\}\}").unwrap();
+    let re = template_regex();
     for cap in re.captures_iter(template) {
         let var_name = &cap[1];
         let placeholder = format!("{{{{{}}}}}", var_name);
