@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.26.6] - 2026-01-18
 
 ### Added
 - NullableUpdate<T> type alias for three-state update semantics in CLI commands
