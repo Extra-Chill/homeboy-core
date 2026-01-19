@@ -395,11 +395,10 @@ pub fn finalize_next_section(
             "changelog",
             "No changelog items found (cannot finalize)",
             None,
-            Some(vec![
-                "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
-                "Ensure changelog contains all changes since the last version update.".to_string(),
-            ]),
+            None,
         )
+        .with_hint("Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`")
+        .with_hint("Ensure changelog contains all changes since the last version update.")
     })?;
 
     let end = find_section_end(&lines, start);
@@ -411,21 +410,11 @@ pub fn finalize_next_section(
             return Ok((changelog_content.to_string(), false));
         }
 
-        let (message, hints) = match content_status {
-            SectionContentStatus::SubsectionsOnly => (
-                "Changelog has subsection headers but no bullet items",
-                vec![
-                    "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
-                    "Ensure changelog contains all changes since the last version update.".to_string(),
-                ],
-            ),
-            SectionContentStatus::Empty => (
-                "Changelog has no items",
-                vec![
-                    "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
-                    "Ensure changelog contains all changes since the last version update.".to_string(),
-                ],
-            ),
+        let message = match content_status {
+            SectionContentStatus::SubsectionsOnly => {
+                "Changelog has subsection headers but no bullet items"
+            }
+            SectionContentStatus::Empty => "Changelog has no items",
             _ => unreachable!(),
         };
 
@@ -433,8 +422,10 @@ pub fn finalize_next_section(
             "changelog",
             message,
             None,
-            Some(hints),
-        ));
+            None,
+        )
+        .with_hint("Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`")
+        .with_hint("Ensure changelog contains all changes since the last version update."));
     }
 
     let mut out_lines: Vec<String> = Vec::new();

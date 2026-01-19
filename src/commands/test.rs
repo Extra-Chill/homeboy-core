@@ -25,8 +25,8 @@ pub struct TestArgs {
 pub struct TestOutput {
     status: String,
     component: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output: Option<String>,
+    stdout: String,
+    stderr: String,
     exit_code: i32,
 }
 
@@ -72,7 +72,8 @@ pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
         TestOutput {
             status: status.to_string(),
             component: args.component,
-            output: Some(String::from_utf8_lossy(&output.stdout).to_string()),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             exit_code,
         },
         exit_code,

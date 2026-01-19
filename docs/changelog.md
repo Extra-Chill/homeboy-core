@@ -4,6 +4,22 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.3] - 2026-01-18
+
+### Security
+- Fix heredoc injection vulnerability in file write operations
+- Fix infinite loop in pattern replacement when pattern appears in replacement
+- Fix grep failing on single files (was always using recursive flag)
+- Fix non-portable --max-depth in grep (now uses find|xargs)
+- Fix race condition in file prepend operations (now uses mktemp)
+- Fix inconsistent echo behavior in append/prepend (now uses printf)
+
+### Added
+- Add --raw flag to `file read` for output without JSON wrapper
+
+### Changed
+- Separate stdout/stderr in lint and test command output
+
 ## [0.27.2] - 2026-01-18
 
 - Add granular lint options: --file, --glob, and --errors-only flags for targeted linting

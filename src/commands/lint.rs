@@ -42,8 +42,8 @@ pub struct LintArgs {
 pub struct LintOutput {
     status: String,
     component: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output: Option<String>,
+    stdout: String,
+    stderr: String,
     exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
@@ -96,7 +96,8 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
         LintOutput {
             status: status.to_string(),
             component: args.component,
-            output: Some(String::from_utf8_lossy(&output.stdout).to_string()),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             exit_code,
             hints,
         },

@@ -275,6 +275,7 @@ fn main() -> std::process::ExitCode {
             }
         }
         ResponseMode::Raw(RawOutputMode::Markdown) => {}
+        ResponseMode::Raw(RawOutputMode::PlainText) => {}
     }
 
     if matches!(cli.command, Commands::List) {
