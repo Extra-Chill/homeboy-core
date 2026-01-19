@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.26.5] - 2026-01-18
+
+- feat: add --stream and --no-stream flags to module run command for explicit output control
+- feat: add HOMEBOY_COMPONENT_PATH environment variable to test runners
+- feat: make ModuleExecutionMode enum public for module integration
+
 ## [0.26.4] - 2026-01-18
 
 - feat: new test command for running component test suites with module-based infrastructure

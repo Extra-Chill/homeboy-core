@@ -473,7 +473,7 @@ pub(crate) struct ModuleExecutionOutcome {
     pub result: ModuleExecutionResult,
 }
 
-pub(crate) enum ModuleExecutionMode {
+pub enum ModuleExecutionMode {
     Interactive,
     Captured,
 }
@@ -541,6 +541,7 @@ pub fn run_module(
     component_id: Option<&str>,
     inputs: Vec<(String, String)>,
     args: Vec<String>,
+    mode: ModuleExecutionMode,
 ) -> Result<ModuleRunResult> {
     let execution = execute_module_runtime(
         module_id,
@@ -550,7 +551,7 @@ pub fn run_module(
         args,
         None,
         None,
-        ModuleExecutionMode::Interactive,
+        mode,
     )?;
 
     Ok(ModuleRunResult {

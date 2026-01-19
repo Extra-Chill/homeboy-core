@@ -198,12 +198,13 @@ fn merge_settings(manifest: &serde_json::Value, module_settings: &[(String, Stri
 fn prepare_env_vars(module_path: &PathBuf, project_path: &PathBuf, settings_json: &str, component_id: &str) -> homeboy::Result<Vec<(String, String)>> {
     let module_name = module_path.file_name().unwrap().to_string_lossy();
 
-    Ok(vec![
+Ok(vec![
         ("HOMEBOY_EXEC_CONTEXT_VERSION".to_string(), "1".to_string()),
         ("HOMEBOY_MODULE_ID".to_string(), module_name.to_string()),
         ("HOMEBOY_MODULE_PATH".to_string(), module_path.to_string_lossy().to_string()),
         ("HOMEBOY_PROJECT_PATH".to_string(), project_path.to_string_lossy().to_string()),
         ("HOMEBOY_COMPONENT_ID".to_string(), component_id.to_string()),
+        ("HOMEBOY_COMPONENT_PATH".to_string(), project_path.to_string_lossy().to_string()),
         ("HOMEBOY_SETTINGS_JSON".to_string(), settings_json.to_string()),
     ])
 }

@@ -88,6 +88,8 @@ The following environment variables are set for test runners:
 - `HOMEBOY_MODULE_ID`: Component name
 - `HOMEBOY_MODULE_PATH`: Absolute path to module directory
 - `HOMEBOY_PROJECT_PATH`: Absolute path to project directory
+- `HOMEBOY_COMPONENT_ID`: Component identifier
+- `HOMEBOY_COMPONENT_PATH`: Absolute path to component directory
 - `HOMEBOY_SETTINGS_JSON`: Merged settings as JSON string
 
 ## Notes

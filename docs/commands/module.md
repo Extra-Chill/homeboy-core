@@ -17,12 +17,15 @@ homeboy module list [-p|--project <project_id>]
 ### `run`
 
 ```sh
-homeboy module run <module_id> [-p|--project <project_id>] [-c|--component <component_id>] [-i|--input <key=value>]... [<args...>]
+homeboy module run <module_id> [-p|--project <project_id>] [-c|--component <component_id>] [-i|--input <key=value>]... [--stream|--no-stream] [<args...>]
 ```
 
 - `--project` is required when the module needs project context.
 - `--component` is required when component context is ambiguous.
 - `--input` repeats; each value must be in `KEY=value` form.
+- `--stream` forces streaming output directly to terminal.
+- `--no-stream` disables streaming and captures output.
+- By default, Homeboy auto-detects streaming behavior based on TTY.
 - Trailing `<args...>` are passed to CLI-type modules.
 
 ### `set`
@@ -108,6 +111,7 @@ When running a module, Homeboy passes an execution context via environment varia
 - `HOMEBOY_SETTINGS_JSON`: merged effective settings (JSON)
 - `HOMEBOY_PROJECT_ID` (optional; when a project context is used)
 - `HOMEBOY_COMPONENT_ID` (optional; when a component context is resolved)
+- `HOMEBOY_COMPONENT_PATH` (optional; absolute path to component directory)
 
 Modules can define additional environment variables via `runtime.env` in their manifest.
 
@@ -118,8 +122,6 @@ Module settings validation currently happens during module execution (and may al
 `homeboy module run` requires the module to be installed/linked under the Homeboy modules directory (discovered by scanning `<config dir>/homeboy/modules/<module_id>/<module_id>.json`). There is no separate "installedModules in global config" requirement.
 
 ## Runtime Configuration
-
-## Release configuration
 
 Release steps can be backed by module actions named `release.<step_type>`.
 

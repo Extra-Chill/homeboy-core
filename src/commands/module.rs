@@ -38,6 +38,12 @@ enum ModuleCommand {
         /// Arguments to pass to the module (for CLI modules)
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+        /// Stream output directly to terminal (default: auto-detect based on TTY)
+        #[arg(long)]
+        stream: bool,
+        /// Disable streaming and capture output (default: auto-detect based on TTY)
+        #[arg(long)]
+        no_stream: bool,
     },
     /// Run the module's setup command (if defined)
     Setup {
@@ -105,7 +111,9 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             component,
             input,
             args,
-        } => run_module(&module_id, project, component, input, args),
+            stream,
+            no_stream,
+        } => run_module(&module_id, project, component, input, args, stream, no_stream),
         ModuleCommand::Setup { module_id } => setup_module(&module_id),
         ModuleCommand::Install { source, id } => install_module(&source, id),
         ModuleCommand::Update { module_id } => update_module(&module_id),
@@ -299,13 +307,28 @@ fn run_module(
     component: Option<String>,
     inputs: Vec<(String, String)>,
     args: Vec<String>,
+    stream: bool,
+    no_stream: bool,
 ) -> CmdResult<ModuleOutput> {
+    use homeboy::module::ModuleExecutionMode;
+
+    let mode = if no_stream {
+        ModuleExecutionMode::Captured
+    } else if stream {
+        ModuleExecutionMode::Interactive
+    } else if crate::tty::is_stdout_tty() {
+        ModuleExecutionMode::Interactive
+    } else {
+        ModuleExecutionMode::Captured
+    };
+
     let result = homeboy::module::run_module(
         module_id,
         project.as_deref(),
         component.as_deref(),
         inputs,
         args,
+        mode,
     )?;
 
     Ok((
