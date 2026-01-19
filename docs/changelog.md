@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.9] - 2026-01-19
+
+### Added
+- Add --changed-only flag to lint command for focusing on modified PHP files
+- Add prerequisites validation to release plan (warns about empty changelog)
+
 ## [0.27.8] - 2026-01-19
 
 ### Fixed
