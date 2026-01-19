@@ -17,6 +17,10 @@ pub struct TestArgs {
     /// Override settings as key=value pairs
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
+
+    /// Additional arguments to pass to the test runner (after --)
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -39,6 +43,7 @@ pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
     let output = ModuleRunner::new(&args.component, "test-runner.sh")
         .settings(&args.setting)
         .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")
+        .script_args(&args.args)
         .run()?;
 
     let status = if output.success { "passed" } else { "failed" };

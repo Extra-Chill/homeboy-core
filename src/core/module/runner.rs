@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::component::{self, Component, ScopedModuleConfig};
 use crate::error::{Error, Result};
+use crate::shell;
 use crate::ssh::{execute_local_command_in_dir, CommandOutput};
 
 use super::exec_context;
@@ -23,6 +24,7 @@ pub struct ModuleRunner {
     script_name: String,
     settings_overrides: Vec<(String, String)>,
     env_vars: Vec<(String, String)>,
+    script_args: Vec<String>,
 }
 
 impl ModuleRunner {
@@ -36,6 +38,7 @@ impl ModuleRunner {
             script_name: script_name.to_string(),
             settings_overrides: Vec::new(),
             env_vars: Vec::new(),
+            script_args: Vec::new(),
         }
     }
 
@@ -64,6 +67,12 @@ impl ModuleRunner {
         if let Some(v) = value {
             self.env_vars.push((key.to_string(), v.clone()));
         }
+        self
+    }
+
+    /// Add arguments to pass to the script.
+    pub fn script_args(mut self, args: &[String]) -> Self {
+        self.script_args.extend(args.iter().cloned());
         self
     }
 
@@ -272,7 +281,13 @@ impl ModuleRunner {
         env_vars: &[(String, String)],
     ) -> Result<CommandOutput> {
         let script_path = module_path.join("scripts").join(&self.script_name);
-        let command = script_path.to_string_lossy().to_string();
+        let mut command = shell::quote_path(&script_path.to_string_lossy());
+
+        // Append script arguments if any
+        if !self.script_args.is_empty() {
+            command.push(' ');
+            command.push_str(&shell::quote_args(&self.script_args));
+        }
 
         let env_refs: Vec<(&str, &str)> = env_vars
             .iter()

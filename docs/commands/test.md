@@ -37,6 +37,20 @@ homeboy test wordpress --skip-lint
 homeboy test wordpress --setting database_type=mysql --setting mysql_database=test_db
 ```
 
+## Passthrough Arguments
+
+Arguments after `--` are passed directly to the module's test runner script:
+
+```bash
+# Pass a single argument
+homeboy test my-module -- --filter=SomeTest
+
+# Pass multiple arguments
+homeboy test my-module -- --filter=SomeTest --verbose
+```
+
+Supported arguments depend on the underlying test framework.
+
 ## Component Requirements
 
 For a component to be testable, it must have:

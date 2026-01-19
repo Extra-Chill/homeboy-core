@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.13] - 2026-01-19
+
+- Fix passthrough arguments documentation to be generic
+
 ## [0.27.12] - 2026-01-19
 
 - Add shell quoting documentation to wp command docs
