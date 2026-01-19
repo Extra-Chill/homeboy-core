@@ -17,6 +17,10 @@ pub struct LintArgs {
     #[arg(long)]
     fix: bool,
 
+    /// Show compact summary instead of full output
+    #[arg(long)]
+    summary: bool,
+
     /// Override settings as key=value pairs
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
@@ -50,7 +54,7 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
     let manifest = load_module_manifest(&module_path)?;
     let settings_json = merge_settings(&manifest, &module_settings, &args.setting)?;
     let project_path = PathBuf::from(&component.local_path);
-    let env_vars = prepare_env_vars(&module_path, &project_path, &settings_json, &args.component, args.fix)?;
+    let env_vars = prepare_env_vars(&module_path, &project_path, &settings_json, &args.component, args.fix, args.summary)?;
 
     let output = execute_lint_runner(&module_path, &env_vars)?;
 
@@ -222,6 +226,7 @@ fn prepare_env_vars(
     settings_json: &str,
     component_id: &str,
     auto_fix: bool,
+    summary: bool,
 ) -> homeboy::Result<Vec<(String, String)>> {
     let module_name = module_path.file_name().unwrap().to_string_lossy();
 
@@ -246,6 +251,10 @@ fn prepare_env_vars(
 
     if auto_fix {
         env_vars.push(("HOMEBOY_AUTO_FIX".to_string(), "1".to_string()));
+    }
+
+    if summary {
+        env_vars.push(("HOMEBOY_SUMMARY_MODE".to_string(), "1".to_string()));
     }
 
     Ok(env_vars)
