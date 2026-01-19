@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.27.7] - 2026-01-19
+
+### Fixed
+- Fixed: version set no longer validates/finalizes changelog (version-only operation)
+- Fixed: version show now displays all configured version targets, not just the primary
+
 ## [0.27.6] - 2026-01-19
 
 - Fixed: settings_flags now applied during direct execution for local CLI tools

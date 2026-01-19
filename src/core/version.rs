@@ -496,14 +496,39 @@ pub fn read_component_version(component: &Component) -> Result<ComponentVersionI
 
     let version = versions[0].clone();
 
+    // Build target info for primary
+    let mut target_infos = vec![VersionTargetInfo {
+        file: primary.file.clone(),
+        pattern: primary_pattern,
+        full_path: primary_full_path,
+        match_count: versions.len(),
+    }];
+
+    // Add info for all remaining targets
+    for target in targets.iter().skip(1) {
+        let pattern = resolve_target_pattern(target)?;
+        let full_path = resolve_version_file_path(&component.local_path, &target.file);
+        let content = local_files::local().read(Path::new(&full_path))?;
+        let target_versions = parse_versions(&content, &pattern).ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "versionPattern",
+                format!("Invalid version regex pattern '{}'", pattern),
+                None,
+                Some(vec![pattern.clone()]),
+            )
+        })?;
+
+        target_infos.push(VersionTargetInfo {
+            file: target.file.clone(),
+            pattern,
+            full_path,
+            match_count: target_versions.len(),
+        });
+    }
+
     Ok(ComponentVersionInfo {
         version,
-        targets: vec![VersionTargetInfo {
-            file: primary.file.clone(),
-            pattern: primary_pattern,
-            full_path: primary_full_path,
-            match_count: versions.len(),
-        }],
+        targets: target_infos,
     })
 }
 
@@ -587,11 +612,7 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
 
     let old_version = primary_versions[0].clone();
 
-    // Validate and finalize changelog
-    let changelog_validation =
-        validate_and_finalize_changelog(component, &old_version, new_version)?;
-
-    // Update all version targets
+    // Update all version targets (no changelog validation - `set` is version-only)
     let mut target_infos = Vec::new();
 
     for target in targets {
@@ -657,9 +678,9 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
         old_version,
         new_version: new_version.to_string(),
         targets: target_infos,
-        changelog_path: changelog_validation.changelog_path,
-        changelog_finalized: changelog_validation.changelog_finalized,
-        changelog_changed: changelog_validation.changelog_changed,
+        changelog_path: String::new(),
+        changelog_finalized: false,
+        changelog_changed: false,
     })
 }
 
