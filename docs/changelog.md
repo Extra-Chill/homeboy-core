@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.30.5] - 2026-01-20
+
+### Added
+- Add automatic git tag creation after version bump commits
+
 ## [0.30.4] - 2026-01-20
 
 - Accept --json flag as no-op on commands that return JSON by default (init, test, lint, release, upgrade)
