@@ -1,6 +1,6 @@
 # `homeboy init`
 
-Initialize a repo for use with Homeboy. Returns comprehensive context data in JSON format.
+Gather repo context and status. Returns comprehensive data in JSON format. **Read-only** - creates no files or state.
 
 **Alias:** `homeboy status`
 
@@ -11,11 +11,31 @@ homeboy init
 homeboy status  # equivalent
 ```
 
+## When You Need It
+
+- **First time with a repository** - Discover what components are configured
+- **Before release operations** - Check component status, unreleased commits, version alignment
+- **AI agent workflows** - Structured JSON context for automation
+- **Debugging** - See baseline warnings, unconfigured version patterns, config gaps
+
+## When You Don't Need It
+
+If you already know your component IDs, run commands directly:
+
+```bash
+homeboy changes my-plugin      # See unreleased changes
+homeboy version bump my-plugin # Bump version
+homeboy deploy my-plugin       # Deploy
+```
+
+Most commands work without running `init` first. The `init` command is purely informational - it reads existing configuration but never modifies anything.
+
 ## Getting Started
 
 Run `homeboy init` to gather all context in one call:
 - Current directory state (managed, components, gaps)
 - Available servers, projects, components, modules
+- Version alignment warnings and unconfigured patterns
 
 Then read workspace docs (CLAUDE.md, README.md) for project context.
 

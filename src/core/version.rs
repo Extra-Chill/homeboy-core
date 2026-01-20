@@ -9,7 +9,7 @@ use crate::ssh::execute_local_command_in_dir;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -893,4 +893,99 @@ pub fn detect_version_targets(base_path: &str) -> Result<Vec<(String, String, St
     }
 
     Ok(found)
+}
+
+/// Information about a version pattern found but not configured
+#[derive(Debug, Clone, Serialize)]
+pub struct UnconfiguredPattern {
+    pub file: String,
+    pub pattern: String,
+    pub description: String,
+    pub found_version: String,
+    pub full_path: String,
+}
+
+/// Detect additional version patterns that exist in PHP files but aren't configured.
+/// Returns patterns that are found in the file but NOT in the configured version targets.
+pub fn detect_unconfigured_patterns(
+    component: &Component,
+) -> Vec<UnconfiguredPattern> {
+    let mut unconfigured = Vec::new();
+    let base_path = &component.local_path;
+
+    // Get configured file/pattern combinations
+    let configured: HashSet<(String, String)> = component
+        .version_targets
+        .as_ref()
+        .map(|targets| {
+            targets
+                .iter()
+                .filter_map(|t| {
+                    let pattern = t
+                        .pattern
+                        .clone()
+                        .or_else(|| default_pattern_for_file(&t.file))?;
+                    Some((t.file.clone(), pattern))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Patterns to scan for in PHP files (beyond plugin headers)
+    let php_constant_patterns = [
+        (
+            r#"define\s*\(\s*['"]([A-Z_]+VERSION)['"]\s*,\s*['"](\d+\.\d+\.\d+)['"]\s*\)"#,
+            "PHP constant",
+        ),
+    ];
+
+    // Scan PHP files in root directory
+    if let Ok(entries) = fs::read_dir(base_path) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "php") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let filename = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown.php")
+                        .to_string();
+
+                    // Check for PHP constant patterns
+                    for (pattern, description) in &php_constant_patterns {
+                        if let Ok(re) = Regex::new(pattern) {
+                            for caps in re.captures_iter(&content) {
+                                if let (Some(const_name), Some(version)) =
+                                    (caps.get(1), caps.get(2))
+                                {
+                                    // Build the specific pattern for this constant
+                                    let specific_pattern = format!(
+                                        r#"define\s*\(\s*['"]{}['"]\s*,\s*['"](\d+\.\d+\.\d+)['"]\s*\)"#,
+                                        regex::escape(const_name.as_str())
+                                    );
+
+                                    // Check if already configured
+                                    if !configured.contains(&(filename.clone(), specific_pattern.clone())) {
+                                        unconfigured.push(UnconfiguredPattern {
+                                            file: filename.clone(),
+                                            pattern: specific_pattern,
+                                            description: format!(
+                                                "{}: {}",
+                                                description,
+                                                const_name.as_str()
+                                            ),
+                                            found_version: version.as_str().to_string(),
+                                            full_path: path.to_string_lossy().to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    unconfigured
 }

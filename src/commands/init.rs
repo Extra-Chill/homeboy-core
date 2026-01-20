@@ -836,6 +836,8 @@ fn validate_version_targets(components: &[ComponentWithState]) -> Vec<String> {
     let mut warnings = Vec::new();
     for wrapper in components {
         let comp = &wrapper.component;
+
+        // Check for missing patterns on configured targets
         if let Some(targets) = &comp.version_targets {
             for target in targets {
                 if target.pattern.is_none()
@@ -847,6 +849,16 @@ fn validate_version_targets(components: &[ComponentWithState]) -> Vec<String> {
                     ));
                 }
             }
+        }
+
+        // Check for unconfigured patterns (version patterns found but not managed)
+        let unconfigured = version::detect_unconfigured_patterns(comp);
+        for pattern in &unconfigured {
+            warnings.push(format!(
+                "Unconfigured version pattern in '{}': {} found in {} (v{}). Add with: homeboy component add-version-target {} '{}' '{}'",
+                comp.id, pattern.description, pattern.file, pattern.found_version,
+                comp.id, pattern.file, pattern.pattern
+            ));
         }
     }
     warnings

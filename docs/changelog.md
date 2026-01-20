@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+- Wire up version-aware baseline detection in changes() to fix stale tag mismatch
+- Add unconfigured version pattern detection to init warnings
+- Clarify init command help text and documentation
+
 ## [0.30.9] - 2026-01-20
 
 ### Added

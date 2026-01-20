@@ -67,7 +67,7 @@ enum Commands {
     /// Execute CLI-compatible modules
     #[command(visible_alias = "modules")]
     Module(module::ModuleArgs),
-    /// Initialize a repo for use with Homeboy
+    /// Get repo context and status (read-only, creates no state)
     #[command(visible_alias = "status")]
     Init(init::InitArgs),
     /// Display CLI documentation

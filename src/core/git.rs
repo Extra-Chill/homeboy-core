@@ -606,20 +606,6 @@ pub fn detect_baseline_with_version(
     })
 }
 
-fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> {
-    // Handle explicit since_tag override (used by changes command)
-    if let Some(t) = since_tag {
-        return Ok(BaselineInfo {
-            latest_tag: Some(t.to_string()),
-            source: Some(BaselineSource::Tag),
-            reference: Some(t.to_string()),
-            warning: None,
-        });
-    }
-
-    // Delegate to version-aware detection (without version context)
-    detect_baseline_with_version(path, None)
-}
 
 // Input types for JSON parsing
 #[derive(Debug, Deserialize)]
@@ -1262,7 +1248,25 @@ pub fn changes(
     })?;
     let path = get_component_path(id)?;
 
-    let baseline = detect_baseline(&path, since_tag)?;
+    // Determine baseline with version alignment awareness
+    let baseline = match since_tag {
+        Some(t) => {
+            // Explicit tag override - use as-is
+            BaselineInfo {
+                latest_tag: Some(t.to_string()),
+                source: Some(BaselineSource::Tag),
+                reference: Some(t.to_string()),
+                warning: None,
+            }
+        }
+        None => {
+            // Load component version for alignment checking
+            let current_version = crate::component::load(id)
+                .ok()
+                .and_then(|c| crate::version::get_component_version(&c));
+            detect_baseline_with_version(&path, current_version.as_deref())?
+        }
+    };
 
     let commits = match baseline.source {
         Some(BaselineSource::LastNCommits) => get_last_n_commits(&path, DEFAULT_COMMIT_LIMIT)?,
