@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.30.6] - 2026-01-20
 
 ### Added
 - Require clean working tree before version bump with helpful hints
