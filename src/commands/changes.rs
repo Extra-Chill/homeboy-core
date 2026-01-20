@@ -91,6 +91,14 @@ pub fn run(
 
     let (ctx, _) = context::run(None)?;
 
+    // Auto-use when exactly one component is matched
+    if ctx.managed && ctx.matched_components.len() == 1 {
+        let component_id = &ctx.matched_components[0];
+        let output = git::changes(Some(component_id), args.since.as_deref(), args.git_diffs)?;
+        return Ok((ChangesCommandOutput::Single(Box::new(output)), 0));
+    }
+
+    // Multiple components or unmanaged: return error with helpful hints
     let mut err = homeboy::Error::validation_invalid_argument(
         "input",
         "No component ID provided",
@@ -98,12 +106,17 @@ pub fn run(
         None,
     );
 
-    if ctx.managed && ctx.matched_components.len() == 1 {
-        err = err.with_hint(format!("Detected component: {}", ctx.matched_components[0]));
+    if ctx.managed && ctx.matched_components.len() > 1 {
+        err = err.with_hint(format!(
+            "Multiple components detected: {}",
+            ctx.matched_components.join(", ")
+        ));
+        err = err.with_hint("Specify one explicitly:");
+    } else {
+        err = err.with_hint(
+            "Run 'homeboy init' to see available components, or specify one explicitly:",
+        );
     }
-
-    err =
-        err.with_hint("Run 'homeboy init' to see available components, or specify one explicitly:");
     err = err.with_hint("  homeboy changes <component-id>");
 
     Err(err)

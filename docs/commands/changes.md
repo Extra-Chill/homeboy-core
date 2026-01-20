@@ -3,13 +3,25 @@
 ## Synopsis
 
 ```sh
-homeboy changes <component_id> [--since <tag>] [--git-diffs]
+homeboy changes [<component_id>] [--since <tag>] [--git-diffs]
 homeboy changes --json <spec> [--git-diffs]
 
 # Project mode
 homeboy changes --project <project_id> [<component_ids...>] [--git-diffs]
 homeboy changes <project_id> <component_id> [<component_id>...] [--git-diffs]
 ```
+
+## Component Auto-Detection
+
+When run from a directory containing exactly one Homeboy-managed component, the component ID is optional:
+
+```sh
+# In a managed directory with one component
+homeboy changes              # Auto-detects component
+homeboy changes my-component # Explicit (always works)
+```
+
+When multiple components exist or directory is unmanaged, explicit ID is required.
 
 ## Description
 

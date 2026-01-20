@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+- Added component auto-detection in `homeboy changes` - auto-uses detected component when exactly one matched
+- Added version/baseline alignment warning in `homeboy init` when source file version differs from git baseline
+- Renamed `GitSnapshot.version_baseline` to `baseline_ref` for consistency with `changes` output
+
 ## [0.29.3] - 2026-01-19
 
 - Remove redundant fields from init JSON output (context.contained_components, context.components, context.command)

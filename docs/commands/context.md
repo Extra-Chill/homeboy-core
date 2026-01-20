@@ -56,6 +56,21 @@ JSON payload (as `data`) is a `DiscoverOutput`:
 - `depth`: max depth
 - `repos`: array of `{ path, name, is_managed, matched_component }`
 
+## Relationship to `homeboy init`
+
+- `context` = Fast, lightweight directory detection (component matching, git root)
+- `init` = Comprehensive state (includes context + version + git state + changelog + modules)
+
+Use `context` for:
+- Quick component detection in CI/scripts
+- Repository discovery (`--discover`)
+- Fast checks when full state not needed
+
+Use `init` for:
+- Understanding complete project state
+- AI agent context gathering
+- Pre-deployment state verification
+
 ## Related
 
 - [init](init.md)

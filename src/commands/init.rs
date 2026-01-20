@@ -103,7 +103,7 @@ pub struct GitSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commits_since_version: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub version_baseline: Option<String>,
+    pub baseline_ref: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -324,7 +324,14 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
     };
     let git_snapshot = resolve_git_snapshot(context_output.git_root.as_ref());
     let (last_release, changelog_snapshot) = resolve_changelog_snapshots(&components);
-    let warnings = validate_version_targets(&components);
+
+    let mut warnings = validate_version_targets(&components);
+    if let Some(alignment_warning) =
+        validate_version_baseline_alignment(&version_snapshot, &git_snapshot)
+    {
+        warnings.push(alignment_warning);
+    }
+
     let agent_context_files = resolve_agent_context_files(context_output.git_root.as_ref());
 
     Ok((
@@ -398,7 +405,7 @@ fn resolve_git_snapshot(git_root: Option<&String>) -> Option<GitSnapshot> {
         ahead: snapshot.ahead,
         behind: snapshot.behind,
         commits_since_version: commits_since,
-        version_baseline: baseline.and_then(|b| b.reference),
+        baseline_ref: baseline.and_then(|b| b.reference),
     })
 }
 
@@ -571,4 +578,26 @@ fn validate_version_targets(components: &[ComponentWithState]) -> Vec<String> {
         }
     }
     warnings
+}
+
+fn validate_version_baseline_alignment(
+    version: &Option<VersionSnapshot>,
+    git: &Option<GitSnapshot>,
+) -> Option<String> {
+    let version_snapshot = version.as_ref()?;
+    let git_snapshot = git.as_ref()?;
+    let baseline = git_snapshot.baseline_ref.as_ref()?;
+
+    // Extract version from tag (v0.5.1 -> 0.5.1)
+    let baseline_version = baseline.strip_prefix('v').unwrap_or(baseline);
+
+    if version_snapshot.version != baseline_version {
+        Some(format!(
+            "Version mismatch: source files show {} but git baseline is {}. \
+            Consider creating a tag or bumping the version.",
+            version_snapshot.version, baseline
+        ))
+    } else {
+        None
+    }
 }
