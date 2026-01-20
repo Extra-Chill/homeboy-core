@@ -581,7 +581,7 @@ fn create_single<T: ConfigEntity>(entity: T) -> Result<CreateResult<T>> {
 
     if exists::<T>(entity.id()) {
         return Err(Error::validation_invalid_argument(
-            &format!("{}.id", T::entity_type()),
+            format!("{}.id", T::entity_type()),
             format!("{} '{}' already exists", T::entity_type(), entity.id()),
             Some(entity.id().to_string()),
             None,

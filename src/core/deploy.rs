@@ -10,14 +10,15 @@ use crate::config;
 use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
 use crate::defaults;
 use crate::error::{Error, Result};
+use crate::git;
 use crate::module::{load_all_modules, DeployOverride, DeployVerification, ModuleManifest};
 use crate::permissions;
 use crate::project::{self, Project};
 use crate::shell;
 use crate::ssh::SshClient;
 use crate::template::{render_map, TemplateVars};
+use crate::utils::parser;
 use crate::version;
-use crate::git;
 
 /// Parse bulk component IDs from a JSON spec.
 pub fn parse_bulk_component_ids(json_spec: &str) -> Result<Vec<String>> {
@@ -858,12 +859,7 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
             continue;
         };
 
-        // Resolve relative path
-        let resolved_artifact = if artifact.starts_with('/') {
-            artifact
-        } else {
-            format!("{}/{}", loaded.local_path, artifact)
-        };
+        let resolved_artifact = parser::resolve_path_string(&loaded.local_path, &artifact);
 
         loaded.build_artifact = Some(resolved_artifact);
         components.push(loaded);

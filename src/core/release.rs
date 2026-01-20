@@ -260,7 +260,6 @@ impl From<PipelinePlanStep> for ReleasePlanStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-
 pub enum ReleasePlanStatus {
     Ready,
     Missing,
@@ -1203,7 +1202,7 @@ fn validate_preflight(component: &Component, steps: &[ReleaseStep]) -> Result<()
                     "empty" => {
                         // Empty unreleased section is fine - no content to release
                     }
-                    "subsection_headers_only" | _ => {
+                    _ => {
                         // Has unreleased content - should be finalized before release
                         return Err(Error::validation_invalid_argument(
                             "changelog",

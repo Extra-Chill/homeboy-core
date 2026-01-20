@@ -1,6 +1,5 @@
 /// Environment variable names for module execution context.
 /// Modules receive these variables when executed via `homeboy module run`.
-
 /// Version of the exec context protocol. Modules can check this for compatibility.
 pub const VERSION: &str = "HOMEBOY_EXEC_CONTEXT_VERSION";
 /// ID of the module being executed.

@@ -570,11 +570,7 @@ fn ensure_next_section(content: &str, aliases: &[String]) -> Result<(String, boo
 /// - "[0.1.0] - 2025-01-14" -> Some("0.1.0")
 /// - "Unreleased" -> None
 fn extract_version_from_heading(label: &str) -> Option<String> {
-    let semver_pattern = regex::Regex::new(r"\[?(\d+\.\d+\.\d+)\]?").ok()?;
-    semver_pattern
-        .captures(label)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
+    parser::extract_first(label, r"\[?(\d+\.\d+\.\d+)\]?")
 }
 
 /// Get the latest finalized version from the changelog (first ## heading that contains a semver).
@@ -779,10 +775,10 @@ fn append_item_to_subsection(
         let mut insert_after = target_idx;
 
         // Find the last bullet in this subsection
-        for i in (target_idx + 1)..subsection_end {
-            let trimmed = lines[i].trim();
+        for (rel_i, line) in lines[target_idx + 1..subsection_end].iter().enumerate() {
+            let trimmed = line.trim();
             if trimmed.starts_with('-') || trimmed.starts_with('*') {
-                insert_after = i;
+                insert_after = target_idx + 1 + rel_i;
             }
         }
 
@@ -1023,19 +1019,17 @@ pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<I
         let configured_path = resolve_target_path(&component.local_path, configured_target)?;
         
         // If user didn't specify a custom path, or specified the same path, check for existing changelog
-        if path.is_none() || path == Some(configured_target) {
-            if configured_path.exists() {
-                return Err(Error::validation_invalid_argument(
-                    "changelog",
-                    "Changelog already exists for this component",
-                    None,
-                    Some(vec![
-                        format!("Existing changelog at: {}", configured_path.display()),
-                        format!("View with: homeboy changelog show {}", component_id),
-                        format!("Or use --path to specify a different location"),
-                    ]),
-                ));
-            }
+        if (path.is_none() || path == Some(configured_target)) && configured_path.exists() {
+            return Err(Error::validation_invalid_argument(
+                "changelog",
+                "Changelog already exists for this component",
+                None,
+                Some(vec![
+                    format!("Existing changelog at: {}", configured_path.display()),
+                    format!("View with: homeboy changelog show {}", component_id),
+                    format!("Or use --path to specify a different location"),
+                ]),
+            ));
         }
     } else {
         // No changelog_target configured - scan for common changelog filenames

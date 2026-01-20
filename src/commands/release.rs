@@ -37,7 +37,6 @@ enum ReleaseCommand {
 
 #[derive(Serialize)]
 #[serde(tag = "command")]
-
 pub enum ReleaseOutput {
     #[serde(rename = "release.plan")]
     Plan { plan: ReleasePlan },

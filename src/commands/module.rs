@@ -314,9 +314,7 @@ fn run_module(
 
     let mode = if no_stream {
         ModuleExecutionMode::Captured
-    } else if stream {
-        ModuleExecutionMode::Interactive
-    } else if crate::tty::is_stdout_tty() {
+    } else if stream || crate::tty::is_stdout_tty() {
         ModuleExecutionMode::Interactive
     } else {
         ModuleExecutionMode::Captured

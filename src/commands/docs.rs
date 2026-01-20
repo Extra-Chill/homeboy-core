@@ -320,7 +320,7 @@ fn audit_doc_links(content: &str, doc_file: &str, docs_path: &Path, _source_path
             // Resolve the link relative to the doc file's directory
             let doc_dir = Path::new(doc_file).parent().unwrap_or(Path::new(""));
             let resolved_path = if link_path.starts_with('/') {
-                docs_path.join(&link_path[1..])
+                docs_path.join(link_path.strip_prefix('/').unwrap())
             } else {
                 docs_path.join(doc_dir).join(link_path)
             };
@@ -471,7 +471,7 @@ fn identify_undocumented(source_dirs: &[String], existing_docs: &[String]) -> Ve
         .iter()
         .filter(|src_dir| {
             // Check if any doc contains this directory name
-            let dir_name = src_dir.split('/').last().unwrap_or(src_dir);
+            let dir_name = src_dir.split('/').next_back().unwrap_or(src_dir);
             !existing_docs
                 .iter()
                 .any(|doc| doc.contains(dir_name) || doc.replace(".md", "").contains(dir_name))
@@ -540,7 +540,7 @@ fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
                 .path
                 .trim_end_matches(".md")
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap_or(&file_spec.path);
             format!("# {}\n", title_from_name(name))
         };
@@ -585,7 +585,7 @@ fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
 
 fn title_from_name(name: &str) -> String {
     // Convert kebab-case or snake_case to Title Case
-    name.split(|c| c == '-' || c == '_')
+    name.split(['-', '_'])
         .map(|word| {
             let mut chars = word.chars();
             match chars.next() {

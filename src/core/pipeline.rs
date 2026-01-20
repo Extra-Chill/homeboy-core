@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelineStep {
     pub id: String,
     #[serde(rename = "type")]
@@ -20,7 +19,6 @@ pub struct PipelineStep {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelinePlan {
     pub steps: Vec<PipelinePlanStep>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -28,7 +26,6 @@ pub struct PipelinePlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelinePlanStep {
     pub id: String,
     #[serde(rename = "type")]
@@ -46,7 +43,6 @@ pub struct PipelinePlanStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-
 pub enum PipelineStepStatus {
     Ready,
     Missing,
@@ -63,7 +59,6 @@ pub trait PipelineStepExecutor: Send + Sync {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelineRunPlan {
     pub steps: Vec<PipelineStep>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -71,7 +66,6 @@ pub struct PipelineRunPlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelineStepResult {
     pub id: String,
     #[serde(rename = "type")]
@@ -90,7 +84,6 @@ pub struct PipelineStepResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelineRunResult {
     pub steps: Vec<PipelineStepResult>,
     pub status: PipelineRunStatus,
@@ -101,7 +94,6 @@ pub struct PipelineRunResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub struct PipelineRunSummary {
     pub total_steps: usize,
     pub succeeded: usize,
@@ -113,7 +105,6 @@ pub struct PipelineRunSummary {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-
 pub enum PipelineRunStatus {
     Success,
     PartialSuccess,
@@ -501,8 +492,8 @@ fn execute_batch(
 
     let handles: Vec<_> = steps
         .iter()
-        .cloned()
         .map(|step| {
+            let step = step.clone();
             let executor = Arc::clone(&executor);
             let resolver = Arc::clone(&resolver);
             thread::spawn(move || execute_single_step(step, executor.as_ref(), resolver.as_ref()))

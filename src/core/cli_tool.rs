@@ -247,7 +247,7 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
             .join("\n");
         return Err(Error::validation_invalid_argument(
             "subtarget",
-            &format!(
+            format!(
                 "This project has subtargets configured. You must specify which subtarget to use.\n\nAvailable subtargets for project '{}':\n{}",
                 project.id, subtarget_list
             ),
@@ -274,7 +274,7 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
         .join("\n");
     Err(Error::validation_invalid_argument(
         "subtarget",
-        &format!(
+        format!(
             "Subtarget '{}' not found. Available subtargets for project '{}':\n{}",
             sub_id, project.id, subtarget_list
         ),

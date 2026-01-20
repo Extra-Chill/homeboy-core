@@ -153,6 +153,7 @@ pub fn run(input: &str) -> Result<(BuildResult, i32)> {
 /// - Examples: "bash {{script}}", "sh build.sh", "npm run build"
 /// - Build processes often require chaining with &&, ||, ;
 /// - Direct execution cannot handle shell scripts or shell features
+///
 /// See executor.rs for detailed execution strategy decision tree
 pub fn build_component(component: &component::Component) -> (Option<i32>, Option<String>) {
     let resolved = match resolve_build_command(component) {

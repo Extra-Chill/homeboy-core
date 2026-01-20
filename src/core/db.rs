@@ -128,7 +128,7 @@ fn resolve_domain(project: &Project, subtarget: Option<&str>, project_id: &str) 
             .join("\n");
         return Err(Error::validation_invalid_argument(
             "subtarget",
-            &format!(
+            format!(
                 "This project has subtargets configured. You must specify which subtarget to use.\n\nAvailable subtargets for project '{}':\n{}",
                 project_id, subtarget_list
             ),
@@ -155,7 +155,7 @@ fn resolve_domain(project: &Project, subtarget: Option<&str>, project_id: &str) 
         .join("\n");
     Err(Error::validation_invalid_argument(
         "subtarget",
-        &format!(
+        format!(
             "Subtarget '{}' not found. Available subtargets for project '{}':\n{}",
             sub_id, project_id, subtarget_list
         ),

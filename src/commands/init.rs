@@ -10,6 +10,7 @@ use homeboy::module::{
 };
 use homeboy::project::{self, Project};
 use homeboy::server::{self, Server};
+use homeboy::utils::parser;
 use homeboy::{changelog, git, version};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -708,7 +709,7 @@ fn resolve_changelog_snapshots(
 
 fn build_changelog_snapshot(
     content: &str,
-    changelog_path: &PathBuf,
+    changelog_path: &Path,
     settings: &changelog::EffectiveChangelogSettings,
 ) -> Option<ChangelogSnapshot> {
     let items = extract_section_items(content, &settings.next_section_aliases);
@@ -811,15 +812,11 @@ fn extract_first_bullet(lines: &[&str], start: usize) -> Option<String> {
 }
 
 fn parse_version_label(label: &str) -> Option<String> {
-    let re = regex::Regex::new(r"\[?(\d+\.\d+\.\d+)\]?").ok()?;
-    re.captures(label)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
+    parser::extract_first(label, r"\[?(\d+\.\d+\.\d+)\]?")
 }
 
 fn parse_date_label(label: &str) -> Option<String> {
-    let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").ok()?;
-    re.find(label).map(|m| m.as_str().to_string())
+    parser::extract_first(label, r"(\d{4}-\d{2}-\d{2})")
 }
 
 fn resolve_agent_context_files(git_root: Option<&String>) -> Vec<String> {

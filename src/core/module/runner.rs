@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::component::{self, Component, ScopedModuleConfig};
 use crate::error::{Error, Result};
@@ -171,7 +171,7 @@ impl ModuleRunner {
         }
     }
 
-    fn validate_script_exists(&self, module_path: &PathBuf) -> Result<()> {
+    fn validate_script_exists(&self, module_path: &Path) -> Result<()> {
         let script_path = module_path.join("scripts").join(&self.script_name);
         if !script_path.exists() {
             return Err(Error::validation_invalid_argument(
@@ -189,7 +189,7 @@ impl ModuleRunner {
         Ok(())
     }
 
-    fn load_module_manifest(&self, module_path: &PathBuf) -> Result<serde_json::Value> {
+    fn load_module_manifest(&self, module_path: &Path) -> Result<serde_json::Value> {
         let module_name = module_path.file_name().unwrap().to_string_lossy();
         let manifest_path = module_path.join(format!("{}.json", module_name));
 
@@ -253,8 +253,8 @@ impl ModuleRunner {
 
     fn prepare_env_vars(
         &self,
-        module_path: &PathBuf,
-        project_path: &PathBuf,
+        module_path: &Path,
+        project_path: &Path,
         settings_json: &str,
     ) -> Vec<(String, String)> {
         let module_name = module_path.file_name().unwrap().to_string_lossy();
@@ -277,7 +277,7 @@ impl ModuleRunner {
 
     fn execute_script(
         &self,
-        module_path: &PathBuf,
+        module_path: &Path,
         env_vars: &[(String, String)],
     ) -> Result<CommandOutput> {
         let script_path = module_path.join("scripts").join(&self.script_name);
