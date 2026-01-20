@@ -42,16 +42,17 @@ pub struct ProjectContext {
 #[derive(Debug, Clone, Serialize)]
 
 pub struct ContextOutput {
+    #[serde(skip_serializing)]
     pub command: String,
     pub cwd: String,
     pub git_root: Option<String>,
     pub managed: bool,
     pub matched_components: Vec<String>,
+    #[serde(skip_serializing)]
     pub contained_components: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub components: Option<Vec<ContainedComponentInfo>>,
     pub suggestion: Option<String>,
 }
 
@@ -94,13 +95,6 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
         None
     };
 
-    // Build component details for monorepo context
-    let component_details = if !contained.is_empty() {
-        Some(contained.iter().map(|c| build_component_info(c)).collect())
-    } else {
-        None
-    };
-
     // Generate context-aware suggestion
     let suggestion = if managed {
         None
@@ -134,7 +128,6 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             matched_components: matched,
             contained_components: contained_ids,
             project: project_ctx,
-            components: component_details,
             suggestion,
         },
         0,
@@ -171,7 +164,7 @@ fn path_matches(cwd: &Path, local_path: &str) -> bool {
     }
 }
 
-fn path_is_parent_of(parent: &Path, child_path: &str) -> bool {
+pub fn path_is_parent_of(parent: &Path, child_path: &str) -> bool {
     let child = PathBuf::from(child_path);
     match (parent.canonicalize().ok(), child.canonicalize().ok()) {
         (Some(parent_canonical), Some(child_canonical)) => {
@@ -191,7 +184,7 @@ fn find_project_for_components(component_ids: &[String]) -> Option<project::Proj
         .find(|p| component_ids.iter().all(|id| p.component_ids.contains(id)))
 }
 
-fn build_component_info(component: &component::Component) -> ContainedComponentInfo {
+pub fn build_component_info(component: &component::Component) -> ContainedComponentInfo {
     let mut gaps = Vec::new();
     let local_path = PathBuf::from(&component.local_path);
 

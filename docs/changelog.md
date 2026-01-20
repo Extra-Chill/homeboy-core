@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.29.3] - 2026-01-19
+
+- Remove redundant fields from init JSON output (context.contained_components, context.components, context.command)
+- Add gaps field to components array in init output for parent context
+- Make version block conditional on managed context in init output
+- Skip empty settings HashMap serialization in module configs
+- Skip null suggestion field serialization in context output
+
 ## [0.29.2] - 2026-01-19
 
 - Add per-component release_state to init output (commits_since_version, has_uncommitted_changes, baseline_ref)

@@ -4,7 +4,7 @@ use clap::Args;
 use serde::Serialize;
 
 use homeboy::component::{self, Component};
-use homeboy::context::{self, ContextOutput};
+use homeboy::context::{self, build_component_info, path_is_parent_of, ComponentGap, ContextOutput};
 use homeboy::module::{
     is_module_compatible, is_module_linked, load_all_modules, module_ready_status,
 };
@@ -137,6 +137,8 @@ pub struct ComponentWithState {
     pub component: Component,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_state: Option<ComponentReleaseState>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<ComponentGap>,
 }
 
 pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
@@ -170,14 +172,26 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
             .collect()
     };
 
-    // Wrap components with release state
+    // Wrap components with release state and gaps
+    let cwd = std::env::current_dir().ok();
     let components: Vec<ComponentWithState> = filtered_components
         .into_iter()
         .map(|component| {
             let release_state = calculate_component_release_state(&component);
+            // Calculate gaps for contained components (parent context)
+            let gaps = if let Some(ref cwd_path) = cwd {
+                if path_is_parent_of(cwd_path, &component.local_path) {
+                    build_component_info(&component).gaps
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
             ComponentWithState {
                 component,
                 release_state,
+                gaps,
             }
         })
         .collect();
@@ -303,7 +317,11 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
         }
     }
 
-    let version_snapshot = resolve_version_snapshot(&components);
+    let version_snapshot = if context_output.managed {
+        resolve_version_snapshot(&components)
+    } else {
+        None
+    };
     let git_snapshot = resolve_git_snapshot(context_output.git_root.as_ref());
     let (last_release, changelog_snapshot) = resolve_changelog_snapshots(&components);
     let warnings = validate_version_targets(&components);

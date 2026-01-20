@@ -18,7 +18,7 @@ pub struct VersionTarget {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 
 pub struct ScopedModuleConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub settings: HashMap<String, serde_json::Value>,
 }
 
