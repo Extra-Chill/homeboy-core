@@ -3,8 +3,8 @@ use serde::Serialize;
 
 use homeboy::git::{commit, get_uncommitted_changes, tag, CommitOptions};
 use homeboy::version::{
-    bump_version, increment_version, read_version, set_version, validate_changelog_for_bump,
-    VersionTargetInfo,
+    bump_version, increment_version, read_version, run_pre_bump_commands, set_version,
+    validate_changelog_for_bump, VersionTargetInfo,
 };
 
 use super::CmdResult;
@@ -175,6 +175,18 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     ]),
                 )
             })?;
+
+            // Execute pre-bump commands before clean-tree check
+            if let Some(ref id) = component_id {
+                if let Ok(component) = homeboy::component::load(id) {
+                    if !component.pre_version_bump_commands.is_empty() {
+                        run_pre_bump_commands(
+                            &component.pre_version_bump_commands,
+                            &component.local_path,
+                        )?;
+                    }
+                }
+            }
 
             // Require clean working tree before version bump
             if let Some(ref id) = component_id {
@@ -403,10 +415,16 @@ fn create_version_commit(
         }
         Err(e) => Some(GitCommitInfo {
             success: false,
-            message: commit_message,
-            files_staged: files_to_stage,
+            message: commit_message.clone(),
+            files_staged: files_to_stage.clone(),
             stdout: None,
-            stderr: Some(e.to_string()),
+            stderr: Some(format!(
+                "Commit failed: {}. Version files modified but not committed: {}. Recovery: git add -A && git commit -m \"{}\" OR git checkout -- {}",
+                e,
+                files_to_stage.join(", "),
+                commit_message,
+                files_to_stage.join(" ")
+            )),
             tag_created: None,
             tag_name: None,
         }),

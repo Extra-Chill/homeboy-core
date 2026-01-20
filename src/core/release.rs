@@ -485,9 +485,17 @@ impl ReleaseStepExecutor {
                     &tag_commit[..8.min(tag_commit.len())],
                     &head_commit[..8.min(head_commit.len())]
                 )),
-                vec![crate::error::Hint {
-                    message: format!("Delete the tag and retry: git tag -d {}", tag_name),
-                }],
+                vec![
+                    crate::error::Hint {
+                        message: format!(
+                            "Delete and retry: git tag -d {} && homeboy release run {}",
+                            tag_name, self.component_id
+                        ),
+                    },
+                    crate::error::Hint {
+                        message: format!("Or just delete the tag: git tag -d {}", tag_name),
+                    },
+                ],
             ));
         }
 

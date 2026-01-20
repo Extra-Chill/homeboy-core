@@ -14,6 +14,31 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+/// Execute pre-bump commands before the clean working tree check.
+/// These commands are expected to stage build artifacts like Cargo.lock.
+pub fn run_pre_bump_commands(commands: &[String], working_dir: &str) -> Result<()> {
+    if commands.is_empty() {
+        return Ok(());
+    }
+
+    for command in commands {
+        let output = execute_local_command_in_dir(command, Some(working_dir), None);
+        if !output.success {
+            let error_text = if output.stderr.trim().is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            };
+            return Err(Error::internal_unexpected(format!(
+                "Pre version bump command failed: {}\n{}",
+                command, error_text
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn run_post_bump_commands(commands: &[String], working_dir: &str) -> Result<()> {
     if commands.is_empty() {
         return Ok(());
