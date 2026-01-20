@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.30.0] - 2026-01-19
 
 - Added component auto-detection in `homeboy changes` - auto-uses detected component when exactly one matched
 - Added version/baseline alignment warning in `homeboy init` when source file version differs from git baseline
