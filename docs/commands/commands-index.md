@@ -30,5 +30,8 @@ Note: some modules also expose additional top-level CLI commands at runtime (loa
 Related:
 
 - [Root command](../cli/homeboy-root-command.md)
-- [JSON output contract](../json-output/json-output-contract.md) (global output envelope)
-- [Embedded docs](../embedded-docs/embedded-docs-topic-resolution.md)
+- [JSON output contract](../architecture/output-system.md) (global output envelope)
+- [Embedded docs](../architecture/embedded-docs/embedded-docs-topic-resolution.md)
+- [Schema Reference](../schemas/) - JSON configuration schemas (component, project, server, module)
+- [Architecture](../architecture/) - System internals (API client, keychain, SSH, release pipeline, execution context)
+- [Developer Guide](../developer-guide/) - Contributing guides (architecture overview, config directory, error handling)

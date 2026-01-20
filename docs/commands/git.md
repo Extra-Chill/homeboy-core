@@ -6,7 +6,7 @@
 homeboy git <COMMAND>
 ```
 
-Output is always JSON-wrapped (see [JSON output contract](../json-output/json-output-contract.md)).
+Output is always JSON-wrapped (see [JSON output contract](../architecture/output-system.md)).
 
 Note: some subcommands accept a `--json` flag for bulk operations.
 
@@ -101,7 +101,7 @@ Notes:
 
 ## JSON Output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
 
 ### Single Component Output
 

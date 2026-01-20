@@ -150,7 +150,7 @@ Release steps can be backed by module actions named `release.<step_type>`.
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy module` returns a tagged `ModuleOutput` object as `data`.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). `homeboy module` returns a tagged `ModuleOutput` object as `data`.
 
 Top-level variants (`data.command`):
 

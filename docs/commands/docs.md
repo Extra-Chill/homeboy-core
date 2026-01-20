@@ -198,4 +198,4 @@ If a component does not exist (for scaffold/audit), the command fails with a com
 ## Related
 
 - [Changelog command](changelog.md)
-- [JSON output contract](../json-output/json-output-contract.md)
+- [JSON output contract](../architecture/output-system.md)

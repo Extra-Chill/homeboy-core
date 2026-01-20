@@ -68,7 +68,7 @@ homeboy file grep mysite /var/www "add_action" --name "*.php" --max-depth 3
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy file` returns one of several output types as the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). `homeboy file` returns one of several output types as the `data` payload.
 
 ### Standard operations (list, read, write, delete, rename)
 

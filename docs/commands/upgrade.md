@@ -59,7 +59,7 @@ homeboy upgrade --force
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md).
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md).
 
 `homeboy upgrade --check` data payload:
 

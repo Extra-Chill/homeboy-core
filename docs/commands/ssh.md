@@ -32,7 +32,7 @@ homeboy ssh list
 
 ### `ssh list`
 
-> Note: output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is `data`.
+> Note: output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is `data`.
 
 ```json
 {

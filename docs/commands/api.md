@@ -58,4 +58,4 @@ JSON output is wrapped in the global envelope. `data` is the `homeboy::api::ApiO
 
 - [auth](auth.md)
 - [project](project.md)
-- [JSON output contract](../json-output/json-output-contract.md)
+- [JSON output contract](../architecture/output-system.md)

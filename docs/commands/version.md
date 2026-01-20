@@ -67,7 +67,7 @@ Arguments:
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy version` returns a `VersionOutput` object as the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). `homeboy version` returns a `VersionOutput` object as the `data` payload.
 
 `homeboy version show` data payload:
 

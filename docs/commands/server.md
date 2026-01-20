@@ -75,7 +75,7 @@ Key subcommands:
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). `homeboy server` returns a single `ServerOutput` object as the `data` payload. Fields are optional based on subcommand.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). `homeboy server` returns a single `ServerOutput` object as the `data` payload. Fields are optional based on subcommand.
 
 Top-level fields:
 

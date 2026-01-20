@@ -159,7 +159,7 @@ Lists all projects that reference the given component. Returns both project IDs 
 
 ## JSON output
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
 
 `homeboy component` returns a `ComponentOutput` object.
 
@@ -190,4 +190,4 @@ Notes:
 - [build](build.md)
 - [deploy](deploy.md)
 - [project](project.md)
-- [JSON output contract](../json-output/json-output-contract.md)
+- [JSON output contract](../architecture/output-system.md)

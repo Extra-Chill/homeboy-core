@@ -86,7 +86,7 @@ Bulk:
 
 JSON output:
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
 
 CLI mode:
 
@@ -171,7 +171,7 @@ Notes:
 
 JSON output:
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
 
 ```json
 {
@@ -185,7 +185,7 @@ JSON output:
 
 JSON output (`list`):
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
 
 ```json
 {
@@ -201,7 +201,7 @@ JSON output (`list`):
 
 JSON output (`show`):
 
-> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../json-output/json-output-contract.md). The object below is the `data` payload.
+> Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
 
 ```json
 {
@@ -447,4 +447,4 @@ JSON output:
 
 ## Related
 
-- [JSON output contract](../json-output/json-output-contract.md)
+- [JSON output contract](../architecture/output-system.md)

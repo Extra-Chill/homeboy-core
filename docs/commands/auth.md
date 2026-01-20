@@ -50,4 +50,4 @@ Note: `command` is a tagged enum value (`login|logout|status`), and fields use s
 
 - [api](api.md)
 - [project](project.md)
-- [JSON output contract](../json-output/json-output-contract.md)
+- [JSON output contract](../architecture/output-system.md)
