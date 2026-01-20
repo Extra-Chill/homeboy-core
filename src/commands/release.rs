@@ -14,6 +14,10 @@ pub struct ReleaseArgs {
 
     #[command(subcommand)]
     command: Option<ReleaseCommand>,
+
+    /// Accept --json for compatibility (output is JSON by default)
+    #[arg(long, hide = true)]
+    json: bool,
 }
 
 #[derive(Subcommand)]

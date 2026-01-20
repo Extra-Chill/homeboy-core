@@ -51,6 +51,10 @@ pub struct LintArgs {
     /// Override settings as key=value pairs
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
+
+    /// Accept --json for compatibility (output is JSON by default)
+    #[arg(long, hide = true)]
+    json: bool,
 }
 
 #[derive(Serialize)]

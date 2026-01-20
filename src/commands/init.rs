@@ -21,6 +21,10 @@ pub struct InitArgs {
     /// Show all components, modules, projects, and servers
     #[arg(long, short = 'a')]
     pub all: bool,
+
+    /// Accept --json for compatibility (output is JSON by default)
+    #[arg(long, hide = true)]
+    pub json: bool,
 }
 
 #[derive(Debug, Serialize)]

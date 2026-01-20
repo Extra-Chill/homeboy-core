@@ -17,6 +17,10 @@ pub struct UpgradeArgs {
     /// Skip automatic restart after upgrade
     #[arg(long)]
     pub no_restart: bool,
+
+    /// Accept --json for compatibility (output is JSON by default)
+    #[arg(long, hide = true)]
+    pub json: bool,
 }
 
 pub fn run(args: UpgradeArgs, _global: &GlobalArgs) -> CmdResult<Value> {

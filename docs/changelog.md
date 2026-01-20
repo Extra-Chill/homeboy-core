@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.30.4] - 2026-01-20
+
+- Accept --json flag as no-op on commands that return JSON by default (init, test, lint, release, upgrade)
+
 ## [0.30.3] - 2026-01-20
 
 - Add plural aliases for entity commands (servers, components, modules)

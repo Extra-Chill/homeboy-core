@@ -21,6 +21,10 @@ pub struct TestArgs {
     /// Additional arguments to pass to the test runner (after --)
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
+
+    /// Accept --json for compatibility (output is JSON by default)
+    #[arg(long, hide = true)]
+    json: bool,
 }
 
 #[derive(Serialize)]
