@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Changed
+- Consolidate utils and create command primitives
+
+### Fixed
+- Fix changelog init --configure circular error
+- Accept changelog_targets as alias for changelog_target
+
 ## [0.30.13] - 2026-01-20
 
 - Auto-fix orphaned tags in git.tag step instead of failing with hints
