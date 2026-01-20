@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.30.2] - 2026-01-20
+
+- Fixed: Version baseline detection now correctly identifies stale tags and falls back to release commits for accurate commit counts
+
 ## [0.30.1] - 2026-01-20
 
 ### Added

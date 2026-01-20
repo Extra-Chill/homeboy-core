@@ -164,6 +164,16 @@ pub fn parse_conventional_commit(subject: &str) -> CommitCategory {
     }
 }
 
+/// Extract version number from a git tag.
+/// Handles formats: v1.0.0, 1.0.0, component-v1.0.0
+fn extract_version_from_tag(tag: &str) -> Option<String> {
+    let version_pattern = Regex::new(r"v?(\d+\.\d+(?:\.\d+)?)").ok()?;
+    version_pattern
+        .captures(tag)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
 /// Get the latest git tag in the repository.
 /// Returns None if no tags exist.
 pub fn get_latest_tag(path: &str) -> Result<Option<String>> {
@@ -218,9 +228,11 @@ pub fn find_version_commit(path: &str) -> Result<Option<String>> {
         return Err(Error::other(format!("git log failed: {}", stderr)));
     }
 
-    let version_pattern =
-        Regex::new(r"(?i)(?:^v|(?:^|\s)bump\s+(?:version\s+)?(?:to\s+)?|(?:^|\s)release\s+v?|(?:^|\s)version\s+)(\d+\.\d+(?:\.\d+)?)")
-            .expect("Invalid regex pattern");
+    // Strict patterns - require release keywords at START of message
+    let version_pattern = Regex::new(
+        r"(?i)(?:^v|^bump\s+(?:version\s+)?(?:to\s+)?v?|^(?:chore\([^)]*\):\s*)?release:?\s*v?)(\d+\.\d+(?:\.\d+)?)",
+    )
+    .expect("Invalid regex pattern");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
@@ -237,6 +249,57 @@ pub fn find_version_commit(path: &str) -> Result<Option<String>> {
         }
     }
 
+    Ok(None)
+}
+
+/// Find the commit that released a specific version.
+/// Uses strict patterns to avoid false positives - only matches commits that
+/// clearly mark a release (e.g., "release: v0.2.0"), not mentions of releases.
+pub fn find_version_release_commit(path: &str, version: &str) -> Result<Option<String>> {
+    let output = Command::new("git")
+        .args(["log", "-200", "--format=%h|%s"])
+        .current_dir(path)
+        .output()
+        .map_err(|e| Error::other(format!("Failed to run git log: {}", e)))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let escaped_version = regex::escape(version);
+
+    // STRICT patterns - require start of message and word boundaries
+    let patterns = [
+        // Conventional commit: "release: v0.2.0" or "chore(release): v0.2.0"
+        format!(
+            r"(?i)^(?:chore\([^)]*\):\s*)?release:?\s*v?{}(?:\s|$)",
+            escaped_version
+        ),
+        // Version only: "v0.2.0" or "0.2.0" as the entire message
+        format!(r"(?i)^v?{}\s*$", escaped_version),
+        // Bump at start: "bump to 0.2.0" or "bump version to 0.2.0"
+        format!(
+            r"(?i)^bump\s+(?:version\s+)?(?:to\s+)?v?{}(?:\s|$)",
+            escaped_version
+        ),
+    ];
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.splitn(2, '|').collect();
+        if parts.len() == 2 {
+            let hash = parts[0];
+            let subject = parts[1];
+            for pattern in &patterns {
+                if Regex::new(pattern)
+                    .map(|re| re.is_match(subject))
+                    .unwrap_or(false)
+                {
+                    return Ok(Some(hash.to_string()));
+                }
+            }
+        }
+    }
     Ok(None)
 }
 
@@ -441,22 +504,64 @@ pub struct BaselineInfo {
 }
 
 /// Detect baseline for a path (public wrapper).
-/// Used by init and deploy commands to get release state info.
+/// For version-aware baseline detection, use detect_baseline_with_version().
 pub fn detect_baseline_for_path(path: &str) -> Result<BaselineInfo> {
-    detect_baseline(path, None)
+    detect_baseline_with_version(path, None)
 }
 
-fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> {
-    if let Some(t) = since_tag {
-        return Ok(BaselineInfo {
-            latest_tag: Some(t.to_string()),
-            source: Some(BaselineSource::Tag),
-            reference: Some(t.to_string()),
-            warning: None,
-        });
-    }
-
+/// Detect baseline with version alignment checking.
+/// If a tag exists but doesn't match current_version, warns and finds version commit instead.
+pub fn detect_baseline_with_version(
+    path: &str,
+    current_version: Option<&str>,
+) -> Result<BaselineInfo> {
+    // Priority 1: Check for latest tag
     if let Some(tag) = get_latest_tag(path)? {
+        let tag_version = extract_version_from_tag(&tag);
+
+        // If we have current version, check alignment
+        if let (Some(current), Some(tag_ver)) = (current_version, &tag_version) {
+            if current != tag_ver {
+                // Tag is stale - try to find the release commit for current version
+                if let Some(hash) = find_version_release_commit(path, current)? {
+                    return Ok(BaselineInfo {
+                        latest_tag: Some(tag.clone()),
+                        source: Some(BaselineSource::VersionCommit),
+                        reference: Some(hash),
+                        warning: Some(format!(
+                            "Latest tag '{}' doesn't match version {}. Using release commit as baseline. Consider: git tag v{}",
+                            tag, current, current
+                        )),
+                    });
+                }
+
+                // No matching release commit - fall back to generic version commit
+                if let Some(hash) = find_version_commit(path)? {
+                    return Ok(BaselineInfo {
+                        latest_tag: Some(tag.clone()),
+                        source: Some(BaselineSource::VersionCommit),
+                        reference: Some(hash),
+                        warning: Some(format!(
+                            "Latest tag '{}' doesn't match version {}. Using most recent version commit.",
+                            tag, current
+                        )),
+                    });
+                }
+
+                // No version commits found - use the stale tag but warn
+                return Ok(BaselineInfo {
+                    latest_tag: Some(tag.clone()),
+                    source: Some(BaselineSource::Tag),
+                    reference: Some(tag.clone()),
+                    warning: Some(format!(
+                        "Latest tag '{}' doesn't match version {}. Consider: git tag v{}",
+                        tag, current, current
+                    )),
+                });
+            }
+        }
+
+        // Tag version matches or no version to compare - use tag
         return Ok(BaselineInfo {
             latest_tag: Some(tag.clone()),
             source: Some(BaselineSource::Tag),
@@ -465,6 +570,19 @@ fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> 
         });
     }
 
+    // Priority 2: No tags - try version commit for current version first
+    if let Some(current) = current_version {
+        if let Some(hash) = find_version_release_commit(path, current)? {
+            return Ok(BaselineInfo {
+                latest_tag: None,
+                source: Some(BaselineSource::VersionCommit),
+                reference: Some(hash),
+                warning: Some("No tags found. Using release commit for current version.".to_string()),
+            });
+        }
+    }
+
+    // Priority 3: Generic version commit
     if let Some(hash) = find_version_commit(path)? {
         return Ok(BaselineInfo {
             latest_tag: None,
@@ -476,6 +594,7 @@ fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> 
         });
     }
 
+    // Fallback: No baseline found
     Ok(BaselineInfo {
         latest_tag: None,
         source: Some(BaselineSource::LastNCommits),
@@ -485,6 +604,21 @@ fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> 
             DEFAULT_COMMIT_LIMIT
         )),
     })
+}
+
+fn detect_baseline(path: &str, since_tag: Option<&str>) -> Result<BaselineInfo> {
+    // Handle explicit since_tag override (used by changes command)
+    if let Some(t) = since_tag {
+        return Ok(BaselineInfo {
+            latest_tag: Some(t.to_string()),
+            source: Some(BaselineSource::Tag),
+            reference: Some(t.to_string()),
+            warning: None,
+        });
+    }
+
+    // Delegate to version-aware detection (without version context)
+    detect_baseline_with_version(path, None)
 }
 
 // Input types for JSON parsing

@@ -104,6 +104,8 @@ pub struct GitSnapshot {
     pub commits_since_version: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_warning: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,6 +131,8 @@ pub struct ComponentReleaseState {
     pub has_uncommitted_changes: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_warning: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -322,7 +326,10 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
     } else {
         None
     };
-    let git_snapshot = resolve_git_snapshot(context_output.git_root.as_ref());
+    let git_snapshot = resolve_git_snapshot(
+        context_output.git_root.as_ref(),
+        version_snapshot.as_ref().map(|v| v.version.as_str()),
+    );
     let (last_release, changelog_snapshot) = resolve_changelog_snapshots(&components);
 
     let mut warnings = validate_version_targets(&components);
@@ -357,7 +364,12 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
 fn calculate_component_release_state(component: &Component) -> Option<ComponentReleaseState> {
     let path = &component.local_path;
 
-    let baseline = git::detect_baseline_for_path(path).ok()?;
+    // Get current version for alignment checking
+    let current_version = version::read_component_version(component)
+        .ok()
+        .map(|info| info.version);
+
+    let baseline = git::detect_baseline_with_version(path, current_version.as_deref()).ok()?;
 
     let commits = git::get_commits_since_tag(path, baseline.reference.as_deref())
         .ok()
@@ -373,6 +385,7 @@ fn calculate_component_release_state(component: &Component) -> Option<ComponentR
         commits_since_version: commits,
         has_uncommitted_changes: uncommitted,
         baseline_ref: baseline.reference,
+        baseline_warning: baseline.warning,
     })
 }
 
@@ -387,12 +400,15 @@ fn resolve_version_snapshot(components: &[ComponentWithState]) -> Option<Version
     })
 }
 
-fn resolve_git_snapshot(git_root: Option<&String>) -> Option<GitSnapshot> {
+fn resolve_git_snapshot(
+    git_root: Option<&String>,
+    current_version: Option<&str>,
+) -> Option<GitSnapshot> {
     let root = git_root?;
     let snapshot = git::get_repo_snapshot(root).ok()?;
 
-    // Get release state info (commits since last version tag)
-    let baseline = git::detect_baseline_for_path(root).ok();
+    // Get release state info with version alignment checking
+    let baseline = git::detect_baseline_with_version(root, current_version).ok();
     let commits_since = baseline.as_ref().and_then(|b| {
         git::get_commits_since_tag(root, b.reference.as_deref())
             .ok()
@@ -405,7 +421,8 @@ fn resolve_git_snapshot(git_root: Option<&String>) -> Option<GitSnapshot> {
         ahead: snapshot.ahead,
         behind: snapshot.behind,
         commits_since_version: commits_since,
-        baseline_ref: baseline.and_then(|b| b.reference),
+        baseline_ref: baseline.as_ref().and_then(|b| b.reference.clone()),
+        baseline_warning: baseline.and_then(|b| b.warning),
     })
 }
 
