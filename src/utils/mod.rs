@@ -5,9 +5,11 @@
 //! - `shell` - Shell escaping and quoting
 //! - `template` - String template rendering
 //! - `token` - String comparison and normalization
+//! - `validation` - Input validation helpers
 
 pub mod command;
 pub mod parser;
 pub mod shell;
 pub mod token;
+pub mod validation;
 pub(crate) mod template;
