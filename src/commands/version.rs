@@ -2,7 +2,10 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::git::{commit, tag, CommitOptions};
+use homeboy::release::{self, ReleasePlan, ReleaseRun};
 use homeboy::version::{read_version, set_version, VersionTargetInfo};
+
+use super::release::BumpType;
 
 use super::CmdResult;
 
@@ -26,6 +29,7 @@ pub struct GitCommitInfo {
 pub enum VersionOutput {
     Show(VersionShowOutput),
     Set(VersionSetOutput),
+    Bump(VersionBumpOutput),
 }
 
 #[derive(Args)]
@@ -49,6 +53,34 @@ enum VersionCommand {
 
         /// New version (e.g., 1.2.3)
         new_version: String,
+    },
+    /// Bump version with semantic versioning (alias for `release`)
+    Bump {
+        /// Component ID
+        component_id: String,
+
+        /// Version bump type (patch, minor, major)
+        bump_type: BumpType,
+
+        /// Preview what will happen without making changes
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Skip creating git tag
+        #[arg(long)]
+        no_tag: bool,
+
+        /// Skip pushing to remote
+        #[arg(long)]
+        no_push: bool,
+
+        /// Skip auto-committing uncommitted changes (fail if dirty)
+        #[arg(long)]
+        no_commit: bool,
+
+        /// Custom message for pre-release commit
+        #[arg(long, value_name = "MESSAGE")]
+        commit_message: Option<String>,
     },
 }
 
@@ -76,6 +108,23 @@ pub struct VersionSetOutput {
     changelog_changed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     git_commit: Option<GitCommitInfo>,
+}
+
+#[derive(Serialize)]
+pub struct VersionBumpOutput {
+    command: String,
+    component_id: String,
+    bump_type: String,
+    dry_run: bool,
+    no_tag: bool,
+    no_push: bool,
+    no_commit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commit_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan: Option<ReleasePlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run: Option<ReleaseRun>,
 }
 
 pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<VersionOutput> {
@@ -124,6 +173,60 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                 0,
             ))
         }
+        VersionCommand::Bump {
+            component_id,
+            bump_type,
+            dry_run,
+            no_tag,
+            no_push,
+            no_commit,
+            commit_message,
+        } => {
+            let options = release::ReleaseOptions {
+                bump_type: bump_type.as_str().to_string(),
+                dry_run,
+                no_tag,
+                no_push,
+                no_commit,
+                commit_message: commit_message.clone(),
+            };
+
+            if dry_run {
+                let plan = release::plan_unified(&component_id, &options)?;
+                Ok((
+                    VersionOutput::Bump(VersionBumpOutput {
+                        command: "version.bump".to_string(),
+                        component_id,
+                        bump_type: options.bump_type,
+                        dry_run: true,
+                        no_tag,
+                        no_push,
+                        no_commit,
+                        commit_message,
+                        plan: Some(plan),
+                        run: None,
+                    }),
+                    0,
+                ))
+            } else {
+                let run_result = release::run_unified(&component_id, &options)?;
+                Ok((
+                    VersionOutput::Bump(VersionBumpOutput {
+                        command: "version.bump".to_string(),
+                        component_id,
+                        bump_type: options.bump_type,
+                        dry_run: false,
+                        no_tag,
+                        no_push,
+                        no_commit,
+                        commit_message,
+                        plan: None,
+                        run: Some(run_result),
+                    }),
+                    0,
+                ))
+            }
+        }
     }
 }
 
@@ -135,11 +238,36 @@ fn create_version_commit(
     changelog_path: &str,
     create_tag: bool,
 ) -> Option<GitCommitInfo> {
-    let mut files_to_stage: Vec<String> = targets.iter().map(|t| t.full_path.clone()).collect();
+    // Get component's local_path and git repo root for path relativization
+    let local_path = component_id
+        .and_then(|id| homeboy::component::load(id).ok())
+        .map(|c| c.local_path)
+        .unwrap_or_default();
 
-    if !changelog_path.is_empty() {
-        files_to_stage.push(changelog_path.to_string());
-    }
+    // Use git repo root for path relativization (handles components in subdirectories)
+    let repo_root = homeboy::git::get_git_root(&local_path).unwrap_or(local_path.clone());
+
+    // Convert absolute paths to relative paths (relative to git repo root) for staging
+    let files_to_stage: Vec<String> = targets
+        .iter()
+        .map(|t| {
+            std::path::Path::new(&t.full_path)
+                .strip_prefix(&repo_root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| t.full_path.clone())
+        })
+        .chain(
+            // Also relativize changelog path if non-empty
+            (!changelog_path.is_empty())
+                .then(|| {
+                    std::path::Path::new(changelog_path)
+                        .strip_prefix(&repo_root)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| changelog_path.to_string())
+                })
+                .into_iter(),
+        )
+        .collect();
 
     let commit_message = format!("release: v{}", new_version);
 

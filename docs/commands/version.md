@@ -19,14 +19,18 @@ Shows the current version for the specified component, or the Homeboy binary ver
 ### `bump`
 
 ```sh
-homeboy version bump [<component_id>] <patch|minor|major>
-homeboy version bump [<component_id>] <patch|minor|major> --no-commit
+homeboy version bump <component_id> <patch|minor|major>
 ```
 
-Flags:
+Alias for [`homeboy release`](release.md). Bumps version, finalizes changelog, commits, tags, and optionally pushes.
 
-- `--dry-run`: Simulate the bump without making any changes
-- `--no-commit`: Skip automatic git commit after bump
+Flags (same as `release`):
+
+- `--dry-run`: Preview without making changes
+- `--no-tag`: Skip git tag creation
+- `--no-push`: Skip pushing to remote
+- `--no-commit`: Fail if uncommitted changes exist (strict mode)
+- `--commit-message <MESSAGE>`: Custom pre-release commit message
 
 ### `set`
 
@@ -40,10 +44,7 @@ homeboy version set [<component_id>] <new_version>
 
 `homeboy version bump`:
 
-- Bumps all configured `version_targets` using semantic versioning (X.Y.Z).
-- Finalizes the component changelog by moving the current "next" section (usually `Unreleased`) into a new `## [<new_version>] - YYYY-MM-DD` section.
-- **Auto-commits** version target files and changelog with message `release: v{new_version}`. Use `--no-commit` to skip.
-- Runs any `post_version_bump_commands` configured on the component.
+Alias for `homeboy release`. Delegates to the release command for full release pipeline execution. See [release](release.md) for details.
 
 `homeboy version set`:
 
@@ -80,18 +81,16 @@ Arguments:
 
 - `command`: `version.bump`
 - `component_id`
-- `old_version` (version before bump)
-- `new_version` (version after bump)
-- `targets`: array of `{ file, pattern, full_path, match_count }`
-- `changelog_path` (resolved changelog path)
-- `changelog_finalized` (always `true` on success)
-- `changelog_changed` (whether the changelog file was modified)
-- `git_commit` (present unless `--no-commit` or `--dry-run`):
-  - `success`: boolean
-  - `message`: commit message (`release: v{new_version}`)
-  - `files_staged`: array of file paths
-  - `stdout` (omitted if empty)
-  - `stderr` (omitted if empty)
+- `bump_type`: patch, minor, or major
+- `dry_run`: boolean
+- `no_tag`: boolean
+- `no_push`: boolean
+- `no_commit`: boolean
+- `commit_message` (omitted if not specified)
+- `plan` (present when `--dry-run`): release plan object
+- `run` (present when not `--dry-run`): release run result object
+
+See [release](release.md) for full plan and run object schemas.
 
 `homeboy version set` data payload:
 
@@ -103,13 +102,7 @@ Arguments:
 
 Errors:
 
-- `bump` errors if the changelog cannot be resolved, if the changelog is out of sync with the current version, or if the "next" section is missing/empty.
-- `bump` errors if the current version is not semantic versioning format (X.Y.Z).
-
-Notes:
-
-- Homeboy does not auto-fix existing changelogs. If the next section is missing or empty, follow the hints in the error to fix it manually.
-- Configure `post_version_bump_commands` on a component to run extra tasks (for example, `cargo generate-lockfile`) after the bump.
+- `bump` errors follow the same validation as `release`. See [release](release.md) for error conditions.
 
 ## Exit code
 

@@ -57,6 +57,7 @@ homeboy component set <id> --json <JSON>
 homeboy component set <id> '<JSON>'
 homeboy component set --json <JSON>   # id may be provided in JSON body
 homeboy component set <id> --key value   # dynamic flags
+homeboy component set <id> --json '{}' -- --key value   # combining --json with dynamic flags
 ```
 
 Updates a component by merging a JSON object into `components/<id>.json`.
@@ -66,6 +67,16 @@ Options:
 - `--json <JSON>`: JSON object to merge into config (supports `@file` and `-` for stdin)
 - `--replace <field>`: replace array fields instead of union (repeatable)
 - `--key value`: Dynamic flags that map directly to JSON keys (e.g., `--changelog-target "CHANGELOG.md"`)
+
+**Important:** When combining `--json` with dynamic flags, you must add an explicit `--` separator before the dynamic flags:
+
+```sh
+# Correct: explicit separator before dynamic flags
+homeboy component set my-plugin --json '{"type":"plugin"}' -- --build_command "npm run build"
+
+# Incorrect: will fail with "unexpected argument"
+homeboy component set my-plugin --json '{"type":"plugin"}' --build_command "npm run build"
+```
 
 Notes:
 

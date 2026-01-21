@@ -11,6 +11,22 @@ pub(crate) struct GlobalArgs {}
 ///
 /// Allows arbitrary `--key value` pairs that map directly to JSON keys.
 /// Flag names become JSON keys with no case conversion.
+///
+/// # Combining --json with dynamic flags
+///
+/// When using both `--json` and dynamic `--key value` flags, you MUST add
+/// an explicit `--` separator before the dynamic flags:
+///
+/// ```sh
+/// # Correct: explicit separator before dynamic flags
+/// homeboy component set my-component --json '{"type":"plugin"}' -- --build_command "npm run build"
+///
+/// # Incorrect: will fail with "unexpected argument"
+/// homeboy component set my-component --json '{"type":"plugin"}' --build_command "npm run build"
+/// ```
+///
+/// This is required because without the positional JSON spec, the parser
+/// cannot determine where dynamic trailing arguments begin.
 #[derive(Args, Default, Debug)]
 pub struct DynamicSetArgs {
     /// Entity ID (optional if provided in JSON body)
@@ -27,7 +43,9 @@ pub struct DynamicSetArgs {
     #[arg(long, value_name = "FIELD")]
     pub replace: Vec<String>,
 
-    /// Additional key=value flags (e.g., --remote-path /var/www)
+    /// Dynamic key=value flags (e.g., --remote_path /var/www).
+    /// When combined with --json, add '--' separator first:
+    /// `homeboy component set ID --json '{}' -- --key value`
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub extra: Vec<String>,
 }

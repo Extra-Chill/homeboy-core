@@ -188,12 +188,41 @@ pub fn build_component(component: &component::Component) -> (Option<i32>, Option
     } else {
         (
             Some(output.exit_code),
-            Some(format!(
-                "Build failed for '{}'. Fix build errors before deploying.",
-                component.id
-            )),
+            Some(format_build_error(&component.id, output.exit_code, &output.stderr, &output.stdout)),
         )
     }
+}
+
+/// Format a build error message with context from stderr/stdout.
+/// Only includes universal POSIX exit code hints - Homeboy is technology-agnostic.
+fn format_build_error(component_id: &str, exit_code: i32, stderr: &str, stdout: &str) -> String {
+    // Get useful output (prefer stderr, fall back to stdout)
+    let output_text = if stderr.trim().is_empty() { stdout } else { stderr };
+
+    // Get last 15 lines for context
+    let tail: Vec<&str> = output_text.lines().rev().take(15).collect();
+    let output_tail: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+
+    // Translate universal POSIX exit codes only (no tool-specific hints)
+    let hint = match exit_code {
+        127 => "\nHint: Command not found. Check that the build command and its dependencies are installed and in PATH.",
+        126 => "\nHint: Permission denied. Check file permissions on the build script.",
+        _ => "",
+    };
+
+    let mut msg = format!("Build failed for '{}' (exit code {}).", component_id, exit_code);
+
+    if !output_tail.is_empty() {
+        msg.push_str("\n\n--- Build output (last 15 lines) ---\n");
+        msg.push_str(&output_tail);
+        msg.push_str("\n--- End of output ---");
+    }
+
+    if !hint.is_empty() {
+        msg.push_str(hint);
+    }
+
+    msg
 }
 
 // === Internal implementation ===

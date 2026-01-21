@@ -5,22 +5,13 @@
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::keychain;
+use crate::module::HttpMethod;
 use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use reqwest::blocking::{Client, RequestBuilder, Response};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// HTTP method for API requests.
-#[derive(Clone, Copy)]
-enum HttpMethod {
-    Get,
-    Post,
-    Put,
-    Patch,
-    Delete,
-}
 
 fn config_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::ConfigInvalidValue, msg, Value::Null)

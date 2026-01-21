@@ -44,6 +44,14 @@ pub struct ReleaseArgs {
     #[arg(long)]
     no_push: bool,
 
+    /// Skip auto-committing uncommitted changes (fail if dirty)
+    #[arg(long)]
+    no_commit: bool,
+
+    /// Custom message for pre-release commit
+    #[arg(long, value_name = "MESSAGE")]
+    commit_message: Option<String>,
+
     /// Accept --json for compatibility (output is JSON by default)
     #[arg(long, hide = true)]
     json: bool,
@@ -62,6 +70,9 @@ pub struct ReleaseResult {
     pub dry_run: bool,
     pub no_tag: bool,
     pub no_push: bool,
+    pub no_commit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<ReleasePlan>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,6 +85,8 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
         dry_run: args.dry_run,
         no_tag: args.no_tag,
         no_push: args.no_push,
+        no_commit: args.no_commit,
+        commit_message: args.commit_message.clone(),
     };
 
     if args.dry_run {
@@ -86,6 +99,8 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     dry_run: true,
                     no_tag: args.no_tag,
                     no_push: args.no_push,
+                    no_commit: args.no_commit,
+                    commit_message: args.commit_message,
                     plan: Some(plan),
                     run: None,
                 },
@@ -102,6 +117,8 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     dry_run: false,
                     no_tag: args.no_tag,
                     no_push: args.no_push,
+                    no_commit: args.no_commit,
+                    commit_message: args.commit_message,
                     plan: None,
                     run: Some(run_result),
                 },

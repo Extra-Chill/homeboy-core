@@ -1,3 +1,4 @@
+use crate::component::ScopedModuleConfig;
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::output::{CreateOutput, MergeOutput, RemoveResult};
@@ -103,13 +104,6 @@ impl ConfigEntity for Project {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-
-pub struct ScopedModuleConfig {
-    #[serde(default)]
-    pub settings: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

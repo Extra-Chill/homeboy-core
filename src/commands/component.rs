@@ -61,6 +61,9 @@ enum ComponentCommand {
         id: String,
     },
     /// Update component configuration fields
+    ///
+    /// When combining --json with dynamic flags, use '--' separator:
+    ///   homeboy component set ID --json '{}' -- --build_command "cmd"
     #[command(visible_aliases = ["edit", "merge"])]
     Set {
         #[command(flatten)]

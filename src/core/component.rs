@@ -85,7 +85,7 @@ impl Component {
     }
 }
 
-/// Deserialize empty strings as None for backward compatibility.
+/// Normalize empty strings to None. Treats "", null, and field omission identically for consistent validation.
 fn deserialize_empty_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -107,12 +107,6 @@ impl ConfigEntity for Component {
     fn not_found_error(id: String, suggestions: Vec<String>) -> Error {
         Error::component_not_found(id, suggestions)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ComponentRecord {
-    pub id: String,
-    pub config: Component,
 }
 
 // ============================================================================

@@ -85,11 +85,33 @@ Commits release changes (version bumps, changelog updates) before tagging.
 }
 ```
 
+### Pre-release commit
+
+By default, `homeboy release` automatically commits any uncommitted changes before proceeding with the release:
+
+```sh
+# Auto-commits uncommitted changes with default message
+homeboy release <component> patch
+
+# Auto-commits with custom message
+homeboy release <component> minor --commit-message "final tweaks"
+
+# Strict mode: fail if uncommitted changes exist
+homeboy release <component> patch --no-commit
+```
+
+The auto-commit:
+- Stages all changes (staged, unstaged, untracked)
+- Creates a commit with message "pre-release changes" (or custom via `--commit-message`)
+- Proceeds with version bump, tagging, and push
+
+Use `--no-commit` to preserve the previous strict behavior that fails on uncommitted changes.
+
 ### Pre-flight validation
 
 Before executing the pipeline, `release run` validates:
 
-1. **Working tree status**: If uncommitted changes exist and no `git.commit` step is present, the command fails early with actionable guidance.
+1. **Working tree status**: If `--no-commit` is specified and uncommitted changes exist, the command fails early with actionable guidance.
 
 This prevents `cargo publish --locked` and similar commands from failing mid-pipeline due to dirty working trees.
 

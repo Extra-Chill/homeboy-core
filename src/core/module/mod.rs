@@ -40,7 +40,7 @@ use crate::config;
 use crate::error::Result;
 use crate::output::MergeOutput;
 use crate::paths;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub fn load_module(id: &str) -> Result<ModuleManifest> {
     let mut manifest = config::load::<ModuleManifest>(id)?;
@@ -87,12 +87,6 @@ pub fn is_module_linked(module_id: &str) -> bool {
     paths::module(module_id)
         .map(|p| p.is_symlink())
         .unwrap_or(false)
-}
-
-/// Returns the path to a module's manifest file: {module_dir}/{id}.json
-#[allow(dead_code)]
-fn manifest_path_for_module(module_dir: &Path, id: &str) -> PathBuf {
-    module_dir.join(format!("{}.json", id))
 }
 
 /// Check if any of the component's linked modules provide build configuration.

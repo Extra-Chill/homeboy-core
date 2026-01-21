@@ -1297,6 +1297,8 @@ pub struct ReleaseOptions {
     pub dry_run: bool,
     pub no_tag: bool,
     pub no_push: bool,
+    pub no_commit: bool,
+    pub commit_message: Option<String>,
 }
 
 /// Determine if the component has publish targets configured.
@@ -1365,6 +1367,10 @@ pub fn plan_unified(component_id: &str, options: &ReleaseOptions) -> Result<Rele
     // Validate changelog for bump (dry-run validation)
     version::validate_changelog_for_bump(&component, &version_info.version, &new_version)?;
 
+    // Check for uncommitted changes (for pre-release commit display)
+    let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
+    let needs_pre_commit = uncommitted.has_changes && !options.no_commit;
+
     // Determine effective behavior based on flags and config
     // Default: full pipeline (push + publish when configured)
     let has_publish = has_publish_targets(&component);
@@ -1373,10 +1379,43 @@ pub fn plan_unified(component_id: &str, options: &ReleaseOptions) -> Result<Rele
 
     // Build plan steps
     let mut steps = Vec::new();
-    let warnings = Vec::new();
+    let mut warnings = Vec::new();
     let mut hints = Vec::new();
 
-    // Step 1: Version bump (implicit, always first)
+    // Pre-release commit step (if uncommitted changes exist)
+    if needs_pre_commit {
+        let pre_commit_message = options
+            .commit_message
+            .clone()
+            .unwrap_or_else(|| "pre-release changes".to_string());
+        steps.push(ReleasePlanStep {
+            id: "pre-release.commit".to_string(),
+            step_type: "git.commit".to_string(),
+            label: Some(format!("Commit pre-release changes: {}", pre_commit_message)),
+            needs: vec![],
+            config: {
+                let mut config = std::collections::HashMap::new();
+                config.insert(
+                    "message".to_string(),
+                    serde_json::Value::String(pre_commit_message),
+                );
+                config
+            },
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
+        hints.push("Will auto-commit uncommitted changes before release".to_string());
+    } else if uncommitted.has_changes && options.no_commit {
+        // User specified --no-commit but has uncommitted changes
+        warnings.push("Working tree has uncommitted changes (--no-commit will cause release to fail)".to_string());
+    }
+
+    // Step 1: Version bump (needs pre-release commit if present)
+    let version_needs = if needs_pre_commit {
+        vec!["pre-release.commit".to_string()]
+    } else {
+        vec![]
+    };
     steps.push(ReleasePlanStep {
         id: "version".to_string(),
         step_type: "version".to_string(),
@@ -1384,7 +1423,7 @@ pub fn plan_unified(component_id: &str, options: &ReleaseOptions) -> Result<Rele
             "Bump version {} → {} ({})",
             version_info.version, new_version, options.bump_type
         )),
-        needs: vec![],
+        needs: version_needs,
         config: {
             let mut config = std::collections::HashMap::new();
             config.insert(
@@ -1544,30 +1583,56 @@ pub fn run_unified(component_id: &str, options: &ReleaseOptions) -> Result<Relea
         }
     }
 
-    // Require clean working tree
+    // Check for uncommitted changes
     let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
     if uncommitted.has_changes {
-        let mut details = vec![];
-        if !uncommitted.staged.is_empty() {
-            details.push(format!("Staged: {}", uncommitted.staged.join(", ")));
+        if options.no_commit {
+            // Strict mode: fail with error
+            let mut details = vec![];
+            if !uncommitted.staged.is_empty() {
+                details.push(format!("Staged: {}", uncommitted.staged.join(", ")));
+            }
+            if !uncommitted.unstaged.is_empty() {
+                details.push(format!("Unstaged: {}", uncommitted.unstaged.join(", ")));
+            }
+            if !uncommitted.untracked.is_empty() {
+                details.push(format!("Untracked: {}", uncommitted.untracked.join(", ")));
+            }
+            return Err(Error::validation_invalid_argument(
+                "workingTree",
+                "Working tree has uncommitted changes (--no-commit specified)",
+                Some(details.join("\n")),
+                Some(vec![
+                    "Commit your changes manually before releasing.".to_string(),
+                    "Or remove --no-commit to auto-commit pre-release changes.".to_string(),
+                ]),
+            ));
+        } else {
+            // Default: auto-commit pre-release changes
+            let message = options
+                .commit_message
+                .clone()
+                .unwrap_or_else(|| "pre-release changes".to_string());
+
+            eprintln!("[release] Committing pre-release changes: {}...", message);
+
+            let commit_options = crate::git::CommitOptions {
+                staged_only: false,
+                files: None,
+                exclude: None,
+                amend: false,
+            };
+
+            let commit_output =
+                crate::git::commit(Some(component_id), Some(&message), commit_options)?;
+
+            if !commit_output.success {
+                return Err(Error::other(format!(
+                    "Pre-release commit failed: {}",
+                    commit_output.stderr
+                )));
+            }
         }
-        if !uncommitted.unstaged.is_empty() {
-            details.push(format!("Unstaged: {}", uncommitted.unstaged.join(", ")));
-        }
-        if !uncommitted.untracked.is_empty() {
-            details.push(format!("Untracked: {}", uncommitted.untracked.join(", ")));
-        }
-        return Err(Error::validation_invalid_argument(
-            "workingTree",
-            "Working tree has uncommitted changes",
-            Some(details.join("\n")),
-            Some(vec![
-                "Release only commits version targets and changelog.".to_string(),
-                "1. Document changes: homeboy changelog add <component> -m \"...\"".to_string(),
-                "2. Commit everything: git add -A && git commit -m \"<description>\"".to_string(),
-                "3. Run release: homeboy release <component> <level>".to_string(),
-            ]),
-        ));
     }
 
     // Step 1: Version bump with changelog finalization
