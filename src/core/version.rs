@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::local_files::{self, FileSystem};
 use crate::module::{load_all_modules, ModuleManifest};
 use crate::ssh::execute_local_command_in_dir;
-use crate::utils::{parser, validation};
+use crate::utils::{io, parser, validation};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
@@ -161,8 +161,7 @@ pub fn update_version_in_file(
     }
 
     // Text files use regex replacement
-    let content = fs::read_to_string(path)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("read version file".to_string())))?;
+    let content = io::read_file(Path::new(path), "read version file")?;
 
     let versions = parse_versions(&content, pattern).ok_or_else(|| {
         Error::validation_invalid_argument(
@@ -200,8 +199,7 @@ pub fn update_version_in_file(
             )
         })?;
 
-    fs::write(path, &new_content)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("write version file".to_string())))?;
+    io::write_file(Path::new(path), &new_content, "write version file")?;
 
     Ok(replaced_count)
 }

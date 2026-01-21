@@ -198,21 +198,17 @@ fn build_project_command(
     let mut rendered = render_map(&cli_config.command_template, &variables);
 
     // Append settings-based flags from module config
-    if !cli_config.settings_flags.is_empty() {
-        if let Some(modules) = &project.modules {
-            if let Some(module_config) = modules.get(module_id) {
-                for (setting_key, flag_template) in &cli_config.settings_flags {
-                    if let Some(value) = module_config.settings.get(setting_key) {
-                        if let Some(value_str) = value.as_str() {
-                            if !value_str.is_empty() {
-                                let flag = flag_template
-                                    .replace("{{value}}", &shell::quote_arg(value_str));
-                                rendered.push(' ');
-                                rendered.push_str(&flag);
-                            }
-                        }
-                    }
-                }
+    if let Some(module_config) = project.modules.as_ref().and_then(|m| m.get(module_id)) {
+        for (setting_key, flag_template) in &cli_config.settings_flags {
+            if let Some(flag) = module_config
+                .settings
+                .get(setting_key)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|value_str| flag_template.replace("{{value}}", &shell::quote_arg(value_str)))
+            {
+                rendered.push(' ');
+                rendered.push_str(&flag);
             }
         }
     }

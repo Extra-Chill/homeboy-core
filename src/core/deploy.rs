@@ -156,24 +156,25 @@ pub fn deploy_artifact(
     }
 
     // Step 3: Run verification if configured
-    if let Some(v) = verification {
-        if let Some(ref verify_cmd_template) = v.verify_command {
-            let mut vars = HashMap::new();
-            vars.insert(
-                TemplateVars::TARGET_DIR.to_string(),
-                remote_path.to_string(),
-            );
-            let verify_cmd = render_map(verify_cmd_template, &vars);
+    if let Some((v, verify_cmd_template)) = verification
+        .as_ref()
+        .and_then(|v| v.verify_command.as_ref().map(|cmd| (v, cmd)))
+    {
+        let mut vars = HashMap::new();
+        vars.insert(
+            TemplateVars::TARGET_DIR.to_string(),
+            remote_path.to_string(),
+        );
+        let verify_cmd = render_map(verify_cmd_template, &vars);
 
-            let verify_output = ssh_client.execute(&verify_cmd);
-            if !verify_output.success || verify_output.stdout.trim().is_empty() {
-                let error_msg = v
-                    .verify_error_message
-                    .as_ref()
-                    .map(|msg| render_map(msg, &vars))
-                    .unwrap_or_else(|| format!("Deploy verification failed for {}", remote_path));
-                return Ok(DeployResult::failure(1, error_msg));
-            }
+        let verify_output = ssh_client.execute(&verify_cmd);
+        if !verify_output.success || verify_output.stdout.trim().is_empty() {
+            let error_msg = v
+                .verify_error_message
+                .as_ref()
+                .map(|msg| render_map(msg, &vars))
+                .unwrap_or_else(|| format!("Deploy verification failed for {}", remote_path));
+            return Ok(DeployResult::failure(1, error_msg));
         }
     }
 

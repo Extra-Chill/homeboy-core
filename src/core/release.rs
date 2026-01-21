@@ -1029,26 +1029,30 @@ fn validate_plan_prerequisites(component: &Component) -> Vec<String> {
     // Check changelog status
     match changelog::resolve_changelog_path(component) {
         Ok(changelog_path) => {
-            if let Ok(content) = crate::core::local_files::local().read(&changelog_path) {
-                let settings = changelog::resolve_effective_settings(Some(component));
-                if let Ok(Some(status)) =
+            let status = crate::core::local_files::local()
+                .read(&changelog_path)
+                .ok()
+                .and_then(|content| {
+                    let settings = changelog::resolve_effective_settings(Some(component));
                     changelog::check_next_section_content(&content, &settings.next_section_aliases)
-                {
-                    match status.as_str() {
-                        "empty" => {
-                            warnings.push(
-                                "No unreleased changelog entries. Run `homeboy changelog add` first."
-                                    .to_string(),
-                            );
-                        }
-                        "subsection_headers_only" => {
-                            warnings.push(
-                                "Changelog has subsection headers but no items. Add entries with `homeboy changelog add`."
-                                    .to_string(),
-                            );
-                        }
-                        _ => {}
+                        .ok()
+                        .flatten()
+                });
+            if let Some(status) = status {
+                match status.as_str() {
+                    "empty" => {
+                        warnings.push(
+                            "No unreleased changelog entries. Run `homeboy changelog add` first."
+                                .to_string(),
+                        );
                     }
+                    "subsection_headers_only" => {
+                        warnings.push(
+                            "Changelog has subsection headers but no items. Add entries with `homeboy changelog add`."
+                                .to_string(),
+                        );
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1291,8 +1295,6 @@ fn build_plan_hints(
 pub struct ReleaseOptions {
     pub bump_type: String,
     pub dry_run: bool,
-    pub local: bool,
-    pub publish: bool,
     pub no_tag: bool,
     pub no_push: bool,
 }
@@ -1364,9 +1366,10 @@ pub fn plan_unified(component_id: &str, options: &ReleaseOptions) -> Result<Rele
     version::validate_changelog_for_bump(&component, &version_info.version, &new_version)?;
 
     // Determine effective behavior based on flags and config
+    // Default: full pipeline (push + publish when configured)
     let has_publish = has_publish_targets(&component);
-    let will_push = !options.local && !options.no_push && (options.publish || has_publish);
-    let will_publish = !options.local && options.publish;
+    let will_push = !options.no_push;
+    let will_publish = has_publish && !options.no_push;
 
     // Build plan steps
     let mut steps = Vec::new();
@@ -1485,21 +1488,12 @@ pub fn plan_unified(component_id: &str, options: &ReleaseOptions) -> Result<Rele
     }
 
     // Add hints based on configuration
-    if options.local {
-        hints.push("Local-only release: skipping push and publish steps".to_string());
-    } else if options.no_push {
-        hints.push("Skipping push (--no-push)".to_string());
+    if options.no_push {
+        hints.push("Skipping push and publish (--no-push)".to_string());
     }
 
     if options.no_tag {
         hints.push("Skipping tag creation (--no-tag)".to_string());
-    }
-
-    if !will_publish && has_publish {
-        hints.push(format!(
-            "Component has publish targets. Use --publish to run: homeboy release {} {} --publish",
-            component_id, options.bump_type
-        ));
     }
 
     if options.dry_run {
@@ -1623,9 +1617,10 @@ pub fn run_unified(component_id: &str, options: &ReleaseOptions) -> Result<Relea
     }
 
     // Determine effective behavior
+    // Default: full pipeline (push + publish when configured)
     let has_publish = has_publish_targets(&component);
-    let will_push = !options.local && !options.no_push && (options.publish || has_publish);
-    let will_publish = !options.local && options.publish;
+    let will_push = !options.no_push;
+    let will_publish = has_publish && !options.no_push;
 
     // Step 4: Git push (unless --local or --no-push)
     if will_push {

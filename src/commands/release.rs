@@ -36,14 +36,6 @@ pub struct ReleaseArgs {
     #[arg(long)]
     dry_run: bool,
 
-    /// Local-only release: bump + commit + tag (no push/publish even if configured)
-    #[arg(long, conflicts_with = "publish")]
-    local: bool,
-
-    /// Force full pipeline: push + publish even if not configured as default
-    #[arg(long, conflicts_with = "local")]
-    publish: bool,
-
     /// Skip creating git tag
     #[arg(long)]
     no_tag: bool,
@@ -68,8 +60,6 @@ pub struct ReleaseResult {
     pub component_id: String,
     pub bump_type: String,
     pub dry_run: bool,
-    pub local: bool,
-    pub publish: bool,
     pub no_tag: bool,
     pub no_push: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,8 +72,6 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
     let options = release::ReleaseOptions {
         bump_type: args.bump_type.as_str().to_string(),
         dry_run: args.dry_run,
-        local: args.local,
-        publish: args.publish,
         no_tag: args.no_tag,
         no_push: args.no_push,
     };
@@ -96,8 +84,6 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     component_id: args.component_id,
                     bump_type: options.bump_type,
                     dry_run: true,
-                    local: args.local,
-                    publish: args.publish,
                     no_tag: args.no_tag,
                     no_push: args.no_push,
                     plan: Some(plan),
@@ -114,8 +100,6 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     component_id: args.component_id,
                     bump_type: options.bump_type,
                     dry_run: false,
-                    local: args.local,
-                    publish: args.publish,
                     no_tag: args.no_tag,
                     no_push: args.no_push,
                     plan: None,

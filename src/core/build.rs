@@ -52,22 +52,26 @@ pub fn resolve_build_command(component: &Component) -> Result<ResolvedBuildComma
             if let Ok(module) = module::load_module(module_id) {
                 if let Some(build) = &module.build {
                     // Check for module's bundled script
-                    if let Some(module_script) = &build.module_script {
-                        if let Ok(module_dir) = paths::module(module_id) {
+                    let bundled = build.module_script.as_ref().and_then(|module_script| {
+                        paths::module(module_id).ok().and_then(|module_dir| {
                             let script_path = module_dir.join(module_script);
-                            if script_path.exists() {
-                                let quoted_path = shell::quote_path(&script_path.to_string_lossy());
+                            script_path.exists().then(|| {
+                                let quoted_path =
+                                    shell::quote_path(&script_path.to_string_lossy());
                                 let command = build
                                     .command_template
                                     .as_ref()
                                     .map(|t| t.replace("{{script}}", &quoted_path))
                                     .unwrap_or_else(|| format!("sh {}", quoted_path));
-                                return Ok(ResolvedBuildCommand::ModuleProvided {
+                                ResolvedBuildCommand::ModuleProvided {
                                     command,
                                     source: format!("{}:{}", module_id, module_script),
-                                });
-                            }
-                        }
+                                }
+                            })
+                        })
+                    });
+                    if let Some(result) = bundled {
+                        return Ok(result);
                     }
 
                     // Check for local script matching module's script_names

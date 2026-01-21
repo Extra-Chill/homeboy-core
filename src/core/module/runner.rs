@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::component::{self, Component, ScopedModuleConfig};
 use crate::error::{Error, Result};
-use crate::utils::shell;
 use crate::ssh::{execute_local_command_in_dir, CommandOutput};
+use crate::utils::{io, shell};
 
 use super::exec_context;
 
@@ -200,12 +200,7 @@ impl ModuleRunner {
             ));
         }
 
-        let content = std::fs::read_to_string(&manifest_path).map_err(|e| {
-            Error::internal_io(
-                e.to_string(),
-                Some(format!("read {}", manifest_path.display())),
-            )
-        })?;
+        let content = io::read_file(&manifest_path, &format!("read {}", manifest_path.display()))?;
 
         serde_json::from_str(&content)
             .map_err(|e| Error::validation_invalid_json(e, Some("parse manifest".to_string()), None))
