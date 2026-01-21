@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.33.2] - 2026-01-21
 
 - **Release Pipeline**: Fixed architecture to use module's `release.package` action for artifact creation instead of direct build
 
