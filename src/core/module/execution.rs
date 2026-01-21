@@ -507,27 +507,6 @@ fn execute_module_runtime(
     })
 }
 
-pub(crate) fn run_module_runtime(
-    module_id: &str,
-    project_id: Option<&str>,
-    component_id: Option<&str>,
-    inputs: Vec<(String, String)>,
-    args: Vec<String>,
-    payload: Option<&serde_json::Value>,
-    working_dir: Option<&str>,
-) -> Result<ModuleExecutionOutcome> {
-    execute_module_runtime(
-        module_id,
-        project_id,
-        component_id,
-        inputs,
-        args,
-        payload,
-        working_dir,
-        ModuleExecutionMode::Captured,
-    )
-}
-
 /// Build execution environment variables for a module.
 pub fn build_exec_env(
     module_id: &str,

@@ -23,7 +23,7 @@ pub use execution::{
     ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult, ModuleSetupResult,
     run_action, run_module, run_setup,
 };
-pub(crate) use execution::{execute_action, run_module_runtime};
+pub(crate) use execution::execute_action;
 
 // Re-export scope types
 pub use scope::ModuleScope;
