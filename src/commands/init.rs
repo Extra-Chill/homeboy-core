@@ -29,6 +29,14 @@ pub struct InitArgs {
 }
 
 #[derive(Debug, Serialize)]
+pub struct GapSummary {
+    pub component_id: String,
+    pub field: String,
+    pub reason: String,
+    pub command: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct InitStatus {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ready_to_deploy: Vec<String>,
@@ -38,6 +46,8 @@ pub struct InitStatus {
     pub has_uncommitted: Vec<String>,
     #[serde(skip_serializing_if = "is_zero")]
     pub config_gaps: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gap_details: Vec<GapSummary>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -384,12 +394,21 @@ fn compute_status(components: &[ComponentWithState]) -> InitStatus {
     let mut needs_version_bump = Vec::new();
     let mut has_uncommitted = Vec::new();
     let mut config_gaps = 0;
+    let mut gap_details = Vec::new();
 
     for comp in components {
         let id = &comp.component.id;
 
-        // Count config gaps
-        config_gaps += comp.gaps.len();
+        // Collect gap details
+        for gap in &comp.gaps {
+            config_gaps += 1;
+            gap_details.push(GapSummary {
+                component_id: id.clone(),
+                field: gap.field.clone(),
+                reason: gap.reason.clone(),
+                command: gap.command.clone(),
+            });
+        }
 
         if let Some(ref state) = comp.release_state {
             if state.has_uncommitted_changes {
@@ -407,6 +426,7 @@ fn compute_status(components: &[ComponentWithState]) -> InitStatus {
         needs_version_bump,
         has_uncommitted,
         config_gaps,
+        gap_details,
     }
 }
 

@@ -36,6 +36,21 @@ pub fn quote_args(args: &[String]) -> String {
         .join(" ")
 }
 
+/// Normalize argument list - if single arg contains spaces, split it.
+/// Handles both input styles for CLI tool commands:
+/// - Multiple args: ["arg1", "arg2", "--flag"] -> unchanged
+/// - Single quoted arg: ["arg1 arg2 --flag"] -> split to ["arg1", "arg2", "--flag"]
+///
+/// This provides a consistent experience for users who may quote arguments
+/// in their shell vs. provide them as separate args.
+pub fn normalize_args(args: &[String]) -> Vec<String> {
+    if args.len() == 1 && args[0].contains(' ') {
+        args[0].split_whitespace().map(|s| s.to_string()).collect()
+    } else {
+        args.to_vec()
+    }
+}
+
 /// Escape an entire command string for sh -c execution.
 /// Use this when passing a complete command (with operators) to sh -c.
 /// Wraps entire command in single quotes and escapes embedded quotes.
@@ -139,5 +154,36 @@ mod tests {
     fn escape_perl_regex_slash() {
         assert_eq!(escape_perl_regex("path/to/file"), "path\\/to\\/file");
         assert_eq!(escape_perl_regex("/var/www"), "\\/var\\/www");
+    }
+
+    #[test]
+    fn normalize_args_multiple_args_unchanged() {
+        let args = vec![
+            "arg1".to_string(),
+            "arg2".to_string(),
+            "--flag".to_string(),
+        ];
+        assert_eq!(normalize_args(&args), args);
+    }
+
+    #[test]
+    fn normalize_args_single_arg_with_spaces_splits() {
+        let args = vec!["arg1 arg2 --flag".to_string()];
+        assert_eq!(
+            normalize_args(&args),
+            vec!["arg1".to_string(), "arg2".to_string(), "--flag".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_args_single_arg_no_spaces_unchanged() {
+        let args = vec!["simple".to_string()];
+        assert_eq!(normalize_args(&args), args);
+    }
+
+    #[test]
+    fn normalize_args_empty_vec() {
+        let args: Vec<String> = vec![];
+        assert_eq!(normalize_args(&args), args);
     }
 }

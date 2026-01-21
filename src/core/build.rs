@@ -160,6 +160,12 @@ pub fn run(input: &str) -> Result<(BuildResult, i32)> {
 ///
 /// See executor.rs for detailed execution strategy decision tree
 pub fn build_component(component: &component::Component) -> (Option<i32>, Option<String>) {
+    // Validate local_path before attempting build
+    let validated_path = match component::validate_local_path(component) {
+        Ok(p) => p,
+        Err(e) => return (Some(1), Some(format_path_validation_error(component, &e))),
+    };
+
     let resolved = match resolve_build_command(component) {
         Ok(r) => r,
         Err(e) => return (Some(1), Some(e.to_string())),
@@ -168,7 +174,8 @@ pub fn build_component(component: &component::Component) -> (Option<i32>, Option
     let build_cmd = resolved.command().to_string();
 
     // Fix local permissions before build to ensure zip has correct permissions
-    permissions::fix_local_permissions(&component.local_path);
+    let local_path_str = validated_path.to_string_lossy().to_string();
+    permissions::fix_local_permissions(&local_path_str);
 
     // Get module path env vars for build command (matches pre-build script behavior)
     let env_vars = get_build_env_vars(component);
@@ -179,7 +186,7 @@ pub fn build_component(component: &component::Component) -> (Option<i32>, Option
 
     let output = execute_local_command_in_dir(
         &build_cmd,
-        Some(&component.local_path),
+        Some(&local_path_str),
         if env_refs.is_empty() { None } else { Some(&env_refs) },
     );
 
@@ -188,14 +195,31 @@ pub fn build_component(component: &component::Component) -> (Option<i32>, Option
     } else {
         (
             Some(output.exit_code),
-            Some(format_build_error(&component.id, output.exit_code, &output.stderr, &output.stdout)),
+            Some(format_build_error(&component.id, &build_cmd, &local_path_str, output.exit_code, &output.stderr, &output.stdout)),
         )
     }
 }
 
+/// Format a path validation error with build context.
+fn format_path_validation_error(component: &component::Component, error: &Error) -> String {
+    format!(
+        "Build failed for component '{}':\n  {}\n\nHint: Update local_path with:\n  homeboy component set {} --local-path \"/path/to/component\"",
+        component.id,
+        error.message,
+        component.id
+    )
+}
+
 /// Format a build error message with context from stderr/stdout.
 /// Only includes universal POSIX exit code hints - Homeboy is technology-agnostic.
-fn format_build_error(component_id: &str, exit_code: i32, stderr: &str, stdout: &str) -> String {
+fn format_build_error(
+    component_id: &str,
+    build_cmd: &str,
+    working_dir: &str,
+    exit_code: i32,
+    stderr: &str,
+    stdout: &str,
+) -> String {
     // Get useful output (prefer stderr, fall back to stdout)
     let output_text = if stderr.trim().is_empty() { stdout } else { stderr };
 
@@ -210,7 +234,10 @@ fn format_build_error(component_id: &str, exit_code: i32, stderr: &str, stdout: 
         _ => "",
     };
 
-    let mut msg = format!("Build failed for '{}' (exit code {}).", component_id, exit_code);
+    let mut msg = format!(
+        "Build failed for '{}' (exit code {}).\n  Command: {}\n  Working directory: {}",
+        component_id, exit_code, build_cmd, working_dir
+    );
 
     if !output_tail.is_empty() {
         msg.push_str("\n\n--- Build output (last 15 lines) ---\n");
@@ -282,6 +309,11 @@ fn run_bulk(json_spec: &str) -> Result<(BuildResult, i32)> {
 
 fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
     let comp = component::load(component_id)?;
+
+    // Validate local_path before attempting build
+    let validated_path = component::validate_local_path(&comp)?;
+    let local_path_str = validated_path.to_string_lossy().to_string();
+
     let resolved = resolve_build_command(&comp)?;
     let build_cmd = resolved.command().to_string();
 
@@ -303,7 +335,7 @@ fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
     }
 
     // Fix local permissions before build to ensure zip has correct permissions
-    permissions::fix_local_permissions(&comp.local_path);
+    permissions::fix_local_permissions(&local_path_str);
 
     // Get module path env vars for build command (matches pre-build script behavior)
     let env_vars = get_build_env_vars(&comp);
@@ -314,7 +346,7 @@ fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
 
     let output = execute_local_command_in_dir(
         &build_cmd,
-        Some(&comp.local_path),
+        Some(&local_path_str),
         if env_refs.is_empty() { None } else { Some(&env_refs) },
     );
 

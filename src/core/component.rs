@@ -398,23 +398,27 @@ pub fn module_provides_artifact_pattern(component: &Component) -> bool {
 }
 
 /// Validates component local_path is usable (absolute and exists).
+/// Expands tilde to home directory before validation.
 /// Returns the validated PathBuf on success, or an actionable error with self-healing hints.
 pub fn validate_local_path(component: &Component) -> Result<PathBuf> {
-    let path = PathBuf::from(&component.local_path);
+    // Expand tilde to home directory (e.g., ~/Developer -> /Users/chubes/Developer)
+    let expanded = shellexpand::tilde(&component.local_path);
+    let path = PathBuf::from(expanded.as_ref());
 
     // Check if relative path (no leading /)
     if !path.is_absolute() {
         return Err(Error::validation_invalid_argument(
             "local_path",
             format!(
-                "Component '{}' has relative local_path '{}' which cannot be resolved",
+                "Component '{}' has relative local_path '{}' which cannot be resolved. \
+                Use absolute path like /Users/chubes/path/to/component",
                 component.id, component.local_path
             ),
             Some(component.id.clone()),
             None,
         )
         .with_hint(format!(
-            "Set absolute path: homeboy component set {} local_path \"/full/path/to/{}\"",
+            "Set absolute path: homeboy component set {} --local-path \"/full/path/to/{}\"",
             component.id, component.local_path
         ))
         .with_hint("Use 'pwd' in the component directory to get the absolute path".to_string()));
@@ -426,14 +430,14 @@ pub fn validate_local_path(component: &Component) -> Result<PathBuf> {
             "local_path",
             format!(
                 "Component '{}' local_path does not exist: {}",
-                component.id, component.local_path
+                component.id, path.display()
             ),
             Some(component.id.clone()),
             None,
         )
-        .with_hint(format!("Verify the path exists: ls -la {}", component.local_path))
+        .with_hint(format!("Verify the path exists: ls -la {}", path.display()))
         .with_hint(format!(
-            "Update path: homeboy component set {} local_path \"/correct/path\"",
+            "Update path: homeboy component set {} --local-path \"/correct/path\"",
             component.id
         )));
     }
