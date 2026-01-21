@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+- fix: add missing Build step to release pipeline
+
 ## [0.33.0] - 2026-01-21
 
 - Refactor release system: built-in core steps (commit, tag, push) with config-driven publish targets

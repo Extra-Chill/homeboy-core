@@ -28,7 +28,8 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
             ReleaseStepType::Version
             | ReleaseStepType::GitCommit
             | ReleaseStepType::GitTag
-            | ReleaseStepType::GitPush => true,
+            | ReleaseStepType::GitPush
+            | ReleaseStepType::Build => true,
             ReleaseStepType::Publish(ref target) => {
                 // Extract target from "publish.<target>" format
                 let target_name = target.strip_prefix("publish.").unwrap_or(target);

@@ -263,10 +263,21 @@ fn build_release_steps(
         missing: vec![],
     });
 
+    // 6. Build (produces artifacts for publish steps)
+    steps.push(ReleasePlanStep {
+        id: "build".to_string(),
+        step_type: "build".to_string(),
+        label: Some("Build release artifacts".to_string()),
+        needs: vec!["git.push".to_string()],
+        config: std::collections::HashMap::new(),
+        status: ReleasePlanStatus::Ready,
+        missing: vec![],
+    });
+
     // === PUBLISH STEPS (config-driven) ===
 
     if let Some(release) = &component.release {
-        let mut previous_step = "git.push".to_string();
+        let mut previous_step = "build".to_string();
 
         for target in &release.publish {
             let step_id = format!("publish.{}", target);

@@ -51,6 +51,7 @@ impl ReleaseStepExecutor {
             ReleaseStepType::GitCommit => self.run_git_commit(step),
             ReleaseStepType::GitTag => self.run_git_tag(step),
             ReleaseStepType::GitPush => self.run_git_push(step),
+            ReleaseStepType::Build => self.run_build(step),
             ReleaseStepType::Publish(target) => self.run_publish(step, &target),
         }
     }
@@ -191,6 +192,52 @@ impl ReleaseStepExecutor {
             None,
             Vec::new(),
         ))
+    }
+
+    fn run_build(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
+        let (build_result, exit_code) = crate::build::run(&self.component_id)?;
+
+        let data = serde_json::to_value(&build_result)
+            .map_err(|e| Error::internal_json(e.to_string(), Some("build output".to_string())))?;
+
+        let status = if exit_code == 0 {
+            self.store_build_artifacts()?;
+            PipelineRunStatus::Success
+        } else {
+            PipelineRunStatus::Failed
+        };
+
+        let error = if exit_code != 0 {
+            Some(format!("Build failed with exit code {}", exit_code))
+        } else {
+            None
+        };
+
+        Ok(self.step_result(step, status, Some(data), error, Vec::new()))
+    }
+
+    fn store_build_artifacts(&self) -> Result<()> {
+        let component = component::load(&self.component_id)?;
+
+        if let Some(artifact_path) = component::resolve_artifact(&component) {
+            let full_path = if artifact_path.starts_with('/') {
+                artifact_path
+            } else {
+                format!("{}/{}", component.local_path, artifact_path)
+            };
+
+            let mut context = self.context.lock().map_err(|_| {
+                Error::internal_unexpected("Failed to lock release context".to_string())
+            })?;
+
+            context.artifacts.push(super::types::ReleaseArtifact {
+                path: full_path,
+                artifact_type: Some("zip".to_string()),
+                platform: None,
+            });
+        }
+
+        Ok(())
     }
 
     fn run_git_commit(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
