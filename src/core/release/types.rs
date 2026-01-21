@@ -11,7 +11,7 @@ pub(crate) enum ReleaseStepType {
     GitCommit,
     GitTag,
     GitPush,
-    Build,
+    Package,
     Publish(String),
 }
 
@@ -22,7 +22,7 @@ impl ReleaseStepType {
             "git.commit" => ReleaseStepType::GitCommit,
             "git.tag" => ReleaseStepType::GitTag,
             "git.push" => ReleaseStepType::GitPush,
-            "build" => ReleaseStepType::Build,
+            "package" => ReleaseStepType::Package,
             other => ReleaseStepType::Publish(other.to_string()),
         }
     }

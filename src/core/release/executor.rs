@@ -51,7 +51,7 @@ impl ReleaseStepExecutor {
             ReleaseStepType::GitCommit => self.run_git_commit(step),
             ReleaseStepType::GitTag => self.run_git_tag(step),
             ReleaseStepType::GitPush => self.run_git_push(step),
-            ReleaseStepType::Build => self.run_build(step),
+            ReleaseStepType::Package => self.run_package(step),
             ReleaseStepType::Publish(target) => self.run_publish(step, &target),
         }
     }
@@ -194,49 +194,61 @@ impl ReleaseStepExecutor {
         ))
     }
 
-    fn run_build(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
-        let (build_result, exit_code) = crate::build::run(&self.component_id)?;
-
-        let data = serde_json::to_value(&build_result)
-            .map_err(|e| Error::internal_json(e.to_string(), Some("build output".to_string())))?;
-
-        let status = if exit_code == 0 {
-            self.store_build_artifacts()?;
-            PipelineRunStatus::Success
-        } else {
-            PipelineRunStatus::Failed
-        };
-
-        let error = if exit_code != 0 {
-            Some(format!("Build failed with exit code {}", exit_code))
-        } else {
-            None
-        };
-
-        Ok(self.step_result(step, status, Some(data), error, Vec::new()))
-    }
-
-    fn store_build_artifacts(&self) -> Result<()> {
-        let component = component::load(&self.component_id)?;
-
-        if let Some(artifact_path) = component::resolve_artifact(&component) {
-            let full_path = if artifact_path.starts_with('/') {
-                artifact_path
-            } else {
-                format!("{}/{}", component.local_path, artifact_path)
-            };
-
-            let mut context = self.context.lock().map_err(|_| {
-                Error::internal_unexpected("Failed to lock release context".to_string())
+    fn run_package(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
+        let module = self
+            .modules
+            .iter()
+            .find(|m| m.actions.iter().any(|a| a.id == "release.package"))
+            .ok_or_else(|| {
+                Error::validation_invalid_argument(
+                    "release.package",
+                    "No module provides release.package action",
+                    None,
+                    Some(vec![
+                        "Add a module with release.package action to the component".to_string(),
+                        "For Rust projects, add: \"modules\": { \"rust\": {} }".to_string(),
+                    ]),
+                )
             })?;
 
-            context.artifacts.push(super::types::ReleaseArtifact {
-                path: full_path,
-                artifact_type: Some("zip".to_string()),
-                platform: None,
-            });
-        }
+        let payload = self.build_release_payload(step)?;
+        let response = module::execute_action(&module.id, "release.package", None, None, Some(&payload))?;
 
+        self.store_artifacts_from_output(&response)?;
+
+        let data = serde_json::json!({
+            "module": module.id,
+            "action": "release.package",
+            "response": response
+        });
+
+        Ok(self.step_result(
+            step,
+            PipelineRunStatus::Success,
+            Some(data),
+            None,
+            Vec::new(),
+        ))
+    }
+
+    fn store_artifacts_from_output(&self, response: &serde_json::Value) -> Result<()> {
+        let stdout = response
+            .get("stdout")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let artifacts: Vec<super::types::ReleaseArtifact> =
+            serde_json::from_str(stdout).map_err(|e| {
+                Error::internal_json(
+                    e.to_string(),
+                    Some(format!("Failed to parse package artifacts: {}", stdout)),
+                )
+            })?;
+
+        let mut context = self.context.lock().map_err(|_| {
+            Error::internal_unexpected("Failed to lock release context".to_string())
+        })?;
+
+        context.artifacts.extend(artifacts);
         Ok(())
     }
 

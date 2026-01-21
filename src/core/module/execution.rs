@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use crate::http::ApiClient;
 use crate::project::{self, Project};
 use crate::ssh::{execute_local_command_in_dir, execute_local_command_interactive};
+use crate::utils::command::CapturedOutput;
 use crate::utils::{parser, template, validation};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -16,12 +17,12 @@ use super::load_module;
 pub struct ModuleRunResult {
     pub exit_code: i32,
     pub project_id: Option<String>,
+    pub output: Option<CapturedOutput>,
 }
 
 pub(crate) struct ModuleExecutionResult {
+    pub output: CapturedOutput,
     pub exit_code: i32,
-    pub stdout: String,
-    pub stderr: String,
     pub success: bool,
 }
 
@@ -100,6 +101,7 @@ pub fn run_module(
     args: Vec<String>,
     mode: ModuleExecutionMode,
 ) -> Result<ModuleRunResult> {
+    let is_captured = matches!(mode, ModuleExecutionMode::Captured);
     let execution = execute_module_runtime(
         module_id,
         project_id,
@@ -111,9 +113,16 @@ pub fn run_module(
         mode,
     )?;
 
+    let output = if is_captured && !execution.result.output.is_empty() {
+        Some(execution.result.output)
+    } else {
+        None
+    };
+
     Ok(ModuleRunResult {
         exit_code: execution.result.exit_code,
         project_id: execution.project_id,
+        output,
     })
 }
 
@@ -225,8 +234,8 @@ pub(crate) fn execute_action(
                 ModuleExecutionMode::Captured,
             )?;
             Ok(serde_json::json!({
-                "stdout": execution.stdout,
-                "stderr": execution.stderr,
+                "stdout": execution.output.stdout,
+                "stderr": execution.output.stderr,
                 "exitCode": execution.exit_code,
                 "success": execution.success,
                 "payload": payload
@@ -417,19 +426,17 @@ fn execute_module_command(
             let exit_code =
                 execute_local_command_interactive(&command, working_dir, Some(&env_refs));
             Ok(ModuleExecutionResult {
+                output: CapturedOutput::default(),
                 exit_code,
-                stdout: String::new(),
-                stderr: String::new(),
                 success: exit_code == 0,
             })
         }
         ModuleExecutionMode::Captured => {
-            let output = execute_local_command_in_dir(&command, working_dir, Some(&env_refs));
+            let cmd_output = execute_local_command_in_dir(&command, working_dir, Some(&env_refs));
             Ok(ModuleExecutionResult {
-                exit_code: output.exit_code,
-                stdout: output.stdout,
-                stderr: output.stderr,
-                success: output.success,
+                output: CapturedOutput::new(cmd_output.stdout, cmd_output.stderr),
+                exit_code: cmd_output.exit_code,
+                success: cmd_output.success,
             })
         }
     }

@@ -2,6 +2,7 @@ use clap::Args;
 use serde::Serialize;
 
 use homeboy::module::ModuleRunner;
+use homeboy::utils::command::CapturedOutput;
 
 use super::CmdResult;
 
@@ -31,8 +32,8 @@ pub struct TestArgs {
 pub struct TestOutput {
     status: String,
     component: String,
-    stdout: String,
-    stderr: String,
+    #[serde(flatten)]
+    output: CapturedOutput,
     exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
@@ -78,8 +79,7 @@ pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
         TestOutput {
             status: status.to_string(),
             component: args.component,
-            stdout: output.stdout,
-            stderr: output.stderr,
+            output: output.output,
             exit_code: output.exit_code,
             hints,
         },

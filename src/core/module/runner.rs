@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 use crate::component::{self, Component, ScopedModuleConfig};
 use crate::error::{Error, Result};
 use crate::ssh::{execute_local_command_in_dir, CommandOutput};
+use crate::utils::command::CapturedOutput;
 use crate::utils::{io, shell};
 
 use super::exec_context;
 
 /// Output from a module runner script execution.
 pub struct RunnerOutput {
-    pub stdout: String,
-    pub stderr: String,
+    pub output: CapturedOutput,
     pub exit_code: i32,
     pub success: bool,
 }
@@ -102,8 +102,7 @@ impl ModuleRunner {
         let output = self.execute_script(&module_path, &env_vars)?;
 
         Ok(RunnerOutput {
-            stdout: output.stdout,
-            stderr: output.stderr,
+            output: CapturedOutput::new(output.stdout, output.stderr),
             exit_code: output.exit_code,
             success: output.success,
         })

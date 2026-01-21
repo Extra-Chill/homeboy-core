@@ -155,6 +155,8 @@ pub enum ModuleOutput {
         module_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", flatten)]
+        output: Option<homeboy::utils::command::CapturedOutput>,
     },
     #[serde(rename = "module.setup")]
     Setup { module_id: String },
@@ -481,6 +483,7 @@ fn run_module(
         ModuleOutput::Run {
             module_id: module_id.to_string(),
             project_id: result.project_id,
+            output: result.output,
         },
         result.exit_code,
     ))

@@ -106,6 +106,28 @@ pub fn require_success(success: bool, stderr: &str, operation: &str) -> Result<(
     }
 }
 
+use serde::Serialize;
+
+/// Captured output from command execution.
+/// Reusable primitive for any command that executes external processes.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CapturedOutput {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub stdout: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub stderr: String,
+}
+
+impl CapturedOutput {
+    pub fn new(stdout: String, stderr: String) -> Self {
+        Self { stdout, stderr }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stdout.is_empty() && self.stderr.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

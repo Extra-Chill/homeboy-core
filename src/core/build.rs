@@ -8,8 +8,9 @@ use crate::module;
 use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::paths;
 use crate::permissions;
-use crate::utils::shell;
 use crate::ssh::execute_local_command_in_dir;
+use crate::utils::command::CapturedOutput;
+use crate::utils::shell;
 
 // === Build Command Resolution ===
 
@@ -118,13 +119,12 @@ pub fn resolve_build_command(component: &Component) -> Result<ResolvedBuildComma
 // === Public API ===
 
 #[derive(Debug, Clone, Serialize)]
-
 pub struct BuildOutput {
     pub command: String,
     pub component_id: String,
     pub build_command: String,
-    pub stdout: String,
-    pub stderr: String,
+    #[serde(flatten)]
+    pub output: CapturedOutput,
     pub success: bool,
 }
 
@@ -325,8 +325,7 @@ fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
                     command: "build.run".to_string(),
                     component_id: component_id.to_string(),
                     build_command: build_cmd,
-                    stdout: String::new(),
-                    stderr,
+                    output: CapturedOutput::new(String::new(), stderr),
                     success: false,
                 },
                 exit_code,
@@ -344,7 +343,7 @@ fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    let output = execute_local_command_in_dir(
+    let cmd_output = execute_local_command_in_dir(
         &build_cmd,
         Some(&local_path_str),
         if env_refs.is_empty() { None } else { Some(&env_refs) },
@@ -355,11 +354,10 @@ fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
             command: "build.run".to_string(),
             component_id: component_id.to_string(),
             build_command: build_cmd,
-            stdout: output.stdout,
-            stderr: output.stderr,
-            success: output.success,
+            output: CapturedOutput::new(cmd_output.stdout, cmd_output.stderr),
+            success: cmd_output.success,
         },
-        output.exit_code,
+        cmd_output.exit_code,
     ))
 }
 

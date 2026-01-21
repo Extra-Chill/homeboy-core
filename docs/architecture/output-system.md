@@ -148,6 +148,21 @@ Many command outputs include a `command` string field:
 
 - Values follow a dotted namespace (for example: `project.show`, `server.key.generate`).
 
+## Captured Output
+
+Commands that execute external processes include captured output in their response
+when running in non-interactive mode.
+
+The `CapturedOutput` primitive (`utils/command.rs`) provides:
+- `stdout`: Captured standard output (omitted if empty)
+- `stderr`: Captured standard error (omitted if empty)
+
+Commands using this primitive:
+- `module run` (captured mode only)
+- `lint`
+- `test`
+- `build`
+
 ## Related
 
 - [Docs command JSON](../commands/docs.md)

@@ -14,6 +14,12 @@ impl ReleaseCapabilityResolver {
         Self { modules }
     }
 
+    fn supports_package(&self) -> bool {
+        self.modules
+            .iter()
+            .any(|module| module.actions.iter().any(|a| a.id == "release.package"))
+    }
+
     fn supports_publish_target(&self, target: &str) -> bool {
         self.modules
             .iter()
@@ -28,10 +34,9 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
             ReleaseStepType::Version
             | ReleaseStepType::GitCommit
             | ReleaseStepType::GitTag
-            | ReleaseStepType::GitPush
-            | ReleaseStepType::Build => true,
+            | ReleaseStepType::GitPush => true,
+            ReleaseStepType::Package => self.supports_package(),
             ReleaseStepType::Publish(ref target) => {
-                // Extract target from "publish.<target>" format
                 let target_name = target.strip_prefix("publish.").unwrap_or(target);
                 self.supports_publish_target(target_name)
             }
@@ -41,6 +46,13 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
     fn missing(&self, step_type: &str) -> Vec<String> {
         let st = ReleaseStepType::from_str(step_type);
         match st {
+            ReleaseStepType::Package => {
+                if !self.supports_package() {
+                    vec!["Missing module with action 'release.package'".to_string()]
+                } else {
+                    Vec::new()
+                }
+            }
             ReleaseStepType::Publish(ref target) => {
                 let target_name = target.strip_prefix("publish.").unwrap_or(target);
                 vec![format!(

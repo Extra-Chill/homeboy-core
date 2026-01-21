@@ -4,6 +4,7 @@ use serde::Serialize;
 use homeboy::component;
 use homeboy::git;
 use homeboy::module::ModuleRunner;
+use homeboy::utils::command::CapturedOutput;
 
 use super::CmdResult;
 
@@ -61,8 +62,8 @@ pub struct LintArgs {
 pub struct LintOutput {
     status: String,
     component: String,
-    stdout: String,
-    stderr: String,
+    #[serde(flatten)]
+    output: CapturedOutput,
     exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
@@ -92,8 +93,10 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
                 LintOutput {
                     status: "passed".to_string(),
                     component: args.component,
-                    stdout: "No files in working tree changes".to_string(),
-                    stderr: String::new(),
+                    output: CapturedOutput::new(
+                        "No files in working tree changes".to_string(),
+                        String::new(),
+                    ),
                     exit_code: 0,
                     hints: None,
                 },
@@ -152,8 +155,7 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
         LintOutput {
             status: status.to_string(),
             component: args.component,
-            stdout: output.stdout,
-            stderr: output.stderr,
+            output: output.output,
             exit_code: output.exit_code,
             hints,
         },
