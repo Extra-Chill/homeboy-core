@@ -108,7 +108,7 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             0,
         ))
     } else {
-        let run_result = release::run_unified(&args.component_id, &options)?;
+        let run_result = release::run(&args.component_id, &options)?;
         Ok((
             ReleaseOutput {
                 result: ReleaseResult {

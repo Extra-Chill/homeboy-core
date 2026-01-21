@@ -209,7 +209,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     0,
                 ))
             } else {
-                let run_result = release::run_unified(&component_id, &options)?;
+                let run_result = release::run(&component_id, &options)?;
                 Ok((
                     VersionOutput::Bump(VersionBumpOutput {
                         command: "version.bump".to_string(),

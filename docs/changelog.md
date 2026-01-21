@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+- Consolidate release runner, fix step ordering
+
 ## [0.32.2] - 2026-01-20
 
 ### Added
