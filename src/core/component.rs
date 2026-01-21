@@ -52,6 +52,8 @@ pub struct Component {
     pub pre_version_bump_commands: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub post_version_bump_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_release_commands: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,6 +79,7 @@ impl Component {
             changelog_next_section_aliases: None,
             pre_version_bump_commands: Vec::new(),
             post_version_bump_commands: Vec::new(),
+            post_release_commands: Vec::new(),
             build_command: None,
             extract_command: None,
         }

@@ -161,7 +161,7 @@ fn has_package_capability(modules: &[ModuleManifest]) -> bool {
 
 /// Build all release steps: core steps (non-configurable) + publish steps (module-derived).
 fn build_release_steps(
-    _component: &Component,
+    component: &Component,
     modules: &[ModuleManifest],
     current_version: &str,
     new_version: &str,
@@ -329,6 +329,38 @@ fn build_release_steps(
             label: Some("Clean up release artifacts".to_string()),
             needs: publish_step_ids,
             config: std::collections::HashMap::new(),
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
+    }
+
+    // === POST-RELEASE STEP (optional, runs after everything else) ===
+    if !component.post_release_commands.is_empty() {
+        let post_release_needs = if !publish_targets.is_empty() {
+            vec!["cleanup".to_string()]
+        } else {
+            vec!["git.push".to_string()]
+        };
+
+        steps.push(ReleasePlanStep {
+            id: "post_release".to_string(),
+            step_type: "post_release".to_string(),
+            label: Some("Run post-release commands".to_string()),
+            needs: post_release_needs,
+            config: {
+                let mut config = std::collections::HashMap::new();
+                config.insert(
+                    "commands".to_string(),
+                    serde_json::Value::Array(
+                        component
+                            .post_release_commands
+                            .iter()
+                            .map(|s| serde_json::Value::String(s.clone()))
+                            .collect(),
+                    ),
+                );
+                config
+            },
             status: ReleasePlanStatus::Ready,
             missing: vec![],
         });

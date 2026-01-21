@@ -14,6 +14,7 @@ pub(crate) enum ReleaseStepType {
     Package,
     Publish(String),
     Cleanup,
+    PostRelease,
 }
 
 impl ReleaseStepType {
@@ -25,6 +26,7 @@ impl ReleaseStepType {
             "git.push" => ReleaseStepType::GitPush,
             "package" => ReleaseStepType::Package,
             "cleanup" => ReleaseStepType::Cleanup,
+            "post_release" => ReleaseStepType::PostRelease,
             other => {
                 // Strip "publish." prefix at source - single source of truth for format parsing
                 let target = other.strip_prefix("publish.").unwrap_or(other);

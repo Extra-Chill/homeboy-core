@@ -54,6 +54,7 @@ impl ReleaseStepExecutor {
             ReleaseStepType::Package => self.run_package(step),
             ReleaseStepType::Publish(target) => self.run_publish(step, &target),
             ReleaseStepType::Cleanup => self.run_cleanup(step),
+            ReleaseStepType::PostRelease => self.run_post_release(step),
         }
     }
 
@@ -381,6 +382,92 @@ impl ReleaseStepExecutor {
             None,
             Vec::new(),
         ))
+    }
+
+    fn run_post_release(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
+        let component = component::load(&self.component_id)?;
+        let commands: Vec<String> = step
+            .config
+            .get("commands")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut results: Vec<serde_json::Value> = Vec::new();
+        let mut had_failure = false;
+        let mut failure_message: Option<String> = None;
+
+        for cmd in &commands {
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .current_dir(&component.local_path)
+                .output();
+
+            match output {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+                    results.push(serde_json::json!({
+                        "command": cmd,
+                        "success": success,
+                        "stdout": stdout.trim(),
+                        "stderr": stderr.trim(),
+                        "exit_code": out.status.code()
+                    }));
+
+                    if !success && !had_failure {
+                        had_failure = true;
+                        failure_message = Some(format!("Command '{}' failed: {}", cmd, stderr.trim()));
+                    }
+                }
+                Err(e) => {
+                    results.push(serde_json::json!({
+                        "command": cmd,
+                        "success": false,
+                        "error": e.to_string()
+                    }));
+
+                    if !had_failure {
+                        had_failure = true;
+                        failure_message = Some(format!("Failed to execute '{}': {}", cmd, e));
+                    }
+                }
+            }
+        }
+
+        let data = serde_json::json!({
+            "action": "post_release",
+            "commands": results,
+            "all_succeeded": !had_failure
+        });
+
+        // Post-release failures are non-fatal (release already published)
+        // Report success but include warning message if command failed
+        let mut result = self.step_result(
+            step,
+            PipelineRunStatus::Success,
+            Some(data),
+            None,
+            Vec::new(),
+        );
+
+        if had_failure {
+            result.warnings = vec![
+                "Post-release command failed but release is complete".to_string(),
+            ];
+            if let Some(msg) = failure_message {
+                result.hints.push(crate::error::Hint { message: msg });
+            }
+        }
+
+        Ok(result)
     }
 
     fn default_commit_message(&self) -> String {
