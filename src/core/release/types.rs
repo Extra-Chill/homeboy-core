@@ -13,6 +13,7 @@ pub(crate) enum ReleaseStepType {
     GitPush,
     Package,
     Publish(String),
+    Cleanup,
 }
 
 impl ReleaseStepType {
@@ -23,7 +24,12 @@ impl ReleaseStepType {
             "git.tag" => ReleaseStepType::GitTag,
             "git.push" => ReleaseStepType::GitPush,
             "package" => ReleaseStepType::Package,
-            other => ReleaseStepType::Publish(other.to_string()),
+            "cleanup" => ReleaseStepType::Cleanup,
+            other => {
+                // Strip "publish." prefix at source - single source of truth for format parsing
+                let target = other.strip_prefix("publish.").unwrap_or(other);
+                ReleaseStepType::Publish(target.to_string())
+            }
         }
     }
 }

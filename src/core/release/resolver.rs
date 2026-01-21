@@ -34,12 +34,10 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
             ReleaseStepType::Version
             | ReleaseStepType::GitCommit
             | ReleaseStepType::GitTag
-            | ReleaseStepType::GitPush => true,
+            | ReleaseStepType::GitPush
+            | ReleaseStepType::Cleanup => true,
             ReleaseStepType::Package => self.supports_package(),
-            ReleaseStepType::Publish(ref target) => {
-                let target_name = target.strip_prefix("publish.").unwrap_or(target);
-                self.supports_publish_target(target_name)
-            }
+            ReleaseStepType::Publish(ref target) => self.supports_publish_target(target),
         }
     }
 
@@ -54,10 +52,9 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
                 }
             }
             ReleaseStepType::Publish(ref target) => {
-                let target_name = target.strip_prefix("publish.").unwrap_or(target);
                 vec![format!(
                     "Missing module '{}' with action 'release.publish'",
-                    target_name
+                    target
                 )]
             }
             _ => Vec::new(),

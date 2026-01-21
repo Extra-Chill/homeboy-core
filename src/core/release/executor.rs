@@ -53,6 +53,7 @@ impl ReleaseStepExecutor {
             ReleaseStepType::GitPush => self.run_git_push(step),
             ReleaseStepType::Package => self.run_package(step),
             ReleaseStepType::Publish(target) => self.run_publish(step, &target),
+            ReleaseStepType::Cleanup => self.run_cleanup(step),
         }
     }
 
@@ -344,6 +345,33 @@ impl ReleaseStepExecutor {
             "module": module.id,
             "action": action_id,
             "response": module_data
+        });
+
+        Ok(self.step_result(
+            step,
+            PipelineRunStatus::Success,
+            Some(data),
+            None,
+            Vec::new(),
+        ))
+    }
+
+    fn run_cleanup(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
+        let component = component::load(&self.component_id)?;
+        let distrib_path = format!("{}/target/distrib", component.local_path);
+
+        let mut removed = false;
+        if std::path::Path::new(&distrib_path).exists() {
+            std::fs::remove_dir_all(&distrib_path).map_err(|e| {
+                Error::other(format!("Failed to clean up {}: {}", distrib_path, e))
+            })?;
+            removed = true;
+        }
+
+        let data = serde_json::json!({
+            "action": "cleanup",
+            "path": distrib_path,
+            "removed": removed
         });
 
         Ok(self.step_result(

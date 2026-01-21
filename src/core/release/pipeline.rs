@@ -276,11 +276,13 @@ fn build_release_steps(
 
     // === PUBLISH STEPS (config-driven, all run independently after package) ===
 
+    let mut publish_step_ids: Vec<String> = Vec::new();
     if let Some(release) = &component.release {
         for target in &release.publish {
             let step_id = format!("publish.{}", target);
             let step_type = format!("publish.{}", target);
 
+            publish_step_ids.push(step_id.clone());
             steps.push(ReleasePlanStep {
                 id: step_id,
                 step_type,
@@ -292,6 +294,24 @@ fn build_release_steps(
             });
         }
     }
+
+    // === CLEANUP STEP (runs after all publish steps) ===
+
+    let cleanup_needs = if publish_step_ids.is_empty() {
+        vec!["package".to_string()]
+    } else {
+        publish_step_ids
+    };
+
+    steps.push(ReleasePlanStep {
+        id: "cleanup".to_string(),
+        step_type: "cleanup".to_string(),
+        label: Some("Clean up release artifacts".to_string()),
+        needs: cleanup_needs,
+        config: std::collections::HashMap::new(),
+        status: ReleasePlanStatus::Ready,
+        missing: vec![],
+    });
 
     Ok(steps)
 }
