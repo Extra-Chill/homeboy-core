@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- Add `component add-version-target` command for adding version targets without full JSON spec
+
+### Changed
+- Auto-insert `--` separator for trailing_var_arg commands (`component set`, `server set`, `test`) - intuitive syntax now works without explicit separator
+
 ## [0.33.5] - 2026-01-21
 
 - Create engine/ directory with pipeline and executor modules

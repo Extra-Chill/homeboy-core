@@ -25,6 +25,7 @@ use commands::{
     lint, logs, module, project, release, server, ssh, test, upgrade, version,
 };
 use homeboy::module::load_all_modules;
+use homeboy::utils::args;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -198,76 +199,12 @@ fn try_parse_module_cli_command(
     })
 }
 
-/// Normalize version bump arguments to support --patch/--minor/--major syntax.
-/// Converts `version bump <component> --patch` to `version bump <component> -- patch`.
-/// The bump type must appear last (after `--`) so other flags like `--dry-run` are parsed correctly.
-fn normalize_version_bump_args(args: Vec<String>) -> Vec<String> {
-    let is_version_bump = args.len() >= 3
-        && args.get(1).map(|s| s == "version").unwrap_or(false)
-        && args.get(2).map(|s| s == "bump").unwrap_or(false);
-
-    if !is_version_bump {
-        return args;
-    }
-
-    let bump_flags = ["--patch", "--minor", "--major"];
-    let mut result = Vec::new();
-    let mut found_bump_type: Option<String> = None;
-
-    for arg in args {
-        if bump_flags.contains(&arg.as_str()) && found_bump_type.is_none() {
-            found_bump_type = Some(arg.trim_start_matches('-').to_string());
-        } else {
-            result.push(arg);
-        }
-    }
-
-    if let Some(bump_type) = found_bump_type {
-        result.push("--".to_string());
-        result.push(bump_type);
-    }
-
-    result
-}
-
-/// Normalize version command arguments.
-/// Converts `homeboy version <component_id>` to `homeboy version show <component_id>`
-/// when the argument is not a recognized subcommand (show, set, bump, edit, merge).
-fn normalize_version_show_args(args: Vec<String>) -> Vec<String> {
-    if args.len() < 3 {
-        return args;
-    }
-
-    let is_version_cmd = args.get(1).map(|s| s == "version").unwrap_or(false);
-    if !is_version_cmd {
-        return args;
-    }
-
-    let known_subcommands = ["show", "set", "bump", "edit", "merge", "--help", "-h", "help"];
-    let second_arg = args.get(2).map(|s| s.as_str()).unwrap_or("");
-
-    // If it's already a known subcommand or a flag, pass through unchanged
-    if known_subcommands.contains(&second_arg) || second_arg.starts_with('-') {
-        return args;
-    }
-
-    // Otherwise, assume it's a component_id and insert "show"
-    let mut result = Vec::with_capacity(args.len() + 1);
-    result.push(args[0].clone()); // homeboy
-    result.push(args[1].clone()); // version
-    result.push("show".to_string()); // insert "show"
-    result.extend(args[2..].iter().cloned()); // component_id and remaining args
-
-    result
-}
-
 fn main() -> std::process::ExitCode {
     let module_info = collect_module_cli_info();
     let cmd = build_augmented_command(&module_info);
 
     let args: Vec<String> = std::env::args().collect();
-    let normalized = normalize_version_bump_args(args);
-    let normalized = normalize_version_show_args(normalized);
+    let normalized = args::normalize(args);
     let matches = cmd.get_matches_from(normalized);
 
     let global = GlobalArgs {};

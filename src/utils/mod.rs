@@ -1,5 +1,6 @@
 //! Generic utility primitives with zero domain knowledge.
 //!
+//! - `args` - CLI argument normalization
 //! - `base_path` - Remote path joining utilities
 //! - `command` - Command execution with error handling
 //! - `io` - File I/O with consistent error handling
@@ -10,6 +11,7 @@
 //! - `token` - String comparison and normalization
 //! - `validation` - Input validation helpers
 
+pub mod args;
 pub mod base_path;
 pub mod command;
 pub mod io;
