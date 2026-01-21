@@ -158,6 +158,25 @@ where
         .collect()
 }
 
+/// Parse a potentially combined project:subtarget identifier.
+///
+/// Splits on the first `:` only, allowing subtargets with colons.
+/// Both parts are trimmed.
+pub fn split_identifier(identifier: &str) -> (&str, Option<&str>) {
+    match identifier.split_once(':') {
+        Some((project, subtarget)) => {
+            let project = project.trim();
+            let subtarget = subtarget.trim();
+            if subtarget.is_empty() {
+                (project, None)
+            } else {
+                (project, Some(subtarget))
+            }
+        }
+        None => (identifier.trim(), None),
+    }
+}
+
 /// Extract a string value from a nested JSON path.
 ///
 /// Traverses the JSON object using the provided path segments and returns
@@ -307,5 +326,44 @@ mod tests {
     fn json_path_str_handles_deep_nesting() {
         let json = serde_json::json!({"a": {"b": {"c": {"d": "value"}}}});
         assert_eq!(json_path_str(&json, &["a", "b", "c", "d"]), Some("value"));
+    }
+
+    #[test]
+    fn split_identifier_parses_project_subtarget() {
+        assert_eq!(
+            split_identifier("extra-chill:events"),
+            ("extra-chill", Some("events"))
+        );
+    }
+
+    #[test]
+    fn split_identifier_handles_project_only() {
+        assert_eq!(split_identifier("extra-chill"), ("extra-chill", None));
+    }
+
+    #[test]
+    fn split_identifier_preserves_subtarget_colons() {
+        assert_eq!(
+            split_identifier("project:sub:target"),
+            ("project", Some("sub:target"))
+        );
+    }
+
+    #[test]
+    fn split_identifier_treats_empty_subtarget_as_none() {
+        assert_eq!(split_identifier("project:"), ("project", None));
+    }
+
+    #[test]
+    fn split_identifier_handles_empty_project() {
+        assert_eq!(split_identifier(":subtarget"), ("", Some("subtarget")));
+    }
+
+    #[test]
+    fn split_identifier_trims_whitespace() {
+        assert_eq!(
+            split_identifier("project : subtarget"),
+            ("project", Some("subtarget"))
+        );
     }
 }

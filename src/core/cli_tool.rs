@@ -27,11 +27,23 @@ pub struct CliToolResult {
 }
 
 pub fn run(tool: &str, identifier: &str, args: &[String]) -> Result<CliToolResult> {
+    // Parse project:subtarget syntax
+    let (project_id, embedded_subtarget) = crate::utils::parser::split_identifier(identifier);
+
+    // Build args with embedded subtarget prepended if present
+    let full_args: Vec<String> = match embedded_subtarget {
+        Some(sub) => std::iter::once(sub.to_string())
+            .chain(args.iter().cloned())
+            .collect(),
+        None => args.to_vec(),
+    };
+
+    // Try component first (uses original identifier for component lookup)
     if let Some(result) = try_run_for_component(tool, identifier, args) {
         return result;
     }
 
-    run_for_project(tool, identifier, args)
+    run_for_project(tool, project_id, &full_args)
 }
 
 fn try_run_for_component(
@@ -244,8 +256,10 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
         return Err(Error::validation_invalid_argument(
             "subtarget",
             format!(
-                "This project has subtargets configured. You must specify which subtarget to use.\n\nAvailable subtargets for project '{}':\n{}",
-                project.id, subtarget_list
+                "This project has subtargets configured. You must specify which subtarget to use.\n\n\
+                 Available subtargets for project '{}':\n{}\n\n\
+                 Syntax: homeboy <tool> {}:<subtarget> \"<command>\" OR homeboy <tool> {} <subtarget> \"<command>\"",
+                project.id, subtarget_list, project.id, project.id
             ),
             Some(project.id.clone()),
             None,
@@ -271,8 +285,9 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
     Err(Error::validation_invalid_argument(
         "subtarget",
         format!(
-            "Subtarget '{}' not found. Available subtargets for project '{}':\n{}",
-            sub_id, project.id, subtarget_list
+            "Subtarget '{}' not found. Available subtargets for project '{}':\n{}\n\n\
+             Syntax: homeboy <tool> {}:<subtarget> \"<command>\" OR homeboy <tool> {} <subtarget> \"<command>\"",
+            sub_id, project.id, subtarget_list, project.id, project.id
         ),
         Some(project.id.clone()),
         None,
