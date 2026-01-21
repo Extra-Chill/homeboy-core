@@ -137,6 +137,9 @@ pub fn resolve_effective_settings(component: Option<&Component>) -> EffectiveCha
 }
 
 pub fn resolve_changelog_path(component: &Component) -> Result<PathBuf> {
+    // Validate local_path is absolute and exists before any file operations
+    component::validate_local_path(component)?;
+
     // Require explicit configuration - no auto-detection
     let target = validation::require_with_hints(
         component.changelog_target.as_ref(),
@@ -1002,6 +1005,10 @@ fn generate_template(initial_version: &str, next_label: &str) -> String {
 /// If the changelog file exists, ensures it has an Unreleased section.
 pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<InitOutput> {
     let component = component::load(component_id)?;
+
+    // Validate local_path is absolute and exists before any file operations
+    component::validate_local_path(&component)?;
+
     let settings = resolve_effective_settings(Some(&component));
 
     // Determine changelog path (relative to component)

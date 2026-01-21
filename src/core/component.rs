@@ -6,6 +6,7 @@ use crate::project::{self, NullableUpdate};
 use crate::slugify;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 
@@ -394,4 +395,48 @@ pub fn module_provides_artifact_pattern(component: &Component) -> bool {
             })
         })
         .unwrap_or(false)
+}
+
+/// Validates component local_path is usable (absolute and exists).
+/// Returns the validated PathBuf on success, or an actionable error with self-healing hints.
+pub fn validate_local_path(component: &Component) -> Result<PathBuf> {
+    let path = PathBuf::from(&component.local_path);
+
+    // Check if relative path (no leading /)
+    if !path.is_absolute() {
+        return Err(Error::validation_invalid_argument(
+            "local_path",
+            format!(
+                "Component '{}' has relative local_path '{}' which cannot be resolved",
+                component.id, component.local_path
+            ),
+            Some(component.id.clone()),
+            None,
+        )
+        .with_hint(format!(
+            "Set absolute path: homeboy component set {} local_path \"/full/path/to/{}\"",
+            component.id, component.local_path
+        ))
+        .with_hint("Use 'pwd' in the component directory to get the absolute path".to_string()));
+    }
+
+    // Check if path exists
+    if !path.exists() {
+        return Err(Error::validation_invalid_argument(
+            "local_path",
+            format!(
+                "Component '{}' local_path does not exist: {}",
+                component.id, component.local_path
+            ),
+            Some(component.id.clone()),
+            None,
+        )
+        .with_hint(format!("Verify the path exists: ls -la {}", component.local_path))
+        .with_hint(format!(
+            "Update path: homeboy component set {} local_path \"/correct/path\"",
+            component.id
+        )));
+    }
+
+    Ok(path)
 }

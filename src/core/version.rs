@@ -444,6 +444,9 @@ fn build_version_parse_error(file: &str, pattern: &str, content: &str) -> Error 
 
 /// Read the current version from a component's version targets.
 pub fn read_component_version(component: &Component) -> Result<ComponentVersionInfo> {
+    // Validate local_path is absolute and exists before any file operations
+    component::validate_local_path(component)?;
+
     let targets = component
         .version_targets
         .as_ref()
@@ -550,6 +553,9 @@ pub struct SetResult {
 
 /// Set a component's version directly (without incrementing).
 pub fn set_component_version(component: &Component, new_version: &str) -> Result<SetResult> {
+    // Validate local_path is absolute and exists before any file operations
+    component::validate_local_path(component)?;
+
     let targets = component
         .version_targets
         .as_ref()
@@ -661,6 +667,9 @@ pub fn set_version(component_id: Option<&str>, new_version: &str) -> Result<SetR
 /// Bump a component's version and finalize changelog.
 /// bump_type: "patch", "minor", or "major"
 pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<BumpResult> {
+    // Validate local_path is absolute and exists before any file operations
+    component::validate_local_path(component)?;
+
     let targets = component
         .version_targets
         .as_ref()

@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- Add validate_local_path with self-healing hints for misconfigured components
+
 ## [0.32.1] - 2026-01-20
 
 ### Refactored
