@@ -4,9 +4,8 @@ mod resolver;
 mod types;
 mod utils;
 
-pub use pipeline::{plan, resolve_component_release, run};
+pub use pipeline::{plan, run};
 pub use types::{
-    ReleaseArtifact, ReleaseConfig, ReleaseOptions, ReleasePlan, ReleasePlanStatus,
-    ReleasePlanStep, ReleaseRun,
+    ReleaseArtifact, ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun,
 };
 pub use utils::{extract_latest_notes, parse_release_artifacts};

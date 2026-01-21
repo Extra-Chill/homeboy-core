@@ -34,18 +34,6 @@ impl ReleaseStepType {
     }
 }
 
-/// Release configuration - only controls which publish targets to run.
-/// Core release steps (version, commit, tag, push) are built-in and non-configurable.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ReleaseConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// Publish targets to run after the core release flow.
-    /// Examples: ["github", "homebrew", "rust"]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub publish: Vec<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleasePlan {
     pub component_id: String,

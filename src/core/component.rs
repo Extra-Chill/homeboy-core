@@ -48,8 +48,6 @@ pub struct Component {
     pub changelog_next_section_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub changelog_next_section_aliases: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub release: Option<crate::release::ReleaseConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_version_bump_commands: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -77,7 +75,6 @@ impl Component {
             changelog_target: None,
             changelog_next_section_label: None,
             changelog_next_section_aliases: None,
-            release: None,
             pre_version_bump_commands: Vec::new(),
             post_version_bump_commands: Vec::new(),
             build_command: None,

@@ -2,18 +2,13 @@ use crate::changelog;
 use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
 use crate::error::{Error, Result};
+use crate::module::ModuleManifest;
 use crate::pipeline::{self, PipelineStep};
 use crate::version;
 
 use super::executor::ReleaseStepExecutor;
 use super::resolver::{resolve_modules, ReleaseCapabilityResolver};
-use super::types::{
-    ReleaseConfig, ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun,
-};
-
-pub fn resolve_component_release(component: &Component) -> Option<ReleaseConfig> {
-    component.release.clone()
-}
+use super::types::{ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun};
 
 /// Execute a release by computing the plan and executing it.
 /// What you preview (dry-run) is what you execute.
@@ -52,7 +47,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     })
 }
 
-/// Plan a release with built-in core steps and config-driven publish targets.
+/// Plan a release with built-in core steps and module-derived publish targets.
 ///
 /// Core steps (always generated, non-configurable):
 /// 1. Pre-commit uncommitted changes (if any)
@@ -61,10 +56,12 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
 /// 4. Git tag
 /// 5. Git push (commits AND tags)
 ///
-/// Publish steps (config-driven):
-/// - From release.publish array: ["github", "homebrew", "rust"]
+/// Publish steps (derived from modules):
+/// - From component's modules that have `release.publish` action
+/// - Or explicit `release.publish` array if configured
 pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan> {
     let component = component::load(component_id)?;
+    let modules = resolve_modules(&component, None)?;
 
     validate_changelog(&component)?;
 
@@ -82,15 +79,17 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     version::validate_changelog_for_bump(&component, &version_info.version, &new_version)?;
 
     let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
-    let warnings = Vec::new();
+    let mut warnings = Vec::new();
     let mut hints = Vec::new();
 
     let steps = build_release_steps(
         &component,
+        &modules,
         &version_info.version,
         &new_version,
         options,
         uncommitted.has_changes,
+        &mut warnings,
         &mut hints,
     )?;
 
@@ -144,16 +143,44 @@ fn validate_changelog(component: &Component) -> Result<()> {
     Ok(())
 }
 
-/// Build all release steps: core steps (non-configurable) + publish steps (config-driven).
+/// Derive publish targets from modules that have `release.publish` action.
+fn get_publish_targets(modules: &[ModuleManifest]) -> Vec<String> {
+    modules
+        .iter()
+        .filter(|m| m.actions.iter().any(|a| a.id == "release.publish"))
+        .map(|m| m.id.clone())
+        .collect()
+}
+
+/// Check if any module provides the `release.package` action.
+fn has_package_capability(modules: &[ModuleManifest]) -> bool {
+    modules
+        .iter()
+        .any(|m| m.actions.iter().any(|a| a.id == "release.package"))
+}
+
+/// Build all release steps: core steps (non-configurable) + publish steps (module-derived).
 fn build_release_steps(
-    component: &Component,
+    _component: &Component,
+    modules: &[ModuleManifest],
     current_version: &str,
     new_version: &str,
     options: &ReleaseOptions,
     has_uncommitted: bool,
+    warnings: &mut Vec<String>,
     hints: &mut Vec<String>,
 ) -> Result<Vec<ReleasePlanStep>> {
     let mut steps = Vec::new();
+    let publish_targets = get_publish_targets(modules);
+
+    // === WARNING: No package capability ===
+    if !publish_targets.is_empty() && !has_package_capability(modules) {
+        warnings.push(
+            "Publish targets derived from modules but no module provides 'release.package'. \
+             Add a module like 'rust' that provides packaging."
+                .to_string(),
+        );
+    }
 
     // === CORE STEPS (non-configurable, always present) ===
 
@@ -263,22 +290,23 @@ fn build_release_steps(
         missing: vec![],
     });
 
-    // 6. Package (produces artifacts for publish steps via module's release.package action)
-    steps.push(ReleasePlanStep {
-        id: "package".to_string(),
-        step_type: "package".to_string(),
-        label: Some("Package release artifacts".to_string()),
-        needs: vec!["git.push".to_string()],
-        config: std::collections::HashMap::new(),
-        status: ReleasePlanStatus::Ready,
-        missing: vec![],
-    });
+    // === PUBLISH STEPS (module-derived, only if publish targets exist) ===
 
-    // === PUBLISH STEPS (config-driven, all run independently after package) ===
+    if !publish_targets.is_empty() {
+        // 6. Package (produces artifacts for publish steps)
+        steps.push(ReleasePlanStep {
+            id: "package".to_string(),
+            step_type: "package".to_string(),
+            label: Some("Package release artifacts".to_string()),
+            needs: vec!["git.push".to_string()],
+            config: std::collections::HashMap::new(),
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
 
-    let mut publish_step_ids: Vec<String> = Vec::new();
-    if let Some(release) = &component.release {
-        for target in &release.publish {
+        // 7. Publish steps (all run independently after package)
+        let mut publish_step_ids: Vec<String> = Vec::new();
+        for target in &publish_targets {
             let step_id = format!("publish.{}", target);
             let step_type = format!("publish.{}", target);
 
@@ -293,25 +321,18 @@ fn build_release_steps(
                 missing: vec![],
             });
         }
+
+        // 8. Cleanup step (runs after all publish steps)
+        steps.push(ReleasePlanStep {
+            id: "cleanup".to_string(),
+            step_type: "cleanup".to_string(),
+            label: Some("Clean up release artifacts".to_string()),
+            needs: publish_step_ids,
+            config: std::collections::HashMap::new(),
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
     }
-
-    // === CLEANUP STEP (runs after all publish steps) ===
-
-    let cleanup_needs = if publish_step_ids.is_empty() {
-        vec!["package".to_string()]
-    } else {
-        publish_step_ids
-    };
-
-    steps.push(ReleasePlanStep {
-        id: "cleanup".to_string(),
-        step_type: "cleanup".to_string(),
-        label: Some("Clean up release artifacts".to_string()),
-        needs: cleanup_needs,
-        config: std::collections::HashMap::new(),
-        status: ReleasePlanStatus::Ready,
-        missing: vec![],
-    });
 
     Ok(steps)
 }
