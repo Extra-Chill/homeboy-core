@@ -9,6 +9,12 @@ All notable changes to Homeboy CLI are documented in this file.
 ### Added
 - Add --project/-p flag to deploy command for explicit project specification
 
+### Refactored
+- Add utils/io module with read_file and write_file helpers for consistent error handling
+
+### Refactored
+- Add json_path_str helper for nested JSON value extraction
+
 ## [0.30.15] - 2026-01-20
 
 ### Added
