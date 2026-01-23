@@ -5,6 +5,7 @@
 //! - `command` - Command execution with error handling
 //! - `io` - File I/O with consistent error handling
 //! - `parser` - Text extraction and manipulation
+//! - `resolve` - Project/component argument resolution
 //! - `shell` - Shell escaping and quoting
 //! - `slugify` - String slug generation
 //! - `template` - String template rendering
@@ -16,6 +17,7 @@ pub mod base_path;
 pub mod command;
 pub mod io;
 pub mod parser;
+pub mod resolve;
 pub mod shell;
 pub mod slugify;
 pub mod token;

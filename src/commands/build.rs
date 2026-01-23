@@ -1,5 +1,7 @@
 use clap::Args;
 use homeboy::build;
+use homeboy::project;
+use homeboy::resolve::resolve_project_components;
 
 use crate::commands::CmdResult;
 
@@ -9,23 +11,112 @@ pub struct BuildArgs {
     #[arg(long)]
     pub json: Option<String>,
 
-    /// Component ID (single build)
-    pub component_id: Option<String>,
+    /// Target ID: component ID or project ID (when using --all)
+    pub target_id: Option<String>,
+
+    /// Additional component IDs (enables project/component order detection)
+    pub component_ids: Vec<String>,
+
+    /// Build all components in the project
+    #[arg(long)]
+    pub all: bool,
 }
 
 pub fn run(
     args: BuildArgs,
     _global: &crate::commands::GlobalArgs,
 ) -> CmdResult<build::BuildResult> {
-    // --json takes precedence, otherwise use component_id (auto-detected by core)
-    let input = args.json.or(args.component_id).ok_or_else(|| {
+    // Priority: --json > --all with project > positional args
+
+    // JSON takes precedence
+    if let Some(ref json) = args.json {
+        return build::run(json);
+    }
+
+    let target_id = args.target_id.as_ref().ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
             "input",
-            "Provide component ID or JSON spec",
+            "Provide component ID, project ID with --all, or JSON spec",
             None,
-            None,
+            Some(vec![
+                "Build a single component: homeboy build <component-id>".to_string(),
+                "Build all project components: homeboy build <project-id> --all".to_string(),
+            ]),
         )
     })?;
 
-    build::run(&input)
+    // --all mode: build all components in project
+    if args.all {
+        let proj = project::load(target_id).map_err(|e| {
+            homeboy::Error::validation_invalid_argument(
+                "project_id",
+                format!("'{}' is not a valid project ID", target_id),
+                None,
+                Some(vec![
+                    format!("Error: {}", e),
+                    "Use --all only with a project ID: homeboy build <project-id> --all".to_string(),
+                ]),
+            )
+        })?;
+
+        if proj.component_ids.is_empty() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "project_id",
+                format!("Project '{}' has no components configured", target_id),
+                None,
+                Some(vec![format!(
+                    "Add components: homeboy project components add {} <component-id>",
+                    target_id
+                )]),
+            )
+            .into());
+        }
+
+        let json_spec = serde_json::json!({
+            "componentIds": proj.component_ids
+        })
+        .to_string();
+
+        return build::run(&json_spec);
+    }
+
+    // Multiple positional args: use shared resolver
+    if !args.component_ids.is_empty() {
+        let (project_id, component_ids) =
+            resolve_project_components(target_id, &args.component_ids)?;
+
+        // Validate all components belong to this project
+        let proj = project::load(&project_id)?;
+        let invalid: Vec<_> = component_ids
+            .iter()
+            .filter(|c| !proj.component_ids.contains(c))
+            .collect();
+
+        if !invalid.is_empty() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "component_ids",
+                format!(
+                    "Components not in project '{}': {}",
+                    project_id,
+                    invalid.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+                None,
+                Some(vec![format!(
+                    "Project components: {}",
+                    proj.component_ids.join(", ")
+                )]),
+            )
+            .into());
+        }
+
+        let json_spec = serde_json::json!({
+            "componentIds": component_ids
+        })
+        .to_string();
+
+        return build::run(&json_spec);
+    }
+
+    // Single target_id: treat as component ID
+    build::run(target_id)
 }

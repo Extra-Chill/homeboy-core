@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+- Add shared project/component argument resolution primitive (utils/resolve.rs)
+- Add project-level build support with --all flag
+- Support flexible argument order in changes command
+- Add hooks system documentation
+- Update agent system reminder wording
+
 ## [0.33.12] - 2026-01-22
 
 - feat: add module-defined CLI help configuration

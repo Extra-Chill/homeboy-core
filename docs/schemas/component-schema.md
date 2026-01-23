@@ -52,6 +52,23 @@ Component configuration defines buildable and deployable units stored in `compon
   - **`steps`** (array): Release step definitions
   - **`settings`** (object): Release pipeline settings
 
+### Hook Fields
+
+- **`pre_version_bump_commands`** (array of strings): Commands to run BEFORE version targets are updated
+  - Execution: Sequential, runs in `local_path` directory
+  - Failure behavior: **Fatal** - stops version bump on non-zero exit code
+  - Use case: Stage build artifacts (e.g., `cargo build --release` to update Cargo.lock)
+
+- **`post_version_bump_commands`** (array of strings): Commands to run AFTER version files are updated
+  - Execution: Sequential, runs in `local_path` directory
+  - Failure behavior: **Fatal** - stops version bump on non-zero exit code
+  - Use case: Regenerate files that depend on version, run linters, stage additional files
+
+- **`post_release_commands`** (array of strings): Commands to run after the release pipeline completes
+  - Execution: Sequential, runs in `local_path` directory
+  - Failure behavior: **Non-fatal** - logs warnings but doesn't fail the release
+  - Use case: Cleanup tasks, notifications, non-critical post-release actions
+
 ## Example
 
 ```json
@@ -70,6 +87,15 @@ Component configuration defines buildable and deployable units stored in `compon
     }
   ],
   "changelog_target": "CHANGELOG.md",
+  "pre_version_bump_commands": [
+    "cargo build --release"
+  ],
+  "post_version_bump_commands": [
+    "git add Cargo.lock"
+  ],
+  "post_release_commands": [
+    "echo 'Release complete!'"
+  ],
   "modules": {
     "wordpress": {
       "settings": {
@@ -121,5 +147,6 @@ Components are stored as individual JSON files under the OS config directory:
 ## Related
 
 - [Component command](../commands/component.md) - Manage component configuration
+- [Hooks system](../architecture/hooks.md) - Lifecycle hooks for version and release operations
 - [Project schema](project-schema.md) - How components link to projects
 - [Module manifest schema](module-manifest-schema.md) - Module configuration structure

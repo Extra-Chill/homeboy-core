@@ -4,6 +4,7 @@ use serde::Serialize;
 use homeboy::context;
 use homeboy::git::{self, ChangesOutput};
 use homeboy::project;
+use homeboy::resolve::resolve_project_components;
 use homeboy::BulkResult;
 
 use super::CmdResult;
@@ -67,10 +68,12 @@ pub fn run(
 
     // Positional args mode
     if let Some(target_id) = &args.target_id {
-        // If additional component_ids provided, treat target_id as project_id
+        // Multiple args: use shared resolver to detect order
         if !args.component_ids.is_empty() {
+            let (project_id, component_ids) =
+                resolve_project_components(target_id, &args.component_ids)?;
             let output =
-                git::changes_project_filtered(target_id, &args.component_ids, args.git_diffs)?;
+                git::changes_project_filtered(&project_id, &component_ids, args.git_diffs)?;
             let exit_code = if output.summary.failed > 0 { 1 } else { 0 };
             return Ok((ChangesCommandOutput::Bulk(output), exit_code));
         }
