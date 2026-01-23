@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.34.0] - 2026-01-22
 
 - Add shared project/component argument resolution primitive (utils/resolve.rs)
 - Add project-level build support with --all flag
