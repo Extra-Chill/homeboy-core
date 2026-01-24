@@ -200,9 +200,6 @@ homeboy wp <project_id> db export
 homeboy pm2 <project_id> status
 homeboy pm2 <project_id> restart
 
-# GitHub (via github module)
-homeboy gh <project_id> issue list
-
 # Cargo (via rust module)
 homeboy cargo <component_id> test
 ```
