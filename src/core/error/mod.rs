@@ -481,8 +481,8 @@ impl Error {
     pub fn internal_unexpected(error: impl Into<String>) -> Self {
         Self::new(
             ErrorCode::InternalUnexpected,
-            "Unexpected error",
-            serde_json::json!({ "error": error.into() }),
+            error,
+            Value::Object(serde_json::Map::new()),
         )
     }
 
