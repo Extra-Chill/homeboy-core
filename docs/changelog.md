@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.36.4] - 2026-01-24
 
 ### Removed
 - Remove --force flag from version bump and release commands (bypassing validation defeats its purpose)
