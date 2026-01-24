@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.36.0] - 2026-01-23
 
 - feat: distinguish docs-only commits from code changes in init command (#16)
 
