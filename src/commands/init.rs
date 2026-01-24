@@ -43,6 +43,8 @@ pub struct InitStatus {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs_version_bump: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub docs_only: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub has_uncommitted: Vec<String>,
     #[serde(skip_serializing_if = "is_zero")]
     pub config_gaps: usize,
@@ -70,6 +72,10 @@ pub struct ComponentSummary {
     pub status: String,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub commits_since_version: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub code_commits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub docs_only_commits: u32,
 }
 
 fn is_zero_u32(n: &u32) -> bool {
@@ -186,6 +192,10 @@ pub struct ChangelogSnapshot {
 #[derive(Debug, Clone, Serialize)]
 pub struct ComponentReleaseState {
     pub commits_since_version: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub code_commits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub docs_only_commits: u32,
     pub has_uncommitted_changes: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline_ref: Option<String>,
@@ -392,6 +402,7 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
 fn compute_status(components: &[ComponentWithState]) -> InitStatus {
     let mut ready_to_deploy = Vec::new();
     let mut needs_version_bump = Vec::new();
+    let mut docs_only = Vec::new();
     let mut has_uncommitted = Vec::new();
     let mut config_gaps = 0;
     let mut gap_details = Vec::new();
@@ -413,8 +424,10 @@ fn compute_status(components: &[ComponentWithState]) -> InitStatus {
         if let Some(ref state) = comp.release_state {
             if state.has_uncommitted_changes {
                 has_uncommitted.push(id.clone());
-            } else if state.commits_since_version > 0 {
+            } else if state.code_commits > 0 {
                 needs_version_bump.push(id.clone());
+            } else if state.docs_only_commits > 0 {
+                docs_only.push(id.clone());
             } else {
                 ready_to_deploy.push(id.clone());
             }
@@ -424,6 +437,7 @@ fn compute_status(components: &[ComponentWithState]) -> InitStatus {
     InitStatus {
         ready_to_deploy,
         needs_version_bump,
+        docs_only,
         has_uncommitted,
         config_gaps,
         gap_details,
@@ -457,7 +471,8 @@ fn compute_summary(components: &[ComponentWithState]) -> InitSummary {
 fn determine_component_status(comp: &ComponentWithState) -> String {
     match &comp.release_state {
         Some(state) if state.has_uncommitted_changes => "uncommitted".to_string(),
-        Some(state) if state.commits_since_version > 0 => "needs_bump".to_string(),
+        Some(state) if state.code_commits > 0 => "needs_bump".to_string(),
+        Some(state) if state.docs_only_commits > 0 => "docs_only".to_string(),
         Some(_) => "clean".to_string(),
         None => "unknown".to_string(),
     }
@@ -492,11 +507,11 @@ fn build_component_summaries(
         .iter()
         .map(|comp| {
             let status = determine_component_status(comp);
-            let commits = comp
+            let (commits, code, docs) = comp
                 .release_state
                 .as_ref()
-                .map(|s| s.commits_since_version)
-                .unwrap_or(0);
+                .map(|s| (s.commits_since_version, s.code_commits, s.docs_only_commits))
+                .unwrap_or((0, 0, 0));
 
             // Get primary module
             let module = comp
@@ -511,6 +526,8 @@ fn build_component_summaries(
                 module,
                 status,
                 commits_since_version: commits,
+                code_commits: code,
+                docs_only_commits: docs,
             }
         })
         .collect()
@@ -553,6 +570,22 @@ fn build_actionable_next_steps(
         } else {
             next_steps.push(format!(
                 "{} components have unreleased commits. Bump with `homeboy version bump <id>`.",
+                count
+            ));
+        }
+    }
+
+    // Priority 2.5: Docs-only changes (informational, no action needed)
+    if !status.docs_only.is_empty() {
+        let count = status.docs_only.len();
+        if count == 1 {
+            next_steps.push(format!(
+                "1 component has docs-only changes: `{}`. No version bump needed.",
+                status.docs_only[0]
+            ));
+        } else {
+            next_steps.push(format!(
+                "{} components have docs-only changes. No version bump needed.",
                 count
             ));
         }
@@ -649,8 +682,10 @@ fn calculate_component_release_state(component: &Component) -> Option<ComponentR
 
     let commits = git::get_commits_since_tag(path, baseline.reference.as_deref())
         .ok()
-        .map(|c| c.len() as u32)
-        .unwrap_or(0);
+        .unwrap_or_default();
+
+    // Categorize commits into code vs docs-only
+    let counts = git::categorize_commits(path, &commits);
 
     let uncommitted = git::get_uncommitted_changes(path)
         .ok()
@@ -658,7 +693,9 @@ fn calculate_component_release_state(component: &Component) -> Option<ComponentR
         .unwrap_or(false);
 
     Some(ComponentReleaseState {
-        commits_since_version: commits,
+        commits_since_version: counts.total,
+        code_commits: counts.code,
+        docs_only_commits: counts.docs_only,
         has_uncommitted_changes: uncommitted,
         baseline_ref: baseline.reference,
         baseline_warning: baseline.warning,

@@ -336,11 +336,21 @@ pub enum ComponentStatus {
 pub struct ReleaseState {
     /// Number of commits since the last version tag
     pub commits_since_version: u32,
+    /// Number of code commits (non-docs)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub code_commits: u32,
+    /// Number of docs-only commits
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub docs_only_commits: u32,
     /// Whether there are uncommitted changes in the working directory
     pub has_uncommitted_changes: bool,
     /// The baseline reference (tag or commit hash) used for comparison
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline_ref: Option<String>,
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Result for a single component deployment.
@@ -861,8 +871,10 @@ fn calculate_release_state(component: &Component) -> Option<ReleaseState> {
 
     let commits = git::get_commits_since_tag(path, baseline.reference.as_deref())
         .ok()
-        .map(|c| c.len() as u32)
-        .unwrap_or(0);
+        .unwrap_or_default();
+
+    // Categorize commits into code vs docs-only
+    let counts = git::categorize_commits(path, &commits);
 
     let uncommitted = git::get_uncommitted_changes(path)
         .ok()
@@ -870,7 +882,9 @@ fn calculate_release_state(component: &Component) -> Option<ReleaseState> {
         .unwrap_or(false);
 
     Some(ReleaseState {
-        commits_since_version: commits,
+        commits_since_version: counts.total,
+        code_commits: counts.code,
+        docs_only_commits: counts.docs_only,
         has_uncommitted_changes: uncommitted,
         baseline_ref: baseline.reference,
     })

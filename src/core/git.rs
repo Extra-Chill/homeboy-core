@@ -157,6 +157,10 @@ pub fn get_latest_tag(path: &str) -> Result<Option<String>> {
 
 const DEFAULT_COMMIT_LIMIT: usize = 10;
 const VERBOSE_UNTRACKED_THRESHOLD: usize = 200;
+
+// Docs file patterns for categorizing commits
+const DOCS_FILE_EXTENSIONS: [&str; 1] = [".md"];
+const DOCS_DIRECTORIES: [&str; 1] = ["docs/"];
 const NOISY_UNTRACKED_DIRS: [&str; 8] = [
     "node_modules",
     "dist",
@@ -258,6 +262,94 @@ pub fn get_commits_since_tag(path: &str, tag: Option<&str>) -> Result<Vec<Commit
         .collect();
 
     Ok(commits)
+}
+
+// ============================================================================
+// Docs-Only Commit Detection
+// ============================================================================
+
+/// Counts of commits categorized by type.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CommitCounts {
+    pub total: u32,
+    pub code: u32,
+    pub docs_only: u32,
+}
+
+/// Get the list of files changed by a specific commit.
+pub fn get_commit_files(path: &str, commit_hash: &str) -> Result<Vec<String>> {
+    let stdout = command::run_in(
+        path,
+        "git",
+        &["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
+        "git diff-tree",
+    )?;
+
+    Ok(stdout.lines().filter(|l| !l.is_empty()).map(String::from).collect())
+}
+
+/// Check if a file path is considered a docs file.
+/// Returns true for *.md files and files in docs/ directories.
+fn is_docs_file(file_path: &str) -> bool {
+    // Check file extension
+    for ext in DOCS_FILE_EXTENSIONS {
+        if file_path.ends_with(ext) {
+            return true;
+        }
+    }
+
+    // Check if in docs/ directory (at any depth)
+    for dir in DOCS_DIRECTORIES {
+        if file_path.starts_with(dir) || file_path.contains(&format!("/{}", dir)) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if a commit only touches documentation files.
+/// Uses belt-and-suspenders approach:
+/// 1. Fast path: commits with `docs:` prefix (CommitCategory::Docs) are docs-only
+/// 2. Fallback: check all changed files match docs patterns
+pub fn is_docs_only_commit(path: &str, commit: &CommitInfo) -> bool {
+    // Fast path: conventional commit prefix
+    if commit.category == CommitCategory::Docs {
+        return true;
+    }
+
+    // Fallback: check actual file changes
+    let files = match get_commit_files(path, &commit.hash) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    // Empty file list shouldn't count as docs-only
+    if files.is_empty() {
+        return false;
+    }
+
+    // All files must be docs files
+    files.iter().all(|f| is_docs_file(f))
+}
+
+/// Categorize commits into code vs docs-only.
+pub fn categorize_commits(path: &str, commits: &[CommitInfo]) -> CommitCounts {
+    let mut counts = CommitCounts {
+        total: commits.len() as u32,
+        code: 0,
+        docs_only: 0,
+    };
+
+    for commit in commits {
+        if is_docs_only_commit(path, commit) {
+            counts.docs_only += 1;
+        } else {
+            counts.code += 1;
+        }
+    }
+
+    counts
 }
 
 /// Convert commits to changelog entries.
@@ -1443,6 +1535,44 @@ mod tests {
         assert!(
             !is_workdir_clean(path),
             "Expected invalid path to return false"
+        );
+    }
+
+    #[test]
+    fn is_docs_file_recognizes_markdown() {
+        assert!(is_docs_file("README.md"));
+        assert!(is_docs_file("CLAUDE.md"));
+        assert!(is_docs_file("changelog.md"));
+        assert!(is_docs_file("path/to/file.md"));
+    }
+
+    #[test]
+    fn is_docs_file_recognizes_docs_directory() {
+        assert!(is_docs_file("docs/guide.md"));
+        assert!(is_docs_file("docs/api/reference.md"));
+        assert!(is_docs_file("docs/commands/init.md"));
+        assert!(is_docs_file("src/docs/readme.txt"));
+        assert!(is_docs_file("path/to/docs/file.txt"));
+    }
+
+    #[test]
+    fn is_docs_file_rejects_code() {
+        assert!(!is_docs_file("src/main.rs"));
+        assert!(!is_docs_file("lib/module.js"));
+        assert!(!is_docs_file("Cargo.toml"));
+        assert!(!is_docs_file("package.json"));
+        assert!(!is_docs_file("src/component.tsx"));
+    }
+
+    #[test]
+    fn parse_conventional_commit_docs() {
+        assert_eq!(
+            parse_conventional_commit("docs: Update README"),
+            CommitCategory::Docs
+        );
+        assert_eq!(
+            parse_conventional_commit("docs(api): Add endpoint docs"),
+            CommitCategory::Docs
         );
     }
 }

@@ -139,6 +139,32 @@ Then read workspace docs (CLAUDE.md, README.md) for project context.
 | `changelog` | Unreleased preview from component changelog |
 | `agent_context_files` | Git-tracked markdown files for AI agent context (CLAUDE.md, README.md, etc.) |
 
+## Component Status
+
+Each component has a `status` field indicating its release state:
+
+| Status | Meaning |
+|--------|---------|
+| `clean` | No commits since last version - ready to deploy |
+| `needs_bump` | Has code commits that require a version bump before release |
+| `docs_only` | Only documentation changes since last version - no version bump needed |
+| `uncommitted` | Has uncommitted changes in working directory |
+| `unknown` | Could not determine release state |
+
+### Commit Categorization
+
+Components also include commit count breakdowns:
+
+| Field | Meaning |
+|-------|---------|
+| `commits_since_version` | Total commits since last version tag |
+| `code_commits` | Commits that touch code files (require version bump) |
+| `docs_only_commits` | Commits that only touch documentation files (*.md, docs/*) |
+
+Docs-only detection uses belt-and-suspenders approach:
+1. **Fast path**: Commits with `docs:` prefix (conventional commit format)
+2. **Fallback**: Commits where all changed files match docs patterns (*.md or docs/*)
+
 ## Decision Tree
 
 ### If `managed: true`
