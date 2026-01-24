@@ -2,6 +2,7 @@ use crate::changelog;
 use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
 use crate::error::{Error, Result};
+use crate::git;
 use crate::module::ModuleManifest;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::version;
@@ -64,6 +65,10 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let component = component::load(component_id)?;
     let modules = resolve_modules(&component, None)?;
 
+    // Check commits vs changelog entries (before changelog content validation)
+    validate_commits_vs_changelog(&component)?;
+
+    // Validate changelog has unreleased entries
     validate_changelog(&component)?;
 
     let version_info = version::read_version(Some(component_id))?;
@@ -151,6 +156,65 @@ fn validate_changelog(component: &Component) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Validate that commits since the last tag have corresponding changelog entries.
+/// Returns Ok(()) if validation passes, or Err if commits exist without entries.
+fn validate_commits_vs_changelog(component: &Component) -> Result<()> {
+    // Get latest tag
+    let latest_tag = git::get_latest_tag(&component.local_path)?;
+
+    // Get commits since tag
+    let commits = git::get_commits_since_tag(&component.local_path, latest_tag.as_deref())?;
+
+    // If no commits, nothing to validate
+    if commits.is_empty() {
+        return Ok(());
+    }
+
+    // Count unreleased changelog entries
+    let changelog_path = changelog::resolve_changelog_path(component)?;
+    let changelog_content = crate::core::local_files::local().read(&changelog_path)?;
+    let settings = changelog::resolve_effective_settings(Some(component));
+    let entry_count =
+        changelog::count_unreleased_entries(&changelog_content, &settings.next_section_aliases);
+
+    // If entries exist, validation passes
+    if entry_count > 0 {
+        return Ok(());
+    }
+
+    // Build error message
+    let tag_ref = latest_tag.as_deref().unwrap_or("initial commit");
+    let commit_list: Vec<String> = commits
+        .iter()
+        .take(5)
+        .map(|c| format!("  - {} {}", &c.hash[..7.min(c.hash.len())], c.subject))
+        .collect();
+
+    let more_commits = if commits.len() > 5 {
+        format!("\n  ... and {} more", commits.len() - 5)
+    } else {
+        String::new()
+    };
+
+    let message = format!(
+        "No unreleased changelog entries found\n  {} commits since {}:\n{}{}",
+        commits.len(),
+        tag_ref,
+        commit_list.join("\n"),
+        more_commits
+    );
+
+    Err(Error::validation_invalid_argument(
+        "changelog",
+        &message,
+        None,
+        Some(vec![format!(
+            "Add entries with: homeboy changelog add {} --type <type> --message \"...\"",
+            component.id
+        )]),
+    ))
 }
 
 /// Derive publish targets from modules that have `release.publish` action.
