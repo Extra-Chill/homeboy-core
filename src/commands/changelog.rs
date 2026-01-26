@@ -31,10 +31,11 @@ pub enum ChangelogCommand {
         json: Option<String>,
 
         /// Component ID (non-JSON mode)
-        #[arg(long = "component")]
+        #[arg(index = 1)]
         component_id: Option<String>,
 
         /// Changelog item content (positional, for backward compatibility)
+        #[arg(index = 2)]
         positional_message: Option<String>,
 
         /// Changelog message (repeatable: -m "first" -m "second")

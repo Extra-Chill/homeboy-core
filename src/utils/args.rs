@@ -66,6 +66,104 @@ pub fn normalize_version_show(args: Vec<String>) -> Vec<String> {
     result
 }
 
+/// Normalize version --bump flag to subcommand form.
+/// Converts `version <component> --bump <type>` to `version bump <component> <type>`.
+pub fn normalize_version_bump_flag(args: Vec<String>) -> Vec<String> {
+    // Must have: homeboy version <something> --bump <type>
+    if args.len() < 5 {
+        return args;
+    }
+
+    let is_version_cmd = args.get(1).map(|s| s == "version").unwrap_or(false);
+    if !is_version_cmd {
+        return args;
+    }
+
+    // Already has subcommand (bump, show, set, etc.)
+    let known_subcommands = ["bump", "show", "set", "edit", "merge"];
+    if args
+        .get(2)
+        .map(|s| known_subcommands.contains(&s.as_str()))
+        .unwrap_or(false)
+    {
+        return args;
+    }
+
+    // Look for --bump flag
+    let bump_pos = args.iter().position(|s| s == "--bump");
+    let Some(bump_pos) = bump_pos else {
+        return args;
+    };
+
+    // Need a value after --bump
+    let Some(bump_type) = args.get(bump_pos + 1) else {
+        return args;
+    };
+
+    // Build normalized args: homeboy version bump <component> <type> [other flags]
+    let mut result = vec![
+        args[0].clone(), // homeboy
+        args[1].clone(), // version
+        "bump".to_string(), // insert subcommand
+    ];
+
+    // Add args between "version" and "--bump" (the component)
+    for arg in &args[2..bump_pos] {
+        result.push(arg.clone());
+    }
+
+    // Add bump type
+    result.push(bump_type.clone());
+
+    // Add remaining args after bump type
+    for arg in &args[bump_pos + 2..] {
+        result.push(arg.clone());
+    }
+
+    result
+}
+
+/// Normalize changelog add --component flag to positional form.
+/// Converts `changelog add --component <value>` to `changelog add <value>`.
+pub fn normalize_changelog_component(args: Vec<String>) -> Vec<String> {
+    let is_changelog_add = args.len() >= 4
+        && args.get(1).map(|s| s == "changelog").unwrap_or(false)
+        && args.get(2).map(|s| s == "add").unwrap_or(false);
+
+    if !is_changelog_add {
+        return args;
+    }
+
+    // Look for --component flag
+    let component_pos = args.iter().position(|s| s == "--component");
+    let Some(component_pos) = component_pos else {
+        return args;
+    };
+
+    // Need a value after --component
+    let Some(component_value) = args.get(component_pos + 1) else {
+        return args;
+    };
+
+    // Build normalized args: homeboy changelog add <component> [other args]
+    let mut result = vec![
+        args[0].clone(),         // homeboy
+        args[1].clone(),         // changelog
+        args[2].clone(),         // add
+        component_value.clone(), // component as positional
+    ];
+
+    // Add remaining args, skipping --component and its value
+    for (i, arg) in args.iter().enumerate().skip(3) {
+        if i == component_pos || i == component_pos + 1 {
+            continue;
+        }
+        result.push(arg.clone());
+    }
+
+    result
+}
+
 /// Auto-insert '--' separator before unknown flags for trailing_var_arg commands.
 ///
 /// Commands that use trailing_var_arg with allow_hyphen_values need a '--' separator
@@ -157,7 +255,9 @@ pub fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
 /// Apply all argument normalizations in sequence.
 pub fn normalize(args: Vec<String>) -> Vec<String> {
     let args = normalize_version_bump(args);
+    let args = normalize_version_bump_flag(args); // Must run before normalize_version_show
     let args = normalize_version_show(args);
+    let args = normalize_changelog_component(args);
     normalize_trailing_flags(args)
 }
 
@@ -315,5 +415,90 @@ mod tests {
         let result = normalize(args);
         assert_eq!(result[4], "--");
         assert_eq!(result[5], "--build_command");
+    }
+
+    #[test]
+    fn test_version_bump_flag_to_subcommand() {
+        let args = vec![
+            "homeboy".into(),
+            "version".into(),
+            "data-machine".into(),
+            "--bump".into(),
+            "patch".into(),
+        ];
+        let result = normalize_version_bump_flag(args);
+        assert_eq!(
+            result,
+            vec!["homeboy", "version", "bump", "data-machine", "patch"]
+        );
+    }
+
+    #[test]
+    fn test_version_bump_flag_with_extra_flags() {
+        let args = vec![
+            "homeboy".into(),
+            "version".into(),
+            "data-machine".into(),
+            "--bump".into(),
+            "minor".into(),
+            "--dry-run".into(),
+        ];
+        let result = normalize_version_bump_flag(args);
+        assert_eq!(
+            result,
+            vec![
+                "homeboy",
+                "version",
+                "bump",
+                "data-machine",
+                "minor",
+                "--dry-run"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_version_bump_subcommand_unchanged() {
+        let args = vec![
+            "homeboy".into(),
+            "version".into(),
+            "bump".into(),
+            "data-machine".into(),
+            "patch".into(),
+        ];
+        let result = normalize_version_bump_flag(args.clone());
+        assert_eq!(result, args);
+    }
+
+    #[test]
+    fn test_changelog_component_flag_to_positional() {
+        let args = vec![
+            "homeboy".into(),
+            "changelog".into(),
+            "add".into(),
+            "--component".into(),
+            "my-plugin".into(),
+            "-m".into(),
+            "message".into(),
+        ];
+        let result = normalize_changelog_component(args);
+        assert_eq!(
+            result,
+            vec!["homeboy", "changelog", "add", "my-plugin", "-m", "message"]
+        );
+    }
+
+    #[test]
+    fn test_changelog_positional_unchanged() {
+        let args = vec![
+            "homeboy".into(),
+            "changelog".into(),
+            "add".into(),
+            "my-plugin".into(),
+            "-m".into(),
+            "message".into(),
+        ];
+        let result = normalize_changelog_component(args.clone());
+        assert_eq!(result, args);
     }
 }
