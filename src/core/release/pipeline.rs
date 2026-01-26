@@ -197,6 +197,22 @@ fn validate_commits_vs_changelog(component: &Component) -> Result<()> {
         return Ok(());
     }
 
+    // Check if changelog is already finalized ahead of the latest tag
+    // This handles cases where the changelog was manually finalized
+    let latest_changelog_version = changelog::get_latest_finalized_version(&changelog_content);
+    if let (Some(latest_tag), Some(changelog_ver_str)) = (&latest_tag, latest_changelog_version) {
+        let tag_version = latest_tag.trim_start_matches('v');
+        if let (Ok(tag_ver), Ok(cl_ver)) = (
+            semver::Version::parse(tag_version),
+            semver::Version::parse(&changelog_ver_str),
+        ) {
+            // If changelog version is newer than tag, it's already finalized for pending changes
+            if cl_ver > tag_ver {
+                return Ok(());
+            }
+        }
+    }
+
     // Build error message
     let tag_ref = latest_tag.as_deref().unwrap_or("initial commit");
     let commit_list: Vec<String> = commits

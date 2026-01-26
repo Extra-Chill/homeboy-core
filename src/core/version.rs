@@ -314,6 +314,15 @@ pub fn validate_changelog_for_bump(
             )
         })?;
 
+    // Check if changelog is already finalized for the target version
+    if latest_changelog_version == new_version {
+        return Ok(ChangelogValidationResult {
+            changelog_path: changelog_path.to_string_lossy().to_string(),
+            changelog_finalized: true,
+            changelog_changed: false, // Already finalized, no changes needed
+        });
+    }
+
     // Reject if changelog is ahead of files (version gap)
     let changelog_ver = semver::Version::parse(&latest_changelog_version);
     let file_ver = semver::Version::parse(current_version);
