@@ -21,7 +21,7 @@ pub struct RunnerOutput {
 /// loading manifests, merging settings, and executing runner scripts.
 pub struct ModuleRunner {
     component_id: String,
-    script_name: String,
+    script_path: String, // Relative to module root (e.g., "scripts/lint/lint-runner.sh")
     settings_overrides: Vec<(String, String)>,
     env_vars: Vec<(String, String)>,
     script_args: Vec<String>,
@@ -31,11 +31,11 @@ impl ModuleRunner {
     /// Create a new ModuleRunner for a component and script.
     ///
     /// - `component_id`: The component to run the script for
-    /// - `script_name`: The script to execute (e.g., "test-runner.sh", "lint-runner.sh")
-    pub fn new(component_id: &str, script_name: &str) -> Self {
+    /// - `script_path`: Path to the script relative to module root (e.g., "scripts/lint/lint-runner.sh")
+    pub fn new(component_id: &str, script_path: &str) -> Self {
         Self {
             component_id: component_id.to_string(),
-            script_name: script_name.to_string(),
+            script_path: script_path.to_string(),
             settings_overrides: Vec::new(),
             env_vars: Vec::new(),
             script_args: Vec::new(),
@@ -171,15 +171,15 @@ impl ModuleRunner {
     }
 
     fn validate_script_exists(&self, module_path: &Path) -> Result<()> {
-        let script_path = module_path.join("scripts").join(&self.script_name);
+        let script_path = module_path.join(&self.script_path);
         if !script_path.exists() {
             return Err(Error::validation_invalid_argument(
                 "module",
                 format!(
-                    "Module at {} does not have {} infrastructure (missing scripts/{})",
+                    "Module at {} does not have {} infrastructure (missing {})",
                     module_path.display(),
                     self.script_description(),
-                    self.script_name
+                    self.script_path
                 ),
                 None,
                 None,
@@ -274,7 +274,7 @@ impl ModuleRunner {
         module_path: &Path,
         env_vars: &[(String, String)],
     ) -> Result<CommandOutput> {
-        let script_path = module_path.join("scripts").join(&self.script_name);
+        let script_path = module_path.join(&self.script_path);
         let mut command = shell::quote_path(&script_path.to_string_lossy());
 
         // Append script arguments if any
@@ -292,9 +292,9 @@ impl ModuleRunner {
     }
 
     fn script_description(&self) -> &str {
-        if self.script_name.contains("test") {
+        if self.script_path.contains("test") {
             "test"
-        } else if self.script_name.contains("lint") {
+        } else if self.script_path.contains("lint") {
             "lint"
         } else {
             "script"

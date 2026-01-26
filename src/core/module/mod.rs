@@ -12,9 +12,9 @@ pub use runner::{ModuleRunner, RunnerOutput};
 // Re-export manifest types
 pub use manifest::{
     ActionConfig, ActionType, BuildConfig, CliConfig, DatabaseCliConfig, DatabaseConfig,
-    DeployOverride, DeployVerification, DiscoveryConfig, HttpMethod, InputConfig, ModuleManifest,
-    OutputConfig, OutputSchema, RequirementsConfig, RuntimeConfig, SelectOption, SettingConfig,
-    VersionPatternConfig,
+    DeployOverride, DeployVerification, DiscoveryConfig, HttpMethod, InputConfig, LintConfig,
+    ModuleManifest, OutputConfig, OutputSchema, RequirementsConfig, RuntimeConfig, SelectOption,
+    SettingConfig, TestConfig, VersionPatternConfig,
 };
 
 // Re-export execution types and functions

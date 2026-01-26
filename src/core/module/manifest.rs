@@ -68,6 +68,10 @@ pub struct ModuleManifest {
     pub version_patterns: Vec<VersionPatternConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lint: Option<LintConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test: Option<TestConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<String>,
 
@@ -111,6 +115,28 @@ impl ModuleManifest {
 
     pub fn has_build(&self) -> bool {
         self.build.is_some()
+    }
+
+    pub fn has_lint(&self) -> bool {
+        self.lint
+            .as_ref()
+            .and_then(|c| c.module_script.as_ref())
+            .is_some()
+    }
+
+    pub fn has_test(&self) -> bool {
+        self.test
+            .as_ref()
+            .and_then(|c| c.module_script.as_ref())
+            .is_some()
+    }
+
+    pub fn lint_script(&self) -> Option<&str> {
+        self.lint.as_ref().and_then(|c| c.module_script.as_deref())
+    }
+
+    pub fn test_script(&self) -> Option<&str> {
+        self.test.as_ref().and_then(|c| c.module_script.as_deref())
     }
 }
 
@@ -258,6 +284,18 @@ pub struct BuildConfig {
     /// Supports: {component_id}, {local_path}
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_pattern: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LintConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module_script: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

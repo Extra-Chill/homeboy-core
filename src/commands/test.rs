@@ -1,7 +1,9 @@
 use clap::Args;
 use serde::Serialize;
 
-use homeboy::module::ModuleRunner;
+use homeboy::component::{self, Component};
+use homeboy::error::Error;
+use homeboy::module::{self, ModuleRunner};
 use homeboy::utils::command::CapturedOutput;
 
 use super::CmdResult;
@@ -46,8 +48,52 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
     Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
+fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> {
+    let modules = component.modules.as_ref().ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "component",
+            format!("Component '{}' has no modules configured", component.id),
+            None,
+            None,
+        )
+    })?;
+
+    let module_id = if modules.contains_key("wordpress") {
+        "wordpress"
+    } else {
+        modules.keys().next().ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "component",
+                format!("Component '{}' has no modules configured", component.id),
+                None,
+                None,
+            )
+        })?
+    };
+
+    let manifest = module::load_module(module_id)?;
+
+    manifest
+        .test_script()
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "module",
+                format!(
+                    "Module '{}' does not have test infrastructure configured (missing test.module_script)",
+                    module_id
+                ),
+                None,
+                None,
+            )
+        })
+}
+
 pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
-    let output = ModuleRunner::new(&args.component, "test-runner.sh")
+    let component = component::load(&args.component)?;
+    let script_path = resolve_test_script(&component)?;
+
+    let output = ModuleRunner::new(&args.component, &script_path)
         .settings(&args.setting)
         .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")
         .script_args(&args.args)
