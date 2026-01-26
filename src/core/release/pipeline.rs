@@ -2,7 +2,7 @@ use crate::changelog;
 use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
 use crate::error::{Error, Result};
-use crate::git;
+use crate::git::{self, UncommittedChanges};
 use crate::module::ModuleManifest;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::version;
@@ -86,13 +86,26 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
     if uncommitted.has_changes {
-        return Err(Error::validation_invalid_argument(
-            "working_tree",
-            "Uncommitted changes detected",
-            Some("Release requires a clean working tree".to_string()),
-            Some(vec![
-                "Commit your changes: git add -A && git commit -m \"...\"".to_string(),]),
-        ));
+        // Allow changelog and version targets - they're modified during release anyway
+        let changelog_path = changelog::resolve_changelog_path(&component)?;
+        let version_targets: Vec<String> = version_info.targets.iter()
+            .map(|t| t.full_path.clone())
+            .collect();
+
+        let allowed_files = get_release_allowed_files(&changelog_path, &version_targets, std::path::Path::new(&component.local_path));
+        let unexpected_files = get_unexpected_uncommitted_files(&uncommitted, &allowed_files);
+
+        if !unexpected_files.is_empty() {
+            return Err(Error::validation_invalid_argument(
+                "working_tree",
+                "Uncommitted changes detected",
+                Some("Release requires a clean working tree (changelog and version files are allowed)".to_string()),
+                Some(vec![
+                    format!("Unexpected files: {}", unexpected_files.join(", ")),
+                    "Commit your changes: git add -A && git commit -m \"...\"".to_string(),
+                ]),
+            ));
+        }
     }
 
     let mut warnings = Vec::new();
@@ -407,4 +420,36 @@ fn build_release_steps(
     }
 
     Ok(steps)
+}
+
+/// Get list of files allowed to be dirty during release (relative paths).
+fn get_release_allowed_files(changelog_path: &std::path::Path, version_targets: &[String], repo_root: &std::path::Path) -> Vec<String> {
+    let mut allowed = Vec::new();
+
+    // Add changelog (convert to relative path)
+    if let Ok(relative) = changelog_path.strip_prefix(repo_root) {
+        allowed.push(relative.to_string_lossy().to_string());
+    }
+
+    // Add version targets (convert to relative paths)
+    for target in version_targets {
+        if let Ok(relative) = std::path::Path::new(target).strip_prefix(repo_root) {
+            allowed.push(relative.to_string_lossy().to_string());
+        }
+    }
+
+    allowed
+}
+
+/// Get uncommitted files that are NOT in the allowed list.
+fn get_unexpected_uncommitted_files(uncommitted: &UncommittedChanges, allowed: &[String]) -> Vec<String> {
+    let all_uncommitted: Vec<&String> = uncommitted.staged.iter()
+        .chain(uncommitted.unstaged.iter())
+        .chain(uncommitted.untracked.iter())
+        .collect();
+
+    all_uncommitted.into_iter()
+        .filter(|f| !allowed.iter().any(|a| f.ends_with(a) || a.ends_with(*f)))
+        .cloned()
+        .collect()
 }

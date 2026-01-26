@@ -15,8 +15,6 @@ Also available as: `homeboy version bump <COMPONENT> <BUMP_TYPE> [OPTIONS]`
 - `--dry-run`: Preview the release plan without executing
 - `--no-tag`: Skip creating git tag
 - `--no-push`: Skip pushing to remote
-- `--no-commit`: Fail if uncommitted changes exist (strict mode)
-- `--commit-message <MESSAGE>`: Custom message for pre-release commit
 
 ## Description
 
@@ -65,35 +63,16 @@ Commits release changes (version bumps, changelog updates) before tagging.
 }
 ```
 
-### Pre-release commit
+### Working tree requirements
 
-By default, `homeboy release` automatically commits any uncommitted changes before proceeding with the release:
+Release requires a clean working tree, with two exceptions:
 
-```sh
-# Auto-commits uncommitted changes with default message
-homeboy release <component> patch
+- **Changelog**: May have uncommitted entries from `homeboy changelog add`
+- **Version targets**: May be staged (though unusual)
 
-# Auto-commits with custom message
-homeboy release <component> minor --commit-message "final tweaks"
+These files are modified during the release anyway and included in the release commit.
 
-# Strict mode: fail if uncommitted changes exist
-homeboy release <component> patch --no-commit
-```
-
-The auto-commit:
-- Stages all changes (staged, unstaged, untracked)
-- Creates a commit with message "pre-release changes" (or custom via `--commit-message`)
-- Proceeds with version bump, tagging, and push
-
-Use `--no-commit` to preserve the previous strict behavior that fails on uncommitted changes.
-
-### Pre-flight validation
-
-Before executing the pipeline, `release` validates:
-
-1. **Working tree status**: If `--no-commit` is specified and uncommitted changes exist, the command fails early with actionable guidance.
-
-This prevents `cargo publish --locked` and similar commands from failing mid-pipeline due to dirty working trees.
+Any other uncommitted changes will cause the release to fail with guidance to commit first.
 
 ### Pipeline step: `module.run`
 
@@ -157,7 +136,6 @@ With `--dry-run`:
     "dry_run": true,
     "no_tag": false,
     "no_push": false,
-    "no_commit": false,
     "plan": {
       "component_id": "<component_id>",
       "enabled": true,
@@ -180,7 +158,6 @@ Without `--dry-run`:
     "dry_run": false,
     "no_tag": false,
     "no_push": false,
-    "no_commit": false,
     "run": {
       "status": "success",
       "warnings": [],
