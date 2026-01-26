@@ -213,37 +213,39 @@ fn validate_commits_vs_changelog(component: &Component) -> Result<()> {
         }
     }
 
-    // Build error message
-    let tag_ref = latest_tag.as_deref().unwrap_or("initial commit");
-    let commit_list: Vec<String> = commits
-        .iter()
-        .take(5)
-        .map(|c| format!("  - {} {}", &c.hash[..7.min(c.hash.len())], c.subject))
-        .collect();
+    // Auto-generate changelog entries from conventional commits
+    auto_generate_changelog_entries(component, &commits)?;
+    Ok(())
+}
 
-    let more_commits = if commits.len() > 5 {
-        format!("\n  ... and {} more", commits.len() - 5)
-    } else {
-        String::new()
-    };
+/// Generate changelog entries from conventional commit messages.
+fn auto_generate_changelog_entries(component: &Component, commits: &[git::CommitInfo]) -> Result<()> {
+    let settings = changelog::resolve_effective_settings(Some(component));
 
-    let message = format!(
-        "No unreleased changelog entries found\n  {} commits since {}:\n{}{}",
-        commits.len(),
-        tag_ref,
-        commit_list.join("\n"),
-        more_commits
-    );
+    // Group commits by changelog entry type
+    let mut entries_by_type: std::collections::HashMap<&str, Vec<String>> = std::collections::HashMap::new();
 
-    Err(Error::validation_invalid_argument(
-        "changelog",
-        &message,
-        None,
-        Some(vec![format!(
-            "Add entries with: homeboy changelog add {} --type <type> --message \"...\"",
-            component.id
-        )]),
-    ))
+    for commit in commits {
+        if let Some(entry_type) = commit.category.to_changelog_entry_type() {
+            let message = git::strip_conventional_prefix(&commit.subject);
+            entries_by_type
+                .entry(entry_type)
+                .or_default()
+                .push(message.to_string());
+        }
+    }
+
+    // Add entries to changelog grouped by type
+    for (entry_type, messages) in entries_by_type {
+        changelog::read_and_add_next_section_items_typed(
+            component,
+            &settings,
+            &messages,
+            entry_type,
+        )?;
+    }
+
+    Ok(())
 }
 
 /// Derive publish targets from modules that have `release.publish` action.

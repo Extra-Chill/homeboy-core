@@ -118,6 +118,19 @@ impl CommitCategory {
             CommitCategory::Other => None,
         }
     }
+
+    /// Map commit category to changelog entry type.
+    /// Returns None for categories that should be skipped (docs, chore).
+    pub fn to_changelog_entry_type(&self) -> Option<&'static str> {
+        match self {
+            CommitCategory::Feature => Some("added"),
+            CommitCategory::Fix => Some("fixed"),
+            CommitCategory::Breaking => Some("changed"),
+            CommitCategory::Docs => None,
+            CommitCategory::Chore => None,
+            CommitCategory::Other => Some("changed"),
+        }
+    }
 }
 
 /// Parse a commit subject into a category based on conventional commit format.
@@ -369,7 +382,7 @@ pub fn commits_to_changelog_entries(commits: &[CommitInfo]) -> Vec<String> {
 /// Strip conventional commit prefix from a subject line.
 /// "feat: Add new feature" -> "Add new feature"
 /// "fix(scope): Fix bug" -> "Fix bug"
-fn strip_conventional_prefix(subject: &str) -> &str {
+pub fn strip_conventional_prefix(subject: &str) -> &str {
     // Pattern: type(scope)?: message or type!: message
     if let Some(pos) = subject.find(": ") {
         let prefix = &subject[..pos];

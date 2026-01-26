@@ -392,9 +392,8 @@ pub fn finalize_next_section(
         "changelog",
         "No changelog items found (cannot finalize)",
         vec![
-            "Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
-            "Ensure changelog contains all changes since the last version update.".to_string(),
-            "Commit all changes before running version bump (clean working tree required).".to_string(),
+            "Commit all changes before running version bump (changelog auto-generates from commits).".to_string(),
+            "Or add entries manually: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
         ],
     )?;
 
@@ -421,9 +420,8 @@ pub fn finalize_next_section(
             None,
             None,
         )
-        .with_hint("Add changelog items with: `homeboy changelog add <componentId> -m \"...\"`")
-        .with_hint("Ensure changelog contains all changes since the last version update.")
-        .with_hint("Commit all changes before running version bump (clean working tree required)."));
+        .with_hint("Commit all changes before running version bump (changelog auto-generates from commits).")
+        .with_hint("Or add entries manually: `homeboy changelog add <componentId> -m \"...\"`"));
     }
 
     let mut out_lines: Vec<String> = Vec::new();
