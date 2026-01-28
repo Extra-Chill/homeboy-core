@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.38.6] - 2026-01-28
+
+### Added
+- validate conflicting version targets for same file
+- add --fix flag for auto-fixing lint issues
+
+### Fixed
+- fix(docs-audit): filter false positives via module-level ignore patterns
+
 ## [0.38.5] - 2026-01-28
 
 - Fixing my fuck-up with version bumping
