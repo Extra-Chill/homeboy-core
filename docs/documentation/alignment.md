@@ -26,39 +26,32 @@ Only update what needs correction. Preserve accurate existing content. Do not re
 
 ## Workflow
 
-### 1. Detect Changes
-Run `homeboy changes <component-id>` to identify what code has changed. The output includes:
-- **commits**: Changes since last tag, each with a `category` (Feature, Fix, Breaking, Docs, Chore, Other)
-- **uncommitted**: Current working tree changes (staged, unstaged, untracked files)
+### 1. Run Audit
+```sh
+homeboy docs audit <component>
+```
 
-Use this to identify documentation focus areas:
-- **Feature/Breaking commits**: Likely need documentation updates
-- **File paths in changes**: Map to related documentation (e.g., changes in `src/auth/` suggest reviewing auth docs)
-- **Uncommitted changes**: Active development that may affect docs once committed
+This extracts claims from documentation (file paths, directory paths, code examples) and verifies them against the codebase.
 
-### 2. Discover Documentation
-Find all `.md` files in the codebase:
-- Respect `.gitignore` and `.buildignore` exclusions
-- Exception: Always include `/docs` directory regardless of ignore patterns
+### 2. Review Priority Docs
+If the output includes `changes_context.priority_docs`, these docs reference recently changed files and should be reviewed first.
 
-### 3. Verify Accuracy
-For each documented feature:
-- Verify the feature exists in current code
-- Check that documented behavior matches implementation
-- Confirm code paths and file references are accurate
+### 3. Execute Broken Tasks
+For each task with `status: "broken"`:
+- The `action` field tells you exactly what to do
+- Usually: file/directory was moved or deleted, update the reference
 
-### 4. Update Stale Content
-When documentation conflicts with code:
-- Update documentation to match code (code is authoritative)
-- Use present-tense language
-- Remove references to deleted functionality
-- Add documentation for new functionality within existing structure
+### 4. Verify Code Examples
+For tasks with `status: "needs_verification"`:
+- Read the referenced code
+- Verify the example matches current implementation
+- Update if the API has changed
 
-### 5. Cross-Reference Validation
-Ensure consistency across all `.md` files:
-- File paths referenced should exist
-- Function/class names should be accurate
-- Architectural descriptions should match implementation
+### 5. Re-run Audit
+```sh
+homeboy docs audit <component>
+```
+Confirm `broken` count is 0. Some `needs_verification` items are acceptable if code examples haven't changed.
 
 ## Forbidden Content
 

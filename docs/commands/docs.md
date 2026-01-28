@@ -68,14 +68,21 @@ homeboy docs scaffold extrachill-api --docs-dir documentation
 
 ### `audit`
 
-Validates documentation for a component by checking:
-- **Link validation**: Verifies markdown links resolve to existing docs
-- **Path validation**: Checks file path references exist in the component
-- **Staleness detection**: Identifies docs that may need review based on recent code changes
+Extracts claims from documentation and verifies them against the codebase. Outputs a structured task list that agents can execute step-by-step.
+
+**Claim types extracted:**
+- **File paths**: Backtick paths like `src/core/mod.rs` - verified against filesystem
+- **Directory paths**: Paths ending with `/` like `src/core/` - verified against filesystem
+- **Code examples**: Fenced code blocks - flagged for manual verification
+
+**Task statuses:**
+- `verified`: Claim confirmed true, no action needed
+- `broken`: Claim confirmed false, action required
+- `needs_verification`: Cannot verify mechanically, agent must check
 
 ```sh
 homeboy docs audit homeboy
-homeboy docs audit extrachill-api
+homeboy docs audit data-machine
 ```
 
 **Arguments:**
@@ -89,29 +96,46 @@ homeboy docs audit extrachill-api
     "command": "docs.audit",
     "component_id": "homeboy",
     "summary": {
-      "docs_audited": 28,
-      "issues_found": 5,
-      "stale_docs": 2,
-      "broken_links": 3
+      "docs_scanned": 48,
+      "claims_extracted": 81,
+      "verified": 37,
+      "broken": 44,
+      "needs_verification": 0
     },
-    "issues": [
+    "tasks": [
       {
-        "doc": "commands/deploy.md",
-        "issue_type": "broken_link",
-        "detail": "Link to 'nonexistent.md' does not resolve",
-        "line": 23
+        "doc": "architecture/output-system.md",
+        "line": 12,
+        "claim": "directory path `src/core/`",
+        "type": "directory_path",
+        "claim_value": "src/core/",
+        "status": "verified"
       },
       {
-        "doc": "core/engine.md",
-        "issue_type": "broken_path",
-        "detail": "Referenced file 'src/old/removed.rs' does not exist",
-        "line": 45
+        "doc": "developer-guide/architecture-overview.md",
+        "line": 62,
+        "claim": "file path `src/core/template.rs`",
+        "type": "file_path",
+        "claim_value": "src/core/template.rs",
+        "status": "broken",
+        "action": "File 'src/core/template.rs' not found. Search codebase for actual location or remove if deleted."
       }
     ],
-    "hints": ["2 docs may need review", "3 broken links should be fixed"]
+    "changes_context": {
+      "commits_since_tag": 5,
+      "changed_files": ["src/core/mod.rs", "src/commands/docs.rs"],
+      "priority_docs": ["architecture/output-system.md"]
+    }
   }
 }
 ```
+
+**Agent workflow:**
+1. Run `homeboy docs audit <component>`
+2. For each task where `status != "verified"`:
+   - If `broken`: Execute the action (fix or remove reference)
+   - If `needs_verification`: Read the referenced file, verify claim, update if wrong
+3. Re-run audit to confirm all tasks resolved
 
 ### `generate`
 

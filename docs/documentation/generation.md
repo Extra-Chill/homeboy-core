@@ -52,6 +52,12 @@ For each file:
 ### 8. Coverage Validation
 Verify ALL discovered components have been documented before completion.
 
+### 9. Run Audit
+```sh
+homeboy docs audit <component>
+```
+Verify all generated documentation references valid code paths. Fix any `broken` tasks before marking generation complete.
+
 ## Forbidden Content
 
 Never generate:

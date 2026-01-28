@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::docs;
 use homeboy::component;
+use homeboy::docs_audit::{self, AuditResult};
 
 use super::CmdResult;
 
@@ -60,23 +61,6 @@ pub struct ScaffoldAnalysis {
 }
 
 #[derive(Serialize)]
-pub struct AuditSummary {
-    pub docs_audited: usize,
-    pub issues_found: usize,
-    pub stale_docs: usize,
-    pub broken_links: usize,
-}
-
-#[derive(Serialize)]
-pub struct AuditIssue {
-    pub doc: String,
-    pub issue_type: String,
-    pub detail: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
-}
-
-#[derive(Serialize)]
 #[serde(tag = "command")]
 pub enum DocsOutput {
     #[serde(rename = "docs.scaffold")]
@@ -87,12 +71,7 @@ pub enum DocsOutput {
     },
 
     #[serde(rename = "docs.audit")]
-    Audit {
-        component_id: String,
-        summary: AuditSummary,
-        issues: Vec<AuditIssue>,
-        hints: Vec<String>,
-    },
+    Audit(AuditResult),
 
     #[serde(rename = "docs.generate")]
     Generate {
@@ -226,164 +205,12 @@ fn run_scaffold(component_id: &str, docs_dir: &str) -> CmdResult<DocsOutput> {
 }
 
 // ============================================================================
-// Audit (Link Validation + Staleness Detection)
+// Audit (Claim-Based Documentation Verification)
 // ============================================================================
 
 fn run_audit(component_id: &str) -> CmdResult<DocsOutput> {
-    let comp = component::load(component_id)?;
-    let source_path = Path::new(&comp.local_path);
-    let docs_path = source_path.join("docs");
-
-    // Find all documentation files
-    let doc_files = find_existing_docs(&docs_path);
-    let docs_audited = doc_files.len();
-
-    let mut issues = Vec::new();
-    let mut stale_docs = 0usize;
-    let mut broken_links = 0usize;
-
-    // Audit each doc file
-    for doc_file in &doc_files {
-        let doc_path = docs_path.join(doc_file);
-        let content = match fs::read_to_string(&doc_path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        // Check for broken internal links
-        let doc_issues = audit_doc_links(&content, doc_file, &docs_path, source_path);
-        for issue in doc_issues {
-            if issue.issue_type == "broken_link" {
-                broken_links += 1;
-            } else if issue.issue_type == "stale" {
-                stale_docs += 1;
-            }
-            issues.push(issue);
-        }
-
-        // Check for path references that don't exist
-        let path_issues = audit_path_references(&content, doc_file, source_path);
-        for issue in path_issues {
-            if issue.issue_type == "broken_path" {
-                broken_links += 1;
-            }
-            issues.push(issue);
-        }
-    }
-
-    // Generate hints
-    let mut hints = Vec::new();
-    if stale_docs > 0 {
-        hints.push(format!("{} docs may need review", stale_docs));
-    }
-    if broken_links > 0 {
-        hints.push(format!("{} broken links should be fixed", broken_links));
-    }
-    if issues.is_empty() {
-        hints.push("All documentation links are valid".to_string());
-    }
-
-    Ok((
-        DocsOutput::Audit {
-            component_id: component_id.to_string(),
-            summary: AuditSummary {
-                docs_audited,
-                issues_found: issues.len(),
-                stale_docs,
-                broken_links,
-            },
-            issues,
-            hints,
-        },
-        0,
-    ))
-}
-
-fn audit_doc_links(content: &str, doc_file: &str, docs_path: &Path, _source_path: &Path) -> Vec<AuditIssue> {
-    let mut issues = Vec::new();
-
-    // Regex to find markdown links: [text](path)
-    let link_pattern = regex::Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
-
-    for (line_num, line) in content.lines().enumerate() {
-        for cap in link_pattern.captures_iter(line) {
-            let link_path = cap.get(2).map(|m| m.as_str()).unwrap_or("");
-
-            // Skip external links, anchors, and mailto
-            if link_path.starts_with("http")
-                || link_path.starts_with('#')
-                || link_path.starts_with("mailto:")
-            {
-                continue;
-            }
-
-            // Resolve the link relative to the doc file's directory
-            let doc_dir = Path::new(doc_file).parent().unwrap_or(Path::new(""));
-            let resolved_path = if link_path.starts_with('/') {
-                docs_path.join(link_path.strip_prefix('/').unwrap())
-            } else {
-                docs_path.join(doc_dir).join(link_path)
-            };
-
-            // Normalize path (handle .. and .)
-            let normalized = normalize_path(&resolved_path);
-
-            // Check if file exists (with or without .md extension)
-            let exists = normalized.exists()
-                || normalized.with_extension("md").exists()
-                || normalized.join("index.md").exists();
-
-            if !exists {
-                issues.push(AuditIssue {
-                    doc: doc_file.to_string(),
-                    issue_type: "broken_link".to_string(),
-                    detail: format!("Link to '{}' does not resolve", link_path),
-                    line: Some(line_num + 1),
-                });
-            }
-        }
-    }
-
-    issues
-}
-
-fn audit_path_references(content: &str, doc_file: &str, source_path: &Path) -> Vec<AuditIssue> {
-    let mut issues = Vec::new();
-
-    // Look for code-style path references like `src/foo/bar.rs` or `inc/core/example.php`
-    let path_pattern = regex::Regex::new(r"`((?:src|inc|lib|app)/[a-zA-Z0-9_/.-]+\.[a-z]+)`").unwrap();
-
-    for (line_num, line) in content.lines().enumerate() {
-        for cap in path_pattern.captures_iter(line) {
-            let path_ref = cap.get(1).map(|m| m.as_str()).unwrap_or("");
-            let full_path = source_path.join(path_ref);
-
-            if !full_path.exists() {
-                issues.push(AuditIssue {
-                    doc: doc_file.to_string(),
-                    issue_type: "broken_path".to_string(),
-                    detail: format!("Referenced file '{}' does not exist", path_ref),
-                    line: Some(line_num + 1),
-                });
-            }
-        }
-    }
-
-    issues
-}
-
-fn normalize_path(path: &Path) -> std::path::PathBuf {
-    let mut result = std::path::PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                result.pop();
-            }
-            std::path::Component::CurDir => {}
-            _ => result.push(component),
-        }
-    }
-    result
+    let result = docs_audit::audit_component(component_id)?;
+    Ok((DocsOutput::Audit(result), 0))
 }
 
 // ============================================================================
