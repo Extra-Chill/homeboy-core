@@ -4,6 +4,10 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.38.4] - 2026-01-28
+
+- Make documentation guidance audit-driven with concrete commands
+
 ## [0.38.3] - 2026-01-28
 
 - Stream test/lint output directly to terminal instead of capturing in JSON
