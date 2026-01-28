@@ -16,6 +16,10 @@ pub struct TestArgs {
     #[arg(long)]
     skip_lint: bool,
 
+    /// Auto-fix linting issues before running tests
+    #[arg(long)]
+    fix: bool,
+
     /// Override settings as key=value pairs
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
@@ -93,6 +97,7 @@ pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
     let output = ModuleRunner::new(&args.component, &script_path)
         .settings(&args.setting)
         .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")
+        .env_if(args.fix, "HOMEBOY_AUTO_FIX", "1")
         .script_args(&args.args)
         .run()?;
 
@@ -104,6 +109,14 @@ pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
     if !output.success && args.args.is_empty() {
         hints.push(format!(
             "To run specific tests: homeboy test {} -- --filter=TestName",
+            args.component
+        ));
+    }
+
+    // Fix hint when lint is enabled (default) and --fix not used
+    if !args.skip_lint && !args.fix {
+        hints.push(format!(
+            "Auto-fix lint issues: homeboy test {} --fix",
             args.component
         ));
     }
