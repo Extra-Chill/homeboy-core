@@ -16,6 +16,39 @@ pub struct VersionTarget {
     pub pattern: Option<String>,
 }
 
+/// Check if adding a new version target would conflict with existing targets.
+/// Returns error if same file already has a different pattern.
+pub fn validate_version_target_conflict(
+    existing: &[VersionTarget],
+    new_file: &str,
+    new_pattern: &str,
+    component_id: &str,
+) -> Result<()> {
+    for target in existing {
+        if target.file == new_file {
+            let existing_pattern = target.pattern.as_deref().unwrap_or("");
+            if existing_pattern != new_pattern {
+                return Err(Error::validation_invalid_argument(
+                    "version_targets",
+                    format!(
+                        "File '{}' already has a version target with a different pattern. \
+                         Existing: '{}', New: '{}'",
+                        new_file, existing_pattern, new_pattern
+                    ),
+                    None,
+                    None,
+                )
+                .with_hint(format!(
+                    "To replace existing targets: homeboy component set {} --replace version_targets --version-target \"{}::{}\"",
+                    component_id, new_file, new_pattern
+                )));
+            }
+            // Same file + same pattern = OK (array_union will dedupe)
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 
 pub struct ScopedModuleConfig {
@@ -460,4 +493,60 @@ pub fn detect_from_cwd() -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_version_target_conflict_different_pattern_errors() {
+        let existing = vec![VersionTarget {
+            file: "plugin.php".to_string(),
+            pattern: Some("Version: (.*)".to_string()),
+        }];
+
+        let result =
+            validate_version_target_conflict(&existing, "plugin.php", "define('VER', '(.*)')", "test-comp");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Check the error details contain expected text
+        let details_str = err.details.to_string();
+        assert!(
+            details_str.contains("already has a version target with a different pattern"),
+            "Expected error details to contain 'already has a version target with a different pattern', got: {}",
+            details_str
+        );
+    }
+
+    #[test]
+    fn validate_version_target_conflict_same_pattern_ok() {
+        let existing = vec![VersionTarget {
+            file: "plugin.php".to_string(),
+            pattern: Some("Version: (.*)".to_string()),
+        }];
+
+        let result = validate_version_target_conflict(&existing, "plugin.php", "Version: (.*)", "test-comp");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_version_target_conflict_different_file_ok() {
+        let existing = vec![VersionTarget {
+            file: "plugin.php".to_string(),
+            pattern: Some("Version: (.*)".to_string()),
+        }];
+
+        let result =
+            validate_version_target_conflict(&existing, "package.json", "\"version\": \"(.*)\"", "test-comp");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_version_target_conflict_empty_existing_ok() {
+        let existing: Vec<VersionTarget> = vec![];
+
+        let result = validate_version_target_conflict(&existing, "plugin.php", "Version: (.*)", "test-comp");
+        assert!(result.is_ok());
+    }
 }

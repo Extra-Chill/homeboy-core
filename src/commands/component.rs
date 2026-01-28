@@ -290,6 +290,14 @@ fn set(args: DynamicSetArgs) -> CmdResult<ComponentOutput> {
 }
 
 fn add_version_target(id: &str, file: &str, pattern: &str) -> CmdResult<ComponentOutput> {
+    // Load component to check existing targets
+    let comp = component::load(id).map_err(|e| e.with_contextual_hint())?;
+
+    // Validate no conflicting target exists
+    if let Some(ref existing) = comp.version_targets {
+        component::validate_version_target_conflict(existing, file, pattern, id)?;
+    }
+
     let version_target = serde_json::json!({
         "version_targets": [{
             "file": file,
