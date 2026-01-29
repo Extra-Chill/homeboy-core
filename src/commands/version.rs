@@ -177,6 +177,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                 ))
             } else {
                 let run_result = release::run(&component_id, &options)?;
+                super::release::display_release_summary(&run_result);
                 Ok((
                     VersionOutput::Bump(VersionBumpOutput {
                         command: "version.bump".to_string(),

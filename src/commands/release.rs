@@ -119,6 +119,7 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
         ))
     } else {
         let run_result = release::run(&args.component_id, &options)?;
+        display_release_summary(&run_result);
 
         let (deployment, deploy_exit_code) = if args.deploy {
             execute_deployment(&args.component_id)
@@ -139,6 +140,18 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             },
             deploy_exit_code,
         ))
+    }
+}
+
+/// Displays release success summary to stderr.
+pub fn display_release_summary(run: &ReleaseRun) {
+    if let Some(ref summary) = run.result.summary {
+        if !summary.success_summary.is_empty() {
+            eprintln!();
+            for line in &summary.success_summary {
+                eprintln!("[release] {}", line);
+            }
+        }
     }
 }
 
