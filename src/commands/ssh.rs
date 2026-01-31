@@ -36,12 +36,16 @@ pub enum SshOutput {
 }
 
 #[derive(Debug, Serialize)]
-
 pub struct SshConnectOutput {
     pub resolved_type: String,
     pub project_id: Option<String>,
     pub server_id: String,
     pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    pub success: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,19 +89,41 @@ pub fn run(args: SshArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Ss
                 _ => args.command.clone(),
             };
 
-            // Execute interactive SSH (CLI-owned TTY interaction)
             let client = SshClient::from_server(&result.server, &result.server_id)?;
-            let exit_code = client.execute_interactive(effective_command.as_deref());
 
-            Ok((
-                SshOutput::Connect(SshConnectOutput {
-                    resolved_type: result.resolved_type,
-                    project_id: result.project_id,
-                    server_id: result.server_id,
-                    command: args.command,
-                }),
-                exit_code,
-            ))
+            if args.command.is_some() {
+                // Non-interactive: capture output for JSON response
+                let output = client.execute(effective_command.as_deref().unwrap());
+
+                Ok((
+                    SshOutput::Connect(SshConnectOutput {
+                        resolved_type: result.resolved_type,
+                        project_id: result.project_id,
+                        server_id: result.server_id,
+                        command: args.command,
+                        stdout: Some(output.stdout),
+                        stderr: Some(output.stderr),
+                        success: output.success,
+                    }),
+                    output.exit_code,
+                ))
+            } else {
+                // Interactive: TTY passthrough
+                let exit_code = client.execute_interactive(effective_command.as_deref());
+
+                Ok((
+                    SshOutput::Connect(SshConnectOutput {
+                        resolved_type: result.resolved_type,
+                        project_id: result.project_id,
+                        server_id: result.server_id,
+                        command: None,
+                        stdout: None,
+                        stderr: None,
+                        success: exit_code == 0,
+                    }),
+                    exit_code,
+                ))
+            }
         }
     }
 }
