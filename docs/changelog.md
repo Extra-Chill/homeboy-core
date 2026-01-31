@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.39.2] - 2026-01-31
+
+### Added
+- capture command output in JSON response
+
 ## [0.39.1] - 2026-01-28
 
 ### Added
