@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use crate::utils::artifact;
-use crate::utils::base_path;
 use crate::build;
 use crate::component::{self, Component};
 use crate::config;
@@ -16,9 +14,11 @@ use crate::module::{load_all_modules, DeployOverride, DeployVerification, Module
 use crate::permissions;
 use crate::project::{self, Project};
 use crate::ssh::SshClient;
+use crate::utils::artifact;
+use crate::utils::base_path;
+use crate::utils::parser;
 use crate::utils::shell;
 use crate::utils::template::{render_map, TemplateVars};
-use crate::utils::parser;
 use crate::version;
 
 /// Parse bulk component IDs from a JSON spec.
@@ -583,7 +583,10 @@ pub fn deploy_components(
             .collect();
 
         if !components_with_changes.is_empty() {
-            let ids: Vec<&str> = components_with_changes.iter().map(|c| c.id.as_str()).collect();
+            let ids: Vec<&str> = components_with_changes
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect();
             return Err(Error::other(format!(
                 "Components have uncommitted changes: {}",
                 ids.join(", ")
@@ -1058,6 +1061,15 @@ fn deploy_with_override(
     vars.insert("siteRoot".to_string(), site_root.unwrap_or("").to_string());
     vars.insert("cliPath".to_string(), cli_path.to_string());
     vars.insert("domain".to_string(), domain.unwrap_or("").to_string());
+    vars.insert(
+        "allowRootFlag".to_string(),
+        if ssh_client.user == "root" {
+            "--allow-root"
+        } else {
+            ""
+        }
+        .to_string(),
+    );
 
     let install_cmd = render_map(&override_config.install_command, &vars);
     eprintln!("[deploy] Running install command: {}", install_cmd);

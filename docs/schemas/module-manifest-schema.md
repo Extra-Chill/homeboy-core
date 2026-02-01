@@ -139,7 +139,7 @@ Platform configuration defines database, deployment, and version detection behav
 #### Deployment Fields
 
 - **`override_command`** (string): Custom build command template
-  - Template variables: `{{targetDir}}`, `{{siteRoot}}`, `{{domain}}`, `{{cliPath}}`
+  - Template variables: `{{targetDir}}`, `{{siteRoot}}`, `{{domain}}`, `{{cliPath}}`, `{{allowRootFlag}}`
 - **`override_extract_command`** (string): Custom extract command template
   - Template variables: `{{artifact}}`, `{{targetDir}}`, `{{stagingArtifact}}`
 

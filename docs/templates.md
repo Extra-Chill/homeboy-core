@@ -86,6 +86,7 @@ Used in module deploy override configurations.
 | `{{siteRoot}}` | Site root path |
 | `{{cliPath}}` | CLI executable path |
 | `{{domain}}` | Target domain |
+| `{{allowRootFlag}}` | `--allow-root` when SSH user is root |
 
 ## Standard Variables
 
