@@ -5,6 +5,9 @@
 ```sh
 homeboy deploy <project_id> [<component_ids...>] [-c|--component <id>]... [--all] [--outdated] [--check] [--dry-run] [--json '<spec>']
 # If no component IDs are provided, you must use --all, --outdated, or --check.
+
+# Multi-project deployment
+homeboy deploy --projects <project1>,<project2> <component_ids...>
 ```
 
 ## Arguments and flags
@@ -23,6 +26,7 @@ Options:
   - Combines with `--outdated` or component IDs to filter results.
 - `--dry-run`: preview what would be deployed without executing (no build, no upload)
 - `--json`: JSON input spec for bulk operations (`{"component_ids": ["component-id", ...]}`)
+- `--projects`: deploy to multiple projects (comma-separated). When using this flag, all positional arguments are treated as component IDs. The build artifact is reused across projects.
 
 Bulk JSON input uses `component_ids` (snake_case):
 
@@ -105,6 +109,56 @@ Exit code is `0` when `summary.failed == 0`, otherwise `1`.
 
 - `0` when all selected component deploys succeed.
 - `1` when any component deploy fails.
+
+## Multi-Project Deployment
+
+When a component belongs to multiple projects, use `--projects` to deploy to all of them in a single command:
+
+```sh
+# Deploy data-machine to both extra-chill and sarai-chinwag projects
+homeboy deploy --projects extra-chill,sarai-chinwag data-machine
+
+# Deploy multiple components to multiple projects
+homeboy deploy --projects extra-chill,sarai-chinwag data-machine extrachill-api
+
+# Preview multi-project deployment
+homeboy deploy --projects extra-chill,sarai-chinwag data-machine --dry-run
+```
+
+The component is built once and the artifact is reused for all subsequent project deployments.
+
+### Multi-project JSON output
+
+When using `--projects`, the output structure differs:
+
+```json
+{
+  "command": "deploy.run_multi",
+  "component_ids": ["data-machine"],
+  "dry_run": false,
+  "check": false,
+  "force": false,
+  "projects": [
+    {
+      "project_id": "extra-chill",
+      "status": "deployed|failed",
+      "error": "<string>|null",
+      "results": [...],
+      "summary": { "total": 1, "succeeded": 1, "skipped": 0, "failed": 0 }
+    },
+    {
+      "project_id": "sarai-chinwag",
+      "status": "deployed|failed",
+      "error": "<string>|null",
+      "results": [...],
+      "summary": { "total": 1, "succeeded": 1, "skipped": 0, "failed": 0 }
+    }
+  ],
+  "summary": { "total_projects": 2, "succeeded": 2, "failed": 0 }
+}
+```
+
+Exit code is `1` if any project deployment fails.
 
 ## Preview Before Deploying
 

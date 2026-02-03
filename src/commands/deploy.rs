@@ -45,6 +45,10 @@ pub struct DeployArgs {
     /// Deploy even with uncommitted changes
     #[arg(long)]
     pub force: bool,
+
+    /// Deploy to multiple projects (comma-separated or repeated)
+    #[arg(long, value_delimiter = ',')]
+    pub projects: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -61,7 +65,50 @@ pub struct DeployOutput {
     pub summary: DeploySummary,
 }
 
-pub fn run(mut args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<DeployOutput> {
+#[derive(Serialize)]
+pub struct MultiProjectDeployOutput {
+    pub command: String,
+    pub component_ids: Vec<String>,
+    pub projects: Vec<ProjectDeployResult>,
+    pub summary: MultiProjectDeploySummary,
+    pub dry_run: bool,
+    pub check: bool,
+    pub force: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProjectDeployResult {
+    pub project_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub results: Vec<ComponentDeployResult>,
+    pub summary: DeploySummary,
+}
+
+#[derive(Serialize)]
+pub struct MultiProjectDeploySummary {
+    pub total_projects: u32,
+    pub succeeded: u32,
+    pub failed: u32,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum DeployCommandOutput {
+    Single(DeployOutput),
+    Multi(MultiProjectDeployOutput),
+}
+
+pub fn run(
+    mut args: DeployArgs,
+    _global: &crate::commands::GlobalArgs,
+) -> CmdResult<DeployCommandOutput> {
+    // Handle multi-project case first
+    if let Some(ref project_ids) = args.projects {
+        return run_multi_project(&args, project_ids);
+    }
+
     // Resolve project and component IDs based on flag/positional combinations
     let (project_id, component_ids) = match (&args.project, &args.component) {
         // Both flags provided - use them directly
@@ -135,7 +182,7 @@ pub fn run(mut args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdRe
     let exit_code = if result.summary.failed > 0 { 1 } else { 0 };
 
     Ok((
-        DeployOutput {
+        DeployCommandOutput::Single(DeployOutput {
             command: "deploy.run".to_string(),
             project_id: project_id.clone(),
             all: args.all,
@@ -145,7 +192,137 @@ pub fn run(mut args: DeployArgs, _global: &crate::commands::GlobalArgs) -> CmdRe
             force: args.force,
             results: result.results,
             summary: result.summary,
-        },
+        }),
+        exit_code,
+    ))
+}
+
+fn run_multi_project(
+    args: &DeployArgs,
+    project_ids: &[String],
+) -> CmdResult<DeployCommandOutput> {
+    // Collect component IDs from positional arguments
+    let mut component_ids = vec![args.project_id.clone()];
+    component_ids.extend(args.component_ids.clone());
+
+    // Filter out empty strings
+    let component_ids: Vec<String> = component_ids.into_iter().filter(|s| !s.is_empty()).collect();
+
+    if component_ids.is_empty() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "component_ids",
+            "At least one component ID is required when using --projects",
+            None,
+            None,
+        )
+        .into());
+    }
+
+    // Validate all specified projects exist
+    let known_projects = homeboy::project::list_ids().unwrap_or_default();
+    for project_id in project_ids {
+        if !known_projects.contains(project_id) {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "projects",
+                &format!("Unknown project: '{}'", project_id),
+                None,
+                None,
+            )
+            .into());
+        }
+    }
+
+    eprintln!(
+        "[deploy] Deploying {:?} to {} project(s)...",
+        component_ids,
+        project_ids.len()
+    );
+
+    let mut project_results = Vec::new();
+    let mut succeeded: u32 = 0;
+    let mut failed: u32 = 0;
+    let mut first_project = true;
+
+    for project_id in project_ids {
+        eprintln!("[deploy] Deploying to project '{}'...", project_id);
+
+        let config = DeployConfig {
+            component_ids: component_ids.clone(),
+            all: args.all,
+            outdated: args.outdated,
+            dry_run: args.dry_run,
+            check: args.check,
+            force: args.force,
+            skip_build: !first_project, // Build only on first project
+        };
+
+        match deploy::run(project_id, &config) {
+            Ok(result) => {
+                let deploy_failed = result.summary.failed > 0;
+
+                if deploy_failed {
+                    let error_msg = result
+                        .results
+                        .iter()
+                        .find_map(|r| r.error.clone())
+                        .unwrap_or_else(|| "Deployment failed".to_string());
+
+                    project_results.push(ProjectDeployResult {
+                        project_id: project_id.clone(),
+                        status: "failed".to_string(),
+                        error: Some(error_msg),
+                        results: result.results,
+                        summary: result.summary,
+                    });
+                    failed += 1;
+                } else {
+                    project_results.push(ProjectDeployResult {
+                        project_id: project_id.clone(),
+                        status: "deployed".to_string(),
+                        error: None,
+                        results: result.results,
+                        summary: result.summary,
+                    });
+                    succeeded += 1;
+                }
+            }
+            Err(e) => {
+                project_results.push(ProjectDeployResult {
+                    project_id: project_id.clone(),
+                    status: "failed".to_string(),
+                    error: Some(e.to_string()),
+                    results: vec![],
+                    summary: DeploySummary {
+                        total: 0,
+                        succeeded: 0,
+                        skipped: 0,
+                        failed: 1,
+                    },
+                });
+                failed += 1;
+            }
+        }
+
+        first_project = false;
+    }
+
+    let total = project_results.len() as u32;
+    let exit_code = if failed > 0 { 1 } else { 0 };
+
+    Ok((
+        DeployCommandOutput::Multi(MultiProjectDeployOutput {
+            command: "deploy.run_multi".to_string(),
+            component_ids,
+            projects: project_results,
+            summary: MultiProjectDeploySummary {
+                total_projects: total,
+                succeeded,
+                failed,
+            },
+            dry_run: args.dry_run,
+            check: args.check,
+            force: args.force,
+        }),
         exit_code,
     ))
 }
