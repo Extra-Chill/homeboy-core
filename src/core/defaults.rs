@@ -130,7 +130,7 @@ fn default_cargo_config() -> InstallMethodConfig {
 fn default_source_config() -> InstallMethodConfig {
     InstallMethodConfig {
         path_patterns: vec!["/target/release/".to_string(), "/target/debug/".to_string()],
-        upgrade_command: "git pull && cargo build --release".to_string(),
+        upgrade_command: "git pull && . \"$HOME/.cargo/env\" && cargo build --release".to_string(),
         list_command: None,
     }
 }
