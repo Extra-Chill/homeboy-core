@@ -1466,6 +1466,34 @@ pub fn stage_files(path: &str, files: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Fetch from remote and return count of commits behind upstream.
+/// Returns Ok(Some(n)) if behind by n commits, Ok(None) if not behind or no upstream.
+pub fn fetch_and_get_behind_count(path: &str) -> Result<Option<u32>> {
+    // Run git fetch (update tracking refs)
+    command::run_in(path, "git", &["fetch"], "git fetch")?;
+
+    // Check if upstream exists
+    let upstream = command::run_in_optional(path, "git", &["rev-parse", "--abbrev-ref", "@{upstream}"]);
+    if upstream.is_none() {
+        return Ok(None); // No upstream configured
+    }
+
+    // Get ahead/behind counts
+    let counts = command::run_in_optional(
+        path,
+        "git",
+        &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    );
+
+    match counts {
+        Some(output) => {
+            let (_, behind) = parse_ahead_behind(&output);
+            Ok(behind.filter(|&n| n > 0))
+        }
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- add preflight remote sync check to version bump to prevent push conflicts
+
+### Fixed
+- source cargo env for source installs
+
 ## [0.40.0] - 2026-02-02
 
 ### Added

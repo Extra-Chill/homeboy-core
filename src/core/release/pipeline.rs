@@ -68,6 +68,9 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     let mut v = ValidationCollector::new();
 
+    // === Stage 0: Remote sync check (preflight) ===
+    v.capture(validate_remote_sync(&component), "remote_sync");
+
     // === Stage 1: Independent validations ===
     v.capture(validate_commits_vs_changelog(&component), "commits");
     v.capture(validate_changelog(&component), "changelog");
@@ -192,6 +195,26 @@ fn validate_changelog(component: &Component) -> Result<()> {
             _ => {}
         }
     }
+    Ok(())
+}
+
+/// Check if local branch is behind remote (after fetching).
+/// Returns Err with actionable hints if behind, Ok(()) if up to date.
+fn validate_remote_sync(component: &Component) -> Result<()> {
+    let behind = git::fetch_and_get_behind_count(&component.local_path)?;
+
+    if let Some(n) = behind {
+        return Err(Error::validation_invalid_argument(
+            "remote_sync",
+            format!("Local branch is {} commit(s) behind remote", n),
+            None,
+            Some(vec![
+                "Pull remote changes before releasing to avoid push conflicts".to_string(),
+                "Run: git pull --rebase".to_string(),
+            ]),
+        ));
+    }
+
     Ok(())
 }
 
