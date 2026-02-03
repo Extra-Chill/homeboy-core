@@ -117,21 +117,36 @@ Errors:
 
 ### Changelog Requirements
 
-`version bump` requires a changelog file. Homeboy auto-detects changelogs at well-known locations:
+`version bump` requires:
+1. A changelog file to exist
+2. The `changelog_target` to be configured on the component
 
-1. `CHANGELOG.md`
-2. `changelog.md`
-3. `docs/CHANGELOG.md`
-4. `docs/changelog.md`
-5. `HISTORY.md`
-
-If your changelog is at a non-standard location, configure `changelog_target`:
-
+**Setup:**
 ```sh
-homeboy component set <id> --changelog-target "path/to/CHANGELOG.md"
+homeboy component set <id> --changelog-target "CHANGELOG.md"
 ```
 
 To bypass changelog finalization entirely, use `version set` instead of `version bump`.
+
+### Auto-Generation from Commits
+
+`version bump` can auto-generate changelog entries from commits since the last tag, **but only if:**
+
+1. All changes are **committed** (uncommitted changes are invisible to auto-gen)
+2. The Unreleased section is **empty** (existing entries skip auto-gen)
+3. At least one commit has an entry-producing prefix
+
+| Commit prefix | Changelog section |
+|---------------|------------------|
+| `feat:`       | Added            |
+| `fix:`        | Fixed            |
+| `BREAKING` / `!:` | Changed      |
+| Other (non-conventional) | Changed |
+| `docs:`, `chore:` | **Skipped**  |
+
+**Important:** If ALL commits are `docs:` or `chore:`, auto-generation produces nothing and you'll get an error.
+
+To manually add entries: `homeboy changelog add <id> "message" --type fixed`
 
 ## Related Workflows
 
@@ -147,6 +162,36 @@ After bumping, push and optionally tag:
 ```sh
 homeboy git push <component_id>
 homeboy git tag <component_id>
+```
+
+## Rollback Procedure
+
+If you accidentally bump a version:
+
+### 1. Revert local changes
+```sh
+git checkout -- CHANGELOG.md Cargo.toml package.json  # your version files
+```
+
+### 2. Delete local tag (if created)
+```sh
+git tag -d v0.X.Y
+```
+
+### 3. Delete remote tag (if pushed)
+```sh
+git push origin --delete v0.X.Y
+```
+
+### 4. Force push (if committed and pushed)
+```sh
+git reset --hard HEAD~1
+git push --force-with-lease
+```
+
+**Prevention:** Always use `--dry-run` first:
+```sh
+homeboy version bump <component_id> patch --dry-run
 ```
 
 ## Related

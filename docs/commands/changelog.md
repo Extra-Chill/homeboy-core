@@ -71,6 +71,16 @@ Requirements:
 - Component must have `version_targets` configured (to determine initial version)
 - Errors if changelog file already exists at target path
 
+## Prerequisites
+
+Before using `changelog add`, configure the changelog path:
+
+```sh
+homeboy component set <id> --changelog-target "CHANGELOG.md"
+```
+
+This is required for both `changelog add` and `version bump`.
+
 ## Changelog Resolution
 
 For `add`, Homeboy resolves the changelog from the component's `changelog_target` configuration.
@@ -83,9 +93,7 @@ Configuration / defaults (strict by default):
 
 - Changelog path resolution:
   - If `changelog_target` is set in the component config, that path is used (relative to `component.local_path` unless it's absolute).
-  - Otherwise, Homeboy auto-detects (in order): `CHANGELOG.md`, then `docs/changelog.md`.
-  - If neither exists, the command errors and asks you to create a changelog file or set `component.changelog_target`.
-  - If both exist, the command errors and asks you to set `component.changelog_target` to disambiguate.
+  - If `changelog_target` is not configured, the command errors with instructions to set it.
 - "Next section" resolution:
   - If no label is configured, Homeboy defaults to `Unreleased`.
   - If no aliases are configured, Homeboy matches both `Unreleased` and `[Unreleased]`.

@@ -1,5 +1,7 @@
 # Config Directory Structure
 
+> **Important:** Homeboy uses centralized configuration only. There is no repo-local config file (no `.homeboy.toml` or `.homeboy/` directory). All configuration lives in `~/.config/homeboy/`.
+
 Homeboy stores all configuration in a universal directory location across operating systems.
 
 ## Location
