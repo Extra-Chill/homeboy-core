@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.40.0] - 2026-02-02
+
+### Added
+- filter merge commits from changelog auto-generation
+- add --projects flag for multi-project deployment
+
 ## [0.39.5] - 2026-02-01
 
 - inject --allow-root for root SSH deploy overrides
