@@ -73,8 +73,9 @@ Never generate:
 ## File Naming
 
 - Use descriptive filenames that reflect functionality being documented
-- No generic names like `readme.md` in subdirectories
+- No generic names like `readme.md`, `index.md`, or `overview.md` in subdirectories
 - File names describe what the content covers
+- For directory entry points, use `{directory}/{directory}.md` pattern (see `homeboy docs documentation/structure`)
 
 ## Completion Criteria
 

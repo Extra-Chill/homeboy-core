@@ -36,6 +36,24 @@ File names describe the functionality being documented:
 ### No Generic Names
 Never use generic names like `readme.md`, `index.md`, or `overview.md` in subdirectories. Each file should have a specific, descriptive name.
 
+### Directory Entry Points
+When a directory needs an introductory file (architecture overview, component listing, how pieces connect), name it after the directory:
+
+```
+blocks/
+├── blocks.md              # Entry point: "What is the blocks module?"
+├── class-wp-block.md      # Specific component
+├── functions.md           # Function reference
+└── hooks.md               # Hook reference
+```
+
+The pattern `{directory}/{directory}.md` serves as the natural entry point:
+- `api/api.md` — API module introduction
+- `cache/cache.md` — Cache system overview
+- `rest-api/rest-api.md` — REST API architecture
+
+This is descriptive (tells you it's THE blocks doc) while serving as an obvious starting point for navigation.
+
 ### Kebab-Case
 Use kebab-case for all file names: `user-authentication.md`, `api-reference.md`
 
