@@ -53,6 +53,10 @@ pub struct DeployArgs {
     /// Deploy to all projects in a fleet
     #[arg(long, short = 'f')]
     pub fleet: Option<String>,
+
+    /// Deploy to all projects using the specified component(s)
+    #[arg(long, short = 's')]
+    pub shared: bool,
 }
 
 #[derive(Serialize)]
@@ -112,6 +116,52 @@ pub fn run(
     if let Some(ref fleet_id) = args.fleet {
         let fl = homeboy::fleet::load(fleet_id)?;
         return run_multi_project(&args, &fl.project_ids);
+    }
+
+    // Resolve --shared: find all projects using the specified component(s)
+    if args.shared {
+        // Get component IDs from args
+        let component_ids: Vec<String> = if let Some(ref comps) = args.component {
+            comps.clone()
+        } else {
+            // First positional arg is the component when using --shared
+            vec![args.project_id.clone()]
+        };
+
+        if component_ids.is_empty() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "component",
+                "At least one component ID is required when using --shared",
+                None,
+                None,
+            ));
+        }
+
+        // Find all projects using any of these components
+        let mut project_ids: Vec<String> = Vec::new();
+        for component_id in &component_ids {
+            let using = homeboy::component::projects_using(component_id).unwrap_or_default();
+            for pid in using {
+                if !project_ids.contains(&pid) {
+                    project_ids.push(pid);
+                }
+            }
+        }
+
+        if project_ids.is_empty() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "component",
+                format!("No projects found using component(s): {:?}", component_ids),
+                None,
+                Some(vec!["Run 'homeboy component shared' to see component usage".to_string()]),
+            ));
+        }
+
+        // Override component_ids for multi-project deploy
+        args.component_ids = component_ids;
+        args.project_id = String::new(); // Clear since we're using component_ids directly
+        
+        return run_multi_project(&args, &project_ids);
     }
 
     // Handle multi-project case first
