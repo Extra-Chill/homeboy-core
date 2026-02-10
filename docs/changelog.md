@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.41.2] - 2026-02-10
 
 ### Added
 - Cross-compilation guide documenting platform requirements
