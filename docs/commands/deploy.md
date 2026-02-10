@@ -8,6 +8,12 @@ homeboy deploy <project_id> [<component_ids...>] [-c|--component <id>]... [--all
 
 # Multi-project deployment
 homeboy deploy --projects <project1>,<project2> <component_ids...>
+
+# Fleet deployment
+homeboy deploy <component_id> --fleet <fleet_id>
+
+# Shared component deployment (auto-detect projects)
+homeboy deploy <component_id> --shared
 ```
 
 ## Arguments and flags
@@ -27,6 +33,8 @@ Options:
 - `--dry-run`: preview what would be deployed without executing (no build, no upload)
 - `--json`: JSON input spec for bulk operations (`{"component_ids": ["component-id", ...]}`)
 - `--projects`: deploy to multiple projects (comma-separated). When using this flag, all positional arguments are treated as component IDs. The build artifact is reused across projects.
+- `-f`, `--fleet`: deploy to all projects in a fleet. Resolves fleet to project IDs, then runs multi-project deployment.
+- `-s`, `--shared`: deploy to all projects using the specified component(s). Auto-detects which projects have the component configured and deploys to all of them.
 
 Bulk JSON input uses `component_ids` (snake_case):
 
@@ -160,6 +168,40 @@ When using `--projects`, the output structure differs:
 
 Exit code is `1` if any project deployment fails.
 
+## Fleet Deployment
+
+Deploy to all projects in a named fleet:
+
+```sh
+# Deploy my-plugin to all projects in the production fleet
+homeboy deploy my-plugin --fleet production
+
+# Preview fleet deployment
+homeboy deploy my-plugin --fleet production --dry-run
+
+# Check status across fleet before deploying
+homeboy fleet check production
+```
+
+See [fleet](fleet.md) for fleet management commands.
+
+## Shared Component Deployment
+
+Deploy to all projects using a component, auto-detected:
+
+```sh
+# Deploy my-plugin to every project that uses it
+homeboy deploy my-plugin --shared
+
+# See which projects would be affected
+homeboy component shared my-plugin
+
+# Preview shared deployment
+homeboy deploy my-plugin --shared --dry-run
+```
+
+This is useful when you don't have a named fleet but want to update a component everywhere it's used.
+
 ## Preview Before Deploying
 
 Use `--dry-run` to see what would be deployed without executing:
@@ -198,3 +240,4 @@ homeboy changes --project myproject --git-diffs
 - [build](build.md)
 - [changes](changes.md)
 - [component](component.md)
+- [fleet](fleet.md)

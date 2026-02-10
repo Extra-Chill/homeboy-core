@@ -168,6 +168,34 @@ homeboy component projects <id>
 
 Lists all projects that reference the given component. Returns both project IDs and full project objects.
 
+### `shared`
+
+```sh
+homeboy component shared [id]
+```
+
+Shows which components are shared across projects.
+
+Without an ID, returns a map of all components and the projects using them:
+
+```sh
+homeboy component shared
+# → my-plugin: [site-a, site-b, site-c]
+# → homeboy: [project-1, project-2]
+```
+
+With an ID, shows only projects using that specific component:
+
+```sh
+homeboy component shared my-plugin
+# → [site-a, site-b, site-c]
+```
+
+This is useful for:
+- Understanding component distribution across your projects
+- Planning coordinated deployments with `deploy --shared`
+- Identifying candidates for fleet grouping
+
 ## JSON output
 
 > Note: all command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The object below is the `data` payload.
@@ -200,5 +228,6 @@ Notes:
 
 - [build](build.md)
 - [deploy](deploy.md)
+- [fleet](fleet.md)
 - [project](project.md)
 - [JSON output contract](../architecture/output-system.md)

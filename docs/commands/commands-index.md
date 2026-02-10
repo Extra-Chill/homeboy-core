@@ -9,6 +9,7 @@
 - [deploy](deploy.md)
 - [docs](docs.md)
 - [file](file.md)
+- [fleet](fleet.md)
 - [git](git.md)
 - [init](init.md) (alias: `status`)
 - [api](api.md)
