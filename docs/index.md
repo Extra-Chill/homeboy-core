@@ -16,11 +16,12 @@ Homeboy is a config-driven automation engine for development and deployment auto
 
 ## Schemas
 
-JSON configuration schemas for components, projects, servers, and modules:
+JSON configuration schemas for components, projects, servers, fleets, and modules:
 
 - [Component schema](schemas/component-schema.md) - Buildable/deployable units
 - [Project schema](schemas/project-schema.md) - Deployable environments
 - [Server schema](schemas/server-schema.md) - SSH connection settings
+- [Fleet schema](schemas/fleet-schema.md) - Named groups of projects
 - [Module manifest schema](schemas/module-manifest-schema.md) - Module configuration
 
 ## Architecture
@@ -68,6 +69,7 @@ Common paths:
 - `projects/`
 - `servers/`
 - `components/`
+- `fleets/`
 - `modules/`
 - `keys/`
 - `backups/`

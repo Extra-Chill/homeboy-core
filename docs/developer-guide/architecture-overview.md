@@ -59,7 +59,7 @@ File-based storage for configurations:
 
 ### Template System
 
-**Location:** `src/core/template.rs`
+**Location:** `src/utils/template.rs`
 
 Variable substitution in templates:
 - Both `{var}` and `{{var}}` syntax supported
@@ -68,7 +68,7 @@ Variable substitution in templates:
 
 ### Execution System
 
-**Location:** `src/core/executor.rs` and `src/core/execution/`
+**Location:** `src/core/engine/executor.rs` and `src/core/engine/`
 
 Executes shell commands with:
 - Environment variable injection
@@ -84,7 +84,7 @@ Supports:
 
 ### SSH Operations
 
-**Location:** `src/core/shell.rs` and `src/core/ssh/client.rs`
+**Location:** `src/core/ssh/` and `src/utils/shell.rs`
 
 SSH client wrapper that:
 - Manages SSH connections
@@ -158,7 +158,7 @@ Module management:
 
 ### Release Pipeline
 
-**Location:** `src/core/release.rs` and `src/core/pipeline.rs`
+**Location:** `src/core/release/` (executor.rs, pipeline.rs, types.rs)
 
 Local orchestration system:
 - Define steps as configuration
@@ -169,6 +169,19 @@ Local orchestration system:
 Step types:
 - Built-in: build, version_bump, git_commit, git_tag, git_push
 - Module: module_run, module_action
+
+### Fleet Management
+
+**Location:** `src/core/fleet.rs`
+
+Fleet management for cloud version management:
+- Named groups of projects
+- Shared component detection
+- Fleet-wide operations (status, check, deploy)
+- Coordinated deployments across multiple servers
+
+Config entities:
+- **Fleets**: Named groups of projects for batch operations
 
 ### CLI Layer
 
@@ -252,7 +265,7 @@ Module manifest defines:
 ### Module Loading
 
 Modules are loaded from:
-- Git-cloned directories in `modules/`
+- Git-cloned directories in `~/.config/homeboy/modules/`
 - Symlinked local directories
 - Module manifest: `<module_id>/<module_id>.json`
 
@@ -276,7 +289,7 @@ Centralized error system:
 
 ## Output System
 
-**Location:** `src/core/output/` and `src/output/response.rs`
+**Location:** `src/output/` (response.rs, mod.rs)
 
 Output modes:
 - **JSON**: Machine-readable, wrapped in stable envelope

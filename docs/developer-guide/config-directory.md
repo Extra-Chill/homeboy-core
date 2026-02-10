@@ -43,6 +43,9 @@ Typically: `C:\Users\<username>\AppData\Roaming\homeboy\`
 ├── components/
 │   ├── <component_id>.json    # Component configurations
 │   └── ...
+├── fleets/
+│   ├── <fleet_id>.json        # Fleet configurations
+│   └── ...
 ├── modules/
 │   ├── <module_id>/
 │   │   ├── <module_id>.json   # Module manifest
@@ -122,6 +125,22 @@ Each component is a separate JSON file named after the component ID.
 }
 ```
 
+### Fleet Configurations
+
+**Directory:** `fleets/`
+
+Each fleet is a separate JSON file named after the fleet ID. Fleets group projects for coordinated operations.
+
+**Example:** `fleets/production.json`
+
+```json
+{
+  "id": "production",
+  "project_ids": ["site-a", "site-b", "site-c"],
+  "description": "Production sites sharing common plugins"
+}
+```
+
 ### Module Directory
 
 **Directory:** `modules/`
@@ -185,6 +204,7 @@ While Homeboy provides CLI commands for most operations, configurations can be e
 - [Component schema](../schemas/component-schema.md)
 - [Project schema](../schemas/project-schema.md)
 - [Server schema](../schemas/server-schema.md)
+- [Fleet schema](../schemas/fleet-schema.md)
 - [Module manifest schema](../schemas/module-manifest-schema.md)
 
 ## Migration and Backups
@@ -279,4 +299,5 @@ If configuration file is invalid:
 - [Project command](../commands/project.md) - Manage project configurations
 - [Server command](../commands/server.md) - Manage server configurations
 - [Component command](../commands/component.md) - Manage component configurations
+- [Fleet command](../commands/fleet.md) - Manage fleet configurations
 - [Module command](../commands/module.md) - Manage module installations
