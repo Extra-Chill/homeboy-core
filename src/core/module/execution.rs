@@ -206,6 +206,12 @@ pub(crate) fn execute_action(
                 HttpMethod::Delete => client.delete(endpoint),
             }
         }
+        ActionType::Builtin => {
+            Err(Error::other(format!(
+                "Action '{}' is a builtin action. Builtin actions run in the Desktop app, not the CLI.",
+                action_id
+            )))
+        }
         ActionType::Command => {
             let command_template = validation::require(
                 action.command.as_ref(),

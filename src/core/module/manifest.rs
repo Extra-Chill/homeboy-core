@@ -10,6 +10,17 @@ use std::path::PathBuf;
 pub enum ActionType {
     Api,
     Command,
+    Builtin,
+}
+
+/// Builtin action types for Desktop app (copy, export operations).
+/// CLI parses these but does not execute them - Desktop implements the behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BuiltinAction {
+    CopyColumn,
+    ExportCsv,
+    CopyJson,
 }
 
 /// HTTP method for API actions.
@@ -305,6 +316,10 @@ pub struct TestConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct RuntimeConfig {
+    /// Desktop app runtime type (python/shell/cli). CLI ignores this field.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub runtime_type: Option<String>,
+
     /// Shell command to execute when running the module.
     /// Template variables: {{entrypoint}}, {{args}}, {{modulePath}}, plus project context vars.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -333,6 +348,14 @@ pub struct RuntimeConfig {
     /// Default site for this module (used by some CLI modules).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_site: Option<String>,
+
+    /// Desktop app: Python dependencies to install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Vec<String>>,
+
+    /// Desktop app: Playwright browsers to install.
+    #[serde(rename = "playwrightBrowsers", skip_serializing_if = "Option::is_none")]
+    pub playwright_browsers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -394,6 +417,12 @@ pub struct ActionConfig {
     pub payload: Option<std::collections::HashMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Builtin action type (Desktop app only). CLI parses but does not execute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<BuiltinAction>,
+    /// Column identifier for copy-column builtin action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- Module manifest: add Desktop runtime fields (dependencies, playwrightBrowsers, builtin actions)
+
+### Fixed
+- Parser: trim content in replace_all to match extract_all behavior (fixes version bump on files with trailing newlines)
+
 ## [0.40.3] - 2026-02-09
 
 - Add cargo-dist release workflow for automatic homebrew tap updates

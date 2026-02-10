@@ -33,12 +33,16 @@ pub fn extract_all(content: &str, pattern: &str) -> Option<Vec<String>> {
 
 /// Replace all matches of capture group with new value.
 /// Returns (new_content, replacement_count).
+/// Content is trimmed before matching to stay consistent with extract_all,
+/// but trailing newline is preserved in output.
 pub fn replace_all(content: &str, pattern: &str, replacement: &str) -> Option<(String, usize)> {
     let re = Regex::new(pattern).ok()?;
     let mut count = 0usize;
+    let had_trailing_newline = content.ends_with('\n');
+    let trimmed = content.trim();
 
     let replaced = re
-        .replace_all(content, |caps: &regex::Captures| {
+        .replace_all(trimmed, |caps: &regex::Captures| {
             count += 1;
             let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
             let captured = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -46,7 +50,13 @@ pub fn replace_all(content: &str, pattern: &str, replacement: &str) -> Option<(S
         })
         .to_string();
 
-    Some((replaced, count))
+    let result = if had_trailing_newline && !replaced.ends_with('\n') {
+        format!("{}\n", replaced)
+    } else {
+        replaced
+    };
+
+    Some((result, count))
 }
 
 /// Validate all extracted values are identical, return the canonical value.
