@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.40.4] - 2026-02-10
 
 ### Added
 - Module manifest: add Desktop runtime fields (dependencies, playwrightBrowsers, builtin actions)
