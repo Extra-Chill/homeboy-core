@@ -80,3 +80,5 @@ Notes:
 - Module docs load from each installed module's `docs/` folder under the Homeboy config root: `~/.config/homeboy/modules/<module_id>/docs/` (same topic-key rules as core docs).
 - The CLI does not write documentation into `~/.config/homeboy/docs/`.
 
+
+- [Cross-Compilation Guide](cross-compilation.md) - Platform requirements for native binaries
