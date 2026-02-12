@@ -217,7 +217,7 @@ fn run_scaffold(
     let existing_docs = find_existing_docs(&docs_path);
 
     // Identify undocumented areas (source dirs without corresponding docs)
-    let undocumented = identify_undocumented(&source_directories, &existing_docs);
+    let undocumented = identify_undocumented(&source_directories, &existing_docs, &docs_path);
 
     // Generate hints
     let mut hints = Vec::new();
@@ -431,16 +431,47 @@ fn find_existing_docs(docs_path: &Path) -> Vec<String> {
     docs
 }
 
-fn identify_undocumented(source_dirs: &[String], existing_docs: &[String]) -> Vec<String> {
-    // Simple heuristic: source dirs without a matching doc file
+fn identify_undocumented(
+    source_dirs: &[String],
+    existing_docs: &[String],
+    docs_path: &Path,
+) -> Vec<String> {
+    // Build a set of doc content references by scanning doc files for source dir mentions
+    let mut referenced_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for doc_file in existing_docs {
+        let doc_full_path = docs_path.join(doc_file);
+        if let Ok(content) = fs::read_to_string(&doc_full_path) {
+            for src_dir in source_dirs {
+                // Check if the doc references this source directory by path or name
+                let dir_name = src_dir.split('/').next_back().unwrap_or(src_dir);
+                if content.contains(src_dir)
+                    || content.contains(&format!("`{}`", src_dir))
+                    || content.contains(&format!("`{}/", src_dir))
+                    || content.contains(&format!("{}/", src_dir))
+                {
+                    referenced_dirs.insert(src_dir.clone());
+                }
+                // Also check if the dir name appears meaningfully (as path segment)
+                if content.contains(&format!("{}/", dir_name))
+                    || content.contains(&format!("`{}`", dir_name))
+                {
+                    referenced_dirs.insert(src_dir.clone());
+                }
+            }
+        }
+    }
+
     source_dirs
         .iter()
         .filter(|src_dir| {
-            // Check if any doc contains this directory name
+            // Check both: doc filename matching AND content references
             let dir_name = src_dir.split('/').next_back().unwrap_or(src_dir);
-            !existing_docs
+            let has_matching_doc = existing_docs
                 .iter()
-                .any(|doc| doc.contains(dir_name) || doc.replace(".md", "").contains(dir_name))
+                .any(|doc| doc.contains(dir_name) || doc.replace(".md", "").contains(dir_name));
+            let is_referenced = referenced_dirs.contains(*src_dir);
+            !has_matching_doc && !is_referenced
         })
         .cloned()
         .collect()

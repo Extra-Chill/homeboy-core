@@ -74,6 +74,7 @@ fn build_claim_description(claim: &Claim) -> String {
             };
             format!("code example: {}", preview.replace('\n', " "))
         }
+        ClaimType::ClassName => format!("class reference `{}`", claim.value),
     }
 }
 

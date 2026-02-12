@@ -4,6 +4,7 @@
 //! Some claims can be verified mechanically (file exists), others require
 //! manual verification by an agent.
 
+use std::fs;
 use std::path::Path;
 
 use super::claims::{Claim, ClaimType};
@@ -39,6 +40,7 @@ pub fn verify_claim(
             verify_directory_path(claim, source_path, docs_path, component_id)
         }
         ClaimType::CodeExample => verify_code_example(claim),
+        ClaimType::ClassName => verify_class_name(claim, source_path),
     }
 }
 
@@ -141,6 +143,93 @@ fn verify_directory_path(
             path
         )),
     }
+}
+
+/// Verify a namespaced class reference by searching for the class definition in source files.
+///
+/// Converts namespace path to directory structure (e.g., `DataMachine\Services\CacheManager`
+/// becomes a search for `class CacheManager` in files under a path matching the namespace).
+fn verify_class_name(claim: &Claim, source_path: &Path) -> VerifyResult {
+    let class_ref = &claim.value;
+
+    // Split into segments: DataMachine\Services\CacheManager -> ["DataMachine", "Services", "CacheManager"]
+    let segments: Vec<&str> = class_ref.split('\\').collect();
+    if segments.len() < 2 {
+        return VerifyResult::NeedsVerification {
+            hint: "Class reference too short to verify.".to_string(),
+        };
+    }
+
+    let class_name = segments.last().unwrap();
+
+    // Search for the class definition in source files
+    if search_class_in_dir(source_path, class_name) {
+        return VerifyResult::Verified;
+    }
+
+    VerifyResult::Broken {
+        suggestion: Some(format!(
+            "Class '{}' not found in source. It may have been renamed or deleted. Search codebase for the current class name.",
+            class_ref
+        )),
+    }
+}
+
+/// Recursively search for a class/struct/trait definition in source files.
+fn search_class_in_dir(dir: &Path, class_name: &str) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden dirs, vendor, node_modules, target, etc.
+        if name.starts_with('.')
+            || name == "vendor"
+            || name == "node_modules"
+            || name == "target"
+            || name == "__pycache__"
+        {
+            continue;
+        }
+
+        if path.is_dir() {
+            if search_class_in_dir(&path, class_name) {
+                return true;
+            }
+        } else if path.is_file() {
+            // Only check source files
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !matches!(ext, "php" | "rs" | "py" | "js" | "ts" | "go" | "java" | "rb" | "kt" | "swift") {
+                continue;
+            }
+
+            if let Ok(content) = fs::read_to_string(&path) {
+                // Check for class/struct/trait/interface definitions
+                // PHP: class CacheManager, interface CacheManager, trait CacheManager
+                // Rust: struct CacheManager, enum CacheManager, trait CacheManager
+                // Python: class CacheManager
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if (trimmed.contains(&format!("class {}", class_name))
+                        || trimmed.contains(&format!("struct {}", class_name))
+                        || trimmed.contains(&format!("trait {}", class_name))
+                        || trimmed.contains(&format!("interface {}", class_name))
+                        || trimmed.contains(&format!("enum {}", class_name)))
+                        && !trimmed.starts_with("//")
+                        && !trimmed.starts_with('#')
+                        && !trimmed.starts_with('*')
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Verify a code example claim.
