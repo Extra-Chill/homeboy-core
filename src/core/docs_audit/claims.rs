@@ -19,6 +19,8 @@ pub enum ClaimType {
     DirectoryPath,
     /// Code example in a fenced block
     CodeExample,
+    /// Namespaced class reference (e.g., `DataMachine\Services\CacheManager`)
+    ClassName,
 }
 
 /// A claim extracted from documentation.
@@ -49,6 +51,13 @@ static DIR_PATH_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     // Matches fenced code blocks with language identifier
     Regex::new(r"(?s)```(\w+)\n(.*?)```").unwrap()
+});
+
+static CLASS_NAME_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    // Matches namespaced class references like DataMachine\Services\CacheManager
+    // or DataMachine\\Services\\CacheManager (escaped backslashes in markdown)
+    // Requires at least two segments (Namespace\Class)
+    Regex::new(r"(?:`)?([A-Z][a-zA-Z0-9]*(?:\\{1,2}[A-Z][a-zA-Z0-9]*)+)(?:`)?").unwrap()
 });
 
 /// Extensions that indicate domain-like patterns (not file paths)
@@ -129,6 +138,33 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
                 claims.push(Claim {
                     claim_type: ClaimType::FilePath,
                     value: path.to_string(),
+                    doc_file: doc_file.to_string(),
+                    line: line_num,
+                    context: Some(line.trim().to_string()),
+                });
+            }
+        }
+
+        // Extract namespaced class references
+        for cap in CLASS_NAME_PATTERN.captures_iter(line) {
+            let full_match = cap.get(0).unwrap();
+            let pos = (line_idx, full_match.start());
+
+            if !claimed_positions.contains(&pos) {
+                let class_ref = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+
+                // Normalize double backslashes to single
+                let normalized = class_ref.replace("\\\\", "\\");
+
+                // Skip component-configured ignore patterns
+                if matches_ignore_pattern(&normalized, ignore_patterns) {
+                    continue;
+                }
+
+                claimed_positions.push(pos);
+                claims.push(Claim {
+                    claim_type: ClaimType::ClassName,
+                    value: normalized,
                     doc_file: doc_file.to_string(),
                     line: line_num,
                     context: Some(line.trim().to_string()),
@@ -333,6 +369,37 @@ Supported types: `text/plain`, `image/png`, `audio/mpeg`, `video/mp4`.
         let claims = extract_claims(content, "test.md", &patterns);
 
         assert!(!claims.iter().any(|c| c.value.contains("-auth/")));
+    }
+
+    #[test]
+    fn test_extract_class_names() {
+        let content = "**Service**: DataMachine\\Services\\ProcessedItemsManager";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        assert!(claims
+            .iter()
+            .any(|c| c.claim_type == ClaimType::ClassName
+                && c.value == "DataMachine\\Services\\ProcessedItemsManager"));
+    }
+
+    #[test]
+    fn test_extract_class_names_escaped_backslashes() {
+        let content = "The class `DataMachine\\\\Services\\\\CacheManager` handles caching.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        assert!(claims
+            .iter()
+            .any(|c| c.claim_type == ClaimType::ClassName
+                && c.value == "DataMachine\\Services\\CacheManager"));
+    }
+
+    #[test]
+    fn test_skip_non_namespaced_identifiers() {
+        // Single class name without namespace should NOT be extracted
+        let content = "The `CacheManager` class handles caching.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        assert!(!claims.iter().any(|c| c.claim_type == ClaimType::ClassName));
     }
 
     #[test]

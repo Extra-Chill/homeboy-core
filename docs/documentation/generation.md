@@ -77,6 +77,61 @@ Never generate:
 - File names describe what the content covers
 - For directory entry points, use `{directory}/{directory}.md` pattern (see `homeboy docs documentation/structure`)
 
+## Generate Spec Schema
+
+The `homeboy docs generate` command accepts a JSON spec that defines files to create. The spec can be provided as a positional argument, via `--json`, from a file with `@path/to/spec.json`, or from stdin with `-`.
+
+### Schema
+
+```json
+{
+  "output_dir": "string (required) — target directory for generated files",
+  "files": [
+    {
+      "path": "string (required) — relative path within output_dir (e.g., 'api/endpoints.md')",
+      "title": "string (optional) — used to generate an H1 heading when content is not provided",
+      "content": "string (optional) — full file content; when provided, replaces auto-generated heading"
+    }
+  ]
+}
+```
+
+### Field Behavior
+
+- **`output_dir`**: Created automatically if it doesn't exist. All file paths are relative to this directory.
+- **`files[].path`**: Parent directories are created automatically. Must include file extension.
+- **`files[].title`**: Only used when `content` is omitted. Generates `# {title}\n` as the file content.
+- **`files[].content`**: When provided, written as-is. The `title` field is ignored.
+- If neither `title` nor `content` is provided, an H1 heading is auto-generated from the filename (kebab-case and snake_case converted to Title Case).
+
+### Example
+
+```bash
+homeboy docs generate @spec.json
+```
+
+Where `spec.json` contains:
+
+```json
+{
+  "output_dir": "docs/api",
+  "files": [
+    {"path": "endpoints.md", "title": "API Endpoints"},
+    {"path": "auth/oauth.md", "title": "OAuth Flow"},
+    {"path": "errors.md"}
+  ]
+}
+```
+
+This creates:
+- `docs/api/endpoints.md` with heading "API Endpoints"
+- `docs/api/auth/oauth.md` with heading "OAuth Flow"
+- `docs/api/errors.md` with auto-generated heading "Errors"
+
+### Output
+
+Returns JSON with `files_created`, `files_updated`, and `hints` arrays. Files that already exist are reported as updated rather than created.
+
 ## Completion Criteria
 
 Do not mark generation complete until:
