@@ -480,11 +480,24 @@ pub(crate) trait ConfigEntity: Serialize + DeserializeOwned {
     fn validate(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Returns the entity's aliases. Override to support alias-based lookup.
+    fn aliases(&self) -> &[String] {
+        &[]
+    }
 }
 
 pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
     let path = T::config_path(id)?;
     if !path.exists() {
+        // Try alias resolution before giving up
+        if let Some(real_id) = resolve_alias::<T>(id) {
+            let alias_path = T::config_path(&real_id)?;
+            let content = local_files::local().read(&alias_path)?;
+            let mut entity: T = from_str(&content)?;
+            entity.set_id(real_id);
+            return Ok(entity);
+        }
         let suggestions = find_similar_ids::<T>(id);
         return Err(T::not_found_error(id.to_string(), suggestions));
     }
@@ -492,6 +505,20 @@ pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
     let mut entity: T = from_str(&content)?;
     entity.set_id(id.to_string());
     Ok(entity)
+}
+
+/// Resolve an alias to the real entity ID by scanning all entities.
+fn resolve_alias<T: ConfigEntity>(alias: &str) -> Option<String> {
+    let alias_lower = alias.to_lowercase();
+    let entities = list::<T>().ok()?;
+    for entity in &entities {
+        for a in entity.aliases() {
+            if a.to_lowercase() == alias_lower {
+                return Some(entity.id().to_string());
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
@@ -559,6 +586,43 @@ fn check_id_collision(id: &str, saving_type: &str) -> Result<()> {
             }
         }
     }
+
+    // Check if the ID collides with any existing alias
+    check_alias_collision_all(id, saving_type)?;
+
+    Ok(())
+}
+
+/// Check if a given ID or alias collides with any existing entity's aliases.
+fn check_alias_collision_all(id: &str, saving_type: &str) -> Result<()> {
+    let id_lower = id.to_lowercase();
+
+    // Helper macro to avoid repeating for each entity type
+    fn check_aliases_in<T: ConfigEntity>(id_lower: &str, saving_type: &str) -> Result<()> {
+        if T::ENTITY_TYPE == saving_type {
+            return Ok(());
+        }
+        if let Ok(entities) = list::<T>() {
+            for entity in &entities {
+                for alias in entity.aliases() {
+                    if alias.to_lowercase() == *id_lower {
+                        return Err(Error::config(format!(
+                            "ID '{}' conflicts with an alias on {} '{}'",
+                            id_lower,
+                            T::ENTITY_TYPE,
+                            entity.id()
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    check_aliases_in::<crate::project::Project>(&id_lower, saving_type)?;
+    check_aliases_in::<crate::server::Server>(&id_lower, saving_type)?;
+    check_aliases_in::<crate::component::Component>(&id_lower, saving_type)?;
+
     Ok(())
 }
 
@@ -969,33 +1033,50 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// Uses prefix matching, suffix matching, and Levenshtein distance.
 /// Returns up to 3 matches prioritized by match quality.
 pub(crate) fn find_similar_ids<T: ConfigEntity>(target: &str) -> Vec<String> {
-    let existing = match list_ids::<T>() {
-        Ok(ids) => ids,
+    let entities = match list::<T>() {
+        Ok(e) => e,
         Err(_) => return vec![],
     };
 
     let target_lower = target.to_lowercase();
     let mut matches: Vec<(String, usize)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
-    for id in existing {
-        let id_lower = id.to_lowercase();
+    for entity in &entities {
+        let id = entity.id().to_string();
+        // Collect the ID and all aliases as candidates
+        let mut candidates = vec![id.clone()];
+        candidates.extend(entity.aliases().iter().cloned());
 
-        // Priority 0: Prefix match (target is prefix of existing)
-        if id_lower.starts_with(&target_lower) && id_lower != target_lower {
-            matches.push((id, 0));
-            continue;
-        }
+        for candidate in &candidates {
+            let candidate_lower = candidate.to_lowercase();
 
-        // Priority 1: Suffix match (target is suffix of existing)
-        if id_lower.ends_with(&target_lower) {
-            matches.push((id, 1));
-            continue;
-        }
+            let priority = if candidate_lower.starts_with(&target_lower)
+                && candidate_lower != target_lower
+            {
+                Some(0) // Prefix match
+            } else if candidate_lower.ends_with(&target_lower) {
+                Some(1) // Suffix match
+            } else {
+                let dist = levenshtein(&target_lower, &candidate_lower);
+                if dist <= 3 && dist > 0 {
+                    Some(dist + 10) // Fuzzy match
+                } else {
+                    None
+                }
+            };
 
-        // Priority 2: Levenshtein distance <= 3
-        let dist = levenshtein(&target_lower, &id_lower);
-        if dist <= 3 && dist > 0 {
-            matches.push((id, dist + 10)); // Offset to sort after prefix/suffix
+            if let Some(p) = priority {
+                // Show the real ID (with alias hint if matched via alias)
+                let display = if candidate != &id {
+                    format!("{} (alias: {})", id, candidate)
+                } else {
+                    id.clone()
+                };
+                if seen.insert(display.clone()) {
+                    matches.push((display, p));
+                }
+            }
         }
     }
 

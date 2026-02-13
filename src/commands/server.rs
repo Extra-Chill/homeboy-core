@@ -174,6 +174,7 @@ pub fn run(
 
                 let new_server = server::Server {
                     id,
+                    aliases: Vec::new(),
                     host,
                     user,
                     port: port.unwrap_or(22),

@@ -13,6 +13,8 @@ use std::process::Command;
 pub struct Server {
     #[serde(skip_deserializing, default)]
     pub id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     pub host: String,
     pub user: String,
     #[serde(default = "default_port")]
@@ -51,6 +53,9 @@ impl ConfigEntity for Server {
     }
     fn not_found_error(id: String, suggestions: Vec<String>) -> Error {
         Error::server_not_found(id, suggestions)
+    }
+    fn aliases(&self) -> &[String] {
+        &self.aliases
     }
 }
 

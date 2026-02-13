@@ -24,6 +24,9 @@ pub struct Project {
     #[serde(skip)]
     pub id: String,
 
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
 
@@ -103,6 +106,9 @@ impl ConfigEntity for Project {
             }
         }
         Ok(())
+    }
+    fn aliases(&self) -> &[String] {
+        &self.aliases
     }
 }
 
