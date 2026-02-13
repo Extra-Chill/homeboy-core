@@ -4,6 +4,19 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.42.0] - 2026-02-13
+
+### Added
+- support aliases for components, projects, and servers
+- add transfer command for server-to-server file transfer (#67)
+- add file download command (SCP remote-to-local)
+- add class name detection to audit, fix scaffold false positives, document generate spec
+
+### Fixed
+- use non-existent path in docs audit test
+- expand {{module_path}} in project CLI command templates
+- clarify local file permissions message with path and modes
+
 ## [0.41.2] - 2026-02-10
 
 ### Added
