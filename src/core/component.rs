@@ -61,6 +61,8 @@ pub struct ScopedModuleConfig {
 pub struct Component {
     #[serde(skip_deserializing)]
     pub id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     pub local_path: String,
     pub remote_path: String,
     #[serde(
@@ -102,6 +104,7 @@ impl Component {
     ) -> Self {
         Self {
             id,
+            aliases: Vec::new(),
             local_path,
             remote_path,
             build_artifact,
@@ -140,6 +143,9 @@ impl ConfigEntity for Component {
     }
     fn not_found_error(id: String, suggestions: Vec<String>) -> Error {
         Error::component_not_found(id, suggestions)
+    }
+    fn aliases(&self) -> &[String] {
+        &self.aliases
     }
 }
 
