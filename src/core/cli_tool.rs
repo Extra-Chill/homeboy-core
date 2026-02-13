@@ -246,12 +246,14 @@ fn build_project_command(
         }
     }
 
-    // Auto-inject --allow-root when SSH user is root
-    if let Some(ref server_id) = project.server_id {
-        if !server_id.is_empty() {
-            if let Ok(svr) = server::load(server_id) {
-                if svr.user == "root" {
-                    rendered.push_str(" --allow-root");
+    // Auto-inject --allow-root when SSH user is root (WP-CLI only)
+    if module_id == "wordpress" {
+        if let Some(ref server_id) = project.server_id {
+            if !server_id.is_empty() {
+                if let Ok(svr) = server::load(server_id) {
+                    if svr.user == "root" {
+                        rendered.push_str(" --allow-root");
+                    }
                 }
             }
         }
