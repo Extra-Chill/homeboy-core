@@ -219,6 +219,15 @@ fn build_project_command(
     variables.insert(TemplateVars::SITE_PATH.to_string(), base_path);
     variables.insert(TemplateVars::CLI_PATH.to_string(), cli_path);
 
+    // Add module_path so {{module_path}} resolves in command templates
+    let module_dir = crate::module::module_path(module_id);
+    if module_dir.exists() {
+        variables.insert(
+            TemplateVars::MODULE_PATH.to_string(),
+            module_dir.to_string_lossy().to_string(),
+        );
+    }
+
     let mut rendered = render_map(&cli_config.command_template, &variables);
 
     // Append settings-based flags from module config

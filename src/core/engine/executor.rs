@@ -203,6 +203,12 @@ fn parse_direct_template(
         .unwrap_or_else(|| cli_config.tool.clone());
     template = template.replace("{{cliPath}}", &cli_path);
 
+    // Expand {{module_path}}
+    let module_dir = crate::module::module_path(module_id);
+    if module_dir.exists() {
+        template = template.replace("{{module_path}}", &module_dir.to_string_lossy());
+    }
+
     // Expand {{domain}} in --url={{domain}}
     template = template.replace("--url={{domain}}", &format!("--url={}", target_domain));
 
