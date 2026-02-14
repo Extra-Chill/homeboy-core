@@ -90,6 +90,23 @@ enum FleetCommand {
         #[arg(long)]
         outdated: bool,
     },
+    /// Sync OpenClaw agent configurations across fleet servers
+    Sync {
+        /// Fleet ID
+        id: String,
+
+        /// Sync only specific categories (repeatable)
+        #[arg(long, short = 'c', value_delimiter = ',')]
+        category: Option<Vec<String>>,
+
+        /// Show what would be synced without doing it
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Override leader server (defaults to fleet-sync.json config)
+        #[arg(long)]
+        leader: Option<String>,
+    },
 }
 
 #[derive(Default, Serialize)]
@@ -113,6 +130,8 @@ pub struct FleetOutput {
     pub summary: Option<FleetCheckSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub updated_fields: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync: Option<fleet::FleetSyncResult>,
 }
 
 #[derive(Default, Serialize)]
@@ -161,10 +180,7 @@ pub struct FleetComponentStatus {
     pub version: Option<String>,
 }
 
-pub fn run(
-    args: FleetArgs,
-    _global: &super::GlobalArgs,
-) -> CmdResult<FleetOutput> {
+pub fn run(args: FleetArgs, _global: &super::GlobalArgs) -> CmdResult<FleetOutput> {
     match args.command {
         FleetCommand::Create {
             id,
@@ -181,6 +197,12 @@ pub fn run(
         FleetCommand::Components { id } => components(&id),
         FleetCommand::Status { id } => status(&id),
         FleetCommand::Check { id, outdated } => check(&id, outdated),
+        FleetCommand::Sync {
+            id,
+            category,
+            dry_run,
+            leader,
+        } => sync(&id, category, dry_run, leader),
     }
 }
 
@@ -199,9 +221,8 @@ fn create(
     let mut new_fleet = Fleet::new(id.to_string(), project_ids);
     new_fleet.description = description;
 
-    let json_spec = serde_json::to_string(&new_fleet).map_err(|e| {
-        homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-    })?;
+    let json_spec = serde_json::to_string(&new_fleet)
+        .map_err(|e| homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e)))?;
 
     match fleet::create(&json_spec, false)? {
         homeboy::CreateOutput::Single(result) => Ok((
@@ -489,6 +510,31 @@ fn check(id: &str, only_outdated: bool) -> CmdResult<FleetOutput> {
             fleet_id: Some(id.to_string()),
             check: Some(project_checks),
             summary: Some(summary),
+            ..Default::default()
+        },
+        exit_code,
+    ))
+}
+
+fn sync(
+    id: &str,
+    categories: Option<Vec<String>>,
+    dry_run: bool,
+    leader_override: Option<String>,
+) -> CmdResult<FleetOutput> {
+    let result = fleet::sync(id, categories, dry_run, leader_override)?;
+
+    let exit_code = if result.summary.projects_failed > 0 {
+        1
+    } else {
+        0
+    };
+
+    Ok((
+        FleetOutput {
+            command: "fleet.sync".to_string(),
+            fleet_id: Some(id.to_string()),
+            sync: Some(result),
             ..Default::default()
         },
         exit_code,
