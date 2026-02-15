@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.44.3] - 2026-02-15
+
+### Fixed
+- version bump: run pre_version_bump_commands after bump to keep generated artifacts (e.g. Cargo.lock) in the release commit
+- deploy: upload to temp file + atomic mv to avoid scp 'Text file busy' when replacing running binaries
+
 ## [0.44.2] - 2026-02-15
 
 ### Fixed
