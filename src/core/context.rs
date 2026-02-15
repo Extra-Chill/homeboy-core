@@ -115,12 +115,14 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             let comp_canon = PathBuf::from(&component_match.local_path).canonicalize().ok();
 
             if git_canon.is_some() && comp_canon.is_some() && git_canon != comp_canon {
+                // JSON-escape just enough for typical paths (quotes + backslashes).
+                let json_path = git_root_str.replace('\\', "\\\\").replace('"', "\\\"");
                 Some(format!(
-                    "This looks like component '{}' but local_path is set to '{}'. To relink: homeboy component set {} --json '{{\"local_path\":\"{}\"}}'",
+                    "This looks like component '{}' but local_path is set to '{}'. To relink: homeboy component set {} --json '{{\"local_path\":\"{}\"}}' (edit JSON if your path contains unusual characters)",
                     component_match.id,
                     component_match.local_path,
                     component_match.id,
-                    git_root_str
+                    json_path
                 ))
             } else {
                 Some(format!(

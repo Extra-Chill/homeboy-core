@@ -147,7 +147,7 @@ fn default_binary_config() -> InstallMethodConfig {
     InstallMethodConfig {
         // Matches typical install locations. We intentionally key off "/bin/homeboy" so both
         // /usr/local/bin/homeboy and ~/bin/homeboy are detected.
-        path_patterns: vec!["/bin/homeboy".to_string(), "\\homeboy.exe".to_string()],
+        path_patterns: vec!["/bin/homeboy".to_string(), "homeboy.exe".to_string()],
         upgrade_command: r#"set -e
 
 BIN_PATH="$(command -v homeboy)"
@@ -198,7 +198,23 @@ if [ ! -f "homeboy" ]; then
   exit 1
 fi
 
-install -m 0755 homeboy "$BIN_PATH"
+# Install with permission-aware behavior
+if [ -w "$BIN_PATH" ] || [ -w "$(dirname "$BIN_PATH")" ]; then
+  install -m 0755 homeboy "$BIN_PATH"
+else
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo -n true >/dev/null 2>&1; then
+      sudo install -m 0755 homeboy "$BIN_PATH"
+    else
+      echo "Insufficient permissions to write to $BIN_PATH. Re-run with sudo:" >&2
+      echo "  sudo homeboy upgrade --method binary" >&2
+      exit 1
+    fi
+  else
+    echo "Insufficient permissions to write to $BIN_PATH (and sudo not found)." >&2
+    exit 1
+  fi
+fi
 "#.to_string(),
         list_command: None,
     }
