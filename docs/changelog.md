@@ -4,6 +4,19 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.45.0] - 2026-02-16
+
+### Added
+- Module flag for component create and set (--module)
+- Auto-detect module from component context in homeboy test
+
+### Removed
+- Fleet sync command deprecated — use homeboy deploy instead
+- 800+ lines of hardcoded OpenClaw-specific sync logic removed from core
+
+### Fixed
+- docs_audit absolute path verification bug — Path::join with absolute paths bypassed source tree check
+
 ## [0.44.4] - 2026-02-16
 
 ### Fixed
