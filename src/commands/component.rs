@@ -54,6 +54,9 @@ enum ComponentCommand {
         /// Path to changelog file relative to localPath
         #[arg(long)]
         changelog_target: Option<String>,
+        /// Module(s) this component uses (e.g., "wordpress"). Repeatable.
+        #[arg(long = "module", value_name = "MODULE")]
+        modules: Vec<String>,
     },
     /// Display component configuration
     Show {
@@ -73,6 +76,10 @@ enum ComponentCommand {
         /// Same format as `component create --version-target`.
         #[arg(long = "version-target", value_name = "TARGET")]
         version_targets: Vec<String>,
+
+        /// Module(s) this component uses (e.g., "wordpress"). Repeatable.
+        #[arg(long = "module", value_name = "MODULE")]
+        modules: Vec<String>,
     },
     /// Delete a component configuration
     Delete {
@@ -146,6 +153,7 @@ pub fn run(
             build_command,
             extract_command,
             changelog_target,
+            modules,
         } => {
             let json_spec = if let Some(spec) = json {
                 spec
@@ -198,6 +206,14 @@ pub fn run(
                 new_component.extract_command = extract_command;
                 new_component.changelog_target = changelog_target;
 
+                if !modules.is_empty() {
+                    let mut module_map = std::collections::HashMap::new();
+                    for module_id in modules {
+                        module_map.insert(module_id, component::ScopedModuleConfig::default());
+                    }
+                    new_component.modules = Some(module_map);
+                }
+
                 serde_json::to_string(&new_component).map_err(|e| {
                     homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
                 })?
@@ -231,7 +247,8 @@ pub fn run(
         ComponentCommand::Set {
             args,
             version_targets,
-        } => set(args, version_targets),
+            modules,
+        } => set(args, version_targets, modules),
         ComponentCommand::Delete { id } => delete(&id),
         ComponentCommand::Rename { id, new_id } => rename(&id, &new_id),
         ComponentCommand::List => list(),
@@ -257,20 +274,24 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
     ))
 }
 
-fn set(args: DynamicSetArgs, version_targets: Vec<String>) -> CmdResult<ComponentOutput> {
+fn set(args: DynamicSetArgs, version_targets: Vec<String>, modules: Vec<String>) -> CmdResult<ComponentOutput> {
     // Merge JSON sources: positional/--json/--base64 spec + dynamic flags
     let spec = args.json_spec()?;
-    let has_input = spec.is_some() || !args.extra.is_empty();
+    let has_input = spec.is_some() || !args.extra.is_empty() || !version_targets.is_empty() || !modules.is_empty();
     if !has_input {
         return Err(homeboy::Error::validation_invalid_argument(
             "spec",
-            "Provide JSON spec, --json flag, --base64 flag, or --key value flags",
+            "Provide JSON spec, --json flag, --base64 flag, --key value flags, --version-target, or --module",
             None,
             None,
         ));
     }
 
-    let mut merged = super::merge_json_sources(spec.as_deref(), &args.extra)?;
+    let mut merged = if spec.is_some() || !args.extra.is_empty() {
+        super::merge_json_sources(spec.as_deref(), &args.extra)?
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
+    };
 
     // Support --version-target flag like `component create`.
     // If provided, it replaces any existing version_targets value in the merged spec.
@@ -285,6 +306,17 @@ fn set(args: DynamicSetArgs, version_targets: Vec<String>) -> CmdResult<Componen
                 None,
                 None,
             ));
+        }
+    }
+
+    // Support --module flag. Builds modules map with default empty configs.
+    if !modules.is_empty() {
+        let mut module_map = serde_json::Map::new();
+        for module_id in &modules {
+            module_map.insert(module_id.clone(), serde_json::json!({}));
+        }
+        if let serde_json::Value::Object(ref mut obj) = merged {
+            obj.insert("modules".to_string(), serde_json::Value::Object(module_map));
         }
     }
 
