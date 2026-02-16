@@ -185,6 +185,17 @@ homeboy fleet check production
 
 See [fleet](fleet.md) for fleet management commands.
 
+### Fleet vs Shared: When to Use Which
+
+`--fleet` and `--shared` often produce the same result, especially in smaller setups where a fleet's projects are exactly the set of projects that use a given component. The difference is in **how they resolve targets**:
+
+- **`--fleet <name>`** targets a **named group of projects**. The fleet is an explicit list you maintain. Use this when you want organizational control — e.g., deploying only to "production" projects, or deploying a component to a fleet even if not every project in it uses that component yet.
+- **`--shared`** targets **every project that has the component configured**. It auto-detects from project configs. Use this when you want to update a component everywhere it's used, regardless of fleet membership.
+
+**Rule of thumb:** Use `--shared` for "update this component everywhere." Use `--fleet` for "update this fleet specifically."
+
+In practice, if your fleet membership mirrors your component usage, they're interchangeable — but as your fleet grows (staging vs production, multi-site networks), the distinction becomes meaningful.
+
 ## Shared Component Deployment
 
 Deploy to all projects using a component, auto-detected:
