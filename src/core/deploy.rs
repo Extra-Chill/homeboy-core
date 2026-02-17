@@ -1235,16 +1235,16 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
         let is_git_deploy = loaded.deploy_strategy.as_deref() == Some("git");
 
         match effective_artifact {
-            Some(artifact) => {
+            Some(artifact) if !is_git_deploy => {
                 let resolved_artifact = parser::resolve_path_string(&loaded.local_path, &artifact);
                 loaded.build_artifact = Some(resolved_artifact);
                 components.push(loaded);
             }
-            None if is_git_deploy => {
+            _ if is_git_deploy => {
                 // Git-deploy components are deployable without an artifact
                 components.push(loaded);
             }
-            None => {
+            Some(_) | None => {
                 // Skip - component is intentionally non-deployable
                 eprintln!(
                     "[deploy] Skipping '{}': no artifact configured (non-deployable component)",
