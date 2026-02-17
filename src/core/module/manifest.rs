@@ -89,6 +89,11 @@ pub struct ModuleManifest {
     /// Uses `*` for single segment and `**` for multiple segments (e.g., `/wp-json/**`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub audit_ignore_claim_patterns: Vec<String>,
+    /// Regex patterns to detect feature registrations in source code.
+    /// Each pattern should have a capture group for the feature name.
+    /// Example: `registerStepType\(\s*['"](\w+)['"]` captures step type names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit_feature_patterns: Vec<String>,
 
     // Executable tools (from former modules)
     #[serde(skip_serializing_if = "Option::is_none")]

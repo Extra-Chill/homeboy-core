@@ -18,6 +18,8 @@ pub use claims::{Claim, ClaimType};
 pub use tasks::{AuditTask, AuditTaskStatus};
 pub use verify::VerifyResult;
 
+use regex::Regex;
+
 use crate::{component, git, module, Result};
 
 /// A doc that needs content review due to referenced files changing.
@@ -28,6 +30,15 @@ pub struct PriorityDoc {
     pub changed_files_referenced: Vec<String>,
     pub code_examples: usize,
     pub action: String,
+}
+
+/// A feature found in source code with no mention in documentation.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UndocumentedFeature {
+    pub name: String,
+    pub source_file: String,
+    pub line: usize,
+    pub pattern: String,
 }
 
 /// A broken reference that needs fixing.
@@ -46,6 +57,7 @@ pub struct AlignmentSummary {
     pub priority_docs: usize,
     pub broken_references: usize,
     pub unchanged_docs: usize,
+    pub undocumented_features: usize,
 }
 
 /// Result of auditing a component's documentation for content alignment.
@@ -58,6 +70,7 @@ pub struct AuditResult {
     pub changed_files: Vec<String>,
     pub priority_docs: Vec<PriorityDoc>,
     pub broken_references: Vec<BrokenReference>,
+    pub undocumented_features: Vec<UndocumentedFeature>,
 }
 
 /// Audit a component's documentation and return an alignment report.
@@ -71,6 +84,9 @@ pub fn audit_component(component_id: &str) -> Result<AuditResult> {
 
     // Collect ignore patterns from all linked modules
     let ignore_patterns = collect_module_ignore_patterns(&comp);
+
+    // Collect feature patterns from all linked modules
+    let feature_patterns = collect_module_feature_patterns(&comp);
 
     // Find all documentation files (excluding changelog)
     let doc_files = find_doc_files(&docs_path, changelog_exclude);
@@ -101,6 +117,15 @@ pub fn audit_component(component_id: &str) -> Result<AuditResult> {
     let priority_docs = build_priority_docs(&tasks, &changed_files);
     let broken_references = extract_broken_references(&tasks);
 
+    // Detect undocumented features in changed source files
+    let undocumented_features = detect_undocumented_features(
+        &feature_patterns,
+        &changed_files,
+        source_path,
+        &docs_path,
+        changelog_exclude,
+    );
+
     // Calculate unchanged docs (docs with no priority items and no broken refs)
     let docs_with_issues: HashSet<_> = priority_docs
         .iter()
@@ -117,10 +142,12 @@ pub fn audit_component(component_id: &str) -> Result<AuditResult> {
             priority_docs: priority_docs.len(),
             broken_references: broken_references.len(),
             unchanged_docs,
+            undocumented_features: undocumented_features.len(),
         },
         changed_files,
         priority_docs,
         broken_references,
+        undocumented_features,
     })
 }
 
@@ -332,6 +359,85 @@ fn extract_broken_references(tasks: &[AuditTask]) -> Vec<BrokenReference> {
                 .unwrap_or_else(|| "Fix broken reference".to_string()),
         })
         .collect()
+}
+
+/// Collect feature detection patterns from all linked modules.
+fn collect_module_feature_patterns(comp: &component::Component) -> Vec<String> {
+    let mut patterns = Vec::new();
+    if let Some(ref modules) = comp.modules {
+        for module_id in modules.keys() {
+            if let Ok(manifest) = module::load_module(module_id) {
+                patterns.extend(manifest.audit_feature_patterns.clone());
+            }
+        }
+    }
+    patterns
+}
+
+/// Detect features in changed source files that have no mentions in documentation.
+fn detect_undocumented_features(
+    feature_patterns: &[String],
+    changed_files: &[String],
+    source_path: &Path,
+    docs_path: &Path,
+    changelog_exclude: Option<&str>,
+) -> Vec<UndocumentedFeature> {
+    if feature_patterns.is_empty() {
+        return Vec::new();
+    }
+
+    // Compile regexes once
+    let compiled: Vec<(Regex, String)> = feature_patterns
+        .iter()
+        .filter_map(|p| Regex::new(p).ok().map(|r| (r, p.clone())))
+        .collect();
+
+    if compiled.is_empty() {
+        return Vec::new();
+    }
+
+    // Collect all doc content for searching
+    let doc_files = find_doc_files(docs_path, changelog_exclude);
+    let all_doc_content: String = doc_files
+        .iter()
+        .filter_map(|f| fs::read_to_string(docs_path.join(f)).ok())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut undocumented = Vec::new();
+
+    for file in changed_files {
+        // Skip markdown files
+        if file.ends_with(".md") {
+            continue;
+        }
+
+        let file_path = source_path.join(file);
+        let content = match fs::read_to_string(&file_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for (regex, pattern) in &compiled {
+            for (line_idx, line) in content.lines().enumerate() {
+                for caps in regex.captures_iter(line) {
+                    if let Some(name_match) = caps.get(1) {
+                        let name = name_match.as_str().to_string();
+                        if !all_doc_content.contains(&name) {
+                            undocumented.push(UndocumentedFeature {
+                                name,
+                                source_file: file.clone(),
+                                line: line_idx + 1,
+                                pattern: pattern.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    undocumented
 }
 
 /// Collect audit ignore patterns from all linked modules.
@@ -553,6 +659,74 @@ index 111222..333444 100644
         assert_eq!(priority[0].changed_files_referenced.len(), 2);
         assert_eq!(priority[1].doc, "doc_one.md");
         assert_eq!(priority[1].changed_files_referenced.len(), 1);
+    }
+
+    #[test]
+    fn test_detect_undocumented_features_finds_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path();
+        let docs_path = source_path.join("docs");
+        fs::create_dir_all(&docs_path).unwrap();
+
+        // Create a source file with a feature registration
+        fs::write(
+            source_path.join("plugin.js"),
+            "registerStepType('coolStep', handler);\nregisterStepType('docStep', handler);\n",
+        )
+        .unwrap();
+
+        // Create a doc file that mentions docStep but not coolStep
+        fs::write(docs_path.join("guide.md"), "Use the docStep to do things.\n").unwrap();
+
+        let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
+        let changed_files = vec!["plugin.js".to_string()];
+
+        let result = detect_undocumented_features(&patterns, &changed_files, source_path, &docs_path, None);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "coolStep");
+        assert_eq!(result[0].source_file, "plugin.js");
+        assert_eq!(result[0].line, 1);
+    }
+
+    #[test]
+    fn test_detect_undocumented_features_empty_when_no_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = detect_undocumented_features(&[], &["file.rs".to_string()], dir.path(), &dir.path().join("docs"), None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_detect_undocumented_features_skips_md_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path();
+        let docs_path = source_path.join("docs");
+        fs::create_dir_all(&docs_path).unwrap();
+
+        fs::write(source_path.join("notes.md"), "registerStepType('hidden', h);\n").unwrap();
+
+        let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
+        let changed_files = vec!["notes.md".to_string()];
+
+        let result = detect_undocumented_features(&patterns, &changed_files, source_path, &docs_path, None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_detect_undocumented_features_all_documented() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path();
+        let docs_path = source_path.join("docs");
+        fs::create_dir_all(&docs_path).unwrap();
+
+        fs::write(source_path.join("plugin.js"), "registerStepType('myStep', handler);\n").unwrap();
+        fs::write(docs_path.join("guide.md"), "The myStep feature does things.\n").unwrap();
+
+        let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
+        let changed_files = vec!["plugin.js".to_string()];
+
+        let result = detect_undocumented_features(&patterns, &changed_files, source_path, &docs_path, None);
+        assert!(result.is_empty());
     }
 
     #[test]
