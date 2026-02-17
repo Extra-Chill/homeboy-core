@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.45.2] - 2026-02-17
+
+### Fixed
+- fix: allow git-deploy components without build artifacts
+
 ## [0.45.1] - 2026-02-17
 
 ### Added
