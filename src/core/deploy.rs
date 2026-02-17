@@ -445,6 +445,8 @@ pub struct DeployConfig {
     pub force: bool,
     /// Skip build if artifact already exists (used by release --deploy)
     pub skip_build: bool,
+    /// Keep build dependencies (skip cleanup even when auto_cleanup is enabled)
+    pub keep_deps: bool,
 }
 
 /// Reason why a component was selected for deployment.
@@ -801,6 +803,13 @@ pub fn deploy_components(
             );
             match deploy_result {
                 Ok(DeployResult { success: true, exit_code, .. }) => {
+                    // Perform post-deploy cleanup of build dependencies
+                    if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
+                        if let Some(summary) = cleanup_summary {
+                            eprintln!("[deploy] Cleanup: {}", summary);
+                        }
+                    }
+                    
                     results.push(
                         ComponentDeployResult::new(component, base_path)
                             .with_status("deployed")
@@ -890,6 +899,13 @@ pub fn deploy_components(
                 exit_code,
                 ..
             }) => {
+                // Perform post-deploy cleanup of build dependencies
+                if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
+                    if let Some(summary) = cleanup_summary {
+                        eprintln!("[deploy] Cleanup: {}", summary);
+                    }
+                }
+                
                 results.push(
                     ComponentDeployResult::new(component, base_path)
                         .with_status("deployed")
@@ -940,6 +956,129 @@ pub fn deploy_components(
             skipped: 0,
         },
     })
+}
+
+// =============================================================================
+// Cleanup Functions
+// =============================================================================
+
+/// Clean up build dependencies from component's local_path after successful deploy.
+/// This is a best-effort operation - failures are logged but do not fail the deploy.
+fn cleanup_build_dependencies(component: &Component, config: &DeployConfig) -> Result<Option<String>> {
+    // Skip cleanup if disabled at component level
+    if !component.auto_cleanup {
+        return Ok(None);
+    }
+    
+    // Skip cleanup if --keep-deps flag is set
+    if config.keep_deps {
+        return Ok(Some("skipped (--keep-deps flag)".to_string()));
+    }
+    
+    // Collect cleanup paths from linked modules
+    let mut cleanup_paths = Vec::new();
+    if let Some(ref modules) = component.modules {
+        for module_id in modules.keys() {
+            if let Ok(manifest) = crate::module::load_module(module_id) {
+                if let Some(ref build) = manifest.build {
+                    cleanup_paths.extend(build.cleanup_paths.iter().cloned());
+                }
+            }
+        }
+    }
+    
+    if cleanup_paths.is_empty() {
+        return Ok(Some("skipped (no cleanup paths configured in modules)".to_string()));
+    }
+    
+    let local_path = Path::new(&component.local_path);
+    let mut cleaned_paths = Vec::new();
+    let mut total_bytes_freed = 0u64;
+    
+    for cleanup_path in &cleanup_paths {
+        let full_path = local_path.join(cleanup_path);
+        
+        if !full_path.exists() {
+            continue;
+        }
+        
+        // Calculate size before deletion
+        let size_before = if full_path.is_dir() {
+            calculate_directory_size(&full_path).unwrap_or(0)
+        } else {
+            full_path.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+        
+        // Attempt to remove the path
+        let cleanup_result = if full_path.is_dir() {
+            std::fs::remove_dir_all(&full_path)
+        } else {
+            std::fs::remove_file(&full_path)
+        };
+        
+        match cleanup_result {
+            Ok(()) => {
+                cleaned_paths.push(cleanup_path.clone());
+                total_bytes_freed += size_before;
+                eprintln!("[cleanup] Removed {} (freed {})", cleanup_path, format_bytes(size_before));
+            }
+            Err(e) => {
+                eprintln!("[cleanup] Warning: failed to remove {}: {}", cleanup_path, e);
+                // Don't return error - cleanup is best-effort
+            }
+        }
+    }
+    
+    if cleaned_paths.is_empty() {
+        Ok(Some("no paths needed cleanup".to_string()))
+    } else {
+        let summary = format!(
+            "cleaned {} path(s), freed {}",
+            cleaned_paths.len(),
+            format_bytes(total_bytes_freed)
+        );
+        Ok(Some(summary))
+    }
+}
+
+/// Calculate total size of a directory recursively.
+fn calculate_directory_size(path: &Path) -> std::io::Result<u64> {
+    let mut total_size = 0;
+    
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            
+            if entry_path.is_dir() {
+                total_size += calculate_directory_size(&entry_path)?;
+            } else {
+                total_size += entry.metadata()?.len();
+            }
+        }
+    } else {
+        total_size = path.metadata()?.len();
+    }
+    
+    Ok(total_size)
+}
+
+/// Format bytes into human-readable format.
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit_index = 0;
+    
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+    
+    if unit_index == 0 {
+        format!("{} {}", size as u64, UNITS[unit_index])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_index])
+    }
 }
 
 // =============================================================================

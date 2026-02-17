@@ -57,6 +57,10 @@ pub struct DeployArgs {
     /// Deploy to all projects using the specified component(s)
     #[arg(long, short = 's')]
     pub shared: bool,
+
+    /// Keep build dependencies (skip post-deploy cleanup)
+    #[arg(long)]
+    pub keep_deps: bool,
 }
 
 #[derive(Serialize)]
@@ -225,6 +229,7 @@ pub fn run(
         check: args.check,
         force: args.force,
         skip_build: false,
+        keep_deps: args.keep_deps,
     };
 
     let result = deploy::run(&project_id, &config).map_err(|e| {
@@ -314,6 +319,7 @@ fn run_multi_project(
             check: args.check,
             force: args.force,
             skip_build: !first_project, // Build only on first project
+            keep_deps: args.keep_deps,
         };
 
         match deploy::run(project_id, &config) {

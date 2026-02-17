@@ -237,6 +237,7 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
             check: false,
             force: false,
             skip_build: true,
+            keep_deps: false, // Release deploy doesn't support --keep-deps
         };
 
         match deploy::run(project_id, &config) {
