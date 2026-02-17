@@ -751,9 +751,9 @@ pub fn deploy_components(
         let local_version = local_versions.get(&component.id).cloned();
         let remote_version = remote_versions.get(&component.id).cloned();
 
-        // Build is mandatory before deploy UNLESS skip_build is set
-        let artifact_pattern = component.build_artifact.as_ref().unwrap();
-        let (build_exit_code, build_error) = if config.skip_build {
+        // Git-deploy components skip the build step entirely
+        let is_git_deploy = component.deploy_strategy.as_deref() == Some("git");
+        let (build_exit_code, build_error) = if is_git_deploy || config.skip_build {
             (Some(0), None)
         } else {
             build::build_component(component)
@@ -770,27 +770,6 @@ pub fn deploy_components(
             failed += 1;
             continue;
         }
-
-        // Resolve artifact path (supports glob patterns like dist/app-*.zip)
-        let artifact_path = match artifact::resolve_artifact_path(artifact_pattern) {
-            Ok(path) => path,
-            Err(e) => {
-                let error_msg = if config.skip_build {
-                    format!("{}. Release build may have failed.", e)
-                } else {
-                    format!("{}. Run build first: homeboy build {}", e, component.id)
-                };
-                results.push(
-                    ComponentDeployResult::new(component, base_path)
-                        .with_status("failed")
-                        .with_versions(local_version, remote_version)
-                        .with_error(error_msg)
-                        .with_build_exit_code(build_exit_code),
-                );
-                failed += 1;
-                continue;
-            }
-        };
 
         // Calculate install directory
         let install_dir = match base_path::join_remote_path(Some(base_path), &component.remote_path)
@@ -855,6 +834,28 @@ pub fn deploy_components(
             }
             continue;
         }
+
+        // Resolve artifact path (supports glob patterns like dist/app-*.zip)
+        let artifact_pattern = component.build_artifact.as_ref().unwrap();
+        let artifact_path = match artifact::resolve_artifact_path(artifact_pattern) {
+            Ok(path) => path,
+            Err(e) => {
+                let error_msg = if config.skip_build {
+                    format!("{}. Release build may have failed.", e)
+                } else {
+                    format!("{}. Run build first: homeboy build {}", e, component.id)
+                };
+                results.push(
+                    ComponentDeployResult::new(component, base_path)
+                        .with_status("failed")
+                        .with_versions(local_version, remote_version)
+                        .with_error(error_msg)
+                        .with_build_exit_code(build_exit_code),
+                );
+                failed += 1;
+                continue;
+            }
+        };
 
         // Look up verification from modules
         let verification = find_deploy_verification(&install_dir);
@@ -1091,19 +1092,28 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
         // Resolve effective artifact (component value OR module pattern)
         let effective_artifact = component::resolve_artifact(&loaded);
 
-        let Some(artifact) = effective_artifact else {
-            // Skip - component is intentionally non-deployable
-            eprintln!(
-                "[deploy] Skipping '{}': no artifact configured (non-deployable component)",
-                loaded.id
-            );
-            continue;
-        };
+        // Git-deploy components don't need a build artifact
+        let is_git_deploy = loaded.deploy_strategy.as_deref() == Some("git");
 
-        let resolved_artifact = parser::resolve_path_string(&loaded.local_path, &artifact);
-
-        loaded.build_artifact = Some(resolved_artifact);
-        components.push(loaded);
+        match effective_artifact {
+            Some(artifact) => {
+                let resolved_artifact = parser::resolve_path_string(&loaded.local_path, &artifact);
+                loaded.build_artifact = Some(resolved_artifact);
+                components.push(loaded);
+            }
+            None if is_git_deploy => {
+                // Git-deploy components are deployable without an artifact
+                components.push(loaded);
+            }
+            None => {
+                // Skip - component is intentionally non-deployable
+                eprintln!(
+                    "[deploy] Skipping '{}': no artifact configured (non-deployable component)",
+                    loaded.id
+                );
+                continue;
+            }
+        }
     }
 
     Ok(components)
