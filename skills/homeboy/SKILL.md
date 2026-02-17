@@ -107,8 +107,7 @@ homeboy deploy <component> --shared
 
 ```bash
 homeboy fleet create prod --projects site-a,site-b
-homeboy fleet status prod           # component usage across fleet
-homeboy fleet versions prod         # versions across fleet (local only)
+homeboy fleet status prod           # component versions across fleet (local only)
 homeboy fleet check prod            # drift detection (local vs remote)
 homeboy fleet add prod site-c
 homeboy fleet remove prod site-a
@@ -183,7 +182,7 @@ homeboy docs documentation/alignment     # keeping docs current
 
 ```bash
 homeboy module list [-p <project>]              # list available modules
-homeboy module info <module>                     # show module details
+homeboy module show <module>                     # show module details
 homeboy module run <module> [-p <project>] [-c <component>] [-i key=val]
 homeboy module setup <module>                    # run module setup
 homeboy module install <source> [--id <id>]      # install from git URL or local path
@@ -227,12 +226,12 @@ homeboy logs <project> clear <log-id>
 ### Database
 
 ```bash
-homeboy db <project> list                  # list tables
+homeboy db <project> tables                # list tables
 homeboy db <project> describe <table>      # table structure
-homeboy db <project> select <table>        # SELECT query
+homeboy db <project> query <table>         # SELECT query
 homeboy db <project> search <table> <col> <val>
-homeboy db <project> delete <table> <id>
-homeboy db <project> drop <table>
+homeboy db <project> delete-row <table> <id>
+homeboy db <project> drop-table <table>
 homeboy db <project> tunnel                # open SSH tunnel to DB
 ```
 
