@@ -101,6 +101,9 @@ pub struct Component {
     /// Git deploy configuration (used when deploy_strategy = "git")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_deploy: Option<GitDeployConfig>,
+    /// Enable post-deploy cleanup of build dependencies (default: false)
+    #[serde(default)]
+    pub auto_cleanup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -149,6 +152,7 @@ impl Component {
             extract_command: None,
             deploy_strategy: None,
             git_deploy: None,
+            auto_cleanup: false,
         }
     }
 }

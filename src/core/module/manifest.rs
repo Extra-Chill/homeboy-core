@@ -304,6 +304,9 @@ pub struct BuildConfig {
     /// Supports: {component_id}, {local_path}
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_pattern: Option<String>,
+    /// Paths to clean up after successful deploy (e.g., node_modules, vendor, target)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
