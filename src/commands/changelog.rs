@@ -23,6 +23,25 @@ pub enum ChangelogCommand {
     },
 
     /// Add changelog items to the configured "next" section
+    ///
+    /// Examples:
+    ///   homeboy changelog add my-plugin "Fixed login bug"
+    ///   homeboy changelog add my-plugin "Removed legacy API" --type Removed
+    ///   homeboy changelog add my-plugin -m "Added search" -m "Added filters"
+    #[command(after_long_help = "\
+EXAMPLES:
+  Add a simple entry:
+    homeboy changelog add my-plugin \"Fixed login bug\"
+
+  Add with a type (Added, Changed, Removed, Fixed, etc.):
+    homeboy changelog add my-plugin \"Removed legacy API\" --type Removed
+
+  Add multiple entries at once:
+    homeboy changelog add my-plugin -m \"Added search\" -m \"Added filters\"
+
+  Add with type and multiple messages:
+    homeboy changelog add my-plugin -m \"New auth flow\" -m \"New API keys\" --type Added
+")]
     Add {
         /// JSON input spec for batch operations.
         ///
