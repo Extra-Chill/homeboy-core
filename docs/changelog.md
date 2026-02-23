@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.47.0] - 2026-02-23
 
 ### Added
 - Add total_features and documented_features counts to docs audit summary for coverage reporting
