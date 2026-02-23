@@ -53,7 +53,7 @@ homeboy lint extrachill-api --setting some_option=value
 For a component to be lintable, it must have:
 
 - A module configured (e.g., `wordpress`)
-- The module must provide `scripts/lint-runner.sh`
+- The module must provide a lint-runner script (at scripts/lint-runner.sh within the module)
 
 ## Environment Variables
 

@@ -118,7 +118,7 @@ Secrets stored:
 
 ### Git Operations
 
-**Location:** `src/core/git.rs`
+**Location:** `src/core/git/`
 
 Git wrapper for:
 - Status checking
@@ -137,7 +137,7 @@ Semantic versioning:
 
 ### Changelog Management
 
-**Location:** `src/core/changelog.rs`
+**Location:** `src/core/changelog/`
 
 Changelog operations:
 - Add entries

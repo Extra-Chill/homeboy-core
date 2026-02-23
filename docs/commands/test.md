@@ -14,7 +14,7 @@ The `test` command executes test suites for specified Homeboy components. It aut
 
 ## Arguments
 
-- `<component>`: Name of the component/module to test (must exist in `homeboy-modules/`)
+- `<component>`: Name of the component to test (must have a module configured)
 
 ## Options
 
@@ -55,9 +55,9 @@ Supported arguments depend on the underlying test framework.
 
 For a component to be testable, it must have:
 
-- A directory in `homeboy-modules/{component}/`
-- A `{component}.json` manifest file
-- A `scripts/test-runner.sh` executable script
+- A linked module with test support
+- A manifest file for the module (e.g., wordpress.json)
+- A test-runner script provided by the module (at scripts/test-runner.sh within the module)
 
 ## Supported Components
 

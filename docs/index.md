@@ -66,13 +66,13 @@ Configuration and state live under universal directory `~/.config/homeboy/` (all
 
 Common paths:
 
-- `projects/`
-- `servers/`
-- `components/`
-- `fleets/`
-- `modules/`
-- `keys/`
-- `backups/`
+- ~/.config/homeboy/projects/
+- ~/.config/homeboy/servers/
+- ~/.config/homeboy/components/
+- ~/.config/homeboy/fleets/
+- ~/.config/homeboy/modules/
+- ~/.config/homeboy/keys/
+- ~/.config/homeboy/backups/
 
 Notes:
 

@@ -1,6 +1,6 @@
 # Config Directory Structure
 
-> **Important:** Homeboy uses centralized configuration only. There is no repo-local config file (no `.homeboy.toml` or `.homeboy/` directory). All configuration lives in `~/.config/homeboy/`.
+> **Important:** Homeboy uses centralized configuration only. There is no repo-local config file (no .homeboy.toml or .homeboy directory). All configuration lives in `~/.config/homeboy/`.
 
 Homeboy stores all configuration in a universal directory location across operating systems.
 
@@ -63,7 +63,7 @@ Typically: `C:\Users\<username>\AppData\Roaming\homeboy\`
 
 ### Global App Configuration
 
-**File:** `homeboy/homeboy.json`
+**File:** `~/.config/homeboy/homeboy.json`
 
 Contains global Homeboy settings. Created automatically on first run with defaults.
 
@@ -76,11 +76,11 @@ Contains global Homeboy settings. Created automatically on first run with defaul
 
 ### Project Configurations
 
-**Directory:** `projects/`
+**Directory:** `~/.config/homeboy/projects/`
 
 Each project is a separate JSON file named after the project ID.
 
-**Example:** `projects/extrachill.json`
+**Example:** `~/.config/homeboy/projects/extrachill.json`
 
 ```json
 {
@@ -94,11 +94,11 @@ Each project is a separate JSON file named after the project ID.
 
 ### Server Configurations
 
-**Directory:** `servers/`
+**Directory:** `~/.config/homeboy/servers/`
 
 Each server is a separate JSON file named after the server ID.
 
-**Example:** `servers/production.json`
+**Example:** `~/.config/homeboy/servers/production.json`
 
 ```json
 {
@@ -111,11 +111,11 @@ Each server is a separate JSON file named after the server ID.
 
 ### Component Configurations
 
-**Directory:** `components/`
+**Directory:** `~/.config/homeboy/components/`
 
 Each component is a separate JSON file named after the component ID.
 
-**Example:** `components/theme.json`
+**Example:** `~/.config/homeboy/components/theme.json`
 
 ```json
 {
@@ -127,11 +127,11 @@ Each component is a separate JSON file named after the component ID.
 
 ### Fleet Configurations
 
-**Directory:** `fleets/`
+**Directory:** `~/.config/homeboy/fleets/`
 
 Each fleet is a separate JSON file named after the fleet ID. Fleets group projects for coordinated operations.
 
-**Example:** `fleets/production.json`
+**Example:** `~/.config/homeboy/fleets/production.json`
 
 ```json
 {
@@ -143,14 +143,14 @@ Each fleet is a separate JSON file named after the fleet ID. Fleets group projec
 
 ### Module Directory
 
-**Directory:** `modules/`
+**Directory:** `~/.config/homeboy/modules/`
 
 Each module is a subdirectory containing:
 - Module manifest: `<module_id>/<module_id>.json`
 - Module documentation: `<module_id>/docs/`
 - Module files: `<module_id>/` (executables, scripts, etc.)
 
-**Example:** `modules/wordpress/wordpress.json`
+**Example:** `~/.config/homeboy/modules/wordpress/wordpress.json`
 
 Modules are installed via:
 - Git clone (remote modules)
@@ -158,7 +158,7 @@ Modules are installed via:
 
 ### Keys Directory
 
-**Directory:** `keys/`
+**Directory:** `~/.config/homeboy/keys/`
 
 Stores SSH private keys managed by Homeboy (optional). Keys can be referenced via relative paths in server configurations.
 
@@ -166,7 +166,7 @@ Stores SSH private keys managed by Homeboy (optional). Keys can be referenced vi
 
 ### Backups Directory
 
-**Directory:** `backups/`
+**Directory:** `~/.config/homeboy/backups/`
 
 Configuration backups created by Homeboy (optional). Created before destructive operations.
 
@@ -180,13 +180,13 @@ Homeboy does not write to directories outside the config directory:
 ## Auto-creation
 
 Directories are created automatically when needed:
-- `homeboy/`: First run
-- `projects/`: First project created
-- `servers/`: First server created
-- `components/`: First component created
-- `modules/<module_id>/`: Module installed
-- `keys/`: Key referenced in server config
-- `backups/`: Backup created
+- homeboy/ — First run
+- projects/ — First project created
+- servers/ — First server created
+- components/ — First component created
+- modules/&lt;module_id&gt;/ — Module installed
+- keys/ — Key referenced in server config
+- backups/ — Backup created
 
 ## Manual Configuration Editing
 
@@ -216,7 +216,7 @@ Homeboy creates backups before:
 - Major schema updates (optional)
 - Bulk import operations
 
-Backups are stored in `backups/` with timestamps.
+Backups are stored in `~/.config/homeboy/backups/` with timestamps.
 
 ### Export Configurations
 
@@ -289,7 +289,7 @@ If Homeboy cannot find config directory:
 
 If configuration file is invalid:
 
-1. Restore from backup in `backups/`
+1. Restore from backup in `~/.config/homeboy/backups/`
 2. Or delete corrupt file and recreate via CLI commands
 
 ## Related

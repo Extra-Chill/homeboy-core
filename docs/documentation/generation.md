@@ -124,9 +124,9 @@ Where `spec.json` contains:
 ```
 
 This creates:
-- `docs/api/endpoints.md` with heading "API Endpoints"
-- `docs/api/auth/oauth.md` with heading "OAuth Flow"
-- `docs/api/errors.md` with auto-generated heading "Errors"
+- docs/api/endpoints.md with heading "API Endpoints"
+- docs/api/auth/oauth.md with heading "OAuth Flow"
+- docs/api/errors.md with auto-generated heading "Errors"
 
 ### Output
 

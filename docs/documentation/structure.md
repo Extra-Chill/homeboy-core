@@ -47,10 +47,10 @@ blocks/
 └── hooks.md               # Hook reference
 ```
 
-The pattern `{directory}/{directory}.md` serves as the natural entry point:
-- `api/api.md` — API module introduction
-- `cache/cache.md` — Cache system overview
-- `rest-api/rest-api.md` — REST API architecture
+The pattern {directory}/{directory}.md serves as the natural entry point:
+- api/api.md — API module introduction
+- cache/cache.md — Cache system overview
+- rest-api/rest-api.md — REST API architecture
 
 This is descriptive (tells you it's THE blocks doc) while serving as an obvious starting point for navigation.
 

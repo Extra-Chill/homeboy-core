@@ -1,6 +1,6 @@
 # `homeboy config`
 
-Manage global Homeboy configuration stored under the OS config directory as `homeboy/homeboy.json`.
+Manage global Homeboy configuration stored under the OS config directory as `~/.config/homeboy/homeboy.json`.
 
 ## Overview
 
