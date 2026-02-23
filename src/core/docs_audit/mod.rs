@@ -48,6 +48,9 @@ pub struct BrokenReference {
     pub line: usize,
     pub claim: String,
     pub confidence: ClaimConfidence,
+    /// Surrounding lines from the doc file for context (up to 3 lines around the reference).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_context: Option<Vec<String>>,
     pub action: String,
 }
 
@@ -107,13 +110,15 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
     let doc_files = find_doc_files(&docs_path, changelog_exclude);
     let docs_scanned = doc_files.len();
 
-    // Extract claims from all docs
+    // Extract claims from all docs (keep content for context extraction)
     let mut all_claims = Vec::new();
+    let mut doc_contents: HashMap<String, String> = HashMap::new();
     for doc_file in &doc_files {
         let doc_path = docs_path.join(doc_file);
         if let Ok(content) = fs::read_to_string(&doc_path) {
             let claims = claims::extract_claims(&content, doc_file, &ignore_patterns);
             all_claims.extend(claims);
+            doc_contents.insert(doc_file.clone(), content);
         }
     }
 
@@ -130,7 +135,7 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
 
     // Build doc-centric outputs
     let priority_docs = build_priority_docs(&tasks, &changed_files);
-    let broken_references = extract_broken_references(&tasks);
+    let broken_references = extract_broken_references(&tasks, &doc_contents);
 
     // Detect undocumented features across all source files (not just changed ones)
     let undocumented_features = detect_undocumented_features(
@@ -369,20 +374,60 @@ fn build_doc_action(changed_files: &[String], code_examples: usize) -> String {
 }
 
 /// Extract broken references from tasks into a separate list.
-fn extract_broken_references(tasks: &[AuditTask]) -> Vec<BrokenReference> {
+///
+/// Includes surrounding lines from the doc file for context when available.
+fn extract_broken_references(
+    tasks: &[AuditTask],
+    doc_contents: &HashMap<String, String>,
+) -> Vec<BrokenReference> {
     tasks
         .iter()
         .filter(|t| matches!(t.status, AuditTaskStatus::Broken))
-        .map(|t| BrokenReference {
-            doc: t.doc.clone(),
-            line: t.line,
-            claim: t.claim.clone(),
-            confidence: t.confidence.clone(),
-            action: t.action.clone().unwrap_or_else(|| {
-                "Stale reference. Update or remove from documentation.".to_string()
-            }),
+        .map(|t| {
+            let doc_context = extract_doc_context(doc_contents, &t.doc, t.line);
+            BrokenReference {
+                doc: t.doc.clone(),
+                line: t.line,
+                claim: t.claim.clone(),
+                confidence: t.confidence.clone(),
+                doc_context,
+                action: t.action.clone().unwrap_or_else(|| {
+                    "Stale reference. Update or remove from documentation.".to_string()
+                }),
+            }
         })
         .collect()
+}
+
+/// Extract surrounding lines from a doc file for context.
+///
+/// Returns up to 3 lines centered on the target line (1 before, target, 1 after).
+/// Each line is prefixed with its line number for easy navigation.
+fn extract_doc_context(
+    doc_contents: &HashMap<String, String>,
+    doc_file: &str,
+    line: usize,
+) -> Option<Vec<String>> {
+    let content = doc_contents.get(doc_file)?;
+    let lines: Vec<&str> = content.lines().collect();
+
+    if line == 0 || line > lines.len() {
+        return None;
+    }
+
+    let line_idx = line - 1; // 0-indexed
+    let start = line_idx.saturating_sub(1);
+    let end = (line_idx + 2).min(lines.len()); // exclusive, up to 1 line after
+
+    let context: Vec<String> = (start..end)
+        .map(|i| format!("{}: {}", i + 1, lines[i]))
+        .collect();
+
+    if context.is_empty() {
+        None
+    } else {
+        Some(context)
+    }
 }
 
 /// Collect feature detection patterns from all linked modules.
@@ -686,11 +731,13 @@ index 111222..333444 100644
             },
         ];
 
-        let broken = extract_broken_references(&tasks);
+        let doc_contents = HashMap::new(); // No content for context extraction
+        let broken = extract_broken_references(&tasks, &doc_contents);
         assert_eq!(broken.len(), 1);
         assert_eq!(broken[0].doc, "api/index.md");
         assert_eq!(broken[0].line, 10);
         assert_eq!(broken[0].action, "File no longer exists");
+        assert!(broken[0].doc_context.is_none()); // No content provided
     }
 
     #[test]
@@ -1005,6 +1052,69 @@ index 111222..333444 100644
         );
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "orphanStep");
+    }
+
+    #[test]
+    fn test_extract_doc_context_with_content() {
+        let mut doc_contents = HashMap::new();
+        doc_contents.insert(
+            "api/tools.md".to_string(),
+            "# Tools\n\nSee `src/old.rs` for details.\n\nMore content here.\n".to_string(),
+        );
+
+        // Line 3 is "See `src/old.rs` for details."
+        let context = extract_doc_context(&doc_contents, "api/tools.md", 3);
+        assert!(context.is_some());
+        let lines = context.unwrap();
+        assert_eq!(lines.len(), 3); // line 2, 3, 4
+        assert!(lines[0].starts_with("2:"));
+        assert!(lines[1].contains("src/old.rs"));
+        assert!(lines[2].starts_with("4:"));
+    }
+
+    #[test]
+    fn test_extract_doc_context_first_line() {
+        let mut doc_contents = HashMap::new();
+        doc_contents.insert("test.md".to_string(), "# Title\nSecond line\n".to_string());
+
+        let context = extract_doc_context(&doc_contents, "test.md", 1);
+        assert!(context.is_some());
+        let lines = context.unwrap();
+        assert_eq!(lines.len(), 2); // line 1, 2 (no line before)
+        assert!(lines[0].starts_with("1:"));
+    }
+
+    #[test]
+    fn test_extract_doc_context_missing_doc() {
+        let doc_contents = HashMap::new();
+        let context = extract_doc_context(&doc_contents, "nonexistent.md", 1);
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn test_broken_reference_includes_context() {
+        let tasks = vec![AuditTask {
+            doc: "api/tools.md".to_string(),
+            line: 2,
+            claim: "file path `src/old.rs`".to_string(),
+            claim_type: ClaimType::FilePath,
+            claim_value: "src/old.rs".to_string(),
+            confidence: ClaimConfidence::Real,
+            status: AuditTaskStatus::Broken,
+            action: Some("File no longer exists".to_string()),
+        }];
+
+        let mut doc_contents = HashMap::new();
+        doc_contents.insert(
+            "api/tools.md".to_string(),
+            "# API\nSee `src/old.rs` for the tool.\nMore info below.\n".to_string(),
+        );
+
+        let broken = extract_broken_references(&tasks, &doc_contents);
+        assert_eq!(broken.len(), 1);
+        assert!(broken[0].doc_context.is_some());
+        let ctx = broken[0].doc_context.as_ref().unwrap();
+        assert!(ctx.iter().any(|l| l.contains("src/old.rs")));
     }
 
     #[test]
