@@ -4,7 +4,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## [Unreleased]
+## [0.46.0] - 2026-02-23
 
 ### Added
 - Dedicated `status` command for focused, actionable component overview with filtering flags (`--uncommitted`, `--needs-bump`, `--ready`, `--docs-only`, `--all`) (#121, #119)
