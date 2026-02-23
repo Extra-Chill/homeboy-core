@@ -268,7 +268,7 @@ pub struct BumpResult {
 
 /// Resolve pattern for a version target, using explicit pattern or module default.
 fn resolve_target_pattern(target: &VersionTarget) -> Result<String> {
-    target
+    let pattern = target
         .pattern
         .clone()
         .or_else(|| default_pattern_for_file(&target.file))
@@ -282,7 +282,10 @@ fn resolve_target_pattern(target: &VersionTarget) -> Result<String> {
                 None,
                 None,
             )
-        })
+        })?;
+
+    // Normalize the pattern to fix double-escaped backslashes
+    Ok(component::normalize_version_pattern(&pattern))
 }
 
 /// Pre-validate all version targets match the expected version.
@@ -832,15 +835,13 @@ pub fn bump_version(component_id: Option<&str>, bump_type: &str) -> Result<BumpR
         }
     }
 
-    hints.push("Provide a component ID: homeboy version bump <component-id> <bump-type>".to_string());
+    hints.push(
+        "Provide a component ID: homeboy version bump <component-id> <bump-type>".to_string(),
+    );
     hints.push("List available components: homeboy component list".to_string());
 
-    let id = validation::require_with_hints(
-        component_id,
-        "componentId",
-        "Missing componentId",
-        hints,
-    )?;
+    let id =
+        validation::require_with_hints(component_id, "componentId", "Missing componentId", hints)?;
     let component = component::load(id)?;
     bump_component_version(&component, bump_type)
 }
@@ -906,9 +907,7 @@ pub struct UnconfiguredPattern {
 
 /// Detect additional version patterns that exist in PHP files but aren't configured.
 /// Returns patterns that are found in the file but NOT in the configured version targets.
-pub fn detect_unconfigured_patterns(
-    component: &Component,
-) -> Vec<UnconfiguredPattern> {
+pub fn detect_unconfigured_patterns(component: &Component) -> Vec<UnconfiguredPattern> {
     let mut unconfigured = Vec::new();
     let base_path = &component.local_path;
 
@@ -931,12 +930,10 @@ pub fn detect_unconfigured_patterns(
         .unwrap_or_default();
 
     // Patterns to scan for in PHP files (beyond plugin headers)
-    let php_constant_patterns = [
-        (
-            r#"define\s*\(\s*['"]([A-Z_]+VERSION)['"]\s*,\s*['"](\d+\.\d+\.\d+)['"]\s*\)"#,
-            "PHP constant",
-        ),
-    ];
+    let php_constant_patterns = [(
+        r#"define\s*\(\s*['"]([A-Z_]+VERSION)['"]\s*,\s*['"](\d+\.\d+\.\d+)['"]\s*\)"#,
+        "PHP constant",
+    )];
 
     // Scan PHP files in root directory
     if let Ok(entries) = fs::read_dir(base_path) {
@@ -964,7 +961,9 @@ pub fn detect_unconfigured_patterns(
                                     );
 
                                     // Check if already configured
-                                    if !configured.contains(&(filename.clone(), specific_pattern.clone())) {
+                                    if !configured
+                                        .contains(&(filename.clone(), specific_pattern.clone()))
+                                    {
                                         unconfigured.push(UnconfiguredPattern {
                                             file: filename.clone(),
                                             pattern: specific_pattern,

@@ -126,10 +126,16 @@ pub struct Component {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GitDeployConfig {
     /// Git remote to pull from (default: "origin")
-    #[serde(default = "default_git_remote", skip_serializing_if = "is_default_remote")]
+    #[serde(
+        default = "default_git_remote",
+        skip_serializing_if = "is_default_remote"
+    )]
     pub remote: String,
     /// Branch to pull (default: "main")
-    #[serde(default = "default_git_branch", skip_serializing_if = "is_default_branch")]
+    #[serde(
+        default = "default_git_branch",
+        skip_serializing_if = "is_default_branch"
+    )]
     pub branch: String,
     /// Commands to run after git pull (e.g., "composer install", "npm run build")
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -139,10 +145,18 @@ pub struct GitDeployConfig {
     pub tag_pattern: Option<String>,
 }
 
-fn default_git_remote() -> String { "origin".to_string() }
-fn default_git_branch() -> String { "main".to_string() }
-fn is_default_remote(s: &str) -> bool { s == "origin" }
-fn is_default_branch(s: &str) -> bool { s == "main" }
+fn default_git_remote() -> String {
+    "origin".to_string()
+}
+fn default_git_branch() -> String {
+    "main".to_string()
+}
+fn is_default_remote(s: &str) -> bool {
+    s == "origin"
+}
+fn is_default_branch(s: &str) -> bool {
+    s == "main"
+}
 
 impl Component {
     pub fn new(
@@ -178,7 +192,9 @@ impl Component {
 }
 
 /// Normalize empty strings to None. Treats "", null, and field omission identically for consistent validation.
-fn deserialize_empty_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+fn deserialize_empty_as_none<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -329,6 +345,19 @@ pub fn validate_version_pattern(pattern: &str) -> Result<()> {
     Ok(())
 }
 
+/// Normalize a regex pattern by converting double-escaped backslashes to single.
+/// This fixes patterns that were incorrectly stored with shell-escaped backslashes
+/// like "Version:\\s*(\\d+\\.\\d+\\.\\d+)" which should be "Version:\s*(\d+\.\d+\.\d+)".
+pub fn normalize_version_pattern(pattern: &str) -> String {
+    // If pattern contains \\ (literal backslash-backslash), convert to \ (literal backslash)
+    // This handles patterns that were double-escaped during CLI input
+    if pattern.contains("\\\\") {
+        pattern.replace("\\\\", "\\")
+    } else {
+        pattern.to_string()
+    }
+}
+
 pub fn parse_version_targets(targets: &[String]) -> Result<Vec<VersionTarget>> {
     let mut parsed = Vec::new();
     for target in targets {
@@ -347,12 +376,18 @@ pub fn parse_version_targets(targets: &[String]) -> Result<Vec<VersionTarget>> {
             })?;
         let pattern = parts.next().map(str::trim).filter(|s| !s.is_empty());
         if let Some(p) = pattern {
-            validate_version_pattern(p)?;
+            let normalized = normalize_version_pattern(p);
+            validate_version_pattern(&normalized)?;
+            parsed.push(VersionTarget {
+                file: file.to_string(),
+                pattern: Some(normalized),
+            });
+        } else {
+            parsed.push(VersionTarget {
+                file: file.to_string(),
+                pattern: None,
+            });
         }
-        parsed.push(VersionTarget {
-            file: file.to_string(),
-            pattern: pattern.map(|p| p.to_string()),
-        });
     }
     Ok(parsed)
 }
@@ -472,7 +507,8 @@ pub fn projects_using(component_id: &str) -> Result<Vec<String>> {
 /// Only includes components that are used by at least one project.
 pub fn shared_components() -> Result<std::collections::HashMap<String, Vec<String>>> {
     let projects = project::list().unwrap_or_default();
-    let mut sharing: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut sharing: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
 
     for project in projects {
         for component_id in &project.component_ids {
@@ -589,7 +625,8 @@ pub fn validate_local_path(component: &Component) -> Result<PathBuf> {
             "local_path",
             format!(
                 "Component '{}' local_path does not exist: {}",
-                component.id, path.display()
+                component.id,
+                path.display()
             ),
             Some(component.id.clone()),
             None,
@@ -632,8 +669,12 @@ mod tests {
             pattern: Some("Version: (.*)".to_string()),
         }];
 
-        let result =
-            validate_version_target_conflict(&existing, "plugin.php", "define('VER', '(.*)')", "test-comp");
+        let result = validate_version_target_conflict(
+            &existing,
+            "plugin.php",
+            "define('VER', '(.*)')",
+            "test-comp",
+        );
         assert!(result.is_err());
         let err = result.unwrap_err();
         // Check the error details contain expected text
@@ -652,7 +693,8 @@ mod tests {
             pattern: Some("Version: (.*)".to_string()),
         }];
 
-        let result = validate_version_target_conflict(&existing, "plugin.php", "Version: (.*)", "test-comp");
+        let result =
+            validate_version_target_conflict(&existing, "plugin.php", "Version: (.*)", "test-comp");
         assert!(result.is_ok());
     }
 
@@ -663,8 +705,12 @@ mod tests {
             pattern: Some("Version: (.*)".to_string()),
         }];
 
-        let result =
-            validate_version_target_conflict(&existing, "package.json", "\"version\": \"(.*)\"", "test-comp");
+        let result = validate_version_target_conflict(
+            &existing,
+            "package.json",
+            "\"version\": \"(.*)\"",
+            "test-comp",
+        );
         assert!(result.is_ok());
     }
 
@@ -672,7 +718,8 @@ mod tests {
     fn validate_version_target_conflict_empty_existing_ok() {
         let existing: Vec<VersionTarget> = vec![];
 
-        let result = validate_version_target_conflict(&existing, "plugin.php", "Version: (.*)", "test-comp");
+        let result =
+            validate_version_target_conflict(&existing, "plugin.php", "Version: (.*)", "test-comp");
         assert!(result.is_ok());
     }
 
@@ -708,5 +755,32 @@ mod tests {
         let targets = vec!["style.css::Version: {version}".to_string()];
         let result = parse_version_targets(&targets);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalize_version_pattern_converts_double_escaped() {
+        // Pattern with double-escaped backslashes (as stored in config)
+        let double_escaped = r"Version:\\s*(\\d+\\.\\d+\\.\\d+)";
+        let normalized = normalize_version_pattern(double_escaped);
+        assert_eq!(normalized, r"Version:\s*(\d+\.\d+\.\d+)");
+
+        // Pattern already correct should stay the same
+        let correct = r"Version:\s*(\d+\.\d+\.\d+)";
+        let normalized2 = normalize_version_pattern(correct);
+        assert_eq!(normalized2, r"Version:\s*(\d+\.\d+\.\d+)");
+    }
+
+    #[test]
+    fn parse_version_targets_normalizes_double_escaped_patterns() {
+        // Simulate pattern stored with double-escaped backslashes
+        let targets = vec!["plugin.php::Version:\\s*(\\d+\\.\\d+\\.\\d+)".to_string()];
+        let result = parse_version_targets(&targets).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].file, "plugin.php");
+        assert_eq!(
+            result[0].pattern.as_ref().unwrap(),
+            r"Version:\s*(\d+\.\d+\.\d+)"
+        );
     }
 }
