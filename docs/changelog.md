@@ -4,6 +4,29 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [Unreleased]
+
+### Added
+- Dedicated `status` command for focused, actionable component overview with filtering flags (`--uncommitted`, `--needs-bump`, `--ready`, `--docs-only`, `--all`) (#121, #119)
+- `transfer` command supports local-to-remote (push) and remote-to-local (pull) in addition to server-to-server (#115)
+- Post-deploy cleanup of build dependencies via module-defined `cleanup_paths` and component `auto_cleanup` flag (#105)
+- Configurable `docs_dir` and `docs_dirs` fields for component documentation audit
+- Multi-directory docs scanning with automatic README inclusion
+- `remote_owner` chown support in deploy for explicit file ownership
+
+### Fixed
+- `component set` now rejects unknown fields instead of silently dropping them; prevents false success when using `module` (singular) instead of `modules` (plural) (#124)
+- Deploy command accepts component-only target like build command (#120)
+- Double-escaped backslashes in version patterns are normalized at both parse and load time (#116)
+- Audit feature patterns now scan all source files, not just changed ones
+- Git-deploy components skip artifact resolution (#108)
+
+### Improved
+- Missing-module errors on lint/test/build now include remediation hint: "Add a module: homeboy component set <id> --module <module_id>" (#123)
+- Init detects missing module configuration as a config gap with auto-suggested module type
+- Clearer error message when changelog is not configured (#117)
+- Usage examples added to `changelog add --help` (#118)
+
 ## [0.45.2] - 2026-02-17
 
 ### Fixed
