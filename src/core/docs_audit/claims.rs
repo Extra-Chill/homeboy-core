@@ -23,6 +23,18 @@ pub enum ClaimType {
     ClassName,
 }
 
+/// How confident we are that a claim is a real reference vs. a placeholder/example.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimConfidence {
+    /// Real reference — expected to resolve against codebase
+    Real,
+    /// Likely a placeholder or example (inside code block, generic names)
+    Example,
+    /// Cannot determine — needs manual review
+    Unclear,
+}
+
 /// A claim extracted from documentation.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Claim {
@@ -30,6 +42,7 @@ pub struct Claim {
     pub value: String,
     pub doc_file: String,
     pub line: usize,
+    pub confidence: ClaimConfidence,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
 }
@@ -82,6 +95,79 @@ fn matches_ignore_pattern(value: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|pattern| glob_match(pattern, value))
 }
 
+/// Placeholder name prefixes that indicate example/template references.
+const PLACEHOLDER_PREFIXES: &[&str] = &[
+    "My", "Your", "Example", "Sample", "Foo", "Bar", "Test", "Demo", "Dummy", "Fake",
+];
+
+/// Check if a class name uses placeholder/example naming conventions.
+fn is_placeholder_class(value: &str) -> bool {
+    // Check each namespace segment for placeholder prefixes
+    value.split('\\').any(|segment| {
+        PLACEHOLDER_PREFIXES
+            .iter()
+            .any(|prefix| segment.starts_with(prefix))
+    })
+}
+
+/// Check if a line's surrounding context suggests an example rather than a real reference.
+fn line_suggests_example(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.contains("example")
+        || lower.contains("e.g.")
+        || lower.contains("e.g.,")
+        || lower.contains("for instance")
+        || lower.contains("sample")
+        || lower.contains("such as")
+}
+
+/// Check if a line's context suggests a real reference (annotation, cross-ref).
+fn line_suggests_real(line: &str) -> bool {
+    line.contains("@see")
+        || line.contains("@uses")
+        || line.contains("@link")
+        || line.contains("@param")
+        || line.contains("@return")
+        || line.contains("@throws")
+}
+
+/// Classify confidence for a file/directory path claim.
+fn classify_path_confidence(value: &str, line: &str, in_code_block: bool) -> ClaimConfidence {
+    if in_code_block {
+        return ClaimConfidence::Example;
+    }
+    if line_suggests_real(line) {
+        return ClaimConfidence::Real;
+    }
+    if line_suggests_example(line) {
+        return ClaimConfidence::Unclear;
+    }
+    // Path references in prose default to real — they should resolve
+    let lower = value.to_lowercase();
+    if lower.contains("example") || lower.contains("sample") || lower.contains("your-") {
+        return ClaimConfidence::Unclear;
+    }
+    ClaimConfidence::Real
+}
+
+/// Classify confidence for a class name claim.
+fn classify_class_confidence(value: &str, line: &str, in_code_block: bool) -> ClaimConfidence {
+    if is_placeholder_class(value) {
+        return ClaimConfidence::Example;
+    }
+    if in_code_block {
+        // Inside a code block with a non-placeholder name — could be real or example
+        if line_suggests_real(line) {
+            return ClaimConfidence::Real;
+        }
+        return ClaimConfidence::Unclear;
+    }
+    if line_suggests_example(line) {
+        return ClaimConfidence::Unclear;
+    }
+    ClaimConfidence::Real
+}
+
 /// Extract all claims from a markdown document.
 ///
 /// The `ignore_patterns` parameter allows components to filter out platform-specific
@@ -92,12 +178,22 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
     // Track which positions we've already claimed to avoid duplicates
     let mut claimed_positions: Vec<(usize, usize)> = Vec::new();
 
+    // Track whether we're inside a fenced code block
+    let mut in_code_block = false;
+
     // Process line by line for line numbers
     for (line_idx, line) in content.lines().enumerate() {
         let line_num = line_idx + 1;
 
-        // Skip lines that are inside code blocks (we'll handle those separately)
+        // Toggle code block state on fence lines
         if line.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        // Skip inline extraction for lines inside code blocks —
+        // code blocks are handled separately as CodeExample claims
+        if in_code_block {
             continue;
         }
 
@@ -134,12 +230,15 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
                     continue;
                 }
 
+                let confidence = classify_path_confidence(path, line, false);
+
                 claimed_positions.push(pos);
                 claims.push(Claim {
                     claim_type: ClaimType::FilePath,
                     value: path.to_string(),
                     doc_file: doc_file.to_string(),
                     line: line_num,
+                    confidence,
                     context: Some(line.trim().to_string()),
                 });
             }
@@ -161,12 +260,15 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
                     continue;
                 }
 
+                let confidence = classify_class_confidence(&normalized, line, false);
+
                 claimed_positions.push(pos);
                 claims.push(Claim {
                     claim_type: ClaimType::ClassName,
                     value: normalized,
                     doc_file: doc_file.to_string(),
                     line: line_num,
+                    confidence,
                     context: Some(line.trim().to_string()),
                 });
             }
@@ -190,12 +292,15 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
                     continue;
                 }
 
+                let confidence = classify_path_confidence(path, line, false);
+
                 claimed_positions.push(pos);
                 claims.push(Claim {
                     claim_type: ClaimType::DirectoryPath,
                     value: path.to_string(),
                     doc_file: doc_file.to_string(),
                     line: line_num,
+                    confidence,
                     context: Some(line.trim().to_string()),
                 });
             }
@@ -221,6 +326,8 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
                 value: code.trim().to_string(),
                 doc_file: doc_file.to_string(),
                 line: line_num,
+                // Code examples are inherently unclear — they may be illustrative
+                confidence: ClaimConfidence::Unclear,
                 context: Some(format!("```{} block", language)),
             });
         }
@@ -407,5 +514,107 @@ Supported types: `text/plain`, `image/png`, `audio/mpeg`, `video/mp4`.
 
         // With no patterns, this should be extracted as a file path
         assert!(claims.iter().any(|c| c.value.contains("wp-json")));
+    }
+
+    // ========================================================================
+    // Confidence classification tests
+    // ========================================================================
+
+    #[test]
+    fn test_prose_file_path_is_real_confidence() {
+        let content = "See `src/core/config.rs` for the configuration module.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        let claim = claims
+            .iter()
+            .find(|c| c.claim_type == ClaimType::FilePath)
+            .expect("should extract file path");
+        assert_eq!(claim.confidence, ClaimConfidence::Real);
+    }
+
+    #[test]
+    fn test_example_context_path_is_unclear() {
+        let content = "For example, `your-project/src/main.rs` would be the entry point.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        let claim = claims
+            .iter()
+            .find(|c| c.claim_type == ClaimType::FilePath)
+            .expect("should extract file path");
+        // "your-" in path triggers unclear, and "example" in context also does
+        assert_ne!(claim.confidence, ClaimConfidence::Real);
+    }
+
+    #[test]
+    fn test_placeholder_class_is_example_confidence() {
+        let content = "Create a handler like MyNamespace\\MyHandler to process events.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        let claim = claims
+            .iter()
+            .find(|c| c.claim_type == ClaimType::ClassName)
+            .expect("should extract class name");
+        assert_eq!(claim.confidence, ClaimConfidence::Example);
+    }
+
+    #[test]
+    fn test_real_class_in_prose_is_real_confidence() {
+        let content = "The DataMachine\\Services\\CacheManager handles caching.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        let claim = claims
+            .iter()
+            .find(|c| c.claim_type == ClaimType::ClassName)
+            .expect("should extract class name");
+        assert_eq!(claim.confidence, ClaimConfidence::Real);
+    }
+
+    #[test]
+    fn test_code_block_claims_are_unclear() {
+        let content = "Example:\n```php\nfunction test() { return true; }\n```\n";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        let code_claim = claims
+            .iter()
+            .find(|c| c.claim_type == ClaimType::CodeExample)
+            .expect("should extract code example");
+        assert_eq!(code_claim.confidence, ClaimConfidence::Unclear);
+    }
+
+    #[test]
+    fn test_code_block_interior_paths_not_extracted() {
+        // File paths inside code blocks should NOT be extracted as separate claims
+        // (they are part of the code example claim)
+        let content = "```rust\nuse crate::core::config;\nlet path = \"src/main.rs\";\n```\n";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        // Should only have the code block claim, no file path claims
+        assert!(
+            !claims.iter().any(|c| c.claim_type == ClaimType::FilePath),
+            "file paths inside code blocks should not be extracted separately"
+        );
+    }
+
+    #[test]
+    fn test_annotation_context_is_real() {
+        let content = "@see DataMachine\\Core\\Engine for the main engine class.";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        let claim = claims
+            .iter()
+            .find(|c| c.claim_type == ClaimType::ClassName)
+            .expect("should extract class name");
+        assert_eq!(claim.confidence, ClaimConfidence::Real);
+    }
+
+    #[test]
+    fn test_is_placeholder_class_detection() {
+        assert!(is_placeholder_class("MyNamespace\\MyHandler"));
+        assert!(is_placeholder_class("Your\\Extension\\Plugin"));
+        assert!(is_placeholder_class("Example\\Namespace\\Class"));
+        assert!(is_placeholder_class("Foo\\Bar\\Baz"));
+        assert!(is_placeholder_class("Test\\Mock\\Handler"));
+        assert!(!is_placeholder_class("DataMachine\\Services\\Cache"));
+        assert!(!is_placeholder_class("WordPress\\Plugin\\Activator"));
     }
 }

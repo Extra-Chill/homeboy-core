@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-pub use claims::{Claim, ClaimType};
+pub use claims::{Claim, ClaimConfidence, ClaimType};
 pub use tasks::{AuditTask, AuditTaskStatus};
 pub use verify::VerifyResult;
 
@@ -47,6 +47,7 @@ pub struct BrokenReference {
     pub doc: String,
     pub line: usize,
     pub claim: String,
+    pub confidence: ClaimConfidence,
     pub action: String,
 }
 
@@ -376,6 +377,7 @@ fn extract_broken_references(tasks: &[AuditTask]) -> Vec<BrokenReference> {
             doc: t.doc.clone(),
             line: t.line,
             claim: t.claim.clone(),
+            confidence: t.confidence.clone(),
             action: t.action.clone().unwrap_or_else(|| {
                 "Stale reference. Update or remove from documentation.".to_string()
             }),
@@ -668,6 +670,7 @@ index 111222..333444 100644
                 claim: "file path `src/old.rs`".to_string(),
                 claim_type: ClaimType::FilePath,
                 claim_value: "src/old.rs".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Broken,
                 action: Some("File no longer exists".to_string()),
             },
@@ -677,6 +680,7 @@ index 111222..333444 100644
                 claim: "file path `src/main.rs`".to_string(),
                 claim_type: ClaimType::FilePath,
                 claim_value: "src/main.rs".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Verified,
                 action: None,
             },
@@ -698,6 +702,7 @@ index 111222..333444 100644
                 claim: "file path `inc/ToolExecutor.php`".to_string(),
                 claim_type: ClaimType::FilePath,
                 claim_value: "inc/ToolExecutor.php".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Verified,
                 action: None,
             },
@@ -707,6 +712,7 @@ index 111222..333444 100644
                 claim: "file path `inc/Unrelated.php`".to_string(),
                 claim_type: ClaimType::FilePath,
                 claim_value: "inc/Unrelated.php".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Verified,
                 action: None,
             },
@@ -733,6 +739,7 @@ index 111222..333444 100644
                 claim_type: ClaimType::FilePath,
                 claim: "".to_string(),
                 claim_value: "file1.rs".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Verified,
                 action: None,
             },
@@ -742,6 +749,7 @@ index 111222..333444 100644
                 claim_type: ClaimType::FilePath,
                 claim: "".to_string(),
                 claim_value: "file1.rs".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Verified,
                 action: None,
             },
@@ -751,6 +759,7 @@ index 111222..333444 100644
                 claim_type: ClaimType::FilePath,
                 claim: "".to_string(),
                 claim_value: "file2.rs".to_string(),
+                confidence: ClaimConfidence::Real,
                 status: AuditTaskStatus::Verified,
                 action: None,
             },
@@ -1006,6 +1015,7 @@ index 111222..333444 100644
             claim: "file path `inc/Tool.php`".to_string(),
             claim_type: ClaimType::FilePath,
             claim_value: "inc/Tool.php".to_string(),
+            confidence: ClaimConfidence::Real,
             status: AuditTaskStatus::Verified,
             action: None,
         }];

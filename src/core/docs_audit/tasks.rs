@@ -3,7 +3,7 @@
 //! Converts verification results into actionable tasks that agents can execute
 //! step-by-step without interpretation.
 
-use super::claims::{Claim, ClaimType};
+use super::claims::{Claim, ClaimConfidence, ClaimType};
 use super::verify::VerifyResult;
 
 /// Status of an audit task.
@@ -32,6 +32,8 @@ pub struct AuditTask {
     pub claim_type: ClaimType,
     /// Raw value extracted from the claim
     pub claim_value: String,
+    /// Confidence that this claim is a real reference vs. example/placeholder
+    pub confidence: ClaimConfidence,
     /// Verification status
     pub status: AuditTaskStatus,
     /// Action to take (null if verified)
@@ -58,6 +60,7 @@ pub fn build_task(claim: Claim, result: VerifyResult) -> AuditTask {
         claim: claim_description,
         claim_type: claim.claim_type,
         claim_value: claim.value,
+        confidence: claim.confidence,
         status,
         action,
     }
@@ -91,6 +94,7 @@ mod tests {
             value: "/src/main.rs".to_string(),
             doc_file: "docs/index.md".to_string(),
             line: 10,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -108,6 +112,7 @@ mod tests {
             value: "/src/old.rs".to_string(),
             doc_file: "docs/index.md".to_string(),
             line: 15,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -130,6 +135,7 @@ mod tests {
             value: "fn process() { }".to_string(),
             doc_file: "docs/api.md".to_string(),
             line: 42,
+            confidence: ClaimConfidence::Unclear,
             context: None,
         };
 
@@ -152,6 +158,7 @@ mod tests {
             value: long_code.to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Unclear,
             context: None,
         };
 

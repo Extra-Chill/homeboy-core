@@ -249,6 +249,7 @@ fn verify_code_example(_claim: &Claim) -> VerifyResult {
 
 #[cfg(test)]
 mod tests {
+    use super::super::claims::ClaimConfidence;
     use super::*;
     use std::fs;
     use tempfile::TempDir;
@@ -264,6 +265,7 @@ mod tests {
             value: "test.rs".to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -280,6 +282,7 @@ mod tests {
             value: "nonexistent.rs".to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -296,6 +299,7 @@ mod tests {
             value: "/var/lib/sweatpants/modules.yaml".to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -314,6 +318,7 @@ mod tests {
             value: "src/core/".to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -330,6 +335,7 @@ mod tests {
             value: "/opt/nonexistent-test-path-xyz/".to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
@@ -373,6 +379,7 @@ mod tests {
             value: "homeboy/docs/index.md".to_string(),
             doc_file: "test.md".to_string(),
             line: 1,
+            confidence: ClaimConfidence::Real,
             context: None,
         };
 
