@@ -8,10 +8,10 @@ use super::CmdResult;
 
 #[derive(Args)]
 pub struct DeployArgs {
-    /// Project ID (or component ID - order is auto-detected)
-    pub project_id: String,
+    /// Target ID: project ID or component ID (order is auto-detected)
+    pub target_id: Option<String>,
 
-    /// Component IDs to deploy (or project ID if first arg is a component)
+    /// Additional component IDs (enables project/component order detection)
     pub component_ids: Vec<String>,
 
     /// Explicit project ID (takes precedence over positional detection)
@@ -127,9 +127,16 @@ pub fn run(
         // Get component IDs from args
         let component_ids: Vec<String> = if let Some(ref comps) = args.component {
             comps.clone()
-        } else {
+        } else if let Some(ref target) = args.target_id {
             // First positional arg is the component when using --shared
-            vec![args.project_id.clone()]
+            vec![target.clone()]
+        } else {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "component",
+                "At least one component ID is required when using --shared",
+                None,
+                None,
+            ));
         };
 
         if component_ids.is_empty() {
@@ -157,14 +164,16 @@ pub fn run(
                 "component",
                 format!("No projects found using component(s): {:?}", component_ids),
                 None,
-                Some(vec!["Run 'homeboy component shared' to see component usage".to_string()]),
+                Some(vec![
+                    "Run 'homeboy component shared' to see component usage".to_string(),
+                ]),
             ));
         }
 
         // Override component_ids for multi-project deploy
         args.component_ids = component_ids;
-        args.project_id = String::new(); // Clear since we're using component_ids directly
-        
+        args.target_id = None; // Clear since we're using component_ids directly
+
         return run_multi_project(&args, &project_ids);
     }
 
@@ -173,6 +182,19 @@ pub fn run(
         return run_multi_project(&args, project_ids);
     }
 
+    // Require at least one positional arg if no flags provided
+    let target_id = args.target_id.as_ref().ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "input",
+            "Provide component ID, project ID with --all, or use flags",
+            None,
+            Some(vec![
+                "Deploy a single component: homeboy deploy <component-id>".to_string(),
+                "Deploy to a project: homeboy deploy <project-id> --all".to_string(),
+            ]),
+        )
+    })?;
+
     // Resolve project and component IDs based on flag/positional combinations
     let (project_id, component_ids) = match (&args.project, &args.component) {
         // Both flags provided - use them directly
@@ -180,7 +202,7 @@ pub fn run(
 
         // Only --project flag - positionals are components
         (Some(ref proj), None) => {
-            let mut comps = vec![args.project_id.clone()];
+            let mut comps = vec![target_id.clone()];
             comps.extend(args.component_ids.clone());
             (proj.clone(), comps)
         }
@@ -188,8 +210,8 @@ pub fn run(
         // Only --component flag - resolve project from positional or inference
         (None, Some(ref comps)) => {
             let projects = homeboy::project::list_ids().unwrap_or_default();
-            if projects.contains(&args.project_id) {
-                (args.project_id.clone(), comps.clone())
+            if projects.contains(target_id) {
+                (target_id.clone(), comps.clone())
             } else {
                 // Try to infer project from components
                 match infer_project_for_components(comps) {
@@ -208,11 +230,11 @@ pub fn run(
         }
 
         // No flags - use shared positional detection
-        (None, None) => resolve_project_components(&args.project_id, &args.component_ids)?,
+        (None, None) => resolve_project_components(target_id, &args.component_ids)?,
     };
 
     // Update args with resolved values
-    args.project_id = project_id.clone();
+    args.target_id = Some(project_id.clone());
     args.component_ids = component_ids;
 
     // Parse JSON input if provided
@@ -262,16 +284,19 @@ pub fn run(
     ))
 }
 
-fn run_multi_project(
-    args: &DeployArgs,
-    project_ids: &[String],
-) -> CmdResult<DeployCommandOutput> {
+fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<DeployCommandOutput> {
     // Collect component IDs from positional arguments
-    let mut component_ids = vec![args.project_id.clone()];
+    let mut component_ids: Vec<String> = Vec::new();
+    if let Some(ref target) = args.target_id {
+        component_ids.push(target.clone());
+    }
     component_ids.extend(args.component_ids.clone());
 
     // Filter out empty strings
-    let component_ids: Vec<String> = component_ids.into_iter().filter(|s| !s.is_empty()).collect();
+    let component_ids: Vec<String> = component_ids
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
 
     if component_ids.is_empty() {
         return Err(homeboy::Error::validation_invalid_argument(
