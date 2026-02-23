@@ -82,6 +82,10 @@ fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> 
             None,
             None,
         )
+        .with_hint(format!(
+            "Add a module: homeboy component set {} --module <module_id>",
+            component.id
+        ))
     })?;
 
     let module_id = if modules.contains_key("wordpress") {
@@ -94,6 +98,10 @@ fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> 
                 None,
                 None,
             )
+            .with_hint(format!(
+                "Add a module: homeboy component set {} --module <module_id>",
+                component.id
+            ))
         })?
     };
 

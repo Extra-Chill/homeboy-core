@@ -121,12 +121,18 @@ impl ModuleRunner {
                 None,
                 None,
             )
+            .with_hint(format!(
+                "Add a module: homeboy component set {} --module <module_id>",
+                component.id
+            ))
         })?;
 
         // Prefer wordpress module if available
         if modules.contains_key("wordpress") {
             let settings = extract_module_settings(
-                modules.get("wordpress").expect("wordpress module checked above"),
+                modules
+                    .get("wordpress")
+                    .expect("wordpress module checked above"),
             );
             return Ok(("wordpress".to_string(), settings));
         }
@@ -146,7 +152,11 @@ impl ModuleRunner {
             ),
             None,
             None,
-        ))
+        )
+        .with_hint(format!(
+            "Add a module: homeboy component set {} --module <module_id>",
+            component.id
+        )))
     }
 
     fn find_module_path(&self, module_name: &str) -> Result<PathBuf> {
@@ -198,8 +208,9 @@ impl ModuleRunner {
 
         let content = io::read_file(&manifest_path, &format!("read {}", manifest_path.display()))?;
 
-        serde_json::from_str(&content)
-            .map_err(|e| Error::validation_invalid_json(e, Some("parse manifest".to_string()), None))
+        serde_json::from_str(&content).map_err(|e| {
+            Error::validation_invalid_json(e, Some("parse manifest".to_string()), None)
+        })
     }
 
     fn merge_settings(
@@ -218,7 +229,10 @@ impl ModuleRunner {
                             setting.get("id").and_then(|v| v.as_str()),
                             setting.get("default").and_then(|v| v.as_str()),
                         ) {
-                            obj.insert(id.to_string(), serde_json::Value::String(default.to_string()));
+                            obj.insert(
+                                id.to_string(),
+                                serde_json::Value::String(default.to_string()),
+                            );
                         }
                     }
                 }
@@ -251,13 +265,31 @@ impl ModuleRunner {
         let module_name = module_path.file_name().unwrap().to_string_lossy();
 
         let mut env = vec![
-            (exec_context::VERSION.to_string(), exec_context::CURRENT_VERSION.to_string()),
+            (
+                exec_context::VERSION.to_string(),
+                exec_context::CURRENT_VERSION.to_string(),
+            ),
             (exec_context::MODULE_ID.to_string(), module_name.to_string()),
-            (exec_context::MODULE_PATH.to_string(), module_path.to_string_lossy().to_string()),
-            (exec_context::PROJECT_PATH.to_string(), project_path.to_string_lossy().to_string()),
-            (exec_context::COMPONENT_ID.to_string(), self.component_id.clone()),
-            ("HOMEBOY_COMPONENT_PATH".to_string(), project_path.to_string_lossy().to_string()),
-            (exec_context::SETTINGS_JSON.to_string(), settings_json.to_string()),
+            (
+                exec_context::MODULE_PATH.to_string(),
+                module_path.to_string_lossy().to_string(),
+            ),
+            (
+                exec_context::PROJECT_PATH.to_string(),
+                project_path.to_string_lossy().to_string(),
+            ),
+            (
+                exec_context::COMPONENT_ID.to_string(),
+                self.component_id.clone(),
+            ),
+            (
+                "HOMEBOY_COMPONENT_PATH".to_string(),
+                project_path.to_string_lossy().to_string(),
+            ),
+            (
+                exec_context::SETTINGS_JSON.to_string(),
+                settings_json.to_string(),
+            ),
         ];
 
         // Add command-specific environment variables
@@ -285,7 +317,11 @@ impl ModuleRunner {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
 
-        Ok(execute_local_command_passthrough(&command, None, Some(&env_refs)))
+        Ok(execute_local_command_passthrough(
+            &command,
+            None,
+            Some(&env_refs),
+        ))
     }
 
     fn script_description(&self) -> &str {

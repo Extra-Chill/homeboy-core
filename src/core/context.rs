@@ -106,13 +106,17 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             .map(|s| s.to_string_lossy().to_string());
 
         let relink_match = repo_name.as_ref().and_then(|name| {
-            components.iter().find(|c| c.id == *name || c.aliases.iter().any(|a| a == name))
+            components
+                .iter()
+                .find(|c| c.id == *name || c.aliases.iter().any(|a| a == name))
         });
 
         if let Some(component_match) = relink_match {
             // Only suggest relink if paths differ (canonicalize best-effort)
             let git_canon = git_root_path.canonicalize().ok();
-            let comp_canon = PathBuf::from(&component_match.local_path).canonicalize().ok();
+            let comp_canon = PathBuf::from(&component_match.local_path)
+                .canonicalize()
+                .ok();
 
             if git_canon.is_some() && comp_canon.is_some() && git_canon != comp_canon {
                 // JSON-escape just enough for typical paths (quotes + backslashes).
@@ -284,13 +288,40 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
             // Component has remote_path but no artifact source
             gaps.push(ComponentGap {
                 field: "buildArtifact".to_string(),
-                reason: "Component has remotePath but no buildArtifact or module pattern".to_string(),
+                reason: "Component has remotePath but no buildArtifact or module pattern"
+                    .to_string(),
                 command: format!(
                     "homeboy component set {} --build-artifact \"build/{}.zip\"",
                     component.id, component.id
                 ),
             });
         }
+    }
+
+    // Check for missing module configuration
+    if component.modules.is_none() || component.modules.as_ref().map_or(true, |m| m.is_empty()) {
+        // Suggest a module based on project file indicators
+        let suggestion =
+            if local_path.join("style.css").exists() && local_path.join("functions.php").exists() {
+                Some("wordpress")
+            } else if local_path.join("Cargo.toml").exists() {
+                Some("rust")
+            } else if local_path.join("package.json").exists() {
+                Some("nodejs")
+            } else {
+                None
+            };
+
+        let module_hint = suggestion.unwrap_or("MODULE_ID");
+        gaps.push(ComponentGap {
+            field: "modules".to_string(),
+            reason: "No module configured. Module commands (lint, test, build) require a module."
+                .to_string(),
+            command: format!(
+                "homeboy component set {} --module {}",
+                component.id, module_hint
+            ),
+        });
     }
 
     // Check for changelog without changelogTarget
