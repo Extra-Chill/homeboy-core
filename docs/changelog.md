@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- Add total_features and documented_features counts to docs audit summary for coverage reporting
+- Include doc_context (surrounding lines) in broken reference output for faster remediation
+- Add claim confidence classification (real/example/unclear) to docs audit, with code-block awareness and placeholder name detection
+
+### Changed
+- Rewrite docs audit action strings with source-of-truth framing (code is authoritative, docs must be updated to match)
+
 ## [0.46.0] - 2026-02-23
 
 ### Added
