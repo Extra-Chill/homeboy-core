@@ -71,7 +71,10 @@ fn auto_detect_module(component: &Component) -> Option<String> {
 fn no_modules_error(component: &Component) -> Error {
     Error::validation_invalid_argument(
         "component",
-        format!("Component '{}' has no modules configured and none could be auto-detected", component.id),
+        format!(
+            "Component '{}' has no modules configured and none could be auto-detected",
+            component.id
+        ),
         None,
         None,
     )

@@ -274,10 +274,17 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
     ))
 }
 
-fn set(args: DynamicSetArgs, version_targets: Vec<String>, modules: Vec<String>) -> CmdResult<ComponentOutput> {
+fn set(
+    args: DynamicSetArgs,
+    version_targets: Vec<String>,
+    modules: Vec<String>,
+) -> CmdResult<ComponentOutput> {
     // Merge JSON sources: positional/--json/--base64 spec + dynamic flags
     let spec = args.json_spec()?;
-    let has_input = spec.is_some() || !args.extra.is_empty() || !version_targets.is_empty() || !modules.is_empty();
+    let has_input = spec.is_some()
+        || !args.extra.is_empty()
+        || !version_targets.is_empty()
+        || !modules.is_empty();
     if !has_input {
         return Err(homeboy::Error::validation_invalid_argument(
             "spec",
@@ -373,9 +380,8 @@ fn add_version_target(id: &str, file: &str, pattern: &str) -> CmdResult<Componen
         }]
     });
 
-    let json_string = serde_json::to_string(&version_target).map_err(|e| {
-        homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-    })?;
+    let json_string = serde_json::to_string(&version_target)
+        .map_err(|e| homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e)))?;
 
     match component::merge(Some(id), &json_string, &[])? {
         homeboy::MergeOutput::Single(result) => {

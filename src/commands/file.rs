@@ -259,7 +259,11 @@ pub fn run(
             let (out, code) = list(&project_id, &path)?;
             Ok((FileCommandOutput::Standard(out), code))
         }
-        FileCommand::Read { project_id, path, raw } => {
+        FileCommand::Read {
+            project_id,
+            path,
+            raw,
+        } => {
             if raw {
                 let result = files::read(&project_id, &path)?;
                 Ok((FileCommandOutput::Raw(result.content), 0))
@@ -538,40 +542,34 @@ fn edit(args: EditArgs) -> homeboy::Result<(FileEditOutput, i32)> {
     } = args;
 
     let result = if let Some(line_num) = line_ops.replace_line {
-        let content = line_ops
-            .replace_line_content
-            .ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "content",
-                    "Content required for --replace-line",
-                    None,
-                    None,
-                )
-            })?;
+        let content = line_ops.replace_line_content.ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "content",
+                "Content required for --replace-line",
+                None,
+                None,
+            )
+        })?;
         files::edit_replace_line(&project_id, &file_path, line_num, &content)?
     } else if let Some(line_num) = line_ops.insert_after {
-        let content = line_ops
-            .insert_after_content
-            .ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "content",
-                    "Content required for --insert-after",
-                    None,
-                    None,
-                )
-            })?;
+        let content = line_ops.insert_after_content.ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "content",
+                "Content required for --insert-after",
+                None,
+                None,
+            )
+        })?;
         files::edit_insert_after_line(&project_id, &file_path, line_num, &content)?
     } else if let Some(line_num) = line_ops.insert_before {
-        let content = line_ops
-            .insert_before_content
-            .ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "content",
-                    "Content required for --insert-before",
-                    None,
-                    None,
-                )
-            })?;
+        let content = line_ops.insert_before_content.ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "content",
+                "Content required for --insert-before",
+                None,
+                None,
+            )
+        })?;
         files::edit_insert_before_line(&project_id, &file_path, line_num, &content)?
     } else if let Some(line_num) = line_ops.delete_line {
         files::edit_delete_line(&project_id, &file_path, line_num)?

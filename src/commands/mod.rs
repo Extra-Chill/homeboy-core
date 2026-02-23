@@ -59,16 +59,16 @@ impl DynamicSetArgs {
     pub fn json_spec(&self) -> Result<Option<String>, homeboy::Error> {
         // Base64 takes priority - decode and return
         if let Some(b64) = &self.base64 {
-            let decoded_bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(
-                |e| {
+            let decoded_bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| {
                     homeboy::Error::validation_invalid_argument(
                         "base64",
                         format!("Invalid base64 encoding: {}", e),
                         None,
                         Some(vec!["Encode with: echo '{...}' | base64".to_string()]),
                     )
-                },
-            )?;
+                })?;
             let decoded_str = String::from_utf8(decoded_bytes).map_err(|e| {
                 homeboy::Error::validation_invalid_argument(
                     "base64",
@@ -198,8 +198,9 @@ pub mod project;
 pub mod release;
 pub mod server;
 pub mod ssh;
-pub mod transfer;
+pub mod status;
 pub mod test;
+pub mod transfer;
 pub mod upgrade;
 pub mod version;
 
@@ -238,6 +239,7 @@ pub(crate) fn run_json(
     match command {
         // Commands without global context
         crate::Commands::Init(args) => dispatch!(args, init),
+        crate::Commands::Status(args) => dispatch!(args, status),
         crate::Commands::Test(args) => dispatch!(args, test),
         crate::Commands::Lint(args) => dispatch!(args, lint),
 

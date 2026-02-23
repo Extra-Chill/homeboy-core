@@ -200,7 +200,9 @@ fn run_scaffold(
         dirs
     } else if detect_by_extension {
         // Extension-based detection
-        let extensions = source_extensions.clone().unwrap_or_else(default_source_extensions);
+        let extensions = source_extensions
+            .clone()
+            .unwrap_or_else(default_source_extensions);
         find_source_directories_by_extension(source_path, &extensions)
     } else if let Some(extensions) = source_extensions {
         // Custom extensions provided - use extension-based detection automatically

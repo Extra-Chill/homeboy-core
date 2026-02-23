@@ -35,18 +35,22 @@ pub fn run(args: UpgradeArgs, _global: &GlobalArgs) -> CmdResult<Value> {
         return Ok((json, 0));
     }
 
-    let method_override = args.method.as_deref().map(|m| match m {
-        "homebrew" => Ok(upgrade::InstallMethod::Homebrew),
-        "cargo" => Ok(upgrade::InstallMethod::Cargo),
-        "source" => Ok(upgrade::InstallMethod::Source),
-        "binary" => Ok(upgrade::InstallMethod::Binary),
-        other => Err(homeboy::Error::validation_invalid_argument(
-            "method",
-            format!("Unknown method: {}", other),
-            Some(other.to_string()),
-            None,
-        )),
-    }).transpose()?;
+    let method_override = args
+        .method
+        .as_deref()
+        .map(|m| match m {
+            "homebrew" => Ok(upgrade::InstallMethod::Homebrew),
+            "cargo" => Ok(upgrade::InstallMethod::Cargo),
+            "source" => Ok(upgrade::InstallMethod::Source),
+            "binary" => Ok(upgrade::InstallMethod::Binary),
+            other => Err(homeboy::Error::validation_invalid_argument(
+                "method",
+                format!("Unknown method: {}", other),
+                Some(other.to_string()),
+                None,
+            )),
+        })
+        .transpose()?;
 
     let result = upgrade::run_upgrade_with_method(args.force, method_override)?;
     let json = serde_json::to_value(&result)

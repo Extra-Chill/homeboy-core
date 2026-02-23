@@ -31,7 +31,11 @@ pub struct ReleaseArgs {
     component_id: String,
 
     /// Version bump type (patch, minor, major) — not needed with --recover
-    #[arg(value_name = "BUMP_TYPE", ignore_case = true, required_unless_present = "recover")]
+    #[arg(
+        value_name = "BUMP_TYPE",
+        ignore_case = true,
+        required_unless_present = "recover"
+    )]
     bump_type: Option<BumpType>,
 
     /// Preview what will happen without making changes
@@ -98,7 +102,9 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
         return run_recover(&args.component_id);
     }
 
-    let bump_type = args.bump_type.expect("bump_type required when not recovering");
+    let bump_type = args
+        .bump_type
+        .expect("bump_type required when not recovering");
     let options = release::ReleaseOptions {
         bump_type: bump_type.as_str().to_string(),
         dry_run: args.dry_run,
@@ -305,10 +311,10 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
     let tag_name = format!("v{}", current_version);
 
     // Check what state we're in
-    let tag_exists_local = homeboy::git::tag_exists_locally(&component.local_path, &tag_name)
-        .unwrap_or(false);
-    let tag_exists_remote = homeboy::git::tag_exists_on_remote(&component.local_path, &tag_name)
-        .unwrap_or(false);
+    let tag_exists_local =
+        homeboy::git::tag_exists_locally(&component.local_path, &tag_name).unwrap_or(false);
+    let tag_exists_remote =
+        homeboy::git::tag_exists_on_remote(&component.local_path, &tag_name).unwrap_or(false);
     let uncommitted = homeboy::git::get_uncommitted_changes(&component.local_path)?;
 
     let mut actions = Vec::new();
@@ -367,9 +373,16 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
     }
 
     if actions.is_empty() {
-        eprintln!("[recover] Release v{} appears complete — nothing to recover.", current_version);
+        eprintln!(
+            "[recover] Release v{} appears complete — nothing to recover.",
+            current_version
+        );
     } else {
-        eprintln!("[recover] Recovery complete for v{}: {}", current_version, actions.join(", "));
+        eprintln!(
+            "[recover] Recovery complete for v{}: {}",
+            current_version,
+            actions.join(", ")
+        );
     }
 
     Ok((

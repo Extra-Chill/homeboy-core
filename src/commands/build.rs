@@ -54,7 +54,8 @@ pub fn run(
                 None,
                 Some(vec![
                     format!("Error: {}", e),
-                    "Use --all only with a project ID: homeboy build <project-id> --all".to_string(),
+                    "Use --all only with a project ID: homeboy build <project-id> --all"
+                        .to_string(),
                 ]),
             )
         })?;
@@ -98,7 +99,11 @@ pub fn run(
                 format!(
                     "Components not in project '{}': {}",
                     project_id,
-                    invalid.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    invalid
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
                 None,
                 Some(vec![format!(

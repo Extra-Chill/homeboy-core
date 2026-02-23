@@ -4,7 +4,9 @@ use clap::Args;
 use serde::Serialize;
 
 use homeboy::component::{self, Component};
-use homeboy::context::{self, build_component_info, path_is_parent_of, ComponentGap, ContextOutput};
+use homeboy::context::{
+    self, build_component_info, path_is_parent_of, ComponentGap, ContextOutput,
+};
 use homeboy::module::{
     is_module_compatible, is_module_linked, load_all_modules, module_ready_status,
 };

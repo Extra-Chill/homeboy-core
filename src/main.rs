@@ -21,8 +21,9 @@ mod output;
 mod tty;
 
 use commands::{
-    api, auth, build, changelog, changes, cli, component, config, db, deploy, file, fleet, git, init,
-    lint, logs, module, project, release, server, ssh, test, transfer, upgrade, version,
+    api, auth, build, changelog, changes, cli, component, config, db, deploy, file, fleet, git,
+    init, lint, logs, module, project, release, server, ssh, status, test, transfer, upgrade,
+    version,
 };
 use homeboy::module::load_all_modules;
 use homeboy::utils::args;
@@ -74,9 +75,10 @@ enum Commands {
     /// Execute CLI-compatible modules
     #[command(visible_alias = "modules")]
     Module(module::ModuleArgs),
-    /// Get repo context and status (read-only, creates no state)
-    #[command(visible_alias = "status")]
+    /// Get repo context (read-only, creates no state)
     Init(init::InitArgs),
+    /// Actionable component status overview
+    Status(status::StatusArgs),
     /// Display CLI documentation
     Docs(crate::commands::docs::DocsArgs),
     /// Changelog operations

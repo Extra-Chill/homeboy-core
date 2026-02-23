@@ -120,7 +120,9 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             args,
             stream,
             no_stream,
-        } => run_module(&module_id, project, component, input, args, stream, no_stream),
+        } => run_module(
+            &module_id, project, component, input, args, stream, no_stream,
+        ),
         ModuleCommand::Setup { module_id } => setup_module(&module_id),
         ModuleCommand::Install { source, id } => install_module(&source, id),
         ModuleCommand::Update { module_id } => update_module(&module_id),

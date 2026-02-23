@@ -95,7 +95,11 @@ pub fn run(args: TransferArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
     let dest_client = SshClient::from_server(&dest_server, &dest_server_id)?;
 
     if args.dry_run {
-        let method = if args.recursive { "tar-pipe" } else { "scp-pipe" };
+        let method = if args.recursive {
+            "tar-pipe"
+        } else {
+            "scp-pipe"
+        };
         eprintln!(
             "[dry-run] Would transfer {} -> {}",
             args.source, args.destination
@@ -166,12 +170,7 @@ pub fn run(args: TransferArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
         // Single file transfer via cat pipe
         let cmd = format!(
             "ssh {} {} 'cat \"{}\"' | ssh {} {} 'cat > \"{}\"'",
-            source_ssh_args,
-            source_remote,
-            source_path,
-            dest_ssh_args,
-            dest_remote,
-            dest_path,
+            source_ssh_args, source_remote, source_path, dest_ssh_args, dest_remote, dest_path,
         );
 
         ("cat-pipe".to_string(), cmd)
