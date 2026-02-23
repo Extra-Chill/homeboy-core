@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Changed
+- Omit zero-value feature coverage fields from docs audit JSON output
+
+### Fixed
+- Filter Windows filesystem paths (e.g., AppData\Roaming) from class name extraction in docs audit
+- Improve example context detection for 'this creates', 'would create', 'typically:' patterns
+
 ## [0.47.0] - 2026-02-23
 
 ### Added
