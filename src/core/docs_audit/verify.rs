@@ -15,13 +15,9 @@ pub enum VerifyResult {
     /// Claim verified as true
     Verified,
     /// Claim verified as false
-    Broken {
-        suggestion: Option<String>,
-    },
+    Broken { suggestion: Option<String> },
     /// Cannot verify mechanically - agent must check
-    NeedsVerification {
-        hint: String,
-    },
+    NeedsVerification { hint: String },
 }
 
 /// Verify a claim against the codebase.
@@ -99,7 +95,7 @@ fn verify_file_path(
 
     VerifyResult::Broken {
         suggestion: Some(format!(
-            "File '{}' not found. Search codebase for actual location or remove if deleted.",
+            "File '{}' no longer exists. Update or remove this reference from documentation.",
             path
         )),
     }
@@ -121,8 +117,9 @@ fn verify_directory_path(
     // to avoid Path::join replacing the base with the absolute path.
     if Path::new(path).is_absolute() {
         return VerifyResult::NeedsVerification {
-            hint: "Absolute directory path outside repository; verify path exists on target system."
-                .to_string(),
+            hint:
+                "Absolute directory path outside repository; verify path exists on target system."
+                    .to_string(),
         };
     }
 
@@ -145,7 +142,7 @@ fn verify_directory_path(
 
     VerifyResult::Broken {
         suggestion: Some(format!(
-            "Directory '{}' not found. Check if directory was moved or renamed.",
+            "Directory '{}' no longer exists. Update or remove this reference from documentation.",
             path
         )),
     }
@@ -175,7 +172,7 @@ fn verify_class_name(claim: &Claim, source_path: &Path) -> VerifyResult {
 
     VerifyResult::Broken {
         suggestion: Some(format!(
-            "Class '{}' not found in source. It may have been renamed or deleted. Search codebase for the current class name.",
+            "Class '{}' not found in source. Update documentation to reflect current class name, or remove if deleted.",
             class_ref
         )),
     }
@@ -208,7 +205,10 @@ fn search_class_in_dir(dir: &Path, class_name: &str) -> bool {
         } else if path.is_file() {
             // Only check source files
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !matches!(ext, "php" | "rs" | "py" | "js" | "ts" | "go" | "java" | "rb" | "kt" | "swift") {
+            if !matches!(
+                ext,
+                "php" | "rs" | "py" | "js" | "ts" | "go" | "java" | "rb" | "kt" | "swift"
+            ) {
                 continue;
             }
 
@@ -243,7 +243,7 @@ fn verify_code_example(_claim: &Claim) -> VerifyResult {
     // Code examples always require manual verification
     // We can't know if the syntax is still valid without understanding the API
     VerifyResult::NeedsVerification {
-        hint: "Verify code example syntax matches current API. Check that all referenced functions, classes, and parameters are correct.".to_string(),
+        hint: "Code example may be stale. Compare against current implementation and update documentation if it no longer matches.".to_string(),
     }
 }
 

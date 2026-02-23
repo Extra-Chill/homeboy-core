@@ -44,7 +44,9 @@ pub fn build_task(claim: Claim, result: VerifyResult) -> AuditTask {
     let (status, action) = match result {
         VerifyResult::Verified => (AuditTaskStatus::Verified, None),
         VerifyResult::Broken { suggestion } => (AuditTaskStatus::Broken, suggestion),
-        VerifyResult::NeedsVerification { hint } => (AuditTaskStatus::NeedsVerification, Some(hint)),
+        VerifyResult::NeedsVerification { hint } => {
+            (AuditTaskStatus::NeedsVerification, Some(hint))
+        }
     };
 
     // Build human-readable claim description

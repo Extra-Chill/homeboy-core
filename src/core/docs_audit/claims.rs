@@ -250,10 +250,8 @@ mod tests {
         let content = "Check the file at `/inc/Engine/AI/Tools/BaseTool.php` for details.";
         let claims = extract_claims(content, "test.md", &[]);
 
-        assert!(claims
-            .iter()
-            .any(|c| c.claim_type == ClaimType::FilePath
-                && c.value == "/inc/Engine/AI/Tools/BaseTool.php"));
+        assert!(claims.iter().any(|c| c.claim_type == ClaimType::FilePath
+            && c.value == "/inc/Engine/AI/Tools/BaseTool.php"));
     }
 
     #[test]
@@ -270,10 +268,12 @@ mod tests {
         let content = "The tools are in `src/core/docs_audit/` directory.";
         let claims = extract_claims(content, "test.md", &[]);
 
-        assert!(claims
-            .iter()
-            .any(|c| c.claim_type == ClaimType::DirectoryPath
-                && c.value == "src/core/docs_audit/"));
+        assert!(
+            claims
+                .iter()
+                .any(|c| c.claim_type == ClaimType::DirectoryPath
+                    && c.value == "src/core/docs_audit/")
+        );
     }
 
     #[test]
@@ -325,7 +325,8 @@ Call `register_tool(name, handler)` to register a tool.
 
     #[test]
     fn test_skip_mime_types() {
-        let content = "The file type is `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.";
+        let content =
+            "The file type is `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.";
         let claims = extract_claims(content, "test.md", &[]);
 
         assert!(!claims.iter().any(|c| c.value.starts_with("application/")));
@@ -376,10 +377,8 @@ Supported types: `text/plain`, `image/png`, `audio/mpeg`, `video/mp4`.
         let content = "**Service**: DataMachine\\Services\\ProcessedItemsManager";
         let claims = extract_claims(content, "test.md", &[]);
 
-        assert!(claims
-            .iter()
-            .any(|c| c.claim_type == ClaimType::ClassName
-                && c.value == "DataMachine\\Services\\ProcessedItemsManager"));
+        assert!(claims.iter().any(|c| c.claim_type == ClaimType::ClassName
+            && c.value == "DataMachine\\Services\\ProcessedItemsManager"));
     }
 
     #[test]
@@ -387,10 +386,8 @@ Supported types: `text/plain`, `image/png`, `audio/mpeg`, `video/mp4`.
         let content = "The class `DataMachine\\\\Services\\\\CacheManager` handles caching.";
         let claims = extract_claims(content, "test.md", &[]);
 
-        assert!(claims
-            .iter()
-            .any(|c| c.claim_type == ClaimType::ClassName
-                && c.value == "DataMachine\\Services\\CacheManager"));
+        assert!(claims.iter().any(|c| c.claim_type == ClaimType::ClassName
+            && c.value == "DataMachine\\Services\\CacheManager"));
     }
 
     #[test]

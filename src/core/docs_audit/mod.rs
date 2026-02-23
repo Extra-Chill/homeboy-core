@@ -297,7 +297,10 @@ fn build_priority_docs(tasks: &[AuditTask], changed_files: &[String]) -> Vec<Pri
 
         priority_docs.push(PriorityDoc {
             doc,
-            reason: format!("References {} changed file(s)", referenced_changes.len()),
+            reason: format!(
+                "{} referenced source file(s) changed since baseline",
+                referenced_changes.len()
+            ),
             changed_files_referenced: referenced_changes,
             code_examples,
             action,
@@ -305,7 +308,11 @@ fn build_priority_docs(tasks: &[AuditTask], changed_files: &[String]) -> Vec<Pri
     }
 
     // Sort by impact (most changed files referenced first)
-    priority_docs.sort_by(|a, b| b.changed_files_referenced.len().cmp(&a.changed_files_referenced.len()));
+    priority_docs.sort_by(|a, b| {
+        b.changed_files_referenced
+            .len()
+            .cmp(&a.changed_files_referenced.len())
+    });
 
     priority_docs
 }
@@ -349,11 +356,14 @@ fn build_doc_action(changed_files: &[String], code_examples: usize) -> String {
 
     if code_examples > 0 {
         format!(
-            "Verify {} code example(s) match current {} implementation",
+            "Documentation may be stale: {} code example(s) reference changed source ({}). Update docs to match current implementation.",
             code_examples, files_desc
         )
     } else {
-        format!("Review documentation against {} changes", files_desc)
+        format!(
+            "Source changed ({}). Review documentation for accuracy against current implementation.",
+            files_desc
+        )
     }
 }
 
@@ -366,10 +376,9 @@ fn extract_broken_references(tasks: &[AuditTask]) -> Vec<BrokenReference> {
             doc: t.doc.clone(),
             line: t.line,
             claim: t.claim.clone(),
-            action: t
-                .action
-                .clone()
-                .unwrap_or_else(|| "Fix broken reference".to_string()),
+            action: t.action.clone().unwrap_or_else(|| {
+                "Stale reference. Update or remove from documentation.".to_string()
+            }),
         })
         .collect()
 }
@@ -471,8 +480,7 @@ fn detect_undocumented_features(
                     if !seen_names.contains(&name) && !all_doc_content.contains(&name) {
                         // Map byte offset to line number
                         let byte_pos = name_match.start();
-                        let line_num = line_offsets
-                            .partition_point(|&offset| offset <= byte_pos);
+                        let line_num = line_offsets.partition_point(|&offset| offset <= byte_pos);
                         seen_names.insert(name.clone());
                         undocumented.push(UndocumentedFeature {
                             name,
@@ -612,7 +620,10 @@ index 111222..333444 100644
     #[test]
     fn test_references_file_basename_match() {
         // Code examples often reference class names without full paths
-        assert!(references_file("ToolExecutor::run()", "inc/Engine/ToolExecutor.php"));
+        assert!(references_file(
+            "ToolExecutor::run()",
+            "inc/Engine/ToolExecutor.php"
+        ));
         assert!(references_file("new BaseTool()", "src/tools/BaseTool.rs"));
     }
 
@@ -632,15 +643,12 @@ index 111222..333444 100644
     fn test_build_doc_action_single_file() {
         let action = build_doc_action(&["src/main.rs".to_string()], 0);
         assert!(action.contains("src/main.rs"));
-        assert!(action.contains("Review"));
+        assert!(action.contains("Source changed"));
     }
 
     #[test]
     fn test_build_doc_action_multiple_files() {
-        let action = build_doc_action(
-            &["src/main.rs".to_string(), "src/lib.rs".to_string()],
-            0,
-        );
+        let action = build_doc_action(&["src/main.rs".to_string(), "src/lib.rs".to_string()], 0);
         assert!(action.contains("2 files"));
     }
 
@@ -648,7 +656,7 @@ index 111222..333444 100644
     fn test_build_doc_action_with_code_examples() {
         let action = build_doc_action(&["src/main.rs".to_string()], 3);
         assert!(action.contains("3 code example(s)"));
-        assert!(action.contains("Verify"));
+        assert!(action.contains("stale"));
     }
 
     #[test]
@@ -661,7 +669,7 @@ index 111222..333444 100644
                 claim_type: ClaimType::FilePath,
                 claim_value: "src/old.rs".to_string(),
                 status: AuditTaskStatus::Broken,
-                action: Some("File not found".to_string()),
+                action: Some("File no longer exists".to_string()),
             },
             AuditTask {
                 doc: "api/index.md".to_string(),
@@ -678,7 +686,7 @@ index 111222..333444 100644
         assert_eq!(broken.len(), 1);
         assert_eq!(broken[0].doc, "api/index.md");
         assert_eq!(broken[0].line, 10);
-        assert_eq!(broken[0].action, "File not found");
+        assert_eq!(broken[0].action, "File no longer exists");
     }
 
     #[test]
@@ -710,7 +718,10 @@ index 111222..333444 100644
         // Only api/tools.md should be a priority doc
         assert_eq!(priority.len(), 1);
         assert_eq!(priority[0].doc, "api/tools.md");
-        assert_eq!(priority[0].changed_files_referenced, vec!["inc/ToolExecutor.php"]);
+        assert_eq!(
+            priority[0].changed_files_referenced,
+            vec!["inc/ToolExecutor.php"]
+        );
     }
 
     #[test]
@@ -772,11 +783,16 @@ index 111222..333444 100644
         .unwrap();
 
         // Create a doc file that mentions docStep but not coolStep
-        fs::write(docs_path.join("guide.md"), "Use the docStep to do things.\n").unwrap();
+        fs::write(
+            docs_path.join("guide.md"),
+            "Use the docStep to do things.\n",
+        )
+        .unwrap();
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "coolStep");
@@ -798,11 +814,16 @@ index 111222..333444 100644
         let docs_path = source_path.join("docs");
         fs::create_dir_all(&docs_path).unwrap();
 
-        fs::write(source_path.join("notes.md"), "registerStepType('hidden', h);\n").unwrap();
+        fs::write(
+            source_path.join("notes.md"),
+            "registerStepType('hidden', h);\n",
+        )
+        .unwrap();
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
         assert!(result.is_empty());
     }
 
@@ -813,12 +834,21 @@ index 111222..333444 100644
         let docs_path = source_path.join("docs");
         fs::create_dir_all(&docs_path).unwrap();
 
-        fs::write(source_path.join("plugin.js"), "registerStepType('myStep', handler);\n").unwrap();
-        fs::write(docs_path.join("guide.md"), "The myStep feature does things.\n").unwrap();
+        fs::write(
+            source_path.join("plugin.js"),
+            "registerStepType('myStep', handler);\n",
+        )
+        .unwrap();
+        fs::write(
+            docs_path.join("guide.md"),
+            "The myStep feature does things.\n",
+        )
+        .unwrap();
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
         assert!(result.is_empty());
     }
 
@@ -840,7 +870,8 @@ index 111222..333444 100644
 
         let patterns = vec![r#"register_rest_route\(\s*['"](\w[\w-]*/v\d+)['"]"#.to_string()];
 
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "myplugin/v1");
@@ -865,7 +896,8 @@ index 111222..333444 100644
 
         let patterns = vec![r#"register_rest_route\(\s*['"](\w[\w-]*/v\d+)['"]"#.to_string()];
 
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
         assert!(result.is_empty());
     }
 
@@ -890,7 +922,8 @@ index 111222..333444 100644
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
         assert_eq!(result.len(), 1); // Deduplicated
     }
 
@@ -909,10 +942,15 @@ index 111222..333444 100644
         .unwrap();
 
         // README.md documents one of them (no docs/ file does)
-        fs::write(source_path.join("README.md"), "This plugin provides readmeStep for automation.\n").unwrap();
+        fs::write(
+            source_path.join("README.md"),
+            "This plugin provides readmeStep for automation.\n",
+        )
+        .unwrap();
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
 
         // readmeStep is documented via README, hiddenStep is not
         assert_eq!(result.len(), 1);
@@ -936,16 +974,26 @@ index 111222..333444 100644
         .unwrap();
 
         // Documented in wiki, not in docs
-        fs::write(wiki_path.join("features.md"), "The wikiStep handles wiki operations.\n").unwrap();
+        fs::write(
+            wiki_path.join("features.md"),
+            "The wikiStep handles wiki operations.\n",
+        )
+        .unwrap();
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
         // Only scanning docs/ — both undocumented
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result =
+            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
         assert_eq!(result.len(), 2);
 
         // Scanning both dirs — wikiStep found in wiki/
-        let result = detect_undocumented_features(&patterns, source_path, &["docs".to_string(), "wiki".to_string()], None);
+        let result = detect_undocumented_features(
+            &patterns,
+            source_path,
+            &["docs".to_string(), "wiki".to_string()],
+            None,
+        );
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "orphanStep");
     }
