@@ -22,6 +22,11 @@ use regex::Regex;
 
 use crate::{component, git, module, Result};
 
+/// Helper for `skip_serializing_if` on zero-value usize fields.
+fn is_zero(v: &usize) -> bool {
+    *v == 0
+}
+
 /// A doc that needs content review due to referenced files changing.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PriorityDoc {
@@ -61,10 +66,13 @@ pub struct AlignmentSummary {
     pub priority_docs: usize,
     pub broken_references: usize,
     pub unchanged_docs: usize,
-    /// Total features detected by module-defined patterns.
+    /// Total features detected by module-defined patterns (omitted when 0).
+    #[serde(skip_serializing_if = "is_zero")]
     pub total_features: usize,
-    /// Features with at least one mention in documentation.
+    /// Features with at least one mention in documentation (omitted when 0).
+    #[serde(skip_serializing_if = "is_zero")]
     pub documented_features: usize,
+    #[serde(skip_serializing_if = "is_zero")]
     pub undocumented_features: usize,
 }
 

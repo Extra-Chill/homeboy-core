@@ -119,6 +119,34 @@ fn line_suggests_example(line: &str) -> bool {
         || lower.contains("for instance")
         || lower.contains("sample")
         || lower.contains("such as")
+        || lower.contains("this creates")
+        || lower.contains("would create")
+        || lower.contains("would generate")
+        || lower.contains("would produce")
+        || lower.contains("typically:")
+}
+
+/// Check if a backslash-separated match is part of an OS filesystem path on the line.
+///
+/// Looks at characters before the regex match position to detect drive letters (`C:\`),
+/// or other OS path indicators that mean this isn't a namespaced class reference.
+fn is_os_path_context(line: &str, match_start: usize) -> bool {
+    // Check if there's a drive letter + colon + backslash before the match
+    // e.g., "C:\Users\<username>\AppData\Roaming"
+    if match_start >= 2 {
+        let prefix = &line[..match_start];
+        // Look for X:\ pattern anywhere before the match
+        if prefix.contains(":\\") || prefix.contains(":/") {
+            return true;
+        }
+    }
+    // Check if the line contains common OS path indicators
+    let lower = line.to_lowercase();
+    (lower.contains("c:\\") || lower.contains("c:/"))
+        || (lower.contains("users\\") || lower.contains("users/"))
+        || lower.contains("program files")
+        || lower.contains("%appdata%")
+        || lower.contains("$home")
 }
 
 /// Check if a line's context suggests a real reference (annotation, cross-ref).
@@ -251,6 +279,12 @@ pub fn extract_claims(content: &str, doc_file: &str, ignore_patterns: &[String])
 
             if !claimed_positions.contains(&pos) {
                 let class_ref = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+
+                // Skip if this looks like part of a Windows/OS filesystem path
+                // (e.g., C:\Users\<username>\AppData\Roaming)
+                if is_os_path_context(line, full_match.start()) {
+                    continue;
+                }
 
                 // Normalize double backslashes to single
                 let normalized = class_ref.replace("\\\\", "\\");
@@ -616,5 +650,57 @@ Supported types: `text/plain`, `image/png`, `audio/mpeg`, `video/mp4`.
         assert!(is_placeholder_class("Test\\Mock\\Handler"));
         assert!(!is_placeholder_class("DataMachine\\Services\\Cache"));
         assert!(!is_placeholder_class("WordPress\\Plugin\\Activator"));
+    }
+
+    #[test]
+    fn test_windows_path_not_extracted_as_class() {
+        let content = "Typically: `C:\\Users\\<username>\\AppData\\Roaming\\homeboy\\`";
+        let claims = extract_claims(content, "test.md", &[]);
+
+        // Should NOT extract AppData\Roaming as a class name
+        assert!(
+            !claims.iter().any(|c| c.claim_type == ClaimType::ClassName),
+            "Windows path segments should not be extracted as class names"
+        );
+    }
+
+    #[test]
+    fn test_os_path_context_detection() {
+        assert!(is_os_path_context(
+            "Typically: C:\\Users\\admin\\AppData\\Roaming",
+            25
+        ));
+        assert!(is_os_path_context("Path is C:/Users/admin/AppData", 20));
+        assert!(!is_os_path_context(
+            "The DataMachine\\Services\\Cache class",
+            4
+        ));
+    }
+
+    #[test]
+    fn test_this_creates_context_is_example() {
+        // Test when path is on the same line as "this creates"
+        let content2 = "This creates `docs/api/endpoints.md` with heading";
+        let claims2 = extract_claims(content2, "test.md", &[]);
+
+        if let Some(claim) = claims2.iter().find(|c| c.claim_type == ClaimType::FilePath) {
+            assert_ne!(
+                claim.confidence,
+                ClaimConfidence::Real,
+                "paths in 'this creates' context should not be real"
+            );
+        }
+
+        // Also verify paths after "Example:" context
+        let content3 = "**Example:** `projects/extrachill.json`";
+        let claims3 = extract_claims(content3, "test.md", &[]);
+
+        if let Some(claim) = claims3.iter().find(|c| c.claim_type == ClaimType::FilePath) {
+            assert_ne!(
+                claim.confidence,
+                ClaimConfidence::Real,
+                "paths in 'Example:' context should not be real"
+            );
+        }
     }
 }
