@@ -61,6 +61,10 @@ pub struct AlignmentSummary {
     pub priority_docs: usize,
     pub broken_references: usize,
     pub unchanged_docs: usize,
+    /// Total features detected by module-defined patterns.
+    pub total_features: usize,
+    /// Features with at least one mention in documentation.
+    pub documented_features: usize,
     pub undocumented_features: usize,
 }
 
@@ -137,8 +141,8 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
     let priority_docs = build_priority_docs(&tasks, &changed_files);
     let broken_references = extract_broken_references(&tasks, &doc_contents);
 
-    // Detect undocumented features across all source files (not just changed ones)
-    let undocumented_features = detect_undocumented_features(
+    // Detect features and documentation coverage across all source files
+    let feature_result = detect_features(
         &feature_patterns,
         source_path,
         &docs_dirs,
@@ -161,12 +165,14 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
             priority_docs: priority_docs.len(),
             broken_references: broken_references.len(),
             unchanged_docs,
-            undocumented_features: undocumented_features.len(),
+            total_features: feature_result.total,
+            documented_features: feature_result.documented,
+            undocumented_features: feature_result.undocumented.len(),
         },
         changed_files,
         priority_docs,
         broken_references,
-        undocumented_features,
+        undocumented_features: feature_result.undocumented,
     })
 }
 
@@ -443,23 +449,39 @@ fn collect_module_feature_patterns(comp: &component::Component) -> Vec<String> {
     patterns
 }
 
-/// Detect features across all source files that have no mentions in documentation.
+/// Result of feature detection including coverage counts.
+struct FeatureDetectionResult {
+    /// Total unique feature names found in source code.
+    total: usize,
+    /// Features that have at least one mention in documentation.
+    documented: usize,
+    /// Features with no documentation mention.
+    undocumented: Vec<UndocumentedFeature>,
+}
+
+/// Detect features across all source files and report documentation coverage.
 ///
 /// Scans the entire source tree (excluding vendor/node_modules/test dirs) for
-/// feature registrations matching the configured patterns. Any feature name not
-/// found in documentation content is reported as undocumented.
+/// feature registrations matching the configured patterns. Returns counts of
+/// total, documented, and undocumented features.
 ///
 /// Documentation is gathered from:
 /// 1. All configured docs directories
 /// 2. README.md and README.txt in the project root (auto-included)
-fn detect_undocumented_features(
+fn detect_features(
     feature_patterns: &[String],
     source_path: &Path,
     docs_dirs: &[String],
     changelog_exclude: Option<&str>,
-) -> Vec<UndocumentedFeature> {
+) -> FeatureDetectionResult {
+    let empty = FeatureDetectionResult {
+        total: 0,
+        documented: 0,
+        undocumented: Vec::new(),
+    };
+
     if feature_patterns.is_empty() {
-        return Vec::new();
+        return empty;
     }
 
     // Compile regexes once
@@ -469,7 +491,7 @@ fn detect_undocumented_features(
         .collect();
 
     if compiled.is_empty() {
-        return Vec::new();
+        return empty;
     }
 
     // Collect all doc content from all configured directories
@@ -502,6 +524,7 @@ fn detect_undocumented_features(
 
     let mut undocumented = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
+    let mut documented_count: usize = 0;
 
     for file in &source_files {
         let file_path = source_path.join(file);
@@ -523,12 +546,17 @@ fn detect_undocumented_features(
             for caps in regex.captures_iter(&content) {
                 if let Some(name_match) = caps.get(1) {
                     let name = name_match.as_str().to_string();
-                    // Deduplicate: only report first occurrence of each feature name
-                    if !seen_names.contains(&name) && !all_doc_content.contains(&name) {
-                        // Map byte offset to line number
+                    // Deduplicate: only count first occurrence of each feature name
+                    if seen_names.contains(&name) {
+                        continue;
+                    }
+                    seen_names.insert(name.clone());
+
+                    if all_doc_content.contains(&name) {
+                        documented_count += 1;
+                    } else {
                         let byte_pos = name_match.start();
                         let line_num = line_offsets.partition_point(|&offset| offset <= byte_pos);
-                        seen_names.insert(name.clone());
                         undocumented.push(UndocumentedFeature {
                             name,
                             source_file: file.clone(),
@@ -541,7 +569,11 @@ fn detect_undocumented_features(
         }
     }
 
-    undocumented
+    FeatureDetectionResult {
+        total: seen_names.len(),
+        documented: documented_count,
+        undocumented,
+    }
 }
 
 /// Directories to skip when scanning for source files.
@@ -825,7 +857,7 @@ index 111222..333444 100644
     }
 
     #[test]
-    fn test_detect_undocumented_features_finds_missing() {
+    fn test_detect_features_finds_missing() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -847,24 +879,26 @@ index 111222..333444 100644
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "coolStep");
-        assert_eq!(result[0].source_file, "plugin.js");
-        assert_eq!(result[0].line, 1);
+        assert_eq!(result.total, 2);
+        assert_eq!(result.documented, 1);
+        assert_eq!(result.undocumented.len(), 1);
+        assert_eq!(result.undocumented[0].name, "coolStep");
+        assert_eq!(result.undocumented[0].source_file, "plugin.js");
+        assert_eq!(result.undocumented[0].line, 1);
     }
 
     #[test]
-    fn test_detect_undocumented_features_empty_when_no_patterns() {
+    fn test_detect_features_empty_when_no_patterns() {
         let dir = tempfile::tempdir().unwrap();
-        let result = detect_undocumented_features(&[], dir.path(), &["docs".to_string()], None);
-        assert!(result.is_empty());
+        let result = detect_features(&[], dir.path(), &["docs".to_string()], None);
+        assert_eq!(result.total, 0);
+        assert!(result.undocumented.is_empty());
     }
 
     #[test]
-    fn test_detect_undocumented_features_skips_md_files() {
+    fn test_detect_features_skips_md_files() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -878,13 +912,13 @@ index 111222..333444 100644
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
-        assert!(result.is_empty());
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
+        assert_eq!(result.total, 0);
+        assert!(result.undocumented.is_empty());
     }
 
     #[test]
-    fn test_detect_undocumented_features_all_documented() {
+    fn test_detect_features_all_documented() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -903,13 +937,14 @@ index 111222..333444 100644
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
-        assert!(result.is_empty());
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
+        assert_eq!(result.total, 1);
+        assert_eq!(result.documented, 1);
+        assert!(result.undocumented.is_empty());
     }
 
     #[test]
-    fn test_detect_undocumented_features_scans_subdirectories() {
+    fn test_detect_features_scans_subdirectories() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -926,16 +961,15 @@ index 111222..333444 100644
 
         let patterns = vec![r#"register_rest_route\(\s*['"](\w[\w-]*/v\d+)['"]"#.to_string()];
 
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "myplugin/v1");
-        assert!(result[0].source_file.contains("Routes.php"));
+        assert_eq!(result.undocumented.len(), 1);
+        assert_eq!(result.undocumented[0].name, "myplugin/v1");
+        assert!(result.undocumented[0].source_file.contains("Routes.php"));
     }
 
     #[test]
-    fn test_detect_undocumented_features_skips_vendor() {
+    fn test_detect_features_skips_vendor() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -952,13 +986,13 @@ index 111222..333444 100644
 
         let patterns = vec![r#"register_rest_route\(\s*['"](\w[\w-]*/v\d+)['"]"#.to_string()];
 
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
-        assert!(result.is_empty());
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
+        assert_eq!(result.total, 0);
+        assert!(result.undocumented.is_empty());
     }
 
     #[test]
-    fn test_detect_undocumented_features_deduplicates() {
+    fn test_detect_features_deduplicates() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -978,13 +1012,13 @@ index 111222..333444 100644
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
-        assert_eq!(result.len(), 1); // Deduplicated
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
+        assert_eq!(result.total, 1); // Deduplicated
+        assert_eq!(result.undocumented.len(), 1);
     }
 
     #[test]
-    fn test_detect_undocumented_features_reads_readme() {
+    fn test_detect_features_reads_readme() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -1005,16 +1039,17 @@ index 111222..333444 100644
         .unwrap();
 
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
 
         // readmeStep is documented via README, hiddenStep is not
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "hiddenStep");
+        assert_eq!(result.total, 2);
+        assert_eq!(result.documented, 1);
+        assert_eq!(result.undocumented.len(), 1);
+        assert_eq!(result.undocumented[0].name, "hiddenStep");
     }
 
     #[test]
-    fn test_detect_undocumented_features_multiple_dirs() {
+    fn test_detect_features_multiple_dirs() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path();
         let docs_path = source_path.join("docs");
@@ -1039,19 +1074,21 @@ index 111222..333444 100644
         let patterns = vec![r#"registerStepType\(\s*'(\w+)'"#.to_string()];
 
         // Only scanning docs/ — both undocumented
-        let result =
-            detect_undocumented_features(&patterns, source_path, &["docs".to_string()], None);
-        assert_eq!(result.len(), 2);
+        let result = detect_features(&patterns, source_path, &["docs".to_string()], None);
+        assert_eq!(result.total, 2);
+        assert_eq!(result.undocumented.len(), 2);
 
         // Scanning both dirs — wikiStep found in wiki/
-        let result = detect_undocumented_features(
+        let result = detect_features(
             &patterns,
             source_path,
             &["docs".to_string(), "wiki".to_string()],
             None,
         );
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "orphanStep");
+        assert_eq!(result.total, 2);
+        assert_eq!(result.documented, 1);
+        assert_eq!(result.undocumented.len(), 1);
+        assert_eq!(result.undocumented[0].name, "orphanStep");
     }
 
     #[test]
