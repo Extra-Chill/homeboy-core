@@ -258,6 +258,7 @@ fn normalize_keys_to_snake_case(value: Value) -> Value {
 }
 
 /// Internal result from merge_config (no ID, caller adds it).
+#[derive(Debug)]
 pub(crate) struct MergeFields {
     pub updated_fields: Vec<String>,
 }
@@ -294,13 +295,63 @@ pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
         ));
     }
 
+    // Detect unknown fields by round-tripping through the typed struct.
+    // After deep-merging the patch into the serialized base, deserialize back
+    // into T. Serde silently drops unknown keys. We detect this by comparing
+    // the merged JSON against the re-serialized struct output.
     let mut base = serde_json::to_value(&*existing)
         .map_err(|e| Error::internal_json(e.to_string(), Some("serialize config".to_string())))?;
+
+    // Snapshot patch values before merge (for zero-value detection)
+    let patch_values: Map<String, Value> = patch.as_object().cloned().unwrap_or_default();
 
     deep_merge(&mut base, patch, replace_fields, String::new());
 
     *existing = serde_json::from_value(base)
         .map_err(|e| Error::validation_invalid_json(e, Some("merge config".to_string()), None))?;
+
+    // Re-serialize and check which patch keys survived the round-trip.
+    // Fields with skip_serializing_if may vanish when set to zero values
+    // (empty vec, None, false), so we only flag keys whose patch value was
+    // non-trivial but still disappeared — those are truly unknown fields.
+    let after_roundtrip = serde_json::to_value(&*existing)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize config".to_string())))?;
+    let surviving_keys: std::collections::HashSet<String> = after_roundtrip
+        .as_object()
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let dropped: Vec<&String> = updated_fields
+        .iter()
+        .filter(|key| {
+            if surviving_keys.contains(key.as_str()) {
+                return false; // Key survived — it's known
+            }
+            // Key disappeared. Check if the patch value was a "zero value"
+            // that skip_serializing_if would legitimately omit.
+            match patch_values.get(key.as_str()) {
+                None => false, // Shouldn't happen, but be safe
+                Some(val) => !is_serialization_zero(val),
+            }
+        })
+        .collect();
+
+    if !dropped.is_empty() {
+        let field_list = dropped
+            .iter()
+            .map(|k| format!("'{}'", k))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::validation_invalid_argument(
+            "merge",
+            format!(
+                "Unknown field(s): {}. Check field names with the entity's config schema.",
+                field_list
+            ),
+            None,
+            None,
+        ));
+    }
 
     Ok(MergeFields { updated_fields })
 }
@@ -372,6 +423,20 @@ fn deep_remove(base: &mut Value, spec: Value, removed_from: &mut Vec<String>, pa
             }
         }
         _ => {}
+    }
+}
+
+/// Returns true if a JSON value is a "zero value" that skip_serializing_if
+/// would legitimately omit (empty array, empty string, null, false, 0).
+fn is_serialization_zero(val: &Value) -> bool {
+    match val {
+        Value::Null => true,
+        Value::Bool(false) => true,
+        Value::Number(n) => n.as_f64() == Some(0.0),
+        Value::String(s) => s.is_empty(),
+        Value::Array(arr) => arr.is_empty(),
+        Value::Object(obj) => obj.is_empty(),
+        _ => false,
     }
 }
 
@@ -549,14 +614,22 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
             let content = match local_files::local().read(&json_path) {
                 Ok(c) => c,
                 Err(err) => {
-                    eprintln!("[config] Warning: failed to read {}: {}", json_path.display(), err);
+                    eprintln!(
+                        "[config] Warning: failed to read {}: {}",
+                        json_path.display(),
+                        err
+                    );
                     return None;
                 }
             };
             let mut entity: T = match from_str(&content) {
                 Ok(e) => e,
                 Err(err) => {
-                    eprintln!("[config] Warning: failed to parse {}: {}", json_path.display(), err);
+                    eprintln!(
+                        "[config] Warning: failed to parse {}: {}",
+                        json_path.display(),
+                        err
+                    );
                     return None;
                 }
             };
@@ -1051,20 +1124,19 @@ pub(crate) fn find_similar_ids<T: ConfigEntity>(target: &str) -> Vec<String> {
         for candidate in &candidates {
             let candidate_lower = candidate.to_lowercase();
 
-            let priority = if candidate_lower.starts_with(&target_lower)
-                && candidate_lower != target_lower
-            {
-                Some(0) // Prefix match
-            } else if candidate_lower.ends_with(&target_lower) {
-                Some(1) // Suffix match
-            } else {
-                let dist = levenshtein(&target_lower, &candidate_lower);
-                if dist <= 3 && dist > 0 {
-                    Some(dist + 10) // Fuzzy match
+            let priority =
+                if candidate_lower.starts_with(&target_lower) && candidate_lower != target_lower {
+                    Some(0) // Prefix match
+                } else if candidate_lower.ends_with(&target_lower) {
+                    Some(1) // Suffix match
                 } else {
-                    None
-                }
-            };
+                    let dist = levenshtein(&target_lower, &candidate_lower);
+                    if dist <= 3 && dist > 0 {
+                        Some(dist + 10) // Fuzzy match
+                    } else {
+                        None
+                    }
+                };
 
             if let Some(p) = priority {
                 // Show the real ID (with alias hint if matched via alias)
@@ -1082,4 +1154,83 @@ pub(crate) fn find_similar_ids<T: ConfigEntity>(target: &str) -> Vec<String> {
 
     matches.sort_by_key(|(_, priority)| *priority);
     matches.into_iter().take(3).map(|(id, _)| id).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test struct mimicking Component's skip_serializing_if patterns.
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    struct TestConfig {
+        pub name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub description: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub tags: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub modules: Option<std::collections::HashMap<String, serde_json::Value>>,
+    }
+
+    #[test]
+    fn merge_config_rejects_unknown_fields() {
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        let patch = serde_json::json!({"module": "wordpress"});
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let problem = err.details["problem"].as_str().unwrap_or("");
+        assert!(
+            problem.contains("Unknown field(s)"),
+            "Expected unknown field error, got: {}",
+            problem
+        );
+        assert!(
+            problem.contains("'module'"),
+            "Expected 'module' in error, got: {}",
+            problem
+        );
+    }
+
+    #[test]
+    fn merge_config_accepts_known_fields() {
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        let patch = serde_json::json!({"description": "hello"});
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(result.is_ok());
+        assert_eq!(config.description, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn merge_config_allows_zero_value_for_known_fields() {
+        // Setting a known field to an empty/zero value should not be rejected,
+        // even though skip_serializing_if will omit it from output.
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        // tags starts empty; patching with empty array is a valid zero-value
+        // that skip_serializing_if would omit, but it's still a known field.
+        let patch = serde_json::json!({"tags": []});
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn merge_config_accepts_modules_plural() {
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        let patch = serde_json::json!({"modules": {"wordpress": {}}});
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(result.is_ok());
+        assert!(config.modules.is_some());
+    }
 }
