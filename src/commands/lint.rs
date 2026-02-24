@@ -150,11 +150,18 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
             ));
         }
 
+        // Make paths absolute so lint runners can find files regardless of
+        // the shell's working directory (git status returns repo-relative paths)
+        let abs_files: Vec<String> = changed_files
+            .iter()
+            .map(|f| format!("{}/{}", component.local_path, f))
+            .collect();
+
         // Pass ALL files to module - let lint runner filter to relevant types
-        if changed_files.len() == 1 {
-            Some(changed_files[0].clone())
+        if abs_files.len() == 1 {
+            Some(abs_files[0].clone())
         } else {
-            Some(format!("{{{}}}", changed_files.join(",")))
+            Some(format!("{{{}}}", abs_files.join(",")))
         }
     } else {
         args.glob.clone()
