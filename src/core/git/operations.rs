@@ -8,8 +8,8 @@ use crate::error::{Error, Result};
 use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::project;
 
-use super::commits::*;
 use super::changes::*;
+use super::commits::*;
 use super::primitives::is_git_repo;
 use super::{execute_git, resolve_target};
 
@@ -188,7 +188,9 @@ pub fn detect_baseline_with_version(
                 latest_tag: None,
                 source: Some(BaselineSource::VersionCommit),
                 reference: Some(hash),
-                warning: Some("No tags found. Using release commit for current version.".to_string()),
+                warning: Some(
+                    "No tags found. Using release commit for current version.".to_string(),
+                ),
             });
         }
     }
@@ -216,7 +218,6 @@ pub fn detect_baseline_with_version(
         )),
     })
 }
-
 
 // Input types for JSON parsing
 #[derive(Debug, Deserialize)]
@@ -274,7 +275,12 @@ pub fn get_repo_snapshot(path: &str) -> Result<RepoSnapshot> {
         return Err(Error::git_command_failed("Not a git repository"));
     }
 
-    let branch = crate::utils::command::run_in(path, "git", &["rev-parse", "--abbrev-ref", "HEAD"], "git branch")?;
+    let branch = crate::utils::command::run_in(
+        path,
+        "git",
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        "git branch",
+    )?;
 
     // Use direct Command to properly handle empty output (clean repo).
     // run_in_optional returns None for empty stdout, which would incorrectly
@@ -286,12 +292,20 @@ pub fn get_repo_snapshot(path: &str) -> Result<RepoSnapshot> {
         .map(|o| o.status.success() && o.stdout.is_empty())
         .unwrap_or(false);
 
-    let (ahead, behind) = crate::utils::command::run_in_optional(path, "git", &["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .and_then(|_| {
-            crate::utils::command::run_in_optional(path, "git", &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
-        })
-        .map(|counts| parse_ahead_behind(&counts))
-        .unwrap_or((None, None));
+    let (ahead, behind) = crate::utils::command::run_in_optional(
+        path,
+        "git",
+        &["rev-parse", "--abbrev-ref", "@{upstream}"],
+    )
+    .and_then(|_| {
+        crate::utils::command::run_in_optional(
+            path,
+            "git",
+            &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+        )
+    })
+    .map(|counts| parse_ahead_behind(&counts))
+    .unwrap_or((None, None));
 
     Ok(RepoSnapshot {
         branch,
@@ -302,10 +316,14 @@ pub fn get_repo_snapshot(path: &str) -> Result<RepoSnapshot> {
 }
 
 fn parse_ahead_behind(counts: &str) -> (Option<u32>, Option<u32>) {
+    // git rev-list --left-right --count @{upstream}...HEAD outputs:
+    //   <upstream_only>\t<local_only>
+    // upstream_only = commits on remote not in local (behind)
+    // local_only = commits in local not on remote (ahead)
     let trimmed = counts.trim();
     let mut parts = trimmed.split_whitespace();
-    let ahead = parts.next().and_then(|v| v.parse::<u32>().ok());
     let behind = parts.next().and_then(|v| v.parse::<u32>().ok());
+    let ahead = parts.next().and_then(|v| v.parse::<u32>().ok());
     (ahead, behind)
 }
 
@@ -745,7 +763,12 @@ pub fn tag_exists_on_remote(path: &str, tag_name: &str) -> Result<bool> {
     Ok(crate::utils::command::run_in_optional(
         path,
         "git",
-        &["ls-remote", "--tags", "origin", &format!("refs/tags/{}", tag_name)],
+        &[
+            "ls-remote",
+            "--tags",
+            "origin",
+            &format!("refs/tags/{}", tag_name),
+        ],
     )
     .map(|s| !s.is_empty())
     .unwrap_or(false))
@@ -753,14 +776,21 @@ pub fn tag_exists_on_remote(path: &str, tag_name: &str) -> Result<bool> {
 
 /// Check if a tag exists locally.
 pub fn tag_exists_locally(path: &str, tag_name: &str) -> Result<bool> {
-    Ok(crate::utils::command::run_in_optional(path, "git", &["tag", "-l", tag_name])
-        .map(|s| !s.is_empty())
-        .unwrap_or(false))
+    Ok(
+        crate::utils::command::run_in_optional(path, "git", &["tag", "-l", tag_name])
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+    )
 }
 
 /// Get the commit SHA a tag points to.
 pub fn get_tag_commit(path: &str, tag_name: &str) -> Result<String> {
-    crate::utils::command::run_in(path, "git", &["rev-list", "-n", "1", tag_name], &format!("get commit for tag '{}'", tag_name))
+    crate::utils::command::run_in(
+        path,
+        "git",
+        &["rev-list", "-n", "1", tag_name],
+        &format!("get commit for tag '{}'", tag_name),
+    )
 }
 
 /// Get the current HEAD commit SHA.
@@ -783,7 +813,11 @@ pub fn fetch_and_get_behind_count(path: &str) -> Result<Option<u32>> {
     crate::utils::command::run_in(path, "git", &["fetch"], "git fetch")?;
 
     // Check if upstream exists
-    let upstream = crate::utils::command::run_in_optional(path, "git", &["rev-parse", "--abbrev-ref", "@{upstream}"]);
+    let upstream = crate::utils::command::run_in_optional(
+        path,
+        "git",
+        &["rev-parse", "--abbrev-ref", "@{upstream}"],
+    );
     if upstream.is_none() {
         return Ok(None); // No upstream configured
     }
