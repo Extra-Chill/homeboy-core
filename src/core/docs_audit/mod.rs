@@ -109,8 +109,9 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
     // Primary docs path (first dir) for claim verification and priority docs
     let docs_path = source_path.join(&docs_dirs[0]);
 
-    // Get changelog target to exclude from audit (historical references are expected)
-    let changelog_exclude = comp.changelog_target.as_deref();
+    // Get changelog target to exclude from audit (historical references are expected).
+    // Default to CHANGELOG.md since changelogs inherently contain historical paths.
+    let changelog_exclude = comp.changelog_target.as_deref().or(Some("CHANGELOG.md"));
 
     // Collect ignore patterns from all linked modules
     let ignore_patterns = collect_module_ignore_patterns(&comp);
@@ -186,8 +187,9 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
 
 /// Find all markdown files in the docs directory.
 ///
-/// Excludes the changelog file if configured, since changelogs contain
-/// historical references to file paths that may no longer exist.
+/// Excludes the changelog file since changelogs contain historical references
+/// to file paths that may no longer exist. Uses `changelog_target` from the
+/// component config if set, otherwise defaults to excluding `CHANGELOG.md`.
 fn find_doc_files(docs_path: &Path, exclude_changelog: Option<&str>) -> Vec<String> {
     let mut docs = Vec::new();
 
@@ -1160,6 +1162,68 @@ index 111222..333444 100644
         assert!(broken[0].doc_context.is_some());
         let ctx = broken[0].doc_context.as_ref().unwrap();
         assert!(ctx.iter().any(|l| l.contains("src/old.rs")));
+    }
+
+    #[test]
+    fn test_find_doc_files_excludes_changelog_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs_path = dir.path();
+
+        fs::write(docs_path.join("guide.md"), "# Guide\n").unwrap();
+        fs::write(docs_path.join("CHANGELOG.md"), "# Changelog\n## v1.0\n- Removed old/path.rs\n").unwrap();
+        fs::write(docs_path.join("api.md"), "# API\n").unwrap();
+
+        // With default CHANGELOG.md exclusion
+        let files = find_doc_files(docs_path, Some("CHANGELOG.md"));
+        assert_eq!(files.len(), 2);
+        assert!(files.contains(&"api.md".to_string()));
+        assert!(files.contains(&"guide.md".to_string()));
+        assert!(!files.iter().any(|f| f.to_lowercase().contains("changelog")));
+    }
+
+    #[test]
+    fn test_find_doc_files_changelog_exclusion_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs_path = dir.path();
+
+        fs::write(docs_path.join("guide.md"), "# Guide\n").unwrap();
+        fs::write(docs_path.join("changelog.md"), "# Changes\n").unwrap();
+
+        // CHANGELOG.md target should match lowercase changelog.md
+        let files = find_doc_files(docs_path, Some("CHANGELOG.md"));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], "guide.md");
+    }
+
+    #[test]
+    fn test_find_doc_files_no_exclusion_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs_path = dir.path();
+
+        fs::write(docs_path.join("guide.md"), "# Guide\n").unwrap();
+        fs::write(docs_path.join("CHANGELOG.md"), "# Changelog\n").unwrap();
+
+        // Without exclusion, changelog should be included
+        let files = find_doc_files(docs_path, None);
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f == "CHANGELOG.md"));
+    }
+
+    #[test]
+    fn test_find_doc_files_custom_changelog_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs_path = dir.path();
+
+        fs::write(docs_path.join("guide.md"), "# Guide\n").unwrap();
+        fs::write(docs_path.join("CHANGELOG.md"), "# Changelog\n").unwrap();
+        fs::write(docs_path.join("CHANGES.md"), "# Changes\n").unwrap();
+
+        // Custom target should exclude CHANGES.md, not CHANGELOG.md
+        let files = find_doc_files(docs_path, Some("CHANGES.md"));
+        assert_eq!(files.len(), 2);
+        assert!(files.contains(&"CHANGELOG.md".to_string()));
+        assert!(files.contains(&"guide.md".to_string()));
+        assert!(!files.iter().any(|f| f == "CHANGES.md"));
     }
 
     #[test]
