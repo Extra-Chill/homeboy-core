@@ -252,7 +252,8 @@ fn show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
 fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
     // Merge JSON sources: positional/--json/--base64 spec + dynamic flags
     let spec = args.json_spec()?;
-    let has_input = spec.is_some() || !args.extra.is_empty();
+    let extra = args.effective_extra();
+    let has_input = spec.is_some() || !extra.is_empty();
     if !has_input {
         return Err(homeboy::Error::validation_invalid_argument(
             "spec",
@@ -262,7 +263,7 @@ fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
         ));
     }
 
-    let merged = super::merge_json_sources(spec.as_deref(), &args.extra)?;
+    let merged = super::merge_json_sources(spec.as_deref(), &extra)?;
     let json_string = serde_json::to_string(&merged).map_err(|e| {
         homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
     })?;

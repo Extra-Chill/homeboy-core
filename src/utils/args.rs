@@ -48,7 +48,9 @@ pub fn normalize_version_show(args: Vec<String>) -> Vec<String> {
         return args;
     }
 
-    let known_subcommands = ["show", "set", "bump", "edit", "merge", "--help", "-h", "help"];
+    let known_subcommands = [
+        "show", "set", "bump", "edit", "merge", "--help", "-h", "help",
+    ];
     let second_arg = args.get(2).map(|s| s.as_str()).unwrap_or("");
 
     // If it's already a known subcommand or a flag, pass through unchanged
@@ -102,8 +104,8 @@ pub fn normalize_version_bump_flag(args: Vec<String>) -> Vec<String> {
 
     // Build normalized args: homeboy version bump <component> <type> [other flags]
     let mut result = vec![
-        args[0].clone(), // homeboy
-        args[1].clone(), // version
+        args[0].clone(),    // homeboy
+        args[1].clone(),    // version
         "bump".to_string(), // insert subcommand
     ];
 
@@ -180,21 +182,72 @@ pub fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
         (
             "component",
             "set",
-            &["--json", "--replace", "--help", "-h"],
+            &[
+                "--json",
+                "--base64",
+                "--replace",
+                "--version-target",
+                "--module",
+                "--help",
+                "-h",
+            ],
         ),
         (
             "component",
             "edit",
-            &["--json", "--replace", "--help", "-h"],
+            &[
+                "--json",
+                "--base64",
+                "--replace",
+                "--version-target",
+                "--module",
+                "--help",
+                "-h",
+            ],
         ),
         (
             "component",
             "merge",
-            &["--json", "--replace", "--help", "-h"],
+            &[
+                "--json",
+                "--base64",
+                "--replace",
+                "--version-target",
+                "--module",
+                "--help",
+                "-h",
+            ],
         ),
-        ("server", "set", &["--json", "--replace", "--help", "-h"]),
-        ("server", "edit", &["--json", "--replace", "--help", "-h"]),
-        ("server", "merge", &["--json", "--replace", "--help", "-h"]),
+        (
+            "server",
+            "set",
+            &["--json", "--base64", "--replace", "--help", "-h"],
+        ),
+        (
+            "server",
+            "edit",
+            &["--json", "--base64", "--replace", "--help", "-h"],
+        ),
+        (
+            "server",
+            "merge",
+            &["--json", "--base64", "--replace", "--help", "-h"],
+        ),
+        (
+            "fleet",
+            "set",
+            &["--json", "--base64", "--replace", "--help", "-h"],
+        ),
+        (
+            "fleet",
+            "edit",
+            &["--json", "--base64", "--replace", "--help", "-h"],
+        ),
+        (
+            "fleet",
+            "merge",
+            &["--json", "--base64", "--replace", "--help", "-h"],
+        ),
         (
             "test",
             "",

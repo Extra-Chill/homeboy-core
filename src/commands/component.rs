@@ -363,8 +363,9 @@ fn set(
 ) -> CmdResult<ComponentOutput> {
     // Merge JSON sources: positional/--json/--base64 spec + dynamic flags
     let spec = args.json_spec()?;
+    let extra = args.effective_extra();
     let has_input = spec.is_some()
-        || !args.extra.is_empty()
+        || !extra.is_empty()
         || flags.has_any()
         || !version_targets.is_empty()
         || !modules.is_empty();
@@ -377,8 +378,8 @@ fn set(
         ));
     }
 
-    let mut merged = if spec.is_some() || !args.extra.is_empty() {
-        super::merge_json_sources(spec.as_deref(), &args.extra)?
+    let mut merged = if spec.is_some() || !extra.is_empty() {
+        super::merge_json_sources(spec.as_deref(), &extra)?
     } else {
         serde_json::Value::Object(serde_json::Map::new())
     };
@@ -649,14 +650,8 @@ mod tests {
         };
 
         let mut obj = serde_json::Map::new();
-        obj.insert(
-            "local_path".to_string(),
-            serde_json::json!("/original"),
-        );
-        obj.insert(
-            "remote_path".to_string(),
-            serde_json::json!("/keep-this"),
-        );
+        obj.insert("local_path".to_string(), serde_json::json!("/original"));
+        obj.insert("remote_path".to_string(), serde_json::json!("/keep-this"));
 
         flags.apply_to(&mut obj);
 

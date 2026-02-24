@@ -56,6 +56,10 @@ pub struct DynamicSetArgs {
 impl DynamicSetArgs {
     /// Get the JSON spec from --base64, --json, or positional argument.
     /// Priority: --base64 > --json > positional spec
+    ///
+    /// If the positional `spec` looks like a flag (starts with `--`), it was
+    /// misrouted by clap after a `--` separator and is not a JSON spec.
+    /// Use `effective_extra()` to recover it as a key-value flag.
     pub fn json_spec(&self) -> Result<Option<String>, homeboy::Error> {
         // Base64 takes priority - decode and return
         if let Some(b64) = &self.base64 {
@@ -79,7 +83,30 @@ impl DynamicSetArgs {
             })?;
             return Ok(Some(decoded_str));
         }
+        // If spec looks like a flag (--key), it was misrouted — not a JSON spec
+        if let Some(ref s) = self.spec {
+            if s.starts_with("--") {
+                return Ok(self.json.clone());
+            }
+        }
         Ok(self.json.clone().or_else(|| self.spec.clone()))
+    }
+
+    /// Return the full list of trailing key-value args, including any flag
+    /// that was misrouted into the `spec` positional by clap.
+    ///
+    /// When `--` separates trailing args, clap assigns the first positional
+    /// after the ID to `spec`. If that value starts with `--`, it's a flag
+    /// key that belongs with `extra`.
+    pub fn effective_extra(&self) -> Vec<String> {
+        match &self.spec {
+            Some(s) if s.starts_with("--") => {
+                let mut combined = vec![s.clone()];
+                combined.extend(self.extra.iter().cloned());
+                combined
+            }
+            _ => self.extra.clone(),
+        }
     }
 }
 
