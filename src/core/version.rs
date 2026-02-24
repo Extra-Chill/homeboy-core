@@ -491,7 +491,7 @@ fn build_version_parse_error(file: &str, pattern: &str, content: &str) -> Error 
     }
 
     if content.contains("Version:")
-        && !Regex::new(pattern)
+        && !Regex::new(&crate::utils::parser::ensure_multiline(pattern))
             .map(|r| r.is_match(content))
             .unwrap_or(false)
     {

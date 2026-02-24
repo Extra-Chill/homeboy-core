@@ -318,8 +318,8 @@ pub fn validate_version_pattern(pattern: &str) -> Result<()> {
         ));
     }
 
-    // Must be valid regex
-    let re = Regex::new(pattern).map_err(|e| {
+    // Must be valid regex (use multiline mode to match runtime behavior)
+    let re = Regex::new(&crate::utils::parser::ensure_multiline(pattern)).map_err(|e| {
         Error::validation_invalid_argument(
             "version_target.pattern",
             format!("Invalid regex pattern '{}': {}", pattern, e),

@@ -10,11 +10,23 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::path::PathBuf;
 
+/// Ensure a regex pattern has multiline mode enabled so `^` and `$` match
+/// line boundaries, not just start/end of the entire string. Version target
+/// patterns nearly always need this since the version line is never at
+/// position 0 of the file.
+pub fn ensure_multiline(pattern: &str) -> String {
+    if pattern.contains("(?m)") {
+        pattern.to_string()
+    } else {
+        format!("(?m){}", pattern)
+    }
+}
+
 /// Extract first match from content using regex pattern with capture group.
 /// Pattern must contain exactly one capture group for the value to extract.
-/// Content is trimmed before matching.
+/// Content is trimmed before matching. Multiline mode is enabled automatically.
 pub fn extract_first(content: &str, pattern: &str) -> Option<String> {
-    let re = Regex::new(pattern).ok()?;
+    let re = Regex::new(&ensure_multiline(pattern)).ok()?;
     re.captures(content.trim())
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
@@ -22,8 +34,9 @@ pub fn extract_first(content: &str, pattern: &str) -> Option<String> {
 
 /// Extract all matches from content using regex pattern with capture group.
 /// Returns empty Vec if pattern is invalid, None only on regex compile error.
+/// Multiline mode is enabled automatically.
 pub fn extract_all(content: &str, pattern: &str) -> Option<Vec<String>> {
-    let re = Regex::new(pattern).ok()?;
+    let re = Regex::new(&ensure_multiline(pattern)).ok()?;
     let matches: Vec<String> = re
         .captures_iter(content.trim())
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().to_string()))
@@ -34,9 +47,9 @@ pub fn extract_all(content: &str, pattern: &str) -> Option<Vec<String>> {
 /// Replace all matches of capture group with new value.
 /// Returns (new_content, replacement_count).
 /// Content is trimmed before matching to stay consistent with extract_all,
-/// but trailing newline is preserved in output.
+/// but trailing newline is preserved in output. Multiline mode is enabled automatically.
 pub fn replace_all(content: &str, pattern: &str, replacement: &str) -> Option<(String, usize)> {
-    let re = Regex::new(pattern).ok()?;
+    let re = Regex::new(&ensure_multiline(pattern)).ok()?;
     let mut count = 0usize;
     let had_trailing_newline = content.ends_with('\n');
     let trimmed = content.trim();
