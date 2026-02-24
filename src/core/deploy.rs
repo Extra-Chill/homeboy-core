@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::time::SystemTime;
 
 use crate::build;
 use crate::component::{self, Component};
@@ -70,7 +71,10 @@ pub fn deploy_via_git(
     };
 
     // Step 1: Fetch latest
-    eprintln!("[deploy:git] Fetching from {} in {}", git_config.remote, remote_path);
+    eprintln!(
+        "[deploy:git] Fetching from {} in {}",
+        git_config.remote, remote_path
+    );
     let fetch_cmd = format!(
         "cd {} && git fetch {} --tags",
         shell::quote_path(remote_path),
@@ -376,17 +380,14 @@ fn scp_file_atomic(
 ) -> Result<DeployResult> {
     let remote = Path::new(remote_path);
     let remote_dir = remote.parent().and_then(|p| p.to_str()).unwrap_or(".");
-    let remote_filename = remote
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| {
-            Error::validation_invalid_argument(
-                "remotePath",
-                "Remote path must include a file name",
-                Some(remote_path.to_string()),
-                None,
-            )
-        })?;
+    let remote_filename = remote.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "remotePath",
+            "Remote path must include a file name",
+            Some(remote_path.to_string()),
+            None,
+        )
+    })?;
 
     let tmp_path = format!(
         "{}/.homeboy-upload-{}.tmp.{}",
@@ -758,6 +759,12 @@ pub fn deploy_components(
         let is_git_deploy = component.deploy_strategy.as_deref() == Some("git");
         let (build_exit_code, build_error) = if is_git_deploy || config.skip_build {
             (Some(0), None)
+        } else if artifact_is_fresh(component) {
+            eprintln!(
+                "[deploy] Artifact for '{}' is up-to-date, skipping build",
+                component.id
+            );
+            (Some(0), None)
         } else {
             build::build_component(component)
         };
@@ -803,14 +810,18 @@ pub fn deploy_components(
                 local_version.as_deref(),
             );
             match deploy_result {
-                Ok(DeployResult { success: true, exit_code, .. }) => {
+                Ok(DeployResult {
+                    success: true,
+                    exit_code,
+                    ..
+                }) => {
                     // Perform post-deploy cleanup of build dependencies
                     if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
                         if let Some(summary) = cleanup_summary {
                             eprintln!("[deploy] Cleanup: {}", summary);
                         }
                     }
-                    
+
                     results.push(
                         ComponentDeployResult::new(component, base_path)
                             .with_status("deployed")
@@ -820,7 +831,9 @@ pub fn deploy_components(
                     );
                     succeeded += 1;
                 }
-                Ok(DeployResult { error, exit_code, .. }) => {
+                Ok(DeployResult {
+                    error, exit_code, ..
+                }) => {
                     results.push(
                         ComponentDeployResult::new(component, base_path)
                             .with_status("failed")
@@ -908,7 +921,14 @@ pub fn deploy_components(
                         eprintln!("[deploy] Cleanup: {}", summary);
                     }
                 }
-                
+
+                if is_self_deploy(component) {
+                    eprintln!(
+                        "[deploy] Deployed '{}' binary. Remote processes will use the new version on next invocation.",
+                        component.id
+                    );
+                }
+
                 results.push(
                     ComponentDeployResult::new(component, base_path)
                         .with_status("deployed")
@@ -967,17 +987,20 @@ pub fn deploy_components(
 
 /// Clean up build dependencies from component's local_path after successful deploy.
 /// This is a best-effort operation - failures are logged but do not fail the deploy.
-fn cleanup_build_dependencies(component: &Component, config: &DeployConfig) -> Result<Option<String>> {
+fn cleanup_build_dependencies(
+    component: &Component,
+    config: &DeployConfig,
+) -> Result<Option<String>> {
     // Skip cleanup if disabled at component level
     if !component.auto_cleanup {
         return Ok(None);
     }
-    
+
     // Skip cleanup if --keep-deps flag is set
     if config.keep_deps {
         return Ok(Some("skipped (--keep-deps flag)".to_string()));
     }
-    
+
     // Collect cleanup paths from linked modules
     let mut cleanup_paths = Vec::new();
     if let Some(ref modules) = component.modules {
@@ -989,49 +1012,58 @@ fn cleanup_build_dependencies(component: &Component, config: &DeployConfig) -> R
             }
         }
     }
-    
+
     if cleanup_paths.is_empty() {
-        return Ok(Some("skipped (no cleanup paths configured in modules)".to_string()));
+        return Ok(Some(
+            "skipped (no cleanup paths configured in modules)".to_string(),
+        ));
     }
-    
+
     let local_path = Path::new(&component.local_path);
     let mut cleaned_paths = Vec::new();
     let mut total_bytes_freed = 0u64;
-    
+
     for cleanup_path in &cleanup_paths {
         let full_path = local_path.join(cleanup_path);
-        
+
         if !full_path.exists() {
             continue;
         }
-        
+
         // Calculate size before deletion
         let size_before = if full_path.is_dir() {
             calculate_directory_size(&full_path).unwrap_or(0)
         } else {
             full_path.metadata().map(|m| m.len()).unwrap_or(0)
         };
-        
+
         // Attempt to remove the path
         let cleanup_result = if full_path.is_dir() {
             std::fs::remove_dir_all(&full_path)
         } else {
             std::fs::remove_file(&full_path)
         };
-        
+
         match cleanup_result {
             Ok(()) => {
                 cleaned_paths.push(cleanup_path.clone());
                 total_bytes_freed += size_before;
-                eprintln!("[cleanup] Removed {} (freed {})", cleanup_path, format_bytes(size_before));
+                eprintln!(
+                    "[cleanup] Removed {} (freed {})",
+                    cleanup_path,
+                    format_bytes(size_before)
+                );
             }
             Err(e) => {
-                eprintln!("[cleanup] Warning: failed to remove {}: {}", cleanup_path, e);
+                eprintln!(
+                    "[cleanup] Warning: failed to remove {}: {}",
+                    cleanup_path, e
+                );
                 // Don't return error - cleanup is best-effort
             }
         }
     }
-    
+
     if cleaned_paths.is_empty() {
         Ok(Some("no paths needed cleanup".to_string()))
     } else {
@@ -1047,12 +1079,12 @@ fn cleanup_build_dependencies(component: &Component, config: &DeployConfig) -> R
 /// Calculate total size of a directory recursively.
 fn calculate_directory_size(path: &Path) -> std::io::Result<u64> {
     let mut total_size = 0;
-    
+
     if path.is_dir() {
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let entry_path = entry.path();
-            
+
             if entry_path.is_dir() {
                 total_size += calculate_directory_size(&entry_path)?;
             } else {
@@ -1062,7 +1094,7 @@ fn calculate_directory_size(path: &Path) -> std::io::Result<u64> {
     } else {
         total_size = path.metadata()?.len();
     }
-    
+
     Ok(total_size)
 }
 
@@ -1071,12 +1103,12 @@ fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
     let mut size = bytes as f64;
     let mut unit_index = 0;
-    
+
     while size >= 1024.0 && unit_index < UNITS.len() - 1 {
         size /= 1024.0;
         unit_index += 1;
     }
-    
+
     if unit_index == 0 {
         format!("{} {}", size as u64, UNITS[unit_index])
     } else {
@@ -1259,6 +1291,70 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
     }
 
     Ok(components)
+}
+
+/// Check if a component's build artifact is newer than its latest source commit.
+///
+/// Returns true if the artifact exists and its mtime is after the HEAD commit
+/// timestamp, meaning a rebuild would produce the same result.
+fn artifact_is_fresh(component: &Component) -> bool {
+    let artifact_pattern = match component.build_artifact.as_ref() {
+        Some(p) => p,
+        None => return false,
+    };
+
+    let artifact_path = match artifact::resolve_artifact_path(artifact_pattern) {
+        Ok(p) => p,
+        Err(_) => return false, // artifact doesn't exist yet
+    };
+
+    let artifact_mtime = match artifact_path.metadata().and_then(|m| m.modified()) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+
+    // Get HEAD commit timestamp as Unix epoch seconds
+    let commit_ts = crate::utils::command::run_in_optional(
+        &component.local_path,
+        "git",
+        &["log", "-1", "--format=%ct", "HEAD"],
+    );
+
+    let commit_time = match commit_ts {
+        Some(ts) => {
+            let secs: u64 = match ts.trim().parse() {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs)
+        }
+        None => return false,
+    };
+
+    artifact_mtime > commit_time
+}
+
+/// Detect if a component's artifact is a CLI binary matching the currently
+/// running process name. Used to print a post-deploy hint for self-deploy.
+fn is_self_deploy(component: &Component) -> bool {
+    let artifact_pattern = match component.build_artifact.as_ref() {
+        Some(p) => p,
+        None => return false,
+    };
+
+    let artifact_name = Path::new(artifact_pattern)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+
+    let exe_name = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+
+    match exe_name {
+        Some(name) => name == artifact_name,
+        None => false,
+    }
 }
 
 /// Fetch versions from remote server for components.
