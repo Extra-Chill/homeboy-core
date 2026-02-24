@@ -126,6 +126,12 @@ pub fn detect_baseline_with_version(
     path: &str,
     current_version: Option<&str>,
 ) -> Result<BaselineInfo> {
+    // Fetch tags from remote so locally-missing tags (pushed from another
+    // machine) are available before we resolve the baseline.  Best-effort:
+    // if there is no remote or the network is unavailable we silently
+    // proceed with whatever tags are already local.
+    let _ = crate::utils::command::run_in_optional(path, "git", &["fetch", "--tags", "--quiet"]);
+
     // Priority 1: Check for latest tag
     if let Some(tag) = get_latest_tag(path)? {
         let tag_version = extract_version_from_tag(&tag);
