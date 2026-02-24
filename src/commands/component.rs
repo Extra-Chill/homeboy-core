@@ -65,12 +65,32 @@ enum ComponentCommand {
     },
     /// Update component configuration fields
     ///
-    /// When combining --json with dynamic flags, use '--' separator:
-    ///   homeboy component set ID --json '{}' -- --build_command "cmd"
+    /// Supports dedicated flags for common fields (e.g., --local-path, --build-command)
+    /// as well as --json for arbitrary updates. When combining --json with dynamic
+    /// trailing flags, use '--' separator.
     #[command(visible_aliases = ["edit", "merge"])]
     Set {
         #[command(flatten)]
         args: DynamicSetArgs,
+
+        /// Absolute path to local source directory
+        #[arg(long)]
+        local_path: Option<String>,
+        /// Remote path relative to project basePath
+        #[arg(long)]
+        remote_path: Option<String>,
+        /// Build artifact path relative to localPath
+        #[arg(long)]
+        build_artifact: Option<String>,
+        /// Build command to run in localPath
+        #[arg(long)]
+        build_command: Option<String>,
+        /// Extract command to run after upload (e.g., "unzip -o {artifact} && rm {artifact}")
+        #[arg(long)]
+        extract_command: Option<String>,
+        /// Path to changelog file relative to localPath
+        #[arg(long)]
+        changelog_target: Option<String>,
 
         /// Version targets in the form "file" or "file::pattern" (repeatable).
         /// Same format as `component create --version-target`.
@@ -246,9 +266,27 @@ pub fn run(
         ComponentCommand::Show { id } => show(&id),
         ComponentCommand::Set {
             args,
+            local_path,
+            remote_path,
+            build_artifact,
+            build_command,
+            extract_command,
+            changelog_target,
             version_targets,
             modules,
-        } => set(args, version_targets, modules),
+        } => set(
+            args,
+            ComponentSetFlags {
+                local_path,
+                remote_path,
+                build_artifact,
+                build_command,
+                extract_command,
+                changelog_target,
+            },
+            version_targets,
+            modules,
+        ),
         ComponentCommand::Delete { id } => delete(&id),
         ComponentCommand::Rename { id, new_id } => rename(&id, &new_id),
         ComponentCommand::List => list(),
@@ -274,8 +312,52 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
     ))
 }
 
+/// Dedicated flags for common component fields on `component set`.
+struct ComponentSetFlags {
+    local_path: Option<String>,
+    remote_path: Option<String>,
+    build_artifact: Option<String>,
+    build_command: Option<String>,
+    extract_command: Option<String>,
+    changelog_target: Option<String>,
+}
+
+impl ComponentSetFlags {
+    fn has_any(&self) -> bool {
+        self.local_path.is_some()
+            || self.remote_path.is_some()
+            || self.build_artifact.is_some()
+            || self.build_command.is_some()
+            || self.extract_command.is_some()
+            || self.changelog_target.is_some()
+    }
+
+    /// Insert non-None fields into a JSON object.
+    fn apply_to(&self, obj: &mut serde_json::Map<String, serde_json::Value>) {
+        if let Some(ref v) = self.local_path {
+            obj.insert("local_path".to_string(), serde_json::json!(v));
+        }
+        if let Some(ref v) = self.remote_path {
+            obj.insert("remote_path".to_string(), serde_json::json!(v));
+        }
+        if let Some(ref v) = self.build_artifact {
+            obj.insert("build_artifact".to_string(), serde_json::json!(v));
+        }
+        if let Some(ref v) = self.build_command {
+            obj.insert("build_command".to_string(), serde_json::json!(v));
+        }
+        if let Some(ref v) = self.extract_command {
+            obj.insert("extract_command".to_string(), serde_json::json!(v));
+        }
+        if let Some(ref v) = self.changelog_target {
+            obj.insert("changelog_target".to_string(), serde_json::json!(v));
+        }
+    }
+}
+
 fn set(
     args: DynamicSetArgs,
+    flags: ComponentSetFlags,
     version_targets: Vec<String>,
     modules: Vec<String>,
 ) -> CmdResult<ComponentOutput> {
@@ -283,12 +365,13 @@ fn set(
     let spec = args.json_spec()?;
     let has_input = spec.is_some()
         || !args.extra.is_empty()
+        || flags.has_any()
         || !version_targets.is_empty()
         || !modules.is_empty();
     if !has_input {
         return Err(homeboy::Error::validation_invalid_argument(
             "spec",
-            "Provide JSON spec, --json flag, --base64 flag, --key value flags, --version-target, or --module",
+            "Provide a flag (e.g., --local-path), --json spec, --base64, --key value, --version-target, or --module",
             None,
             None,
         ));
@@ -299,6 +382,11 @@ fn set(
     } else {
         serde_json::Value::Object(serde_json::Map::new())
     };
+
+    // Apply dedicated flags — these override JSON spec values for the same field.
+    if let serde_json::Value::Object(ref mut obj) = merged {
+        flags.apply_to(obj);
+    }
 
     // Support --version-target flag like `component create`.
     // If provided, it replaces any existing version_targets value in the merged spec.
@@ -495,5 +583,84 @@ fn shared(id: Option<&str>) -> CmdResult<ComponentOutput> {
             },
             0,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_set_flags_has_any_all_none() {
+        let flags = ComponentSetFlags {
+            local_path: None,
+            remote_path: None,
+            build_artifact: None,
+            build_command: None,
+            extract_command: None,
+            changelog_target: None,
+        };
+        assert!(!flags.has_any());
+    }
+
+    #[test]
+    fn test_component_set_flags_has_any_single_field() {
+        let flags = ComponentSetFlags {
+            local_path: Some("/foo".to_string()),
+            remote_path: None,
+            build_artifact: None,
+            build_command: None,
+            extract_command: None,
+            changelog_target: None,
+        };
+        assert!(flags.has_any());
+    }
+
+    #[test]
+    fn test_component_set_flags_apply_to_inserts_fields() {
+        let flags = ComponentSetFlags {
+            local_path: Some("/new/path".to_string()),
+            remote_path: None,
+            build_artifact: None,
+            build_command: Some("npm run build".to_string()),
+            extract_command: None,
+            changelog_target: Some("CHANGELOG.md".to_string()),
+        };
+
+        let mut obj = serde_json::Map::new();
+        flags.apply_to(&mut obj);
+
+        assert_eq!(obj.len(), 3);
+        assert_eq!(obj["local_path"], serde_json::json!("/new/path"));
+        assert_eq!(obj["build_command"], serde_json::json!("npm run build"));
+        assert_eq!(obj["changelog_target"], serde_json::json!("CHANGELOG.md"));
+        assert!(!obj.contains_key("remote_path"));
+    }
+
+    #[test]
+    fn test_component_set_flags_apply_to_overrides_existing() {
+        let flags = ComponentSetFlags {
+            local_path: Some("/override".to_string()),
+            remote_path: None,
+            build_artifact: None,
+            build_command: None,
+            extract_command: None,
+            changelog_target: None,
+        };
+
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "local_path".to_string(),
+            serde_json::json!("/original"),
+        );
+        obj.insert(
+            "remote_path".to_string(),
+            serde_json::json!("/keep-this"),
+        );
+
+        flags.apply_to(&mut obj);
+
+        assert_eq!(obj["local_path"], serde_json::json!("/override"));
+        assert_eq!(obj["remote_path"], serde_json::json!("/keep-this"));
     }
 }
