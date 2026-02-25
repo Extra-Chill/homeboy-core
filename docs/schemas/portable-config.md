@@ -1,0 +1,91 @@
+# Portable Component Config (`homeboy.json`)
+
+A `homeboy.json` file in a repo root defines portable component configuration that travels with the code. Clone a repo, run one command, and homeboy knows how to build, test, version, and deploy it.
+
+## Schema
+
+```json
+{
+  "remote_path": "string",
+  "build_artifact": "string",
+  "build_command": "string",
+  "extract_command": "string",
+  "version_targets": [
+    {
+      "file": "string",
+      "pattern": "string"
+    }
+  ],
+  "changelog_target": "string",
+  "modules": {
+    "module_id": {}
+  }
+}
+```
+
+All fields are optional. The component `id` is derived from the directory name, and `local_path` is always machine-specific (provided at registration time).
+
+## Example
+
+```json
+{
+  "remote_path": "wp-content/plugins/data-machine",
+  "version_targets": [
+    {
+      "file": "data-machine.php",
+      "pattern": "Version:\\s*([0-9.]+)"
+    }
+  ],
+  "changelog_target": "docs/CHANGELOG.md",
+  "modules": {
+    "wordpress": {}
+  }
+}
+```
+
+## Usage
+
+### Register from repo
+
+```bash
+# Read config from homeboy.json, only need to provide machine-specific path
+homeboy component create --from-repo /path/to/repo --remote-path wp-content/plugins/my-plugin
+
+# If homeboy.json already includes remote_path:
+homeboy component create --from-repo /path/to/repo
+
+# Override any field from the CLI:
+homeboy component create --from-repo /path/to/repo --build-command "npm run build"
+```
+
+### What stays local (not in homeboy.json)
+
+| Field | Why |
+|-------|-----|
+| `local_path` | Absolute path, varies per machine |
+| `id` | Derived from directory name automatically |
+
+### What goes in homeboy.json
+
+| Field | Description |
+|-------|-------------|
+| `remote_path` | Deploy target relative to project `base_path` |
+| `build_artifact` | Build output path relative to repo root |
+| `build_command` | Shell command to build the component |
+| `extract_command` | Post-upload command (supports `{artifact}`, `{targetDir}`) |
+| `version_targets` | Version detection patterns |
+| `changelog_target` | Path to changelog file |
+| `modules` | Module configuration (e.g., `{"wordpress": {}}`) |
+
+## Precedence
+
+CLI flags override `homeboy.json` values. This lets teams share a base config while individuals customize for their environment:
+
+```
+homeboy.json (repo)  →  CLI flags (override)  →  ~/.config/homeboy/components/ (stored)
+```
+
+## Related
+
+- [Component schema](component-schema.md) - Full component configuration reference
+- [Component command](../commands/component.md) - CLI reference
