@@ -639,9 +639,9 @@ pub fn deploy_components(
         ));
     }
 
-    let components_to_deploy = plan_components(config, &all_components, base_path, &ctx.client)?;
+    let components = plan_components(config, &all_components, base_path, &ctx.client)?;
 
-    if components_to_deploy.is_empty() {
+    if components.is_empty() {
         return Ok(DeployOrchestrationResult {
             results: vec![],
             summary: DeploySummary {
@@ -653,109 +653,27 @@ pub fn deploy_components(
         });
     }
 
-    // Gather local versions
-    let local_versions: HashMap<String, String> = components_to_deploy
+    // Gather versions
+    let local_versions: HashMap<String, String> = components
         .iter()
         .filter_map(|c| version::get_component_version(c).map(|v| (c.id.clone(), v)))
         .collect();
-
-    // Gather remote versions if needed (for --outdated, --dry-run, or --check)
     let remote_versions = if config.outdated || config.dry_run || config.check {
-        fetch_remote_versions(&components_to_deploy, base_path, &ctx.client)
+        fetch_remote_versions(&components, base_path, &ctx.client)
     } else {
         HashMap::new()
     };
 
-    // Check mode: return status results without building or deploying
+    // Check and dry-run modes return early without building or deploying
     if config.check {
-        let results: Vec<ComponentDeployResult> = components_to_deploy
-            .iter()
-            .map(|c| {
-                let local_version = local_versions.get(&c.id).cloned();
-                let remote_version = remote_versions.get(&c.id).cloned();
-                let status = calculate_component_status(c, &remote_versions);
-                let release_state = calculate_release_state(c);
-
-                let mut result = ComponentDeployResult::new(c, base_path)
-                    .with_status("checked")
-                    .with_versions(local_version, remote_version)
-                    .with_component_status(status);
-
-                if let Some(state) = release_state {
-                    result = result.with_release_state(state);
-                }
-                result
-            })
-            .collect();
-
-        let total = results.len() as u32;
-        return Ok(DeployOrchestrationResult {
-            results,
-            summary: DeploySummary {
-                total,
-                succeeded: 0,
-                failed: 0,
-                skipped: 0,
-            },
-        });
+        return Ok(run_check_mode(&components, &local_versions, &remote_versions, base_path));
     }
-
-    // Dry-run mode: return planned results without building or deploying
     if config.dry_run {
-        let results: Vec<ComponentDeployResult> = components_to_deploy
-            .iter()
-            .map(|c| {
-                let local_version = local_versions.get(&c.id).cloned();
-                let remote_version = remote_versions.get(&c.id).cloned();
-                let status = if config.check {
-                    calculate_component_status(c, &remote_versions)
-                } else {
-                    ComponentStatus::Unknown
-                };
-                let mut result = ComponentDeployResult::new(c, base_path)
-                    .with_status("planned")
-                    .with_versions(local_version, remote_version);
-                if config.check {
-                    result = result.with_component_status(status);
-                }
-                result
-            })
-            .collect();
-
-        let total = results.len() as u32;
-        return Ok(DeployOrchestrationResult {
-            results,
-            summary: DeploySummary {
-                total,
-                succeeded: 0,
-                failed: 0,
-                skipped: 0,
-            },
-        });
+        return Ok(run_dry_run_mode(&components, &local_versions, &remote_versions, base_path, config));
     }
 
-    // Check for uncommitted changes before deployment
     if !config.force {
-        let components_with_changes: Vec<&Component> = components_to_deploy
-            .iter()
-            .filter(|c| !git::is_workdir_clean(Path::new(&c.local_path)))
-            .collect();
-
-        if !components_with_changes.is_empty() {
-            let ids: Vec<&str> = components_with_changes
-                .iter()
-                .map(|c| c.id.as_str())
-                .collect();
-            return Err(Error::validation_invalid_argument(
-                "components",
-                format!("Components have uncommitted changes: {}", ids.join(", ")),
-                None,
-                Some(vec![
-                    "Commit your changes before deploying to ensure deployed code is tracked".to_string(),
-                    "Use --force to deploy anyway".to_string(),
-                ]),
-            ));
-        }
+        check_uncommitted_changes(&components)?;
     }
 
     // Execute deployments
@@ -763,247 +681,22 @@ pub fn deploy_components(
     let mut succeeded: u32 = 0;
     let mut failed: u32 = 0;
 
-    for component in &components_to_deploy {
-        let local_version = local_versions.get(&component.id).cloned();
-        let remote_version = remote_versions.get(&component.id).cloned();
-
-        // Git-deploy components skip the build step entirely
-        let is_git_deploy = component.deploy_strategy.as_deref() == Some("git");
-        let (build_exit_code, build_error) = if is_git_deploy || config.skip_build {
-            (Some(0), None)
-        } else if artifact_is_fresh(component) {
-            log_status!(
-                "deploy",
-                "Artifact for '{}' is up-to-date, skipping build",
-                component.id
-            );
-            (Some(0), None)
+    for component in &components {
+        let result = execute_component_deploy(
+            component,
+            config,
+            ctx,
+            base_path,
+            project,
+            local_versions.get(&component.id).cloned(),
+            remote_versions.get(&component.id).cloned(),
+        );
+        if result.status == "deployed" {
+            succeeded += 1;
         } else {
-            build::build_component(component)
-        };
-
-        if let Some(ref error) = build_error {
-            results.push(
-                ComponentDeployResult::new(component, base_path)
-                    .with_status("failed")
-                    .with_versions(local_version, remote_version)
-                    .with_error(error.clone())
-                    .with_build_exit_code(build_exit_code),
-            );
             failed += 1;
-            continue;
         }
-
-        // Calculate install directory
-        let install_dir = match base_path::join_remote_path(Some(base_path), &component.remote_path)
-        {
-            Ok(v) => v,
-            Err(err) => {
-                results.push(
-                    ComponentDeployResult::new(component, base_path)
-                        .with_status("failed")
-                        .with_versions(local_version, remote_version)
-                        .with_error(err.to_string())
-                        .with_build_exit_code(build_exit_code),
-                );
-                failed += 1;
-                continue;
-            }
-        };
-
-        // Check deploy strategy
-        let strategy = component.deploy_strategy.as_deref().unwrap_or("rsync");
-
-        if strategy == "git" {
-            let git_config = component.git_deploy.clone().unwrap_or_default();
-            let deploy_result = deploy_via_git(
-                &ctx.client,
-                &install_dir,
-                &git_config,
-                local_version.as_deref(),
-            );
-            match deploy_result {
-                Ok(DeployResult {
-                    success: true,
-                    exit_code,
-                    ..
-                }) => {
-                    // Perform post-deploy cleanup of build dependencies
-                    if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
-                        if let Some(summary) = cleanup_summary {
-                            log_status!("deploy", "Cleanup: {}", summary);
-                        }
-                    }
-
-                    // Run post:deploy hooks remotely
-                    run_post_deploy_hooks(&ctx.client, component, &install_dir, base_path);
-
-                    results.push(
-                        ComponentDeployResult::new(component, base_path)
-                            .with_status("deployed")
-                            .with_versions(local_version.clone(), local_version)
-                            .with_remote_path(install_dir)
-                            .with_deploy_exit_code(Some(exit_code)),
-                    );
-                    succeeded += 1;
-                }
-                Ok(DeployResult {
-                    error, exit_code, ..
-                }) => {
-                    results.push(
-                        ComponentDeployResult::new(component, base_path)
-                            .with_status("failed")
-                            .with_versions(local_version, remote_version)
-                            .with_remote_path(install_dir)
-                            .with_error(error.unwrap_or_default())
-                            .with_deploy_exit_code(Some(exit_code)),
-                    );
-                    failed += 1;
-                }
-                Err(err) => {
-                    results.push(
-                        ComponentDeployResult::new(component, base_path)
-                            .with_status("failed")
-                            .with_versions(local_version, remote_version)
-                            .with_remote_path(install_dir)
-                            .with_error(err.to_string()),
-                    );
-                    failed += 1;
-                }
-            }
-            continue;
-        }
-
-        // Resolve artifact path (supports glob patterns like dist/app-*.zip)
-        let artifact_pattern = match component.build_artifact.as_ref() {
-            Some(pattern) => pattern,
-            None => {
-                results.push(
-                    ComponentDeployResult::new(component, base_path)
-                        .with_status("failed")
-                        .with_versions(local_version, remote_version)
-                        .with_error(format!(
-                            "Component '{}' has no build_artifact configured",
-                            component.id
-                        ))
-                        .with_build_exit_code(build_exit_code),
-                );
-                failed += 1;
-                continue;
-            }
-        };
-        let artifact_path = match artifact::resolve_artifact_path(artifact_pattern) {
-            Ok(path) => path,
-            Err(e) => {
-                let error_msg = if config.skip_build {
-                    format!("{}. Release build may have failed.", e)
-                } else {
-                    format!("{}. Run build first: homeboy build {}", e, component.id)
-                };
-                results.push(
-                    ComponentDeployResult::new(component, base_path)
-                        .with_status("failed")
-                        .with_versions(local_version, remote_version)
-                        .with_error(error_msg)
-                        .with_build_exit_code(build_exit_code),
-                );
-                failed += 1;
-                continue;
-            }
-        };
-
-        // Look up verification from modules
-        let verification = find_deploy_verification(&install_dir);
-
-        // Check for module-defined deploy override
-        let deploy_result =
-            if let Some((override_config, module)) = find_deploy_override(&install_dir) {
-                deploy_with_override(
-                    &ctx.client,
-                    &artifact_path,
-                    &install_dir,
-                    &override_config,
-                    &module,
-                    verification.as_ref(),
-                    Some(base_path),
-                    project.domain.as_deref(),
-                    component.remote_owner.as_deref(),
-                )
-            } else {
-                // Standard deploy
-                deploy_artifact(
-                    &ctx.client,
-                    &artifact_path,
-                    &install_dir,
-                    component.extract_command.as_deref(),
-                    verification.as_ref(),
-                    component.remote_owner.as_deref(),
-                )
-            };
-
-        match deploy_result {
-            Ok(DeployResult {
-                success: true,
-                exit_code,
-                ..
-            }) => {
-                // Perform post-deploy cleanup of build dependencies
-                if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
-                    if let Some(summary) = cleanup_summary {
-                        log_status!("deploy", "Cleanup: {}", summary);
-                    }
-                }
-
-                if is_self_deploy(component) {
-                    log_status!(
-                        "deploy",
-                        "Deployed '{}' binary. Remote processes will use the new version on next invocation.",
-                        component.id
-                    );
-                }
-
-                // Run post:deploy hooks remotely
-                run_post_deploy_hooks(&ctx.client, component, &install_dir, base_path);
-
-                results.push(
-                    ComponentDeployResult::new(component, base_path)
-                        .with_status("deployed")
-                        .with_versions(local_version.clone(), local_version)
-                        .with_remote_path(install_dir)
-                        .with_build_exit_code(build_exit_code)
-                        .with_deploy_exit_code(Some(exit_code)),
-                );
-                succeeded += 1;
-            }
-            Ok(DeployResult {
-                success: false,
-                exit_code,
-                error,
-            }) => {
-                let mut result = ComponentDeployResult::new(component, base_path)
-                    .with_status("failed")
-                    .with_versions(local_version, remote_version)
-                    .with_remote_path(install_dir)
-                    .with_build_exit_code(build_exit_code)
-                    .with_deploy_exit_code(Some(exit_code));
-                if let Some(e) = error {
-                    result = result.with_error(e);
-                }
-                results.push(result);
-                failed += 1;
-            }
-            Err(err) => {
-                results.push(
-                    ComponentDeployResult::new(component, base_path)
-                        .with_status("failed")
-                        .with_versions(local_version, remote_version)
-                        .with_remote_path(install_dir)
-                        .with_error(err.to_string())
-                        .with_build_exit_code(build_exit_code),
-                );
-                failed += 1;
-            }
-        }
+        results.push(result);
     }
 
     Ok(DeployOrchestrationResult {
@@ -1015,6 +708,310 @@ pub fn deploy_components(
             skipped: 0,
         },
     })
+}
+
+/// Check mode: return component status without building or deploying.
+fn run_check_mode(
+    components: &[Component],
+    local_versions: &HashMap<String, String>,
+    remote_versions: &HashMap<String, String>,
+    base_path: &str,
+) -> DeployOrchestrationResult {
+    let results: Vec<ComponentDeployResult> = components
+        .iter()
+        .map(|c| {
+            let status = calculate_component_status(c, remote_versions);
+            let release_state = calculate_release_state(c);
+            let mut result = ComponentDeployResult::new(c, base_path)
+                .with_status("checked")
+                .with_versions(local_versions.get(&c.id).cloned(), remote_versions.get(&c.id).cloned())
+                .with_component_status(status);
+            if let Some(state) = release_state {
+                result = result.with_release_state(state);
+            }
+            result
+        })
+        .collect();
+
+    let total = results.len() as u32;
+    DeployOrchestrationResult {
+        results,
+        summary: DeploySummary { total, succeeded: 0, failed: 0, skipped: 0 },
+    }
+}
+
+/// Dry-run mode: return planned results without building or deploying.
+fn run_dry_run_mode(
+    components: &[Component],
+    local_versions: &HashMap<String, String>,
+    remote_versions: &HashMap<String, String>,
+    base_path: &str,
+    config: &DeployConfig,
+) -> DeployOrchestrationResult {
+    let results: Vec<ComponentDeployResult> = components
+        .iter()
+        .map(|c| {
+            let status = if config.check {
+                calculate_component_status(c, remote_versions)
+            } else {
+                ComponentStatus::Unknown
+            };
+            let mut result = ComponentDeployResult::new(c, base_path)
+                .with_status("planned")
+                .with_versions(local_versions.get(&c.id).cloned(), remote_versions.get(&c.id).cloned());
+            if config.check {
+                result = result.with_component_status(status);
+            }
+            result
+        })
+        .collect();
+
+    let total = results.len() as u32;
+    DeployOrchestrationResult {
+        results,
+        summary: DeploySummary { total, succeeded: 0, failed: 0, skipped: 0 },
+    }
+}
+
+/// Verify no components have uncommitted changes before deployment.
+fn check_uncommitted_changes(components: &[Component]) -> Result<()> {
+    let dirty: Vec<&str> = components
+        .iter()
+        .filter(|c| !git::is_workdir_clean(Path::new(&c.local_path)))
+        .map(|c| c.id.as_str())
+        .collect();
+
+    if !dirty.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "components",
+            format!("Components have uncommitted changes: {}", dirty.join(", ")),
+            None,
+            Some(vec![
+                "Commit your changes before deploying to ensure deployed code is tracked".to_string(),
+                "Use --force to deploy anyway".to_string(),
+            ]),
+        ));
+    }
+    Ok(())
+}
+
+/// Build, deploy, and post-process a single component.
+///
+/// Returns a `ComponentDeployResult` regardless of success or failure —
+/// the caller uses the `status` field to count outcomes.
+fn execute_component_deploy(
+    component: &Component,
+    config: &DeployConfig,
+    ctx: &RemoteProjectContext,
+    base_path: &str,
+    project: &Project,
+    local_version: Option<String>,
+    remote_version: Option<String>,
+) -> ComponentDeployResult {
+    let is_git_deploy = component.deploy_strategy.as_deref() == Some("git");
+
+    // Build (git-deploy and skip-build skip this step)
+    let (build_exit_code, build_error) = if is_git_deploy || config.skip_build {
+        (Some(0), None)
+    } else if artifact_is_fresh(component) {
+        log_status!("deploy", "Artifact for '{}' is up-to-date, skipping build", component.id);
+        (Some(0), None)
+    } else {
+        build::build_component(component)
+    };
+
+    if let Some(ref error) = build_error {
+        return ComponentDeployResult::new(component, base_path)
+            .with_status("failed")
+            .with_versions(local_version, remote_version)
+            .with_error(error.clone())
+            .with_build_exit_code(build_exit_code);
+    }
+
+    // Resolve install directory
+    let install_dir = match base_path::join_remote_path(Some(base_path), &component.remote_path) {
+        Ok(v) => v,
+        Err(err) => {
+            return ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_error(err.to_string())
+                .with_build_exit_code(build_exit_code);
+        }
+    };
+
+    // Dispatch by deploy strategy
+    let strategy = component.deploy_strategy.as_deref().unwrap_or("rsync");
+
+    if strategy == "git" {
+        return execute_git_deploy(component, config, ctx, base_path, &install_dir, local_version, remote_version);
+    }
+
+    execute_artifact_deploy(
+        component, config, ctx, base_path, project, &install_dir,
+        local_version, remote_version, build_exit_code,
+    )
+}
+
+/// Deploy a component via git push strategy.
+fn execute_git_deploy(
+    component: &Component,
+    config: &DeployConfig,
+    ctx: &RemoteProjectContext,
+    base_path: &str,
+    install_dir: &str,
+    local_version: Option<String>,
+    remote_version: Option<String>,
+) -> ComponentDeployResult {
+    let git_config = component.git_deploy.clone().unwrap_or_default();
+    let deploy_result = deploy_via_git(
+        &ctx.client,
+        install_dir,
+        &git_config,
+        local_version.as_deref(),
+    );
+
+    match deploy_result {
+        Ok(DeployResult { success: true, exit_code, .. }) => {
+            if let Ok(Some(summary)) = cleanup_build_dependencies(component, config) {
+                log_status!("deploy", "Cleanup: {}", summary);
+            }
+            run_post_deploy_hooks(&ctx.client, component, install_dir, base_path);
+
+            ComponentDeployResult::new(component, base_path)
+                .with_status("deployed")
+                .with_versions(local_version.clone(), local_version)
+                .with_remote_path(install_dir.to_string())
+                .with_deploy_exit_code(Some(exit_code))
+        }
+        Ok(DeployResult { error, exit_code, .. }) => {
+            ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_remote_path(install_dir.to_string())
+                .with_error(error.unwrap_or_default())
+                .with_deploy_exit_code(Some(exit_code))
+        }
+        Err(err) => {
+            ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_remote_path(install_dir.to_string())
+                .with_error(err.to_string())
+        }
+    }
+}
+
+/// Deploy a component via artifact upload (rsync / module override).
+fn execute_artifact_deploy(
+    component: &Component,
+    config: &DeployConfig,
+    ctx: &RemoteProjectContext,
+    base_path: &str,
+    project: &Project,
+    install_dir: &str,
+    local_version: Option<String>,
+    remote_version: Option<String>,
+    build_exit_code: Option<i32>,
+) -> ComponentDeployResult {
+    // Resolve artifact path
+    let artifact_pattern = match component.build_artifact.as_ref() {
+        Some(pattern) => pattern,
+        None => {
+            return ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_error(format!("Component '{}' has no build_artifact configured", component.id))
+                .with_build_exit_code(build_exit_code);
+        }
+    };
+
+    let artifact_path = match artifact::resolve_artifact_path(artifact_pattern) {
+        Ok(path) => path,
+        Err(e) => {
+            let error_msg = if config.skip_build {
+                format!("{}. Release build may have failed.", e)
+            } else {
+                format!("{}. Run build first: homeboy build {}", e, component.id)
+            };
+            return ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_error(error_msg)
+                .with_build_exit_code(build_exit_code);
+        }
+    };
+
+    // Look up verification from modules
+    let verification = find_deploy_verification(install_dir);
+
+    // Check for module-defined deploy override
+    let deploy_result =
+        if let Some((override_config, module)) = find_deploy_override(install_dir) {
+            deploy_with_override(
+                &ctx.client,
+                &artifact_path,
+                install_dir,
+                &override_config,
+                &module,
+                verification.as_ref(),
+                Some(base_path),
+                project.domain.as_deref(),
+                component.remote_owner.as_deref(),
+            )
+        } else {
+            deploy_artifact(
+                &ctx.client,
+                &artifact_path,
+                install_dir,
+                component.extract_command.as_deref(),
+                verification.as_ref(),
+                component.remote_owner.as_deref(),
+            )
+        };
+
+    match deploy_result {
+        Ok(DeployResult { success: true, exit_code, .. }) => {
+            if let Ok(Some(summary)) = cleanup_build_dependencies(component, config) {
+                log_status!("deploy", "Cleanup: {}", summary);
+            }
+            if is_self_deploy(component) {
+                log_status!(
+                    "deploy",
+                    "Deployed '{}' binary. Remote processes will use the new version on next invocation.",
+                    component.id
+                );
+            }
+            run_post_deploy_hooks(&ctx.client, component, install_dir, base_path);
+
+            ComponentDeployResult::new(component, base_path)
+                .with_status("deployed")
+                .with_versions(local_version.clone(), local_version)
+                .with_remote_path(install_dir.to_string())
+                .with_build_exit_code(build_exit_code)
+                .with_deploy_exit_code(Some(exit_code))
+        }
+        Ok(DeployResult { success: false, exit_code, error }) => {
+            let mut result = ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_remote_path(install_dir.to_string())
+                .with_build_exit_code(build_exit_code)
+                .with_deploy_exit_code(Some(exit_code));
+            if let Some(e) = error {
+                result = result.with_error(e);
+            }
+            result
+        }
+        Err(err) => {
+            ComponentDeployResult::new(component, base_path)
+                .with_status("failed")
+                .with_versions(local_version, remote_version)
+                .with_remote_path(install_dir.to_string())
+                .with_error(err.to_string())
+                .with_build_exit_code(build_exit_code)
+        }
+    }
 }
 
 // =============================================================================
