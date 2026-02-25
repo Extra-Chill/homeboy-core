@@ -314,44 +314,39 @@ impl Error {
         )
     }
 
-    pub fn project_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
-        let mut err = Self::not_found(ErrorCode::ProjectNotFound, "Project not found", id);
+    /// Generic entity-not-found constructor. All entity-specific variants delegate here.
+    pub fn entity_not_found(
+        code: ErrorCode,
+        entity_type: &str,
+        id: impl Into<String>,
+        suggestions: Vec<String>,
+    ) -> Self {
+        let mut err = Self::not_found(code, &format!("{} not found", entity_type), id);
         if !suggestions.is_empty() {
             err = err.with_hint(format_suggestions(&suggestions));
         }
-        err.with_hint("Run 'homeboy project list' to see available projects")
+        let list_cmd = entity_type.to_lowercase();
+        err.with_hint(format!("Run 'homeboy {} list' to see available {}s", list_cmd, list_cmd))
+    }
+
+    pub fn project_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
+        Self::entity_not_found(ErrorCode::ProjectNotFound, "Project", id, suggestions)
     }
 
     pub fn server_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
-        let mut err = Self::not_found(ErrorCode::ServerNotFound, "Server not found", id);
-        if !suggestions.is_empty() {
-            err = err.with_hint(format_suggestions(&suggestions));
-        }
-        err.with_hint("Run 'homeboy server list' to see available servers")
+        Self::entity_not_found(ErrorCode::ServerNotFound, "Server", id, suggestions)
     }
 
     pub fn component_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
-        let mut err = Self::not_found(ErrorCode::ComponentNotFound, "Component not found", id);
-        if !suggestions.is_empty() {
-            err = err.with_hint(format_suggestions(&suggestions));
-        }
-        err.with_hint("Run 'homeboy component list' to see available components")
+        Self::entity_not_found(ErrorCode::ComponentNotFound, "Component", id, suggestions)
     }
 
     pub fn module_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
-        let mut err = Self::not_found(ErrorCode::ModuleNotFound, "Module not found", id);
-        if !suggestions.is_empty() {
-            err = err.with_hint(format_suggestions(&suggestions));
-        }
-        err.with_hint("Run 'homeboy module list' to see available modules")
+        Self::entity_not_found(ErrorCode::ModuleNotFound, "Module", id, suggestions)
     }
 
     pub fn fleet_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
-        let mut err = Self::not_found(ErrorCode::FleetNotFound, "Fleet not found", id);
-        if !suggestions.is_empty() {
-            err = err.with_hint(format_suggestions(&suggestions));
-        }
-        err.with_hint("Run 'homeboy fleet list' to see available fleets")
+        Self::entity_not_found(ErrorCode::FleetNotFound, "Fleet", id, suggestions)
     }
 
     pub fn docs_topic_not_found(topic: impl Into<String>) -> Self {

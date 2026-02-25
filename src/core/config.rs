@@ -79,7 +79,7 @@ pub(crate) fn is_json_array(input: &str) -> bool {
 // JSON Pointer Operations (internal)
 // ============================================================================
 
-pub(crate) fn set_json_pointer(root: &mut Value, pointer: &str, new_value: Value) -> Result<()> {
+pub fn set_json_pointer(root: &mut Value, pointer: &str, new_value: Value) -> Result<()> {
     let pointer = normalize_pointer(pointer)?;
     let Some((parent_ptr, token)) = split_parent_pointer(&pointer) else {
         *root = new_value;
@@ -88,6 +88,104 @@ pub(crate) fn set_json_pointer(root: &mut Value, pointer: &str, new_value: Value
 
     let parent = ensure_pointer_container(root, &parent_ptr)?;
     set_child(parent, &token, new_value)
+}
+
+/// Remove the value at a JSON pointer path.
+pub fn remove_json_pointer(root: &mut Value, pointer: &str) -> Result<()> {
+    let pointer = normalize_pointer(pointer)?;
+    let Some((parent_ptr, token)) = split_parent_pointer(&pointer) else {
+        return Err(Error::validation_invalid_argument(
+            "pointer",
+            "Cannot remove root element",
+            None,
+            None,
+        ));
+    };
+
+    let parent = navigate_pointer(root, &parent_ptr)?;
+    remove_child(parent, &token)
+}
+
+/// Navigate to the value at a JSON pointer without creating intermediate objects.
+/// Returns an error if any segment along the path is missing.
+fn navigate_pointer<'a>(root: &'a mut Value, pointer: &str) -> Result<&'a mut Value> {
+    if pointer.is_empty() {
+        return Ok(root);
+    }
+
+    let tokens: Vec<String> = pointer.split('/').skip(1).map(unescape_token).collect();
+    let mut current = root;
+
+    for token in &tokens {
+        current = match current {
+            Value::Object(map) => map.get_mut(token.as_str()).ok_or_else(|| {
+                Error::validation_invalid_argument(
+                    "pointer",
+                    format!("Key '{}' not found", token),
+                    None,
+                    None,
+                )
+            })?,
+            Value::Array(arr) => {
+                let index = parse_array_index(token)?;
+                let len = arr.len();
+                if index >= len {
+                    return Err(Error::validation_invalid_argument(
+                        "pointer",
+                        format!("Array index {} out of bounds (length {})", index, len),
+                        None,
+                        None,
+                    ));
+                }
+                &mut arr[index]
+            }
+            _ => {
+                return Err(Error::validation_invalid_argument(
+                    "pointer",
+                    format!("Cannot navigate through non-object at path: {}", pointer),
+                    None,
+                    None,
+                ))
+            }
+        };
+    }
+
+    Ok(current)
+}
+
+fn remove_child(parent: &mut Value, token: &str) -> Result<()> {
+    match parent {
+        Value::Object(map) => {
+            if map.remove(token).is_none() {
+                return Err(Error::validation_invalid_argument(
+                    "pointer",
+                    format!("Key '{}' not found", token),
+                    None,
+                    None,
+                ));
+            }
+            Ok(())
+        }
+        Value::Array(arr) => {
+            let index = parse_array_index(token)?;
+            if index >= arr.len() {
+                return Err(Error::validation_invalid_argument(
+                    "pointer",
+                    format!("Array index {} out of bounds (length {})", index, arr.len()),
+                    None,
+                    None,
+                ));
+            }
+            arr.remove(index);
+            Ok(())
+        }
+        _ => Err(Error::validation_invalid_argument(
+            "pointer",
+            "Cannot remove from non-container type",
+            None,
+            None,
+        )),
+    }
 }
 
 fn normalize_pointer(pointer: &str) -> Result<String> {
