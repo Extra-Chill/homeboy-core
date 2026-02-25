@@ -195,7 +195,8 @@ pub fn run(
 
                 let id = component::slugify_id(dir_name)?;
 
-                let mut new_component = Component::new(id, local_path, remote_path, build_artifact);
+                let mut new_component =
+                    Component::new(id.clone(), local_path, remote_path, build_artifact);
 
                 new_component.version_targets = if let Some(json_spec) = version_targets_json {
                     let raw = homeboy::config::read_json_spec_to_string(&json_spec)?;
@@ -226,7 +227,16 @@ pub fn run(
                     new_component.modules = Some(module_map);
                 }
 
-                serde_json::to_string(&new_component).map_err(|e| {
+                // Serialize to Value first so we can inject the id field.
+                // Component's serde(skip_serializing) on id means to_string() drops it,
+                // but create_single_from_json() needs id in the JSON.
+                let mut value = serde_json::to_value(&new_component).map_err(|e| {
+                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
+                })?;
+                if let serde_json::Value::Object(ref mut map) = value {
+                    map.insert("id".to_string(), serde_json::json!(id));
+                }
+                serde_json::to_string(&value).map_err(|e| {
                     homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
                 })?
             };
