@@ -801,6 +801,102 @@ pub fn detect_from_cwd() -> Option<String> {
     None
 }
 
+/// Create a virtual (unregistered) Component from a directory's `homeboy.json`.
+///
+/// Derives `id` from the directory name (slugified) and sets `local_path`
+/// from the given path. All other fields come from the portable config.
+/// Returns None if no `homeboy.json` found or it can't be parsed.
+pub fn discover_from_portable(dir: &Path) -> Option<Component> {
+    let portable = read_portable_config(dir).ok()??;
+
+    let dir_name = dir.file_name()?.to_string_lossy();
+    let id = crate::utils::slugify::slugify_id(&dir_name, "component_id").ok()?;
+    let local_path = dir.to_string_lossy().to_string();
+
+    // Start with portable config, inject machine-specific fields
+    let mut json = portable;
+    if let Some(obj) = json.as_object_mut() {
+        obj.insert("id".to_string(), Value::String(id));
+        obj.insert("local_path".to_string(), Value::String(local_path));
+        // remote_path is required but machine-specific — default to empty
+        obj.entry("remote_path".to_string())
+            .or_insert(Value::String(String::new()));
+    }
+
+    serde_json::from_value::<Component>(json).ok()
+}
+
+/// Find the git root directory for a given path.
+fn detect_git_root(dir: &Path) -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+    None
+}
+
+/// Resolve a Component from an optional ID, with CWD auto-discovery fallback.
+///
+/// Resolution order:
+/// 1. Explicit `id` → `load(id)` (includes portable config layering via post_load)
+/// 2. No `id` → try registered component detection from CWD
+/// 3. Still no match → try `homeboy.json` in CWD
+/// 4. Still no match → try `homeboy.json` at git root (covers subdirectories)
+pub fn resolve(id: Option<&str>) -> Result<Component> {
+    // Explicit ID: load from config (post_load applies portable layering)
+    if let Some(id) = id {
+        return load(id);
+    }
+
+    // Try registered component detection from CWD
+    if let Some(detected_id) = detect_from_cwd() {
+        return load(&detected_id);
+    }
+
+    // Try portable config discovery from CWD
+    let cwd = std::env::current_dir()
+        .map_err(|e| Error::internal_io(e.to_string(), None))?;
+
+    if let Some(component) = discover_from_portable(&cwd) {
+        return Ok(component);
+    }
+
+    // Try git root as fallback (e.g., running from a subdirectory)
+    if let Some(git_root) = detect_git_root(&cwd) {
+        if git_root != cwd {
+            if let Some(component) = discover_from_portable(&git_root) {
+                return Ok(component);
+            }
+        }
+    }
+
+    // Nothing found — produce a helpful error
+    let mut hints = vec![
+        "Provide a component ID: homeboy <command> <component-id>".to_string(),
+        "Or run from a directory containing homeboy.json".to_string(),
+    ];
+    if detect_from_cwd().is_none() {
+        hints.push(
+            "Register a component: homeboy component create <id> --local-path .".to_string(),
+        );
+    }
+
+    Err(Error::validation_invalid_argument(
+        "component_id",
+        "No component ID provided and no homeboy.json found in current directory",
+        None,
+        Some(hints),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1019,5 +1115,78 @@ mod tests {
         overlay_portable(&mut stored, &portable);
 
         assert_eq!(stored, original);
+    }
+
+    // ========================================================================
+    // Portable config discovery tests
+    // ========================================================================
+
+    #[test]
+    fn discover_from_portable_creates_component_from_homeboy_json() {
+        let dir = std::env::temp_dir().join("homeboy_test_discover");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let config = serde_json::json!({
+            "build_command": "cargo build --release",
+            "version_targets": [{"file": "Cargo.toml", "pattern": "(?m)^version\\s*=\\s*\"([0-9.]+)\""}],
+            "changelog_target": "docs/CHANGELOG.md"
+        });
+        std::fs::write(dir.join("homeboy.json"), config.to_string()).unwrap();
+
+        let result = discover_from_portable(&dir);
+        assert!(result.is_some(), "Should discover component from homeboy.json");
+
+        let comp = result.unwrap();
+        assert_eq!(comp.id, "homeboy-test-discover");
+        assert_eq!(comp.local_path, dir.to_string_lossy());
+        assert_eq!(comp.build_command.as_deref(), Some("cargo build --release"));
+        assert_eq!(
+            comp.changelog_target.as_deref(),
+            Some("docs/CHANGELOG.md")
+        );
+        assert!(comp.version_targets.is_some());
+        assert!(comp.remote_path.is_empty()); // default
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_from_portable_returns_none_without_homeboy_json() {
+        let dir = std::env::temp_dir().join("homeboy_test_no_config");
+        let _ = std::fs::create_dir_all(&dir);
+        // Ensure no homeboy.json
+        let _ = std::fs::remove_file(dir.join("homeboy.json"));
+
+        let result = discover_from_portable(&dir);
+        assert!(result.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_from_portable_ignores_machine_specific_in_portable() {
+        let dir = std::env::temp_dir().join("homeboy_test_machine_fields");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let config = serde_json::json!({
+            "id": "should-be-overridden",
+            "local_path": "/wrong/path",
+            "remote_path": "/also/wrong",
+            "build_command": "make"
+        });
+        std::fs::write(dir.join("homeboy.json"), config.to_string()).unwrap();
+
+        let comp = discover_from_portable(&dir).unwrap();
+        // id is derived from dir name, not from portable
+        assert_eq!(comp.id, "homeboy-test-machine-fields");
+        // local_path is derived from actual dir, not portable
+        assert_eq!(comp.local_path, dir.to_string_lossy());
+        // remote_path from portable is allowed (it's set explicitly)
+        assert_eq!(comp.remote_path, "/also/wrong");
+        // build_command from portable
+        assert_eq!(comp.build_command.as_deref(), Some("make"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
