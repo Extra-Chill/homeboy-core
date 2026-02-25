@@ -271,7 +271,15 @@ fn set(args: DynamicSetArgs) -> CmdResult<FleetOutput> {
         homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
     })?;
 
-    match fleet::merge(args.id.as_deref(), &json_string, &args.replace)? {
+    // Auto-replace array fields in set commands (see #154)
+    let mut replace_fields = args.replace.clone();
+    for field in homeboy::config::collect_array_fields(&merged) {
+        if !replace_fields.contains(&field) {
+            replace_fields.push(field);
+        }
+    }
+
+    match fleet::merge(args.id.as_deref(), &json_string, &replace_fields)? {
         homeboy::MergeOutput::Single(result) => {
             let fl = fleet::load(&result.id)?;
             Ok((

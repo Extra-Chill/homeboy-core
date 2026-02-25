@@ -440,6 +440,19 @@ fn is_serialization_zero(val: &Value) -> bool {
     }
 }
 
+/// Collect top-level array field names from a JSON object.
+/// Used by `set` commands to auto-replace arrays instead of merging.
+pub fn collect_array_fields(value: &Value) -> Vec<String> {
+    match value {
+        Value::Object(obj) => obj
+            .iter()
+            .filter(|(_, v)| v.is_array())
+            .map(|(k, _)| k.clone())
+            .collect(),
+        _ => vec![],
+    }
+}
+
 fn should_replace(path: &str, replace_fields: &[String]) -> bool {
     replace_fields
         .iter()
