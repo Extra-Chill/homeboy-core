@@ -360,18 +360,13 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
 
 // === Project/Server Context Resolution ===
 
-pub struct ProjectServerContext {
+pub(crate) struct ProjectServerContext {
     pub project: Project,
     pub server_id: String,
     pub server: Server,
 }
 
-pub enum ResolvedTarget {
-    Project(Box<ProjectServerContext>),
-    Server { server_id: String, server: Server },
-}
-
-pub fn resolve_project_server(project_id: &str) -> Result<ProjectServerContext> {
+pub(crate) fn resolve_project_server(project_id: &str) -> Result<ProjectServerContext> {
     let project = project::load(project_id)?;
 
     let server_id = project.server_id.clone().ok_or_else(|| {
@@ -394,27 +389,6 @@ pub fn require_project_base_path(project_id: &str, project: &Project) -> Result<
         .clone()
         .filter(|p| !p.is_empty())
         .ok_or_else(|| Error::config_missing_key("project.base_path", Some(project_id.to_string())))
-}
-
-pub fn resolve_project_server_with_base_path(
-    project_id: &str,
-) -> Result<(ProjectServerContext, String)> {
-    let ctx = resolve_project_server(project_id)?;
-    let base_path = require_project_base_path(project_id, &ctx.project)?;
-    Ok((ctx, base_path))
-}
-
-pub fn resolve_project_or_server_id(id: &str) -> Result<ResolvedTarget> {
-    if let Ok(ctx) = resolve_project_server(id) {
-        return Ok(ResolvedTarget::Project(Box::new(ctx)));
-    }
-
-    let server = server::load(id).map_err(|_| Error::server_not_found(id.to_string(), vec![]))?;
-
-    Ok(ResolvedTarget::Server {
-        server_id: id.to_string(),
-        server,
-    })
 }
 
 pub struct RemoteProjectContext {

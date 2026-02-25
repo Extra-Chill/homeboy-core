@@ -1,7 +1,6 @@
 use crate::changelog;
 use crate::component::{self, Component, VersionTarget};
 use crate::config::{from_str, set_json_pointer, to_string_pretty};
-use crate::defaults;
 use crate::error::{Error, Result};
 use crate::hooks::{self, HookFailureMode};
 use crate::local_files::{self, FileSystem};
@@ -812,54 +811,6 @@ pub fn bump_version(component_id: Option<&str>, bump_type: &str) -> Result<BumpR
 }
 
 /// Detect version targets in a directory by checking for well-known version files.
-pub fn detect_version_targets(base_path: &str) -> Result<Vec<(String, String, String)>> {
-    let mut found = Vec::new();
-
-    // Load version candidates from configurable defaults
-    let version_candidates = defaults::load_defaults().version_candidates;
-
-    // Check well-known files first
-    for candidate in &version_candidates {
-        let full_path = format!("{}/{}", base_path, candidate.file);
-        if Path::new(&full_path).exists() {
-            let content = fs::read_to_string(&full_path).ok();
-            if let Some(content) = content {
-                if parse_version(&content, &candidate.pattern).is_some() {
-                    found.push((candidate.file.clone(), candidate.pattern.clone(), full_path));
-                }
-            }
-        }
-    }
-
-    // Check for PHP plugin files (*.php with Version: header)
-    if let Ok(entries) = fs::read_dir(base_path) {
-        let php_pattern = r"Version:\s*(\d+\.\d+\.\d+)";
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "php") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    // Only match if it looks like a WordPress plugin header
-                    if (content.contains("Plugin Name:") || content.contains("Theme Name:"))
-                        && parse_version(&content, php_pattern).is_some()
-                    {
-                        let filename = path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown.php");
-                        found.push((
-                            filename.to_string(),
-                            php_pattern.to_string(),
-                            path.to_string_lossy().to_string(),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(found)
-}
-
 /// Information about a version pattern found but not configured
 #[derive(Debug, Clone, Serialize)]
 pub struct UnconfiguredPattern {

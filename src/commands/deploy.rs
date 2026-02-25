@@ -5,7 +5,7 @@ use serde::Serialize;
 use homeboy::deploy::{self, ComponentDeployResult, DeployConfig, DeploySummary};
 use homeboy::resolve::{infer_project_for_components, resolve_project_components};
 
-use super::CmdResult;
+use super::{CmdResult, ProjectsSummary};
 
 #[derive(Args)]
 pub struct DeployArgs {
@@ -83,7 +83,7 @@ pub struct MultiProjectDeployOutput {
     pub command: String,
     pub component_ids: Vec<String>,
     pub projects: Vec<ProjectDeployResult>,
-    pub summary: MultiProjectDeploySummary,
+    pub summary: ProjectsSummary,
     pub dry_run: bool,
     pub check: bool,
     pub force: bool,
@@ -97,13 +97,6 @@ pub struct ProjectDeployResult {
     pub error: Option<String>,
     pub results: Vec<ComponentDeployResult>,
     pub summary: DeploySummary,
-}
-
-#[derive(Serialize)]
-pub struct MultiProjectDeploySummary {
-    pub total_projects: u32,
-    pub succeeded: u32,
-    pub failed: u32,
 }
 
 #[derive(Serialize)]
@@ -404,7 +397,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
             command: "deploy.run_multi".to_string(),
             component_ids,
             projects: project_results,
-            summary: MultiProjectDeploySummary {
+            summary: ProjectsSummary {
                 total_projects: total,
                 succeeded,
                 failed,

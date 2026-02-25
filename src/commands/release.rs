@@ -6,7 +6,7 @@ use homeboy::component;
 use homeboy::deploy::{self, DeployConfig};
 use homeboy::release::{self, ReleasePlan, ReleaseRun};
 
-use super::CmdResult;
+use super::{CmdResult, ProjectsSummary};
 
 #[derive(Clone, ValueEnum)]
 pub enum BumpType {
@@ -59,7 +59,7 @@ pub struct ReleaseArgs {
 #[derive(Serialize)]
 pub struct DeploymentResult {
     pub projects: Vec<ProjectDeployResult>,
-    pub summary: DeploymentSummary,
+    pub summary: ProjectsSummary,
 }
 
 #[derive(Serialize)]
@@ -70,13 +70,6 @@ pub struct ProjectDeployResult {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_result: Option<homeboy::deploy::ComponentDeployResult>,
-}
-
-#[derive(Serialize)]
-pub struct DeploymentSummary {
-    pub total_projects: u32,
-    pub succeeded: u32,
-    pub failed: u32,
 }
 
 #[derive(Serialize)]
@@ -196,7 +189,7 @@ fn plan_deployment(component_id: &str) -> DeploymentResult {
     let total = project_results.len() as u32;
     DeploymentResult {
         projects: project_results,
-        summary: DeploymentSummary {
+        summary: ProjectsSummary {
             total_projects: total,
             succeeded: 0,
             failed: 0,
@@ -216,7 +209,7 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
         return (
             Some(DeploymentResult {
                 projects: vec![],
-                summary: DeploymentSummary {
+                summary: ProjectsSummary {
                     total_projects: 0,
                     succeeded: 0,
                     failed: 0,
@@ -297,7 +290,7 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
     (
         Some(DeploymentResult {
             projects: project_results,
-            summary: DeploymentSummary {
+            summary: ProjectsSummary {
                 total_projects: total,
                 succeeded,
                 failed,
