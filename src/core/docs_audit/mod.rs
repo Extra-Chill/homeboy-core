@@ -89,6 +89,95 @@ pub struct AuditResult {
     pub undocumented_features: Vec<UndocumentedFeature>,
 }
 
+/// Audit documentation at a direct filesystem path without a registered component.
+///
+/// Uses the directory name as the label and defaults to "docs" for the docs
+/// directory. Module patterns and changelog exclusion are not available.
+pub fn audit_path(path: &str, docs_dir_override: Option<&str>) -> Result<AuditResult> {
+    let source_path = Path::new(path);
+    if !source_path.is_dir() {
+        return Err(crate::Error::validation_invalid_argument(
+            "path",
+            format!("'{}' is not a directory", path),
+            Some(path.to_string()),
+            None,
+        ));
+    }
+
+    let label = source_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let docs_dir = docs_dir_override.unwrap_or("docs");
+    let docs_dirs = vec![docs_dir.to_string()];
+    let docs_path = source_path.join(docs_dir);
+
+    let doc_files = find_doc_files(&docs_path, None);
+    let docs_scanned = doc_files.len();
+
+    let mut all_claims = Vec::new();
+    let mut doc_contents: HashMap<String, String> = HashMap::new();
+    for doc_file in &doc_files {
+        let doc_path = docs_path.join(doc_file);
+        if let Ok(content) = fs::read_to_string(&doc_path) {
+            let claims = claims::extract_claims(&content, doc_file, &[]);
+            all_claims.extend(claims);
+            doc_contents.insert(doc_file.clone(), content);
+        }
+    }
+
+    let mut tasks = Vec::new();
+    for claim in all_claims {
+        let result = verify::verify_claim(&claim, source_path, &docs_path, None);
+        let task = tasks::build_task(claim, result);
+        tasks.push(task);
+    }
+
+    // Get uncommitted changes directly from the path's git repo
+    let changed_files = git::get_uncommitted_changes(path)
+        .map(|u| {
+            let mut files = Vec::new();
+            files.extend(u.staged);
+            files.extend(u.unstaged);
+            files.sort();
+            files.dedup();
+            files
+        })
+        .unwrap_or_default();
+
+    let priority_docs = build_priority_docs(&tasks, &changed_files);
+    let broken_references = extract_broken_references(&tasks, &doc_contents);
+
+    let feature_result = detect_features(&[], source_path, &docs_dirs, None);
+
+    let docs_with_issues: HashSet<_> = priority_docs
+        .iter()
+        .map(|p| &p.doc)
+        .chain(broken_references.iter().map(|b| &b.doc))
+        .collect();
+    let unchanged_docs = docs_scanned.saturating_sub(docs_with_issues.len());
+
+    Ok(AuditResult {
+        component_id: label,
+        baseline_ref: None,
+        summary: AlignmentSummary {
+            docs_scanned,
+            priority_docs: priority_docs.len(),
+            broken_references: broken_references.len(),
+            unchanged_docs,
+            total_features: feature_result.total,
+            documented_features: feature_result.documented,
+            undocumented_features: feature_result.undocumented.len(),
+        },
+        changed_files,
+        priority_docs,
+        broken_references,
+        undocumented_features: feature_result.undocumented,
+    })
+}
+
 /// Audit a component's documentation and return an alignment report.
 ///
 /// If `docs_dir_override` is provided, it's used instead of the component's

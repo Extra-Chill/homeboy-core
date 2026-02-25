@@ -45,10 +45,10 @@ pub enum DocsCommand {
 
     /// Audit documentation for broken links and stale references
     Audit {
-        /// Component to audit
+        /// Component ID or direct filesystem path to audit
         component_id: String,
 
-        /// Docs directory relative to component root (overrides component config, default: docs)
+        /// Docs directory relative to component/project root (overrides config, default: docs)
         #[arg(long)]
         docs_dir: Option<String>,
     },
@@ -262,7 +262,13 @@ fn run_scaffold(
 // ============================================================================
 
 fn run_audit(component_id: &str, docs_dir: Option<&str>) -> CmdResult<DocsOutput> {
-    let result = docs_audit::audit_component(component_id, docs_dir)?;
+    // If the argument looks like a filesystem path, audit it directly
+    // without requiring component registration
+    let result = if std::path::Path::new(component_id).is_dir() {
+        docs_audit::audit_path(component_id, docs_dir)?
+    } else {
+        docs_audit::audit_component(component_id, docs_dir)?
+    };
     Ok((DocsOutput::Audit(result), 0))
 }
 
