@@ -20,6 +20,37 @@ pub fn write_file(path: &Path, content: &str, operation: &str) -> Result<()> {
         .map_err(|e| Error::internal_io(e.to_string(), Some(operation.to_string())))
 }
 
+/// Write content to file atomically (write to .tmp, then rename).
+///
+/// Prevents data loss if the process crashes mid-write. The rename is
+/// atomic on POSIX filesystems, so readers always see either the old
+/// content or the new content — never a partial write.
+pub fn write_file_atomic(path: &Path, content: &str, operation: &str) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        Error::internal_io(
+            format!("Invalid path: {}", path.display()),
+            Some(operation.to_string()),
+        )
+    })?;
+
+    let filename = path.file_name().ok_or_else(|| {
+        Error::internal_io(
+            format!("Invalid path: {}", path.display()),
+            Some(operation.to_string()),
+        )
+    })?;
+
+    let tmp_path = parent.join(format!("{}.tmp", filename.to_string_lossy()));
+
+    fs::write(&tmp_path, content)
+        .map_err(|e| Error::internal_io(e.to_string(), Some(format!("{} (write temp)", operation))))?;
+
+    fs::rename(&tmp_path, path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some(format!("{} (rename)", operation))))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
