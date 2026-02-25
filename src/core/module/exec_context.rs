@@ -15,5 +15,10 @@ pub const MODULE_PATH: &str = "HOMEBOY_MODULE_PATH";
 /// Filesystem path to the project directory (base_path).
 pub const PROJECT_PATH: &str = "HOMEBOY_PROJECT_PATH";
 
+/// Run only specific steps (comma-separated). Scripts should skip steps not in this list.
+pub const STEP: &str = "HOMEBOY_STEP";
+/// Skip specific steps (comma-separated). Scripts should skip steps in this list.
+pub const SKIP: &str = "HOMEBOY_SKIP";
+
 /// Current version of the exec context protocol.
-pub const CURRENT_VERSION: &str = "1";
+pub const CURRENT_VERSION: &str = "2";

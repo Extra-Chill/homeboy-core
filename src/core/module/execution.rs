@@ -9,9 +9,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 use super::exec_context;
+use super::load_module;
 use super::manifest::{ActionConfig, ActionType, HttpMethod, ModuleManifest, RuntimeConfig};
 use super::scope::ModuleScope;
-use super::load_module;
 
 /// Result of executing a module.
 pub struct ModuleRunResult {
@@ -67,11 +67,8 @@ pub fn run_setup(module_id: &str) -> Result<ModuleSetupResult> {
         }
     };
 
-    let module_path = validation::require(
-        module.module_path.as_ref(),
-        "module",
-        "module_path not set",
-    )?;
+    let module_path =
+        validation::require(module.module_path.as_ref(), "module", "module_path not set")?;
 
     let entrypoint = runtime.entrypoint.clone().unwrap_or_default();
     let vars: Vec<(&str, &str)> = vec![
@@ -92,6 +89,15 @@ pub fn run_setup(module_id: &str) -> Result<ModuleSetupResult> {
     Ok(ModuleSetupResult { exit_code })
 }
 
+/// Options for filtering which steps a module script executes.
+#[derive(Default)]
+pub struct ModuleStepFilter {
+    /// Run only these steps (comma-separated).
+    pub step: Option<String>,
+    /// Skip these steps (comma-separated).
+    pub skip: Option<String>,
+}
+
 /// Execute a module with optional project context.
 pub fn run_module(
     module_id: &str,
@@ -100,6 +106,7 @@ pub fn run_module(
     inputs: Vec<(String, String)>,
     args: Vec<String>,
     mode: ModuleExecutionMode,
+    filter: ModuleStepFilter,
 ) -> Result<ModuleRunResult> {
     let is_captured = matches!(mode, ModuleExecutionMode::Captured);
     let execution = execute_module_runtime(
@@ -111,6 +118,7 @@ pub fn run_module(
         None,
         None,
         mode,
+        &filter,
     )?;
 
     let output = if is_captured && !execution.result.output.is_empty() {
@@ -206,12 +214,10 @@ pub(crate) fn execute_action(
                 HttpMethod::Delete => client.delete(endpoint),
             }
         }
-        ActionType::Builtin => {
-            Err(Error::other(format!(
-                "Action '{}' is a builtin action. Builtin actions run in the Desktop app, not the CLI.",
-                action_id
-            )))
-        }
+        ActionType::Builtin => Err(Error::other(format!(
+            "Action '{}' is a builtin action. Builtin actions run in the Desktop app, not the CLI.",
+            action_id
+        ))),
         ActionType::Command => {
             let command_template = validation::require(
                 action.command.as_ref(),
@@ -229,14 +235,20 @@ pub(crate) fn execute_action(
                 .and_then(|pid| project::load(pid).ok())
                 .and_then(|proj| proj.base_path.clone());
 
-            let working_dir = parser::json_path_str(&payload, &["release", "local_path"])
-                .unwrap_or(module_path);
+            let working_dir =
+                parser::json_path_str(&payload, &["release", "local_path"]).unwrap_or(module_path);
 
             let execution = execute_module_command(
                 command_template,
                 &vars,
                 Some(working_dir),
-                &build_action_env(module_id, project_id, &payload, Some(module_path), project_base_path.as_deref()),
+                &build_action_env(
+                    module_id,
+                    project_id,
+                    &payload,
+                    Some(module_path),
+                    project_base_path.as_deref(),
+                ),
                 ModuleExecutionMode::Captured,
             )?;
             Ok(serde_json::json!({
@@ -320,7 +332,10 @@ fn resolve_module_context(
 
         if let Some(ref comp_id) = resolved_component_id {
             component = Some(component::load(comp_id).map_err(|_| {
-                Error::config(format!("Component {} required by module {} is not configured", comp_id, &module.id))
+                Error::config(format!(
+                    "Component {} required by module {} is not configured",
+                    comp_id, &module.id
+                ))
             })?);
         }
 
@@ -328,7 +343,8 @@ fn resolve_module_context(
         project = Some(loaded_project);
     }
 
-    let settings = ModuleScope::effective_settings(module_id, project.as_ref(), component.as_ref())?;
+    let settings =
+        ModuleScope::effective_settings(module_id, project.as_ref(), component.as_ref())?;
 
     Ok(ModuleExecutionContext {
         module_id: module_id.to_string(),
@@ -412,7 +428,15 @@ fn build_action_env(
     project_base_path: Option<&str>,
 ) -> Vec<(String, String)> {
     let settings_json = payload.to_string();
-    build_exec_env(module_id, project_id, None, &settings_json, module_path, project_base_path, None)
+    build_exec_env(
+        module_id,
+        project_id,
+        None,
+        &settings_json,
+        module_path,
+        project_base_path,
+        None,
+    )
 }
 
 fn execute_module_command(
@@ -457,6 +481,7 @@ fn execute_module_runtime(
     payload: Option<&serde_json::Value>,
     working_dir: Option<&str>,
     mode: ModuleExecutionMode,
+    filter: &ModuleStepFilter,
 ) -> Result<ModuleExecutionOutcome> {
     // Shell execution is required for module runtime commands by design:
     // - Runtime commands execute bash scripts (set -euo pipefail, arrays, jq)
@@ -474,11 +499,8 @@ fn execute_module_runtime(
         ))
     })?;
 
-    let module_path = validation::require(
-        module.module_path.as_ref(),
-        "module",
-        "module_path not set",
-    )?;
+    let module_path =
+        validation::require(module.module_path.as_ref(), "module", "module_path not set")?;
 
     let args_str = build_args_string(&module, inputs, args);
     let context =
@@ -497,7 +519,14 @@ fn execute_module_runtime(
         context.project.as_ref(),
         &context.project_id,
     );
-    let env_pairs = build_runtime_env(runtime, &context, &vars, &settings_json, module_path);
+    let mut env_pairs = build_runtime_env(runtime, &context, &vars, &settings_json, module_path);
+
+    if let Some(ref step) = filter.step {
+        env_pairs.push((exec_context::STEP.to_string(), step.clone()));
+    }
+    if let Some(ref skip) = filter.skip {
+        env_pairs.push((exec_context::SKIP.to_string(), skip.clone()));
+    }
 
     let execution = execute_module_command(
         run_command,
@@ -549,7 +578,10 @@ pub fn build_exec_env(
             }
             Err(e) => {
                 // For debugging: if component loading fails, still set a placeholder path
-                env.push(("HOMEBOY_COMPONENT_PATH".to_string(), format!("/debug/component-not-found/{}", cid)));
+                env.push((
+                    "HOMEBOY_COMPONENT_PATH".to_string(),
+                    format!("/debug/component-not-found/{}", cid),
+                ));
                 env.push(("HOMEBOY_COMPONENT_LOAD_ERROR".to_string(), e.to_string()));
             }
         }

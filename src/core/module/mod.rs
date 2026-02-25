@@ -1,8 +1,8 @@
-mod manifest;
 mod execution;
-mod scope;
 mod lifecycle;
+mod manifest;
 mod runner;
+mod scope;
 
 pub mod exec_context;
 
@@ -18,12 +18,12 @@ pub use manifest::{
 };
 
 // Re-export execution types and functions
-pub use execution::{
-    build_exec_env, is_module_compatible, is_module_ready, module_ready_status,
-    ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult, ModuleSetupResult,
-    run_action, run_module, run_setup,
-};
 pub(crate) use execution::execute_action;
+pub use execution::{
+    build_exec_env, is_module_compatible, is_module_ready, module_ready_status, run_action,
+    run_module, run_setup, ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult,
+    ModuleSetupResult, ModuleStepFilter,
+};
 
 // Re-export scope types
 pub use scope::ModuleScope;
@@ -61,9 +61,11 @@ pub fn load_all_modules() -> Result<Vec<ModuleManifest>> {
 }
 
 pub fn find_module_by_tool(tool: &str) -> Option<ModuleManifest> {
-    load_all_modules()
-        .ok()
-        .and_then(|modules| modules.into_iter().find(|m| m.cli.as_ref().is_some_and(|c| c.tool == tool)))
+    load_all_modules().ok().and_then(|modules| {
+        modules
+            .into_iter()
+            .find(|m| m.cli.as_ref().is_some_and(|c| c.tool == tool))
+    })
 }
 
 pub fn module_path(id: &str) -> PathBuf {

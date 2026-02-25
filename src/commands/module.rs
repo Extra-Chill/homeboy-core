@@ -41,6 +41,12 @@ enum ModuleCommand {
         /// Input values as key=value pairs
         #[arg(short, long, value_parser = parse_key_val)]
         input: Vec<(String, String)>,
+        /// Run only specific steps (comma-separated, e.g. --step phpunit,phpcs)
+        #[arg(long)]
+        step: Option<String>,
+        /// Skip specific steps (comma-separated, e.g. --skip phpstan,lint)
+        #[arg(long)]
+        skip: Option<String>,
         /// Arguments to pass to the module (for CLI modules)
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
@@ -117,11 +123,13 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             project,
             component,
             input,
+            step,
+            skip,
             args,
             stream,
             no_stream,
         } => run_module(
-            &module_id, project, component, input, args, stream, no_stream,
+            &module_id, project, component, input, args, stream, no_stream, step, skip,
         ),
         ModuleCommand::Setup { module_id } => setup_module(&module_id),
         ModuleCommand::Install { source, id } => install_module(&source, id),
@@ -461,8 +469,10 @@ fn run_module(
     args: Vec<String>,
     stream: bool,
     no_stream: bool,
+    step: Option<String>,
+    skip: Option<String>,
 ) -> CmdResult<ModuleOutput> {
-    use homeboy::module::ModuleExecutionMode;
+    use homeboy::module::{ModuleExecutionMode, ModuleStepFilter};
 
     let mode = if no_stream {
         ModuleExecutionMode::Captured
@@ -472,6 +482,8 @@ fn run_module(
         ModuleExecutionMode::Captured
     };
 
+    let filter = ModuleStepFilter { step, skip };
+
     let result = homeboy::module::run_module(
         module_id,
         project.as_deref(),
@@ -479,6 +491,7 @@ fn run_module(
         inputs,
         args,
         mode,
+        filter,
     )?;
 
     Ok((
