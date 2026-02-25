@@ -21,9 +21,8 @@ pub use manifest::{
 // Re-export execution types and functions
 pub(crate) use execution::execute_action;
 pub use execution::{
-    build_exec_env, is_module_compatible, is_module_ready, module_ready_status, run_action,
-    run_module, run_setup, ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult,
-    ModuleSetupResult, ModuleStepFilter,
+    is_module_compatible, module_ready_status, run_action, run_module, run_setup,
+    ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult, ModuleSetupResult, ModuleStepFilter,
 };
 
 // Re-export scope types

@@ -315,29 +315,6 @@ pub fn get_latest_finalized_version(content: &str) -> Option<String> {
     None
 }
 
-pub fn add_next_section_item(
-    changelog_content: &str,
-    next_section_aliases: &[String],
-    message: &str,
-) -> Result<(String, bool)> {
-    let trimmed_message = message.trim();
-    if trimmed_message.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "message",
-            "Changelog message cannot be empty",
-            None,
-            None,
-        ));
-    }
-
-    let (with_section, section_changed) =
-        ensure_next_section(changelog_content, next_section_aliases)?;
-    let (with_item, item_changed) =
-        append_item_to_next_section(&with_section, next_section_aliases, trimmed_message)?;
-
-    Ok((with_item, section_changed || item_changed))
-}
-
 pub fn add_next_section_items(
     changelog_content: &str,
     next_section_aliases: &[String],

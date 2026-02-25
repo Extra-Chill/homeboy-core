@@ -68,7 +68,7 @@ pub struct RenameResult {
 }
 
 /// Parse `ls -la` output into structured file entries.
-pub fn parse_ls_output(output: &str, base_path: &str) -> Vec<FileEntry> {
+fn parse_ls_output(output: &str, base_path: &str) -> Vec<FileEntry> {
     let mut entries: Vec<FileEntry> =
         parser::lines_filtered(output, |line| !line.starts_with("total "))
             .filter_map(|line| parse_ls_line(line, base_path))

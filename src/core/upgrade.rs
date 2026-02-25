@@ -30,18 +30,6 @@ impl InstallMethod {
         }
     }
 
-    pub fn upgrade_instructions(&self) -> String {
-        let defaults = defaults::load_defaults();
-        match self {
-            InstallMethod::Homebrew => defaults.install_methods.homebrew.upgrade_command.clone(),
-            InstallMethod::Cargo => defaults.install_methods.cargo.upgrade_command.clone(),
-            InstallMethod::Source => defaults.install_methods.source.upgrade_command.clone(),
-            InstallMethod::Binary => defaults.install_methods.binary.upgrade_command.clone(),
-            InstallMethod::Unknown => {
-                "Please reinstall using Homebrew, Cargo, or a release binary".to_string()
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,10 +214,6 @@ fn version_is_newer(latest: &str, current: &str) -> bool {
         (Some(l), Some(c)) => l > c,
         _ => latest != current,
     }
-}
-
-pub fn run_upgrade(force: bool) -> Result<UpgradeResult> {
-    run_upgrade_with_method(force, None)
 }
 
 pub fn run_upgrade_with_method(

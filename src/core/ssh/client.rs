@@ -1,4 +1,4 @@
-use crate::error::{Error, RemoteCommandFailedDetails, Result, TargetDetails};
+use crate::error::{Error, Result};
 use crate::server::Server;
 use crate::utils::shell;
 use std::process::{Command, Stdio};
@@ -15,22 +15,6 @@ pub struct CommandOutput {
     pub stderr: String,
     pub success: bool,
     pub exit_code: i32,
-}
-
-impl CommandOutput {
-    pub fn into_remote_result(self, command: &str, target: TargetDetails) -> Result<Self> {
-        if self.success {
-            return Ok(self);
-        }
-
-        Err(Error::remote_command_failed(RemoteCommandFailedDetails {
-            command: command.to_string(),
-            exit_code: self.exit_code,
-            stdout: self.stdout,
-            stderr: self.stderr,
-            target,
-        }))
-    }
 }
 
 impl SshClient {

@@ -41,7 +41,7 @@ impl ResolvedBuildCommand {
 /// 1. Explicit component.build_command (always wins)
 /// 2. Module's bundled script (module.build.module_script)
 /// 3. Local script matching module's script_names pattern
-pub fn resolve_build_command(component: &Component) -> Result<ResolvedBuildCommand> {
+pub(crate) fn resolve_build_command(component: &Component) -> Result<ResolvedBuildCommand> {
     // 1. Explicit component override takes precedence
     if let Some(cmd) = &component.build_command {
         return Ok(ResolvedBuildCommand::ComponentDefined(cmd.clone()));
@@ -166,7 +166,7 @@ pub fn run(input: &str) -> Result<(BuildResult, i32)> {
 /// - Direct execution cannot handle shell scripts or shell features
 ///
 /// See executor.rs for detailed execution strategy decision tree
-pub fn build_component(component: &component::Component) -> (Option<i32>, Option<String>) {
+pub(crate) fn build_component(component: &component::Component) -> (Option<i32>, Option<String>) {
     // Validate local_path before attempting build
     let validated_path = match component::validate_local_path(component) {
         Ok(p) => p,
