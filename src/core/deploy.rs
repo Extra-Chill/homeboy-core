@@ -11,7 +11,9 @@ use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
 use crate::defaults;
 use crate::error::{Error, Result};
 use crate::git;
-use crate::module::{load_all_modules, DeployOverride, DeployVerification, ModuleManifest};
+use crate::module::{
+    self, load_all_modules, DeployOverride, DeployVerification, ModuleManifest,
+};
 use crate::permissions;
 use crate::project::{self, Project};
 use crate::ssh::SshClient;
@@ -1257,11 +1259,20 @@ fn calculate_release_state(component: &Component) -> Option<ReleaseState> {
 }
 
 /// Load components by ID, resolve artifact paths via module patterns, and filter non-deployable.
+///
+/// Validates that any modules declared in the component's `modules` field are installed.
+/// Returns an actionable error with install instructions when modules are missing,
+/// rather than silently skipping the component.
 fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
     let mut components = Vec::new();
 
     for id in component_ids {
         let mut loaded = component::load(id)?;
+
+        // Validate required modules are installed before attempting artifact resolution.
+        // Without this check, missing modules cause resolve_artifact() to silently
+        // return None, and the component gets skipped with a vague "no artifact" message.
+        module::validate_required_modules(&loaded)?;
 
         // Resolve effective artifact (component value OR module pattern)
         let effective_artifact = component::resolve_artifact(&loaded);
