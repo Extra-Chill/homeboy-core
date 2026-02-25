@@ -166,21 +166,16 @@ fn build_augmented_command(module_info: &[ModuleCliInfo]) -> Command {
     let mut cmd = Cli::command();
 
     for info in module_info {
-        let tool_name: &'static str = Box::leak(info.tool.clone().into_boxed_str());
-
         let project_id_help = info
             .project_id_help
             .clone()
             .unwrap_or_else(|| "Project ID".to_string());
-        let project_id_help: &'static str = Box::leak(project_id_help.into_boxed_str());
-
         let args_help = info
             .args_help
             .clone()
             .unwrap_or_else(|| "Command arguments".to_string());
-        let args_help: &'static str = Box::leak(args_help.into_boxed_str());
 
-        let mut subcommand = Command::new(tool_name)
+        let mut subcommand = Command::new(info.tool.clone())
             .about(format!(
                 "Run {} commands via {}",
                 info.display_name, info.module_name
@@ -202,7 +197,6 @@ fn build_augmented_command(module_info: &[ModuleCliInfo]) -> Command {
 
         if !info.examples.is_empty() {
             let examples_text = format!("Examples:\n  {}", info.examples.join("\n  "));
-            let examples_text: &'static str = Box::leak(examples_text.into_boxed_str());
             subcommand = subcommand.after_help(examples_text);
         }
 
