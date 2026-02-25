@@ -1,9 +1,12 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use homeboy::component;
 use homeboy::git::{commit, tag, CommitOptions};
 use homeboy::release::{self, ReleasePlan, ReleaseRun};
-use homeboy::version::{read_version, set_version, VersionTargetInfo};
+use homeboy::version::{
+    read_component_version, read_version, set_component_version, set_version, VersionTargetInfo,
+};
 
 use super::release::BumpType;
 
@@ -44,6 +47,10 @@ enum VersionCommand {
     Show {
         /// Component ID (optional - shows homeboy binary version when omitted)
         component_id: Option<String>,
+
+        /// Override local_path for version file lookup
+        #[arg(long)]
+        path: Option<String>,
     },
     /// Set version directly (without incrementing or changelog finalization)
     #[command(visible_aliases = ["edit", "merge"])]
@@ -53,6 +60,10 @@ enum VersionCommand {
 
         /// New version (e.g., 1.2.3)
         new_version: String,
+
+        /// Override local_path for version file lookup
+        #[arg(long)]
+        path: Option<String>,
     },
     /// Bump version with semantic versioning (alias for `release`)
     Bump {
@@ -65,6 +76,10 @@ enum VersionCommand {
         /// Preview what will happen without making changes
         #[arg(long)]
         dry_run: bool,
+
+        /// Override local_path for version operations
+        #[arg(long)]
+        path: Option<String>,
     },
 }
 
@@ -108,8 +123,17 @@ pub struct VersionBumpOutput {
 
 pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<VersionOutput> {
     match args.command {
-        VersionCommand::Show { component_id } => {
-            let info = read_version(component_id.as_deref())?;
+        VersionCommand::Show { component_id, path } => {
+            let info = if path.is_some() && component_id.is_some() {
+                // With --path: load component, override local_path, use component variant
+                let mut comp = component::load(component_id.as_ref().unwrap())?;
+                if let Some(ref p) = path {
+                    comp.local_path = p.clone();
+                }
+                read_component_version(&comp)?
+            } else {
+                read_version(component_id.as_deref())?
+            };
 
             Ok((
                 VersionOutput::Show(VersionShowOutput {
@@ -124,17 +148,29 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
         VersionCommand::Set {
             component_id,
             new_version,
+            path,
         } => {
-            // Core validates componentId
-            let result = set_version(component_id.as_deref(), &new_version)?;
+            let result = if path.is_some() && component_id.is_some() {
+                // With --path: load component, override local_path, use component variant
+                let mut comp = component::load(component_id.as_ref().unwrap())?;
+                if let Some(ref p) = path {
+                    comp.local_path = p.clone();
+                }
+                set_component_version(&comp, &new_version)?
+            } else {
+                set_version(component_id.as_deref(), &new_version)?
+            };
 
             // Auto-commit version and changelog changes
+            // Use override path for git operations if provided
+            let commit_path = path.as_deref();
             let git_commit = create_version_commit(
                 component_id.as_deref(),
                 &result.new_version,
                 &result.targets,
                 &result.changelog_path,
                 true,
+                commit_path,
             );
 
             Ok((
@@ -156,10 +192,12 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             component_id,
             bump_type,
             dry_run,
+            path,
         } => {
             let options = release::ReleaseOptions {
                 bump_type: bump_type.as_str().to_string(),
                 dry_run,
+                path_override: path,
             };
 
             if dry_run {
@@ -201,12 +239,17 @@ fn create_version_commit(
     targets: &[VersionTargetInfo],
     changelog_path: &str,
     create_tag: bool,
+    path_override: Option<&str>,
 ) -> Option<GitCommitInfo> {
     // Get component's local_path and git repo root for path relativization
-    let local_path = component_id
-        .and_then(|id| homeboy::component::load(id).ok())
-        .map(|c| c.local_path)
-        .unwrap_or_default();
+    let local_path = if let Some(path) = path_override {
+        path.to_string()
+    } else {
+        component_id
+            .and_then(|id| homeboy::component::load(id).ok())
+            .map(|c| c.local_path)
+            .unwrap_or_default()
+    };
 
     // Use git repo root for path relativization (handles components in subdirectories)
     let repo_root = homeboy::git::get_git_root(&local_path).unwrap_or(local_path.clone());

@@ -269,7 +269,16 @@ fn format_build_error(
 // === Internal implementation ===
 
 fn run_single(component_id: &str) -> Result<(BuildResult, i32)> {
-    let (output, exit_code) = execute_build(component_id)?;
+    let (output, exit_code) = execute_build(component_id, None)?;
+    Ok((BuildResult::Single(output), exit_code))
+}
+
+/// Build a single component with an overridden local_path.
+///
+/// Use this for workspace clones, temporary checkouts, or CI builds
+/// where the source lives somewhere other than the configured `local_path`.
+pub fn run_with_path(component_id: &str, path: &str) -> Result<(BuildResult, i32)> {
+    let (output, exit_code) = execute_build(component_id, Some(path))?;
     Ok((BuildResult::Single(output), exit_code))
 }
 
@@ -281,7 +290,7 @@ fn run_bulk(json_spec: &str) -> Result<(BuildResult, i32)> {
     let mut failed = 0usize;
 
     for id in &input.component_ids {
-        match execute_build(id) {
+        match execute_build(id, None) {
             Ok((output, _)) => {
                 if output.success {
                     succeeded += 1;
@@ -321,8 +330,11 @@ fn run_bulk(json_spec: &str) -> Result<(BuildResult, i32)> {
     ))
 }
 
-fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
-    let comp = component::load(component_id)?;
+fn execute_build(component_id: &str, path_override: Option<&str>) -> Result<(BuildOutput, i32)> {
+    let mut comp = component::load(component_id)?;
+    if let Some(path) = path_override {
+        comp.local_path = path.to_string();
+    }
 
     // Validate required modules are installed before resolving build commands.
     // Without this, missing modules cause vague "no build command" errors.

@@ -17,7 +17,10 @@ use super::types::{ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanSt
 pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     let release_plan = plan(component_id, options)?;
 
-    let component = component::load(component_id)?;
+    let mut component = component::load(component_id)?;
+    if let Some(ref path) = options.path_override {
+        component.local_path = path.clone();
+    }
     let modules = resolve_modules(&component, None)?;
     let resolver = ReleaseCapabilityResolver::new(modules.clone());
     let executor = ReleaseStepExecutor::new(component_id.to_string(), modules);
@@ -63,7 +66,10 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
 /// - From component's modules that have `release.publish` action
 /// - Or explicit `release.publish` array if configured
 pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan> {
-    let component = component::load(component_id)?;
+    let mut component = component::load(component_id)?;
+    if let Some(ref path) = options.path_override {
+        component.local_path = path.clone();
+    }
     let modules = resolve_modules(&component, None)?;
 
     let mut v = ValidationCollector::new();
