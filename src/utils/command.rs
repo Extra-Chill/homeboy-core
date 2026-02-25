@@ -81,17 +81,6 @@ pub fn error_text(output: &Output) -> String {
     }
 }
 
-/// Check if a command succeeds without capturing output.
-///
-/// Returns true if the command exits with status 0.
-pub fn succeeded(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 /// Check if a command succeeds in a directory without capturing output.
 pub fn succeeded_in(dir: &str, program: &str, args: &[&str]) -> bool {
     Command::new(program)
@@ -151,16 +140,6 @@ mod tests {
     fn run_fails_with_invalid_command() {
         let result = run("nonexistent_command_xyz", &[], "test");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn succeeded_returns_true_for_valid_command() {
-        assert!(succeeded("true", &[]));
-    }
-
-    #[test]
-    fn succeeded_returns_false_for_failing_command() {
-        assert!(!succeeded("false", &[]));
     }
 
     #[test]

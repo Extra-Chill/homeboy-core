@@ -98,41 +98,9 @@ where
     Ok(values[0].clone())
 }
 
-/// Extract all matches and validate they are identical.
-/// Combines extract_all + require_identical for the common pattern.
-pub fn extract_unique(content: &str, pattern: &str, context: &str) -> Result<String> {
-    let values = extract_all(content, pattern).ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "pattern",
-            format!("Invalid regex pattern: {}", pattern),
-            None,
-            None,
-        )
-    })?;
-
-    if values.is_empty() {
-        return Err(Error::internal_unexpected(format!(
-            "No matches found in {} using pattern: {}",
-            context, pattern
-        )));
-    }
-
-    require_identical(&values, context)
-}
-
 /// Parse output into non-empty lines.
 pub fn lines(output: &str) -> impl Iterator<Item = &str> {
     output.lines().filter(|line| !line.is_empty())
-}
-
-/// Convert content into a Vec of owned line strings.
-///
-/// Replaces the common pattern:
-/// ```ignore
-/// content.lines().map(|s| s.to_string()).collect()
-/// ```
-pub fn lines_to_vec(content: &str) -> Vec<String> {
-    content.lines().map(|s| s.to_string()).collect()
 }
 
 /// Parse output into lines with custom filter.
@@ -302,20 +270,6 @@ mod tests {
         let items = vec!["a", "b", "a", "c", "b"];
         let result = dedupe(items);
         assert_eq!(result, vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn lines_to_vec_splits_correctly() {
-        let content = "line1\nline2\nline3";
-        let result = lines_to_vec(content);
-        assert_eq!(result, vec!["line1", "line2", "line3"]);
-    }
-
-    #[test]
-    fn lines_to_vec_preserves_empty_lines() {
-        let content = "line1\n\nline3";
-        let result = lines_to_vec(content);
-        assert_eq!(result, vec!["line1", "", "line3"]);
     }
 
     #[test]
