@@ -2,7 +2,7 @@
 
 /// Escape a value for use inside single quotes.
 /// Replaces `'` with `'\''` (end quote, escaped quote, start quote).
-pub fn escape_single_quote_content(value: &str) -> String {
+fn escape_single_quote_content(value: &str) -> String {
     value.replace('\'', "'\\''")
 }
 
@@ -99,33 +99,9 @@ fn split_respecting_quotes(input: &str) -> Vec<String> {
     result
 }
 
-/// Escape an entire command string for sh -c execution.
-/// Use this when passing a complete command (with operators) to sh -c.
-/// Wraps entire command in single quotes and escapes embedded quotes.
-pub fn escape_command_for_shell(command: &str) -> String {
-    format!("'{}'", escape_single_quote_content(command))
-}
-
 /// Quote a path for shell execution (always quotes).
 pub fn quote_path(path: &str) -> String {
     format!("'{}'", escape_single_quote_content(path))
-}
-
-/// Escape special characters for perl regex patterns.
-/// Characters: \ ^ $ . | ? * + ( ) [ ] { } and the delimiter /
-pub fn escape_perl_regex(pattern: &str) -> String {
-    let mut escaped = String::new();
-    for c in pattern.chars() {
-        match c {
-            '\\' | '^' | '$' | '.' | '|' | '?' | '*' | '+' | '(' | ')' | '[' | ']' | '{' | '}'
-            | '/' => {
-                escaped.push('\\');
-                escaped.push(c);
-            }
-            _ => escaped.push(c),
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]
@@ -175,33 +151,6 @@ mod tests {
     #[test]
     fn quote_path_with_quote() {
         assert_eq!(quote_path("/var/www/it's"), "'/var/www/it'\\''s'");
-    }
-
-    #[test]
-    fn escape_perl_regex_simple() {
-        assert_eq!(escape_perl_regex("hello"), "hello");
-        assert_eq!(escape_perl_regex("test123"), "test123");
-    }
-
-    #[test]
-    fn escape_perl_regex_special_chars() {
-        assert_eq!(escape_perl_regex("hello.world"), "hello\\.world");
-        assert_eq!(escape_perl_regex("price$100"), "price\\$100");
-        assert_eq!(escape_perl_regex("a|b|c"), "a\\|b\\|c");
-        assert_eq!(escape_perl_regex("foo+"), "foo\\+");
-        assert_eq!(escape_perl_regex("test*"), "test\\*");
-    }
-
-    #[test]
-    fn escape_perl_regex_brackets() {
-        assert_eq!(escape_perl_regex("[test]"), "\\[test\\]");
-        assert_eq!(escape_perl_regex("func()"), "func\\(\\)");
-    }
-
-    #[test]
-    fn escape_perl_regex_slash() {
-        assert_eq!(escape_perl_regex("path/to/file"), "path\\/to\\/file");
-        assert_eq!(escape_perl_regex("/var/www"), "\\/var\\/www");
     }
 
     #[test]
