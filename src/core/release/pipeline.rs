@@ -153,9 +153,13 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     // === Return aggregated errors or proceed ===
     v.finish()?;
 
-    // All validations passed - unwrap safely
-    let version_info = version_info.unwrap();
-    let new_version = new_version.unwrap();
+    // All validations passed — these are guaranteed Some by the validator above
+    let version_info = version_info.ok_or_else(|| {
+        Error::internal_unexpected("version_info missing after validation".to_string())
+    })?;
+    let new_version = new_version.ok_or_else(|| {
+        Error::internal_unexpected("new_version missing after validation".to_string())
+    })?;
 
     let mut warnings = Vec::new();
     let mut hints = Vec::new();

@@ -124,12 +124,10 @@ pub struct VersionBumpOutput {
 pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<VersionOutput> {
     match args.command {
         VersionCommand::Show { component_id, path } => {
-            let info = if path.is_some() && component_id.is_some() {
+            let info = if let (Some(ref cid), Some(ref p)) = (&component_id, &path) {
                 // With --path: load component, override local_path, use component variant
-                let mut comp = component::load(component_id.as_ref().unwrap())?;
-                if let Some(ref p) = path {
-                    comp.local_path = p.clone();
-                }
+                let mut comp = component::load(cid)?;
+                comp.local_path = p.clone();
                 read_component_version(&comp)?
             } else {
                 read_version(component_id.as_deref())?
@@ -150,12 +148,10 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             new_version,
             path,
         } => {
-            let result = if path.is_some() && component_id.is_some() {
+            let result = if let (Some(ref cid), Some(ref p)) = (&component_id, &path) {
                 // With --path: load component, override local_path, use component variant
-                let mut comp = component::load(component_id.as_ref().unwrap())?;
-                if let Some(ref p) = path {
-                    comp.local_path = p.clone();
-                }
+                let mut comp = component::load(cid)?;
+                comp.local_path = p.clone();
                 set_component_version(&comp, &new_version)?
             } else {
                 set_version(component_id.as_deref(), &new_version)?

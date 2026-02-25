@@ -104,9 +104,7 @@ impl ValidationCollector {
                 self.errors.push(crate::error::ValidationErrorItem {
                     field: field.to_string(),
                     problem,
-                    context: if err.details.is_object()
-                        && !err.details.as_object().unwrap().is_empty()
-                    {
+                    context: if err.details.as_object().is_some_and(|o| !o.is_empty()) {
                         Some(err.details)
                     } else {
                         None

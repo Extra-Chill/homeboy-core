@@ -865,7 +865,23 @@ pub fn deploy_components(
         }
 
         // Resolve artifact path (supports glob patterns like dist/app-*.zip)
-        let artifact_pattern = component.build_artifact.as_ref().unwrap();
+        let artifact_pattern = match component.build_artifact.as_ref() {
+            Some(pattern) => pattern,
+            None => {
+                results.push(
+                    ComponentDeployResult::new(component, base_path)
+                        .with_status("failed")
+                        .with_versions(local_version, remote_version)
+                        .with_error(format!(
+                            "Component '{}' has no build_artifact configured",
+                            component.id
+                        ))
+                        .with_build_exit_code(build_exit_code),
+                );
+                failed += 1;
+                continue;
+            }
+        };
         let artifact_path = match artifact::resolve_artifact_path(artifact_pattern) {
             Ok(path) => path,
             Err(e) => {

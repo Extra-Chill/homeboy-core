@@ -211,7 +211,10 @@ impl ModuleRunner {
     }
 
     fn load_module_manifest(&self, module_path: &Path) -> Result<serde_json::Value> {
-        let module_name = module_path.file_name().unwrap().to_string_lossy();
+        let module_name = module_path
+            .file_name()
+            .ok_or_else(|| Error::internal_io("Module path has no file name".to_string(), None))?
+            .to_string_lossy();
         let manifest_path = module_path.join(format!("{}.json", module_name));
 
         if !manifest_path.exists() {
@@ -277,7 +280,10 @@ impl ModuleRunner {
         project_path: &Path,
         settings_json: &str,
     ) -> Vec<(String, String)> {
-        let module_name = module_path.file_name().unwrap().to_string_lossy();
+        let module_name = module_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "unknown".to_string());
 
         let mut env = vec![
             (
