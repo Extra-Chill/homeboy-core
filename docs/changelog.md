@@ -4,6 +4,25 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.49.1] - 2026-02-25
+
+### Changed
+- Batch 3: remove 11 dead functions, narrow visibility across codebase
+- Batch 2: unify ProjectsSummary, remove dead code, narrow visibility
+- Batch cleanup: dead fns, to_details helper, serialize_with_id, deploy failed() constructor, visibility fixes
+- Extract deploy_components() into focused single-concern functions
+- Remove dead utility functions (~182 LOC)
+- Remove --from-repo flag and build_from_repo_spec (~137 LOC)
+- Standardize rename and delete_safe as universal entity primitives
+- Adopt consistent logging with log_status! macro and to_json_string helper
+- Replace all Error::other() escape hatches with specific error codes
+- Add CWD auto-discovery for unregistered repos with homeboy.json
+- Layer portable homeboy.json as live runtime defaults on component load
+- Extract shared DynamicSetArgs processing, migrate project set
+- Make global config writes atomic + warn on parse failures
+- Replace production unwrap() calls with proper error handling (#192)
+- Code quality sweep: consolidate duplicates, fix safety issues (#191)
+
 ## [0.49.0] - 2026-02-25
 
 ### Added
