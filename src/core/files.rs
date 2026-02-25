@@ -911,9 +911,14 @@ pub fn download(
     scp_args.push(local_path.to_string());
 
     let label = if recursive { "directory" } else { "file" };
-    eprintln!(
-        "[download] Downloading {}: {}@{}:{} -> {}",
-        label, ctx.client.user, ctx.client.host, full_remote_path, local_path
+    log_status!(
+        "download",
+        "Downloading {}: {}@{}:{} -> {}",
+        label,
+        ctx.client.user,
+        ctx.client.host,
+        full_remote_path,
+        local_path
     );
 
     let output = Command::new("scp").args(&scp_args).output();

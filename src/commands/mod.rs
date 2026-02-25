@@ -233,9 +233,7 @@ pub fn finalize_set_spec(
     merged: &Value,
     explicit_replace: &[String],
 ) -> homeboy::Result<(String, Vec<String>)> {
-    let json_string = serde_json::to_string(merged).map_err(|e| {
-        homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
-    })?;
+    let json_string = homeboy::config::to_json_string(merged)?;
 
     let mut replace_fields = explicit_replace.to_vec();
     for field in homeboy::config::collect_array_fields(merged) {

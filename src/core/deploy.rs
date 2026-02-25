@@ -74,9 +74,11 @@ pub fn deploy_via_git(
     };
 
     // Step 1: Fetch latest
-    eprintln!(
-        "[deploy:git] Fetching from {} in {}",
-        git_config.remote, remote_path
+    log_status!(
+        "deploy:git",
+        "Fetching from {} in {}",
+        git_config.remote,
+        remote_path
     );
     let fetch_cmd = format!(
         "cd {} && git fetch {} --tags",
@@ -108,7 +110,7 @@ pub fn deploy_via_git(
             shell::quote_arg(&checkout_target),
         )
     };
-    eprintln!("[deploy:git] Checking out {}", checkout_target);
+    log_status!("deploy:git", "Checking out {}", checkout_target);
     let checkout_output = ssh_client.execute(&checkout_cmd);
     if !checkout_output.success {
         return Ok(DeployResult::failure(
@@ -119,7 +121,7 @@ pub fn deploy_via_git(
 
     // Step 3: Run post-pull commands
     for cmd in &git_config.post_pull {
-        eprintln!("[deploy:git] Running: {}", cmd);
+        log_status!("deploy:git", "Running: {}", cmd);
         let full_cmd = format!("cd {} && {}", shell::quote_path(remote_path), cmd);
         let output = ssh_client.execute(&full_cmd);
         if !output.success {
@@ -130,7 +132,7 @@ pub fn deploy_via_git(
         }
     }
 
-    eprintln!("[deploy:git] Deploy complete for {}", remote_path);
+    log_status!("deploy:git", "Deploy complete for {}", remote_path);
     Ok(DeployResult::success(0))
 }
 
@@ -207,7 +209,7 @@ pub fn deploy_artifact(
 
         // Create target directory
         let mkdir_cmd = format!("mkdir -p {}", shell::quote_path(remote_path));
-        eprintln!("[deploy] Creating directory: {}", remote_path);
+        log_status!("deploy", "Creating directory: {}", remote_path);
         let mkdir_output = ssh_client.execute(&mkdir_cmd);
         if !mkdir_output.success {
             return Ok(DeployResult::failure(
@@ -230,7 +232,7 @@ pub fn deploy_artifact(
             let rendered_cmd = render_extract_command(cmd_template, &vars);
 
             let extract_cmd = format!("cd {} && {}", shell::quote_path(remote_path), rendered_cmd);
-            eprintln!("[deploy] Extracting: {}", rendered_cmd);
+            log_status!("deploy", "Extracting: {}", rendered_cmd);
 
             let extract_output = ssh_client.execute(&extract_cmd);
             if !extract_output.success {
@@ -249,7 +251,7 @@ pub fn deploy_artifact(
             }
 
             // Fix file permissions after extraction
-            eprintln!("[deploy] Fixing file permissions");
+            log_status!("deploy", "Fixing file permissions");
             permissions::fix_deployed_permissions(ssh_client, remote_path, remote_owner)?;
         }
     }
@@ -299,7 +301,7 @@ fn upload_directory(
         .unwrap_or(remote_path);
 
     let mkdir_cmd = format!("mkdir -p {}", shell::quote_path(parent));
-    eprintln!("[deploy] Creating parent directory: {}", parent);
+    log_status!("deploy", "Creating parent directory: {}", parent);
     let mkdir_output = ssh_client.execute(&mkdir_cmd);
     if !mkdir_output.success {
         return Ok(DeployResult::failure(
@@ -352,8 +354,9 @@ fn scp_transfer(
     ));
 
     let label = if recursive { "directory" } else { "file" };
-    eprintln!(
-        "[deploy] Uploading {}: {} -> {}@{}:{}",
+    log_status!(
+        "deploy",
+        "Uploading {}: {} -> {}@{}:{}",
         label,
         local_path.display(),
         ssh_client.user,
@@ -763,8 +766,9 @@ pub fn deploy_components(
         let (build_exit_code, build_error) = if is_git_deploy || config.skip_build {
             (Some(0), None)
         } else if artifact_is_fresh(component) {
-            eprintln!(
-                "[deploy] Artifact for '{}' is up-to-date, skipping build",
+            log_status!(
+                "deploy",
+                "Artifact for '{}' is up-to-date, skipping build",
                 component.id
             );
             (Some(0), None)
@@ -821,7 +825,7 @@ pub fn deploy_components(
                     // Perform post-deploy cleanup of build dependencies
                     if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
                         if let Some(summary) = cleanup_summary {
-                            eprintln!("[deploy] Cleanup: {}", summary);
+                            log_status!("deploy", "Cleanup: {}", summary);
                         }
                     }
 
@@ -940,13 +944,14 @@ pub fn deploy_components(
                 // Perform post-deploy cleanup of build dependencies
                 if let Ok(cleanup_summary) = cleanup_build_dependencies(component, config) {
                     if let Some(summary) = cleanup_summary {
-                        eprintln!("[deploy] Cleanup: {}", summary);
+                        log_status!("deploy", "Cleanup: {}", summary);
                     }
                 }
 
                 if is_self_deploy(component) {
-                    eprintln!(
-                        "[deploy] Deployed '{}' binary. Remote processes will use the new version on next invocation.",
+                    log_status!(
+                        "deploy",
+                        "Deployed '{}' binary. Remote processes will use the new version on next invocation.",
                         component.id
                     );
                 }
@@ -1073,16 +1078,19 @@ fn cleanup_build_dependencies(
             Ok(()) => {
                 cleaned_paths.push(cleanup_path.clone());
                 total_bytes_freed += size_before;
-                eprintln!(
-                    "[cleanup] Removed {} (freed {})",
+                log_status!(
+                    "cleanup",
+                    "Removed {} (freed {})",
                     cleanup_path,
                     format_bytes(size_before)
                 );
             }
             Err(e) => {
-                eprintln!(
-                    "[cleanup] Warning: failed to remove {}: {}",
-                    cleanup_path, e
+                log_status!(
+                    "cleanup",
+                    "Warning: failed to remove {}: {}",
+                    cleanup_path,
+                    e
                 );
                 // Don't return error - cleanup is best-effort
             }
@@ -1315,8 +1323,9 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
             }
             Some(_) | None => {
                 // Skip - component is intentionally non-deployable
-                eprintln!(
-                    "[deploy] Skipping '{}': no artifact configured (non-deployable component)",
+                log_status!(
+                    "deploy",
+                    "Skipping '{}': no artifact configured (non-deployable component)",
                     loaded.id
                 );
                 continue;
@@ -1501,9 +1510,10 @@ fn deploy_with_override(
         "mkdir -p {}",
         shell::quote_path(&override_config.staging_path)
     );
-    eprintln!("[deploy] Using module deploy override: {}", module.id);
-    eprintln!(
-        "[deploy] Creating staging directory: {}",
+    log_status!("deploy", "Using module deploy override: {}", module.id);
+    log_status!(
+        "deploy",
+        "Creating staging directory: {}",
         override_config.staging_path
     );
     let mkdir_output = ssh_client.execute(&mkdir_cmd);
@@ -1548,7 +1558,7 @@ fn deploy_with_override(
     );
 
     let install_cmd = render_map(&override_config.install_command, &vars);
-    eprintln!("[deploy] Running install command: {}", install_cmd);
+    log_status!("deploy", "Running install command: {}", install_cmd);
 
     let install_output = ssh_client.execute(&install_cmd);
     if !install_output.success {
@@ -1569,13 +1579,13 @@ fn deploy_with_override(
     // Step 4: Run cleanup command if configured
     if let Some(cleanup_cmd_template) = &override_config.cleanup_command {
         let cleanup_cmd = render_map(cleanup_cmd_template, &vars);
-        eprintln!("[deploy] Running cleanup: {}", cleanup_cmd);
+        log_status!("deploy", "Running cleanup: {}", cleanup_cmd);
         let _ = ssh_client.execute(&cleanup_cmd); // Best effort cleanup
     }
 
     // Step 5: Fix permissions unless skipped
     if !override_config.skip_permissions_fix {
-        eprintln!("[deploy] Fixing file permissions");
+        log_status!("deploy", "Fixing file permissions");
         permissions::fix_deployed_permissions(ssh_client, remote_path, remote_owner)?;
     }
 
@@ -1630,17 +1640,19 @@ fn run_post_deploy_hooks(
         Ok(result) => {
             for cmd_result in &result.commands {
                 if cmd_result.success {
-                    eprintln!("[deploy] post:deploy> {}", cmd_result.command);
+                    log_status!("deploy", "post:deploy> {}", cmd_result.command);
                 } else {
-                    eprintln!(
-                        "[deploy] post:deploy failed (exit {})> {}",
-                        cmd_result.exit_code, cmd_result.command
+                    log_status!(
+                        "deploy",
+                        "post:deploy failed (exit {})> {}",
+                        cmd_result.exit_code,
+                        cmd_result.command
                     );
                 }
             }
         }
         Err(e) => {
-            eprintln!("[deploy] post:deploy hook error: {}", e);
+            log_status!("deploy", "post:deploy hook error: {}", e);
         }
     }
 }

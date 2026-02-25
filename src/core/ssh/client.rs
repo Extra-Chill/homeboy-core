@@ -124,8 +124,9 @@ impl SshClient {
             }
 
             let delay = backoff_secs.get(attempt as usize + 1).copied().unwrap_or(5);
-            eprintln!(
-                "[ssh] Connection failed (attempt {}/{}), retrying in {}s...",
+            log_status!(
+                "ssh",
+                "Connection failed (attempt {}/{}), retrying in {}s...",
                 attempt + 1,
                 max_attempts,
                 delay

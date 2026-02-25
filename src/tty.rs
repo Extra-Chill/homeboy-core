@@ -43,3 +43,5 @@ pub fn status(message: &str) {
         eprintln!("{}", message);
     }
 }
+
+// log_status! macro is defined in lib.rs (#[macro_export]) and available crate-wide.

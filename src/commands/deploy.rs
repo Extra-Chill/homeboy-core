@@ -1,4 +1,5 @@
 use clap::Args;
+use homeboy::log_status;
 use serde::Serialize;
 
 use homeboy::deploy::{self, ComponentDeployResult, DeployConfig, DeploySummary};
@@ -322,8 +323,9 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
         }
     }
 
-    eprintln!(
-        "[deploy] Deploying {:?} to {} project(s)...",
+    log_status!(
+        "deploy",
+        "Deploying {:?} to {} project(s)...",
         component_ids,
         project_ids.len()
     );
@@ -334,7 +336,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
     let mut first_project = true;
 
     for project_id in project_ids {
-        eprintln!("[deploy] Deploying to project '{}'...", project_id);
+        log_status!("deploy", "Deploying to project '{}'...", project_id);
 
         let config = DeployConfig {
             component_ids: component_ids.clone(),

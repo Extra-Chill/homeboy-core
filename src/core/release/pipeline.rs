@@ -133,7 +133,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
             } else if uncommitted.has_changes {
                 // Only changelog/version files are uncommitted — auto-stage them
                 // so the release commit includes them (e.g., after `homeboy changelog add`)
-                eprintln!("[release] Auto-staging changelog/version files for release commit");
+                log_status!("release", "Auto-staging changelog/version files for release commit");
                 let all_files: Vec<&String> = uncommitted
                     .staged
                     .iter()

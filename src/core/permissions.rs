@@ -13,9 +13,12 @@ pub fn fix_local_permissions(local_path: &str) {
     let quoted_path = shell::quote_path(local_path);
     let perms = defaults::load_defaults().permissions.local;
 
-    eprintln!(
-        "[build] Fixing local file permissions in {} (files: {}, dirs: {})",
-        local_path, perms.file_mode, perms.dir_mode
+    log_status!(
+        "build",
+        "Fixing local file permissions in {} (files: {}, dirs: {})",
+        local_path,
+        perms.file_mode,
+        perms.dir_mode
     );
 
     // Fix files (configurable mode, default: g+rw)
@@ -79,8 +82,9 @@ fn fix_deployed_ownership(
         let stat_cmd = format!("stat -c '%U:%G' {} 2>/dev/null", quoted_path);
         let stat_output = ssh_client.execute(&stat_cmd);
         if !stat_output.success || stat_output.stdout.trim().is_empty() {
-            eprintln!(
-                "[deploy] Could not detect ownership of {}, skipping chown",
+            log_status!(
+                "deploy",
+                "Could not detect ownership of {}, skipping chown",
                 remote_path
             );
             return;
@@ -93,7 +97,7 @@ fn fix_deployed_ownership(
         detected
     };
 
-    eprintln!("[deploy] Setting ownership to {} on {}", owner, remote_path);
+    log_status!("deploy", "Setting ownership to {} on {}", owner, remote_path);
     let chown_cmd = format!(
         "chown -R {} {} 2>/dev/null",
         shell::quote_arg(&owner),
@@ -101,9 +105,11 @@ fn fix_deployed_ownership(
     );
     let chown_output = ssh_client.execute(&chown_cmd);
     if !chown_output.success {
-        eprintln!(
-            "[deploy] Warning: chown failed (exit {}): {}",
-            chown_output.exit_code, chown_output.stderr
+        log_status!(
+            "deploy",
+            "Warning: chown failed (exit {}): {}",
+            chown_output.exit_code,
+            chown_output.stderr
         );
         // Don't fail the deploy - chown is best-effort
     }

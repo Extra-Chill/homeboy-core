@@ -1,4 +1,5 @@
 use clap::{Args, ValueEnum};
+use homeboy::log_status;
 use serde::Serialize;
 
 use homeboy::component;
@@ -165,7 +166,7 @@ pub fn display_release_summary(run: &ReleaseRun) {
         if !summary.success_summary.is_empty() {
             eprintln!();
             for line in &summary.success_summary {
-                eprintln!("[release] {}", line);
+                log_status!("release", "{}", line);
             }
         }
     }
@@ -175,8 +176,9 @@ fn plan_deployment(component_id: &str) -> DeploymentResult {
     let projects = component::projects_using(component_id).unwrap_or_default();
 
     if projects.is_empty() {
-        eprintln!(
-            "[release] Warning: No projects use component '{}'. Nothing to deploy.",
+        log_status!(
+            "release",
+            "Warning: No projects use component '{}'. Nothing to deploy.",
             component_id
         );
     }
@@ -206,8 +208,9 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
     let projects = component::projects_using(component_id).unwrap_or_default();
 
     if projects.is_empty() {
-        eprintln!(
-            "[release] Warning: No projects use component '{}'. Nothing to deploy.",
+        log_status!(
+            "release",
+            "Warning: No projects use component '{}'. Nothing to deploy.",
             component_id
         );
         return (
@@ -223,8 +226,9 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
         );
     }
 
-    eprintln!(
-        "[release] Deploying '{}' to {} project(s)...",
+    log_status!(
+        "release",
+        "Deploying '{}' to {} project(s)...",
         component_id,
         projects.len()
     );
@@ -234,7 +238,7 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
     let mut failed: u32 = 0;
 
     for project_id in &projects {
-        eprintln!("[release] Deploying to project '{}'...", project_id);
+        log_status!("release", "Deploying to project '{}'...", project_id);
 
         let config = DeployConfig {
             component_ids: vec![component_id.to_string()],
@@ -322,7 +326,7 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
 
     // Step 1: Commit uncommitted version files if needed
     if uncommitted.has_changes {
-        eprintln!("[recover] Committing uncommitted changes...");
+        log_status!("recover", "Committing uncommitted changes...");
         let msg = format!("release: v{}", current_version);
         let commit_result = homeboy::git::commit(
             Some(component_id),
@@ -345,7 +349,7 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
 
     // Step 2: Create tag if missing locally
     if !tag_exists_local {
-        eprintln!("[recover] Creating tag {}...", tag_name);
+        log_status!("recover", "Creating tag {}...", tag_name);
         let tag_result = homeboy::git::tag(
             Some(component_id),
             Some(&tag_name),
@@ -362,7 +366,7 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
 
     // Step 3: Push commits and tags if not on remote
     if !tag_exists_remote {
-        eprintln!("[recover] Pushing to remote...");
+        log_status!("recover", "Pushing to remote...");
         let push_result = homeboy::git::push(Some(component_id), true)?;
         if !push_result.success {
             return Err(homeboy::Error::other(format!(
@@ -374,13 +378,15 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
     }
 
     if actions.is_empty() {
-        eprintln!(
-            "[recover] Release v{} appears complete — nothing to recover.",
+        log_status!(
+            "recover",
+            "Release v{} appears complete — nothing to recover.",
             current_version
         );
     } else {
-        eprintln!(
-            "[recover] Recovery complete for v{}: {}",
+        log_status!(
+            "recover",
+            "Recovery complete for v{}: {}",
             current_version,
             actions.join(", ")
         );

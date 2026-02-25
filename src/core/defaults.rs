@@ -317,8 +317,9 @@ pub fn load_config() -> HomeboyConfig {
         Err(err) => {
             // Only warn if the file actually exists — missing file is expected
             if config_exists() {
-                eprintln!(
-                    "[config] Warning: failed to load homeboy.json ({}), using defaults",
+                log_status!(
+                    "config",
+                    "Warning: failed to load homeboy.json ({}), using defaults",
                     err.message
                 );
             }
@@ -359,9 +360,7 @@ pub fn save_config(config: &HomeboyConfig) -> crate::Result<()> {
         })?;
     }
 
-    let content = serde_json::to_string_pretty(config).map_err(|e| {
-        crate::Error::validation_invalid_json(e, Some("serialize homeboy.json".to_string()), None)
-    })?;
+    let content = crate::config::to_string_pretty(config)?;
 
     io::write_file_atomic(&path, &content, &format!("write {}", path.display()))?;
 
