@@ -23,7 +23,7 @@ Options:
 
 - `--json <spec>`: JSON input spec for create/update (supports single or bulk)
 - `--skip-existing`: skip items that already exist (JSON mode only)
-- `--local-path <path>`: absolute path to local source directory (required; ID derived from directory name; `~` is expanded)
+- `--local-path <path>`: absolute path to local **source / git checkout** directory (required; ID derived from directory name; `~` is expanded). Must be a git repo — not the production deploy target (see [component schema](../schemas/component-schema.md#local_path-vs-remote_path))
 - `--remote-path <path>`: remote path relative to project `base_path` (required)
 - `--build-artifact <path>`: build artifact path relative to `local_path` (required; must include a filename)
 - `--version-target <TARGET>`: version target in format `file` or `file::pattern` (repeatable)
