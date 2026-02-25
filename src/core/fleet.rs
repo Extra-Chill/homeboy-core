@@ -89,13 +89,6 @@ pub fn remove_project(fleet_id: &str, project_id: &str) -> Result<Fleet> {
     Ok(fleet)
 }
 
-/// Rename a fleet
-pub fn rename(id: &str, new_id: &str) -> Result<Fleet> {
-    let new_id = new_id.to_lowercase();
-    config::rename::<Fleet>(id, &new_id)?;
-    load(&new_id)
-}
-
 /// Get all projects in a fleet with full project data
 pub fn get_projects(fleet_id: &str) -> Result<Vec<crate::project::Project>> {
     let fleet = load(fleet_id)?;

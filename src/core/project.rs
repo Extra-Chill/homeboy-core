@@ -7,16 +7,6 @@ use crate::utils::parser;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Represents a nullable optional field in update operations.
-///
-/// Three-state semantics for CLI update commands:
-/// - `None`: Field unchanged (flag not provided by user)
-/// - `Some(None)`: Explicitly clear the field (user passed empty value)
-/// - `Some(Some(T))`: Set to new value (user provided value)
-///
-/// Example: `--server-id ""` passes `Some(None)` to clear the association.
-pub type NullableUpdate<T> = Option<Option<T>>;
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 
 pub struct Project {
@@ -320,95 +310,9 @@ pub struct NewsletterConfig {
 
 entity_crud!(Project; list_ids, merge, slugify_id);
 
-/// Delete a project with existence check.
-/// Unlike server/component, projects have no dependents to check.
-pub fn delete_safe(id: &str) -> Result<()> {
-    if !exists(id) {
-        let suggestions = config::find_similar_ids::<Project>(id);
-        return Err(Error::project_not_found(id.to_string(), suggestions));
-    }
-    delete(id)
-}
-
 // ============================================================================
 // Operations
 // ============================================================================
-
-#[derive(Debug, Clone)]
-pub struct UpdateResult {
-    pub id: String,
-    pub project: Project,
-    pub updated_fields: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenameResult {
-    pub old_id: String,
-    pub new_id: String,
-    pub project: Project,
-}
-
-pub fn update(
-    project_id: &str,
-    domain: Option<String>,
-    server_id: NullableUpdate<String>,
-    base_path: NullableUpdate<String>,
-    table_prefix: NullableUpdate<String>,
-    component_ids: Option<Vec<String>>,
-) -> Result<UpdateResult> {
-    let mut project = load(project_id)?;
-    let mut updated = Vec::new();
-
-    if let Some(new_domain) = domain {
-        project.domain = Some(new_domain);
-        updated.push("domain".to_string());
-    }
-
-    if let Some(new_server_id) = server_id {
-        if let Some(ref sid) = new_server_id {
-            if !server::exists(sid) {
-                let suggestions = config::find_similar_ids::<server::Server>(sid);
-                return Err(Error::server_not_found(sid.clone(), suggestions));
-            }
-        }
-        project.server_id = new_server_id;
-        updated.push("server_id".to_string());
-    }
-
-    if let Some(new_base_path) = base_path {
-        project.base_path = new_base_path;
-        updated.push("base_path".to_string());
-    }
-
-    if let Some(new_table_prefix) = table_prefix {
-        project.table_prefix = new_table_prefix;
-        updated.push("table_prefix".to_string());
-    }
-
-    if let Some(new_component_ids) = component_ids {
-        project.component_ids = new_component_ids;
-        updated.push("component_ids".to_string());
-    }
-
-    save(&project)?;
-
-    Ok(UpdateResult {
-        id: project_id.to_string(),
-        project,
-        updated_fields: updated,
-    })
-}
-
-pub fn rename(id: &str, new_id: &str) -> Result<RenameResult> {
-    let new_id = new_id.to_lowercase();
-    config::rename::<Project>(id, &new_id)?;
-    let project = load(&new_id)?;
-    Ok(RenameResult {
-        old_id: id.to_string(),
-        new_id,
-        project,
-    })
-}
 
 pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
     use crate::component;
@@ -519,13 +423,6 @@ pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result
         .retain(|id| !component_ids.contains(id));
     save(&project)?;
     Ok(project.component_ids)
-}
-
-pub fn clear_components(project_id: &str) -> Result<()> {
-    let mut project = load(project_id)?;
-    project.component_ids.clear();
-    save(&project)?;
-    Ok(())
 }
 
 pub fn pin(project_id: &str, pin_type: PinType, path: &str, options: PinOptions) -> Result<()> {

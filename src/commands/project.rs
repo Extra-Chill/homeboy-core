@@ -498,13 +498,13 @@ fn remove(project_id: Option<&str>, json: &str) -> homeboy::Result<(ProjectOutpu
 }
 
 fn rename(project_id: &str, new_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
-    let result = project::rename(project_id, new_id)?;
+    let project = project::rename(project_id, new_id)?;
 
     Ok((
         ProjectOutput {
             command: "project.rename".to_string(),
-            id: Some(result.new_id.clone()),
-            entity: Some(project::load(&result.new_id)?),
+            id: Some(project.id.clone()),
+            entity: Some(project),
             updated_fields: vec!["id".to_string()],
             ..Default::default()
         },

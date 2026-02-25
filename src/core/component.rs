@@ -2,7 +2,7 @@ use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::module;
 use crate::output::{CreateOutput, MergeOutput, MergeResult, RemoveResult};
-use crate::project::{self, NullableUpdate};
+use crate::project;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -363,6 +363,14 @@ impl ConfigEntity for Component {
         &self.aliases
     }
 
+    fn dependents(id: &str) -> Result<Vec<String>> {
+        projects_using(id)
+    }
+
+    fn on_rename(old_id: &str, new_id: &str) -> Result<()> {
+        update_project_references(old_id, new_id)
+    }
+
     /// Layer portable `homeboy.json` under the stored config at load time.
     ///
     /// Reads `homeboy.json` from the component's `local_path` directory.
@@ -543,77 +551,11 @@ pub fn parse_version_targets(targets: &[String]) -> Result<Vec<VersionTarget>> {
 // Operations
 // ============================================================================
 
-#[derive(Debug, Clone)]
-pub struct UpdateResult {
-    pub id: String,
-    pub component: Component,
-    pub updated_fields: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RenameResult {
-    pub old_id: String,
-    pub new_id: String,
-    pub component: Component,
-}
-
-pub fn update(
-    component_id: &str,
-    local_path: Option<String>,
-    remote_path: Option<String>,
-    build_artifact: Option<String>,
-    build_command: NullableUpdate<String>,
-    extract_command: NullableUpdate<String>,
-) -> Result<UpdateResult> {
-    let mut component = load(component_id)?;
-    let mut updated = Vec::new();
-
-    if let Some(new_local_path) = local_path {
-        component.local_path = new_local_path;
-        updated.push("localPath".to_string());
-    }
-
-    if let Some(new_remote_path) = remote_path {
-        component.remote_path = new_remote_path;
-        updated.push("remotePath".to_string());
-    }
-
-    if let Some(new_build_artifact) = build_artifact {
-        component.build_artifact = Some(new_build_artifact);
-        updated.push("buildArtifact".to_string());
-    }
-
-    if let Some(new_build_command) = build_command {
-        component.build_command = new_build_command;
-        updated.push("buildCommand".to_string());
-    }
-
-    if let Some(new_extract_command) = extract_command {
-        component.extract_command = new_extract_command;
-        updated.push("extractCommand".to_string());
-    }
-
-    save(&component)?;
-
-    Ok(UpdateResult {
-        id: component_id.to_string(),
-        component,
-        updated_fields: updated,
-    })
-}
-
 /// Set the changelog target for a component's configuration.
 pub fn set_changelog_target(component_id: &str, file_path: &str) -> Result<()> {
     let mut component = load(component_id)?;
     component.changelog_target = Some(file_path.to_string());
     save(&component)
-}
-
-pub fn rename(id: &str, new_id: &str) -> Result<Component> {
-    let new_id = new_id.to_lowercase();
-    config::rename::<Component>(id, &new_id)?;
-    update_project_references(id, &new_id)?;
-    load(&new_id)
 }
 
 fn update_project_references(old_id: &str, new_id: &str) -> Result<()> {
@@ -663,30 +605,6 @@ pub fn shared_components() -> Result<std::collections::HashMap<String, Vec<Strin
     }
 
     Ok(sharing)
-}
-
-pub fn delete_safe(id: &str) -> Result<()> {
-    if !exists(id) {
-        let suggestions = config::find_similar_ids::<Component>(id);
-        return Err(Component::not_found_error(id.to_string(), suggestions));
-    }
-
-    let using = projects_using(id)?;
-
-    if !using.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "component",
-            format!(
-                "Component '{}' is used by projects: {}. Remove from projects first.",
-                id,
-                using.join(", ")
-            ),
-            Some(id.to_string()),
-            Some(using),
-        ));
-    }
-
-    delete(id)
 }
 
 /// Resolve effective artifact path for a component.
