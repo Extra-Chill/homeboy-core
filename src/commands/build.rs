@@ -1,5 +1,6 @@
 use clap::Args;
 use homeboy::build;
+use homeboy::component;
 use homeboy::project;
 use homeboy::resolve::resolve_project_components;
 
@@ -35,6 +36,15 @@ pub fn run(
     // JSON takes precedence
     if let Some(ref json) = args.json {
         return build::run(json);
+    }
+
+    // No target_id: try CWD auto-discovery (registered component or homeboy.json)
+    if args.target_id.is_none() && args.component_ids.is_empty() && !args.all {
+        let mut resolved = component::resolve(None)?;
+        if let Some(ref path) = args.path {
+            resolved.local_path = path.clone();
+        }
+        return build::run_component(&resolved);
     }
 
     let target_id = args.target_id.as_ref().ok_or_else(|| {

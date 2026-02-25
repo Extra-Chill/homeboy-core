@@ -5,7 +5,7 @@ use homeboy::component;
 use homeboy::git::{commit, tag, CommitOptions};
 use homeboy::release::{self, ReleasePlan, ReleaseRun};
 use homeboy::version::{
-    read_component_version, read_version, set_component_version, set_version, VersionTargetInfo,
+    read_component_version, read_version, set_component_version, VersionTargetInfo,
 };
 
 use super::release::BumpType;
@@ -124,19 +124,35 @@ pub struct VersionBumpOutput {
 pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<VersionOutput> {
     match args.command {
         VersionCommand::Show { component_id, path } => {
-            let info = if let (Some(ref cid), Some(ref p)) = (&component_id, &path) {
-                // With --path: load component, override local_path, use component variant
-                let mut comp = component::load(cid)?;
+            let info = if let Some(ref p) = path {
+                // With --path: resolve component, override local_path
+                let mut comp = component::resolve(component_id.as_deref())?;
                 comp.local_path = p.clone();
                 read_component_version(&comp)?
+            } else if component_id.is_some() {
+                // Explicit component ID or CWD discovery
+                let comp = component::resolve(component_id.as_deref())?;
+                read_component_version(&comp)?
             } else {
-                read_version(component_id.as_deref())?
+                // No component ID and no --path: try CWD discovery first,
+                // fall back to showing homeboy binary version
+                match component::resolve(None) {
+                    Ok(comp) => read_component_version(&comp)?,
+                    Err(_) => read_version(None)?,
+                }
             };
+
+            let display_id = component_id.or_else(|| {
+                // Include discovered component ID in output
+                if info.targets.is_empty() { None } else {
+                    component::resolve(None).ok().map(|c| c.id)
+                }
+            });
 
             Ok((
                 VersionOutput::Show(VersionShowOutput {
                     command: "version.show".to_string(),
-                    component_id,
+                    component_id: display_id,
                     version: info.version,
                     targets: info.targets,
                 }),
@@ -148,13 +164,12 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             new_version,
             path,
         } => {
-            let result = if let (Some(ref cid), Some(ref p)) = (&component_id, &path) {
-                // With --path: load component, override local_path, use component variant
-                let mut comp = component::load(cid)?;
-                comp.local_path = p.clone();
+            let result = {
+                let mut comp = component::resolve(component_id.as_deref())?;
+                if let Some(ref p) = path {
+                    comp.local_path = p.clone();
+                }
                 set_component_version(&comp, &new_version)?
-            } else {
-                set_version(component_id.as_deref(), &new_version)?
             };
 
             // Auto-commit version and changelog changes

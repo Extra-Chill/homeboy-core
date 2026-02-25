@@ -330,30 +330,39 @@ fn run_bulk(json_spec: &str) -> Result<(BuildResult, i32)> {
     ))
 }
 
+/// Build a pre-resolved component (supports both registered and discovered components).
+pub fn run_component(component: &Component) -> Result<(BuildResult, i32)> {
+    let (output, exit_code) = execute_build_component(component)?;
+    Ok((BuildResult::Single(output), exit_code))
+}
+
 fn execute_build(component_id: &str, path_override: Option<&str>) -> Result<(BuildOutput, i32)> {
     let mut comp = component::load(component_id)?;
     if let Some(path) = path_override {
         comp.local_path = path.to_string();
     }
+    execute_build_component(&comp)
+}
 
+fn execute_build_component(comp: &Component) -> Result<(BuildOutput, i32)> {
     // Validate required modules are installed before resolving build commands.
     // Without this, missing modules cause vague "no build command" errors.
-    module::validate_required_modules(&comp)?;
+    module::validate_required_modules(comp)?;
 
     // Validate local_path before attempting build
-    let validated_path = component::validate_local_path(&comp)?;
+    let validated_path = component::validate_local_path(comp)?;
     let local_path_str = validated_path.to_string_lossy().to_string();
 
-    let resolved = resolve_build_command(&comp)?;
+    let resolved = resolve_build_command(comp)?;
     let build_cmd = resolved.command().to_string();
 
     // Run pre-build script if module provides one
-    if let Some((exit_code, stderr)) = run_pre_build_scripts(&comp)? {
+    if let Some((exit_code, stderr)) = run_pre_build_scripts(comp)? {
         if exit_code != 0 {
             return Ok((
                 BuildOutput {
                     command: "build.run".to_string(),
-                    component_id: component_id.to_string(),
+                    component_id: comp.id.clone(),
                     build_command: build_cmd,
                     output: CapturedOutput::new(String::new(), stderr),
                     success: false,
@@ -367,7 +376,7 @@ fn execute_build(component_id: &str, path_override: Option<&str>) -> Result<(Bui
     permissions::fix_local_permissions(&local_path_str);
 
     // Get module path env vars for build command (matches pre-build script behavior)
-    let env_vars = get_build_env_vars(&comp);
+    let env_vars = get_build_env_vars(comp);
     let env_refs: Vec<(&str, &str)> = env_vars
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -386,7 +395,7 @@ fn execute_build(component_id: &str, path_override: Option<&str>) -> Result<(Bui
     Ok((
         BuildOutput {
             command: "build.run".to_string(),
-            component_id: component_id.to_string(),
+            component_id: comp.id.clone(),
             build_command: build_cmd,
             output: CapturedOutput::new(cmd_output.stdout, cmd_output.stderr),
             success: cmd_output.success,
