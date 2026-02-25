@@ -5,6 +5,7 @@ use crate::output::{CreateOutput, MergeOutput, MergeResult, RemoveResult};
 use crate::project::{self, NullableUpdate};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -276,6 +277,35 @@ impl Component {
             docs_dirs: Vec::new(),
         }
     }
+}
+
+/// Read a `homeboy.json` portable config from a repo directory.
+///
+/// Returns the parsed JSON as a Value (or None if no file exists).
+/// The caller is responsible for injecting machine-specific fields
+/// (`id`, `local_path`) before creating the component.
+pub fn read_portable_config(repo_path: &Path) -> Result<Option<Value>> {
+    let config_path = repo_path.join("homeboy.json");
+    if !config_path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&config_path).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!("read {}", config_path.display())),
+        )
+    })?;
+
+    let value: Value = serde_json::from_str(&content).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some("parse homeboy.json".to_string()),
+            Some(content.chars().take(200).collect::<String>()),
+        )
+    })?;
+
+    Ok(Some(value))
 }
 
 /// Normalize empty strings to None. Treats "", null, and field omission identically for consistent validation.
