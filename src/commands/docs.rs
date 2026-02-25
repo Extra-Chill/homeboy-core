@@ -1,5 +1,6 @@
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -541,17 +542,43 @@ fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
         // Determine content
         let content = if let Some(ref c) = file_spec.content {
             c.clone()
-        } else if let Some(ref title) = file_spec.title {
-            format!("# {}\n", title)
         } else {
-            // Use filename as title
-            let name = file_spec
+            // Build title line
+            let title_line = if let Some(ref title) = file_spec.title {
+                format!("# {}", title)
+            } else {
+                let name = file_spec
+                    .path
+                    .trim_end_matches(".md")
+                    .split('/')
+                    .next_back()
+                    .unwrap_or(&file_spec.path);
+                format!("# {}", title_from_name(name))
+            };
+
+            // Infer section headings from sibling docs in the same directory
+            let filename = file_spec
                 .path
-                .trim_end_matches(".md")
                 .split('/')
                 .next_back()
                 .unwrap_or(&file_spec.path);
-            format!("# {}\n", title_from_name(name))
+            let sibling_dir = if let Some(parent) = file_path.parent() {
+                parent.to_path_buf()
+            } else {
+                output_path.to_path_buf()
+            };
+            let sections = infer_sections_from_siblings(&sibling_dir, filename);
+
+            if let Some(headings) = sections {
+                let mut parts = vec![title_line, String::new()];
+                for heading in headings {
+                    parts.push(format!("## {}", heading));
+                    parts.push(String::new());
+                }
+                parts.join("\n")
+            } else {
+                format!("{}\n", title_line)
+            }
         };
 
         // Track if updating or creating
@@ -592,6 +619,105 @@ fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
     ))
 }
 
+/// Infer common section headings from sibling markdown files in the same directory.
+///
+/// Reads all `.md` files in `dir` (excluding `exclude_filename`), extracts `## ` headings
+/// from each, and returns the ordered list of headings that appear in at least 3 files
+/// or 50% of siblings (whichever threshold is lower).
+///
+/// Returns `None` if fewer than 3 siblings exist or no common headings are found.
+fn infer_sections_from_siblings(dir: &Path, exclude_filename: &str) -> Option<Vec<String>> {
+    if !dir.is_dir() {
+        return None;
+    }
+
+    let entries = fs::read_dir(dir).ok()?;
+
+    let mut sibling_headings: Vec<Vec<String>> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Only .md files, skip the file being generated
+        if !name.ends_with(".md") || name == exclude_filename || !path.is_file() {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).ok();
+        if let Some(text) = content {
+            let headings: Vec<String> = text
+                .lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
+                        Some(trimmed.trim_start_matches("## ").trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !headings.is_empty() {
+                sibling_headings.push(headings);
+            }
+        }
+    }
+
+    let sibling_count = sibling_headings.len();
+    if sibling_count < 3 {
+        return None;
+    }
+
+    // Count how many siblings contain each heading
+    let mut heading_counts: HashMap<String, usize> = HashMap::new();
+
+    for headings in &sibling_headings {
+        let unique: std::collections::HashSet<&String> = headings.iter().collect();
+        for heading in unique {
+            *heading_counts.entry(heading.clone()).or_insert(0) += 1;
+        }
+    }
+
+    // Threshold: heading must appear in at least 3 files or 50% of siblings
+    let threshold = std::cmp::min(3, (sibling_count + 1) / 2);
+
+    let common_set: std::collections::HashSet<&str> = heading_counts
+        .iter()
+        .filter(|(_, count)| **count >= threshold)
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    if common_set.is_empty() {
+        return None;
+    }
+
+    // Determine ordering by median position across siblings.
+    // For each common heading, collect its index in every file that has it,
+    // then use the median index as the sort key.
+    let mut median_positions: HashMap<&str, usize> = HashMap::new();
+    for heading in &common_set {
+        let mut positions: Vec<usize> = Vec::new();
+        for headings in &sibling_headings {
+            if let Some(pos) = headings.iter().position(|h| h == heading) {
+                positions.push(pos);
+            }
+        }
+        positions.sort();
+        let median = positions[positions.len() / 2];
+        median_positions.insert(heading, median);
+    }
+
+    let mut common_headings: Vec<String> = common_set.iter().map(|s| s.to_string()).collect();
+    common_headings.sort_by_key(|h| median_positions.get(h.as_str()).copied().unwrap_or(usize::MAX));
+
+    if common_headings.is_empty() {
+        None
+    } else {
+        Some(common_headings)
+    }
+}
+
 fn title_from_name(name: &str) -> String {
     // Convert kebab-case or snake_case to Title Case
     name.split(['-', '_'])
@@ -604,4 +730,138 @@ fn title_from_name(name: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn create_temp_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("Failed to create temp dir")
+    }
+
+    fn write_md(dir: &Path, name: &str, content: &str) {
+        fs::write(dir.join(name), content).expect("Failed to write test file");
+    }
+
+    #[test]
+    fn test_infer_sections_returns_none_when_fewer_than_3_siblings() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Config\n\n## Usage\n");
+        write_md(dir, "b.md", "# B\n\n## Config\n\n## Usage\n");
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_none(), "Should return None with only 2 siblings");
+    }
+
+    #[test]
+    fn test_infer_sections_finds_common_headings() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Configuration\n\n## Parameters\n\n## Error Handling\n");
+        write_md(dir, "b.md", "# B\n\n## Configuration\n\n## Parameters\n\n## Error Handling\n");
+        write_md(dir, "c.md", "# C\n\n## Configuration\n\n## Parameters\n\n## Error Handling\n");
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_some(), "Should find common headings");
+        let headings = result.unwrap();
+        assert_eq!(headings, vec!["Configuration", "Parameters", "Error Handling"]);
+    }
+
+    #[test]
+    fn test_infer_sections_excludes_target_file() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Config\n\n## Usage\n");
+        write_md(dir, "b.md", "# B\n\n## Config\n\n## Usage\n");
+        write_md(dir, "c.md", "# C\n\n## Config\n\n## Usage\n");
+        // This file matches the exclude name — should not be counted
+        write_md(dir, "new.md", "# New\n\n## Totally Different\n");
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_some());
+        let headings = result.unwrap();
+        assert!(headings.contains(&"Config".to_string()));
+        assert!(headings.contains(&"Usage".to_string()));
+        assert!(!headings.contains(&"Totally Different".to_string()));
+    }
+
+    #[test]
+    fn test_infer_sections_filters_uncommon_headings() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Config\n\n## Usage\n\n## Special A\n");
+        write_md(dir, "b.md", "# B\n\n## Config\n\n## Usage\n\n## Special B\n");
+        write_md(dir, "c.md", "# C\n\n## Config\n\n## Usage\n");
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_some());
+        let headings = result.unwrap();
+        assert_eq!(headings, vec!["Config", "Usage"]);
+    }
+
+    #[test]
+    fn test_infer_sections_returns_none_for_nonexistent_dir() {
+        let result = infer_sections_from_siblings(Path::new("/nonexistent/path"), "new.md");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_infer_sections_skips_non_md_files() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Config\n");
+        write_md(dir, "b.md", "# B\n\n## Config\n");
+        write_md(dir, "c.md", "# C\n\n## Config\n");
+        fs::write(dir.join("readme.txt"), "## Not Markdown\n").unwrap();
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_infer_sections_ignores_h3_headings() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Config\n\n### Sub Detail\n");
+        write_md(dir, "b.md", "# B\n\n## Config\n\n### Sub Detail\n");
+        write_md(dir, "c.md", "# C\n\n## Config\n\n### Sub Detail\n");
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_some());
+        let headings = result.unwrap();
+        assert_eq!(headings, vec!["Config"]);
+        assert!(!headings.contains(&"Sub Detail".to_string()));
+    }
+
+    #[test]
+    fn test_infer_sections_returns_none_when_no_common_pattern() {
+        let tmp = create_temp_dir();
+        let dir = tmp.path();
+
+        write_md(dir, "a.md", "# A\n\n## Alpha\n");
+        write_md(dir, "b.md", "# B\n\n## Beta\n");
+        write_md(dir, "c.md", "# C\n\n## Gamma\n");
+
+        let result = infer_sections_from_siblings(dir, "new.md");
+        assert!(result.is_none(), "No heading appears in 3+ files");
+    }
+
+    #[test]
+    fn test_title_from_name_kebab_case() {
+        assert_eq!(title_from_name("google-analytics"), "Google Analytics");
+    }
+
+    #[test]
+    fn test_title_from_name_snake_case() {
+        assert_eq!(title_from_name("page_speed"), "Page Speed");
+    }
 }
