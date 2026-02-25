@@ -185,7 +185,7 @@ pub fn run(
                     0,
                 )),
                 homeboy::CreateOutput::Bulk(summary) => {
-                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                    let exit_code = summary.exit_code();
                     Ok((
                         ServerOutput {
                             command: "server.create".to_string(),
@@ -278,7 +278,7 @@ fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
             ))
         }
         MergeOutput::Bulk(summary) => {
-            let exit_code = if summary.errors > 0 { 1 } else { 0 };
+            let exit_code = summary.exit_code();
             Ok((
                 ServerOutput {
                     command: "server.set".to_string(),

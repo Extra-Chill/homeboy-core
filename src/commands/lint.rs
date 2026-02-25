@@ -50,7 +50,7 @@ pub struct LintArgs {
     category: Option<String>,
 
     /// Override settings as key=value pairs
-    #[arg(long, value_parser = parse_key_val)]
+    #[arg(long, value_parser = super::parse_key_val)]
     setting: Vec<(String, String)>,
 
     /// Override local_path for this lint run (use a workspace clone or temp checkout)
@@ -69,13 +69,6 @@ pub struct LintOutput {
     exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
-}
-
-fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
-    Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
 fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> {

@@ -302,7 +302,7 @@ pub fn run(
                     0,
                 )),
                 homeboy::CreateOutput::Bulk(summary) => {
-                    let exit_code = if summary.errors > 0 { 1 } else { 0 };
+                    let exit_code = summary.exit_code();
                     Ok((
                         ProjectOutput {
                             command: "project.create".to_string(),
@@ -486,7 +486,7 @@ fn set(
             0,
         )),
         homeboy::MergeOutput::Bulk(summary) => {
-            let exit_code = if summary.errors > 0 { 1 } else { 0 };
+            let exit_code = summary.exit_code();
             Ok((
                 ProjectOutput {
                     command: "project.set".to_string(),

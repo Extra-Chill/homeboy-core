@@ -39,7 +39,7 @@ enum ModuleCommand {
         #[arg(short, long)]
         component: Option<String>,
         /// Input values as key=value pairs
-        #[arg(short, long, value_parser = parse_key_val)]
+        #[arg(short, long, value_parser = super::parse_key_val)]
         input: Vec<(String, String)>,
         /// Run only specific steps (comma-separated, e.g. --step phpunit,phpcs)
         #[arg(long)]
@@ -116,13 +116,6 @@ enum ModuleCommand {
         #[arg(long, value_name = "FIELD")]
         replace: Vec<String>,
     },
-}
-
-fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
-    Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
 pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ModuleOutput> {
@@ -610,7 +603,7 @@ fn set_module(
             0,
         )),
         homeboy::MergeOutput::Bulk(batch) => {
-            let exit_code = if batch.errors > 0 { 1 } else { 0 };
+            let exit_code = batch.exit_code();
             Ok((ModuleOutput::SetBatch { batch }, exit_code))
         }
     }
