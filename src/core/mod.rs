@@ -1,11 +1,12 @@
-// Public modules
+// Public modules (config first — exports entity_crud! macro used by entity modules)
+#[macro_use]
+pub mod config;
 pub mod api;
 pub mod auth;
 pub mod build;
 pub mod changelog;
 pub mod cli_tool;
 pub mod component;
-pub mod config;
 pub mod context;
 pub mod db;
 pub mod deploy;

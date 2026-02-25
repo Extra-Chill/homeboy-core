@@ -1169,6 +1169,96 @@ pub(crate) fn find_similar_ids<T: ConfigEntity>(target: &str) -> Vec<String> {
     matches.into_iter().take(3).map(|(id, _)| id).collect()
 }
 
+// ============================================================================
+// Entity CRUD Macro
+// ============================================================================
+
+/// Generate standard CRUD wrapper functions for a `ConfigEntity` type.
+///
+/// The base invocation generates 7 universal wrappers that every entity needs:
+/// `load`, `list`, `save`, `delete`, `exists`, `remove_from_json`, `create`.
+///
+/// Optional features add extra wrappers:
+/// - `list_ids` — generates `list_ids() -> Result<Vec<String>>`
+/// - `merge` — generates the standard `merge()` one-liner (entities with
+///   custom merge logic should omit this and implement their own)
+/// - `slugify_id` — generates `slugify_id(name) -> Result<String>`
+///
+/// # Examples
+///
+/// ```ignore
+/// // All features:
+/// entity_crud!(Project; list_ids, merge, slugify_id);
+///
+/// // Subset:
+/// entity_crud!(Server; merge);
+///
+/// // Base only (entity has custom merge):
+/// entity_crud!(Component; list_ids);
+/// ```
+macro_rules! entity_crud {
+    // Entry point: split base from optional features
+    ($Entity:ty $(; $($feature:ident),+ )?) => {
+        // --- Universal wrappers (always generated) ---
+
+        pub fn load(id: &str) -> Result<$Entity> {
+            config::load::<$Entity>(id)
+        }
+
+        pub fn list() -> Result<Vec<$Entity>> {
+            config::list::<$Entity>()
+        }
+
+        pub fn save(entity: &$Entity) -> Result<()> {
+            config::save(entity)
+        }
+
+        pub fn delete(id: &str) -> Result<()> {
+            config::delete::<$Entity>(id)
+        }
+
+        pub fn exists(id: &str) -> bool {
+            config::exists::<$Entity>(id)
+        }
+
+        pub fn remove_from_json(id: Option<&str>, json_spec: &str) -> Result<RemoveResult> {
+            config::remove_from_json::<$Entity>(id, json_spec)
+        }
+
+        pub fn create(json_spec: &str, skip_existing: bool) -> Result<CreateOutput<$Entity>> {
+            config::create::<$Entity>(json_spec, skip_existing)
+        }
+
+        // --- Optional features ---
+        $( $(entity_crud!(@feature $Entity, $feature);)+ )?
+    };
+
+    // Feature: list_ids
+    (@feature $Entity:ty, list_ids) => {
+        pub fn list_ids() -> Result<Vec<String>> {
+            config::list_ids::<$Entity>()
+        }
+    };
+
+    // Feature: merge (standard one-liner)
+    (@feature $Entity:ty, merge) => {
+        pub fn merge(
+            id: Option<&str>,
+            json_spec: &str,
+            replace_fields: &[String],
+        ) -> Result<MergeOutput> {
+            config::merge::<$Entity>(id, json_spec, replace_fields)
+        }
+    };
+
+    // Feature: slugify_id
+    (@feature $Entity:ty, slugify_id) => {
+        pub fn slugify_id(name: &str) -> Result<String> {
+            crate::utils::slugify::slugify_id(name, "name")
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
