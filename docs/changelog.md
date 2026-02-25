@@ -4,6 +4,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.49.0] - 2026-02-25
+
+### Added
+- Remote hook execution for post:deploy hooks via SSH with template variable expansion
+- Module dependency validation with actionable install error messages
+- Path override flag for build, lint, test, and version commands
+- Portable homeboy.json config for component creation from repo root
+
+### Changed
+- Improve modules section in README and clarify local_path vs deploy target docs
+
+### Fixed
+- CLI create commands losing component id during serde serialization
+- Module install from monorepo URL creating ghost state
+
 ## [0.48.0] - 2026-02-25
 
 ### Added
