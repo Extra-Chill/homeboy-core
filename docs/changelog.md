@@ -4,6 +4,36 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.48.0] - 2026-02-25
+
+### Added
+- Cleanup command for config health checks (missing modules, invalid paths, stale version targets)
+- Startup update check with 24h cache notifies when newer version available
+- Sibling section inference in docs generate auto-detects heading patterns from adjacent files
+- Module exec command for direct tool access without component context
+- Replace @since placeholder tags during version bump
+- Step and skip flags for module run step filtering
+- Docs audit supports direct filesystem paths without component registration
+- Local flag on logs commands for agent/on-server mode
+- Dedicated flags on component set for common fields
+
+### Changed
+- Module manifests use nested capability groups (deploy, audit, executable, platform) — breaking JSON schema change
+- Remove RawModuleManifest bridge (270 lines); capability structs deserialize directly
+- General hook system replaces per-lifecycle hook executors (pre:version:bump, post:version:bump, post:release, post:deploy)
+- entity_crud! macro generates standard CRUD wrappers, replacing per-entity output structs
+- Remove Box::leak from dynamic module CLI registration
+
+### Fixed
+- Entity set commands replace array fields by default instead of merging
+- Lint changed-only passes absolute paths to module runners
+- Enable multiline mode for version target regex patterns
+- Dynamic key-value flags on entity set commands fail with JSON parse error
+- Fetch tags before baseline detection to prevent stale baseline_ref
+- Skip redundant builds during deploy and detect self-deploy
+- Swap ahead/behind parsing in remote_sync check
+- Default to excluding CHANGELOG.md from docs audit
+
 ## [0.47.1] - 2026-02-23
 
 ### Changed
