@@ -267,6 +267,11 @@ fn main() -> std::process::ExitCode {
         Err(e) => e.exit(),
     };
 
+    // Startup update check — skip for upgrade/update commands (they handle this themselves)
+    if !matches!(&cli.command, Commands::Upgrade(_) | Commands::Update(_)) {
+        homeboy::update_check::run_startup_check();
+    }
+
     let mode = response_mode(&cli.command);
 
     match mode {

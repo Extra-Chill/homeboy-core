@@ -25,6 +25,7 @@ pub mod release;
 
 pub mod server;
 pub mod ssh;
+pub mod update_check;
 pub mod upgrade;
 pub mod version;
 
