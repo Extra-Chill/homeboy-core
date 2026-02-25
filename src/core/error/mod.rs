@@ -241,6 +241,11 @@ pub struct SshIdentityFileNotFoundDetails {
     pub identity_file: String,
 }
 
+/// Serialize a details struct to JSON Value, falling back to empty object on failure.
+fn to_details(details: impl Serialize) -> Value {
+    serde_json::to_value(details).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
+}
+
 impl Error {
     pub fn new(code: ErrorCode, message: impl Into<String>, details: Value) -> Self {
         Self {
@@ -253,8 +258,7 @@ impl Error {
     }
 
     pub fn validation_missing_argument(args: Vec<String>) -> Self {
-        let details = serde_json::to_value(MissingArgumentDetails { args })
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        let details = to_details(MissingArgumentDetails { args });
         Self::new(
             ErrorCode::ValidationMissingArgument,
             "Missing required argument",
@@ -268,13 +272,12 @@ impl Error {
         id: Option<String>,
         tried: Option<Vec<String>>,
     ) -> Self {
-        let details = serde_json::to_value(InvalidArgumentDetails {
+        let details = to_details(InvalidArgumentDetails {
             field: field.into(),
             problem: problem.into(),
             id,
             tried,
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::ValidationInvalidArgument,
@@ -302,8 +305,7 @@ impl Error {
 
     pub fn validation_multiple_errors(errors: Vec<ValidationErrorItem>) -> Self {
         let count = errors.len();
-        let details = serde_json::to_value(MultipleValidationErrorsDetails { errors })
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        let details = to_details(MultipleValidationErrorsDetails { errors });
 
         Self::new(
             ErrorCode::ValidationMultipleErrors,
@@ -362,17 +364,15 @@ impl Error {
     }
 
     fn not_found(code: ErrorCode, message: &str, id: impl Into<String>) -> Self {
-        let details = serde_json::to_value(NotFoundDetails { id: id.into() })
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        let details = to_details(NotFoundDetails { id: id.into() });
         Self::new(code, message, details)
     }
 
     pub fn ssh_server_invalid(server_id: impl Into<String>, missing_fields: Vec<String>) -> Self {
-        let details = serde_json::to_value(SshServerInvalidDetails {
+        let details = to_details(SshServerInvalidDetails {
             server_id: server_id.into(),
             missing_fields,
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::SshServerInvalid,
@@ -385,11 +385,10 @@ impl Error {
         server_id: impl Into<String>,
         identity_file: impl Into<String>,
     ) -> Self {
-        let details = serde_json::to_value(SshIdentityFileNotFoundDetails {
+        let details = to_details(SshIdentityFileNotFoundDetails {
             server_id: server_id.into(),
             identity_file: identity_file.into(),
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::SshIdentityFileNotFound,
@@ -399,8 +398,7 @@ impl Error {
     }
 
     pub fn remote_command_failed(details: RemoteCommandFailedDetails) -> Self {
-        let details =
-            serde_json::to_value(details).unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        let details = to_details(details);
 
         Self::new(
             ErrorCode::RemoteCommandFailed,
@@ -418,11 +416,10 @@ impl Error {
     }
 
     pub fn config_missing_key(key: impl Into<String>, path: Option<String>) -> Self {
-        let details = serde_json::to_value(ConfigMissingKeyDetails {
+        let details = to_details(ConfigMissingKeyDetails {
             key: key.into(),
             path,
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::ConfigMissingKey,
@@ -432,11 +429,10 @@ impl Error {
     }
 
     pub fn config_invalid_json(path: impl Into<String>, err: serde_json::Error) -> Self {
-        let details = serde_json::to_value(ConfigInvalidJsonDetails {
+        let details = to_details(ConfigInvalidJsonDetails {
             path: path.into(),
             error: err.to_string(),
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::ConfigInvalidJson,
@@ -450,12 +446,11 @@ impl Error {
         value: Option<String>,
         problem: impl Into<String>,
     ) -> Self {
-        let details = serde_json::to_value(ConfigInvalidValueDetails {
+        let details = to_details(ConfigInvalidValueDetails {
             key: key.into(),
             value,
             problem: problem.into(),
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::ConfigInvalidValue,
@@ -471,12 +466,11 @@ impl Error {
     ) -> Self {
         let existing = existing_type.into();
         let id_str = id.into();
-        let details = serde_json::to_value(ConfigIdCollisionDetails {
+        let details = to_details(ConfigIdCollisionDetails {
             id: id_str.clone(),
             requested_type: requested_type.into(),
             existing_type: existing.clone(),
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(
             ErrorCode::ConfigIdCollision,
@@ -490,28 +484,25 @@ impl Error {
     }
 
     pub fn project_no_active(config_path: Option<String>) -> Self {
-        let details = serde_json::to_value(NoActiveProjectDetails { config_path })
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        let details = to_details(NoActiveProjectDetails { config_path });
 
         Self::new(ErrorCode::ProjectNoActive, "No active project set", details)
     }
 
     pub fn internal_io(error: impl Into<String>, context: Option<String>) -> Self {
-        let details = serde_json::to_value(InternalIoErrorDetails {
+        let details = to_details(InternalIoErrorDetails {
             error: error.into(),
             context,
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(ErrorCode::InternalIoError, "IO error", details)
     }
 
     pub fn internal_json(error: impl Into<String>, context: Option<String>) -> Self {
-        let details = serde_json::to_value(InternalJsonErrorDetails {
+        let details = to_details(InternalJsonErrorDetails {
             error: error.into(),
             context,
-        })
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
+        });
 
         Self::new(ErrorCode::InternalJsonError, "JSON error", details)
     }

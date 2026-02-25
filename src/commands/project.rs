@@ -269,16 +269,7 @@ pub fn run(
                     ..Default::default()
                 };
 
-                // Serialize to Value first so we can inject the id field.
-                // Project's serde(skip) on id means to_string() drops it,
-                // but create_single_from_json() needs id in the JSON.
-                let mut value = serde_json::to_value(&new_project).map_err(|e| {
-                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-                })?;
-                if let serde_json::Value::Object(ref mut map) = value {
-                    map.insert("id".to_string(), serde_json::json!(id));
-                }
-                homeboy::config::to_json_string(&value)?
+                homeboy::config::serialize_with_id(&new_project, &id)?
             };
 
             match project::create(&json_spec, skip_existing)? {

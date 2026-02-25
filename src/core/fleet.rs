@@ -25,14 +25,6 @@ impl Fleet {
         }
     }
 
-    /// Returns project IDs that actually exist
-    pub fn valid_project_ids(&self) -> Vec<String> {
-        self.project_ids
-            .iter()
-            .filter(|id| project::exists(id))
-            .cloned()
-            .collect()
-    }
 }
 
 impl ConfigEntity for Fleet {

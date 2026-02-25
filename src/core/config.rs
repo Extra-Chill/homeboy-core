@@ -34,6 +34,21 @@ pub fn to_json_string<T: Serialize>(data: &T) -> Result<String> {
         .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))
 }
 
+/// Serialize an entity to JSON and inject an `id` field.
+///
+/// Many entities use `#[serde(skip_serializing)]` on their `id` field, but
+/// `create_single_from_json()` requires the id to be present. This helper
+/// serializes the entity, injects the id, then returns a compact JSON string.
+pub fn serialize_with_id<T: Serialize>(entity: &T, id: &str) -> Result<String> {
+    let mut value = serde_json::to_value(entity).map_err(|e| {
+        Error::internal_json(e.to_string(), Some("serialize entity".to_string()))
+    })?;
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert("id".to_string(), serde_json::Value::String(id.to_string()));
+    }
+    to_json_string(&value)
+}
+
 /// Read JSON spec from string, file (@path), or stdin (-).
 pub fn read_json_spec_to_string(spec: &str) -> Result<String> {
     use std::io::IsTerminal;

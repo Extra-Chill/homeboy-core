@@ -231,16 +231,7 @@ pub fn run(
                     new_component.modules = Some(module_map);
                 }
 
-                // Serialize to Value first so we can inject the id field.
-                // Component's serde(skip_serializing) on id means to_string() drops it,
-                // but create_single_from_json() needs id in the JSON.
-                let mut value = serde_json::to_value(&new_component).map_err(|e| {
-                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-                })?;
-                if let serde_json::Value::Object(ref mut map) = value {
-                    map.insert("id".to_string(), serde_json::json!(id));
-                }
-                homeboy::config::to_json_string(&value)?
+                homeboy::config::serialize_with_id(&new_component, &id)?
             };
 
             match component::create(&json_spec, skip_existing)? {
@@ -458,8 +449,7 @@ fn add_version_target(id: &str, file: &str, pattern: &str) -> CmdResult<Componen
         }]
     });
 
-    let json_string = serde_json::to_string(&version_target)
-        .map_err(|e| homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e)))?;
+    let json_string = homeboy::config::to_json_string(&version_target)?;
 
     match component::merge(Some(id), &json_string, &[])? {
         homeboy::MergeOutput::Single(result) => {

@@ -215,8 +215,7 @@ fn create(
     let mut new_fleet = Fleet::new(id.to_string(), project_ids);
     new_fleet.description = description;
 
-    let json_spec = serde_json::to_string(&new_fleet)
-        .map_err(|e| homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e)))?;
+    let json_spec = homeboy::config::to_json_string(&new_fleet)?;
 
     match fleet::create(&json_spec, false)? {
         homeboy::CreateOutput::Single(result) => Ok((
