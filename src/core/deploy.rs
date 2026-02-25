@@ -11,6 +11,7 @@ use crate::context::{resolve_project_ssh_with_base_path, RemoteProjectContext};
 use crate::defaults;
 use crate::error::{Error, Result};
 use crate::git;
+use crate::hooks::{self, HookFailureMode};
 use crate::module::{
     self, load_all_modules, DeployOverride, DeployVerification, ModuleManifest,
 };
@@ -824,6 +825,9 @@ pub fn deploy_components(
                         }
                     }
 
+                    // Run post:deploy hooks remotely
+                    run_post_deploy_hooks(&ctx.client, component, &install_dir, base_path);
+
                     results.push(
                         ComponentDeployResult::new(component, base_path)
                             .with_status("deployed")
@@ -930,6 +934,9 @@ pub fn deploy_components(
                         component.id
                     );
                 }
+
+                // Run post:deploy hooks remotely
+                run_post_deploy_hooks(&ctx.client, component, &install_dir, base_path);
 
                 results.push(
                     ComponentDeployResult::new(component, base_path)
@@ -1579,4 +1586,45 @@ fn deploy_with_override(
     }
 
     Ok(DeployResult::success(0))
+}
+
+/// Build template variables and run `post:deploy` hooks remotely via SSH.
+///
+/// This is a convenience wrapper around `hooks::run_hooks_remote` that builds
+/// the standard deploy template variables and runs hooks non-fatally (failures
+/// are logged but do not abort the deploy).
+fn run_post_deploy_hooks(
+    ssh_client: &SshClient,
+    component: &Component,
+    install_dir: &str,
+    base_path: &str,
+) {
+    let mut vars = HashMap::new();
+    vars.insert(TemplateVars::COMPONENT_ID.to_string(), component.id.clone());
+    vars.insert(TemplateVars::INSTALL_DIR.to_string(), install_dir.to_string());
+    vars.insert(TemplateVars::BASE_PATH.to_string(), base_path.to_string());
+
+    match hooks::run_hooks_remote(
+        ssh_client,
+        component,
+        hooks::events::POST_DEPLOY,
+        HookFailureMode::NonFatal,
+        &vars,
+    ) {
+        Ok(result) => {
+            for cmd_result in &result.commands {
+                if cmd_result.success {
+                    eprintln!("[deploy] post:deploy> {}", cmd_result.command);
+                } else {
+                    eprintln!(
+                        "[deploy] post:deploy failed (exit {})> {}",
+                        cmd_result.exit_code, cmd_result.command
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[deploy] post:deploy hook error: {}", e);
+        }
+    }
 }

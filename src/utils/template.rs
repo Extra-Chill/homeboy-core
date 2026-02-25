@@ -20,6 +20,9 @@ impl TemplateVars {
     pub const DB_USER: &'static str = "db_user";
     pub const DB_PASSWORD: &'static str = "db_password";
     pub const MODULE_PATH: &'static str = "module_path";
+    pub const COMPONENT_ID: &'static str = "component_id";
+    pub const INSTALL_DIR: &'static str = "install_dir";
+    pub const BASE_PATH: &'static str = "base_path";
 }
 
 pub fn render(template: &str, variables: &[(&str, &str)]) -> String {

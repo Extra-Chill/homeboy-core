@@ -81,7 +81,28 @@ Runs after the release pipeline completes (all publish steps finished). Failures
 
 ### `post:deploy`
 
-Runs after deploy completes. Available for modules and components that need post-deploy automation.
+Runs after a successful deploy. Unlike other hooks, `post:deploy` hooks execute **remotely via SSH** on the deployment target, not locally. This enables post-deploy automation like plugin activation, cache flushing, or service restarts.
+
+Template variables available in `post:deploy` hooks:
+
+| Variable | Description |
+|----------|-------------|
+| `{{component_id}}` | The component ID |
+| `{{install_dir}}` | Remote install directory (base_path + remote_path) |
+| `{{base_path}}` | The project base path on the remote server |
+
+```json
+{
+  "hooks": {
+    "post:deploy": [
+      "wp plugin activate {{component_id}} --path={{base_path}} --allow-root",
+      "wp cache flush --path={{base_path}} --allow-root"
+    ]
+  }
+}
+```
+
+Module-level `post:deploy` hooks apply to all components using that module. For example, the WordPress module activates plugins and flushes cache after every deploy. Component-level hooks can add additional commands.
 
 ## Resolution Order
 
@@ -96,7 +117,9 @@ Module hooks run first so platform behavior executes before user customization.
 
 ### Working Directory
 
-All hooks execute in the component's `local_path` directory via `sh -c`.
+Most hooks execute in the component's `local_path` directory via `sh -c`.
+
+**Exception:** `post:deploy` hooks execute **remotely** on the deployment target via SSH. They do not have a working directory — use absolute paths or template variables like `{{base_path}}`.
 
 ### Command Format
 
@@ -181,8 +204,10 @@ Module hooks merge with component hooks at resolution time. They are not stored 
 The hook engine lives in `src/core/hooks.rs` and provides:
 
 - `resolve_hooks(component, event)` — merge module + component hooks for an event
-- `run_hooks(component, event, failure_mode)` — resolve and execute
-- `run_commands(commands, working_dir, event, failure_mode)` — low-level executor
+- `run_hooks(component, event, failure_mode)` — resolve and execute locally
+- `run_hooks_remote(ssh_client, component, event, failure_mode, vars)` — resolve, expand template variables, and execute via SSH
+- `run_commands(commands, working_dir, event, failure_mode)` — low-level local executor
+- `run_commands_remote(ssh_client, commands, event, failure_mode)` — low-level remote executor
 - `events::*` — constants for standard event names
 - `HookFailureMode` — `Fatal` or `NonFatal`
 - `HookRunResult` / `HookCommandResult` — structured results

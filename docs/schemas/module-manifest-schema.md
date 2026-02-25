@@ -284,6 +284,37 @@ Release actions define steps for release pipelines.
 }
 ```
 
+## Hooks Configuration
+
+Modules can declare lifecycle hooks that run at named events. Module hooks execute before component hooks, providing platform-level behavior.
+
+```json
+{
+  "hooks": {
+    "pre:version:bump": ["cargo generate-lockfile"],
+    "post:deploy": [
+      "wp cache flush --path={{base_path}} --allow-root 2>/dev/null || true"
+    ]
+  }
+}
+```
+
+### Hooks Fields
+
+- **`hooks`** (object): Map of event names to command arrays
+  - Keys: event name (e.g., `pre:version:bump`, `post:version:bump`, `post:release`, `post:deploy`)
+  - Values: array of shell command strings
+
+Most hooks execute locally in the component's directory. `post:deploy` hooks execute **remotely via SSH** with template variable expansion:
+
+| Variable | Description |
+|----------|-------------|
+| `{{component_id}}` | The component ID |
+| `{{install_dir}}` | Remote install directory (base_path + remote_path) |
+| `{{base_path}}` | Project base path on the remote server |
+
+See [hooks architecture](../architecture/hooks.md) for details on execution order and failure modes.
+
 ## Documentation Configuration
 
 Modules can provide embedded documentation.
