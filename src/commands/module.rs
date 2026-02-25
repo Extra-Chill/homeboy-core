@@ -93,6 +93,17 @@ enum ModuleCommand {
         #[arg(long)]
         data: Option<String>,
     },
+    /// Run a tool from a module's vendor directory
+    Exec {
+        /// Module ID
+        module_id: String,
+        /// Component ID (sets working directory to component path)
+        #[arg(short, long)]
+        component: Option<String>,
+        /// Command and arguments to run
+        #[arg(trailing_var_arg = true, required = true)]
+        args: Vec<String>,
+    },
     /// Update module manifest fields
     #[command(visible_aliases = ["edit", "merge"])]
     Set {
@@ -141,6 +152,11 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             project,
             data,
         } => run_action(&module_id, &action_id, project, data),
+        ModuleCommand::Exec {
+            module_id,
+            component,
+            args,
+        } => exec_module_tool(&module_id, component, args),
         ModuleCommand::Set {
             module_id,
             json,
@@ -201,6 +217,12 @@ pub enum ModuleOutput {
     Set {
         module_id: String,
         updated_fields: Vec<String>,
+    },
+    #[serde(rename = "module.exec")]
+    Exec {
+        module_id: String,
+        #[serde(skip_serializing_if = "Option::is_none", flatten)]
+        output: Option<homeboy::utils::command::CapturedOutput>,
     },
     #[serde(rename = "module.set")]
     SetBatch { batch: homeboy::BatchResult },
@@ -596,4 +618,50 @@ fn set_module(
             Ok((ModuleOutput::SetBatch { batch }, exit_code))
         }
     }
+}
+
+fn exec_module_tool(
+    module_id: &str,
+    component: Option<String>,
+    args: Vec<String>,
+) -> CmdResult<ModuleOutput> {
+    let module = load_module(module_id)?;
+    let module_path = module
+        .module_path
+        .as_deref()
+        .ok_or_else(|| homeboy::Error::config_missing_key("module_path", Some(module_id.into())))?;
+
+    // Resolve working directory: component path if given, otherwise current dir
+    let working_dir = if let Some(ref cid) = component {
+        let comp = homeboy::component::load(cid)?;
+        comp.local_path.clone()
+    } else {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    };
+
+    // Build PATH with module's vendor/bin prepended
+    let vendor_bin = format!("{}/vendor/bin", module_path);
+    let node_bin = format!("{}/node_modules/.bin", module_path);
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let enriched_path = format!("{}:{}:{}", vendor_bin, node_bin, current_path);
+
+    let env = vec![
+        ("PATH", enriched_path.as_str()),
+        ("HOMEBOY_MODULE_PATH", module_path),
+        ("HOMEBOY_MODULE_ID", module_id),
+    ];
+
+    let command = args.join(" ");
+    let exit_code =
+        homeboy::ssh::execute_local_command_interactive(&command, Some(&working_dir), Some(&env));
+
+    Ok((
+        ModuleOutput::Exec {
+            module_id: module_id.to_string(),
+            output: None,
+        },
+        exit_code,
+    ))
 }
