@@ -67,9 +67,11 @@ fn is_disabled_by_config() -> bool {
 }
 
 fn print_hint(latest: &str, current: &str) {
-    eprintln!(
-        "hint: Homeboy {} is available (current: {}). Run `homeboy upgrade` to update.",
-        latest, current
+    log_status!(
+        "update",
+        "Homeboy {} is available (current: {}). Run `homeboy upgrade` to update.",
+        latest,
+        current
     );
 }
 

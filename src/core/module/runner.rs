@@ -269,9 +269,7 @@ impl ModuleRunner {
             }
         }
 
-        serde_json::to_string(&settings).map_err(|e| {
-            Error::internal_io(format!("Failed to serialize settings JSON: {}", e), None)
-        })
+        crate::config::to_json_string(&settings)
     }
 
     fn prepare_env_vars(

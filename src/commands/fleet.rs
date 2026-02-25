@@ -1,4 +1,5 @@
 use clap::{Args, Subcommand};
+use homeboy::log_status;
 use serde::Serialize;
 
 use homeboy::component;
@@ -422,7 +423,7 @@ fn check(id: &str, only_outdated: bool) -> CmdResult<FleetOutput> {
     };
 
     for project_id in &fl.project_ids {
-        eprintln!("[fleet] Checking project '{}'...", project_id);
+        log_status!("fleet", "Checking project '{}'...", project_id);
 
         // Use existing deploy check infrastructure
         let config = DeployConfig {

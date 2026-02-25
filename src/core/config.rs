@@ -28,6 +28,12 @@ pub(crate) fn to_string_pretty<T: Serialize>(data: &T) -> Result<String> {
         .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))
 }
 
+/// Serialize value to compact JSON string with proper error handling.
+pub fn to_json_string<T: Serialize>(data: &T) -> Result<String> {
+    serde_json::to_string(data)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize json".to_string())))
+}
+
 /// Read JSON spec from string, file (@path), or stdin (-).
 pub fn read_json_spec_to_string(spec: &str) -> Result<String> {
     use std::io::IsTerminal;
@@ -734,8 +740,9 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
             let content = match local_files::local().read(&json_path) {
                 Ok(c) => c,
                 Err(err) => {
-                    eprintln!(
-                        "[config] Warning: failed to read {}: {}",
+                    log_status!(
+                        "config",
+                        "Warning: failed to read {}: {}",
                         json_path.display(),
                         err
                     );
@@ -745,8 +752,9 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
             let mut entity: T = match from_str(&content) {
                 Ok(e) => e,
                 Err(err) => {
-                    eprintln!(
-                        "[config] Warning: failed to parse {}: {}",
+                    log_status!(
+                        "config",
+                        "Warning: failed to parse {}: {}",
                         json_path.display(),
                         err
                     );

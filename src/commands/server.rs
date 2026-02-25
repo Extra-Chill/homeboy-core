@@ -168,9 +168,7 @@ pub fn run(
                     identity_file: None,
                 };
 
-                serde_json::to_string(&new_server).map_err(|e| {
-                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-                })?
+                homeboy::config::to_json_string(&new_server)?
             };
 
             match server::create(&json_spec, skip_existing)? {

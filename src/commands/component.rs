@@ -258,9 +258,7 @@ pub fn run(
                 if let serde_json::Value::Object(ref mut map) = value {
                     map.insert("id".to_string(), serde_json::json!(id));
                 }
-                serde_json::to_string(&value).map_err(|e| {
-                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-                })?
+                homeboy::config::to_json_string(&value)?
             };
 
             match component::create(&json_spec, skip_existing)? {
@@ -792,7 +790,5 @@ fn build_from_repo_spec(
         map.insert("remote_path".to_string(), serde_json::json!(""));
     }
 
-    serde_json::to_string(&config).map_err(|e| {
-        homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-    })
+    homeboy::config::to_json_string(&config)
 }

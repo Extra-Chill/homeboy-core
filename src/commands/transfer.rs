@@ -1,4 +1,5 @@
 use clap::Args;
+use homeboy::log_status;
 use homeboy::server;
 use homeboy::ssh::SshClient;
 use serde::Serialize;
@@ -171,9 +172,12 @@ fn run_push(
     let remote_target = format!("{}@{}:{}", client.user, client.host, remote_path);
 
     if args.dry_run {
-        eprintln!(
-            "[dry-run] Would push {} -> {}:{}",
-            local_path, server_id, remote_path
+        log_status!(
+            "dry-run",
+            "Would push {} -> {}:{}",
+            local_path,
+            server_id,
+            remote_path
         );
         return Ok((
             TransferOutput {
@@ -214,9 +218,12 @@ fn run_push(
     scp_args.push(local_path.to_string());
     scp_args.push(remote_target);
 
-    eprintln!(
-        "[transfer] Pushing {} -> {}:{}",
-        local_path, server_id, remote_path
+    log_status!(
+        "transfer",
+        "Pushing {} -> {}:{}",
+        local_path,
+        server_id,
+        remote_path
     );
 
     execute_scp(&scp_args, args)
@@ -235,9 +242,12 @@ fn run_pull(
     let remote_target = format!("{}@{}:{}", client.user, client.host, remote_path);
 
     if args.dry_run {
-        eprintln!(
-            "[dry-run] Would pull {}:{} -> {}",
-            server_id, remote_path, local_path
+        log_status!(
+            "dry-run",
+            "Would pull {}:{} -> {}",
+            server_id,
+            remote_path,
+            local_path
         );
         return Ok((
             TransferOutput {
@@ -280,9 +290,12 @@ fn run_pull(
     scp_args.push(remote_target);
     scp_args.push(local_path.to_string());
 
-    eprintln!(
-        "[transfer] Pulling {}:{} -> {}",
-        server_id, remote_path, local_path
+    log_status!(
+        "transfer",
+        "Pulling {}:{} -> {}",
+        server_id,
+        remote_path,
+        local_path
     );
 
     execute_scp(&scp_args, args)
@@ -308,11 +321,15 @@ fn run_server_to_server(
         } else {
             "scp-pipe"
         };
-        eprintln!(
-            "[dry-run] Would transfer {}:{} -> {}:{}",
-            src_id, src_path, dst_id, dst_path
+        log_status!(
+            "dry-run",
+            "Would transfer {}:{} -> {}:{}",
+            src_id,
+            src_path,
+            dst_id,
+            dst_path
         );
-        eprintln!("[dry-run] Method: {}", method);
+        log_status!("dry-run", "Method: {}", method);
         return Ok((
             TransferOutput {
                 source: args.source.clone(),
@@ -368,8 +385,8 @@ fn run_server_to_server(
         ("cat-pipe".to_string(), cmd)
     };
 
-    eprintln!("[transfer] {} -> {}", args.source, args.destination);
-    eprintln!("[transfer] Method: {}", method);
+    log_status!("transfer", "{} -> {}", args.source, args.destination);
+    log_status!("transfer", "Method: {}", method);
 
     let output = Command::new("sh")
         .args(["-c", &command])
@@ -384,7 +401,7 @@ fn run_server_to_server(
             if !success {
                 eprintln!("[transfer] Failed: {}", stderr);
             } else {
-                eprintln!("[transfer] Complete");
+                log_status!("transfer", "Complete");
             }
 
             Ok((
@@ -434,7 +451,7 @@ fn execute_scp(scp_args: &[String], args: &TransferArgs) -> CmdResult<TransferOu
             if !success {
                 eprintln!("[transfer] Failed: {}", stderr);
             } else {
-                eprintln!("[transfer] Complete");
+                log_status!("transfer", "Complete");
             }
 
             Ok((

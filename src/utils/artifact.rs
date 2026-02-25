@@ -49,7 +49,7 @@ pub fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
 
     match newest {
         Some(path) => {
-            eprintln!("[deploy] Resolved '{}' -> '{}'", pattern, path.display());
+            log_status!("deploy", "Resolved '{}' -> '{}'", pattern, path.display());
             Ok(path)
         }
         None => Err(Error::validation_invalid_argument(

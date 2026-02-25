@@ -278,9 +278,7 @@ pub fn run(
                 if let serde_json::Value::Object(ref mut map) = value {
                     map.insert("id".to_string(), serde_json::json!(id));
                 }
-                serde_json::to_string(&value).map_err(|e| {
-                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-                })?
+                homeboy::config::to_json_string(&value)?
             };
 
             match project::create(&json_spec, skip_existing)? {

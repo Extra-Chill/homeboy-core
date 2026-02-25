@@ -73,7 +73,7 @@ pub fn run(args: UpgradeArgs, _global: &GlobalArgs) -> CmdResult<Value> {
         upgrade::restart_with_new_binary();
 
         #[cfg(not(unix))]
-        eprintln!("Please restart homeboy to use the new version.");
+        homeboy::log_status!("upgrade", "Please restart homeboy to use the new version.");
     }
 
     Ok((json, 0))

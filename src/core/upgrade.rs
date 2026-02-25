@@ -386,7 +386,7 @@ pub fn restart_with_new_binary() -> ! {
 #[cfg(not(unix))]
 pub fn restart_with_new_binary() {
     // On Windows, just print a message
-    eprintln!("Please restart homeboy to use the new version.");
+    log_status!("upgrade", "Please restart homeboy to use the new version.");
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use clap::{Args, Subcommand};
+use homeboy::log_status;
 use serde::Serialize;
 
 use homeboy::component;
@@ -316,8 +317,9 @@ fn create_version_commit(
                 match tag(component_id, Some(&tag_name), Some(&tag_message)) {
                     Ok(tag_output) => {
                         if tag_output.success {
-                            eprintln!(
-                                "[version] Tagged {}. For automated packaging/publishing, configure a release pipeline: homeboy docs release",
+                            log_status!(
+                                "version",
+                                "Tagged {}. For automated packaging/publishing, configure a release pipeline: homeboy docs release",
                                 tag_name
                             );
                         }
