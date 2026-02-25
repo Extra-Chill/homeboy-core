@@ -337,7 +337,7 @@ fn main() -> std::process::ExitCode {
                     return std::process::ExitCode::from(exit_code_to_u8(exit_code));
                 }
                 Ok(_) => {
-                    let err = homeboy::Error::other("Unexpected output type for raw mode");
+                    let err = homeboy::Error::internal_unexpected("Unexpected output type for raw mode");
                     output::print_result::<serde_json::Value>(Err(err)).ok();
                     return std::process::ExitCode::from(exit_code_to_u8(1));
                 }

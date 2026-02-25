@@ -367,7 +367,7 @@ impl ReleaseStepExecutor {
         let mut removed = false;
         if std::path::Path::new(&distrib_path).exists() {
             std::fs::remove_dir_all(&distrib_path)
-                .map_err(|e| Error::other(format!("Failed to clean up {}: {}", distrib_path, e)))?;
+                .map_err(|e| Error::internal_io(format!("Failed to clean up {}: {}", distrib_path, e), Some(distrib_path.clone())))?;
             removed = true;
         }
 
@@ -457,7 +457,7 @@ impl ReleaseStepExecutor {
             &component.local_path,
             &["log", "-1", "--format=%s"],
         )
-        .map_err(|e| Error::other(e.to_string()))?;
+        .map_err(|e| Error::internal_io(e.to_string(), Some("git log".to_string())))?;
         if !log_output.status.success() {
             return Ok(false);
         }
@@ -471,7 +471,7 @@ impl ReleaseStepExecutor {
 
         let status_output =
             crate::git::execute_git_for_release(&component.local_path, &["status", "-sb"])
-                .map_err(|e| Error::other(e.to_string()))?;
+                .map_err(|e| Error::internal_io(e.to_string(), Some("git status".to_string())))?;
         if !status_output.status.success() {
             return Ok(false);
         }

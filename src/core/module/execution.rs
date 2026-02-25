@@ -80,10 +80,10 @@ pub fn run_setup(module_id: &str) -> Result<ModuleSetupResult> {
     let exit_code = execute_local_command_interactive(&command, Some(module_path), None);
 
     if exit_code != 0 {
-        return Err(Error::other(format!(
-            "Setup command failed with exit code {}",
-            exit_code
-        )));
+        return Err(Error::internal_io(
+            format!("Setup command failed with exit code {}", exit_code),
+            Some("module setup".to_string()),
+        ));
     }
 
     Ok(ModuleSetupResult { exit_code })
@@ -154,10 +154,12 @@ pub(crate) fn execute_action(
     let module = load_module(module_id)?;
 
     if module.actions.is_empty() {
-        return Err(Error::other(format!(
-            "Module '{}' has no actions defined",
-            module_id
-        )));
+        return Err(Error::validation_invalid_argument(
+            "module_id",
+            format!("Module '{}' has no actions defined", module_id),
+            Some(module_id.to_string()),
+            None,
+        ));
     }
 
     let action = module
@@ -165,15 +167,17 @@ pub(crate) fn execute_action(
         .iter()
         .find(|a| a.id == action_id)
         .ok_or_else(|| {
-            Error::other(format!(
-                "Action '{}' not found in module '{}'",
-                action_id, module_id
-            ))
+            Error::validation_invalid_argument(
+                "action_id",
+                format!("Action '{}' not found in module '{}'", action_id, module_id),
+                Some(action_id.to_string()),
+                None,
+            )
         })?;
 
     let selected: Vec<serde_json::Value> = if let Some(data_str) = data {
         serde_json::from_str(data_str)
-            .map_err(|e| Error::other(format!("Invalid JSON data: {}", e)))?
+            .map_err(|e| Error::internal_json(e.to_string(), Some("parse action data".to_string())))?
     } else {
         Vec::new()
     };
@@ -190,8 +194,11 @@ pub(crate) fn execute_action(
             let client = ApiClient::new(pid, &project.api)?;
 
             if action.requires_auth.unwrap_or(false) && !client.is_authenticated() {
-                return Err(Error::other(
-                    "Not authenticated. Run 'homeboy auth login --project <id>' first.",
+                return Err(Error::validation_invalid_argument(
+                    "auth",
+                    "Not authenticated",
+                    None,
+                    Some(vec!["Run 'homeboy auth login --project <id>' first.".to_string()]),
                 ));
             }
 
@@ -214,10 +221,12 @@ pub(crate) fn execute_action(
                 HttpMethod::Delete => client.delete(endpoint),
             }
         }
-        ActionType::Builtin => Err(Error::other(format!(
-            "Action '{}' is a builtin action. Builtin actions run in the Desktop app, not the CLI.",
-            action_id
-        ))),
+        ActionType::Builtin => Err(Error::validation_invalid_argument(
+            "action_id",
+            format!("Action '{}' is a builtin action. Builtin actions run in the Desktop app, not the CLI.", action_id),
+            Some(action_id.to_string()),
+            None,
+        )),
         ActionType::Command => {
             let command_template = validation::require(
                 action.command.as_ref(),
@@ -264,7 +273,7 @@ pub(crate) fn execute_action(
 
 fn module_runtime(module: &ModuleManifest) -> Result<&RuntimeConfig> {
     module.runtime().ok_or_else(|| {
-        Error::other(format!(
+        Error::config(format!(
             "Module '{}' does not have a runtime configuration and cannot be executed",
             module.id
         ))
@@ -356,7 +365,8 @@ fn resolve_module_context(
 }
 
 fn serialize_settings(settings: &HashMap<String, serde_json::Value>) -> Result<String> {
-    serde_json::to_string(settings).map_err(|e| Error::other(e.to_string()))
+    serde_json::to_string(settings)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize module settings".to_string())))
 }
 
 fn build_template_vars<'a>(
@@ -493,7 +503,7 @@ fn execute_module_runtime(
     let module = load_module(module_id)?;
     let runtime = module_runtime(&module)?;
     let run_command = runtime.run_command.as_ref().ok_or_else(|| {
-        Error::other(format!(
+        Error::config(format!(
             "Module '{}' does not have a runCommand defined",
             module_id
         ))

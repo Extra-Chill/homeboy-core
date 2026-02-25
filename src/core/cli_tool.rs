@@ -121,14 +121,14 @@ fn run_for_project_with_executor(
     local_executor: fn(&str) -> CommandOutput,
 ) -> Result<CliToolResult> {
     if args.is_empty() {
-        return Err(Error::other("No command provided".to_string()));
+        return Err(Error::validation_missing_argument(vec!["command".to_string()]));
     }
 
     let module = find_module_by_tool(tool)
-        .ok_or_else(|| Error::other(format!("No module provides tool '{}'", tool)))?;
+        .ok_or_else(|| Error::validation_invalid_argument("tool", format!("No module provides tool '{}'", tool), Some(tool.to_string()), None))?;
 
     let cli_config = module.cli.as_ref().ok_or_else(|| {
-        Error::other(format!(
+        Error::config(format!(
             "Module '{}' does not have CLI configuration",
             module.id
         ))
@@ -139,9 +139,7 @@ fn run_for_project_with_executor(
     let (target_domain, command_args) = resolve_subtarget(&project, args)?;
 
     if command_args.is_empty() {
-        return Err(Error::other(
-            "No command provided after subtarget".to_string(),
-        ));
+        return Err(Error::validation_missing_argument(vec!["command".to_string()]));
     }
 
     // Try direct execution first (bypasses shell escaping issues)
@@ -199,9 +197,7 @@ fn build_project_command(
     let (target_domain, command_args) = resolve_subtarget(project, args)?;
 
     if command_args.is_empty() {
-        return Err(Error::other(
-            "No command provided after subtarget".to_string(),
-        ));
+        return Err(Error::validation_missing_argument(vec!["command".to_string()]));
     }
 
     let cli_path = cli_config

@@ -91,14 +91,14 @@ fn fetch_latest_crates_io_version() -> Result<String> {
         .user_agent(format!("homeboy/{}", VERSION))
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| Error::other(format!("Failed to create HTTP client: {}", e)))?;
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create HTTP client".to_string())))?;
 
     let response: CratesIoResponse = client
         .get(CRATES_IO_API)
         .send()
-        .map_err(|e| Error::other(format!("Failed to query crates.io: {}", e)))?
+        .map_err(|e| Error::internal_io(e.to_string(), Some("query crates.io".to_string())))?
         .json()
-        .map_err(|e| Error::other(format!("Failed to parse crates.io response: {}", e)))?;
+        .map_err(|e| Error::internal_json(e.to_string(), Some("parse crates.io response".to_string())))?;
 
     Ok(response.crate_info.newest_version)
 }
@@ -108,14 +108,14 @@ fn fetch_latest_github_version() -> Result<String> {
         .user_agent(format!("homeboy/{}", VERSION))
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| Error::other(format!("Failed to create HTTP client: {}", e)))?;
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create HTTP client".to_string())))?;
 
     let response: GitHubRelease = client
         .get(GITHUB_RELEASES_API)
         .send()
-        .map_err(|e| Error::other(format!("Failed to query GitHub releases: {}", e)))?
+        .map_err(|e| Error::internal_io(e.to_string(), Some("query GitHub releases".to_string())))?
         .json()
-        .map_err(|e| Error::other(format!("Failed to parse GitHub release response: {}", e)))?;
+        .map_err(|e| Error::internal_json(e.to_string(), Some("parse GitHub release response".to_string())))?;
 
     // Strip "v" prefix if present (e.g., "v0.15.0" -> "0.15.0")
     let version = response
@@ -294,7 +294,7 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
             let status = Command::new("sh")
                 .args(["-c", cmd])
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run homebrew upgrade".to_string())))?;
             (cmd.clone(), status.success())
         }
         InstallMethod::Cargo => {
@@ -302,13 +302,13 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
             let status = Command::new("sh")
                 .args(["-c", cmd])
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run cargo upgrade".to_string())))?;
             (cmd.clone(), status.success())
         }
         InstallMethod::Source => {
             // For source builds, we need to find the git root
             let exe_path = std::env::current_exe()
-                .map_err(|e| Error::other(format!("Failed to get current exe: {}", e)))?;
+                .map_err(|e| Error::internal_io(e.to_string(), Some("get current executable path".to_string())))?;
 
             // Navigate up from target/release/homeboy to find the workspace root
             let mut workspace_root = exe_path.clone();
@@ -336,7 +336,7 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
                 .args(["-c", cmd])
                 .current_dir(&workspace_root)
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run source upgrade".to_string())))?;
 
             (cmd.clone(), status.success())
         }
@@ -345,7 +345,7 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
             let status = Command::new("sh")
                 .args(["-c", cmd])
                 .status()
-                .map_err(|e| Error::other(format!("Failed to run upgrade: {}", e)))?;
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run binary upgrade".to_string())))?;
             (cmd.clone(), status.success())
         }
         InstallMethod::Unknown => {
@@ -359,10 +359,10 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
     };
 
     if !success {
-        return Err(Error::other(format!(
-            "Upgrade command failed: {}",
-            shell_cmd
-        )));
+        return Err(Error::internal_io(
+            format!("Upgrade command failed: {}", shell_cmd),
+            Some("execute upgrade".to_string()),
+        ));
     }
 
     // Try to fetch the new version

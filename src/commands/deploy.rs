@@ -222,8 +222,7 @@ pub fn run(
                             "Could not infer project. Use --project flag or provide project as first argument.",
                             None,
                             None,
-                        )
-                        .into())
+                        ))
                     }
                 }
             }
@@ -304,8 +303,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
             "At least one component ID is required when using --projects",
             None,
             None,
-        )
-        .into());
+        ));
     }
 
     // Validate all specified projects exist
@@ -317,8 +315,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
                 &format!("Unknown project: '{}'", project_id),
                 None,
                 None,
-            )
-            .into());
+            ));
         }
     }
 
