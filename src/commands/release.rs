@@ -108,6 +108,7 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
     let options = release::ReleaseOptions {
         bump_type: bump_type.as_str().to_string(),
         dry_run: args.dry_run,
+        path_override: None,
     };
 
     if args.dry_run {

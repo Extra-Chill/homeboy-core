@@ -23,6 +23,7 @@ pub struct ModuleRunner {
     settings_overrides: Vec<(String, String)>,
     env_vars: Vec<(String, String)>,
     script_args: Vec<String>,
+    path_override: Option<String>,
 }
 
 impl ModuleRunner {
@@ -37,7 +38,17 @@ impl ModuleRunner {
             settings_overrides: Vec::new(),
             env_vars: Vec::new(),
             script_args: Vec::new(),
+            path_override: None,
         }
+    }
+
+    /// Override the component's `local_path` for this execution.
+    ///
+    /// Use this when running against a workspace clone or temporary checkout
+    /// instead of the configured component path.
+    pub fn path_override(mut self, path: Option<String>) -> Self {
+        self.path_override = path;
+        self
     }
 
     /// Add settings overrides from key=value pairs.
@@ -106,7 +117,11 @@ impl ModuleRunner {
     }
 
     fn find_component(&self) -> Result<Component> {
-        component::load(&self.component_id)
+        let mut comp = component::load(&self.component_id)?;
+        if let Some(ref path) = self.path_override {
+            comp.local_path = path.clone();
+        }
+        Ok(comp)
     }
 
     fn determine_module(&self, component: &Component) -> Result<(String, Vec<(String, String)>)> {

@@ -4,12 +4,28 @@
 
 ```sh
 homeboy build <component_id>
+homeboy build <component_id> --path /path/to/workspace/clone
 homeboy build --json '<spec>'
 ```
 
 ## Description
 
 Runs a build command for the component in the component's `local_path`.
+
+## Path Override
+
+Use `--path` to run the build against a different directory than the configured `local_path`:
+
+```sh
+homeboy build data-machine --path /var/lib/datamachine/workspace/data-machine
+```
+
+This is useful for:
+- **AI agent workflows** — agents working in workspace clones
+- **CI/CD** — running builds on a fresh checkout
+- **Multi-branch development** — testing different branches without swapping the installed plugin
+
+The override is transient — it does not modify the stored component config.
 
 Requires `build_command` to be configured on the component, or a module with build support. If neither is set, the command errors.
 

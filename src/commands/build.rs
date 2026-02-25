@@ -20,6 +20,10 @@ pub struct BuildArgs {
     /// Build all components in the project
     #[arg(long)]
     pub all: bool,
+
+    /// Override local_path for this build (use a workspace clone or temp checkout)
+    #[arg(long)]
+    pub path: Option<String>,
 }
 
 pub fn run(
@@ -123,5 +127,9 @@ pub fn run(
     }
 
     // Single target_id: treat as component ID
-    build::run(target_id)
+    if let Some(ref path) = args.path {
+        build::run_with_path(target_id, path)
+    } else {
+        build::run(target_id)
+    }
 }

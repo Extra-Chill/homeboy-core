@@ -53,6 +53,10 @@ pub struct LintArgs {
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
 
+    /// Override local_path for this lint run (use a workspace clone or temp checkout)
+    #[arg(long)]
+    path: Option<String>,
+
     /// Accept --json for compatibility (output is JSON by default)
     #[arg(long, hide = true)]
     json: bool,
@@ -124,7 +128,10 @@ fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> 
 }
 
 pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
-    let component = component::load(&args.component)?;
+    let mut component = component::load(&args.component)?;
+    if let Some(ref path) = args.path {
+        component.local_path = path.clone();
+    }
     let script_path = resolve_lint_script(&component)?;
 
     // Resolve glob from --changed-only flag
@@ -168,6 +175,7 @@ pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
     };
 
     let output = ModuleRunner::new(&args.component, &script_path)
+        .path_override(args.path.clone())
         .settings(&args.setting)
         .env_if(args.fix, "HOMEBOY_AUTO_FIX", "1")
         .env_if(args.summary, "HOMEBOY_SUMMARY_MODE", "1")

@@ -24,6 +24,10 @@ pub struct TestArgs {
     #[arg(long, value_parser = parse_key_val)]
     setting: Vec<(String, String)>,
 
+    /// Override local_path for this test run (use a workspace clone or temp checkout)
+    #[arg(long)]
+    path: Option<String>,
+
     /// Additional arguments to pass to the test runner (after --)
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
@@ -123,10 +127,14 @@ fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> 
 }
 
 pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
-    let component = component::load(&args.component)?;
+    let mut component = component::load(&args.component)?;
+    if let Some(ref path) = args.path {
+        component.local_path = path.clone();
+    }
     let script_path = resolve_test_script(&component)?;
 
     let output = ModuleRunner::new(&args.component, &script_path)
+        .path_override(args.path.clone())
         .settings(&args.setting)
         .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")
         .env_if(args.fix, "HOMEBOY_AUTO_FIX", "1")
