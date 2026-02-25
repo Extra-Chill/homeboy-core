@@ -246,9 +246,51 @@ homeboy changes --project myproject
 homeboy changes --project myproject --git-diffs
 ```
 
+## Post-Deploy Hooks
+
+After a successful deploy, Homeboy runs `post:deploy` hooks remotely via SSH on the deployment target. Hooks are resolved from modules and components (see [hooks](../architecture/hooks.md)).
+
+Template variables available:
+
+| Variable | Description |
+|----------|-------------|
+| `{{component_id}}` | The component ID |
+| `{{install_dir}}` | Remote install directory |
+| `{{base_path}}` | Project base path on the remote server |
+
+### Module-level hooks
+
+Modules like WordPress define `post:deploy` hooks in their manifest. These run for every component using that module:
+
+```json
+{
+  "hooks": {
+    "post:deploy": [
+      "wp plugin is-installed {{component_id}} --path={{base_path}} --allow-root 2>/dev/null && wp plugin activate {{component_id}} --path={{base_path}} --allow-root 2>/dev/null || true",
+      "wp cache flush --path={{base_path}} --allow-root 2>/dev/null || true"
+    ]
+  }
+}
+```
+
+### Component-level hooks
+
+Components can add their own `post:deploy` hooks for custom automation:
+
+```json
+{
+  "hooks": {
+    "post:deploy": ["systemctl restart my-service"]
+  }
+}
+```
+
+Module hooks run first, then component hooks. All `post:deploy` hooks are non-fatal — failures are logged but do not affect the deploy result.
+
 ## Related
 
 - [build](build.md)
 - [changes](changes.md)
 - [component](component.md)
 - [fleet](fleet.md)
+- [hooks](../architecture/hooks.md)

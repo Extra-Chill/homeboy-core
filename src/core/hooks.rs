@@ -10,7 +10,8 @@
 use crate::component::Component;
 use crate::error::{Error, Result};
 use crate::module;
-use crate::ssh::execute_local_command_in_dir;
+use crate::ssh::{execute_local_command_in_dir, SshClient};
+use crate::utils::template;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -103,6 +104,78 @@ pub fn run_commands(
 
     for command in commands {
         let output = execute_local_command_in_dir(command, Some(working_dir), None);
+
+        let result = HookCommandResult {
+            command: command.clone(),
+            success: output.success,
+            stdout: output.stdout.clone(),
+            stderr: output.stderr.clone(),
+            exit_code: output.exit_code,
+        };
+
+        if !output.success {
+            all_succeeded = false;
+
+            if failure_mode == HookFailureMode::Fatal {
+                let error_text = if output.stderr.trim().is_empty() {
+                    &output.stdout
+                } else {
+                    &output.stderr
+                };
+                results.push(result);
+                return Err(Error::internal_unexpected(format!(
+                    "Hook '{}' command failed: {}\n{}",
+                    event, command, error_text
+                )));
+            }
+        }
+
+        results.push(result);
+    }
+
+    Ok(HookRunResult {
+        event: event.to_string(),
+        commands: results,
+        all_succeeded,
+    })
+}
+
+/// Run all hooks for a given event remotely via SSH.
+///
+/// Resolves hooks from modules and the component, expands template variables
+/// (using `{{key}}` syntax), then executes each command on the remote server.
+/// Uses the same resolution order as `run_hooks` (module hooks first, then
+/// component hooks).
+pub fn run_hooks_remote(
+    ssh_client: &SshClient,
+    component: &Component,
+    event: &str,
+    failure_mode: HookFailureMode,
+    vars: &HashMap<String, String>,
+) -> Result<HookRunResult> {
+    let commands = resolve_hooks(component, event);
+    let expanded: Vec<String> = commands
+        .iter()
+        .map(|c| template::render_map(c, vars))
+        .collect();
+    run_commands_remote(ssh_client, &expanded, event, failure_mode)
+}
+
+/// Run a list of commands remotely via SSH.
+///
+/// This is the low-level remote executor. Use `run_hooks_remote` for the full
+/// resolve+expand+execute flow.
+pub fn run_commands_remote(
+    ssh_client: &SshClient,
+    commands: &[String],
+    event: &str,
+    failure_mode: HookFailureMode,
+) -> Result<HookRunResult> {
+    let mut results = Vec::new();
+    let mut all_succeeded = true;
+
+    for command in commands {
+        let output = ssh_client.execute(command);
 
         let result = HookCommandResult {
             command: command.clone(),
