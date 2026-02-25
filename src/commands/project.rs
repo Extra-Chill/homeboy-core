@@ -269,7 +269,7 @@ pub fn run(
                 })?;
 
                 let new_project = project::Project {
-                    id,
+                    id: id.clone(),
                     domain,
                     server_id,
                     base_path,
@@ -277,7 +277,16 @@ pub fn run(
                     ..Default::default()
                 };
 
-                serde_json::to_string(&new_project).map_err(|e| {
+                // Serialize to Value first so we can inject the id field.
+                // Project's serde(skip) on id means to_string() drops it,
+                // but create_single_from_json() needs id in the JSON.
+                let mut value = serde_json::to_value(&new_project).map_err(|e| {
+                    homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
+                })?;
+                if let serde_json::Value::Object(ref mut map) = value {
+                    map.insert("id".to_string(), serde_json::json!(id));
+                }
+                serde_json::to_string(&value).map_err(|e| {
                     homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
                 })?
             };
