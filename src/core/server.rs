@@ -57,6 +57,14 @@ impl ConfigEntity for Server {
     fn aliases(&self) -> &[String] {
         &self.aliases
     }
+    fn dependents(id: &str) -> Result<Vec<String>> {
+        let projects = project::list().unwrap_or_default();
+        Ok(projects
+            .iter()
+            .filter(|p| p.server_id.as_deref() == Some(id))
+            .map(|p| p.id.clone())
+            .collect())
+    }
 }
 
 // ============================================================================
@@ -76,76 +84,6 @@ pub fn key_path(id: &str) -> Result<std::path::PathBuf> {
 // ============================================================================
 // Operations
 // ============================================================================
-
-#[derive(Debug, Clone)]
-pub struct UpdateResult {
-    pub id: String,
-    pub server: Server,
-    pub updated_fields: Vec<String>,
-}
-
-pub fn update(
-    server_id: &str,
-    host: Option<String>,
-    user: Option<String>,
-    port: Option<u16>,
-) -> Result<UpdateResult> {
-    let mut server = load(server_id)?;
-    let mut updated = Vec::new();
-
-    if let Some(new_host) = host {
-        server.host = new_host;
-        updated.push("host".to_string());
-    }
-
-    if let Some(new_user) = user {
-        server.user = new_user;
-        updated.push("user".to_string());
-    }
-
-    if let Some(new_port) = port {
-        server.port = new_port;
-        updated.push("port".to_string());
-    }
-
-    save(&server)?;
-
-    Ok(UpdateResult {
-        id: server_id.to_string(),
-        server,
-        updated_fields: updated,
-    })
-}
-
-pub fn rename(id: &str, new_id: &str) -> Result<Server> {
-    let new_id = new_id.to_lowercase();
-    config::rename::<Server>(id, &new_id)?;
-    load(&new_id)
-}
-
-pub fn delete_safe(id: &str) -> Result<()> {
-    if !exists(id) {
-        let suggestions = config::find_similar_ids::<Server>(id);
-        return Err(Error::server_not_found(id.to_string(), suggestions));
-    }
-
-    let projects = project::list().unwrap_or_default();
-    for proj in projects {
-        if proj.server_id.as_deref() == Some(id) {
-            return Err(Error::validation_invalid_argument(
-                "server",
-                format!(
-                    "Server is used by project '{}'. Update or delete the project first.",
-                    proj.id
-                ),
-                Some(id.to_string()),
-                Some(vec![proj.id.clone()]),
-            ));
-        }
-    }
-
-    delete(id)
-}
 
 pub fn set_identity_file(id: &str, identity_file: Option<String>) -> Result<Server> {
     let mut server = load(id)?;

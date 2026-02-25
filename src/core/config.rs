@@ -674,6 +674,20 @@ pub(crate) trait ConfigEntity: Serialize + DeserializeOwned {
     /// Override to apply runtime config layering (e.g., portable config overlay).
     /// Default: no-op.
     fn post_load(&mut self, _stored_json: &str) {}
+
+    /// Return IDs of entities that depend on this one (for safe delete).
+    /// Override to check referential integrity before deletion.
+    /// Default: no dependents.
+    fn dependents(_id: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
+
+    /// Update references after rename. Called after the config file is renamed.
+    /// Override to propagate ID changes to entities that reference this one.
+    /// Default: no-op.
+    fn on_rename(_old_id: &str, _new_id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
@@ -1195,6 +1209,34 @@ pub(crate) fn rename<T: ConfigEntity>(id: &str, new_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete an entity with referential integrity check.
+///
+/// Verifies the entity exists, checks for dependents via the trait hook,
+/// and only deletes if nothing references it.
+pub(crate) fn delete_safe<T: ConfigEntity>(id: &str) -> Result<()> {
+    if !exists::<T>(id) {
+        let suggestions = find_similar_ids::<T>(id);
+        return Err(T::not_found_error(id.to_string(), suggestions));
+    }
+
+    let deps = T::dependents(id)?;
+    if !deps.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            T::ENTITY_TYPE,
+            format!(
+                "{} '{}' is in use by: {}. Remove references first.",
+                T::ENTITY_TYPE,
+                id,
+                deps.join(", ")
+            ),
+            Some(id.to_string()),
+            Some(deps),
+        ));
+    }
+
+    delete::<T>(id)
+}
+
 // ============================================================================
 // Fuzzy Matching
 // ============================================================================
@@ -1290,8 +1332,15 @@ pub(crate) fn find_similar_ids<T: ConfigEntity>(target: &str) -> Vec<String> {
 
 /// Generate standard CRUD wrapper functions for a `ConfigEntity` type.
 ///
-/// The base invocation generates 7 universal wrappers that every entity needs:
-/// `load`, `list`, `save`, `delete`, `exists`, `remove_from_json`, `create`.
+/// The base invocation generates 9 universal wrappers that every entity needs:
+/// `load`, `list`, `save`, `delete`, `exists`, `remove_from_json`, `create`,
+/// `rename`, `delete_safe`.
+///
+/// `rename` calls `config::rename`, then the entity's `on_rename` hook
+/// (for updating references in other entities), then reloads.
+///
+/// `delete_safe` checks for dependents via the entity's `dependents` hook
+/// before deleting. Use `delete` for unconditional removal.
 ///
 /// Optional features add extra wrappers:
 /// - `list_ids` — generates `list_ids() -> Result<Vec<String>>`
@@ -1342,6 +1391,17 @@ macro_rules! entity_crud {
 
         pub fn create(json_spec: &str, skip_existing: bool) -> Result<CreateOutput<$Entity>> {
             config::create::<$Entity>(json_spec, skip_existing)
+        }
+
+        pub fn rename(id: &str, new_id: &str) -> Result<$Entity> {
+            config::rename::<$Entity>(id, new_id)?;
+            let resolved_id = new_id.to_lowercase();
+            <$Entity as config::ConfigEntity>::on_rename(id, &resolved_id)?;
+            load(&resolved_id)
+        }
+
+        pub fn delete_safe(id: &str) -> Result<()> {
+            config::delete_safe::<$Entity>(id)
         }
 
         // --- Optional features ---
