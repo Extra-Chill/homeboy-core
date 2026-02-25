@@ -102,9 +102,9 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
         return run_recover(&args.component_id);
     }
 
-    let bump_type = args
-        .bump_type
-        .expect("bump_type required when not recovering");
+    let bump_type = args.bump_type.ok_or_else(|| {
+        homeboy::Error::validation_missing_argument(vec!["bump_type".to_string()])
+    })?;
     let options = release::ReleaseOptions {
         bump_type: bump_type.as_str().to_string(),
         dry_run: args.dry_run,

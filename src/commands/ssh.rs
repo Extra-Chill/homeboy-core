@@ -112,7 +112,12 @@ pub fn run(args: SshArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Ss
 
             if !args.command.is_empty() {
                 // Non-interactive: capture output for JSON response
-                let output = client.execute(effective_command.as_deref().unwrap());
+                let cmd = effective_command.as_deref().ok_or_else(|| {
+                    homeboy::Error::internal_unexpected(
+                        "No command resolved for non-interactive SSH execution".to_string(),
+                    )
+                })?;
+                let output = client.execute(cmd);
 
                 Ok((
                     SshOutput::Connect(SshConnectOutput {
