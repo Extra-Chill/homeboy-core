@@ -48,16 +48,8 @@ enum ProjectCommand {
     /// Update project configuration fields
     #[command(visible_aliases = ["edit", "merge"])]
     Set {
-        /// Project ID (optional if provided in JSON body)
-        project_id: Option<String>,
-        /// JSON spec (positional, supports @file and - for stdin)
-        spec: Option<String>,
-        /// Explicit JSON spec (takes precedence over positional)
-        #[arg(long, value_name = "JSON")]
-        json: Option<String>,
-        /// Replace these fields instead of merging arrays
-        #[arg(long, value_name = "FIELD")]
-        replace: Vec<String>,
+        #[command(flatten)]
+        args: super::DynamicSetArgs,
     },
     /// Remove items from project configuration arrays
     Remove {
@@ -314,22 +306,7 @@ pub fn run(
                 }
             }
         }
-        ProjectCommand::Set {
-            project_id,
-            spec,
-            json,
-            replace,
-        } => {
-            let json_spec = json.or(spec).ok_or_else(|| {
-                homeboy::Error::validation_invalid_argument(
-                    "spec",
-                    "Provide JSON spec or use --json flag",
-                    None,
-                    None,
-                )
-            })?;
-            set(project_id.as_deref(), &json_spec, &replace)
-        }
+        ProjectCommand::Set { args } => set(args),
         ProjectCommand::Remove {
             project_id,
             spec,
@@ -469,12 +446,18 @@ fn calculate_deploy_readiness(project: &Project) -> (bool, Vec<String>) {
     (deploy_ready, blockers)
 }
 
-fn set(
-    project_id: Option<&str>,
-    json: &str,
-    replace_fields: &[String],
-) -> homeboy::Result<(ProjectOutput, i32)> {
-    match project::merge(project_id, json, replace_fields)? {
+fn set(args: super::DynamicSetArgs) -> homeboy::Result<(ProjectOutput, i32)> {
+    let merged = super::merge_dynamic_args(&args)?.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "spec",
+            "Provide JSON spec, --json flag, --base64 flag, or --key value flags",
+            None,
+            None,
+        )
+    })?;
+    let (json_string, replace_fields) = super::finalize_set_spec(&merged, &args.replace)?;
+
+    match project::merge(args.id.as_deref(), &json_string, &replace_fields)? {
         homeboy::MergeOutput::Single(result) => Ok((
             ProjectOutput {
                 command: "project.set".to_string(),

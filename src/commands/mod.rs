@@ -212,6 +212,41 @@ pub fn merge_json_sources(spec: Option<&str>, extra: &[String]) -> homeboy::Resu
     Ok(base)
 }
 
+// ============================================================================
+// DynamicSetArgs Processing Helpers
+// ============================================================================
+
+/// Merge JSON sources from `DynamicSetArgs` into a single JSON value.
+/// Returns `None` if no JSON/base64/key-value input was provided.
+pub fn merge_dynamic_args(args: &DynamicSetArgs) -> homeboy::Result<Option<Value>> {
+    let spec = args.json_spec()?;
+    let extra = args.effective_extra();
+    if spec.is_none() && extra.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(merge_json_sources(spec.as_deref(), &extra)?))
+}
+
+/// Serialize a merged JSON value to a string and compute the full replace
+/// fields list (explicit `--replace` flags + auto-detected array fields).
+pub fn finalize_set_spec(
+    merged: &Value,
+    explicit_replace: &[String],
+) -> homeboy::Result<(String, Vec<String>)> {
+    let json_string = serde_json::to_string(merged).map_err(|e| {
+        homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
+    })?;
+
+    let mut replace_fields = explicit_replace.to_vec();
+    for field in homeboy::config::collect_array_fields(merged) {
+        if !replace_fields.contains(&field) {
+            replace_fields.push(field);
+        }
+    }
+
+    Ok((json_string, replace_fields))
+}
+
 pub mod api;
 pub mod auth;
 pub mod build;

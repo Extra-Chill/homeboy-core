@@ -237,31 +237,15 @@ fn show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
 }
 
 fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
-    // Merge JSON sources: positional/--json/--base64 spec + dynamic flags
-    let spec = args.json_spec()?;
-    let extra = args.effective_extra();
-    let has_input = spec.is_some() || !extra.is_empty();
-    if !has_input {
-        return Err(homeboy::Error::validation_invalid_argument(
+    let merged = super::merge_dynamic_args(&args)?.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
             "spec",
             "Provide JSON spec, --json flag, --base64 flag, or --key value flags",
             None,
             None,
-        ));
-    }
-
-    let merged = super::merge_json_sources(spec.as_deref(), &extra)?;
-    let json_string = serde_json::to_string(&merged).map_err(|e| {
-        homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
+        )
     })?;
-
-    // Auto-replace array fields in set commands (see #154)
-    let mut replace_fields = args.replace.clone();
-    for field in homeboy::config::collect_array_fields(&merged) {
-        if !replace_fields.contains(&field) {
-            replace_fields.push(field);
-        }
-    }
+    let (json_string, replace_fields) = super::finalize_set_spec(&merged, &args.replace)?;
 
     match server::merge(args.id.as_deref(), &json_string, &replace_fields)? {
         MergeOutput::Single(result) => {
