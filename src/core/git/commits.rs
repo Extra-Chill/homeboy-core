@@ -308,19 +308,6 @@ pub fn categorize_commits(path: &str, commits: &[CommitInfo]) -> CommitCounts {
     counts
 }
 
-/// Convert commits to changelog entries.
-/// Strips conventional commit prefixes for cleaner changelog.
-pub fn commits_to_changelog_entries(commits: &[CommitInfo]) -> Vec<String> {
-    commits
-        .iter()
-        .map(|c| {
-            // Strip conventional commit prefix if present
-            let subject = strip_conventional_prefix(&c.subject);
-            subject.to_string()
-        })
-        .collect()
-}
-
 /// Strip conventional commit prefix from a subject line.
 /// "feat: Add new feature" -> "Add new feature"
 /// "fix(scope): Fix bug" -> "Fix bug"

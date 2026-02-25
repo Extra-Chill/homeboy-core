@@ -171,10 +171,6 @@ impl ModuleManifest {
         self.cli.is_some()
     }
 
-    pub fn has_runtime(&self) -> bool {
-        self.executable.is_some()
-    }
-
     pub fn has_build(&self) -> bool {
         self.build.is_some()
     }
@@ -343,18 +339,6 @@ pub struct DiscoveryConfig {
     pub base_path_transform: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name_command: Option<String>,
-}
-
-impl DiscoveryConfig {
-    pub fn transform_to_base_path(&self, path: &str) -> String {
-        match self.base_path_transform.as_str() {
-            "dirname" => std::path::Path::new(path)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.to_string()),
-            _ => path.to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

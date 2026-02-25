@@ -35,24 +35,6 @@ fn resolve_target_path(local_path: &str, file: &str) -> Result<PathBuf> {
     Ok(parser::resolve_path(local_path, file))
 }
 
-pub fn read_and_add_next_section_item(
-    component: &Component,
-    settings: &EffectiveChangelogSettings,
-    message: &str,
-) -> Result<(PathBuf, bool)> {
-    let path = resolve_changelog_path(component)?;
-    let content = io::read_file(&path, "read changelog")?;
-
-    let (new_content, changed) =
-        add_next_section_item(&content, &settings.next_section_aliases, message)?;
-
-    if changed {
-        io::write_file(&path, &new_content, "write changelog")?;
-    }
-
-    Ok((path, changed))
-}
-
 pub fn read_and_add_next_section_items(
     component: &Component,
     settings: &EffectiveChangelogSettings,

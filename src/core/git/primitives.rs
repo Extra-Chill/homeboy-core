@@ -70,28 +70,6 @@ pub fn list_tracked_markdown_files(path: &Path) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Pull with fast-forward only, inheriting stdio for interactive output.
-pub fn pull_ff_only_interactive(path: &Path) -> Result<()> {
-    use std::process::Stdio;
-
-    let status = Command::new("git")
-        .args(["pull", "--ff-only"])
-        .current_dir(path)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .map_err(|e| Error::git_command_failed(format!("Failed to run git pull: {}", e)))?;
-
-    if !status.success() {
-        return Err(Error::git_command_failed(
-            "git pull --ff-only failed".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
 pub(crate) fn is_git_repo(path: &str) -> bool {
     command::succeeded_in(path, "git", &["rev-parse", "--git-dir"])
 }

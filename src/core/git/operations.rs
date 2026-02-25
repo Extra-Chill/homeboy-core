@@ -804,14 +804,6 @@ pub fn get_head_commit(path: &str) -> Result<String> {
     crate::utils::command::run_in(path, "git", &["rev-parse", "HEAD"], "get HEAD commit")
 }
 
-/// Stage specific files in a git repository.
-pub fn stage_files(path: &str, files: &[&str]) -> Result<()> {
-    let mut args = vec!["add", "--"];
-    args.extend(files);
-    crate::utils::command::run_in(path, "git", &args, "stage files")?;
-    Ok(())
-}
-
 /// Fetch from remote and return count of commits behind upstream.
 /// Returns Ok(Some(n)) if behind by n commits, Ok(None) if not behind or no upstream.
 pub fn fetch_and_get_behind_count(path: &str) -> Result<Option<u32>> {

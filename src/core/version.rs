@@ -678,13 +678,6 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
     })
 }
 
-/// Set version by component ID.
-pub fn set_version(component_id: Option<&str>, new_version: &str) -> Result<SetResult> {
-    let id = validation::require(component_id, "componentId", "Missing componentId")?;
-    let component = component::load(id)?;
-    set_component_version(&component, new_version)
-}
-
 /// Bump a component's version and finalize changelog.
 /// bump_type: "patch", "minor", or "major"
 pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<BumpResult> {

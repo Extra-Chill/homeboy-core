@@ -694,11 +694,6 @@ pub fn module_ready_status(module: &ModuleManifest) -> ModuleReadyStatus {
     }
 }
 
-/// Check if a module is ready (setup complete).
-pub fn is_module_ready(module: &ModuleManifest) -> bool {
-    module_ready_status(module).ready
-}
-
 /// Check if a module is compatible with a project.
 pub fn is_module_compatible(module: &ModuleManifest, project: Option<&Project>) -> bool {
     let Some(ref requires) = module.requires else {
