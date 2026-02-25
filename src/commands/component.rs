@@ -4,7 +4,7 @@ use std::path::Path;
 
 use homeboy::component::{self, Component};
 use homeboy::project::{self, Project};
-use homeboy::BatchResult;
+use homeboy::EntityCrudOutput;
 
 use super::{CmdResult, DynamicSetArgs};
 
@@ -136,19 +136,9 @@ enum ComponentCommand {
     },
 }
 
-#[derive(Default, Serialize)]
-
-pub struct ComponentOutput {
-    pub command: String,
-    pub component_id: Option<String>,
-    pub success: bool,
-    pub updated_fields: Vec<String>,
-    pub component: Option<Component>,
-    pub components: Vec<Component>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub import: Option<BatchResult>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub batch: Option<BatchResult>,
+/// Entity-specific fields for component commands.
+#[derive(Debug, Default, Serialize)]
+pub struct ComponentExtra {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -156,6 +146,8 @@ pub struct ComponentOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared: Option<std::collections::HashMap<String, Vec<String>>>,
 }
+
+pub type ComponentOutput = EntityCrudOutput<Component, ComponentExtra>;
 
 pub fn run(
     args: ComponentArgs,
@@ -243,8 +235,8 @@ pub fn run(
                 homeboy::CreateOutput::Single(result) => Ok((
                     ComponentOutput {
                         command: "component.create".to_string(),
-                        component_id: Some(result.id),
-                        component: Some(result.entity),
+                        id: Some(result.id),
+                        entity: Some(result.entity),
                         ..Default::default()
                     },
                     0,
@@ -254,7 +246,6 @@ pub fn run(
                     Ok((
                         ComponentOutput {
                             command: "component.create".to_string(),
-                            success: summary.errors == 0,
                             import: Some(summary),
                             ..Default::default()
                         },
@@ -304,8 +295,8 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
     Ok((
         ComponentOutput {
             command: "component.show".to_string(),
-            component_id: Some(id.to_string()),
-            component: Some(component),
+            id: Some(id.to_string()),
+            entity: Some(component),
             ..Default::default()
         },
         0,
@@ -435,10 +426,9 @@ fn set(
             Ok((
                 ComponentOutput {
                     command: "component.set".to_string(),
-                    success: true,
-                    component_id: Some(result.id),
+                    id: Some(result.id),
                     updated_fields: result.updated_fields,
-                    component: Some(comp),
+                    entity: Some(comp),
                     ..Default::default()
                 },
                 0,
@@ -449,7 +439,6 @@ fn set(
             Ok((
                 ComponentOutput {
                     command: "component.set".to_string(),
-                    success: summary.errors == 0,
                     batch: Some(summary),
                     ..Default::default()
                 },
@@ -487,10 +476,9 @@ fn add_version_target(id: &str, file: &str, pattern: &str) -> CmdResult<Componen
             Ok((
                 ComponentOutput {
                     command: "component.add-version-target".to_string(),
-                    success: true,
-                    component_id: Some(result.id),
+                    id: Some(result.id),
                     updated_fields: result.updated_fields,
-                    component: Some(comp),
+                    entity: Some(comp),
                     ..Default::default()
                 },
                 0,
@@ -508,7 +496,8 @@ fn delete(id: &str) -> CmdResult<ComponentOutput> {
     Ok((
         ComponentOutput {
             command: "component.delete".to_string(),
-            component_id: Some(id.to_string()),
+            id: Some(id.to_string()),
+            deleted: vec![id.to_string()],
             ..Default::default()
         },
         0,
@@ -521,9 +510,9 @@ fn rename(id: &str, new_id: &str) -> CmdResult<ComponentOutput> {
     Ok((
         ComponentOutput {
             command: "component.rename".to_string(),
-            component_id: Some(component.id.clone()),
+            id: Some(component.id.clone()),
             updated_fields: vec!["id".to_string()],
-            component: Some(component),
+            entity: Some(component),
             ..Default::default()
         },
         0,
@@ -536,7 +525,7 @@ fn list() -> CmdResult<ComponentOutput> {
     Ok((
         ComponentOutput {
             command: "component.list".to_string(),
-            components,
+            entities: components,
             ..Default::default()
         },
         0,
@@ -556,9 +545,12 @@ fn projects(id: &str) -> CmdResult<ComponentOutput> {
     Ok((
         ComponentOutput {
             command: "component.projects".to_string(),
-            component_id: Some(id.to_string()),
-            project_ids: Some(project_ids),
-            projects: Some(projects_list),
+            id: Some(id.to_string()),
+            extra: ComponentExtra {
+                project_ids: Some(project_ids),
+                projects: Some(projects_list),
+                ..Default::default()
+            },
             ..Default::default()
         },
         0,
@@ -575,8 +567,11 @@ fn shared(id: Option<&str>) -> CmdResult<ComponentOutput> {
         Ok((
             ComponentOutput {
                 command: "component.shared".to_string(),
-                component_id: Some(component_id.to_string()),
-                shared: Some(shared_map),
+                id: Some(component_id.to_string()),
+                extra: ComponentExtra {
+                    shared: Some(shared_map),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             0,
@@ -588,7 +583,10 @@ fn shared(id: Option<&str>) -> CmdResult<ComponentOutput> {
         Ok((
             ComponentOutput {
                 command: "component.shared".to_string(),
-                shared: Some(shared_map),
+                extra: ComponentExtra {
+                    shared: Some(shared_map),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             0,

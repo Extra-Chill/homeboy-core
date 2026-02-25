@@ -152,3 +152,59 @@ pub struct BulkSummary {
     pub succeeded: usize,
     pub failed: usize,
 }
+
+// ============================================================================
+// Entity CRUD Output (generic for all entity commands)
+// ============================================================================
+
+/// Default extras type for entities with no extra fields.
+#[derive(Debug, Default, Serialize)]
+pub struct NoExtra;
+
+/// Generic output for standard entity CRUD commands.
+///
+/// `T` is the entity type (Component, Server, Project, Fleet).
+/// `E` is an optional extras struct for entity-specific fields, flattened
+/// into the output JSON. Use `NoExtra` (the default) when no extras are needed.
+///
+/// Field naming is generic (`id`, `entity`, `entities`) rather than
+/// entity-specific. Consumers use the `command` field to determine context.
+#[derive(Debug, Serialize)]
+pub struct EntityCrudOutput<T: Serialize, E: Serialize + Default = NoExtra> {
+    pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity: Option<T>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<T>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub updated_fields: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deleted: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import: Option<BatchResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch: Option<BatchResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(flatten)]
+    pub extra: E,
+}
+
+impl<T: Serialize, E: Serialize + Default> Default for EntityCrudOutput<T, E> {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            id: None,
+            entity: None,
+            entities: Vec::new(),
+            updated_fields: Vec::new(),
+            deleted: Vec::new(),
+            import: None,
+            batch: None,
+            hint: None,
+            extra: E::default(),
+        }
+    }
+}

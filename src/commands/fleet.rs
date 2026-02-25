@@ -6,6 +6,7 @@ use homeboy::deploy::{self, DeployConfig};
 use homeboy::fleet::{self, Fleet};
 use homeboy::project::{self, Project};
 use homeboy::version;
+use homeboy::EntityCrudOutput;
 
 use super::{CmdResult, DynamicSetArgs};
 
@@ -109,15 +110,9 @@ enum FleetCommand {
     },
 }
 
-#[derive(Default, Serialize)]
-pub struct FleetOutput {
-    pub command: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fleet_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fleet: Option<Fleet>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fleets: Option<Vec<Fleet>>,
+/// Entity-specific fields for fleet commands.
+#[derive(Debug, Default, Serialize)]
+pub struct FleetExtra {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projects: Option<Vec<Project>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -128,12 +123,11 @@ pub struct FleetOutput {
     pub check: Option<Vec<FleetProjectCheck>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<FleetCheckSummary>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub updated_fields: Vec<String>,
-    // sync field removed — fleet sync deprecated (see #101)
 }
 
-#[derive(Default, Serialize)]
+pub type FleetOutput = EntityCrudOutput<Fleet, FleetExtra>;
+
+#[derive(Debug, Default, Serialize)]
 pub struct FleetProjectCheck {
     pub project_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,7 +138,7 @@ pub struct FleetProjectCheck {
     pub components: Vec<FleetComponentCheck>,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct FleetComponentCheck {
     pub component_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -154,7 +148,7 @@ pub struct FleetComponentCheck {
     pub status: String,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct FleetCheckSummary {
     pub total_projects: u32,
     pub projects_checked: u32,
@@ -164,7 +158,7 @@ pub struct FleetCheckSummary {
     pub components_unknown: u32,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct FleetProjectStatus {
     pub project_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,7 +166,7 @@ pub struct FleetProjectStatus {
     pub components: Vec<FleetComponentStatus>,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct FleetComponentStatus {
     pub component_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -227,8 +221,8 @@ fn create(
         homeboy::CreateOutput::Single(result) => Ok((
             FleetOutput {
                 command: "fleet.create".to_string(),
-                fleet_id: Some(result.id),
-                fleet: Some(result.entity),
+                id: Some(result.id),
+                entity: Some(result.entity),
                 ..Default::default()
             },
             0,
@@ -245,8 +239,8 @@ fn show(id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.show".to_string(),
-            fleet_id: Some(id.to_string()),
-            fleet: Some(fl),
+            id: Some(id.to_string()),
+            entity: Some(fl),
             ..Default::default()
         },
         0,
@@ -285,8 +279,8 @@ fn set(args: DynamicSetArgs) -> CmdResult<FleetOutput> {
             Ok((
                 FleetOutput {
                     command: "fleet.set".to_string(),
-                    fleet_id: Some(result.id),
-                    fleet: Some(fl),
+                    id: Some(result.id),
+                    entity: Some(fl),
                     updated_fields: result.updated_fields,
                     ..Default::default()
                 },
@@ -305,7 +299,8 @@ fn delete(id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.delete".to_string(),
-            fleet_id: Some(id.to_string()),
+            id: Some(id.to_string()),
+            deleted: vec![id.to_string()],
             ..Default::default()
         },
         0,
@@ -318,7 +313,7 @@ fn list() -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.list".to_string(),
-            fleets: Some(fleets),
+            entities: fleets,
             ..Default::default()
         },
         0,
@@ -331,8 +326,8 @@ fn add(fleet_id: &str, project_id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.add".to_string(),
-            fleet_id: Some(fleet_id.to_string()),
-            fleet: Some(fl),
+            id: Some(fleet_id.to_string()),
+            entity: Some(fl),
             updated_fields: vec!["project_ids".to_string()],
             ..Default::default()
         },
@@ -346,8 +341,8 @@ fn remove(fleet_id: &str, project_id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.remove".to_string(),
-            fleet_id: Some(fleet_id.to_string()),
-            fleet: Some(fl),
+            id: Some(fleet_id.to_string()),
+            entity: Some(fl),
             updated_fields: vec!["project_ids".to_string()],
             ..Default::default()
         },
@@ -361,8 +356,11 @@ fn projects(id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.projects".to_string(),
-            fleet_id: Some(id.to_string()),
-            projects: Some(projects),
+            id: Some(id.to_string()),
+            extra: FleetExtra {
+                projects: Some(projects),
+                ..Default::default()
+            },
             ..Default::default()
         },
         0,
@@ -375,8 +373,11 @@ fn components(id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.components".to_string(),
-            fleet_id: Some(id.to_string()),
-            components: Some(components),
+            id: Some(id.to_string()),
+            extra: FleetExtra {
+                components: Some(components),
+                ..Default::default()
+            },
             ..Default::default()
         },
         0,
@@ -416,8 +417,11 @@ fn status(id: &str) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.status".to_string(),
-            fleet_id: Some(id.to_string()),
-            status: Some(project_statuses),
+            id: Some(id.to_string()),
+            extra: FleetExtra {
+                status: Some(project_statuses),
+                ..Default::default()
+            },
             ..Default::default()
         },
         0,
@@ -516,9 +520,12 @@ fn check(id: &str, only_outdated: bool) -> CmdResult<FleetOutput> {
     Ok((
         FleetOutput {
             command: "fleet.check".to_string(),
-            fleet_id: Some(id.to_string()),
-            check: Some(project_checks),
-            summary: Some(summary),
+            id: Some(id.to_string()),
+            extra: FleetExtra {
+                check: Some(project_checks),
+                summary: Some(summary),
+                ..Default::default()
+            },
             ..Default::default()
         },
         exit_code,

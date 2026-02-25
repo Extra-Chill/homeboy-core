@@ -21,7 +21,6 @@ pub mod output;
 pub mod project;
 pub mod release;
 
-
 pub mod server;
 pub mod ssh;
 pub mod upgrade;
@@ -40,6 +39,6 @@ pub mod defaults;
 // Re-export common types for convenience
 pub use error::{Error, ErrorCode, Result};
 pub use output::{
-    BatchResult, BatchResultItem, BulkResult, BulkSummary, CreateOutput, CreateResult, ItemOutcome,
-    MergeOutput, MergeResult, RemoveResult,
+    BatchResult, BatchResultItem, BulkResult, BulkSummary, CreateOutput, CreateResult,
+    EntityCrudOutput, ItemOutcome, MergeOutput, MergeResult, NoExtra, RemoveResult,
 };
