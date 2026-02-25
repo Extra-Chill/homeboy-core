@@ -30,6 +30,9 @@ pub enum LogsCommand {
         /// Follow log output (like tail -f)
         #[arg(short, long)]
         follow: bool,
+        /// Execute locally instead of via SSH (for when running on the target server)
+        #[arg(long)]
+        local: bool,
     },
     /// Clear log file contents
     Clear {
@@ -37,6 +40,9 @@ pub enum LogsCommand {
         project_id: String,
         /// Log file path
         path: String,
+        /// Execute locally instead of via SSH
+        #[arg(long)]
+        local: bool,
     },
     /// Search log file for pattern
     Search {
@@ -55,6 +61,9 @@ pub enum LogsCommand {
         /// Lines of context around matches
         #[arg(short = 'C', long)]
         context: Option<u32>,
+        /// Execute locally instead of via SSH
+        #[arg(long)]
+        local: bool,
     },
 }
 
@@ -70,14 +79,20 @@ pub fn run(args: LogsArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<L
             path: Some(path),
             lines,
             follow,
-        } => show(&project_id, &path, lines, follow),
+            local,
+        } => show(&project_id, &path, lines, follow, local),
         LogsCommand::Show {
             project_id,
             path: None,
             lines,
             follow,
-        } => show_pinned(&project_id, lines, follow),
-        LogsCommand::Clear { project_id, path } => clear(&project_id, &path),
+            local,
+        } => show_pinned(&project_id, lines, follow, local),
+        LogsCommand::Clear {
+            project_id,
+            path,
+            local,
+        } => clear(&project_id, &path, local),
         LogsCommand::Search {
             project_id,
             path,
@@ -85,7 +100,16 @@ pub fn run(args: LogsArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<L
             ignore_case,
             lines,
             context,
-        } => search(&project_id, &path, &pattern, ignore_case, lines, context),
+            local,
+        } => search(
+            &project_id,
+            &path,
+            &pattern,
+            ignore_case,
+            lines,
+            context,
+            local,
+        ),
     }
 }
 
@@ -123,9 +147,15 @@ fn list(project_id: &str) -> CmdResult<LogsOutput> {
     ))
 }
 
-fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<LogsOutput> {
+fn show(
+    project_id: &str,
+    path: &str,
+    lines: u32,
+    follow: bool,
+    local: bool,
+) -> CmdResult<LogsOutput> {
     if follow {
-        let code = logs::follow(project_id, path)?;
+        let code = logs::follow(project_id, path, local)?;
 
         Ok((
             LogsOutput {
@@ -140,7 +170,7 @@ fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<Log
             code,
         ))
     } else {
-        let content = logs::show(project_id, path, lines)?;
+        let content = logs::show(project_id, path, lines, local)?;
 
         Ok((
             LogsOutput {
@@ -157,7 +187,7 @@ fn show(project_id: &str, path: &str, lines: u32, follow: bool) -> CmdResult<Log
     }
 }
 
-fn show_pinned(project_id: &str, lines: u32, follow: bool) -> CmdResult<LogsOutput> {
+fn show_pinned(project_id: &str, lines: u32, follow: bool, local: bool) -> CmdResult<LogsOutput> {
     if follow {
         return Err(homeboy::Error::validation_invalid_argument(
             "follow",
@@ -170,7 +200,7 @@ fn show_pinned(project_id: &str, lines: u32, follow: bool) -> CmdResult<LogsOutp
         ));
     }
 
-    let content = logs::show_pinned(project_id, lines)?;
+    let content = logs::show_pinned(project_id, lines, local)?;
 
     Ok((
         LogsOutput {
@@ -186,8 +216,8 @@ fn show_pinned(project_id: &str, lines: u32, follow: bool) -> CmdResult<LogsOutp
     ))
 }
 
-fn clear(project_id: &str, path: &str) -> CmdResult<LogsOutput> {
-    let cleared_path = logs::clear(project_id, path)?;
+fn clear(project_id: &str, path: &str, local: bool) -> CmdResult<LogsOutput> {
+    let cleared_path = logs::clear(project_id, path, local)?;
 
     Ok((
         LogsOutput {
@@ -210,8 +240,17 @@ fn search(
     ignore_case: bool,
     lines: Option<u32>,
     context: Option<u32>,
+    local: bool,
 ) -> CmdResult<LogsOutput> {
-    let result = logs::search(project_id, path, pattern, ignore_case, lines, context)?;
+    let result = logs::search(
+        project_id,
+        path,
+        pattern,
+        ignore_case,
+        lines,
+        context,
+        local,
+    )?;
 
     Ok((
         LogsOutput {

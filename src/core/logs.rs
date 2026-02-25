@@ -2,12 +2,14 @@
 //!
 //! Provides viewing, following, and clearing of log files.
 //! Routes to local or SSH execution based on project configuration.
+//! Pass `local: true` to bypass SSH and execute commands directly on the
+//! current machine (useful when homeboy runs on the target server itself).
 
-use crate::utils::base_path;
 use crate::context::require_project_base_path;
-use crate::error::{Error, Result};
 use crate::engine::executor::{execute_for_project, execute_for_project_interactive};
-use crate::project;
+use crate::error::{Error, Result};
+use crate::project::{self, Project};
+use crate::utils::base_path;
 use crate::utils::shell;
 use serde::Serialize;
 
@@ -57,6 +59,15 @@ pub struct PinnedLogsContent {
     pub total_logs: usize,
 }
 
+/// Load a project, optionally forcing local execution by clearing server_id.
+fn load_project(project_id: &str, local: bool) -> Result<Project> {
+    let mut project = project::load(project_id)?;
+    if local {
+        project.server_id = None;
+    }
+    Ok(project)
+}
+
 /// Lists pinned log files for a project.
 pub fn list(project_id: &str) -> Result<Vec<LogEntry>> {
     let project = project::load(project_id)?;
@@ -74,8 +85,8 @@ pub fn list(project_id: &str) -> Result<Vec<LogEntry>> {
 }
 
 /// Shows all pinned logs for a project.
-pub fn show_pinned(project_id: &str, lines: u32) -> Result<PinnedLogsContent> {
-    let project = project::load(project_id)?;
+pub fn show_pinned(project_id: &str, lines: u32, local: bool) -> Result<PinnedLogsContent> {
+    let project = load_project(project_id, local)?;
 
     if project.remote_logs.pinned_logs.is_empty() {
         return Err(Error::validation_invalid_argument(
@@ -119,8 +130,8 @@ pub fn show_pinned(project_id: &str, lines: u32) -> Result<PinnedLogsContent> {
 }
 
 /// Shows the last N lines of a log file.
-pub fn show(project_id: &str, path: &str, lines: u32) -> Result<LogContent> {
-    let project = project::load(project_id)?;
+pub fn show(project_id: &str, path: &str, lines: u32, local: bool) -> Result<LogContent> {
+    let project = load_project(project_id, local)?;
     let base_path = require_project_base_path(project_id, &project)?;
     let full_path = base_path::join_remote_path(Some(&base_path), path)?;
 
@@ -138,8 +149,8 @@ pub fn show(project_id: &str, path: &str, lines: u32) -> Result<LogContent> {
 ///
 /// Note: This requires an interactive terminal. The caller is responsible
 /// for ensuring terminal availability before calling.
-pub fn follow(project_id: &str, path: &str) -> Result<i32> {
-    let project = project::load(project_id)?;
+pub fn follow(project_id: &str, path: &str, local: bool) -> Result<i32> {
+    let project = load_project(project_id, local)?;
     let base_path = require_project_base_path(project_id, &project)?;
     let full_path = base_path::join_remote_path(Some(&base_path), path)?;
 
@@ -148,8 +159,8 @@ pub fn follow(project_id: &str, path: &str) -> Result<i32> {
 }
 
 /// Clears the contents of a log file. Returns the full path that was cleared.
-pub fn clear(project_id: &str, path: &str) -> Result<String> {
-    let project = project::load(project_id)?;
+pub fn clear(project_id: &str, path: &str, local: bool) -> Result<String> {
+    let project = load_project(project_id, local)?;
     let base_path = require_project_base_path(project_id, &project)?;
     let full_path = base_path::join_remote_path(Some(&base_path), path)?;
 
@@ -167,8 +178,9 @@ pub fn search(
     case_insensitive: bool,
     lines: Option<u32>,
     context: Option<u32>,
+    local: bool,
 ) -> Result<LogSearchResult> {
-    let project = project::load(project_id)?;
+    let project = load_project(project_id, local)?;
     let base_path = require_project_base_path(project_id, &project)?;
     let full_path = base_path::join_remote_path(Some(&base_path), path)?;
 
