@@ -26,10 +26,6 @@ enum ComponentCommand {
         #[arg(long)]
         skip_existing: bool,
 
-        /// Create from a repo containing homeboy.json (reads portable config)
-        #[arg(long, conflicts_with = "json")]
-        from_repo: Option<String>,
-
         /// Absolute path to local source directory (ID derived from directory name)
         #[arg(long)]
         local_path: Option<String>,
@@ -161,7 +157,6 @@ pub fn run(
         ComponentCommand::Create {
             json,
             skip_existing,
-            from_repo,
             local_path,
             remote_path,
             build_artifact,
@@ -174,29 +169,16 @@ pub fn run(
         } => {
             let json_spec = if let Some(spec) = json {
                 spec
-            } else if let Some(ref repo_path) = from_repo {
-                // --from-repo: read homeboy.json from repo, merge with CLI overrides
-                build_from_repo_spec(
-                    repo_path,
-                    local_path.as_deref(),
-                    remote_path.as_deref(),
-                    build_artifact.as_deref(),
-                    &version_targets,
-                    version_targets_json.as_deref(),
-                    build_command.as_deref(),
-                    extract_command.as_deref(),
-                    changelog_target.as_deref(),
-                    &modules,
-                )?
             } else {
                 let local_path = local_path.ok_or_else(|| {
                     homeboy::Error::validation_invalid_argument(
                         "local_path",
-                        "Missing required argument: --local-path or --from-repo",
+                        "Missing required argument: --local-path",
                         None,
                         Some(vec![
-                            "Create from flags: homeboy component create --local-path <path> --remote-path <path>".to_string(),
-                            "Create from repo config: homeboy component create --from-repo <path>".to_string(),
+                            "Create from flags: homeboy component create --local-path <path>".to_string(),
+                            "Create from JSON: homeboy component create --json '{...}'".to_string(),
+                            "Tip: portable config in homeboy.json is applied automatically at load time".to_string(),
                         ]),
                     )
                 })?;
@@ -676,119 +658,4 @@ mod tests {
     }
 }
 
-/// Build a component JSON spec from a repo's `homeboy.json` with CLI overrides.
-///
-/// Reads the portable config from `{repo_path}/homeboy.json`, injects machine-specific
-/// fields (`id` from dir name, `local_path` from repo_path), and layers CLI flag
-/// overrides on top.
-#[allow(clippy::too_many_arguments)]
-fn build_from_repo_spec(
-    repo_path: &str,
-    local_path_override: Option<&str>,
-    remote_path_override: Option<&str>,
-    build_artifact_override: Option<&str>,
-    version_targets: &[String],
-    version_targets_json: Option<&str>,
-    build_command_override: Option<&str>,
-    extract_command_override: Option<&str>,
-    changelog_target_override: Option<&str>,
-    modules_override: &[String],
-) -> Result<String, homeboy::Error> {
-    let expanded = shellexpand::tilde(repo_path);
-    let repo = Path::new(expanded.as_ref());
 
-    if !repo.is_dir() {
-        return Err(homeboy::Error::validation_invalid_argument(
-            "from_repo",
-            format!("Directory not found: {}", repo_path),
-            Some(repo_path.to_string()),
-            None,
-        ));
-    }
-
-    // Read homeboy.json from repo root
-    let mut config = component::read_portable_config(repo)?.unwrap_or_else(|| {
-        serde_json::json!({})
-    });
-
-    let map = config
-        .as_object_mut()
-        .ok_or_else(|| {
-            homeboy::Error::validation_invalid_json(
-                serde_json::from_str::<serde_json::Value>("x").unwrap_err(),
-                Some("homeboy.json must be a JSON object".to_string()),
-                None,
-            )
-        })?;
-
-    // Derive ID from directory name
-    let dir_name = repo
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| {
-            homeboy::Error::validation_invalid_argument(
-                "from_repo",
-                "Could not derive component ID from repo path",
-                Some(repo_path.to_string()),
-                None,
-            )
-        })?;
-    let id = component::slugify_id(dir_name)?;
-    map.insert("id".to_string(), serde_json::json!(id));
-
-    // local_path: use --local-path override or the repo path itself
-    let local_path = local_path_override.unwrap_or(repo_path);
-    map.insert("local_path".to_string(), serde_json::json!(local_path));
-
-    // Apply CLI overrides (only if provided — don't clobber homeboy.json values)
-    if let Some(v) = remote_path_override {
-        map.insert("remote_path".to_string(), serde_json::json!(v));
-    }
-    if let Some(v) = build_artifact_override {
-        map.insert("build_artifact".to_string(), serde_json::json!(v));
-    }
-    if let Some(v) = build_command_override {
-        map.insert("build_command".to_string(), serde_json::json!(v));
-    }
-    if let Some(v) = extract_command_override {
-        map.insert("extract_command".to_string(), serde_json::json!(v));
-    }
-    if let Some(v) = changelog_target_override {
-        map.insert("changelog_target".to_string(), serde_json::json!(v));
-    }
-
-    // Version targets from CLI override homeboy.json
-    if let Some(json_spec) = version_targets_json {
-        let raw = homeboy::config::read_json_spec_to_string(json_spec)?;
-        let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-            homeboy::Error::validation_invalid_json(
-                e,
-                Some("parse version targets JSON".to_string()),
-                Some(raw.chars().take(200).collect::<String>()),
-            )
-        })?;
-        map.insert("version_targets".to_string(), parsed);
-    } else if !version_targets.is_empty() {
-        let targets = component::parse_version_targets(version_targets)?;
-        let targets_value = serde_json::to_value(targets).map_err(|e| {
-            homeboy::Error::internal_unexpected(format!("Failed to serialize: {}", e))
-        })?;
-        map.insert("version_targets".to_string(), targets_value);
-    }
-
-    // Module overrides from CLI
-    if !modules_override.is_empty() {
-        let mut module_map = serde_json::Map::new();
-        for module_id in modules_override {
-            module_map.insert(module_id.clone(), serde_json::json!({}));
-        }
-        map.insert("modules".to_string(), serde_json::Value::Object(module_map));
-    }
-
-    // Ensure remote_path exists (required field, default to empty string)
-    if !map.contains_key("remote_path") {
-        map.insert("remote_path".to_string(), serde_json::json!(""));
-    }
-
-    homeboy::config::to_json_string(&config)
-}
