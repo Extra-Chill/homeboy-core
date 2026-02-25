@@ -5,6 +5,7 @@ pub mod api;
 pub mod auth;
 pub mod build;
 pub mod changelog;
+pub mod cleanup;
 pub mod cli_tool;
 pub mod component;
 pub mod context;
