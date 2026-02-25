@@ -98,20 +98,28 @@ pub fn resolve_build_command(component: &Component) -> Result<ResolvedBuildComma
     // Check if any module provides build (makes build_command optional)
     if module::module_provides_build(component) {
         // Module provides build config but no matching scripts found
-        Err(Error::other(format!(
-            "Component '{}' links a module with build support, but no build script was found.\n\
-             Expected: module's bundled script OR local script matching module pattern.\n\
-             Check module installation or add a local build.sh to the component directory.",
-            component.id
-        )))
+        Err(Error::validation_invalid_argument(
+            "buildCommand",
+            format!(
+                "Component '{}' links a module with build support, but no build script was found.\n\
+                 Expected: module's bundled script OR local script matching module pattern.\n\
+                 Check module installation or add a local build.sh to the component directory.",
+                component.id
+            ),
+            Some(component.id.clone()),
+            None,
+        ))
     } else {
         // No modules with build support - explicit buildCommand required
-        Err(Error::other(format!(
-            "Component '{}' has no build configuration. Either:\n\
-             - Configure buildCommand: homeboy component set {} --json '{{\"buildCommand\": \"<command>\"}}'\n\
-             - Link a module with build support: homeboy component set {} --json '{{\"modules\": {{\"wordpress\": {{}}}}}}'",
-            component.id, component.id, component.id
-        )))
+        Err(Error::validation_invalid_argument(
+            "buildCommand",
+            format!("Component '{}' has no build configuration", component.id),
+            Some(component.id.clone()),
+            Some(vec![
+                format!("Configure buildCommand: homeboy component set {} --json '{{\"buildCommand\": \"<command>\"}}'", component.id),
+                format!("Link a module with build support: homeboy component set {} --json '{{\"modules\": {{\"wordpress\": {{}}}}}}'", component.id),
+            ]),
+        ))
     }
 }
 

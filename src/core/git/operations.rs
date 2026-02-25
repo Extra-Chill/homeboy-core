@@ -407,7 +407,7 @@ fn resolve_changelog_info(
 pub fn status(component_id: Option<&str>) -> Result<GitOutput> {
     let (id, path) = resolve_target(component_id)?;
     let output = execute_git(&path, &["status", "--porcelain=v1"])
-        .map_err(|e| Error::other(e.to_string()))?;
+        .map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "status", output))
 }
 
@@ -487,7 +487,7 @@ pub fn commit(
 
     // Check for changes - behavior differs based on staged_only
     let status_output = execute_git(&path, &["status", "--porcelain=v1"])
-        .map_err(|e| Error::other(e.to_string()))?;
+        .map_err(|e| Error::git_command_failed(e.to_string()))?;
     let status_str = String::from_utf8_lossy(&status_output.stdout);
 
     if options.staged_only {
@@ -536,7 +536,7 @@ pub fn commit(
                 let mut args = vec!["add", "--"];
                 args.extend(files.iter().map(|s| s.as_str()));
                 let add_output =
-                    execute_git(&path, &args).map_err(|e| Error::other(e.to_string()))?;
+                    execute_git(&path, &args).map_err(|e| Error::git_command_failed(e.to_string()))?;
                 if !add_output.status.success() {
                     return Ok(GitOutput::from_output(id, path, "commit", add_output));
                 }
@@ -544,7 +544,7 @@ pub fn commit(
             // Exclude specific files: stage all, then unstage excluded
             (None, Some(excluded)) => {
                 let add_output =
-                    execute_git(&path, &["add", "."]).map_err(|e| Error::other(e.to_string()))?;
+                    execute_git(&path, &["add", "."]).map_err(|e| Error::git_command_failed(e.to_string()))?;
                 if !add_output.status.success() {
                     return Ok(GitOutput::from_output(id, path, "commit", add_output));
                 }
@@ -553,7 +553,7 @@ pub fn commit(
                 let mut reset_args = vec!["reset", "--"];
                 reset_args.extend(excluded.iter().map(|s| s.as_str()));
                 let reset_output =
-                    execute_git(&path, &reset_args).map_err(|e| Error::other(e.to_string()))?;
+                    execute_git(&path, &reset_args).map_err(|e| Error::git_command_failed(e.to_string()))?;
                 if !reset_output.status.success() {
                     return Ok(GitOutput::from_output(id, path, "commit", reset_output));
                 }
@@ -561,7 +561,7 @@ pub fn commit(
             // Default: stage all
             (None, None) => {
                 let add_output =
-                    execute_git(&path, &["add", "."]).map_err(|e| Error::other(e.to_string()))?;
+                    execute_git(&path, &["add", "."]).map_err(|e| Error::git_command_failed(e.to_string()))?;
                 if !add_output.status.success() {
                     return Ok(GitOutput::from_output(id, path, "commit", add_output));
                 }
@@ -574,7 +574,7 @@ pub fn commit(
     } else {
         vec!["commit", "-m", msg]
     };
-    let output = execute_git(&path, &args).map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &args).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "commit", output))
 }
 
@@ -704,7 +704,7 @@ pub fn push(component_id: Option<&str>, tags: bool) -> Result<GitOutput> {
     } else {
         vec!["push"]
     };
-    let output = execute_git(&path, &args).map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &args).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "push", output))
 }
 
@@ -727,7 +727,7 @@ pub fn push_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
 /// Pull remote changes for a component.
 pub fn pull(component_id: Option<&str>) -> Result<GitOutput> {
     let (id, path) = resolve_target(component_id)?;
-    let output = execute_git(&path, &["pull"]).map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &["pull"]).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "pull", output))
 }
 
@@ -760,7 +760,7 @@ pub fn tag(
         Some(msg) => vec!["tag", "-a", name, "-m", msg],
         None => vec!["tag", name],
     };
-    let output = execute_git(&path, &args).map_err(|e| Error::other(e.to_string()))?;
+    let output = execute_git(&path, &args).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "tag", output))
 }
 

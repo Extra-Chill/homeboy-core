@@ -108,7 +108,7 @@ pub fn read_stdin() -> Result<String> {
     let mut content = String::new();
     io::stdin()
         .read_to_string(&mut content)
-        .map_err(|e| Error::other(format!("Failed to read stdin: {}", e)))?;
+        .map_err(|e| Error::internal_io(format!("Failed to read stdin: {}", e), Some("read stdin".to_string())))?;
 
     if content.ends_with('\n') {
         content.pop();
@@ -322,8 +322,11 @@ pub fn find(
         match t {
             "f" | "d" | "l" => cmd.push_str(&format!(" -type {}", t)),
             _ => {
-                return Err(Error::other(
-                    "Invalid file type. Use 'f', 'd', or 'l'.".to_string(),
+                return Err(Error::validation_invalid_argument(
+                    "file_type",
+                    "Invalid file type. Use 'f', 'd', or 'l'.",
+                    Some(t.to_string()),
+                    Some(vec!["f".to_string(), "d".to_string(), "l".to_string()]),
                 ))
             }
         }
@@ -363,7 +366,7 @@ pub fn grep(
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     if pattern.trim().is_empty() {
-        return Err(Error::other("Search pattern required".to_string()));
+        return Err(Error::validation_missing_argument(vec!["pattern".to_string()]));
     }
 
     // Check if path is a file or directory
@@ -882,7 +885,7 @@ pub fn download(
     if let Some(parent) = local.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| Error::other(format!("Failed to create local directory: {}", e)))?;
+                .map_err(|e| Error::internal_io(format!("Failed to create local directory: {}", e), Some("create local directory".to_string())))?;
         }
     }
 

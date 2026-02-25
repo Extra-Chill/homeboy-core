@@ -128,6 +128,7 @@ fn exit_code_for_error(code: ErrorCode) -> i32 {
         | ErrorCode::ComponentNotFound
         | ErrorCode::FleetNotFound
         | ErrorCode::ModuleNotFound
+        | ErrorCode::DocsTopicNotFound
         | ErrorCode::ProjectNoActive => 4,
 
         ErrorCode::SshServerInvalid

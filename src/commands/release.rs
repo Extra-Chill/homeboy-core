@@ -335,7 +335,7 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
             },
         )?;
         if !commit_result.success {
-            return Err(homeboy::Error::other(format!(
+            return Err(homeboy::Error::git_command_failed(format!(
                 "Failed to commit: {}",
                 commit_result.stderr
             )));
@@ -352,7 +352,7 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
             Some(&format!("Release {}", tag_name)),
         )?;
         if !tag_result.success {
-            return Err(homeboy::Error::other(format!(
+            return Err(homeboy::Error::git_command_failed(format!(
                 "Failed to create tag: {}",
                 tag_result.stderr
             )));
@@ -365,7 +365,7 @@ fn run_recover(component_id: &str) -> CmdResult<ReleaseOutput> {
         eprintln!("[recover] Pushing to remote...");
         let push_result = homeboy::git::push(Some(component_id), true)?;
         if !push_result.success {
-            return Err(homeboy::Error::other(format!(
+            return Err(homeboy::Error::git_command_failed(format!(
                 "Failed to push: {}",
                 push_result.stderr
             )));

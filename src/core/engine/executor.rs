@@ -124,7 +124,7 @@ fn try_execute_direct(
 ) -> Result<CommandOutput> {
     // Check if template requires shell features
     if requires_shell_execution(&cli_config.command_template) {
-        return Err(Error::other(
+        return Err(Error::internal_unexpected(
             "Template requires shell execution".to_string(),
         ));
     }

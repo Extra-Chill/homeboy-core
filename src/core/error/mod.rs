@@ -27,6 +27,7 @@ pub enum ErrorCode {
     ComponentNotFound,
     FleetNotFound,
     ModuleNotFound,
+    DocsTopicNotFound,
 
     SshServerInvalid,
     SshIdentityFileNotFound,
@@ -66,6 +67,7 @@ impl ErrorCode {
             ErrorCode::ComponentNotFound => "component.not_found",
             ErrorCode::FleetNotFound => "fleet.not_found",
             ErrorCode::ModuleNotFound => "module.not_found",
+            ErrorCode::DocsTopicNotFound => "docs.topic_not_found",
 
             ErrorCode::SshServerInvalid => "ssh.server_invalid",
             ErrorCode::SshIdentityFileNotFound => "ssh.identity_file_not_found",
@@ -351,7 +353,7 @@ impl Error {
 
     pub fn docs_topic_not_found(topic: impl Into<String>) -> Self {
         Self::new(
-            ErrorCode::ConfigMissingKey,
+            ErrorCode::DocsTopicNotFound,
             "Documentation topic not found",
             serde_json::json!({ "topic": topic.into() }),
         )
@@ -520,10 +522,6 @@ impl Error {
             error,
             Value::Object(serde_json::Map::new()),
         )
-    }
-
-    pub fn other(message: impl Into<String>) -> Self {
-        Self::internal_unexpected(message)
     }
 
     pub fn config(message: impl Into<String>) -> Self {

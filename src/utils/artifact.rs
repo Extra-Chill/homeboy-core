@@ -15,17 +15,32 @@ pub fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
         if path.exists() {
             return Ok(path);
         }
-        return Err(Error::other(format!("Artifact not found: {}", pattern)));
+        return Err(Error::validation_invalid_argument(
+            "build_artifact",
+            format!("Artifact not found: {}", pattern),
+            Some(pattern.to_string()),
+            None,
+        ));
     }
 
     let entries: Vec<PathBuf> = glob::glob(pattern)
-        .map_err(|e| Error::other(format!("Invalid glob pattern '{}': {}", pattern, e)))?
+        .map_err(|e| Error::validation_invalid_argument(
+            "build_artifact",
+            format!("Invalid glob pattern '{}': {}", pattern, e),
+            Some(pattern.to_string()),
+            None,
+        ))?
         .filter_map(|entry| entry.ok())
         .filter(|p| p.is_file())
         .collect();
 
     if entries.is_empty() {
-        return Err(Error::other(format!("No files match pattern: {}", pattern)));
+        return Err(Error::validation_invalid_argument(
+            "build_artifact",
+            format!("No files match pattern: {}", pattern),
+            Some(pattern.to_string()),
+            None,
+        ));
     }
 
     let newest = entries
@@ -37,7 +52,12 @@ pub fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
             eprintln!("[deploy] Resolved '{}' -> '{}'", pattern, path.display());
             Ok(path)
         }
-        None => Err(Error::other(format!("No files match pattern: {}", pattern))),
+        None => Err(Error::validation_invalid_argument(
+            "build_artifact",
+            format!("No files match pattern: {}", pattern),
+            Some(pattern.to_string()),
+            None,
+        )),
     }
 }
 
@@ -69,10 +89,13 @@ mod tests {
     fn test_literal_path_not_exists() {
         let result = resolve_artifact_path("/nonexistent/path/artifact.zip");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Artifact not found"));
+        let err = result.unwrap_err();
+        let details = err.details.to_string();
+        assert!(
+            details.contains("Artifact not found"),
+            "Expected error details to contain 'Artifact not found', got: {}",
+            details
+        );
     }
 
     #[test]
@@ -115,10 +138,13 @@ mod tests {
         let pattern = dir.path().join("nonexistent-*.zip");
         let result = resolve_artifact_path(pattern.to_str().unwrap());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No files match pattern"));
+        let err = result.unwrap_err();
+        let details = err.details.to_string();
+        assert!(
+            details.contains("No files match pattern"),
+            "Expected error details to contain 'No files match pattern', got: {}",
+            details
+        );
     }
 
     #[test]

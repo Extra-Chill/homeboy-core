@@ -628,8 +628,11 @@ pub fn deploy_components(
 ) -> Result<DeployOrchestrationResult> {
     let all_components = load_project_components(&project.component_ids)?;
     if all_components.is_empty() {
-        return Err(Error::other(
-            "No components configured for project".to_string(),
+        return Err(Error::validation_invalid_argument(
+            "componentIds",
+            "No components configured for project",
+            None,
+            None,
         ));
     }
 
@@ -740,12 +743,15 @@ pub fn deploy_components(
                 .iter()
                 .map(|c| c.id.as_str())
                 .collect();
-            return Err(Error::other(format!(
-                "Components have uncommitted changes: {}",
-                ids.join(", ")
-            ))
-            .with_hint("Commit your changes before deploying to ensure deployed code is tracked")
-            .with_hint("Use --force to deploy anyway"));
+            return Err(Error::validation_invalid_argument(
+                "components",
+                format!("Components have uncommitted changes: {}", ids.join(", ")),
+                None,
+                Some(vec![
+                    "Commit your changes before deploying to ensure deployed code is tracked".to_string(),
+                    "Use --force to deploy anyway".to_string(),
+                ]),
+            ));
         }
     }
 
@@ -1226,9 +1232,9 @@ fn plan_components(
         return Ok(selected);
     }
 
-    Err(Error::other(
-        "No components specified. Use component IDs, --all, --outdated, or --check".to_string(),
-    ))
+    Err(Error::validation_missing_argument(vec![
+        "component IDs, --all, --outdated, or --check".to_string(),
+    ]))
 }
 
 /// Calculate component status based on local and remote versions.
