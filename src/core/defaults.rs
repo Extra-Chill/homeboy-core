@@ -309,8 +309,22 @@ pub fn load_defaults() -> Defaults {
 }
 
 /// Load the full homeboy.json config, falling back to defaults on any error.
+/// Warns to stderr if the file exists but fails to parse, so the user knows
+/// their config is being ignored rather than silently resetting to defaults.
 pub fn load_config() -> HomeboyConfig {
-    load_config_from_file().unwrap_or_default()
+    match load_config_from_file() {
+        Ok(config) => config,
+        Err(err) => {
+            // Only warn if the file actually exists — missing file is expected
+            if config_exists() {
+                eprintln!(
+                    "[config] Warning: failed to load homeboy.json ({}), using defaults",
+                    err.message
+                );
+            }
+            HomeboyConfig::default()
+        }
+    }
 }
 
 /// Attempt to load config from homeboy.json file.
@@ -349,7 +363,7 @@ pub fn save_config(config: &HomeboyConfig) -> crate::Result<()> {
         crate::Error::validation_invalid_json(e, Some("serialize homeboy.json".to_string()), None)
     })?;
 
-    io::write_file(&path, &content, &format!("write {}", path.display()))?;
+    io::write_file_atomic(&path, &content, &format!("write {}", path.display()))?;
 
     Ok(())
 }
