@@ -384,15 +384,9 @@ fn set(
     version_targets: Vec<String>,
     modules: Vec<String>,
 ) -> CmdResult<ComponentOutput> {
-    // Merge JSON sources: positional/--json/--base64 spec + dynamic flags
-    let spec = args.json_spec()?;
-    let extra = args.effective_extra();
-    let has_input = spec.is_some()
-        || !extra.is_empty()
-        || flags.has_any()
-        || !version_targets.is_empty()
-        || !modules.is_empty();
-    if !has_input {
+    // Check if there's any input at all
+    let has_dynamic = args.json_spec()?.is_some() || !args.effective_extra().is_empty();
+    if !has_dynamic && !flags.has_any() && version_targets.is_empty() && modules.is_empty() {
         return Err(homeboy::Error::validation_invalid_argument(
             "spec",
             "Provide a flag (e.g., --local-path), --json spec, --base64, --key value, --version-target, or --module",
@@ -401,11 +395,8 @@ fn set(
         ));
     }
 
-    let mut merged = if spec.is_some() || !extra.is_empty() {
-        super::merge_json_sources(spec.as_deref(), &extra)?
-    } else {
-        serde_json::Value::Object(serde_json::Map::new())
-    };
+    let mut merged = super::merge_dynamic_args(&args)?
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
 
     // Apply dedicated flags — these override JSON spec values for the same field.
     if let serde_json::Value::Object(ref mut obj) = merged {
@@ -413,7 +404,6 @@ fn set(
     }
 
     // Support --version-target flag like `component create`.
-    // If provided, it replaces any existing version_targets value in the merged spec.
     if !version_targets.is_empty() {
         let parsed = component::parse_version_targets(&version_targets)?;
         if let serde_json::Value::Object(ref mut obj) = merged {
@@ -439,18 +429,7 @@ fn set(
         }
     }
 
-    let json_string = serde_json::to_string(&merged).map_err(|e| {
-        homeboy::Error::internal_unexpected(format!("Failed to serialize merged JSON: {}", e))
-    })?;
-
-    // Auto-replace array fields: when `set` provides an array, the user
-    // intends to set the complete value, not append to it.
-    let mut replace_fields = args.replace.clone();
-    for field in homeboy::config::collect_array_fields(&merged) {
-        if !replace_fields.contains(&field) {
-            replace_fields.push(field);
-        }
-    }
+    let (json_string, replace_fields) = super::finalize_set_spec(&merged, &args.replace)?;
 
     match component::merge(args.id.as_deref(), &json_string, &replace_fields)? {
         homeboy::MergeOutput::Single(result) => {
