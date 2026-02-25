@@ -661,6 +661,13 @@ pub(crate) trait ConfigEntity: Serialize + DeserializeOwned {
     fn aliases(&self) -> &[String] {
         &[]
     }
+
+    /// Post-load hook called after deserializing from disk.
+    /// `stored_json` is the raw JSON string from the config file, allowing
+    /// implementations to determine which fields were explicitly set vs defaulted.
+    /// Override to apply runtime config layering (e.g., portable config overlay).
+    /// Default: no-op.
+    fn post_load(&mut self, _stored_json: &str) {}
 }
 
 pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
@@ -672,6 +679,7 @@ pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
             let content = local_files::local().read(&alias_path)?;
             let mut entity: T = from_str(&content)?;
             entity.set_id(real_id);
+            entity.post_load(&content);
             return Ok(entity);
         }
         let suggestions = find_similar_ids::<T>(id);
@@ -680,6 +688,7 @@ pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
     let content = local_files::local().read(&path)?;
     let mut entity: T = from_str(&content)?;
     entity.set_id(id.to_string());
+    entity.post_load(&content);
     Ok(entity)
 }
 

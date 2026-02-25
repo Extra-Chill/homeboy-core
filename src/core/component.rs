@@ -319,6 +319,33 @@ where
     Ok(opt.filter(|s| !s.is_empty()))
 }
 
+/// Fields that are machine-specific and must never come from portable config.
+/// These always come from the stored config (or are derived at runtime).
+const MACHINE_SPECIFIC_FIELDS: &[&str] = &["id", "aliases", "local_path", "remote_path"];
+
+/// Overlay portable config as defaults under stored config.
+///
+/// For each top-level key in `portable`: if that key is absent from `stored`,
+/// copy it into `stored`. Keys already present in `stored` are untouched.
+/// Machine-specific fields are always excluded from portable.
+fn overlay_portable(stored: &mut Value, portable: &Value) {
+    let (Some(stored_obj), Some(portable_obj)) = (stored.as_object_mut(), portable.as_object())
+    else {
+        return;
+    };
+
+    for (key, value) in portable_obj {
+        if MACHINE_SPECIFIC_FIELDS.contains(&key.as_str()) {
+            continue;
+        }
+        // Only fill in keys that are absent from stored config.
+        // If stored has the key at all (even as null), it wins.
+        if !stored_obj.contains_key(key) {
+            stored_obj.insert(key.clone(), value.clone());
+        }
+    }
+}
+
 impl ConfigEntity for Component {
     const ENTITY_TYPE: &'static str = "component";
     const DIR_NAME: &'static str = "components";
@@ -334,6 +361,39 @@ impl ConfigEntity for Component {
     }
     fn aliases(&self) -> &[String] {
         &self.aliases
+    }
+
+    /// Layer portable `homeboy.json` under the stored config at load time.
+    ///
+    /// Reads `homeboy.json` from the component's `local_path` directory.
+    /// Portable fields act as defaults — stored config always wins.
+    fn post_load(&mut self, stored_json: &str) {
+        // Parse stored config to know which fields were explicitly set
+        let mut stored: Value = match serde_json::from_str(stored_json) {
+            Ok(v) => v,
+            Err(_) => return, // shouldn't happen — we just deserialized this
+        };
+
+        // Read portable config from the component's local path
+        let local_path = Path::new(&self.local_path);
+        let portable = match read_portable_config(local_path) {
+            Ok(Some(v)) => v,
+            _ => return, // no homeboy.json or read error — nothing to layer
+        };
+
+        // Preserve identity fields from self (set_id may have resolved aliases)
+        let id = self.id.clone();
+        let aliases = self.aliases.clone();
+
+        // Merge: portable as defaults, stored keys win
+        overlay_portable(&mut stored, &portable);
+
+        // Re-deserialize the merged JSON into a Component
+        if let Ok(merged) = serde_json::from_value::<Component>(stored) {
+            *self = merged;
+            self.id = id;
+            self.aliases = aliases;
+        }
     }
 }
 
@@ -865,5 +925,99 @@ mod tests {
             result[0].pattern.as_ref().unwrap(),
             r"Version:\s*(\d+\.\d+\.\d+)"
         );
+    }
+
+    // ========================================================================
+    // Portable config overlay tests
+    // ========================================================================
+
+    #[test]
+    fn overlay_portable_fills_absent_fields() {
+        let mut stored: Value = serde_json::json!({
+            "id": "my-plugin",
+            "local_path": "/home/user/my-plugin",
+            "remote_path": "/var/www/my-plugin"
+        });
+        let portable = serde_json::json!({
+            "build_command": "npm run build",
+            "changelog_target": "docs/CHANGELOG.md",
+            "version_targets": [{"file": "package.json"}]
+        });
+
+        overlay_portable(&mut stored, &portable);
+
+        assert_eq!(stored["build_command"], "npm run build");
+        assert_eq!(stored["changelog_target"], "docs/CHANGELOG.md");
+        assert!(stored["version_targets"].is_array());
+    }
+
+    #[test]
+    fn overlay_portable_stored_wins() {
+        let mut stored: Value = serde_json::json!({
+            "id": "my-plugin",
+            "local_path": "/home/user/my-plugin",
+            "build_command": "make build"
+        });
+        let portable = serde_json::json!({
+            "build_command": "npm run build",
+            "changelog_target": "docs/CHANGELOG.md"
+        });
+
+        overlay_portable(&mut stored, &portable);
+
+        // Stored value wins
+        assert_eq!(stored["build_command"], "make build");
+        // Absent field filled from portable
+        assert_eq!(stored["changelog_target"], "docs/CHANGELOG.md");
+    }
+
+    #[test]
+    fn overlay_portable_skips_machine_specific_fields() {
+        let mut stored: Value = serde_json::json!({
+            "id": "my-plugin",
+            "local_path": "/home/user/my-plugin",
+            "remote_path": "/var/www/my-plugin"
+        });
+        let portable = serde_json::json!({
+            "id": "wrong-id",
+            "local_path": "/someone-else/path",
+            "remote_path": "/other/remote",
+            "aliases": ["alias1"],
+            "build_command": "npm run build"
+        });
+
+        overlay_portable(&mut stored, &portable);
+
+        // Machine-specific fields untouched
+        assert_eq!(stored["id"], "my-plugin");
+        assert_eq!(stored["local_path"], "/home/user/my-plugin");
+        assert_eq!(stored["remote_path"], "/var/www/my-plugin");
+        assert!(stored.get("aliases").is_none());
+        // Portable field still applied
+        assert_eq!(stored["build_command"], "npm run build");
+    }
+
+    #[test]
+    fn overlay_portable_handles_non_objects() {
+        // Should be a no-op for non-object values
+        let mut stored = serde_json::json!("not an object");
+        let portable = serde_json::json!({"build_command": "make"});
+        overlay_portable(&mut stored, &portable);
+        assert_eq!(stored, "not an object");
+    }
+
+    #[test]
+    fn overlay_portable_empty_portable_is_noop() {
+        let mut stored: Value = serde_json::json!({
+            "id": "my-plugin",
+            "local_path": "/home/user/my-plugin",
+            "build_command": "make"
+        });
+        let original = stored.clone();
+        let portable = serde_json::json!({});
+
+        overlay_portable(&mut stored, &portable);
+
+        assert_eq!(stored, original);
     }
 }
