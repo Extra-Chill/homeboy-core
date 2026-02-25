@@ -1,0 +1,18 @@
+{
+  "version_targets": [
+    {
+      "file": "Cargo.toml",
+      "pattern": "(?m)^version\\s*=\\s*\"([0-9.]+)\""
+    }
+  ],
+  "changelog_target": "docs/changelog.md",
+  "build_command": "cargo build --release",
+  "build_artifact": "target/release/homeboy",
+  "hooks": {
+    "post:release": [
+      "cargo publish"
+    ]
+  },
+  "docs_dir": "docs",
+  "auto_cleanup": false
+}
