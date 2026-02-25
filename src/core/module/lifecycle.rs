@@ -79,6 +79,10 @@ pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult>
 }
 
 /// Install a module by cloning from a git repository URL.
+///
+/// Handles both single-module repos (manifest at repo root) and monorepos
+/// (manifest in a subdirectory matching the module ID). For monorepos,
+/// extracts just the target subdirectory.
 fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResult> {
     let module_id = match id_override {
         Some(id) => slugify_id(id)?,
@@ -96,7 +100,28 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
     }
 
     local_files::ensure_app_dirs()?;
-    git::clone_repo(url, &module_dir)?;
+
+    // Clone to a temp directory first so we can detect monorepos before
+    // committing to the final module location.
+    let modules_dir = paths::modules()?;
+    let temp_dir = modules_dir.join(format!(".clone-tmp-{}", module_id));
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("clean stale temp dir".to_string()))
+        })?;
+    }
+
+    git::clone_repo(url, &temp_dir)?;
+
+    // Determine what was cloned and install accordingly.
+    let result = resolve_cloned_module(&temp_dir, &module_id, &module_dir, url);
+
+    // Always clean up the temp clone dir (may already be renamed on success).
+    if temp_dir.exists() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    let module_id = result?;
 
     // Auto-run setup if module defines a setup_command
     // Setup is best-effort: install succeeds even if setup fails
@@ -111,6 +136,134 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
         url: url.to_string(),
         path: module_dir,
     })
+}
+
+/// After cloning a repo to a temp dir, figure out whether it's a single-module
+/// repo or a monorepo and move the right content to the final module directory.
+///
+/// Returns the installed module ID on success.
+fn resolve_cloned_module(
+    temp_dir: &Path,
+    module_id: &str,
+    module_dir: &Path,
+    _url: &str,
+) -> Result<String> {
+    let manifest_at_root = temp_dir.join(format!("{}.json", module_id));
+
+    // Case 1: Single-module repo — manifest at clone root.
+    if manifest_at_root.exists() {
+        std::fs::rename(temp_dir, module_dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("move cloned module".to_string()))
+        })?;
+        return Ok(module_id.to_string());
+    }
+
+    // Case 2: Monorepo — target module exists as a subdirectory.
+    let subdir = temp_dir.join(module_id);
+    let manifest_in_subdir = subdir.join(format!("{}.json", module_id));
+
+    if subdir.is_dir() && manifest_in_subdir.exists() {
+        // Validate the manifest is parseable before moving.
+        let content = local_files::local().read(&manifest_in_subdir)?;
+        let _manifest: ModuleManifest = from_str(&content)?;
+
+        // Move just the subdirectory to the final module location.
+        rename_dir(&subdir, module_dir)?;
+        return Ok(module_id.to_string());
+    }
+
+    // Case 3: No matching module found. Scan for available modules to help the user.
+    let available = scan_available_modules(temp_dir);
+
+    if available.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "source",
+            format!(
+                "No module manifest '{}.json' found in cloned repository",
+                module_id
+            ),
+            None,
+            None,
+        ));
+    }
+
+    let list = available.join(", ");
+    Err(Error::validation_invalid_argument(
+        "id",
+        format!(
+            "Module '{}' not found in repository. Available modules: {}",
+            module_id, list
+        ),
+        Some(module_id.to_string()),
+        None,
+    )
+    .with_hint(format!(
+        "Install a specific module with: homeboy module install <url> --id <module>\nAvailable: {}",
+        list
+    )))
+}
+
+/// Scan a cloned repo for subdirectories that contain a matching manifest file.
+/// Returns a sorted list of module IDs found.
+fn scan_available_modules(repo_dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(repo_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                    // Skip hidden dirs (.git, .github, etc.)
+                    if dir_name.starts_with('.') {
+                        continue;
+                    }
+                    let manifest = path.join(format!("{}.json", dir_name));
+                    if manifest.exists() {
+                        found.push(dir_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Move a directory, falling back to recursive copy + delete if rename fails
+/// (e.g., across filesystem boundaries).
+fn rename_dir(from: &Path, to: &Path) -> Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+
+    // Fallback: recursive copy then remove source.
+    copy_dir_recursive(from, to)?;
+    std::fs::remove_dir_all(from)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("remove source after copy".into())))?;
+    Ok(())
+}
+
+/// Recursively copy a directory tree.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create target dir".into())))?;
+
+    for entry in std::fs::read_dir(src)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read source dir".into())))?
+    {
+        let entry =
+            entry.map_err(|e| Error::internal_io(e.to_string(), Some("read dir entry".into())))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("copy file".into()))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Install a module by symlinking a local directory.
