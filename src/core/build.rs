@@ -324,6 +324,10 @@ fn run_bulk(json_spec: &str) -> Result<(BuildResult, i32)> {
 fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
     let comp = component::load(component_id)?;
 
+    // Validate required modules are installed before resolving build commands.
+    // Without this, missing modules cause vague "no build command" errors.
+    module::validate_required_modules(&comp)?;
+
     // Validate local_path before attempting build
     let validated_path = component::validate_local_path(&comp)?;
     let local_path_str = validated_path.to_string_lossy().to_string();
