@@ -56,7 +56,7 @@ impl DeployResult {
 }
 
 /// Deploy a component via git pull on the remote server.
-pub fn deploy_via_git(
+fn deploy_via_git(
     ssh_client: &SshClient,
     remote_path: &str,
     git_config: &component::GitDeployConfig,
@@ -137,7 +137,7 @@ pub fn deploy_via_git(
 }
 
 /// Main entry point - uploads artifact and runs extract command if configured
-pub fn deploy_artifact(
+fn deploy_artifact(
     ssh_client: &SshClient,
     local_path: &Path,
     remote_path: &str,
@@ -551,6 +551,20 @@ impl ComponentDeployResult {
         }
     }
 
+    /// Shorthand for the common failure pattern: status="failed" + versions + error.
+    fn failed(
+        component: &Component,
+        base_path: &str,
+        local_version: Option<String>,
+        remote_version: Option<String>,
+        error: String,
+    ) -> Self {
+        Self::new(component, base_path)
+            .with_status("failed")
+            .with_versions(local_version, remote_version)
+            .with_error(error)
+    }
+
     fn with_status(mut self, status: &str) -> Self {
         self.status = status.to_string();
         self
@@ -623,7 +637,7 @@ pub fn run(project_id: &str, config: &DeployConfig) -> Result<DeployOrchestratio
 
 /// Main deploy orchestration entry point.
 /// Handles component selection, building, and deployment.
-pub fn deploy_components(
+fn deploy_components(
     config: &DeployConfig,
     project: &Project,
     ctx: &RemoteProjectContext,
@@ -821,10 +835,7 @@ fn execute_component_deploy(
     };
 
     if let Some(ref error) = build_error {
-        return ComponentDeployResult::new(component, base_path)
-            .with_status("failed")
-            .with_versions(local_version, remote_version)
-            .with_error(error.clone())
+        return ComponentDeployResult::failed(component, base_path, local_version, remote_version, error.clone())
             .with_build_exit_code(build_exit_code);
     }
 
@@ -832,10 +843,7 @@ fn execute_component_deploy(
     let install_dir = match base_path::join_remote_path(Some(base_path), &component.remote_path) {
         Ok(v) => v,
         Err(err) => {
-            return ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
-                .with_error(err.to_string())
+            return ComponentDeployResult::failed(component, base_path, local_version, remote_version, err.to_string())
                 .with_build_exit_code(build_exit_code);
         }
     };
@@ -885,19 +893,13 @@ fn execute_git_deploy(
                 .with_deploy_exit_code(Some(exit_code))
         }
         Ok(DeployResult { error, exit_code, .. }) => {
-            ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
+            ComponentDeployResult::failed(component, base_path, local_version, remote_version, error.unwrap_or_default())
                 .with_remote_path(install_dir.to_string())
-                .with_error(error.unwrap_or_default())
                 .with_deploy_exit_code(Some(exit_code))
         }
         Err(err) => {
-            ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
+            ComponentDeployResult::failed(component, base_path, local_version, remote_version, err.to_string())
                 .with_remote_path(install_dir.to_string())
-                .with_error(err.to_string())
         }
     }
 }
@@ -918,10 +920,8 @@ fn execute_artifact_deploy(
     let artifact_pattern = match component.build_artifact.as_ref() {
         Some(pattern) => pattern,
         None => {
-            return ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
-                .with_error(format!("Component '{}' has no build_artifact configured", component.id))
+            return ComponentDeployResult::failed(component, base_path, local_version, remote_version,
+                format!("Component '{}' has no build_artifact configured", component.id))
                 .with_build_exit_code(build_exit_code);
         }
     };
@@ -934,10 +934,7 @@ fn execute_artifact_deploy(
             } else {
                 format!("{}. Run build first: homeboy build {}", e, component.id)
             };
-            return ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
-                .with_error(error_msg)
+            return ComponentDeployResult::failed(component, base_path, local_version, remote_version, error_msg)
                 .with_build_exit_code(build_exit_code);
         }
     };
@@ -992,23 +989,15 @@ fn execute_artifact_deploy(
                 .with_deploy_exit_code(Some(exit_code))
         }
         Ok(DeployResult { success: false, exit_code, error }) => {
-            let mut result = ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
+            ComponentDeployResult::failed(component, base_path, local_version, remote_version,
+                error.unwrap_or_default())
                 .with_remote_path(install_dir.to_string())
                 .with_build_exit_code(build_exit_code)
-                .with_deploy_exit_code(Some(exit_code));
-            if let Some(e) = error {
-                result = result.with_error(e);
-            }
-            result
+                .with_deploy_exit_code(Some(exit_code))
         }
         Err(err) => {
-            ComponentDeployResult::new(component, base_path)
-                .with_status("failed")
-                .with_versions(local_version, remote_version)
+            ComponentDeployResult::failed(component, base_path, local_version, remote_version, err.to_string())
                 .with_remote_path(install_dir.to_string())
-                .with_error(err.to_string())
                 .with_build_exit_code(build_exit_code)
         }
     }

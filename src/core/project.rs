@@ -54,25 +54,6 @@ pub struct Project {
     pub component_ids: Vec<String>,
 }
 
-impl Project {
-    pub fn has_sub_targets(&self) -> bool {
-        !self.sub_targets.is_empty()
-    }
-
-    pub fn default_sub_target(&self) -> Option<&SubTarget> {
-        self.sub_targets
-            .iter()
-            .find(|t| t.is_default)
-            .or_else(|| self.sub_targets.first())
-    }
-
-    pub fn find_sub_target(&self, target_id: &str) -> Option<&SubTarget> {
-        self.sub_targets
-            .iter()
-            .find(|t| slugify_id(&t.name).ok().as_deref() == Some(target_id))
-    }
-}
-
 impl ConfigEntity for Project {
     const ENTITY_TYPE: &'static str = "project";
     const DIR_NAME: &'static str = "projects";
