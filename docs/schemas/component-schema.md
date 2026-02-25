@@ -30,10 +30,12 @@ Component configuration defines buildable and deployable units stored in `compon
 ### Required Fields
 
 - **`id`** (string): Unique component identifier, derived from `local_path` directory name (lowercased)
-- **`local_path`** (string): Absolute path to local source directory, `~` is expanded
-- **`remote_path`** (string): Remote path relative to project `base_path`
+- **`local_path`** (string): Absolute path to local **source / git checkout** directory, `~` is expanded
+- **`remote_path`** (string): Remote path relative to project `base_path` (the **deploy target**)
 - **`build_artifact`** (string): Build artifact path relative to `local_path`, must include filename
 - **`build_command`** (string): Shell command to execute in `local_path` during builds
+
+> **Important:** `local_path` must point to a **git repository / source checkout**, not the production deploy target. The deploy target is derived from `project.base_path + component.remote_path`. If `local_path` points to the deployed directory, builds will run inside production and uncommitted-changes checks will fail (the directory isn't a git repo). This is a common misconfiguration after server migrations.
 
 ### Optional Fields
 
@@ -68,6 +70,22 @@ Component configuration defines buildable and deployable units stored in `compon
   - Execution: Sequential, runs in `local_path` directory
   - Failure behavior: **Non-fatal** - logs warnings but doesn't fail the release
   - Use case: Cleanup tasks, notifications, non-critical post-release actions
+
+## local_path vs remote_path
+
+```
+local_path (source)                          remote_path (deploy target)
+┌──────────────────────────┐                ┌──────────────────────────────────────────┐
+│ ~/repos/extrachill-api/  │  ── build ──▶  │ /var/www/site/wp-content/plugins/        │
+│ (git checkout, builds    │    deploy      │ extrachill-api/                          │
+│  run here)               │                │ (project.base_path + remote_path)        │
+└──────────────────────────┘                └──────────────────────────────────────────┘
+```
+
+- **`local_path`** — where the code lives on your dev machine (a git repo)
+- **`remote_path`** — where it gets deployed on the server (relative to the project's `base_path`)
+
+Setting `local_path` to the same directory as the deploy target is a misconfiguration — builds would run in production and `homeboy deploy` would fail uncommitted-changes checks.
 
 ## Example
 

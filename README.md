@@ -109,24 +109,31 @@ homeboy docs audit my-component        # Verify docs match code
 
 ## Modules
 
-Extend Homeboy with platform-specific tools:
+Modules extend Homeboy with project-type support — WordPress, Node.js, Rust, and more. Browse all available modules at [homeboy-modules](https://github.com/Extra-Chill/homeboy-modules).
 
 | Module | Purpose |
 |--------|---------|
-| **wordpress** | WP-CLI integration |
+| **wordpress** | WP-CLI integration, build, test, lint |
 | **nodejs** | PM2 process management |
 | **rust** | Cargo CLI integration |
 | **github** | Issues, PRs, releases |
 | **homebrew** | Tap publishing |
 | **agent-hooks** | AI agent guardrails |
 
+Install from the [homeboy-modules](https://github.com/Extra-Chill/homeboy-modules) monorepo:
+
 ```bash
-homeboy module install <git-url>
+# Install a module by name
+homeboy module install https://github.com/Extra-Chill/homeboy-modules --id wordpress
+
+# List installed modules
 homeboy module list
+
+# Use a module's commands
 homeboy wp my-site plugin list         # WordPress via module
 ```
 
-See [homeboy-modules](https://github.com/Extra-Chill/homeboy-modules) for all available modules.
+Homeboy auto-detects monorepo layout — just pass `--id` with the module name. For single-module repos, `--id` is optional.
 
 ## Configuration
 
