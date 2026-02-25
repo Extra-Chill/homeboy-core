@@ -264,6 +264,13 @@ pub struct BumpResult {
     pub changelog_path: String,
     pub changelog_finalized: bool,
     pub changelog_changed: bool,
+    /// Number of `@since` placeholder tags replaced with the new version.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub since_tags_replaced: usize,
+}
+
+fn is_zero(v: &usize) -> bool {
+    *v == 0
 }
 
 /// Resolve pattern for a version target, using explicit pattern or module default.
@@ -805,6 +812,9 @@ pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<
         }
     }
 
+    // Replace @since placeholder tags with the new version (module-driven).
+    let since_tags_replaced = replace_since_tag_placeholders(component, &new_version)?;
+
     // Run commands that may update/stage generated artifacts impacted by the bump (e.g. Cargo.lock).
     // This must happen AFTER version targets are updated so artifacts match the new version.
     run_pre_bump_commands(&component.pre_version_bump_commands, &component.local_path)?;
@@ -815,6 +825,7 @@ pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<
         old_version,
         new_version,
         targets: target_infos,
+        since_tags_replaced,
         changelog_path: changelog_validation.changelog_path,
         changelog_finalized: changelog_validation.changelog_finalized,
         changelog_changed: changelog_validation.changelog_changed,
@@ -986,4 +997,150 @@ pub fn detect_unconfigured_patterns(component: &Component) -> Vec<UnconfiguredPa
     }
 
     unconfigured
+}
+
+/// Default placeholder pattern for `@since` tags.
+const DEFAULT_SINCE_PLACEHOLDER: &str = r"0\.0\.0|NEXT|TBD|TODO|UNRELEASED|x\.x\.x";
+
+/// Replace `@since` placeholder tags in source files with the actual version.
+/// Returns the total number of replacements made across all files.
+///
+/// This is module-driven: the component's module must define `since_tag` config
+/// specifying which file extensions to scan and optionally a custom placeholder pattern.
+fn replace_since_tag_placeholders(component: &Component, new_version: &str) -> Result<usize> {
+    use crate::module::load_module;
+
+    // Find the module's since_tag config
+    let since_tag = component.modules.as_ref().and_then(|modules| {
+        modules.keys().find_map(|module_id| {
+            load_module(module_id)
+                .ok()
+                .and_then(|m| m.since_tag.clone())
+        })
+    });
+
+    let config = match since_tag {
+        Some(c) => c,
+        None => return Ok(0),
+    };
+
+    if config.extensions.is_empty() {
+        return Ok(0);
+    }
+
+    let placeholder = config
+        .placeholder_pattern
+        .as_deref()
+        .unwrap_or(DEFAULT_SINCE_PLACEHOLDER);
+
+    // Build regex: @since\s+(<placeholder>)
+    let pattern_str = format!(r"@since\s+({})", placeholder);
+    let regex = Regex::new(&pattern_str).map_err(|e| {
+        Error::validation_invalid_argument(
+            "since_tag.placeholder_pattern",
+            format!("Invalid regex: {}", e),
+            None,
+            None,
+        )
+    })?;
+
+    let base_path = Path::new(&component.local_path);
+    let mut total_replaced = 0;
+
+    walk_source_files(base_path, &config.extensions, &mut |path| {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        if !regex.is_match(&content) {
+            return;
+        }
+
+        let replaced = regex.replace_all(&content, |caps: &regex::Captures| {
+            // Replace only the placeholder group, keep `@since ` prefix
+            let full = caps.get(0).unwrap().as_str();
+            let placeholder_match = caps.get(1).unwrap().as_str();
+            full.replacen(placeholder_match, new_version, 1)
+        });
+
+        if replaced != content {
+            let count = regex.find_iter(&content).count();
+            total_replaced += count;
+            let _ = fs::write(path, replaced.as_ref());
+        }
+    });
+
+    Ok(total_replaced)
+}
+
+/// Recursively walk source files matching given extensions, skipping common non-source dirs.
+fn walk_source_files(dir: &Path, extensions: &[String], callback: &mut impl FnMut(&Path)) {
+    let skip_dirs = ["vendor", "node_modules", "build", "dist", ".git", "tests"];
+
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
+            if !skip_dirs.contains(&dir_name.as_ref()) {
+                walk_source_files(&path, extensions, callback);
+            }
+        } else if path.is_file() {
+            let file_name = path.to_string_lossy();
+            if extensions
+                .iter()
+                .any(|ext| file_name.ends_with(ext.as_str()))
+            {
+                callback(&path);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn since_tag_regex_matches_placeholders() {
+        let pattern_str = format!(r"@since\s+({})", DEFAULT_SINCE_PLACEHOLDER);
+        let regex = Regex::new(&pattern_str).unwrap();
+
+        // Should match placeholders
+        assert!(regex.is_match("@since 0.0.0"));
+        assert!(regex.is_match("@since NEXT"));
+        assert!(regex.is_match("@since TBD"));
+        assert!(regex.is_match("@since TODO"));
+        assert!(regex.is_match("@since UNRELEASED"));
+        assert!(regex.is_match("@since x.x.x"));
+        assert!(regex.is_match(" * @since TBD"));
+        assert!(regex.is_match(" * @since  NEXT")); // extra space
+
+        // Should NOT match real versions
+        assert!(!regex.is_match("@since 1.2.3"));
+        assert!(!regex.is_match("@since 0.1.0"));
+    }
+
+    #[test]
+    fn since_tag_replacement_preserves_context() {
+        let pattern_str = format!(r"@since\s+({})", DEFAULT_SINCE_PLACEHOLDER);
+        let regex = Regex::new(&pattern_str).unwrap();
+
+        let input = " * @since TBD\n * @since 1.0.0\n * @since NEXT\n";
+        let result = regex.replace_all(input, |caps: &regex::Captures| {
+            let full = caps.get(0).unwrap().as_str();
+            let placeholder = caps.get(1).unwrap().as_str();
+            full.replacen(placeholder, "2.0.0", 1)
+        });
+
+        assert_eq!(
+            result,
+            " * @since 2.0.0\n * @since 1.0.0\n * @since 2.0.0\n"
+        );
+    }
 }

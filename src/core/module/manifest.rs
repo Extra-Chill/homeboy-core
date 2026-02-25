@@ -77,6 +77,9 @@ pub struct ModuleManifest {
     pub deploy_override: Vec<DeployOverride>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub version_patterns: Vec<VersionPatternConfig>,
+    /// Configuration for replacing `@since` placeholder tags during version bump.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_tag: Option<SinceTagConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,6 +288,17 @@ pub struct DeployOverride {
 pub struct VersionPatternConfig {
     pub extension: String,
     pub pattern: String,
+}
+
+/// Configuration for replacing `@since` placeholder tags during version bump.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SinceTagConfig {
+    /// File extensions to scan (e.g., [".php"]).
+    pub extensions: Vec<String>,
+    /// Regex pattern matching placeholder versions in `@since` tags.
+    /// Default: `0\.0\.0|NEXT|TBD|TODO|UNRELEASED|x\.x\.x`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

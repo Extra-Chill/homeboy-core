@@ -14,7 +14,7 @@ pub use manifest::{
     ActionConfig, ActionType, BuildConfig, CliConfig, DatabaseCliConfig, DatabaseConfig,
     DeployOverride, DeployVerification, DiscoveryConfig, HttpMethod, InputConfig, LintConfig,
     ModuleManifest, OutputConfig, OutputSchema, RequirementsConfig, RuntimeConfig, SelectOption,
-    SettingConfig, TestConfig, VersionPatternConfig,
+    SettingConfig, SinceTagConfig, TestConfig, VersionPatternConfig,
 };
 
 // Re-export execution types and functions
