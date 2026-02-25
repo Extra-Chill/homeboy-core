@@ -1,8 +1,10 @@
 use crate::component;
 use crate::core::local_files::FileSystem;
+use crate::engine::pipeline::{
+    PipelineRunStatus, PipelineStep, PipelineStepExecutor, PipelineStepResult,
+};
 use crate::error::{Error, Result};
 use crate::module::{self, ModuleManifest};
-use crate::engine::pipeline::{PipelineRunStatus, PipelineStep, PipelineStepExecutor, PipelineStepResult};
 use crate::utils::validation;
 use crate::{changelog, version};
 
@@ -104,10 +106,7 @@ impl ReleaseStepExecutor {
 
             return Err(Error::validation_invalid_argument(
                 "tag",
-                format!(
-                    "Tag '{}' exists but points to different commit",
-                    tag_name
-                ),
+                format!("Tag '{}' exists but points to different commit", tag_name),
                 Some(format!(
                     "Tag points to {}, HEAD is {}",
                     &tag_commit[..8.min(tag_commit.len())],
@@ -214,7 +213,8 @@ impl ReleaseStepExecutor {
             })?;
 
         let payload = self.build_release_payload(step)?;
-        let response = module::execute_action(&module.id, "release.package", None, None, Some(&payload))?;
+        let response =
+            module::execute_action(&module.id, "release.package", None, None, Some(&payload))?;
 
         self.store_artifacts_from_output(&response)?;
 
@@ -329,7 +329,10 @@ impl ReleaseStepExecutor {
         if !has_action {
             return Err(Error::validation_invalid_argument(
                 "release.publish",
-                format!("Module '{}' does not provide action '{}'", target, action_id),
+                format!(
+                    "Module '{}' does not provide action '{}'",
+                    target, action_id
+                ),
                 None,
                 None,
             ));
@@ -363,9 +366,8 @@ impl ReleaseStepExecutor {
 
         let mut removed = false;
         if std::path::Path::new(&distrib_path).exists() {
-            std::fs::remove_dir_all(&distrib_path).map_err(|e| {
-                Error::other(format!("Failed to clean up {}: {}", distrib_path, e))
-            })?;
+            std::fs::remove_dir_all(&distrib_path)
+                .map_err(|e| Error::other(format!("Failed to clean up {}: {}", distrib_path, e)))?;
             removed = true;
         }
 
@@ -397,55 +399,17 @@ impl ReleaseStepExecutor {
             })
             .unwrap_or_default();
 
-        let mut results: Vec<serde_json::Value> = Vec::new();
-        let mut had_failure = false;
-        let mut failure_message: Option<String> = None;
-
-        for cmd in &commands {
-            let output = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(cmd)
-                .current_dir(&component.local_path)
-                .output();
-
-            match output {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-
-                    results.push(serde_json::json!({
-                        "command": cmd,
-                        "success": success,
-                        "stdout": stdout.trim(),
-                        "stderr": stderr.trim(),
-                        "exit_code": out.status.code()
-                    }));
-
-                    if !success && !had_failure {
-                        had_failure = true;
-                        failure_message = Some(format!("Command '{}' failed: {}", cmd, stderr.trim()));
-                    }
-                }
-                Err(e) => {
-                    results.push(serde_json::json!({
-                        "command": cmd,
-                        "success": false,
-                        "error": e.to_string()
-                    }));
-
-                    if !had_failure {
-                        had_failure = true;
-                        failure_message = Some(format!("Failed to execute '{}': {}", cmd, e));
-                    }
-                }
-            }
-        }
+        let hook_result = crate::hooks::run_commands(
+            &commands,
+            &component.local_path,
+            crate::hooks::events::POST_RELEASE,
+            crate::hooks::HookFailureMode::NonFatal,
+        )?;
 
         let data = serde_json::json!({
             "action": "post_release",
-            "commands": results,
-            "all_succeeded": !had_failure
+            "commands": hook_result.commands,
+            "all_succeeded": hook_result.all_succeeded
         });
 
         // Post-release failures are non-fatal (release already published)
@@ -458,12 +422,18 @@ impl ReleaseStepExecutor {
             Vec::new(),
         );
 
-        if had_failure {
-            result.warnings = vec![
-                "Post-release command failed but release is complete".to_string(),
-            ];
-            if let Some(msg) = failure_message {
-                result.hints.push(crate::error::Hint { message: msg });
+        if !hook_result.all_succeeded {
+            result.warnings =
+                vec!["Post-release command failed but release is complete".to_string()];
+            if let Some(failed) = hook_result.commands.iter().find(|c| !c.success) {
+                let error_text = if failed.stderr.trim().is_empty() {
+                    &failed.stdout
+                } else {
+                    &failed.stderr
+                };
+                result.hints.push(crate::error::Hint {
+                    message: format!("Command '{}' failed: {}", failed.command, error_text.trim()),
+                });
             }
         }
 
@@ -522,9 +492,7 @@ impl ReleaseStepExecutor {
                 "version",
                 "Version context not set for release step",
                 Some(format!("Step '{}' requires version context", step.id)),
-                Some(vec![
-                    "Ensure version step runs before this step".to_string(),
-                ]),
+                Some(vec!["Ensure version step runs before this step".to_string()]),
             )
         })?;
 

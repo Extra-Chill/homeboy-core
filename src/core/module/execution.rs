@@ -53,7 +53,7 @@ struct ModuleExecutionContext {
 pub fn run_setup(module_id: &str) -> Result<ModuleSetupResult> {
     let module = load_module(module_id)?;
 
-    let runtime = match module.runtime.as_ref() {
+    let runtime = match module.runtime() {
         Some(r) => r,
         None => {
             return Ok(ModuleSetupResult { exit_code: 0 });
@@ -263,7 +263,7 @@ pub(crate) fn execute_action(
 }
 
 fn module_runtime(module: &ModuleManifest) -> Result<&RuntimeConfig> {
-    module.runtime.as_ref().ok_or_else(|| {
+    module.runtime().ok_or_else(|| {
         Error::other(format!(
             "Module '{}' does not have a runtime configuration and cannot be executed",
             module.id
@@ -278,7 +278,7 @@ fn build_args_string(
 ) -> String {
     let input_values: HashMap<String, String> = inputs.into_iter().collect();
     let mut argv = Vec::new();
-    for input in &module.inputs {
+    for input in module.inputs() {
         if let Some(value) = input_values.get(&input.id) {
             if !value.is_empty() {
                 argv.push(input.arg.clone());
@@ -619,7 +619,7 @@ pub struct ModuleReadyStatus {
 }
 
 pub fn module_ready_status(module: &ModuleManifest) -> ModuleReadyStatus {
-    let Some(runtime) = module.runtime.as_ref() else {
+    let Some(runtime) = module.runtime() else {
         return ModuleReadyStatus {
             ready: true,
             reason: None,

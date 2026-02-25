@@ -64,10 +64,22 @@ impl DbContext {
         let mut vars = HashMap::with_capacity(8);
         vars.insert(TemplateVars::SITE_PATH.to_string(), self.base_path.clone());
         vars.insert(TemplateVars::CLI_PATH.to_string(), self.cli_path.clone());
-        vars.insert(TemplateVars::DB_HOST.to_string(), self.project.database.host.clone());
-        vars.insert(TemplateVars::DB_PORT.to_string(), self.project.database.port.to_string());
-        vars.insert(TemplateVars::DB_NAME.to_string(), self.project.database.name.clone());
-        vars.insert(TemplateVars::DB_USER.to_string(), self.project.database.user.clone());
+        vars.insert(
+            TemplateVars::DB_HOST.to_string(),
+            self.project.database.host.clone(),
+        );
+        vars.insert(
+            TemplateVars::DB_PORT.to_string(),
+            self.project.database.port.to_string(),
+        );
+        vars.insert(
+            TemplateVars::DB_NAME.to_string(),
+            self.project.database.name.clone(),
+        );
+        vars.insert(
+            TemplateVars::DB_USER.to_string(),
+            self.project.database.user.clone(),
+        );
         vars.insert(TemplateVars::DB_PASSWORD.to_string(), String::new());
         vars
     }
@@ -83,7 +95,7 @@ fn build_context(project_id: &str, subtarget: Option<&str>) -> Result<DbContext>
 
     let db_cli = modules
         .iter()
-        .find_map(|m| m.database.as_ref().and_then(|db| db.cli.clone()))
+        .find_map(|m| m.database().and_then(|db| db.cli.clone()))
         .ok_or_else(|| {
             Error::config("No module with database CLI configuration found".to_string())
         })?;

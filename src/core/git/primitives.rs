@@ -6,8 +6,12 @@ use crate::utils::command;
 
 /// Clone a git repository to a target directory.
 pub fn clone_repo(url: &str, target_dir: &Path) -> Result<()> {
-    command::run("git", &["clone", url, &target_dir.to_string_lossy()], "git clone")
-        .map_err(|e| Error::git_command_failed(e.to_string()))?;
+    command::run(
+        "git",
+        &["clone", url, &target_dir.to_string_lossy()],
+        "git clone",
+    )
+    .map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(())
 }
 
@@ -48,12 +52,22 @@ pub fn list_tracked_markdown_files(path: &Path) -> Result<Vec<String>> {
     let stdout = command::run_in(
         &path.to_string_lossy(),
         "git",
-        &["ls-files", "--cached", "--others", "--exclude-standard", "*.md"],
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "*.md",
+        ],
         "git ls-files",
     )
     .map_err(|e| Error::git_command_failed(e.to_string()))?;
 
-    Ok(stdout.lines().filter(|l| !l.is_empty()).map(String::from).collect())
+    Ok(stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
 }
 
 /// Pull with fast-forward only, inheriting stdio for interactive output.

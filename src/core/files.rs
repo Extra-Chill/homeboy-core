@@ -8,11 +8,11 @@ use std::io::{self, Read};
 
 use crate::context::{require_project_base_path, resolve_project_ssh_with_base_path};
 use crate::defaults;
-use crate::error::{Error, Result};
 use crate::engine::executor::execute_for_project;
+use crate::error::{Error, Result};
 use crate::project;
-use crate::utils::{command, parser, shell, token};
 use crate::utils::base_path;
+use crate::utils::{command, parser, shell, token};
 
 use std::path::Path;
 use std::process::Command;
@@ -69,11 +69,10 @@ pub struct RenameResult {
 
 /// Parse `ls -la` output into structured file entries.
 pub fn parse_ls_output(output: &str, base_path: &str) -> Vec<FileEntry> {
-    let mut entries: Vec<FileEntry> = parser::lines_filtered(output, |line| {
-        !line.starts_with("total ")
-    })
-    .filter_map(|line| parse_ls_line(line, base_path))
-    .collect();
+    let mut entries: Vec<FileEntry> =
+        parser::lines_filtered(output, |line| !line.starts_with("total "))
+            .filter_map(|line| parse_ls_line(line, base_path))
+            .collect();
 
     entries.sort_by(|a, b| {
         if a.is_directory != b.is_directory {
@@ -441,16 +440,16 @@ pub fn edit_replace_line(
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     if line_num == 0 || line_num > original_lines.len() {
         return Err(Error::validation_invalid_argument(
             "line_num",
-            format!("Line number {} is out of range (file has {} lines)", line_num, original_lines.len()),
+            format!(
+                "Line number {} is out of range (file has {} lines)",
+                line_num,
+                original_lines.len()
+            ),
             None,
             None,
         ));
@@ -493,16 +492,16 @@ pub fn edit_insert_after_line(
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     if line_num == 0 || line_num > original_lines.len() {
         return Err(Error::validation_invalid_argument(
             "line_num",
-            format!("Line number {} is out of range (file has {} lines)", line_num, original_lines.len()),
+            format!(
+                "Line number {} is out of range (file has {} lines)",
+                line_num,
+                original_lines.len()
+            ),
             None,
             None,
         ));
@@ -543,16 +542,16 @@ pub fn edit_insert_before_line(
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     if line_num == 0 || line_num > original_lines.len() {
         return Err(Error::validation_invalid_argument(
             "line_num",
-            format!("Line number {} is out of range (file has {} lines)", line_num, original_lines.len()),
+            format!(
+                "Line number {} is out of range (file has {} lines)",
+                line_num,
+                original_lines.len()
+            ),
             None,
             None,
         ));
@@ -588,16 +587,16 @@ pub fn edit_delete_line(project_id: &str, path: &str, line_num: usize) -> Result
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     if line_num == 0 || line_num > original_lines.len() {
         return Err(Error::validation_invalid_argument(
             "line_num",
-            format!("Line number {} is out of range (file has {} lines)", line_num, original_lines.len()),
+            format!(
+                "Line number {} is out of range (file has {} lines)",
+                line_num,
+                original_lines.len()
+            ),
             None,
             None,
         ));
@@ -638,18 +637,22 @@ pub fn edit_delete_lines(
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
-    if start_line == 0 || start_line > original_lines.len() || end_line == 0
-        || end_line > original_lines.len() || start_line > end_line
+    if start_line == 0
+        || start_line > original_lines.len()
+        || end_line == 0
+        || end_line > original_lines.len()
+        || start_line > end_line
     {
         return Err(Error::validation_invalid_argument(
             "line_range",
-            format!("Invalid line range {}-{} (file has {} lines)", start_line, end_line, original_lines.len()),
+            format!(
+                "Invalid line range {}-{} (file has {} lines)",
+                start_line,
+                end_line,
+                original_lines.len()
+            ),
             None,
             None,
         ));
@@ -697,11 +700,7 @@ pub fn edit_replace_pattern(
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     let modified_content = if all {
         read_result.content.replace(pattern, replacement)
@@ -711,10 +710,7 @@ pub fn edit_replace_pattern(
 
     write(project_id, path, &modified_content)?;
 
-    let modified_lines: Vec<String> = modified_content
-        .lines()
-        .map(String::from)
-        .collect();
+    let modified_lines: Vec<String> = modified_content.lines().map(String::from).collect();
 
     let changes: Vec<LineChange> = original_lines
         .iter()
@@ -751,11 +747,7 @@ pub fn edit_delete_pattern(project_id: &str, path: &str, pattern: &str) -> Resul
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     let modified_lines: Vec<String> = original_lines
         .iter()
@@ -795,11 +787,7 @@ pub fn edit_append(project_id: &str, path: &str, content: &str) -> Result<EditRe
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     let command = format!(
         "printf '%s\\n' {} >> {}",
@@ -837,11 +825,7 @@ pub fn edit_prepend(project_id: &str, path: &str, content: &str) -> Result<EditR
     let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
 
     let read_result = read(project_id, path)?;
-    let original_lines: Vec<String> = read_result
-        .content
-        .lines()
-        .map(String::from)
-        .collect();
+    let original_lines: Vec<String> = read_result.content.lines().map(String::from).collect();
 
     let command = format!(
         "tmp=$(mktemp) && printf '%s\\n' {} | cat - {} > \"$tmp\" && mv \"$tmp\" {}",
@@ -897,9 +881,8 @@ pub fn download(
     let local = Path::new(local_path);
     if let Some(parent) = local.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                Error::other(format!("Failed to create local directory: {}", e))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| Error::other(format!("Failed to create local directory: {}", e)))?;
         }
     }
 

@@ -55,7 +55,11 @@ mod tests {
 
     #[test]
     fn write_file_returns_error_for_invalid_path() {
-        let result = write_file(Path::new("/nonexistent/dir/file.txt"), "content", "test write");
+        let result = write_file(
+            Path::new("/nonexistent/dir/file.txt"),
+            "content",
+            "test write",
+        );
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code.as_str(), "internal.io_error");

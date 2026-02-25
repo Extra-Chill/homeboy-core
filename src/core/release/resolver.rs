@@ -1,7 +1,7 @@
 use crate::component::Component;
+use crate::engine::pipeline::PipelineCapabilityResolver;
 use crate::error::{Error, Result};
 use crate::module::{self, ModuleManifest};
-use crate::engine::pipeline::PipelineCapabilityResolver;
 
 use super::types::ReleaseStepType;
 
@@ -21,9 +21,9 @@ impl ReleaseCapabilityResolver {
     }
 
     fn supports_publish_target(&self, target: &str) -> bool {
-        self.modules
-            .iter()
-            .any(|module| module.id == target && module.actions.iter().any(|a| a.id == "release.publish"))
+        self.modules.iter().any(|module| {
+            module.id == target && module.actions.iter().any(|a| a.id == "release.publish")
+        })
     }
 }
 
@@ -82,9 +82,8 @@ pub(crate) fn resolve_modules(
         module_ids.sort();
         let suggestions = module::available_module_ids();
         for module_id in module_ids {
-            let manifest = module::load_module(&module_id).map_err(|_| {
-                Error::module_not_found(module_id.to_string(), suggestions.clone())
-            })?;
+            let manifest = module::load_module(&module_id)
+                .map_err(|_| Error::module_not_found(module_id.to_string(), suggestions.clone()))?;
             modules.push(manifest);
         }
     }

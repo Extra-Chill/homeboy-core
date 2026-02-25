@@ -3,8 +3,8 @@ use crate::error::{Error, Result};
 use crate::project::Project;
 use std::collections::HashMap;
 
-use super::manifest::ModuleManifest;
 use super::load_module;
+use super::manifest::ModuleManifest;
 
 /// Settings resolution for modules with project/component context.
 pub struct ModuleScope;

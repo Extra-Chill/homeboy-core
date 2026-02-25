@@ -176,30 +176,54 @@ pub fn generate_entity_hints(
     // Command-specific suggestions
     match parent_command {
         "changelog" => {
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy changelog show {}", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy changelog show {}",
+                unrecognized, entity_label, id, id
+            ));
         }
         "version" => {
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy version show {}", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy version show {}",
+                unrecognized, entity_label, id, id
+            ));
         }
         "build" => {
             // Build already accepts component ID directly
-            hints.push(format!("'{}' matches {} '{}'. Run: homeboy build {}", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Run: homeboy build {}",
+                unrecognized, entity_label, id, id
+            ));
         }
         "deploy" => {
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy deploy --component {}", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy deploy --component {}",
+                unrecognized, entity_label, id, id
+            ));
         }
         "changes" => {
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy changes show {}", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy changes show {}",
+                unrecognized, entity_label, id, id
+            ));
         }
         "git" => {
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy git {} status", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy git {} status",
+                unrecognized, entity_label, id, id
+            ));
         }
         "release" => {
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy release {}", unrecognized, entity_label, id, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy release {}",
+                unrecognized, entity_label, id, id
+            ));
         }
         _ => {
             // Generic hint for other commands
-            hints.push(format!("'{}' matches {} '{}'. Try: homeboy {} {}", unrecognized, entity_label, id, entity_label, id));
+            hints.push(format!(
+                "'{}' matches {} '{}'. Try: homeboy {} {}",
+                unrecognized, entity_label, id, entity_label, id
+            ));
         }
     }
 

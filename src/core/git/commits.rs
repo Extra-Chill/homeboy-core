@@ -96,7 +96,11 @@ pub(crate) fn extract_version_from_tag(tag: &str) -> Option<String> {
 /// Get the latest git tag in the repository.
 /// Returns None if no tags exist.
 pub fn get_latest_tag(path: &str) -> Result<Option<String>> {
-    Ok(command::run_in_optional(path, "git", &["describe", "--tags", "--abbrev=0"]))
+    Ok(command::run_in_optional(
+        path,
+        "git",
+        &["describe", "--tags", "--abbrev=0"],
+    ))
 }
 
 /// Find the most recent commit containing a version number in its message.
@@ -132,17 +136,29 @@ pub fn find_version_release_commit(path: &str, version: &str) -> Result<Option<S
 
     let escaped_version = regex::escape(version);
     let patterns = [
-        format!(r"(?i)^(?:chore\([^)]*\):\s*)?release:?\s*v?{}(?:\s|$)", escaped_version),
+        format!(
+            r"(?i)^(?:chore\([^)]*\):\s*)?release:?\s*v?{}(?:\s|$)",
+            escaped_version
+        ),
         format!(r"(?i)^v?{}\s*$", escaped_version),
-        format!(r"(?i)^bump\s+(?:version\s+)?(?:to\s+)?v?{}(?:\s|$)", escaped_version),
+        format!(
+            r"(?i)^bump\s+(?:version\s+)?(?:to\s+)?v?{}(?:\s|$)",
+            escaped_version
+        ),
         // Match "Version X.Y.Z" or "Version bump to X.Y.Z"
-        format!(r"(?i)^version\s+(?:bump\s+(?:to\s+)?)?v?{}(?:\s|:|-|$)", escaped_version),
+        format!(
+            r"(?i)^version\s+(?:bump\s+(?:to\s+)?)?v?{}(?:\s|:|-|$)",
+            escaped_version
+        ),
     ];
 
     for line in stdout.lines() {
         if let Some((hash, subject)) = line.split_once('|') {
             for pattern in &patterns {
-                if Regex::new(pattern).map(|re| re.is_match(subject)).unwrap_or(false) {
+                if Regex::new(pattern)
+                    .map(|re| re.is_match(subject))
+                    .unwrap_or(false)
+                {
                     return Ok(Some(hash.to_string()));
                 }
             }
@@ -153,7 +169,12 @@ pub fn find_version_release_commit(path: &str, version: &str) -> Result<Option<S
 
 /// Get the last N commits from the repository.
 pub fn get_last_n_commits(path: &str, n: usize) -> Result<Vec<CommitInfo>> {
-    let stdout = command::run_in(path, "git", &["log", &format!("-{}", n), "--format=%h|%s"], "git log")?;
+    let stdout = command::run_in(
+        path,
+        "git",
+        &["log", &format!("-{}", n), "--format=%h|%s"],
+        "git log",
+    )?;
 
     let commits = stdout
         .lines()
@@ -173,7 +194,9 @@ pub fn get_last_n_commits(path: &str, n: usize) -> Result<Vec<CommitInfo>> {
 /// Get commits since a given tag (or all commits if tag is None).
 /// Returns commits in reverse chronological order (newest first).
 pub fn get_commits_since_tag(path: &str, tag: Option<&str>) -> Result<Vec<CommitInfo>> {
-    let range = tag.map(|t| format!("{}..HEAD", t)).unwrap_or_else(|| "HEAD".to_string());
+    let range = tag
+        .map(|t| format!("{}..HEAD", t))
+        .unwrap_or_else(|| "HEAD".to_string());
     let stdout = command::run_in(path, "git", &["log", &range, "--format=%h|%s"], "git log")?;
 
     let commits = stdout
@@ -204,11 +227,21 @@ pub fn get_commit_files(path: &str, commit_hash: &str) -> Result<Vec<String>> {
     let stdout = command::run_in(
         path,
         "git",
-        &["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            commit_hash,
+        ],
         "git diff-tree",
     )?;
 
-    Ok(stdout.lines().filter(|l| !l.is_empty()).map(String::from).collect())
+    Ok(stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
 }
 
 /// Check if a file path is considered a docs file.

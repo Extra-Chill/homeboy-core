@@ -191,12 +191,14 @@ pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<I
 
     // Determine changelog path (relative to component)
     let mut relative_path = path.unwrap_or("CHANGELOG.md").to_string();
-    let mut changelog_path = crate::utils::parser::resolve_path(&component.local_path, &relative_path);
+    let mut changelog_path =
+        crate::utils::parser::resolve_path(&component.local_path, &relative_path);
 
     // Check for existing changelog_target configuration
     if let Some(ref configured_target) = component.changelog_target {
-        let configured_path = crate::utils::parser::resolve_path(&component.local_path, configured_target);
-        
+        let configured_path =
+            crate::utils::parser::resolve_path(&component.local_path, configured_target);
+
         // If user didn't specify a custom path, or specified the same path, check for existing changelog
         if (path.is_none() || path == Some(configured_target)) && configured_path.exists() {
             return Err(Error::validation_invalid_argument(

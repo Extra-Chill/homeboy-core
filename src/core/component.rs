@@ -57,69 +57,159 @@ pub struct ScopedModuleConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-
+#[serde(from = "RawComponent", into = "RawComponent")]
 pub struct Component {
-    #[serde(skip_deserializing)]
     pub id: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
     pub local_path: String,
     pub remote_path: String,
+    pub build_artifact: Option<String>,
+    pub modules: Option<HashMap<String, ScopedModuleConfig>>,
+    pub version_targets: Option<Vec<VersionTarget>>,
+    pub changelog_target: Option<String>,
+    pub changelog_next_section_label: Option<String>,
+    pub changelog_next_section_aliases: Option<Vec<String>>,
+    /// Lifecycle hooks: event name -> list of shell commands.
+    /// Events: `pre:version:bump`, `post:version:bump`, `post:release`, `post:deploy`
+    pub hooks: HashMap<String, Vec<String>>,
+    pub build_command: Option<String>,
+    pub extract_command: Option<String>,
+    pub remote_owner: Option<String>,
+    pub deploy_strategy: Option<String>,
+    pub git_deploy: Option<GitDeployConfig>,
+    pub auto_cleanup: bool,
+    pub docs_dir: Option<String>,
+    pub docs_dirs: Vec<String>,
+}
+
+/// Raw JSON shape for Component — handles backward-compatible deserialization
+/// of legacy hook fields (`pre_version_bump_commands` etc.) into the `hooks` map.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RawComponent {
+    #[serde(default, skip_serializing)]
+    id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    aliases: Vec<String>,
+    #[serde(default)]
+    local_path: String,
+    #[serde(default)]
+    remote_path: String,
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
         deserialize_with = "deserialize_empty_as_none"
     )]
-    pub build_artifact: Option<String>,
-
+    build_artifact: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub modules: Option<HashMap<String, ScopedModuleConfig>>,
-
+    modules: Option<HashMap<String, ScopedModuleConfig>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub version_targets: Option<Vec<VersionTarget>>,
+    version_targets: Option<Vec<VersionTarget>>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "changelog_targets")]
-    pub changelog_target: Option<String>,
+    changelog_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub changelog_next_section_label: Option<String>,
+    changelog_next_section_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub changelog_next_section_aliases: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pre_version_bump_commands: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub post_version_bump_commands: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub post_release_commands: Vec<String>,
+    changelog_next_section_aliases: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    hooks: HashMap<String, Vec<String>>,
+    // Legacy hook fields — read from old JSON, merged into hooks
+    #[serde(default, skip_serializing)]
+    pre_version_bump_commands: Vec<String>,
+    #[serde(default, skip_serializing)]
+    post_version_bump_commands: Vec<String>,
+    #[serde(default, skip_serializing)]
+    post_release_commands: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub build_command: Option<String>,
+    build_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extract_command: Option<String>,
-
-    /// Owner:group for deployed files (e.g., "www-data:www-data").
-    /// If not set, auto-detected from remote_path ownership.
+    extract_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub remote_owner: Option<String>,
-
-    /// Deployment strategy: "rsync" (default) or "git"
+    remote_owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deploy_strategy: Option<String>,
-    /// Git deploy configuration (used when deploy_strategy = "git")
+    deploy_strategy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub git_deploy: Option<GitDeployConfig>,
-    /// Enable post-deploy cleanup of build dependencies (default: false)
+    git_deploy: Option<GitDeployConfig>,
     #[serde(default)]
-    pub auto_cleanup: bool,
-
-    /// Documentation directory relative to local_path (default: "docs").
-    /// Used by `docs audit` and `docs scaffold` to locate documentation files.
-    /// Can be a single path or use `docs_dirs` for multiple paths.
+    auto_cleanup: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub docs_dir: Option<String>,
-
-    /// Multiple documentation directories relative to local_path.
-    /// When set, all directories are scanned for documentation.
-    /// Takes precedence over `docs_dir`.
+    docs_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub docs_dirs: Vec<String>,
+    docs_dirs: Vec<String>,
+}
+
+/// Insert legacy commands into hooks map if the event key doesn't already exist.
+fn merge_legacy_hook(hooks: &mut HashMap<String, Vec<String>>, event: &str, commands: Vec<String>) {
+    if !commands.is_empty() && !hooks.contains_key(event) {
+        hooks.insert(event.to_string(), commands);
+    }
+}
+
+impl From<RawComponent> for Component {
+    fn from(raw: RawComponent) -> Self {
+        let mut hooks = raw.hooks;
+        merge_legacy_hook(
+            &mut hooks,
+            "pre:version:bump",
+            raw.pre_version_bump_commands,
+        );
+        merge_legacy_hook(
+            &mut hooks,
+            "post:version:bump",
+            raw.post_version_bump_commands,
+        );
+        merge_legacy_hook(&mut hooks, "post:release", raw.post_release_commands);
+
+        Component {
+            id: raw.id,
+            aliases: raw.aliases,
+            local_path: raw.local_path,
+            remote_path: raw.remote_path,
+            build_artifact: raw.build_artifact,
+            modules: raw.modules,
+            version_targets: raw.version_targets,
+            changelog_target: raw.changelog_target,
+            changelog_next_section_label: raw.changelog_next_section_label,
+            changelog_next_section_aliases: raw.changelog_next_section_aliases,
+            hooks,
+            build_command: raw.build_command,
+            extract_command: raw.extract_command,
+            remote_owner: raw.remote_owner,
+            deploy_strategy: raw.deploy_strategy,
+            git_deploy: raw.git_deploy,
+            auto_cleanup: raw.auto_cleanup,
+            docs_dir: raw.docs_dir,
+            docs_dirs: raw.docs_dirs,
+        }
+    }
+}
+
+impl From<Component> for RawComponent {
+    fn from(c: Component) -> Self {
+        RawComponent {
+            id: c.id,
+            aliases: c.aliases,
+            local_path: c.local_path,
+            remote_path: c.remote_path,
+            build_artifact: c.build_artifact,
+            modules: c.modules,
+            version_targets: c.version_targets,
+            changelog_target: c.changelog_target,
+            changelog_next_section_label: c.changelog_next_section_label,
+            changelog_next_section_aliases: c.changelog_next_section_aliases,
+            hooks: c.hooks,
+            pre_version_bump_commands: Vec::new(),
+            post_version_bump_commands: Vec::new(),
+            post_release_commands: Vec::new(),
+            build_command: c.build_command,
+            extract_command: c.extract_command,
+            remote_owner: c.remote_owner,
+            deploy_strategy: c.deploy_strategy,
+            git_deploy: c.git_deploy,
+            auto_cleanup: c.auto_cleanup,
+            docs_dir: c.docs_dir,
+            docs_dirs: c.docs_dirs,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -175,9 +265,7 @@ impl Component {
             changelog_target: None,
             changelog_next_section_label: None,
             changelog_next_section_aliases: None,
-            pre_version_bump_commands: Vec::new(),
-            post_version_bump_commands: Vec::new(),
-            post_release_commands: Vec::new(),
+            hooks: HashMap::new(),
             build_command: None,
             extract_command: None,
             remote_owner: None,

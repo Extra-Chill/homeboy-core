@@ -101,11 +101,7 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
     // Auto-run setup if module defines a setup_command
     // Setup is best-effort: install succeeds even if setup fails
     if let Ok(module) = load_module(&module_id) {
-        if module
-            .runtime
-            .as_ref()
-            .is_some_and(|r| r.setup_command.is_some())
-        {
+        if module.runtime().is_some_and(|r| r.setup_command.is_some()) {
             let _ = run_setup(&module_id);
         }
     }
@@ -248,11 +244,7 @@ pub fn update(module_id: &str, force: bool) -> Result<UpdateResult> {
     // Auto-run setup if module defines a setup_command
     // Setup is best-effort: update succeeds even if setup fails
     if let Ok(module) = load_module(module_id) {
-        if module
-            .runtime
-            .as_ref()
-            .is_some_and(|r| r.setup_command.is_some())
-        {
+        if module.runtime().is_some_and(|r| r.setup_command.is_some()) {
             let _ = run_setup(module_id);
         }
     }

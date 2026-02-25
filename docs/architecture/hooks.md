@@ -1,164 +1,193 @@
-# Component Hooks System
+# Hooks System
 
-Homeboy provides lifecycle hooks for components that execute shell commands at specific points during version management and release operations.
+Homeboy provides a general-purpose hook/event system for lifecycle extensibility. Both components and modules can declare hooks that run shell commands at named lifecycle events.
 
 ## Overview
 
-Hooks allow components to run custom commands at defined points in the version and release lifecycle. Each hook type has specific execution semantics and failure behavior.
+Hooks are stored as a map of event names to command lists:
 
-## Hook Types
-
-### `pre_version_bump_commands`
-
-Commands that run **before** version targets are updated.
-
-**Execution context:**
-- Working directory: Component's `local_path`
-- Runs: Before version files are modified
-- Order: Sequential (each command must complete before the next starts)
-
-**Failure behavior:** **Fatal** - Non-zero exit code stops the version bump operation immediately.
-
-**Use cases:**
-- Build artifacts that include version information (e.g., `cargo build --release` updates Cargo.lock)
-- Generate files that need to be staged alongside version changes
-- Run validation checks before committing to a version bump
-
-**Example:**
 ```json
 {
-  "pre_version_bump_commands": [
-    "cargo build --release",
-    "npm run generate-schema"
-  ]
+  "hooks": {
+    "pre:version:bump": ["cargo build --release"],
+    "post:version:bump": ["git add Cargo.lock"],
+    "post:release": ["curl -X POST https://hooks.example.com/done"]
+  }
 }
 ```
 
-### `post_version_bump_commands`
+When an event fires, Homeboy resolves commands from two sources (in order):
 
-Commands that run **after** version files have been updated but before any git operations.
+1. **Module hooks** — platform-level behavior from linked modules
+2. **Component hooks** — user-level customization
 
-**Execution context:**
-- Working directory: Component's `local_path`
-- Runs: After all version targets have been modified
-- Order: Sequential
+Commands execute sequentially in the component's `local_path` directory via `sh -c`.
 
-**Failure behavior:** **Fatal** - Non-zero exit code stops the version bump, leaving version files updated but uncommitted.
+## Events
 
-**Use cases:**
-- Stage additional files that changed due to version bump (e.g., `git add Cargo.lock`)
-- Run post-bump validation or linting
-- Update dependent files that reference the version
+| Event | When it runs | Failure mode |
+|-------|-------------|--------------|
+| `pre:version:bump` | After version targets are updated, before git commit | Fatal |
+| `post:version:bump` | After pre-bump hooks, before git commit | Fatal |
+| `post:release` | After the release pipeline completes | Non-fatal |
+| `post:deploy` | After deploy completes | Non-fatal |
 
-**Example:**
+**Fatal** means a non-zero exit code aborts the operation. **Non-fatal** means failures are logged as warnings but the operation succeeds.
+
+### `pre:version:bump`
+
+Runs after version files are modified but before git commit. Use for building artifacts that include version info or staging generated files.
+
 ```json
 {
-  "post_version_bump_commands": [
-    "git add Cargo.lock",
-    "npm run format"
-  ]
+  "hooks": {
+    "pre:version:bump": [
+      "cargo build --release",
+      "npm run generate-schema"
+    ]
+  }
 }
 ```
 
-### `post_release_commands`
+### `post:version:bump`
 
-Commands that run **after** the release pipeline completes (all publish steps finished).
+Runs after pre-bump hooks, still before git commit. Use for staging additional changed files or running post-bump validation.
 
-**Execution context:**
-- Working directory: Component's `local_path`
-- Runs: After all release pipeline steps complete successfully
-- Order: Sequential
-
-**Failure behavior:** **Non-fatal** - Failures are logged as warnings but don't fail the release.
-
-**Use cases:**
-- Send notifications
-- Trigger dependent deployments
-- Cleanup temporary files
-- Update external tracking systems
-
-**Example:**
 ```json
 {
-  "post_release_commands": [
-    "curl -X POST https://hooks.example.com/release-complete",
-    "rm -rf tmp/"
-  ]
+  "hooks": {
+    "post:version:bump": [
+      "git add Cargo.lock",
+      "npm run format"
+    ]
+  }
 }
 ```
+
+### `post:release`
+
+Runs after the release pipeline completes (all publish steps finished). Failures are non-fatal since the release is already published.
+
+```json
+{
+  "hooks": {
+    "post:release": [
+      "curl -X POST https://hooks.example.com/release-complete",
+      "rm -rf tmp/"
+    ]
+  }
+}
+```
+
+### `post:deploy`
+
+Runs after deploy completes. Available for modules and components that need post-deploy automation.
+
+## Resolution Order
+
+When hooks fire for an event, commands are collected in this order:
+
+1. **Module hooks** — iterate linked modules, collect `hooks[event]` from each manifest
+2. **Component hooks** — collect `hooks[event]` from the component config
+
+Module hooks run first so platform behavior executes before user customization.
 
 ## Execution Details
 
 ### Working Directory
 
-All hooks execute in the component's `local_path` directory via `sh -c`. The working directory is set before command execution.
-
-### Environment Variables
-
-Hooks have access to standard shell environment. Module-specific environment variables (like `HOMEBOY_MODULE_PATH`) are NOT set for hooks.
+All hooks execute in the component's `local_path` directory via `sh -c`.
 
 ### Command Format
 
-Each command is a string executed via `sh -c`. Multi-command sequences should use shell operators:
+Each command is a string passed to `sh -c`. Chain multiple operations with shell operators:
 
 ```json
 {
-  "post_version_bump_commands": [
-    "npm run lint && npm run test"
-  ]
+  "hooks": {
+    "post:version:bump": ["npm run lint && npm run test"]
+  }
 }
 ```
 
 ### Error Handling
 
-For fatal hooks (`pre_version_bump_commands`, `post_version_bump_commands`):
-- Non-zero exit code stops the operation
+For fatal events (`pre:version:bump`, `post:version:bump`):
+- Non-zero exit code stops the operation immediately
 - `stderr` output is included in the error message
+- Remaining commands are skipped
 - No automatic rollback of previous steps
 
-For non-fatal hooks (`post_release_commands`):
+For non-fatal events (`post:release`, `post:deploy`):
 - Non-zero exit code logs a warning
-- Pipeline continues and reports success
-- All hook results are captured in release output
+- Remaining commands continue executing
+- All results are captured in the operation output
 
-## Hook vs Release Pipeline Steps
+## Backward Compatibility
 
-| Feature | Hooks | Release Steps |
-|---------|-------|---------------|
-| Configuration | Component-level arrays | Release pipeline `steps` array |
-| Dependencies | None (sequential) | `needs` field for DAG ordering |
-| Failure handling | Fixed (fatal or non-fatal) | Configurable per step |
-| Execution point | Fixed lifecycle points | Custom ordering |
-| Use case | Simple shell commands | Complex orchestration |
-
-**When to use hooks:** Simple, component-specific commands that always run at the same lifecycle point.
-
-**When to use release steps:** Complex orchestration with dependencies, module integration, or custom failure handling.
-
-## Configuration
-
-Hooks are configured in the component JSON file:
+Legacy flat fields (`pre_version_bump_commands`, `post_version_bump_commands`, `post_release_commands`) are still supported in component JSON. They are automatically migrated into the `hooks` map during deserialization:
 
 ```json
 {
-  "id": "my-component",
-  "local_path": "/path/to/component",
-  "pre_version_bump_commands": ["command1", "command2"],
-  "post_version_bump_commands": ["command3"],
-  "post_release_commands": ["command4"]
+  "pre_version_bump_commands": ["cargo build --release"],
+  "post_version_bump_commands": ["git add Cargo.lock"]
 }
 ```
 
-Set hooks via CLI:
-```bash
-homeboy component set my-component --json '{
-  "pre_version_bump_commands": ["cargo build --release"],
-  "post_version_bump_commands": ["git add Cargo.lock"]
-}'
+is equivalent to:
+
+```json
+{
+  "hooks": {
+    "pre:version:bump": ["cargo build --release"],
+    "post:version:bump": ["git add Cargo.lock"]
+  }
+}
 ```
+
+Both formats work. The `hooks` map is the canonical format going forward.
+
+## Module Hooks
+
+Modules declare hooks in their manifest using the same format:
+
+```json
+{
+  "id": "rust",
+  "hooks": {
+    "post:version:bump": ["cargo generate-lockfile"]
+  }
+}
+```
+
+Module hooks merge with component hooks at resolution time. They are not stored on the component.
+
+## Hooks vs Release Pipeline Steps
+
+| Feature | Hooks | Release Steps |
+|---------|-------|---------------|
+| Configuration | `hooks` map on component/module | Release pipeline `steps` array |
+| Dependencies | None (sequential) | `needs` field for DAG ordering |
+| Failure handling | Fixed per event (fatal or non-fatal) | Configurable per step |
+| Execution point | Fixed lifecycle points | Custom ordering |
+| Use case | Simple shell commands | Complex orchestration |
+
+**Use hooks** for simple, component-specific commands that always run at the same lifecycle point.
+
+**Use release steps** for complex orchestration with dependencies, module integration, or custom failure handling.
+
+## Implementation
+
+The hook engine lives in `src/core/hooks.rs` and provides:
+
+- `resolve_hooks(component, event)` — merge module + component hooks for an event
+- `run_hooks(component, event, failure_mode)` — resolve and execute
+- `run_commands(commands, working_dir, event, failure_mode)` — low-level executor
+- `events::*` — constants for standard event names
+- `HookFailureMode` — `Fatal` or `NonFatal`
+- `HookRunResult` / `HookCommandResult` — structured results
 
 ## Related
 
-- [Component schema](../schemas/component-schema.md) - Full component configuration reference
 - [Release pipeline](release-pipeline.md) - Configurable release orchestration
 - [Version command](../commands/version.md) - Version bump operations

@@ -39,7 +39,9 @@ pub fn require_with_hints<T>(
 pub fn require_non_empty<'a>(value: &'a str, field: &str, message: &str) -> Result<&'a str> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        Err(Error::validation_invalid_argument(field, message, None, None))
+        Err(Error::validation_invalid_argument(
+            field, message, None, None,
+        ))
     } else {
         Ok(trimmed)
     }
@@ -48,7 +50,9 @@ pub fn require_non_empty<'a>(value: &'a str, field: &str, message: &str) -> Resu
 /// Require a collection to be non-empty.
 pub fn require_non_empty_vec<'a, T>(vec: &'a [T], field: &str, message: &str) -> Result<&'a [T]> {
     if vec.is_empty() {
-        Err(Error::validation_invalid_argument(field, message, None, None))
+        Err(Error::validation_invalid_argument(
+            field, message, None, None,
+        ))
     } else {
         Ok(vec)
     }
@@ -137,7 +141,10 @@ impl ValidationCollector {
             1 => {
                 let err = &self.errors[0];
                 Err(Error::validation_invalid_argument(
-                    &err.field, &err.problem, None, None,
+                    &err.field,
+                    &err.problem,
+                    None,
+                    None,
                 ))
             }
             _ => Err(Error::validation_multiple_errors(self.errors)),
@@ -237,7 +244,9 @@ mod tests {
     fn collector_capture_stores_error_and_returns_none() {
         let mut v = ValidationCollector::new();
         let result: Option<i32> = v.capture(
-            Err(Error::validation_invalid_argument("test", "msg", None, None)),
+            Err(Error::validation_invalid_argument(
+                "test", "msg", None, None,
+            )),
             "test",
         );
         assert!(result.is_none());

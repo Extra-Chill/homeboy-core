@@ -541,7 +541,7 @@ fn collect_module_feature_patterns(comp: &component::Component) -> Vec<String> {
     if let Some(ref modules) = comp.modules {
         for module_id in modules.keys() {
             if let Ok(manifest) = module::load_module(module_id) {
-                patterns.extend(manifest.audit_feature_patterns.clone());
+                patterns.extend(manifest.audit_feature_patterns().to_vec());
             }
         }
     }
@@ -728,7 +728,7 @@ fn collect_module_ignore_patterns(comp: &component::Component) -> Vec<String> {
     if let Some(ref modules) = comp.modules {
         for module_id in modules.keys() {
             if let Ok(manifest) = module::load_module(module_id) {
-                patterns.extend(manifest.audit_ignore_claim_patterns.clone());
+                patterns.extend(manifest.audit_ignore_claim_patterns().to_vec());
             }
         }
     }
@@ -1259,7 +1259,11 @@ index 111222..333444 100644
         let docs_path = dir.path();
 
         fs::write(docs_path.join("guide.md"), "# Guide\n").unwrap();
-        fs::write(docs_path.join("CHANGELOG.md"), "# Changelog\n## v1.0\n- Removed old/path.rs\n").unwrap();
+        fs::write(
+            docs_path.join("CHANGELOG.md"),
+            "# Changelog\n## v1.0\n- Removed old/path.rs\n",
+        )
+        .unwrap();
         fs::write(docs_path.join("api.md"), "# API\n").unwrap();
 
         // With default CHANGELOG.md exclusion

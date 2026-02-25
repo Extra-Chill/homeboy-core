@@ -16,10 +16,7 @@ use crate::{component, project, Error, Result};
 ///
 /// # Returns
 /// `(project_id, component_ids)` or helpful error
-pub fn resolve_project_components(
-    first: &str,
-    rest: &[String],
-) -> Result<(String, Vec<String>)> {
+pub fn resolve_project_components(first: &str, rest: &[String]) -> Result<(String, Vec<String>)> {
     let projects = project::list_ids().unwrap_or_default();
     let components = component::list_ids().unwrap_or_default();
 

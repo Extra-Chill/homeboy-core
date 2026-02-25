@@ -286,7 +286,7 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
     // Filter modules: linked modules + platform modules (runtime.is_none())
     let modules: Vec<ModuleEntry> = all_modules
         .iter()
-        .filter(|m| show_all || linked_module_ids.contains(&m.id) || m.runtime.is_none())
+        .filter(|m| show_all || linked_module_ids.contains(&m.id) || m.executable.is_none())
         .map(|m| {
             let ready_status = module_ready_status(m);
             ModuleEntry {
@@ -299,7 +299,7 @@ pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
                     .and_then(|d| d.lines().next())
                     .unwrap_or("")
                     .to_string(),
-                runtime: if m.runtime.is_some() {
+                runtime: if m.executable.is_some() {
                     "executable"
                 } else {
                     "platform"

@@ -20,9 +20,6 @@ pub struct Defaults {
     #[serde(default = "default_version_candidates")]
     pub version_candidates: Vec<VersionCandidateConfig>,
 
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub post_version_bump_commands: Vec<String>,
-
     #[serde(default = "default_deploy")]
     pub deploy: DeployConfig,
 
@@ -35,7 +32,6 @@ impl Default for Defaults {
         Self {
             install_methods: default_install_methods(),
             version_candidates: default_version_candidates(),
-            post_version_bump_commands: Vec::new(),
             deploy: default_deploy(),
             permissions: default_permissions(),
         }
@@ -215,7 +211,8 @@ else
     exit 1
   fi
 fi
-"#.to_string(),
+"#
+        .to_string(),
         list_command: None,
     }
 }

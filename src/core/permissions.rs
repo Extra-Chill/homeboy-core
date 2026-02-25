@@ -2,8 +2,8 @@ use std::process::Command;
 
 use crate::defaults;
 use crate::error::{Error, Result};
-use crate::utils::shell;
 use crate::ssh::{CommandOutput, SshClient};
+use crate::utils::shell;
 
 /// Fix local file permissions before build.
 ///
@@ -34,7 +34,11 @@ pub fn fix_local_permissions(local_path: &str) {
 }
 
 /// Fix file permissions after deployment.
-pub fn fix_deployed_permissions(ssh_client: &SshClient, remote_path: &str, remote_owner: Option<&str>) -> Result<()> {
+pub fn fix_deployed_permissions(
+    ssh_client: &SshClient,
+    remote_path: &str,
+    remote_owner: Option<&str>,
+) -> Result<()> {
     let quoted_path = shell::quote_path(remote_path);
 
     // Step 1: Fix ownership (chown before chmod)
@@ -62,7 +66,12 @@ pub fn fix_deployed_permissions(ssh_client: &SshClient, remote_path: &str, remot
 
 /// Fix ownership of deployed files via chown.
 /// Uses configured remote_owner if provided, otherwise auto-detects from existing ownership.
-fn fix_deployed_ownership(ssh_client: &SshClient, remote_path: &str, remote_owner: Option<&str>, quoted_path: &str) {
+fn fix_deployed_ownership(
+    ssh_client: &SshClient,
+    remote_path: &str,
+    remote_owner: Option<&str>,
+    quoted_path: &str,
+) {
     let owner = if let Some(configured) = remote_owner {
         configured.to_string()
     } else {
@@ -70,7 +79,10 @@ fn fix_deployed_ownership(ssh_client: &SshClient, remote_path: &str, remote_owne
         let stat_cmd = format!("stat -c '%U:%G' {} 2>/dev/null", quoted_path);
         let stat_output = ssh_client.execute(&stat_cmd);
         if !stat_output.success || stat_output.stdout.trim().is_empty() {
-            eprintln!("[deploy] Could not detect ownership of {}, skipping chown", remote_path);
+            eprintln!(
+                "[deploy] Could not detect ownership of {}, skipping chown",
+                remote_path
+            );
             return;
         }
         let detected = stat_output.stdout.trim().to_string();
@@ -82,10 +94,17 @@ fn fix_deployed_ownership(ssh_client: &SshClient, remote_path: &str, remote_owne
     };
 
     eprintln!("[deploy] Setting ownership to {} on {}", owner, remote_path);
-    let chown_cmd = format!("chown -R {} {} 2>/dev/null", shell::quote_arg(&owner), quoted_path);
+    let chown_cmd = format!(
+        "chown -R {} {} 2>/dev/null",
+        shell::quote_arg(&owner),
+        quoted_path
+    );
     let chown_output = ssh_client.execute(&chown_cmd);
     if !chown_output.success {
-        eprintln!("[deploy] Warning: chown failed (exit {}): {}", chown_output.exit_code, chown_output.stderr);
+        eprintln!(
+            "[deploy] Warning: chown failed (exit {}): {}",
+            chown_output.exit_code, chown_output.stderr
+        );
         // Don't fail the deploy - chown is best-effort
     }
 }

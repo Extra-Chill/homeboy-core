@@ -1,10 +1,10 @@
 use crate::changelog;
 use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
+use crate::engine::pipeline::{self, PipelineStep};
 use crate::error::{Error, Result};
 use crate::git::{self, UncommittedChanges};
 use crate::module::ModuleManifest;
-use crate::engine::pipeline::{self, PipelineStep};
 use crate::utils::validation::ValidationCollector;
 use crate::version;
 
@@ -128,7 +128,9 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
                 // Only changelog/version files are uncommitted — auto-stage them
                 // so the release commit includes them (e.g., after `homeboy changelog add`)
                 eprintln!("[release] Auto-staging changelog/version files for release commit");
-                let all_files: Vec<&String> = uncommitted.staged.iter()
+                let all_files: Vec<&String> = uncommitted
+                    .staged
+                    .iter()
                     .chain(uncommitted.unstaged.iter())
                     .collect();
                 for file in all_files {
@@ -280,11 +282,15 @@ fn validate_commits_vs_changelog(component: &Component) -> Result<()> {
 }
 
 /// Generate changelog entries from conventional commit messages.
-fn auto_generate_changelog_entries(component: &Component, commits: &[git::CommitInfo]) -> Result<()> {
+fn auto_generate_changelog_entries(
+    component: &Component,
+    commits: &[git::CommitInfo],
+) -> Result<()> {
     let settings = changelog::resolve_effective_settings(Some(component));
 
     // Group commits by changelog entry type (skips docs, chore, merge)
-    let mut entries_by_type: std::collections::HashMap<&str, Vec<String>> = std::collections::HashMap::new();
+    let mut entries_by_type: std::collections::HashMap<&str, Vec<String>> =
+        std::collections::HashMap::new();
 
     for commit in commits {
         if let Some(entry_type) = commit.category.to_changelog_entry_type() {
@@ -300,10 +306,14 @@ fn auto_generate_changelog_entries(component: &Component, commits: &[git::Commit
     if entries_by_type.is_empty() {
         let fallback = commits
             .iter()
-            .find(|c| !matches!(
-                c.category,
-                git::CommitCategory::Docs | git::CommitCategory::Chore | git::CommitCategory::Merge
-            ))
+            .find(|c| {
+                !matches!(
+                    c.category,
+                    git::CommitCategory::Docs
+                        | git::CommitCategory::Chore
+                        | git::CommitCategory::Merge
+                )
+            })
             .map(|c| git::strip_conventional_prefix(&c.subject).to_string())
             .unwrap_or_else(|| "Internal improvements".to_string());
 
@@ -319,10 +329,7 @@ fn auto_generate_changelog_entries(component: &Component, commits: &[git::Commit
     // Add entries to changelog grouped by type
     for (entry_type, messages) in entries_by_type {
         changelog::read_and_add_next_section_items_typed(
-            component,
-            &settings,
-            &messages,
-            entry_type,
+            component, &settings, &messages, entry_type,
         )?;
     }
 
@@ -487,7 +494,9 @@ fn build_release_steps(
     }
 
     // === POST-RELEASE STEP (optional, runs after everything else) ===
-    if !component.post_release_commands.is_empty() {
+    let post_release_hooks =
+        crate::hooks::resolve_hooks(component, crate::hooks::events::POST_RELEASE);
+    if !post_release_hooks.is_empty() {
         let post_release_needs = if !publish_targets.is_empty() {
             vec!["cleanup".to_string()]
         } else {
@@ -497,17 +506,16 @@ fn build_release_steps(
         steps.push(ReleasePlanStep {
             id: "post_release".to_string(),
             step_type: "post_release".to_string(),
-            label: Some("Run post-release commands".to_string()),
+            label: Some("Run post-release hooks".to_string()),
             needs: post_release_needs,
             config: {
                 let mut config = std::collections::HashMap::new();
                 config.insert(
                     "commands".to_string(),
                     serde_json::Value::Array(
-                        component
-                            .post_release_commands
+                        post_release_hooks
                             .iter()
-                            .map(|s| serde_json::Value::String(s.clone()))
+                            .map(|s: &String| serde_json::Value::String(s.clone()))
                             .collect(),
                     ),
                 );
@@ -522,7 +530,11 @@ fn build_release_steps(
 }
 
 /// Get list of files allowed to be dirty during release (relative paths).
-fn get_release_allowed_files(changelog_path: &std::path::Path, version_targets: &[String], repo_root: &std::path::Path) -> Vec<String> {
+fn get_release_allowed_files(
+    changelog_path: &std::path::Path,
+    version_targets: &[String],
+    repo_root: &std::path::Path,
+) -> Vec<String> {
     let mut allowed = Vec::new();
 
     // Add changelog (convert to relative path)
@@ -541,13 +553,19 @@ fn get_release_allowed_files(changelog_path: &std::path::Path, version_targets: 
 }
 
 /// Get uncommitted files that are NOT in the allowed list.
-fn get_unexpected_uncommitted_files(uncommitted: &UncommittedChanges, allowed: &[String]) -> Vec<String> {
-    let all_uncommitted: Vec<&String> = uncommitted.staged.iter()
+fn get_unexpected_uncommitted_files(
+    uncommitted: &UncommittedChanges,
+    allowed: &[String],
+) -> Vec<String> {
+    let all_uncommitted: Vec<&String> = uncommitted
+        .staged
+        .iter()
         .chain(uncommitted.unstaged.iter())
         .chain(uncommitted.untracked.iter())
         .collect();
 
-    all_uncommitted.into_iter()
+    all_uncommitted
+        .into_iter()
         .filter(|f| !allowed.iter().any(|a| f.ends_with(a) || a.ends_with(*f)))
         .cloned()
         .collect()

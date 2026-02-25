@@ -89,11 +89,16 @@ pub fn finalize_next_section(
         "changelog",
         &format!(
             "No unreleased changelog section found (looked for: {})",
-            next_section_aliases.iter().map(|a| format!("\"## {}\"", a)).collect::<Vec<_>>().join(", ")
+            next_section_aliases
+                .iter()
+                .map(|a| format!("\"## {}\"", a))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         vec![
             "Add entries: `homeboy changelog add <componentId> -m \"...\"`".to_string(),
-            "Or create section manually: add a `## Unreleased` heading to your changelog".to_string(),
+            "Or create section manually: add a `## Unreleased` heading to your changelog"
+                .to_string(),
         ],
     )?;
 
@@ -930,7 +935,8 @@ mod tests {
 
     #[test]
     fn count_unreleased_entries_with_direct_bullets() {
-        let content = "# Changelog\n\n## Unreleased\n\n- Item one\n- Item two\n- Item three\n\n## 0.1.0\n";
+        let content =
+            "# Changelog\n\n## Unreleased\n\n- Item one\n- Item two\n- Item three\n\n## 0.1.0\n";
         let aliases = vec!["Unreleased".to_string()];
         assert_eq!(count_unreleased_entries(content, &aliases), 3);
     }

@@ -362,13 +362,11 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                 .collect();
 
             let has_setup = module
-                .runtime
-                .as_ref()
+                .runtime()
                 .and_then(|r| r.setup_command.as_ref())
                 .map(|_| true);
             let has_ready_check = module
-                .runtime
-                .as_ref()
+                .runtime()
                 .and_then(|r| r.ready_check.as_ref())
                 .map(|_| true);
 
@@ -382,7 +380,7 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                     .and_then(|d| d.lines().next())
                     .unwrap_or("")
                     .to_string(),
-                runtime: if module.runtime.is_some() {
+                runtime: if module.executable.is_some() {
                     "executable".to_string()
                 } else {
                     "platform".to_string()
@@ -418,13 +416,11 @@ fn show_module(module_id: &str) -> CmdResult<ModuleOutput> {
     let linked = is_module_linked(&module.id);
 
     let has_setup = module
-        .runtime
-        .as_ref()
+        .runtime()
         .and_then(|r| r.setup_command.as_ref())
         .map(|_| true);
     let has_ready_check = module
-        .runtime
-        .as_ref()
+        .runtime()
         .and_then(|r| r.ready_check.as_ref())
         .map(|_| true);
 
@@ -461,7 +457,7 @@ fn show_module(module_id: &str) -> CmdResult<ModuleOutput> {
         author: module.author.clone(),
         homepage: module.homepage.clone(),
         source_url: module.source_url.clone(),
-        runtime: if module.runtime.is_some() {
+        runtime: if module.executable.is_some() {
             "executable".to_string()
         } else {
             "platform".to_string()
@@ -475,7 +471,7 @@ fn show_module(module_id: &str) -> CmdResult<ModuleOutput> {
         path: module.module_path.clone().unwrap_or_default(),
         cli,
         actions,
-        inputs: module.inputs.clone(),
+        inputs: module.inputs().to_vec(),
         settings: module.settings.clone(),
         requires,
     };

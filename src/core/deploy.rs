@@ -1415,7 +1415,7 @@ fn parse_component_version(content: &str, pattern: Option<&str>, filename: &str)
 /// Find deploy verification config from modules.
 fn find_deploy_verification(target_path: &str) -> Option<DeployVerification> {
     for module in load_all_modules().unwrap_or_default() {
-        for verification in &module.deploy {
+        for verification in module.deploy_verifications() {
             if target_path.contains(&verification.path_pattern) {
                 return Some(verification.clone());
             }
@@ -1427,7 +1427,7 @@ fn find_deploy_verification(target_path: &str) -> Option<DeployVerification> {
 /// Find deploy override config from modules.
 fn find_deploy_override(target_path: &str) -> Option<(DeployOverride, ModuleManifest)> {
     for module in load_all_modules().unwrap_or_default() {
-        for override_config in &module.deploy_override {
+        for override_config in module.deploy_overrides() {
             if target_path.contains(&override_config.path_pattern) {
                 return Some((override_config.clone(), module));
             }

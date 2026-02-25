@@ -3,9 +3,9 @@ use crate::component::{self, Component, VersionTarget};
 use crate::config::{from_str, set_json_pointer, to_string_pretty};
 use crate::defaults;
 use crate::error::{Error, Result};
+use crate::hooks::{self, HookFailureMode};
 use crate::local_files::{self, FileSystem};
 use crate::module::{load_all_modules, ModuleManifest};
-use crate::ssh::execute_local_command_in_dir;
 use crate::utils::{io, parser, validation};
 use regex::Regex;
 use serde::Serialize;
@@ -13,59 +13,6 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-
-/// Execute pre-bump commands as part of the version bump pipeline.
-///
-/// These commands are expected to update and/or stage generated artifacts that may change
-/// due to the version bump (e.g., `cargo build` updating Cargo.lock).
-///
-/// Important: this runs *after* the version/changelog files are updated so generated artifacts
-/// can reflect the new version, but *before* the release commit is created.
-pub fn run_pre_bump_commands(commands: &[String], working_dir: &str) -> Result<()> {
-    if commands.is_empty() {
-        return Ok(());
-    }
-
-    for command in commands {
-        let output = execute_local_command_in_dir(command, Some(working_dir), None);
-        if !output.success {
-            let error_text = if output.stderr.trim().is_empty() {
-                output.stdout
-            } else {
-                output.stderr
-            };
-            return Err(Error::internal_unexpected(format!(
-                "Pre version bump command failed: {}\n{}",
-                command, error_text
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-fn run_post_bump_commands(commands: &[String], working_dir: &str) -> Result<()> {
-    if commands.is_empty() {
-        return Ok(());
-    }
-
-    for command in commands {
-        let output = execute_local_command_in_dir(command, Some(working_dir), None);
-        if !output.success {
-            let error_text = if output.stderr.trim().is_empty() {
-                output.stdout
-            } else {
-                output.stderr
-            };
-            return Err(Error::internal_unexpected(format!(
-                "Post version bump command failed: {}\n{}",
-                command, error_text
-            )));
-        }
-    }
-
-    Ok(())
-}
 
 /// Parse version from content using regex pattern.
 /// Pattern must contain a capture group for the version string.
@@ -100,7 +47,7 @@ pub fn default_pattern_for_file(filename: &str) -> Option<String> {
 }
 
 fn find_version_pattern_in_module(module: &ModuleManifest, filename: &str) -> Option<String> {
-    for vp in &module.version_patterns {
+    for vp in module.version_patterns() {
         if filename.ends_with(&vp.extension) {
             return Some(vp.pattern.clone());
         }
@@ -815,11 +762,18 @@ pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<
     // Replace @since placeholder tags with the new version (module-driven).
     let since_tags_replaced = replace_since_tag_placeholders(component, &new_version)?;
 
-    // Run commands that may update/stage generated artifacts impacted by the bump (e.g. Cargo.lock).
+    // Run lifecycle hooks that may update/stage generated artifacts impacted by the bump.
     // This must happen AFTER version targets are updated so artifacts match the new version.
-    run_pre_bump_commands(&component.pre_version_bump_commands, &component.local_path)?;
-
-    run_post_bump_commands(&component.post_version_bump_commands, &component.local_path)?;
+    hooks::run_hooks(
+        component,
+        hooks::events::PRE_VERSION_BUMP,
+        HookFailureMode::Fatal,
+    )?;
+    hooks::run_hooks(
+        component,
+        hooks::events::POST_VERSION_BUMP,
+        HookFailureMode::Fatal,
+    )?;
 
     Ok(BumpResult {
         old_version,
@@ -1015,7 +969,7 @@ fn replace_since_tag_placeholders(component: &Component, new_version: &str) -> R
         modules.keys().find_map(|module_id| {
             load_module(module_id)
                 .ok()
-                .and_then(|m| m.since_tag.clone())
+                .and_then(|m| m.since_tag().cloned())
         })
     });
 

@@ -74,10 +74,14 @@ impl SshClient {
         // to prevent hangs on stalled connections or unexpected prompts.
         if !interactive {
             args.extend([
-                "-o".to_string(), "BatchMode=yes".to_string(),
-                "-o".to_string(), "ConnectTimeout=10".to_string(),
-                "-o".to_string(), "ServerAliveInterval=15".to_string(),
-                "-o".to_string(), "ServerAliveCountMax=3".to_string(),
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                "-o".to_string(),
+                "ConnectTimeout=10".to_string(),
+                "-o".to_string(),
+                "ServerAliveInterval=15".to_string(),
+                "-o".to_string(),
+                "ServerAliveCountMax=3".to_string(),
             ]);
         }
 
@@ -119,10 +123,7 @@ impl SshClient {
                 return result;
             }
 
-            let delay = backoff_secs
-                .get(attempt as usize + 1)
-                .copied()
-                .unwrap_or(5);
+            let delay = backoff_secs.get(attempt as usize + 1).copied().unwrap_or(5);
             eprintln!(
                 "[ssh] Connection failed (attempt {}/{}), retrying in {}s...",
                 attempt + 1,

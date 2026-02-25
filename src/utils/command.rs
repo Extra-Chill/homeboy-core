@@ -15,7 +15,11 @@ pub fn run(program: &str, args: &[&str], context: &str) -> Result<String> {
         .map_err(|e| Error::other(format!("Failed to run {}: {}", context, e)))?;
 
     if !output.status.success() {
-        return Err(Error::other(format!("{} failed: {}", context, error_text(&output))));
+        return Err(Error::other(format!(
+            "{} failed: {}",
+            context,
+            error_text(&output)
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -33,7 +37,11 @@ pub fn run_in(dir: &str, program: &str, args: &[&str], context: &str) -> Result<
         .map_err(|e| Error::other(format!("Failed to run {}: {}", context, e)))?;
 
     if !output.status.success() {
-        return Err(Error::other(format!("{} failed: {}", context, error_text(&output))));
+        return Err(Error::other(format!(
+            "{} failed: {}",
+            context,
+            error_text(&output)
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())

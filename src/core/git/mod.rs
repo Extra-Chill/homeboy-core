@@ -1,22 +1,19 @@
-mod primitives;
+mod changes;
 mod commits;
 mod operations;
-mod changes;
+mod primitives;
 
-pub use primitives::*;
+pub use changes::*;
 pub use commits::*;
 pub use operations::*;
-pub use changes::*;
+pub use primitives::*;
 
 use std::process::Command;
 
 use crate::error::Error;
 
 fn execute_git(path: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
-    Command::new("git")
-        .args(args)
-        .current_dir(path)
-        .output()
+    Command::new("git").args(args).current_dir(path).output()
 }
 
 fn resolve_target(component_id: Option<&str>) -> crate::error::Result<(String, String)> {

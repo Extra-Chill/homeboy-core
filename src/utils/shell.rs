@@ -206,11 +206,7 @@ mod tests {
 
     #[test]
     fn normalize_args_multiple_args_unchanged() {
-        let args = vec![
-            "arg1".to_string(),
-            "arg2".to_string(),
-            "--flag".to_string(),
-        ];
+        let args = vec!["arg1".to_string(), "arg2".to_string(), "--flag".to_string()];
         assert_eq!(normalize_args(&args), args);
     }
 

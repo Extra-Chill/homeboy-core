@@ -25,10 +25,7 @@ pub fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
         .collect();
 
     if entries.is_empty() {
-        return Err(Error::other(format!(
-            "No files match pattern: {}",
-            pattern
-        )));
+        return Err(Error::other(format!("No files match pattern: {}", pattern)));
     }
 
     let newest = entries
@@ -37,17 +34,10 @@ pub fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
 
     match newest {
         Some(path) => {
-            eprintln!(
-                "[deploy] Resolved '{}' -> '{}'",
-                pattern,
-                path.display()
-            );
+            eprintln!("[deploy] Resolved '{}' -> '{}'", pattern, path.display());
             Ok(path)
         }
-        None => Err(Error::other(format!(
-            "No files match pattern: {}",
-            pattern
-        ))),
+        None => Err(Error::other(format!("No files match pattern: {}", pattern))),
     }
 }
 
@@ -79,7 +69,10 @@ mod tests {
     fn test_literal_path_not_exists() {
         let result = resolve_artifact_path("/nonexistent/path/artifact.zip");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Artifact not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Artifact not found"));
     }
 
     #[test]
@@ -122,7 +115,10 @@ mod tests {
         let pattern = dir.path().join("nonexistent-*.zip");
         let result = resolve_artifact_path(pattern.to_str().unwrap());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No files match pattern"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No files match pattern"));
     }
 
     #[test]

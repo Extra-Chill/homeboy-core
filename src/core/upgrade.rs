@@ -37,7 +37,9 @@ impl InstallMethod {
             InstallMethod::Cargo => defaults.install_methods.cargo.upgrade_command.clone(),
             InstallMethod::Source => defaults.install_methods.source.upgrade_command.clone(),
             InstallMethod::Binary => defaults.install_methods.binary.upgrade_command.clone(),
-            InstallMethod::Unknown => "Please reinstall using Homebrew, Cargo, or a release binary".to_string(),
+            InstallMethod::Unknown => {
+                "Please reinstall using Homebrew, Cargo, or a release binary".to_string()
+            }
         }
     }
 }

@@ -57,8 +57,7 @@ pub fn resolve_build_command(component: &Component) -> Result<ResolvedBuildComma
                         paths::module(module_id).ok().and_then(|module_dir| {
                             let script_path = module_dir.join(module_script);
                             script_path.exists().then(|| {
-                                let quoted_path =
-                                    shell::quote_path(&script_path.to_string_lossy());
+                                let quoted_path = shell::quote_path(&script_path.to_string_lossy());
                                 let command = build
                                     .command_template
                                     .as_ref()
@@ -187,7 +186,11 @@ pub fn build_component(component: &component::Component) -> (Option<i32>, Option
     let output = execute_local_command_in_dir(
         &build_cmd,
         Some(&local_path_str),
-        if env_refs.is_empty() { None } else { Some(&env_refs) },
+        if env_refs.is_empty() {
+            None
+        } else {
+            Some(&env_refs)
+        },
     );
 
     if output.success {
@@ -195,7 +198,14 @@ pub fn build_component(component: &component::Component) -> (Option<i32>, Option
     } else {
         (
             Some(output.exit_code),
-            Some(format_build_error(&component.id, &build_cmd, &local_path_str, output.exit_code, &output.stderr, &output.stdout)),
+            Some(format_build_error(
+                &component.id,
+                &build_cmd,
+                &local_path_str,
+                output.exit_code,
+                &output.stderr,
+                &output.stdout,
+            )),
         )
     }
 }
@@ -221,7 +231,11 @@ fn format_build_error(
     stdout: &str,
 ) -> String {
     // Get useful output (prefer stderr, fall back to stdout)
-    let output_text = if stderr.trim().is_empty() { stdout } else { stderr };
+    let output_text = if stderr.trim().is_empty() {
+        stdout
+    } else {
+        stderr
+    };
 
     // Get last 15 lines for context
     let tail: Vec<&str> = output_text.lines().rev().take(15).collect();
@@ -346,7 +360,11 @@ fn execute_build(component_id: &str) -> Result<(BuildOutput, i32)> {
     let cmd_output = execute_local_command_in_dir(
         &build_cmd,
         Some(&local_path_str),
-        if env_refs.is_empty() { None } else { Some(&env_refs) },
+        if env_refs.is_empty() {
+            None
+        } else {
+            Some(&env_refs)
+        },
     );
 
     Ok((
@@ -398,11 +416,7 @@ fn run_pre_build_scripts(comp: &Component) -> Result<Option<(i32, String)>> {
             ("HOMEBOY_PLUGIN_PATH", &comp.local_path),
         ];
 
-        let output = execute_local_command_in_dir(
-            &script_path.to_string_lossy(),
-            None,
-            Some(&env),
-        );
+        let output = execute_local_command_in_dir(&script_path.to_string_lossy(), None, Some(&env));
 
         if !output.success {
             let combined = if output.stderr.is_empty() {
@@ -429,7 +443,10 @@ fn get_build_env_vars(comp: &Component) -> Vec<(String, String)> {
                     if let Ok(module_path) = paths::module(module_id) {
                         let module_path_str = module_path.to_string_lossy().to_string();
                         env.push(("HOMEBOY_MODULE_PATH".to_string(), module_path_str));
-                        env.push(("HOMEBOY_COMPONENT_PATH".to_string(), comp.local_path.clone()));
+                        env.push((
+                            "HOMEBOY_COMPONENT_PATH".to_string(),
+                            comp.local_path.clone(),
+                        ));
                         env.push(("HOMEBOY_PLUGIN_PATH".to_string(), comp.local_path.clone()));
                         break; // Use first module with build config
                     }

@@ -23,6 +23,6 @@ pub mod parser;
 pub mod resolve;
 pub mod shell;
 pub mod slugify;
+pub(crate) mod template;
 pub mod token;
 pub mod validation;
-pub(crate) mod template;

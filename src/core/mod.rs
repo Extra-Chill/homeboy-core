@@ -16,6 +16,7 @@ pub mod error;
 pub mod files;
 pub mod fleet;
 pub mod git;
+pub mod hooks;
 pub mod logs;
 pub mod module;
 pub mod output;
