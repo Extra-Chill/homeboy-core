@@ -272,22 +272,20 @@ pub fn run_upgrade_with_method(
 fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
     let defaults = defaults::load_defaults();
 
-    let (shell_cmd, success) = match method {
+    let output = match method {
         InstallMethod::Homebrew => {
             let cmd = &defaults.install_methods.homebrew.upgrade_command;
-            let status = Command::new("sh")
+            Command::new("sh")
                 .args(["-c", cmd])
-                .status()
-                .map_err(|e| Error::internal_io(e.to_string(), Some("run homebrew upgrade".to_string())))?;
-            (cmd.clone(), status.success())
+                .output()
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run homebrew upgrade".to_string())))?
         }
         InstallMethod::Cargo => {
             let cmd = &defaults.install_methods.cargo.upgrade_command;
-            let status = Command::new("sh")
+            Command::new("sh")
                 .args(["-c", cmd])
-                .status()
-                .map_err(|e| Error::internal_io(e.to_string(), Some("run cargo upgrade".to_string())))?;
-            (cmd.clone(), status.success())
+                .output()
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run cargo upgrade".to_string())))?
         }
         InstallMethod::Source => {
             // For source builds, we need to find the git root
@@ -316,21 +314,18 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
 
             // Execute the upgrade command from defaults
             let cmd = &defaults.install_methods.source.upgrade_command;
-            let status = Command::new("sh")
+            Command::new("sh")
                 .args(["-c", cmd])
                 .current_dir(&workspace_root)
-                .status()
-                .map_err(|e| Error::internal_io(e.to_string(), Some("run source upgrade".to_string())))?;
-
-            (cmd.clone(), status.success())
+                .output()
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run source upgrade".to_string())))?
         }
         InstallMethod::Binary => {
             let cmd = &defaults.install_methods.binary.upgrade_command;
-            let status = Command::new("sh")
+            Command::new("sh")
                 .args(["-c", cmd])
-                .status()
-                .map_err(|e| Error::internal_io(e.to_string(), Some("run binary upgrade".to_string())))?;
-            (cmd.clone(), status.success())
+                .output()
+                .map_err(|e| Error::internal_io(e.to_string(), Some("run binary upgrade".to_string())))?
         }
         InstallMethod::Unknown => {
             return Err(Error::validation_invalid_argument(
@@ -342,9 +337,18 @@ fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
         }
     };
 
-    if !success {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let error_detail = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("exit code {}", output.status.code().unwrap_or(1))
+        };
         return Err(Error::internal_io(
-            format!("Upgrade command failed: {}", shell_cmd),
+            format!("{} upgrade failed: {}", method.as_str(), error_detail),
             Some("execute upgrade".to_string()),
         ));
     }

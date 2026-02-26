@@ -939,6 +939,19 @@ fn execute_artifact_deploy(
         }
     };
 
+    // For self-deploy components (e.g. deploying homeboy itself), prefer the
+    // installed binary over a stale build artifact. This handles the case where
+    // `homeboy upgrade` installed a new binary but the build artifact is from a
+    // previous version — without this, `deploy --shared` would push the old binary.
+    let artifact_path = if is_self_deploy(component) {
+        match prefer_installed_binary(&artifact_path) {
+            Some(installed) => installed,
+            None => artifact_path,
+        }
+    } else {
+        artifact_path
+    };
+
     // Look up verification from modules
     let verification = find_deploy_verification(install_dir);
 
@@ -1389,6 +1402,38 @@ fn is_self_deploy(component: &Component) -> bool {
     match exe_name {
         Some(name) => name == artifact_name,
         None => false,
+    }
+}
+
+/// For self-deploy components, check if the currently installed binary is newer
+/// than the build artifact. Returns the installed binary path if it should be
+/// preferred, or None to keep using the build artifact.
+///
+/// This handles the upgrade-then-deploy scenario: `homeboy upgrade` installs a
+/// new binary to e.g. /usr/local/bin/homeboy, but the build artifact at
+/// target/release/homeboy is still the old version. Without this check,
+/// `deploy --shared` would push the stale build artifact to the fleet.
+fn prefer_installed_binary(build_artifact: &Path) -> Option<std::path::PathBuf> {
+    let exe_path = std::env::current_exe().ok()?;
+
+    // Don't redirect if they're the same file
+    if exe_path == build_artifact {
+        return None;
+    }
+
+    let exe_mtime = exe_path.metadata().ok()?.modified().ok()?;
+    let art_mtime = build_artifact.metadata().ok()?.modified().ok()?;
+
+    if exe_mtime > art_mtime {
+        log_status!(
+            "deploy",
+            "Installed binary ({}) is newer than build artifact ({}) — deploying installed binary",
+            exe_path.display(),
+            build_artifact.display()
+        );
+        Some(exe_path)
+    } else {
+        None
     }
 }
 
