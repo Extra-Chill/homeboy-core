@@ -108,6 +108,8 @@ pub struct VersionSetOutput {
     changelog_changed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     git_commit: Option<GitCommitInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -196,6 +198,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     changelog_finalized: result.changelog_finalized,
                     changelog_changed: result.changelog_changed,
                     git_commit,
+                    warnings: result.warnings,
                 }),
                 0,
             ))

@@ -570,6 +570,8 @@ pub struct SetResult {
     pub changelog_path: String,
     pub changelog_finalized: bool,
     pub changelog_changed: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Set a component's version directly (without incrementing).
@@ -668,6 +670,24 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
         });
     }
 
+    // Warn about version patterns found in files but not configured as targets.
+    // These will silently drift out of sync on future version changes.
+    let unconfigured = detect_unconfigured_patterns(component);
+    let warnings: Vec<String> = unconfigured
+        .iter()
+        .map(|u| {
+            format!(
+                "Found {} in {} (v{}) but it is not a configured version target. \
+                 Add with: homeboy component add-version-target {} '{}' '{}'",
+                u.description, u.file, u.found_version, component.id, u.file, u.pattern
+            )
+        })
+        .collect();
+
+    for warning in &warnings {
+        log_status!("version", "Warning: {}", warning);
+    }
+
     Ok(SetResult {
         old_version,
         new_version: new_version.to_string(),
@@ -675,6 +695,7 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
         changelog_path: String::new(),
         changelog_finalized: false,
         changelog_changed: false,
+        warnings,
     })
 }
 
