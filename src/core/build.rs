@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::component::{self, Component};
 use crate::config::{is_json_input, parse_bulk_ids};
 use crate::error::{Error, Result};
-use crate::module;
+use crate::module::{self, exec_context};
 use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::paths;
 use crate::permissions;
@@ -445,7 +445,7 @@ fn run_pre_build_scripts(comp: &Component) -> Result<Option<(i32, String)>> {
 
         let env: [(&str, &str); 3] = [
             ("HOMEBOY_MODULE_PATH", &module_path.to_string_lossy()),
-            ("HOMEBOY_COMPONENT_PATH", &comp.local_path),
+            (exec_context::COMPONENT_PATH, &comp.local_path),
             ("HOMEBOY_PLUGIN_PATH", &comp.local_path),
         ];
 
@@ -477,7 +477,7 @@ fn get_build_env_vars(comp: &Component) -> Vec<(String, String)> {
                         let module_path_str = module_path.to_string_lossy().to_string();
                         env.push(("HOMEBOY_MODULE_PATH".to_string(), module_path_str));
                         env.push((
-                            "HOMEBOY_COMPONENT_PATH".to_string(),
+                            exec_context::COMPONENT_PATH.to_string(),
                             comp.local_path.clone(),
                         ));
                         env.push(("HOMEBOY_PLUGIN_PATH".to_string(), comp.local_path.clone()));

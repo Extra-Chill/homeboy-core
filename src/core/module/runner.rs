@@ -5,8 +5,6 @@ use crate::error::{Error, Result};
 use crate::ssh::{execute_local_command_passthrough, CommandOutput};
 use crate::utils::{io, shell};
 
-use super::exec_context;
-
 /// Output from a module runner script execution.
 pub struct RunnerOutput {
     pub exit_code: i32,
@@ -283,35 +281,19 @@ impl ModuleRunner {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
 
-        let mut env = vec![
-            (
-                exec_context::VERSION.to_string(),
-                exec_context::CURRENT_VERSION.to_string(),
-            ),
-            (exec_context::MODULE_ID.to_string(), module_name.to_string()),
-            (
-                exec_context::MODULE_PATH.to_string(),
-                module_path.to_string_lossy().to_string(),
-            ),
-            (
-                exec_context::PROJECT_PATH.to_string(),
-                project_path.to_string_lossy().to_string(),
-            ),
-            (
-                exec_context::COMPONENT_ID.to_string(),
-                self.component_id.clone(),
-            ),
-            (
-                "HOMEBOY_COMPONENT_PATH".to_string(),
-                project_path.to_string_lossy().to_string(),
-            ),
-            (
-                exec_context::SETTINGS_JSON.to_string(),
-                settings_json.to_string(),
-            ),
-        ];
+        let component_path = project_path.to_string_lossy();
+        let mut env = super::execution::build_exec_env(
+            &module_name,
+            None, // no project context in runner
+            Some(&self.component_id),
+            settings_json,
+            Some(&module_path.to_string_lossy()),
+            None, // no project base_path in runner
+            None, // no individual settings
+            Some(&component_path), // path_override (respects --path flag)
+        );
 
-        // Add command-specific environment variables
+        // Add command-specific environment variables (e.g. HOMEBOY_SKIP)
         env.extend(self.env_vars.iter().cloned());
 
         env
