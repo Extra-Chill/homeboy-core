@@ -330,6 +330,38 @@ fn scp_transfer(
     remote_path: &str,
     recursive: bool,
 ) -> Result<DeployResult> {
+    let label = if recursive { "directory" } else { "file" };
+
+    // Local deploy: use cp instead of scp
+    if ssh_client.is_local {
+        log_status!(
+            "deploy",
+            "Copying {} (local): {} -> {}",
+            label,
+            local_path.display(),
+            remote_path
+        );
+
+        let mut cp_args = vec!["-f".to_string()];
+        if recursive {
+            cp_args.push("-r".to_string());
+        }
+        // Preserve permissions and timestamps
+        cp_args.push("-p".to_string());
+        cp_args.push(local_path.to_string_lossy().to_string());
+        cp_args.push(remote_path.to_string());
+
+        let output = Command::new("cp").args(&cp_args).output();
+        return match output {
+            Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
+            Ok(output) => Ok(DeployResult::failure(
+                output.status.code().unwrap_or(1),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            )),
+            Err(err) => Ok(DeployResult::failure(1, err.to_string())),
+        };
+    }
+
     let deploy_defaults = defaults::load_defaults().deploy;
     let mut scp_args: Vec<String> = deploy_defaults.scp_flags.clone();
 
@@ -353,7 +385,6 @@ fn scp_transfer(
         shell::quote_path(remote_path)
     ));
 
-    let label = if recursive { "directory" } else { "file" };
     log_status!(
         "deploy",
         "Uploading {}: {} -> {}@{}:{}",

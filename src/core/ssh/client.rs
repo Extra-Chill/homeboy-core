@@ -8,6 +8,9 @@ pub struct SshClient {
     pub user: String,
     pub port: u16,
     pub identity_file: Option<String>,
+    /// When true, all commands run locally instead of over SSH.
+    /// Set automatically when the server host is localhost/127.0.0.1/::1.
+    pub is_local: bool,
 }
 
 pub struct CommandOutput {
@@ -33,11 +36,17 @@ impl SshClient {
             _ => None,
         };
 
+        let is_local = is_local_host(&server.host);
+        if is_local {
+            log_status!("ssh", "Server '{}' is localhost — using local execution", server_id);
+        }
+
         Ok(Self {
             host: server.host.clone(),
             user: server.user.clone(),
             port: server.port,
             identity_file,
+            is_local,
         })
     }
 
@@ -128,6 +137,16 @@ impl SshClient {
     }
 
     fn execute_once(&self, command: &str, stdin_file: Option<&str>) -> CommandOutput {
+        // Local execution: run command directly instead of over SSH
+        if self.is_local {
+            if let Some(stdin_file_path) = stdin_file {
+                // For stdin piping (used by upload_file), use shell redirection
+                let local_cmd = format!("cat {} | {}", shell::quote_path(stdin_file_path), command);
+                return execute_local_command(&local_cmd);
+            }
+            return execute_local_command(command);
+        }
+
         let args = self.build_ssh_args(Some(command), false);
 
         let mut cmd = Command::new("ssh");
@@ -168,6 +187,17 @@ impl SshClient {
     }
 
     pub fn execute_interactive(&self, command: Option<&str>) -> i32 {
+        // Local execution: run command directly instead of opening SSH session
+        if self.is_local {
+            return match command {
+                Some(cmd) => execute_local_command_interactive(cmd, None, None),
+                None => {
+                    // Interactive shell on localhost — just open a shell
+                    execute_local_command_interactive("bash", None, None)
+                }
+            };
+        }
+
         let args = self.build_ssh_args(command, true);
 
         let status = Command::new("ssh")
@@ -317,6 +347,11 @@ pub fn execute_local_command_passthrough(
             exit_code: -1,
         },
     }
+}
+
+/// Check if a host address refers to the local machine.
+pub fn is_local_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 /// Check if an SSH failure is a transient connection error worth retrying.
