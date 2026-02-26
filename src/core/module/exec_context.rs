@@ -14,6 +14,8 @@ pub const COMPONENT_ID: &str = "HOMEBOY_COMPONENT_ID";
 pub const MODULE_PATH: &str = "HOMEBOY_MODULE_PATH";
 /// Filesystem path to the project directory (base_path).
 pub const PROJECT_PATH: &str = "HOMEBOY_PROJECT_PATH";
+/// Filesystem path to the component directory.
+pub const COMPONENT_PATH: &str = "HOMEBOY_COMPONENT_PATH";
 
 /// Run only specific steps (comma-separated). Scripts should skip steps not in this list.
 pub const STEP: &str = "HOMEBOY_STEP";

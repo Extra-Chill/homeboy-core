@@ -418,6 +418,7 @@ fn build_runtime_env(
         Some(module_path),
         project_base_path,
         Some(&context.settings),
+        None, // no path override in runtime context
     );
 
     if let Some(ref module_env) = runtime.env {
@@ -446,6 +447,7 @@ fn build_action_env(
         module_path,
         project_base_path,
         None,
+        None, // no path override in action context
     )
 }
 
@@ -553,6 +555,13 @@ fn execute_module_runtime(
 }
 
 /// Build execution environment variables for a module.
+///
+/// This is the single canonical env builder for all module execution contexts
+/// (test, lint, build, module run, deploy hooks, action handlers).
+///
+/// When `component_path_override` is provided, it is used as the component path
+/// instead of loading the component from storage. This supports `--path` overrides
+/// in commands like `homeboy test --path /alt/path`.
 pub fn build_exec_env(
     module_id: &str,
     project_id: Option<&str>,
@@ -561,6 +570,7 @@ pub fn build_exec_env(
     module_path: Option<&str>,
     project_base_path: Option<&str>,
     settings: Option<&HashMap<String, serde_json::Value>>,
+    component_path_override: Option<&str>,
 ) -> Vec<(String, String)> {
     let mut env = vec![
         (
@@ -581,20 +591,22 @@ pub fn build_exec_env(
     if let Some(cid) = component_id {
         env.push((exec_context::COMPONENT_ID.to_string(), cid.to_string()));
 
-        // Resolve and set component path
-        match component::load(cid) {
-            Ok(component) => {
-                env.push(("HOMEBOY_COMPONENT_PATH".to_string(), component.local_path));
+        // Use override path if provided, otherwise load from storage
+        let component_path = if let Some(override_path) = component_path_override {
+            override_path.to_string()
+        } else {
+            match component::load(cid) {
+                Ok(component) => component.local_path,
+                Err(e) => {
+                    env.push(("HOMEBOY_COMPONENT_LOAD_ERROR".to_string(), e.to_string()));
+                    format!("/debug/component-not-found/{}", cid)
+                }
             }
-            Err(e) => {
-                // For debugging: if component loading fails, still set a placeholder path
-                env.push((
-                    "HOMEBOY_COMPONENT_PATH".to_string(),
-                    format!("/debug/component-not-found/{}", cid),
-                ));
-                env.push(("HOMEBOY_COMPONENT_LOAD_ERROR".to_string(), e.to_string()));
-            }
-        }
+        };
+        env.push((
+            exec_context::COMPONENT_PATH.to_string(),
+            component_path,
+        ));
     }
 
     if let Some(mp) = module_path {
