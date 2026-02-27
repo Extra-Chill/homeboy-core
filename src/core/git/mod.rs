@@ -16,7 +16,10 @@ fn execute_git(path: &str, args: &[&str]) -> std::io::Result<std::process::Outpu
     Command::new("git").args(args).current_dir(path).output()
 }
 
-fn resolve_target(component_id: Option<&str>) -> crate::error::Result<(String, String)> {
+fn resolve_target(
+    component_id: Option<&str>,
+    path_override: Option<&str>,
+) -> crate::error::Result<(String, String)> {
     let id = component_id.ok_or_else(|| {
         Error::validation_invalid_argument(
             "componentId",
@@ -28,6 +31,11 @@ fn resolve_target(component_id: Option<&str>) -> crate::error::Result<(String, S
             ]),
         )
     })?;
-    let comp = crate::component::load(id)?;
-    Ok((id.to_string(), comp.local_path))
+    let path = if let Some(p) = path_override {
+        p.to_string()
+    } else {
+        let comp = crate::component::load(id)?;
+        comp.local_path
+    };
+    Ok((id.to_string(), path))
 }
