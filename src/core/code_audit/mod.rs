@@ -9,6 +9,7 @@
 //! 4. Checking all files against discovered conventions
 //! 5. Producing actionable findings for outliers
 
+pub mod baseline;
 mod checks;
 mod conventions;
 mod findings;
