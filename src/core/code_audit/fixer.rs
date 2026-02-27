@@ -973,6 +973,7 @@ class BadAbility {
                 confidence: 0.5,
             }],
             findings: vec![],
+            directory_conventions: vec![],
         };
 
         let fix_result = generate_fixes(&audit_result, &dir);
@@ -1211,6 +1212,7 @@ class {} {{
                 confidence: 0.75,
             }],
             findings: vec![],
+            directory_conventions: vec![],
         };
 
         let fix_result = generate_fixes(&audit_result, &dir);
@@ -1272,6 +1274,7 @@ class {} {{
                 confidence: 0.33,
             }],
             findings: vec![],
+            directory_conventions: vec![],
         };
 
         let fix_result = generate_fixes(&audit_result, &dir);

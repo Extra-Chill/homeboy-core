@@ -46,7 +46,42 @@ pub struct CodeAuditResult {
     pub source_path: String,
     pub summary: AuditSummary,
     pub conventions: Vec<ConventionReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub directory_conventions: Vec<DirectoryConvention>,
     pub findings: Vec<Finding>,
+}
+
+/// A cross-directory convention: a pattern that sibling subdirectories share.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DirectoryConvention {
+    /// Parent directory path (e.g., "inc/Abilities").
+    pub parent: String,
+    /// Expected methods that most subdirectories' conventions share.
+    pub expected_methods: Vec<String>,
+    /// Expected registrations that most subdirectories share.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub expected_registrations: Vec<String>,
+    /// Subdirectories that conform.
+    pub conforming_dirs: Vec<String>,
+    /// Subdirectories that deviate.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outlier_dirs: Vec<DirectoryOutlier>,
+    /// How many subdirectories were analyzed.
+    pub total_dirs: usize,
+    /// Confidence score.
+    pub confidence: f32,
+}
+
+/// A subdirectory that deviates from the cross-directory convention.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DirectoryOutlier {
+    /// Subdirectory name.
+    pub dir: String,
+    /// What's missing compared to sibling conventions.
+    pub missing_methods: Vec<String>,
+    /// Missing registrations.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_registrations: Vec<String>,
 }
 
 /// A convention as reported to the user (includes check status).
@@ -120,6 +155,7 @@ fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAudit
                 alignment_score: 1.0,
             },
             conventions: vec![],
+            directory_conventions: vec![],
             findings: vec![],
         });
     }
@@ -179,6 +215,19 @@ fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAudit
         alignment_score * 100.0
     );
 
+    // Phase 6: Cross-directory convention discovery
+    let directory_conventions = conventions::discover_cross_directory(&convention_reports);
+
+    if !directory_conventions.is_empty() {
+        let total_dir_outliers: usize = directory_conventions.iter().map(|d| d.outlier_dirs.len()).sum();
+        log_status!(
+            "audit",
+            "Cross-directory: {} pattern(s), {} outlier dir(s)",
+            directory_conventions.len(),
+            total_dir_outliers
+        );
+    }
+
     Ok(CodeAuditResult {
         component_id: component_id.to_string(),
         source_path: source_path.to_string(),
@@ -189,6 +238,7 @@ fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAudit
             alignment_score,
         },
         conventions: convention_reports,
+        directory_conventions,
         findings: all_findings,
     })
 }
