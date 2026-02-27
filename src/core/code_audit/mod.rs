@@ -170,6 +170,9 @@ fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAudit
         }
     }
 
+    // Phase 2b: Check signature consistency within conventions
+    conventions::check_signature_consistency(&mut discovered_conventions, root);
+
     // Phase 3: Check all conventions
     let check_results = checks::check_conventions(&discovered_conventions);
 
