@@ -6,6 +6,7 @@ pub mod auth;
 pub mod build;
 pub mod changelog;
 pub mod cleanup;
+pub mod code_audit;
 pub mod cli_tool;
 pub mod component;
 pub mod context;
