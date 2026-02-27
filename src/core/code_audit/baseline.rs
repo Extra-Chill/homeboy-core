@@ -286,6 +286,7 @@ mod tests {
                 alignment_score: 0.8,
             },
             conventions: vec![],
+            directory_conventions: vec![],
             findings,
         }
     }
