@@ -1,0 +1,139 @@
+//! Convert check results into actionable findings for the report.
+
+use super::checks::{CheckResult, CheckStatus};
+use super::conventions::DeviationKind;
+
+/// An actionable finding from the code audit.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Finding {
+    /// The convention this finding relates to.
+    pub convention: String,
+    /// Severity of the finding.
+    pub severity: Severity,
+    /// The file with the issue.
+    pub file: String,
+    /// Human-readable description.
+    pub description: String,
+    /// Suggested action.
+    pub suggestion: String,
+    /// The kind of deviation.
+    pub kind: DeviationKind,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    /// Convention violation — should be fixed.
+    Warning,
+    /// Pattern is unclear — needs investigation.
+    Info,
+}
+
+/// Build findings from check results.
+pub fn build_findings(results: &[CheckResult]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for result in results {
+        let severity = match result.status {
+            CheckStatus::Clean => continue,
+            CheckStatus::Drift => Severity::Warning,
+            CheckStatus::Fragmented => Severity::Info,
+        };
+
+        for outlier in &result.outliers {
+            for deviation in &outlier.deviations {
+                findings.push(Finding {
+                    convention: result.convention_name.clone(),
+                    severity: severity.clone(),
+                    file: outlier.file.clone(),
+                    description: deviation.description.clone(),
+                    suggestion: deviation.suggestion.clone(),
+                    kind: deviation.kind.clone(),
+                });
+            }
+        }
+    }
+
+    findings
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::code_audit::checks::CheckResult;
+    use crate::code_audit::conventions::{Deviation, Outlier};
+
+    #[test]
+    fn clean_result_produces_no_findings() {
+        let results = vec![CheckResult {
+            convention_name: "Test".to_string(),
+            status: CheckStatus::Clean,
+            conforming_count: 3,
+            total_count: 3,
+            outliers: vec![],
+        }];
+
+        let findings = build_findings(&results);
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn drift_produces_warning_findings() {
+        let results = vec![CheckResult {
+            convention_name: "Step Types".to_string(),
+            status: CheckStatus::Drift,
+            conforming_count: 2,
+            total_count: 3,
+            outliers: vec![Outlier {
+                file: "agent-ping.php".to_string(),
+                deviations: vec![Deviation {
+                    kind: DeviationKind::MissingMethod,
+                    description: "Missing method: validate".to_string(),
+                    suggestion: "Add validate()".to_string(),
+                }],
+            }],
+        }];
+
+        let findings = build_findings(&results);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, Severity::Warning);
+        assert_eq!(findings[0].convention, "Step Types");
+        assert_eq!(findings[0].file, "agent-ping.php");
+    }
+
+    #[test]
+    fn fragmented_produces_info_findings() {
+        let results = vec![CheckResult {
+            convention_name: "Misc".to_string(),
+            status: CheckStatus::Fragmented,
+            conforming_count: 1,
+            total_count: 3,
+            outliers: vec![
+                Outlier {
+                    file: "a.php".to_string(),
+                    deviations: vec![Deviation {
+                        kind: DeviationKind::MissingMethod,
+                        description: "Missing".to_string(),
+                        suggestion: "Fix".to_string(),
+                    }],
+                },
+                Outlier {
+                    file: "b.php".to_string(),
+                    deviations: vec![Deviation {
+                        kind: DeviationKind::MissingMethod,
+                        description: "Missing".to_string(),
+                        suggestion: "Fix".to_string(),
+                    }],
+                },
+            ],
+        }];
+
+        let findings = build_findings(&results);
+        assert_eq!(findings.len(), 2);
+        assert!(findings.iter().all(|f| f.severity == Severity::Info));
+    }
+}
