@@ -25,6 +25,10 @@ pub struct FileFingerprint {
     pub type_name: Option<String>,
     /// Interfaces or traits implemented.
     pub implements: Vec<String>,
+    /// Namespace declaration (PHP namespace, Rust mod path).
+    pub namespace: Option<String>,
+    /// Import/use statements.
+    pub imports: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
@@ -60,6 +64,10 @@ pub struct Convention {
     pub expected_methods: Vec<String>,
     /// The expected registration calls.
     pub expected_registrations: Vec<String>,
+    /// The expected namespace pattern (if consistent across files).
+    pub expected_namespace: Option<String>,
+    /// The expected import/use statements.
+    pub expected_imports: Vec<String>,
     /// Files that follow the convention.
     pub conforming: Vec<String>,
     /// Files that deviate from the convention.
@@ -99,6 +107,8 @@ pub enum DeviationKind {
     DifferentRegistration,
     NamingMismatch,
     SignatureMismatch,
+    NamespaceMismatch,
+    MissingImport,
 }
 
 // ============================================================================
@@ -128,6 +138,7 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
     };
 
     let registrations = extract_registrations(&content, &language);
+    let (namespace, imports) = extract_namespace_imports(&content, &language);
 
     Some(FileFingerprint {
         relative_path,
@@ -136,6 +147,8 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
         registrations,
         type_name,
         implements,
+        namespace,
+        imports,
     })
 }
 
@@ -276,6 +289,65 @@ fn extract_registrations(content: &str, language: &Language) -> Vec<String> {
     registrations
 }
 
+/// Extract namespace declaration and import/use statements from source content.
+fn extract_namespace_imports(content: &str, language: &Language) -> (Option<String>, Vec<String>) {
+    match language {
+        Language::Php => extract_php_namespace_imports(content),
+        Language::Rust => extract_rust_namespace_imports(content),
+        Language::JavaScript | Language::TypeScript => extract_js_namespace_imports(content),
+        Language::Unknown => (None, vec![]),
+    }
+}
+
+fn extract_php_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
+    let ns_re = Regex::new(r"(?m)^\s*namespace\s+([\w\\]+)\s*;").unwrap();
+    let use_re = Regex::new(r"(?m)^\s*use\s+([\w\\]+)(?:\s+as\s+\w+)?\s*;").unwrap();
+
+    let namespace = ns_re.captures(content).map(|c| c[1].to_string());
+
+    let imports: Vec<String> = use_re
+        .captures_iter(content)
+        .map(|c| c[1].to_string())
+        .collect();
+
+    (namespace, imports)
+}
+
+fn extract_rust_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
+    // Rust doesn't have namespace declarations per-file, but we can track the module path
+    // from `mod` declarations in the same directory
+    let use_re = Regex::new(r"(?m)^\s*use\s+([\w:]+(?:::\{[^}]+\})?)").unwrap();
+
+    let imports: Vec<String> = use_re
+        .captures_iter(content)
+        .map(|c| c[1].to_string())
+        .collect();
+
+    (None, imports)
+}
+
+fn extract_js_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
+    // JS/TS import statements
+    let import_re =
+        Regex::new(r#"(?m)^\s*import\s+.*?\s+from\s+['"]([@\w/.!-]+)['"]"#).unwrap();
+    let require_re =
+        Regex::new(r#"(?m)(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"]([@\w/.!-]+)['"]"#).unwrap();
+
+    let mut imports: Vec<String> = import_re
+        .captures_iter(content)
+        .map(|c| c[1].to_string())
+        .collect();
+
+    for cap in require_re.captures_iter(content) {
+        let imp = cap[1].to_string();
+        if !imports.contains(&imp) {
+            imports.push(imp);
+        }
+    }
+
+    (None, imports)
+}
+
 // ============================================================================
 // Convention Discovery
 // ============================================================================
@@ -330,6 +402,32 @@ pub fn discover_conventions(
         .map(|(name, _)| name.clone())
         .collect();
 
+    // Discover namespace convention (most common namespace)
+    let mut ns_counts: HashMap<String, usize> = HashMap::new();
+    for fp in fingerprints {
+        if let Some(ns) = &fp.namespace {
+            *ns_counts.entry(ns.clone()).or_insert(0) += 1;
+        }
+    }
+    let expected_namespace = ns_counts
+        .iter()
+        .filter(|(_, count)| **count >= threshold)
+        .max_by_key(|(_, count)| *count)
+        .map(|(ns, _)| ns.clone());
+
+    // Discover import conventions (imports appearing in ≥ threshold files)
+    let mut import_counts: HashMap<String, usize> = HashMap::new();
+    for fp in fingerprints {
+        for imp in &fp.imports {
+            *import_counts.entry(imp.clone()).or_insert(0) += 1;
+        }
+    }
+    let expected_imports: Vec<String> = import_counts
+        .iter()
+        .filter(|(_, count)| **count >= threshold)
+        .map(|(name, _)| name.clone())
+        .collect();
+
     // Classify files
     let mut conforming = Vec::new();
     let mut outliers = Vec::new();
@@ -365,6 +463,53 @@ pub fn discover_conventions(
             }
         }
 
+        // Check namespace mismatch
+        if let Some(expected_ns) = &expected_namespace {
+            if let Some(actual_ns) = &fp.namespace {
+                if actual_ns != expected_ns {
+                    deviations.push(Deviation {
+                        kind: DeviationKind::NamespaceMismatch,
+                        description: format!(
+                            "Namespace mismatch: expected `{}`, found `{}`",
+                            expected_ns, actual_ns
+                        ),
+                        suggestion: format!(
+                            "Change namespace to `{}`",
+                            expected_ns
+                        ),
+                    });
+                }
+            }
+            // Missing namespace when others have one is also a deviation
+            if fp.namespace.is_none() {
+                deviations.push(Deviation {
+                    kind: DeviationKind::NamespaceMismatch,
+                    description: format!(
+                        "Missing namespace declaration (expected `{}`)",
+                        expected_ns
+                    ),
+                    suggestion: format!(
+                        "Add `namespace {};`",
+                        expected_ns
+                    ),
+                });
+            }
+        }
+
+        // Check missing imports
+        for expected_imp in &expected_imports {
+            if !fp.imports.contains(expected_imp) {
+                deviations.push(Deviation {
+                    kind: DeviationKind::MissingImport,
+                    description: format!("Missing import: {}", expected_imp),
+                    suggestion: format!(
+                        "Add `use {};` to match the convention in {}",
+                        expected_imp, group_name
+                    ),
+                });
+            }
+        }
+
         if deviations.is_empty() {
             conforming.push(fp.relative_path.clone());
         } else {
@@ -392,6 +537,8 @@ pub fn discover_conventions(
         glob: glob_pattern.to_string(),
         expected_methods,
         expected_registrations,
+        expected_namespace,
+        expected_imports,
         conforming,
         outliers,
         total_files: total,
@@ -859,6 +1006,8 @@ register_rest_route('api/v1', '/data', []);
                 registrations: vec![],
                 type_name: Some("AiChat".to_string()),
                 implements: vec![],
+                namespace: None,
+                imports: vec![],
             },
             FileFingerprint {
                 relative_path: "steps/webhook.php".to_string(),
@@ -871,6 +1020,8 @@ register_rest_route('api/v1', '/data', []);
                 registrations: vec![],
                 type_name: Some("Webhook".to_string()),
                 implements: vec![],
+                namespace: None,
+                imports: vec![],
             },
             FileFingerprint {
                 relative_path: "steps/agent-ping.php".to_string(),
@@ -879,6 +1030,8 @@ register_rest_route('api/v1', '/data', []);
                 registrations: vec![],
                 type_name: Some("AgentPing".to_string()),
                 implements: vec![],
+                namespace: None,
+                imports: vec![],
             },
         ];
 
@@ -906,6 +1059,8 @@ register_rest_route('api/v1', '/data', []);
             registrations: vec![],
             type_name: None,
             implements: vec![],
+            namespace: None,
+            imports: vec![],
         }];
 
         assert!(discover_conventions("Single", "*.php", &fingerprints).is_none());
@@ -939,6 +1094,8 @@ register_rest_route('api/v1', '/data', []);
             status: CheckStatus::Clean,
             expected_methods: methods.iter().map(|s| s.to_string()).collect(),
             expected_registrations: registrations.iter().map(|s| s.to_string()).collect(),
+            expected_namespace: None,
+            expected_imports: vec![],
             conforming: vec![],
             outliers: vec![],
             total_files: 3,
@@ -1120,6 +1277,8 @@ class AgentPing {
             glob: "steps/*".to_string(),
             expected_methods: vec!["execute".to_string(), "register".to_string()],
             expected_registrations: vec![],
+            expected_namespace: None,
+            expected_imports: vec![],
             conforming: vec![
                 "steps/AiChat.php".to_string(),
                 "steps/Webhook.php".to_string(),
@@ -1172,6 +1331,8 @@ class AgentPing {
             glob: "steps/*".to_string(),
             expected_methods: vec!["execute".to_string(), "register".to_string()],
             expected_registrations: vec![],
+            expected_namespace: None,
+            expected_imports: vec![],
             conforming: vec![
                 "steps/AiChat.php".to_string(),
                 "steps/Webhook.php".to_string(),
@@ -1220,6 +1381,8 @@ class AgentPing {
             glob: "steps/*".to_string(),
             expected_methods: vec!["execute".to_string()],
             expected_registrations: vec![],
+            expected_namespace: None,
+            expected_imports: vec![],
             conforming: vec!["steps/A.php".to_string(), "steps/B.php".to_string()],
             outliers: vec![],
             total_files: 2,
@@ -1250,6 +1413,8 @@ class AgentPing {
             glob: "data/*".to_string(),
             expected_methods: vec!["process".to_string()],
             expected_registrations: vec![],
+            expected_namespace: None,
+            expected_imports: vec![],
             conforming: vec!["data/a.txt".to_string(), "data/b.txt".to_string()],
             outliers: vec![],
             total_files: 2,
@@ -1292,6 +1457,8 @@ class AgentPing {
             glob: "steps/*".to_string(),
             expected_methods: vec!["run".to_string()],
             expected_registrations: vec![],
+            expected_namespace: None,
+            expected_imports: vec![],
             conforming: vec![
                 "steps/A.php".to_string(),
                 "steps/B.php".to_string(),
@@ -1310,5 +1477,190 @@ class AgentPing {
         assert_eq!(conv.outliers[0].file, "steps/C.php");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ========================================================================
+    // Namespace and import tests
+    // ========================================================================
+
+    #[test]
+    fn extract_php_namespace() {
+        let content = r#"<?php
+namespace DataMachine\Abilities\Flow;
+
+use DataMachine\Core\BaseAbility;
+use DataMachine\Traits\Registrable;
+
+class CreateFlowAbility extends BaseAbility {
+    public function execute() {}
+}
+"#;
+        let (ns, imports) = extract_php_namespace_imports(content);
+        assert_eq!(ns, Some("DataMachine\\Abilities\\Flow".to_string()));
+        assert_eq!(imports.len(), 2);
+        assert!(imports.contains(&"DataMachine\\Core\\BaseAbility".to_string()));
+        assert!(imports.contains(&"DataMachine\\Traits\\Registrable".to_string()));
+    }
+
+    #[test]
+    fn extract_php_no_namespace() {
+        let content = "<?php\nclass SimpleClass {}\n";
+        let (ns, imports) = extract_php_namespace_imports(content);
+        assert!(ns.is_none());
+        assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn extract_js_imports() {
+        let content = r#"
+import React from 'react';
+import { useState } from 'react';
+import FlowCard from '../components/FlowCard';
+
+const App = () => {};
+export default App;
+"#;
+        let (ns, imports) = extract_js_namespace_imports(content);
+        assert!(ns.is_none());
+        assert!(imports.contains(&"react".to_string()));
+        assert!(imports.contains(&"../components/FlowCard".to_string()));
+    }
+
+    #[test]
+    fn namespace_mismatch_detected_in_convention() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "abilities/CreateFlow.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string()],
+                registrations: vec![],
+                type_name: Some("CreateFlow".to_string()),
+                implements: vec![],
+                namespace: Some("DataMachine\\Abilities\\Flow".to_string()),
+                imports: vec![],
+            },
+            FileFingerprint {
+                relative_path: "abilities/UpdateFlow.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string()],
+                registrations: vec![],
+                type_name: Some("UpdateFlow".to_string()),
+                implements: vec![],
+                namespace: Some("DataMachine\\Abilities\\Flow".to_string()),
+                imports: vec![],
+            },
+            FileFingerprint {
+                relative_path: "abilities/DeleteFlow.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string()],
+                registrations: vec![],
+                type_name: Some("DeleteFlow".to_string()),
+                implements: vec![],
+                namespace: Some("DataMachine\\Flow".to_string()), // WRONG namespace
+                imports: vec![],
+            },
+        ];
+
+        let convention =
+            discover_conventions("Flow", "abilities/*", &fingerprints).unwrap();
+
+        assert_eq!(convention.expected_namespace, Some("DataMachine\\Abilities\\Flow".to_string()));
+        assert_eq!(convention.conforming.len(), 2);
+        assert_eq!(convention.outliers.len(), 1);
+        assert_eq!(convention.outliers[0].file, "abilities/DeleteFlow.php");
+        assert!(convention.outliers[0].deviations.iter().any(|d| {
+            d.kind == DeviationKind::NamespaceMismatch
+        }));
+    }
+
+    #[test]
+    fn missing_import_detected_in_convention() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "abilities/A.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+                namespace: None,
+                imports: vec!["DataMachine\\Core\\Base".to_string()],
+            },
+            FileFingerprint {
+                relative_path: "abilities/B.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+                namespace: None,
+                imports: vec!["DataMachine\\Core\\Base".to_string()],
+            },
+            FileFingerprint {
+                relative_path: "abilities/C.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+                namespace: None,
+                imports: vec![], // Missing the common import
+            },
+        ];
+
+        let convention =
+            discover_conventions("Abilities", "abilities/*", &fingerprints).unwrap();
+
+        assert!(convention.expected_imports.contains(&"DataMachine\\Core\\Base".to_string()));
+        assert_eq!(convention.outliers.len(), 1);
+        assert!(convention.outliers[0].deviations.iter().any(|d| {
+            d.kind == DeviationKind::MissingImport
+        }));
+    }
+
+    #[test]
+    fn missing_namespace_detected() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "steps/A.php".to_string(),
+                language: Language::Php,
+                methods: vec!["run".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+                namespace: Some("App\\Steps".to_string()),
+                imports: vec![],
+            },
+            FileFingerprint {
+                relative_path: "steps/B.php".to_string(),
+                language: Language::Php,
+                methods: vec!["run".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+                namespace: Some("App\\Steps".to_string()),
+                imports: vec![],
+            },
+            FileFingerprint {
+                relative_path: "steps/C.php".to_string(),
+                language: Language::Php,
+                methods: vec!["run".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+                namespace: None, // Missing namespace entirely
+                imports: vec![],
+            },
+        ];
+
+        let convention =
+            discover_conventions("Steps", "steps/*", &fingerprints).unwrap();
+
+        assert_eq!(convention.expected_namespace, Some("App\\Steps".to_string()));
+        assert_eq!(convention.outliers.len(), 1);
+        assert!(convention.outliers[0].deviations.iter().any(|d| {
+            d.kind == DeviationKind::NamespaceMismatch
+                && d.description.contains("Missing namespace")
+        }));
     }
 }

@@ -948,6 +948,8 @@ class BadAbility {
                     "registerAbility".to_string(),
                 ],
                 expected_registrations: vec!["wp_abilities_api_init".to_string()],
+                expected_namespace: None,
+                expected_imports: vec![],
                 conforming: vec!["abilities/GoodAbility.php".to_string()],
                 outliers: vec![Outlier {
                     file: "abilities/BadAbility.php".to_string(),
@@ -1182,6 +1184,8 @@ class {} {{
                     "registerAbility".to_string(),
                 ],
                 expected_registrations: vec!["wp_abilities_api_init".to_string()],
+                expected_namespace: None,
+                expected_imports: vec![],
                 conforming: vec![
                     "abilities/CreateFlowAbility.php".to_string(),
                     "abilities/UpdateFlowAbility.php".to_string(),
@@ -1249,6 +1253,8 @@ class {} {{
                 status: CheckStatus::Fragmented,
                 expected_methods: vec!["get_job".to_string()],
                 expected_registrations: vec![],
+                expected_namespace: None,
+                expected_imports: vec![],
                 conforming: vec!["jobs/Jobs.php".to_string()],
                 outliers: vec![
                     Outlier {
