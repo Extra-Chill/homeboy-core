@@ -34,6 +34,8 @@ pub enum AuditOutput {
     Conventions {
         component_id: String,
         conventions: Vec<homeboy::code_audit::ConventionReport>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        directory_conventions: Vec<homeboy::code_audit::DirectoryConvention>,
     },
 
     #[serde(rename = "audit.fix")]
@@ -58,6 +60,7 @@ pub fn run(args: AuditArgs, _global: &super::GlobalArgs) -> CmdResult<AuditOutpu
             AuditOutput::Conventions {
                 component_id: result.component_id,
                 conventions: result.conventions,
+                directory_conventions: result.directory_conventions,
             },
             0,
         ));
