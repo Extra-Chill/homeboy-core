@@ -92,7 +92,7 @@ pub struct Deviation {
     pub suggestion: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviationKind {
     MissingMethod,
@@ -101,6 +101,7 @@ pub enum DeviationKind {
     DifferentRegistration,
     MissingInterface,
     NamingMismatch,
+    SignatureMismatch,
 }
 
 // ============================================================================
@@ -428,6 +429,147 @@ pub fn discover_conventions(
         total_files: total,
         confidence,
     })
+}
+
+// ============================================================================
+// Signature Consistency
+// ============================================================================
+
+/// Check method signatures across all files in a convention for consistency.
+///
+/// For each expected method, builds a canonical signature from the majority of
+/// conforming files. Files with different signatures get a `SignatureMismatch`
+/// deviation and may be moved from conforming to outlier.
+pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) {
+    for conv in conventions.iter_mut() {
+        if conv.expected_methods.is_empty() {
+            continue;
+        }
+
+        // Detect language from the glob pattern
+        let lang = if conv.glob.ends_with(".php") || conv.glob.ends_with("/*") {
+            // Check first conforming file extension
+            conv.conforming
+                .first()
+                .and_then(|f| f.rsplit('.').next())
+                .map(Language::from_extension)
+                .unwrap_or(Language::Unknown)
+        } else {
+            Language::Unknown
+        };
+
+        if lang == Language::Unknown {
+            continue;
+        }
+
+        // Build canonical signatures from conforming files (majority wins)
+        let mut method_sig_counts: HashMap<String, HashMap<String, usize>> = HashMap::new();
+
+        for file in &conv.conforming {
+            let full_path = root.join(file);
+            let content = match std::fs::read_to_string(&full_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let sigs = super::fixer::extract_signatures(&content, &lang);
+            for sig in &sigs {
+                if conv.expected_methods.contains(&sig.name) {
+                    method_sig_counts
+                        .entry(sig.name.clone())
+                        .or_default()
+                        .entry(sig.signature.clone())
+                        .and_modify(|c| *c += 1)
+                        .or_insert(1);
+                }
+            }
+        }
+
+        // Pick canonical: the most frequent signature for each method
+        let mut canonical: HashMap<String, String> = HashMap::new();
+        for (method, sig_counts) in &method_sig_counts {
+            if let Some((sig, _)) = sig_counts.iter().max_by_key(|(_, count)| *count) {
+                canonical.insert(method.clone(), sig.clone());
+            }
+        }
+
+        if canonical.is_empty() {
+            continue;
+        }
+
+        // Check ALL files (conforming + outliers) for signature mismatches
+        let all_files: Vec<String> = conv
+            .conforming
+            .iter()
+            .chain(conv.outliers.iter().map(|o| &o.file))
+            .cloned()
+            .collect();
+
+        let mut new_outlier_deviations: HashMap<String, Vec<Deviation>> = HashMap::new();
+
+        for file in &all_files {
+            let full_path = root.join(file);
+            let content = match std::fs::read_to_string(&full_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let sigs = super::fixer::extract_signatures(&content, &lang);
+            let sig_map: HashMap<&str, &str> = sigs
+                .iter()
+                .map(|s| (s.name.as_str(), s.signature.as_str()))
+                .collect();
+
+            for (method, expected_sig) in &canonical {
+                if let Some(actual_sig) = sig_map.get(method.as_str()) {
+                    if *actual_sig != expected_sig.as_str() {
+                        new_outlier_deviations
+                            .entry(file.clone())
+                            .or_default()
+                            .push(Deviation {
+                                kind: DeviationKind::SignatureMismatch,
+                                description: format!(
+                                    "Signature mismatch for {}: expected `{}`, found `{}`",
+                                    method, expected_sig, actual_sig
+                                ),
+                                suggestion: format!(
+                                    "Update {}() signature to match: `{}`",
+                                    method, expected_sig
+                                ),
+                            });
+                    }
+                }
+                // If the method is absent, that's already caught as MissingMethod
+            }
+        }
+
+        if new_outlier_deviations.is_empty() {
+            continue;
+        }
+
+        // Move conforming files with mismatches to outliers
+        let mut moved_files = Vec::new();
+        for file in &conv.conforming {
+            if let Some(devs) = new_outlier_deviations.remove(file) {
+                moved_files.push(file.clone());
+                conv.outliers.push(Outlier {
+                    file: file.clone(),
+                    deviations: devs,
+                });
+            }
+        }
+        conv.conforming.retain(|f| !moved_files.contains(f));
+
+        // Add deviations to existing outliers
+        for outlier in &mut conv.outliers {
+            if let Some(devs) = new_outlier_deviations.remove(&outlier.file) {
+                outlier.deviations.extend(devs);
+            }
+        }
+
+        // Recalculate confidence
+        conv.confidence = conv.conforming.len() as f32 / conv.total_files as f32;
+    }
 }
 
 // ============================================================================
@@ -1043,5 +1185,249 @@ register_rest_route('api/v1', '/data', []);
 
         let results = discover_cross_directory(&conventions);
         assert!(results.is_empty()); // These aren't siblings under a common parent
+    }
+
+    // ========================================================================
+    // Signature consistency tests
+    // ========================================================================
+
+    #[test]
+    fn signature_check_detects_mismatch() {
+        let dir = std::env::temp_dir().join("homeboy_sig_mismatch_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("steps")).unwrap();
+
+        // Two conforming files with matching signatures
+        std::fs::write(
+            dir.join("steps/AiChat.php"),
+            r#"<?php
+class AiChat {
+    public function execute(array $config): array { return []; }
+    public function register(): void {}
+}
+"#,
+        ).unwrap();
+
+        std::fs::write(
+            dir.join("steps/Webhook.php"),
+            r#"<?php
+class Webhook {
+    public function execute(array $config): array { return []; }
+    public function register(): void {}
+}
+"#,
+        ).unwrap();
+
+        // One file with different signature (missing type hints)
+        std::fs::write(
+            dir.join("steps/AgentPing.php"),
+            r#"<?php
+class AgentPing {
+    public function execute($config) { return []; }
+    public function register(): void {}
+}
+"#,
+        ).unwrap();
+
+        let mut conventions = vec![Convention {
+            name: "Steps".to_string(),
+            glob: "steps/*".to_string(),
+            expected_methods: vec!["execute".to_string(), "register".to_string()],
+            expected_registrations: vec![],
+            expected_interfaces: vec![],
+            conforming: vec![
+                "steps/AiChat.php".to_string(),
+                "steps/Webhook.php".to_string(),
+                "steps/AgentPing.php".to_string(),
+            ],
+            outliers: vec![],
+            total_files: 3,
+            confidence: 1.0,
+        }];
+
+        check_signature_consistency(&mut conventions, &dir);
+
+        let conv = &conventions[0];
+        // AgentPing should be moved to outliers
+        assert_eq!(conv.conforming.len(), 2);
+        assert_eq!(conv.outliers.len(), 1);
+        assert_eq!(conv.outliers[0].file, "steps/AgentPing.php");
+        assert!(conv.outliers[0].deviations.iter().any(|d| {
+            d.kind == DeviationKind::SignatureMismatch
+                && d.description.contains("execute")
+        }));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn signature_check_adds_to_existing_outliers() {
+        let dir = std::env::temp_dir().join("homeboy_sig_existing_outlier_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("steps")).unwrap();
+
+        std::fs::write(
+            dir.join("steps/AiChat.php"),
+            "<?php\nclass AiChat {\n    public function execute(array $config): array { return []; }\n    public function register(): void {}\n}\n",
+        ).unwrap();
+
+        std::fs::write(
+            dir.join("steps/Webhook.php"),
+            "<?php\nclass Webhook {\n    public function execute(array $config): array { return []; }\n    public function register(): void {}\n}\n",
+        ).unwrap();
+
+        // File already an outlier (missing register) AND has wrong execute signature
+        std::fs::write(
+            dir.join("steps/Bad.php"),
+            "<?php\nclass Bad {\n    public function execute($config) { return []; }\n}\n",
+        ).unwrap();
+
+        let mut conventions = vec![Convention {
+            name: "Steps".to_string(),
+            glob: "steps/*".to_string(),
+            expected_methods: vec!["execute".to_string(), "register".to_string()],
+            expected_registrations: vec![],
+            expected_interfaces: vec![],
+            conforming: vec![
+                "steps/AiChat.php".to_string(),
+                "steps/Webhook.php".to_string(),
+            ],
+            outliers: vec![Outlier {
+                file: "steps/Bad.php".to_string(),
+                deviations: vec![Deviation {
+                    kind: DeviationKind::MissingMethod,
+                    description: "Missing method: register".to_string(),
+                    suggestion: "Add register()".to_string(),
+                }],
+            }],
+            total_files: 3,
+            confidence: 0.67,
+        }];
+
+        check_signature_consistency(&mut conventions, &dir);
+
+        let conv = &conventions[0];
+        assert_eq!(conv.conforming.len(), 2);
+        assert_eq!(conv.outliers.len(), 1);
+        // Should have BOTH the original MissingMethod AND the new SignatureMismatch
+        assert!(conv.outliers[0].deviations.len() >= 2);
+        assert!(conv.outliers[0].deviations.iter().any(|d| d.kind == DeviationKind::MissingMethod));
+        assert!(conv.outliers[0].deviations.iter().any(|d| d.kind == DeviationKind::SignatureMismatch));
+    }
+
+    #[test]
+    fn signature_check_no_change_when_all_match() {
+        let dir = std::env::temp_dir().join("homeboy_sig_all_match_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("steps")).unwrap();
+
+        std::fs::write(
+            dir.join("steps/A.php"),
+            "<?php\nclass A {\n    public function execute(array $config): array { return []; }\n}\n",
+        ).unwrap();
+
+        std::fs::write(
+            dir.join("steps/B.php"),
+            "<?php\nclass B {\n    public function execute(array $config): array { return []; }\n}\n",
+        ).unwrap();
+
+        let mut conventions = vec![Convention {
+            name: "Steps".to_string(),
+            glob: "steps/*".to_string(),
+            expected_methods: vec!["execute".to_string()],
+            expected_registrations: vec![],
+            expected_interfaces: vec![],
+            conforming: vec!["steps/A.php".to_string(), "steps/B.php".to_string()],
+            outliers: vec![],
+            total_files: 2,
+            confidence: 1.0,
+        }];
+
+        check_signature_consistency(&mut conventions, &dir);
+
+        let conv = &conventions[0];
+        assert_eq!(conv.conforming.len(), 2);
+        assert!(conv.outliers.is_empty());
+        assert!((conv.confidence - 1.0).abs() < f32::EPSILON);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn signature_check_skips_unknown_language() {
+        let dir = std::env::temp_dir().join("homeboy_sig_unknown_lang_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("data")).unwrap();
+
+        std::fs::write(dir.join("data/a.txt"), "some text\n").unwrap();
+        std::fs::write(dir.join("data/b.txt"), "some text\n").unwrap();
+
+        let mut conventions = vec![Convention {
+            name: "Data".to_string(),
+            glob: "data/*".to_string(),
+            expected_methods: vec!["process".to_string()],
+            expected_registrations: vec![],
+            expected_interfaces: vec![],
+            conforming: vec!["data/a.txt".to_string(), "data/b.txt".to_string()],
+            outliers: vec![],
+            total_files: 2,
+            confidence: 1.0,
+        }];
+
+        check_signature_consistency(&mut conventions, &dir);
+
+        // Should not change anything for unknown language
+        assert_eq!(conventions[0].conforming.len(), 2);
+        assert!(conventions[0].outliers.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn signature_check_majority_wins() {
+        // 2 files have one signature, 1 file has another — the 2-file version is canonical
+        let dir = std::env::temp_dir().join("homeboy_sig_majority_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("steps")).unwrap();
+
+        std::fs::write(
+            dir.join("steps/A.php"),
+            "<?php\nclass A {\n    public function run(string $input): bool { return true; }\n}\n",
+        ).unwrap();
+
+        std::fs::write(
+            dir.join("steps/B.php"),
+            "<?php\nclass B {\n    public function run(string $input): bool { return true; }\n}\n",
+        ).unwrap();
+
+        std::fs::write(
+            dir.join("steps/C.php"),
+            "<?php\nclass C {\n    public function run($input) { return true; }\n}\n",
+        ).unwrap();
+
+        let mut conventions = vec![Convention {
+            name: "Steps".to_string(),
+            glob: "steps/*".to_string(),
+            expected_methods: vec!["run".to_string()],
+            expected_registrations: vec![],
+            expected_interfaces: vec![],
+            conforming: vec![
+                "steps/A.php".to_string(),
+                "steps/B.php".to_string(),
+                "steps/C.php".to_string(),
+            ],
+            outliers: vec![],
+            total_files: 3,
+            confidence: 1.0,
+        }];
+
+        check_signature_consistency(&mut conventions, &dir);
+
+        let conv = &conventions[0];
+        assert_eq!(conv.conforming.len(), 2);
+        assert_eq!(conv.outliers.len(), 1);
+        assert_eq!(conv.outliers[0].file, "steps/C.php");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

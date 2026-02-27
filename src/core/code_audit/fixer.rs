@@ -71,17 +71,18 @@ pub struct FixResult {
 
 /// Full method signature extracted from a conforming file.
 #[derive(Debug, Clone)]
-struct MethodSignature {
+pub(super) struct MethodSignature {
     /// Method name.
-    name: String,
+    pub(super) name: String,
     /// Full signature line (e.g., "public function execute(array $config): array").
-    signature: String,
+    pub(super) signature: String,
     /// The language this was extracted from.
-    language: Language,
+    #[allow(dead_code)]
+    pub(super) language: Language,
 }
 
 /// Extract full method signatures from a source file.
-fn extract_signatures(content: &str, language: &Language) -> Vec<MethodSignature> {
+pub(super) fn extract_signatures(content: &str, language: &Language) -> Vec<MethodSignature> {
     match language {
         Language::Php => extract_php_signatures(content),
         Language::Rust => extract_rust_signatures(content),
