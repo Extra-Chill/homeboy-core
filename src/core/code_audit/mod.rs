@@ -57,6 +57,8 @@ pub struct ConventionReport {
     pub expected_methods: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub expected_registrations: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub expected_interfaces: Vec<String>,
     pub conforming: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outliers: Vec<Outlier>,
@@ -159,6 +161,7 @@ fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAudit
             status: check.status.clone(),
             expected_methods: conv.expected_methods.clone(),
             expected_registrations: conv.expected_registrations.clone(),
+            expected_interfaces: conv.expected_interfaces.clone(),
             conforming: conv.conforming.clone(),
             outliers: conv.outliers.clone(),
             total_files: conv.total_files,
