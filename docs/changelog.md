@@ -4,9 +4,23 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
-## Unreleased
+## [0.50.0] - 2026-02-27
+
+### Added
+- Add code audit system with auto-discovery, convention detection, and drift analysis
 
 - Add portable homeboy.json config with post:release hooks
+- Add audit --fix with smart stub generation, naming/plural tolerance, and confidence filtering
+- Add audit --baseline for drift comparison over time
+- Add audit interface/trait compliance, cross-directory convention, signature consistency, and namespace/import detection
+
+### Changed
+- Suggest fix when version bump fails due to missing changelog target
+
+### Fixed
+- Fix version set --path not committing/tagging in correct repo
+- Fix version set silently skipping changelog update
+- Fix deploy artifact name mismatch with HOMEBOY_COMPONENT_ID env var
 
 ## [0.49.1] - 2026-02-25
 
