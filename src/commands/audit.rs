@@ -2,7 +2,7 @@ use clap::Args;
 use serde::Serialize;
 use std::path::Path;
 
-use homeboy::code_audit::{self, CodeAuditResult};
+use homeboy::code_audit::{self, fixer, CodeAuditResult};
 
 use super::CmdResult;
 
@@ -14,6 +14,14 @@ pub struct AuditArgs {
     /// Only show discovered conventions (skip findings)
     #[arg(long)]
     pub conventions: bool,
+
+    /// Generate fix stubs for outlier files (dry run by default)
+    #[arg(long)]
+    pub fix: bool,
+
+    /// Apply fixes to disk (requires --fix)
+    #[arg(long, requires = "fix")]
+    pub write: bool,
 }
 
 #[derive(Serialize)]
@@ -27,6 +35,15 @@ pub enum AuditOutput {
         component_id: String,
         conventions: Vec<homeboy::code_audit::ConventionReport>,
     },
+
+    #[serde(rename = "audit.fix")]
+    Fix {
+        component_id: String,
+        source_path: String,
+        #[serde(flatten)]
+        fix_result: fixer::FixResult,
+        written: bool,
+    },
 }
 
 pub fn run(args: AuditArgs, _global: &super::GlobalArgs) -> CmdResult<AuditOutput> {
@@ -37,19 +54,42 @@ pub fn run(args: AuditArgs, _global: &super::GlobalArgs) -> CmdResult<AuditOutpu
     };
 
     if args.conventions {
-        Ok((
+        return Ok((
             AuditOutput::Conventions {
                 component_id: result.component_id,
                 conventions: result.conventions,
             },
             0,
-        ))
-    } else {
-        let exit_code = if result.summary.outliers_found > 0 {
-            1
-        } else {
-            0
-        };
-        Ok((AuditOutput::Full(result), exit_code))
+        ));
     }
+
+    if args.fix {
+        let root = Path::new(&result.source_path);
+        let mut fix_result = fixer::generate_fixes(&result, root);
+        let written = args.write;
+
+        if written && !fix_result.fixes.is_empty() {
+            let applied = fixer::apply_fixes(&mut fix_result.fixes, root);
+            fix_result.files_modified = applied;
+        }
+
+        let exit_code = if fix_result.total_insertions > 0 { 1 } else { 0 };
+
+        return Ok((
+            AuditOutput::Fix {
+                component_id: result.component_id,
+                source_path: result.source_path,
+                fix_result,
+                written,
+            },
+            exit_code,
+        ));
+    }
+
+    let exit_code = if result.summary.outliers_found > 0 {
+        1
+    } else {
+        0
+    };
+    Ok((AuditOutput::Full(result), exit_code))
 }

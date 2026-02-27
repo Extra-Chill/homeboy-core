@@ -12,6 +12,7 @@
 mod checks;
 mod conventions;
 mod findings;
+pub mod fixer;
 
 use std::path::Path;
 
