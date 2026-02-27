@@ -405,7 +405,7 @@ fn resolve_changelog_info(
 
 /// Get git status for a component.
 pub fn status(component_id: Option<&str>) -> Result<GitOutput> {
-    let (id, path) = resolve_target(component_id)?;
+    let (id, path) = resolve_target(component_id, None)?;
     let output = execute_git(&path, &["status", "--porcelain=v1"])
         .map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "status", output))
@@ -475,15 +475,28 @@ pub fn status_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
 /// By default, stages all changes before committing. Use `options` to control staging:
 /// - `staged_only`: Skip staging, commit only what's already staged
 /// - `files`: Stage only these specific files before committing
+///
+/// When `path_override` is provided, git operations run in that directory
+/// instead of the component's configured `local_path`.
 pub fn commit(
     component_id: Option<&str>,
     message: Option<&str>,
     options: CommitOptions,
 ) -> Result<GitOutput> {
+    commit_at(component_id, message, options, None)
+}
+
+/// Like [`commit`] but with an explicit path override for git operations.
+pub fn commit_at(
+    component_id: Option<&str>,
+    message: Option<&str>,
+    options: CommitOptions,
+    path_override: Option<&str>,
+) -> Result<GitOutput> {
     let msg = message.ok_or_else(|| {
         Error::validation_invalid_argument("message", "Missing commit message", None, None)
     })?;
-    let (id, path) = resolve_target(component_id)?;
+    let (id, path) = resolve_target(component_id, path_override)?;
 
     // Check for changes - behavior differs based on staged_only
     let status_output = execute_git(&path, &["status", "--porcelain=v1"])
@@ -698,7 +711,7 @@ pub fn commit_from_json(id: Option<&str>, json_spec: &str) -> Result<CommitJsonO
 
 /// Push local commits for a component.
 pub fn push(component_id: Option<&str>, tags: bool) -> Result<GitOutput> {
-    let (id, path) = resolve_target(component_id)?;
+    let (id, path) = resolve_target(component_id, None)?;
     let args: Vec<&str> = if tags {
         vec!["push", "--follow-tags"]
     } else {
@@ -726,7 +739,7 @@ pub fn push_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
 
 /// Pull remote changes for a component.
 pub fn pull(component_id: Option<&str>) -> Result<GitOutput> {
-    let (id, path) = resolve_target(component_id)?;
+    let (id, path) = resolve_target(component_id, None)?;
     let output = execute_git(&path, &["pull"]).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "pull", output))
 }
@@ -752,10 +765,20 @@ pub fn tag(
     tag_name: Option<&str>,
     message: Option<&str>,
 ) -> Result<GitOutput> {
+    tag_at(component_id, tag_name, message, None)
+}
+
+/// Like [`tag`] but with an explicit path override for git operations.
+pub fn tag_at(
+    component_id: Option<&str>,
+    tag_name: Option<&str>,
+    message: Option<&str>,
+    path_override: Option<&str>,
+) -> Result<GitOutput> {
     let name = tag_name.ok_or_else(|| {
         Error::validation_invalid_argument("tagName", "Missing tag name", None, None)
     })?;
-    let (id, path) = resolve_target(component_id)?;
+    let (id, path) = resolve_target(component_id, path_override)?;
     let args: Vec<&str> = match message {
         Some(msg) => vec!["tag", "-a", name, "-m", msg],
         None => vec!["tag", name],

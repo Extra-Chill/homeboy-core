@@ -3,7 +3,7 @@ use homeboy::log_status;
 use serde::Serialize;
 
 use homeboy::component;
-use homeboy::git::{commit, tag, CommitOptions};
+use homeboy::git::{commit_at, tag_at, CommitOptions};
 use homeboy::release::{self, ReleasePlan, ReleaseRun};
 use homeboy::version::{
     read_component_version, read_version, set_component_version, VersionTargetInfo,
@@ -300,7 +300,11 @@ fn create_version_commit(
         amend: false,
     };
 
-    match commit(component_id, Some(&commit_message), options) {
+    // Use repo_root as the path override for git operations so commit and tag
+    // run in the correct directory when --path is provided.
+    let git_path = Some(repo_root.as_str());
+
+    match commit_at(component_id, Some(&commit_message), options, git_path) {
         Ok(output) => {
             let stdout = if output.stdout.is_empty() {
                 None
@@ -317,7 +321,7 @@ fn create_version_commit(
             let (tag_created, tag_name) = if create_tag && output.success {
                 let tag_name = format!("v{}", new_version);
                 let tag_message = format!("Release {}", tag_name);
-                match tag(component_id, Some(&tag_name), Some(&tag_message)) {
+                match tag_at(component_id, Some(&tag_name), Some(&tag_message), git_path) {
                     Ok(tag_output) => {
                         if tag_output.success {
                             log_status!(
