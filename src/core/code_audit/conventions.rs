@@ -60,6 +60,8 @@ pub struct Convention {
     pub expected_methods: Vec<String>,
     /// The expected registration calls.
     pub expected_registrations: Vec<String>,
+    /// The expected interfaces/traits that files should implement.
+    pub expected_interfaces: Vec<String>,
     /// Files that follow the convention.
     pub conforming: Vec<String>,
     /// Files that deviate from the convention.
@@ -97,6 +99,7 @@ pub enum DeviationKind {
     ExtraMethod,
     MissingRegistration,
     DifferentRegistration,
+    MissingInterface,
     NamingMismatch,
 }
 
@@ -329,6 +332,20 @@ pub fn discover_conventions(
         .map(|(name, _)| name.clone())
         .collect();
 
+    // Count interface/trait frequency
+    let mut interface_counts: HashMap<String, usize> = HashMap::new();
+    for fp in fingerprints {
+        for iface in &fp.implements {
+            *interface_counts.entry(iface.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let expected_interfaces: Vec<String> = interface_counts
+        .iter()
+        .filter(|(_, count)| **count >= threshold)
+        .map(|(name, _)| name.clone())
+        .collect();
+
     // Classify files
     let mut conforming = Vec::new();
     let mut outliers = Vec::new();
@@ -364,6 +381,20 @@ pub fn discover_conventions(
             }
         }
 
+        // Check missing interfaces/traits
+        for expected in &expected_interfaces {
+            if !fp.implements.contains(expected) {
+                deviations.push(Deviation {
+                    kind: DeviationKind::MissingInterface,
+                    description: format!("Missing interface: {}", expected),
+                    suggestion: format!(
+                        "Implement {} to match the convention in {}",
+                        expected, group_name
+                    ),
+                });
+            }
+        }
+
         if deviations.is_empty() {
             conforming.push(fp.relative_path.clone());
         } else {
@@ -391,6 +422,7 @@ pub fn discover_conventions(
         glob: glob_pattern.to_string(),
         expected_methods,
         expected_registrations,
+        expected_interfaces,
         conforming,
         outliers,
         total_files: total,
@@ -660,5 +692,86 @@ register_rest_route('api/v1', '/data', []);
         assert_eq!(Language::from_extension("ts"), Language::TypeScript);
         assert_eq!(Language::from_extension("jsx"), Language::JavaScript);
         assert_eq!(Language::from_extension("txt"), Language::Unknown);
+    }
+
+    #[test]
+    fn discover_interface_convention() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "abilities/create.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                registrations: vec![],
+                type_name: Some("CreateAbility".to_string()),
+                implements: vec!["AbilityInterface".to_string()],
+            },
+            FileFingerprint {
+                relative_path: "abilities/update.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                registrations: vec![],
+                type_name: Some("UpdateAbility".to_string()),
+                implements: vec!["AbilityInterface".to_string()],
+            },
+            FileFingerprint {
+                relative_path: "abilities/helpers.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                registrations: vec![],
+                type_name: Some("Helpers".to_string()),
+                implements: vec![], // Missing interface
+            },
+        ];
+
+        let convention =
+            discover_conventions("Abilities", "abilities/*.php", &fingerprints).unwrap();
+
+        // Should detect AbilityInterface as expected
+        assert!(convention.expected_interfaces.contains(&"AbilityInterface".to_string()));
+
+        // helpers.php should be an outlier due to missing interface
+        assert_eq!(convention.outliers.len(), 1);
+        assert_eq!(convention.outliers[0].file, "abilities/helpers.php");
+        assert!(convention.outliers[0]
+            .deviations
+            .iter()
+            .any(|d| matches!(d.kind, DeviationKind::MissingInterface)
+                && d.description.contains("AbilityInterface")));
+    }
+
+    #[test]
+    fn no_interface_convention_when_none_shared() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "a.php".to_string(),
+                language: Language::Php,
+                methods: vec!["run".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec!["FooInterface".to_string()],
+            },
+            FileFingerprint {
+                relative_path: "b.php".to_string(),
+                language: Language::Php,
+                methods: vec!["run".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec!["BarInterface".to_string()],
+            },
+            FileFingerprint {
+                relative_path: "c.php".to_string(),
+                language: Language::Php,
+                methods: vec!["run".to_string()],
+                registrations: vec![],
+                type_name: None,
+                implements: vec![],
+            },
+        ];
+
+        let convention =
+            discover_conventions("Mixed", "*.php", &fingerprints).unwrap();
+
+        // No interface appears in ≥60% of files
+        assert!(convention.expected_interfaces.is_empty());
     }
 }

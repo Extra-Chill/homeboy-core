@@ -71,6 +71,7 @@ mod tests {
             glob: "*.rs".to_string(),
             expected_methods: vec!["run".to_string()],
             expected_registrations: vec![],
+            expected_interfaces: vec![],
             conforming: vec!["a.rs".to_string(), "b.rs".to_string()],
             outliers: vec![],
             total_files: 2,
@@ -88,6 +89,7 @@ mod tests {
             glob: "*.rs".to_string(),
             expected_methods: vec!["run".to_string()],
             expected_registrations: vec![],
+            expected_interfaces: vec![],
             conforming: vec!["a.rs".to_string(), "b.rs".to_string()],
             outliers: vec![Outlier {
                 file: "c.rs".to_string(),
@@ -113,6 +115,7 @@ mod tests {
             glob: "*.rs".to_string(),
             expected_methods: vec!["run".to_string()],
             expected_registrations: vec![],
+            expected_interfaces: vec![],
             conforming: vec!["a.rs".to_string()],
             outliers: vec![
                 Outlier {
