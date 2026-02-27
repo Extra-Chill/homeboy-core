@@ -443,8 +443,9 @@ fn run_pre_build_scripts(comp: &Component) -> Result<Option<(i32, String)>> {
             continue;
         }
 
-        let env: [(&str, &str); 3] = [
+        let env: [(&str, &str); 4] = [
             ("HOMEBOY_MODULE_PATH", &module_path.to_string_lossy()),
+            (exec_context::COMPONENT_ID, &comp.id),
             (exec_context::COMPONENT_PATH, &comp.local_path),
             ("HOMEBOY_PLUGIN_PATH", &comp.local_path),
         ];
@@ -468,6 +469,12 @@ fn run_pre_build_scripts(comp: &Component) -> Result<Option<(i32, String)>> {
 /// Matches the env vars passed to pre-build scripts for consistency.
 fn get_build_env_vars(comp: &Component) -> Vec<(String, String)> {
     let mut env = Vec::new();
+
+    // Always pass the component ID so build scripts can name artifacts consistently
+    env.push((
+        exec_context::COMPONENT_ID.to_string(),
+        comp.id.clone(),
+    ));
 
     if let Some(modules) = &comp.modules {
         for module_id in modules.keys() {
