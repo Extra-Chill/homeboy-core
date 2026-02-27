@@ -673,7 +673,7 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
     // Warn about version patterns found in files but not configured as targets.
     // These will silently drift out of sync on future version changes.
     let unconfigured = detect_unconfigured_patterns(component);
-    let warnings: Vec<String> = unconfigured
+    let mut warnings: Vec<String> = unconfigured
         .iter()
         .map(|u| {
             format!(
@@ -683,6 +683,19 @@ pub fn set_component_version(component: &Component, new_version: &str) -> Result
             )
         })
         .collect();
+
+    // Warn when a changelog_target is configured but `set` won't update it.
+    // This prevents silent changelog drift when agents/users fall back to `set`
+    // after `bump` fails.
+    if component.changelog_target.is_some() {
+        warnings.push(format!(
+            "This component has a changelog_target configured. \
+             `version set` does not update changelogs. \
+             Use `homeboy version bump {} <patch|minor|major>` instead, \
+             or add changelog entries manually with: homeboy changelog add {}",
+            component.id, component.id
+        ));
+    }
 
     for warning in &warnings {
         log_status!("version", "Warning: {}", warning);
