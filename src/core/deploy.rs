@@ -295,22 +295,95 @@ fn upload_directory(
     local_path: &Path,
     remote_path: &str,
 ) -> Result<DeployResult> {
-    let parent = Path::new(remote_path)
-        .parent()
-        .and_then(|p| p.to_str())
-        .unwrap_or(remote_path);
+    rsync_directory(ssh_client, local_path, remote_path)
+}
 
-    let mkdir_cmd = format!("mkdir -p {}", shell::quote_path(parent));
-    log_status!("deploy", "Creating parent directory: {}", parent);
-    let mkdir_output = ssh_client.execute(&mkdir_cmd);
-    if !mkdir_output.success {
-        return Ok(DeployResult::failure(
-            mkdir_output.exit_code,
-            format!("Failed to create remote directory: {}", mkdir_output.stderr),
-        ));
+/// Sync a local directory to the remote using rsync with --delete.
+///
+/// This ensures the remote directory mirrors the source exactly:
+/// files removed or moved in the source are removed from the target.
+/// Without --delete, stale files accumulate on the server and can
+/// shadow new files (e.g. when PHP autoloader loads an old copy).
+fn rsync_directory(
+    ssh_client: &SshClient,
+    local_path: &Path,
+    remote_path: &str,
+) -> Result<DeployResult> {
+    // Ensure local_path ends with / so rsync copies contents, not the directory itself
+    let local_str = format!("{}/", local_path.display().to_string().trim_end_matches('/'));
+
+    // Ensure remote_path ends with /
+    let remote_str = format!("{}/", remote_path.trim_end_matches('/'));
+
+    if ssh_client.is_local {
+        // Local deploy: rsync locally without SSH
+        log_status!(
+            "deploy",
+            "Syncing directory (local rsync): {} -> {}",
+            local_str,
+            remote_str
+        );
+
+        let rsync_args = vec![
+            "-a".to_string(),      // archive mode (recursive, preserves permissions, timestamps, etc.)
+            "--delete".to_string(), // remove files on target that don't exist in source
+            local_str,
+            remote_str,
+        ];
+
+        let output = Command::new("rsync").args(&rsync_args).output();
+        return match output {
+            Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
+            Ok(output) => Ok(DeployResult::failure(
+                output.status.code().unwrap_or(1),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            )),
+            Err(err) => Ok(DeployResult::failure(1, format!("rsync failed: {}", err))),
+        };
     }
 
-    scp_recursive(ssh_client, local_path, remote_path)
+    // Remote deploy: rsync over SSH
+    let mut rsync_args = vec![
+        "-a".to_string(),
+        "--delete".to_string(),
+    ];
+
+    // Build SSH command with the same options as scp
+    let mut ssh_cmd_parts = vec!["ssh".to_string()];
+    if let Some(identity_file) = &ssh_client.identity_file {
+        ssh_cmd_parts.extend(["-i".to_string(), identity_file.clone()]);
+    }
+    if ssh_client.port != 22 {
+        ssh_cmd_parts.extend(["-p".to_string(), ssh_client.port.to_string()]);
+    }
+    // Use same safety options as SSH client
+    ssh_cmd_parts.extend([
+        "-o".to_string(), "BatchMode=yes".to_string(),
+        "-o".to_string(), "ConnectTimeout=10".to_string(),
+    ]);
+
+    rsync_args.extend(["-e".to_string(), ssh_cmd_parts.join(" ")]);
+    rsync_args.push(local_str.clone());
+    rsync_args.push(format!("{}@{}:{}", ssh_client.user, ssh_client.host, remote_str));
+
+    log_status!(
+        "deploy",
+        "Syncing directory: {} -> {}@{}:{}",
+        local_str,
+        ssh_client.user,
+        ssh_client.host,
+        remote_str
+    );
+
+    let output = Command::new("rsync").args(&rsync_args).output();
+    match output {
+        Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
+        Ok(output) => Ok(DeployResult::failure(
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        )),
+        Err(err) => Ok(DeployResult::failure(1, format!("rsync failed: {}", err))),
+    }
 }
 
 fn upload_file(
@@ -461,13 +534,7 @@ fn scp_file_atomic(
     Ok(DeployResult::success(0))
 }
 
-fn scp_recursive(
-    ssh_client: &SshClient,
-    local_path: &Path,
-    remote_path: &str,
-) -> Result<DeployResult> {
-    scp_transfer(ssh_client, local_path, remote_path, true)
-}
+
 
 // =============================================================================
 // Deploy Orchestration
