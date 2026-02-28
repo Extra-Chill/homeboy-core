@@ -18,33 +18,22 @@ pub struct VersionTarget {
 }
 
 /// Check if adding a new version target would conflict with existing targets.
-/// Returns error if same file already has a different pattern.
+/// Multiple targets per file are allowed (e.g. plugin header Version: + PHP define()).
+/// Only rejects if the exact same file+pattern combo already exists.
 pub fn validate_version_target_conflict(
     existing: &[VersionTarget],
     new_file: &str,
     new_pattern: &str,
-    component_id: &str,
+    _component_id: &str,
 ) -> Result<()> {
     for target in existing {
         if target.file == new_file {
             let existing_pattern = target.pattern.as_deref().unwrap_or("");
-            if existing_pattern != new_pattern {
-                return Err(Error::validation_invalid_argument(
-                    "version_targets",
-                    format!(
-                        "File '{}' already has a version target with a different pattern. \
-                         Existing: '{}', New: '{}'",
-                        new_file, existing_pattern, new_pattern
-                    ),
-                    None,
-                    None,
-                )
-                .with_hint(format!(
-                    "To replace existing targets: homeboy component set {} --replace version_targets --version-target \"{}::{}\"",
-                    component_id, new_file, new_pattern
-                )));
+            if existing_pattern == new_pattern {
+                // Same file + same pattern = already exists, no-op (array_union will dedupe)
+                return Ok(());
             }
-            // Same file + same pattern = OK (array_union will dedupe)
+            // Same file + different pattern = allowed (e.g. header + define() in same PHP file)
         }
     }
     Ok(())
@@ -832,15 +821,9 @@ mod tests {
             "define('VER', '(.*)')",
             "test-comp",
         );
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Check the error details contain expected text
-        let details_str = err.details.to_string();
-        assert!(
-            details_str.contains("already has a version target with a different pattern"),
-            "Expected error details to contain 'already has a version target with a different pattern', got: {}",
-            details_str
-        );
+        // Multiple targets per file with different patterns are now allowed
+        // (e.g. plugin header Version: + PHP define() constant in same file)
+        assert!(result.is_ok());
     }
 
     #[test]
