@@ -31,6 +31,9 @@ enum RefactorCommand {
         /// Scope: code, config, all (default: all)
         #[arg(long, default_value = "all")]
         scope: String,
+        /// Exact string matching (no boundary detection, no case variants)
+        #[arg(long)]
+        literal: bool,
         /// Apply changes to disk (default is dry-run)
         #[arg(long)]
         write: bool,
@@ -45,8 +48,9 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             component: component_id,
             path,
             scope,
+            literal,
             write,
-        } => run_rename(&from, &to, component_id.as_deref(), path.as_deref(), &scope, write),
+        } => run_rename(&from, &to, component_id.as_deref(), path.as_deref(), &scope, literal, write),
     }
 }
 
@@ -103,6 +107,7 @@ fn run_rename(
     component_id: Option<&str>,
     path: Option<&str>,
     scope: &str,
+    literal: bool,
     write: bool,
 ) -> CmdResult<RefactorOutput> {
     let scope = RenameScope::from_str(scope)?;
@@ -116,7 +121,11 @@ fn run_rename(
         validated
     };
 
-    let spec = RenameSpec::new(from, to, scope.clone());
+    let spec = if literal {
+        RenameSpec::literal(from, to, scope.clone())
+    } else {
+        RenameSpec::new(from, to, scope.clone())
+    };
     let mut result = refactor::generate_renames(&spec, &root);
 
     // Print warnings to stderr before applying
