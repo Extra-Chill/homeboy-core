@@ -18,6 +18,7 @@
 - [logs](logs.md)
 - [extension](extension.md)
 - [project](project.md)
+- [refactor](refactor.md)
 - [release](release.md) (local release pipeline)
 - [server](server.md)
 - [ssh](ssh.md)
