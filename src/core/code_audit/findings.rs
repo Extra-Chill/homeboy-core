@@ -30,6 +30,10 @@ pub enum Severity {
 }
 
 /// Build findings from check results.
+///
+/// Fragmented conventions (< 50% confidence) are suppressed — the convention
+/// metadata still appears in the report, but individual findings are noise
+/// when the pattern itself is uncertain.
 pub fn build_findings(results: &[CheckResult]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -37,7 +41,9 @@ pub fn build_findings(results: &[CheckResult]) -> Vec<Finding> {
         let severity = match result.status {
             CheckStatus::Clean => continue,
             CheckStatus::Drift => Severity::Warning,
-            CheckStatus::Fragmented => Severity::Info,
+            // Suppress individual findings from fragmented conventions.
+            // The convention is still reported; just the per-file findings are omitted.
+            CheckStatus::Fragmented => continue,
         };
 
         for outlier in &result.outliers {
@@ -106,7 +112,10 @@ mod tests {
     }
 
     #[test]
-    fn fragmented_produces_info_findings() {
+    fn fragmented_produces_no_findings() {
+        // Fragmented conventions (< 50% confidence) are suppressed.
+        // The convention metadata still appears in the report, but individual
+        // findings are noise when the pattern itself is uncertain.
         let results = vec![CheckResult {
             convention_name: "Misc".to_string(),
             status: CheckStatus::Fragmented,
@@ -133,7 +142,6 @@ mod tests {
         }];
 
         let findings = build_findings(&results);
-        assert_eq!(findings.len(), 2);
-        assert!(findings.iter().all(|f| f.severity == Severity::Info));
+        assert!(findings.is_empty(), "Fragmented conventions should not produce findings");
     }
 }

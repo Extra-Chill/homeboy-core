@@ -586,11 +586,118 @@ pub fn discover_conventions(
 // Signature Consistency
 // ============================================================================
 
+/// Normalize a signature string before tokenization.
+///
+/// Collapses whitespace/newlines, removes trailing commas before closing
+/// parens, and normalizes module path references to just the final segment.
+/// This is language-agnostic — works on any signature string.
+fn normalize_signature(sig: &str) -> String {
+    // Collapse all whitespace (including newlines) into single spaces
+    let normalized: String = sig.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // Remove trailing comma before closing paren: ", )" → ")"
+    let normalized = Regex::new(r",\s*\)")
+        .unwrap()
+        .replace_all(&normalized, ")")
+        .to_string();
+
+    // Normalize module paths to final segment: crate::commands::GlobalArgs → GlobalArgs
+    // Also handles super::GlobalArgs → GlobalArgs
+    // This is generic: any sequence of word::word::...::Word keeps only the last part
+    let normalized = Regex::new(r"\b(?:\w+::)+(\w+)")
+        .unwrap()
+        .replace_all(&normalized, "$1")
+        .to_string();
+
+    normalized
+}
+
+/// Split a signature string into tokens for structural comparison.
+///
+/// Splits on whitespace and punctuation boundaries while preserving the
+/// punctuation as separate tokens. This is language-agnostic — it works
+/// on any signature string regardless of language.
+///
+/// Example: `pub fn run(args: FooArgs, _global: &GlobalArgs) -> CmdResult<FooOutput>`
+/// becomes: `["pub", "fn", "run", "(", "args", ":", "FooArgs", ",", "_global", ":", "&", "GlobalArgs", ")", "->", "CmdResult", "<", "FooOutput", ">"]`
+fn tokenize_signature(sig: &str) -> Vec<String> {
+    let sig = normalize_signature(sig);
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+
+    for ch in sig.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            current.push(ch);
+        } else if ch.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+        } else {
+            // Punctuation: flush current word, then emit punctuation as token
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            // Group -> as a single token
+            if ch == '-' {
+                current.push(ch);
+            } else if ch == '>' && current == "-" {
+                current.push(ch);
+                tokens.push(std::mem::take(&mut current));
+            } else {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                tokens.push(ch.to_string());
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Compute the structural skeleton of a set of signatures for the same method.
+///
+/// Given multiple tokenized signatures, identifies which token positions are
+/// constant (same across all signatures) vs. variable (differ per file).
+/// Returns the skeleton as a vec of `Some(token)` for constant positions
+/// and `None` for variable positions, plus the expected token count.
+///
+/// If signatures have different token counts (different arity/structure),
+/// returns `None` — those are real structural mismatches.
+fn compute_signature_skeleton(tokenized_sigs: &[Vec<String>]) -> Option<Vec<Option<String>>> {
+    if tokenized_sigs.is_empty() {
+        return None;
+    }
+
+    let expected_len = tokenized_sigs[0].len();
+
+    // All signatures must have the same number of tokens
+    if !tokenized_sigs.iter().all(|t| t.len() == expected_len) {
+        // Different token counts = structural mismatch, can't build skeleton
+        return None;
+    }
+
+    let mut skeleton = Vec::with_capacity(expected_len);
+    for i in 0..expected_len {
+        let first = &tokenized_sigs[0][i];
+        if tokenized_sigs.iter().all(|t| &t[i] == first) {
+            skeleton.push(Some(first.clone()));
+        } else {
+            skeleton.push(None); // This position varies — it's a "type parameter"
+        }
+    }
+
+    Some(skeleton)
+}
+
 /// Check method signatures across all files in a convention for consistency.
 ///
-/// For each expected method, builds a canonical signature from the majority of
-/// conforming files. Files with different signatures get a `SignatureMismatch`
-/// deviation and may be moved from conforming to outlier.
+/// Uses structural comparison: signatures are tokenized and compared
+/// position-by-position. Positions where tokens vary across files are treated
+/// as "type parameters" (expected to differ). Only structural differences
+/// (different token count, different constant tokens) are flagged.
 pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) {
     for conv in conventions.iter_mut() {
         if conv.expected_methods.is_empty() {
@@ -613,42 +720,7 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
             continue;
         }
 
-        // Build canonical signatures from conforming files (majority wins)
-        let mut method_sig_counts: HashMap<String, HashMap<String, usize>> = HashMap::new();
-
-        for file in &conv.conforming {
-            let full_path = root.join(file);
-            let content = match std::fs::read_to_string(&full_path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            let sigs = super::fixer::extract_signatures(&content, &lang);
-            for sig in &sigs {
-                if conv.expected_methods.contains(&sig.name) {
-                    method_sig_counts
-                        .entry(sig.name.clone())
-                        .or_default()
-                        .entry(sig.signature.clone())
-                        .and_modify(|c| *c += 1)
-                        .or_insert(1);
-                }
-            }
-        }
-
-        // Pick canonical: the most frequent signature for each method
-        let mut canonical: HashMap<String, String> = HashMap::new();
-        for (method, sig_counts) in &method_sig_counts {
-            if let Some((sig, _)) = sig_counts.iter().max_by_key(|(_, count)| *count) {
-                canonical.insert(method.clone(), sig.clone());
-            }
-        }
-
-        if canonical.is_empty() {
-            continue;
-        }
-
-        // Check ALL files (conforming + outliers) for signature mismatches
+        // Collect signatures for each method across ALL files (conforming + outliers)
         let all_files: Vec<String> = conv
             .conforming
             .iter()
@@ -656,7 +728,8 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
             .cloned()
             .collect();
 
-        let mut new_outlier_deviations: HashMap<String, Vec<Deviation>> = HashMap::new();
+        // method_name -> [(file, raw_signature)]
+        let mut method_sigs: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
         for file in &all_files {
             let full_path = root.join(file);
@@ -666,31 +739,111 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
             };
 
             let sigs = super::fixer::extract_signatures(&content, &lang);
-            let sig_map: HashMap<&str, &str> = sigs
+            for sig in &sigs {
+                if conv.expected_methods.contains(&sig.name) {
+                    method_sigs
+                        .entry(sig.name.clone())
+                        .or_default()
+                        .push((file.clone(), sig.signature.clone()));
+                }
+            }
+        }
+
+        // For each method, compute the structural skeleton and find mismatches
+        let mut new_outlier_deviations: HashMap<String, Vec<Deviation>> = HashMap::new();
+
+        for (method, file_sigs) in &method_sigs {
+            if file_sigs.len() < 2 {
+                continue;
+            }
+
+            let tokenized: Vec<Vec<String>> = file_sigs
                 .iter()
-                .map(|s| (s.name.as_str(), s.signature.as_str()))
+                .map(|(_, sig)| tokenize_signature(sig))
                 .collect();
 
-            for (method, expected_sig) in &canonical {
-                if let Some(actual_sig) = sig_map.get(method.as_str()) {
-                    if *actual_sig != expected_sig.as_str() {
-                        new_outlier_deviations
-                            .entry(file.clone())
-                            .or_default()
-                            .push(Deviation {
-                                kind: DeviationKind::SignatureMismatch,
-                                description: format!(
-                                    "Signature mismatch for {}: expected `{}`, found `{}`",
-                                    method, expected_sig, actual_sig
-                                ),
-                                suggestion: format!(
-                                    "Update {}() signature to match: `{}`",
-                                    method, expected_sig
-                                ),
-                            });
+            match compute_signature_skeleton(&tokenized) {
+                Some(skeleton) => {
+                    // Skeleton computed — all signatures have the same structure.
+                    // Check each file against the skeleton's constant positions.
+                    for (i, (file, sig)) in file_sigs.iter().enumerate() {
+                        let tokens = &tokenized[i];
+                        let mut mismatches = Vec::new();
+                        for (j, expected) in skeleton.iter().enumerate() {
+                            if let Some(expected_token) = expected {
+                                if j < tokens.len() && &tokens[j] != expected_token {
+                                    mismatches.push((expected_token.clone(), tokens[j].clone()));
+                                }
+                            }
+                        }
+                        if !mismatches.is_empty() {
+                            // This file's constant tokens differ — real mismatch
+                            let canonical_sig = skeleton
+                                .iter()
+                                .map(|s| s.as_deref().unwrap_or("<_>"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            new_outlier_deviations
+                                .entry(file.clone())
+                                .or_default()
+                                .push(Deviation {
+                                    kind: DeviationKind::SignatureMismatch,
+                                    description: format!(
+                                        "Signature mismatch for {}: expected structure `{}`, found `{}`",
+                                        method, canonical_sig, sig
+                                    ),
+                                    suggestion: format!(
+                                        "Update {}() to match the structural pattern: `{}`",
+                                        method, canonical_sig
+                                    ),
+                                });
+                        }
                     }
                 }
-                // If the method is absent, that's already caught as MissingMethod
+                None => {
+                    // Different token counts — structural mismatch.
+                    // Find the majority token count and flag files that differ.
+                    let mut len_counts: HashMap<usize, usize> = HashMap::new();
+                    for t in &tokenized {
+                        *len_counts.entry(t.len()).or_insert(0) += 1;
+                    }
+                    let majority_len = len_counts
+                        .iter()
+                        .max_by_key(|(_, count)| *count)
+                        .map(|(len, _)| *len)
+                        .unwrap_or(0);
+
+                    // Build canonical from majority-length sigs
+                    let majority_sigs: Vec<&Vec<String>> = tokenized
+                        .iter()
+                        .filter(|t| t.len() == majority_len)
+                        .collect();
+
+                    let canonical_display = if let Some(first) = majority_sigs.first() {
+                        first.join(" ")
+                    } else {
+                        continue;
+                    };
+
+                    for (i, (file, sig)) in file_sigs.iter().enumerate() {
+                        if tokenized[i].len() != majority_len {
+                            new_outlier_deviations
+                                .entry(file.clone())
+                                .or_default()
+                                .push(Deviation {
+                                    kind: DeviationKind::SignatureMismatch,
+                                    description: format!(
+                                        "Signature mismatch for {}: different structure — expected {} tokens, found {}. Example: `{}`",
+                                        method, majority_len, tokenized[i].len(), sig
+                                    ),
+                                    suggestion: format!(
+                                        "Update {}() to match the structural pattern: `{}`",
+                                        method, canonical_display
+                                    ),
+                                });
+                        }
+                    }
+                }
             }
         }
 
@@ -907,7 +1060,31 @@ pub fn discover_cross_directory(
     results
 }
 
-/// Walk source files under a root, skipping common non-source directories.
+/// Module index/entry-point filenames that should be excluded from convention
+/// sibling detection. These files organize other files rather than being
+/// peers — including them produces false "missing method" findings.
+const INDEX_FILES: &[&str] = &[
+    "mod.rs",
+    "lib.rs",
+    "main.rs",
+    "index.js",
+    "index.jsx",
+    "index.ts",
+    "index.tsx",
+    "index.mjs",
+    "__init__.py",
+];
+
+/// Returns true if the filename is a module index/entry-point file.
+fn is_index_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| INDEX_FILES.contains(&name))
+        .unwrap_or(false)
+}
+
+/// Walk source files under a root, skipping common non-source directories
+/// and module index files.
 fn walk_source_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let skip_dirs = [
         "node_modules",
@@ -925,6 +1102,10 @@ fn walk_source_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
 
     let mut files = Vec::new();
     walk_recursive(root, &skip_dirs, &source_extensions, &mut files)?;
+
+    // Exclude module index files from convention sibling detection
+    files.retain(|f| !is_index_file(f));
+
     Ok(files)
 }
 
