@@ -616,7 +616,7 @@ fn execute_single_step(
             missing: Vec::new(),
             warnings: Vec::new(),
             hints: err.hints.clone(),
-            data: None,
+            data: Some(serde_json::json!({ "error_details": err.details })),
             error: Some(err.message.clone()),
         }),
     }
