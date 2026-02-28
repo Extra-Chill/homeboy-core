@@ -7,5 +7,5 @@ mod rename;
 
 pub use rename::{
     find_references, generate_renames, apply_renames, CaseVariant,
-    FileEdit, FileRename, Reference, RenameResult, RenameScope, RenameSpec,
+    FileEdit, FileRename, Reference, RenameResult, RenameScope, RenameSpec, RenameWarning,
 };
