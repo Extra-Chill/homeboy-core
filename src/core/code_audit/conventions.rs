@@ -609,6 +609,14 @@ fn normalize_signature(sig: &str) -> String {
         .replace_all(&normalized, "$1")
         .to_string();
 
+    // Strip parameter modifiers that don't affect the structural contract.
+    // "mut" before a parameter name is a local annotation, not part of the
+    // function's external signature. E.g., "fn run(mut args: T)" → "fn run(args: T)"
+    let normalized = Regex::new(r"\bmut\s+")
+        .unwrap()
+        .replace_all(&normalized, "")
+        .to_string();
+
     normalized
 }
 
