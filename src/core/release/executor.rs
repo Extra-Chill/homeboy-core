@@ -406,38 +406,50 @@ impl ReleaseStepExecutor {
             crate::hooks::HookFailureMode::NonFatal,
         )?;
 
-        let data = serde_json::json!({
-            "action": "post_release",
-            "commands": hook_result.commands,
-            "all_succeeded": hook_result.all_succeeded
-        });
-
-        // Post-release failures are non-fatal (release already published)
-        // Report success but include warning message if command failed
-        let mut result = self.step_result(
-            step,
-            PipelineRunStatus::Success,
-            Some(data),
-            None,
-            Vec::new(),
-        );
-
+        // Post-release failures are non-fatal (release already published).
+        // Warnings go to stderr via display_release_summary() — keep JSON
+        // limited to structured facts (no stdout/stderr noise).
         if !hook_result.all_succeeded {
-            result.warnings =
-                vec!["Post-release command failed but release is complete".to_string()];
-            if let Some(failed) = hook_result.commands.iter().find(|c| !c.success) {
+            for failed in hook_result.commands.iter().filter(|c| !c.success) {
                 let error_text = if failed.stderr.trim().is_empty() {
                     &failed.stdout
                 } else {
                     &failed.stderr
                 };
-                result.hints.push(crate::error::Hint {
-                    message: format!("Command '{}' failed: {}", failed.command, error_text.trim()),
-                });
+                log_status!(
+                    "warning",
+                    "Post-release hook failed: '{}': {}",
+                    failed.command,
+                    error_text.trim()
+                );
             }
         }
 
-        Ok(result)
+        let commands_summary: Vec<serde_json::Value> = hook_result
+            .commands
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "command": c.command,
+                    "success": c.success,
+                    "exit_code": c.exit_code,
+                })
+            })
+            .collect();
+
+        let data = serde_json::json!({
+            "action": "post_release",
+            "commands": commands_summary,
+            "all_succeeded": hook_result.all_succeeded
+        });
+
+        Ok(self.step_result(
+            step,
+            PipelineRunStatus::Success,
+            Some(data),
+            None,
+            Vec::new(),
+        ))
     }
 
     fn default_commit_message(&self) -> String {
