@@ -4,6 +4,37 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.51.0] - 2026-02-28
+
+### Added
+- Add refactor rename command with case-variant awareness and word-boundary matching (#283)
+- Add --literal mode for refactor rename — exact string matching without boundary detection (#299)
+- Add collision detection in refactor rename dry-run — warns on duplicate identifiers and file conflicts (#292)
+- Add snake_case compound matching in refactor rename — matches terms inside snake_case identifiers (#291)
+- Add extension versioning with semver constraint matching (^, ~, >=, etc.) and auto-update checks on startup (#285)
+- Add extension-powered language extractors — fingerprinting moved from built-in to extensions (#286)
+- Add smart import detection for code audit — grouped imports, path equivalence, usage checking
+- Add ImportAdd fix kind for auto-resolving missing import findings in code audit
+
+### Changed
+- Rename modules to extensions across entire codebase — CLI, config, docs, extensions repo (#284)
+- Rename HOMEBOY_MODULE_PATH/ID env vars to HOMEBOY_EXTENSION_PATH/ID (#296)
+- SKIP_DIRS (build, dist, target) only skipped at root level — nested dirs like scripts/build/ are now scanned (#297)
+- Update README with new repo description, refactoring section, and extension versioning
+- Normalize CmdResult type alias and dispatch pattern across all command modules
+- Deprecate version set in favor of version bump (#259)
+
+### Fixed
+- Fix PHP method regex to handle multi-keyword modifiers in code audit
+- Fix import regex to capture grouped imports correctly in code audit
+- Fix false 'unconfigured version target' warning for already-configured PHP constants (#261)
+- Fix version bump error messages to include field name and problem (#258)
+- Handle cargo-dist subdirectory layout in upgrade script (#256)
+- Clean target directory before archive extraction to prevent stale files (#257)
+- Allow multiple version targets per file (#262)
+- Surface post-release hook failures to stderr with non-zero exit code (#255)
+- Normalize mut parameter modifier in signature comparison for code audit (#275)
+
 ## [0.50.1] - 2026-02-28
 
 ### Changed
