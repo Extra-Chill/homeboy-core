@@ -225,6 +225,26 @@ fn deploy_artifact(
 
         // Step 2: Execute extract command if configured
         if let Some(cmd_template) = extract_command {
+            // Clean the target directory before extraction to prevent stale files.
+            // This handles directory renames (e.g. blocks/ → Blocks/) where the old
+            // casing would persist because unzip merges into existing directories.
+            // We remove everything except the uploaded artifact itself.
+            let clean_cmd = format!(
+                "cd {} && find . -mindepth 1 -maxdepth 1 ! -name {} -exec rm -rf {{}} +",
+                shell::quote_path(remote_path),
+                shell::quote_arg(&artifact_filename),
+            );
+            log_status!("deploy", "Cleaning target directory before extraction");
+            let clean_output = ssh_client.execute(&clean_cmd);
+            if !clean_output.success {
+                log_status!(
+                    "deploy",
+                    "Warning: failed to clean target directory: {}",
+                    clean_output.stderr
+                );
+                // Non-fatal — proceed with extraction anyway
+            }
+
             let mut vars = HashMap::new();
             vars.insert("artifact".to_string(), artifact_filename);
             vars.insert("targetDir".to_string(), remote_path.to_string());
