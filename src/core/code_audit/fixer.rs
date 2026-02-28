@@ -44,6 +44,8 @@ pub enum InsertionKind {
     MethodStub,
     RegistrationStub,
     ConstructorWithRegistration,
+    /// Add a missing import/use statement at the top of the file.
+    ImportAdd,
 }
 
 /// A file that was skipped by the fixer with a reason.
@@ -200,6 +202,95 @@ fn generate_method_stub(sig: &MethodSignature) -> String {
     }
 }
 
+// ============================================================================
+// Import Generation
+// ============================================================================
+
+/// Generate the import statement line for a given import path.
+///
+/// Language-aware: `use X;` for Rust/PHP, `import X from 'X';` for JS/TS.
+fn generate_import_statement(import_path: &str, language: &Language) -> String {
+    match language {
+        Language::Rust => format!("use {};", import_path),
+        Language::Php => format!("use {};", import_path),
+        Language::JavaScript | Language::TypeScript => {
+            // Extract the last segment as the name
+            let name = import_path.rsplit("::").next()
+                .or_else(|| import_path.rsplit('/').next())
+                .unwrap_or(import_path);
+            format!("import {{ {} }} from '{}';", name, import_path)
+        }
+        Language::Unknown => format!("use {};", import_path),
+    }
+}
+
+/// Insert an import statement into file content at the correct location.
+///
+/// Finds the last existing import/use line and inserts after it.
+/// If no imports exist, inserts after the first non-comment, non-blank line
+/// (e.g., after `<?php` or after module-level attributes).
+fn insert_import(content: &str, import_line: &str, language: &Language) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Find the last import/use line
+    let import_prefix = match language {
+        Language::Rust => "use ",
+        Language::Php => "use ",
+        Language::JavaScript | Language::TypeScript => "import ",
+        Language::Unknown => "use ",
+    };
+
+    let mut last_import_idx = None;
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(import_prefix)
+            || (trimmed.starts_with("use ") && *language == Language::Rust)
+        {
+            last_import_idx = Some(i);
+        }
+    }
+
+    let insert_after = if let Some(idx) = last_import_idx {
+        idx
+    } else {
+        // No existing imports — insert after first non-blank, non-comment line
+        let mut first_code = 0;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("/*")
+                || trimmed.starts_with('*')
+                || trimmed.starts_with('#')
+                || trimmed == "<?php"
+            {
+                first_code = i + 1;
+            } else {
+                break;
+            }
+        }
+        // Insert before first_code (add a blank line separator)
+        if first_code > 0 { first_code - 1 } else { 0 }
+    };
+
+    let mut result = String::with_capacity(content.len() + import_line.len() + 2);
+    for (i, line) in lines.iter().enumerate() {
+        result.push_str(line);
+        result.push('\n');
+        if i == insert_after {
+            result.push_str(import_line);
+            result.push('\n');
+        }
+    }
+
+    // Preserve trailing newline behavior
+    if !content.ends_with('\n') {
+        result.pop();
+    }
+
+    result
+}
+
 /// Generate a registration stub for PHP (add_action/add_filter in __construct).
 fn generate_registration_stub(hook_name: &str) -> String {
     // The hook name from the audit is the first arg of add_action
@@ -327,6 +418,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             // First pass: collect missing methods and missing registrations
             let mut missing_methods: Vec<&str> = Vec::new();
             let mut missing_registrations: Vec<&str> = Vec::new();
+            let mut missing_imports: Vec<&str> = Vec::new();
             let mut needs_constructor = false;
 
             for deviation in &outlier.deviations {
@@ -355,11 +447,28 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                             .unwrap_or(&deviation.description);
                         missing_registrations.push(hook_name);
                     }
+                    DeviationKind::MissingImport => {
+                        let import_path = deviation
+                            .description
+                            .strip_prefix("Missing import: ")
+                            .unwrap_or(&deviation.description);
+                        missing_imports.push(import_path);
+                    }
                     _ => {}
                 }
             }
 
-            // Second pass: generate insertions, merging constructor + registrations
+            // Second pass: generate insertions
+
+            // Handle missing imports: generate use statements
+            for import_path in &missing_imports {
+                let use_stmt = generate_import_statement(import_path, &language);
+                insertions.push(Insertion {
+                    kind: InsertionKind::ImportAdd,
+                    code: use_stmt,
+                    description: format!("Add missing import: {}", import_path),
+                });
+            }
 
             // Handle registrations: either inject into existing constructor, or create new one
             if !missing_registrations.is_empty() && language == Language::Php {
@@ -652,17 +761,24 @@ fn apply_insertions_to_content(
 ) -> String {
     let mut result = content.to_string();
 
-    // Separate registration stubs (go into __construct) from method stubs (go before closing brace)
+    // Categorize insertions by kind
     let mut method_stubs = Vec::new();
     let mut registration_stubs = Vec::new();
     let mut constructor_stubs = Vec::new();
+    let mut import_adds = Vec::new();
 
     for insertion in insertions {
         match insertion.kind {
             InsertionKind::MethodStub => method_stubs.push(&insertion.code),
             InsertionKind::RegistrationStub => registration_stubs.push(&insertion.code),
             InsertionKind::ConstructorWithRegistration => constructor_stubs.push(&insertion.code),
+            InsertionKind::ImportAdd => import_adds.push(&insertion.code),
         }
+    }
+
+    // Apply import additions first (they go at the top)
+    for import_line in &import_adds {
+        result = insert_import(&result, import_line, language);
     }
 
     // Insert registration stubs into existing __construct
@@ -1290,6 +1406,165 @@ class {} {{
         assert!(fix_result.fixes.is_empty());
         assert_eq!(fix_result.skipped.len(), 2);
         assert!(fix_result.skipped[0].reason.contains("confidence too low"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generate_rust_import_statement() {
+        let stmt = generate_import_statement("super::CmdResult", &Language::Rust);
+        assert_eq!(stmt, "use super::CmdResult;");
+    }
+
+    #[test]
+    fn generate_php_import_statement() {
+        let stmt = generate_import_statement("DataMachine\\Core\\Base", &Language::Php);
+        assert_eq!(stmt, "use DataMachine\\Core\\Base;");
+    }
+
+    #[test]
+    fn insert_import_after_existing_rust_imports() {
+        let content = r#"use serde::Serialize;
+use homeboy::project;
+
+pub struct MyOutput {}
+
+pub fn run() {}
+"#;
+        let result = insert_import(content, "use super::CmdResult;", &Language::Rust);
+        assert!(result.contains("use super::CmdResult;"));
+        // Should be after the last existing use line
+        let cmd_pos = result.find("use super::CmdResult;").unwrap();
+        let project_pos = result.find("use homeboy::project;").unwrap();
+        assert!(cmd_pos > project_pos, "New import should be after existing imports");
+        // Original content preserved
+        assert!(result.contains("pub fn run()"));
+    }
+
+    #[test]
+    fn insert_import_when_no_existing_imports() {
+        let content = r#"// A module with no imports
+
+pub struct Output {}
+"#;
+        let result = insert_import(content, "use super::CmdResult;", &Language::Rust);
+        assert!(result.contains("use super::CmdResult;"));
+        assert!(result.contains("pub struct Output"));
+    }
+
+    #[test]
+    fn apply_import_add_insertion() {
+        let content = r#"use serde::Serialize;
+
+pub struct TestOutput {}
+"#;
+        let insertions = vec![Insertion {
+            kind: InsertionKind::ImportAdd,
+            code: "use super::CmdResult;".to_string(),
+            description: "Add missing import".to_string(),
+        }];
+
+        let result = apply_insertions_to_content(content, &insertions, &Language::Rust);
+        assert!(result.contains("use super::CmdResult;"));
+        assert!(result.contains("use serde::Serialize;"));
+        assert!(result.contains("pub struct TestOutput"));
+    }
+
+    #[test]
+    fn generate_fixes_handles_missing_import() {
+        use super::super::conventions::{Deviation, DeviationKind, Outlier};
+        use super::super::checks::CheckStatus;
+        use super::super::{AuditSummary, CodeAuditResult, ConventionReport};
+
+        let dir = std::env::temp_dir().join("homeboy_fixer_import_test");
+        let commands = dir.join("commands");
+        let _ = std::fs::create_dir_all(&commands);
+
+        // Conforming file
+        std::fs::write(
+            commands.join("good.rs"),
+            "use super::CmdResult;\nuse serde::Serialize;\n\npub fn run() {}\n",
+        ).unwrap();
+
+        // Outlier: missing import
+        std::fs::write(
+            commands.join("bad.rs"),
+            "pub fn run() {}\n",
+        ).unwrap();
+
+        let audit_result = CodeAuditResult {
+            component_id: "test".to_string(),
+            source_path: dir.to_str().unwrap().to_string(),
+            summary: AuditSummary {
+                files_scanned: 2,
+                conventions_detected: 1,
+                outliers_found: 1,
+                alignment_score: 0.5,
+            },
+            conventions: vec![ConventionReport {
+                name: "Commands".to_string(),
+                glob: "commands/*".to_string(),
+                status: CheckStatus::Drift,
+                expected_methods: vec!["run".to_string()],
+                expected_registrations: vec![],
+                expected_interfaces: vec![],
+                expected_namespace: None,
+                expected_imports: vec!["super::CmdResult".to_string()],
+                conforming: vec!["commands/good.rs".to_string()],
+                outliers: vec![Outlier {
+                    file: "commands/bad.rs".to_string(),
+                    deviations: vec![Deviation {
+                        kind: DeviationKind::MissingImport,
+                        description: "Missing import: super::CmdResult".to_string(),
+                        suggestion: "Add use super::CmdResult;".to_string(),
+                    }],
+                }],
+                total_files: 2,
+                confidence: 0.5,
+            }],
+            findings: vec![],
+            directory_conventions: vec![],
+        };
+
+        let fix_result = generate_fixes(&audit_result, &dir);
+        assert_eq!(fix_result.fixes.len(), 1);
+        let fix = &fix_result.fixes[0];
+        assert_eq!(fix.file, "commands/bad.rs");
+        assert_eq!(fix.insertions.len(), 1);
+        assert!(matches!(fix.insertions[0].kind, InsertionKind::ImportAdd));
+        assert!(fix.insertions[0].code.contains("use super::CmdResult;"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_import_fix_to_disk() {
+        let dir = std::env::temp_dir().join("homeboy_fixer_import_apply_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(
+            dir.join("test.rs"),
+            "use serde::Serialize;\n\npub fn run() {}\n",
+        ).unwrap();
+
+        let mut fixes = vec![Fix {
+            file: "test.rs".to_string(),
+            insertions: vec![Insertion {
+                kind: InsertionKind::ImportAdd,
+                code: "use super::CmdResult;".to_string(),
+                description: "Add missing import".to_string(),
+            }],
+            applied: false,
+        }];
+
+        let applied = apply_fixes(&mut fixes, &dir);
+        assert_eq!(applied, 1);
+        assert!(fixes[0].applied);
+
+        let content = std::fs::read_to_string(dir.join("test.rs")).unwrap();
+        assert!(content.contains("use super::CmdResult;"));
+        assert!(content.contains("use serde::Serialize;"));
+        assert!(content.contains("pub fn run()"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
