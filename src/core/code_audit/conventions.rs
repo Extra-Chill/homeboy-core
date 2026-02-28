@@ -288,7 +288,7 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
 
 /// Extract methods, class name, and implements from PHP.
 fn extract_php(content: &str) -> (Vec<String>, Option<String>, Vec<String>) {
-    let method_re = Regex::new(r"(?m)^\s*(?:public|protected|private|static)\s+function\s+(\w+)")
+    let method_re = Regex::new(r"(?m)^\s*(?:(?:public|protected|private|static|abstract|final)\s+)*function\s+(\w+)")
         .unwrap();
     let class_re =
         Regex::new(r"(?m)^\s*(?:abstract\s+)?class\s+(\w+)").unwrap();
