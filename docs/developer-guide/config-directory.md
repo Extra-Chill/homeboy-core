@@ -46,11 +46,11 @@ Typically: `C:\Users\<username>\AppData\Roaming\homeboy\`
 ├── fleets/
 │   ├── <fleet_id>.json        # Fleet configurations
 │   └── ...
-├── modules/
-│   ├── <module_id>/
-│   │   ├── <module_id>.json   # Module manifest
-│   │   ├── docs/             # Module documentation
-│   │   └── ...              # Module files
+├── extensions/
+│   ├── <extension_id>/
+│   │   ├── <extension_id>.json   # Extension manifest
+│   │   ├── docs/             # Extension documentation
+│   │   └── ...              # Extension files
 │   └── ...
 ├── keys/                     # SSH private keys (optional)
 │   ├── <key_name>
@@ -141,20 +141,20 @@ Each fleet is a separate JSON file named after the fleet ID. Fleets group projec
 }
 ```
 
-### Module Directory
+### Extension Directory
 
-**Directory:** `~/.config/homeboy/modules/`
+**Directory:** `~/.config/homeboy/extensions/`
 
-Each module is a subdirectory containing:
-- Module manifest: `<module_id>/<module_id>.json`
-- Module documentation: `<module_id>/docs/`
-- Module files: `<module_id>/` (executables, scripts, etc.)
+Each extension is a subdirectory containing:
+- Extension manifest: `<extension_id>/<extension_id>.json`
+- Extension documentation: `<extension_id>/docs/`
+- Extension files: `<extension_id>/` (executables, scripts, etc.)
 
-**Example:** `~/.config/homeboy/modules/wordpress/wordpress.json`
+**Example:** `~/.config/homeboy/extensions/wordpress/wordpress.json`
 
-Modules are installed via:
-- Git clone (remote modules)
-- Symlink (local development modules)
+Extensions are installed via:
+- Git clone (remote extensions)
+- Symlink (local development extensions)
 
 ### Keys Directory
 
@@ -184,7 +184,7 @@ Directories are created automatically when needed:
 - projects/ — First project created
 - servers/ — First server created
 - components/ — First component created
-- modules/&lt;module_id&gt;/ — Module installed
+- extensions/&lt;extension_id&gt;/ — Extension installed
 - keys/ — Key referenced in server config
 - backups/ — Backup created
 
@@ -205,7 +205,7 @@ While Homeboy provides CLI commands for most operations, configurations can be e
 - [Project schema](../schemas/project-schema.md)
 - [Server schema](../schemas/server-schema.md)
 - [Fleet schema](../schemas/fleet-schema.md)
-- [Module manifest schema](../schemas/module-manifest-schema.md)
+- [Extension manifest schema](../schemas/extension-manifest-schema.md)
 
 ## Migration and Backups
 
@@ -300,4 +300,4 @@ If configuration file is invalid:
 - [Server command](../commands/server.md) - Manage server configurations
 - [Component command](../commands/component.md) - Manage component configurations
 - [Fleet command](../commands/fleet.md) - Manage fleet configurations
-- [Module command](../commands/module.md) - Manage module installations
+- [Extension command](../commands/extension.md) - Manage extension installations

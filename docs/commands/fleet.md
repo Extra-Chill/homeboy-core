@@ -18,7 +18,7 @@ Fleets enable cloud version management by grouping projects that share component
 - Keep shared plugins/themes in sync across a WordPress multisite network
 
 **Hierarchy:**
-- **Component** → versioned thing (plugin, CLI tool, module)
+- **Component** → versioned thing (plugin, CLI tool, extension)
 - **Project** → deployment target (site on a server)
 - **Fleet** → named group of projects
 

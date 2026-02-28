@@ -20,7 +20,7 @@ Component configuration defines buildable and deployable units stored in `compon
     }
   ],
   "changelog_target": "string",
-  "modules": {},
+  "extensions": {},
   "release": {}
 }
 ```
@@ -46,9 +46,9 @@ Component configuration defines buildable and deployable units stored in `compon
   - **`file`** (string): Path to file containing version (relative to `local_path`)
   - **`pattern`** (string): Regex pattern to extract version (first capture group)
 - **`changelog_target`** (string): Path to changelog file (relative to `local_path`)
-- **`modules`** (object): Module-specific settings
-  - Keys are module IDs (e.g., `"wordpress"`, `"rust"`)
-  - Values are module setting objects
+- **`extensions`** (object): Extension-specific settings
+  - Keys are extension IDs (e.g., `"wordpress"`, `"rust"`)
+  - Values are extension setting objects
 - **`release`** (object): Component-scoped release configuration
   - **`enabled`** (boolean): Whether release pipeline is enabled
   - **`steps`** (array): Release step definitions
@@ -114,7 +114,7 @@ Setting `local_path` to the same directory as the deploy target is a misconfigur
   "post_release_commands": [
     "echo 'Release complete!'"
   ],
-  "modules": {
+  "extensions": {
     "wordpress": {
       "settings": {
         "php_version": "8.1"
@@ -126,10 +126,10 @@ Setting `local_path` to the same directory as the deploy target is a misconfigur
     "steps": [
       {
         "id": "test",
-        "type": "module.run",
+        "type": "extension.run",
         "label": "Run Tests",
         "config": {
-          "module": "rust"
+          "extension": "rust"
         }
       }
     ]
@@ -167,4 +167,4 @@ Components are stored as individual JSON files under the OS config directory:
 - [Component command](../commands/component.md) - Manage component configuration
 - [Hooks system](../architecture/hooks.md) - Lifecycle hooks for version and release operations
 - [Project schema](project-schema.md) - How components link to projects
-- [Module manifest schema](module-manifest-schema.md) - Module configuration structure
+- [Extension manifest schema](extension-manifest-schema.md) - Extension configuration structure

@@ -100,4 +100,4 @@ homeboy upgrade --force
 ## Related
 
 - [version](version.md)
-- [module](module.md)
+- [extension](extension.md)

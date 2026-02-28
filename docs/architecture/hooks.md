@@ -1,6 +1,6 @@
 # Hooks System
 
-Homeboy provides a general-purpose hook/event system for lifecycle extensibility. Both components and modules can declare hooks that run shell commands at named lifecycle events.
+Homeboy provides a general-purpose hook/event system for lifecycle extensibility. Both components and extensions can declare hooks that run shell commands at named lifecycle events.
 
 ## Overview
 
@@ -18,7 +18,7 @@ Hooks are stored as a map of event names to command lists:
 
 When an event fires, Homeboy resolves commands from two sources (in order):
 
-1. **Module hooks** — platform-level behavior from linked modules
+1. **Extension hooks** — platform-level behavior from linked extensions
 2. **Component hooks** — user-level customization
 
 Commands execute sequentially in the component's `local_path` directory via `sh -c`.
@@ -102,16 +102,16 @@ Template variables available in `post:deploy` hooks:
 }
 ```
 
-Module-level `post:deploy` hooks apply to all components using that module. For example, the WordPress module activates plugins and flushes cache after every deploy. Component-level hooks can add additional commands.
+Extension-level `post:deploy` hooks apply to all components using that extension. For example, the WordPress extension activates plugins and flushes cache after every deploy. Component-level hooks can add additional commands.
 
 ## Resolution Order
 
 When hooks fire for an event, commands are collected in this order:
 
-1. **Module hooks** — iterate linked modules, collect `hooks[event]` from each manifest
+1. **Extension hooks** — iterate linked extensions, collect `hooks[event]` from each manifest
 2. **Component hooks** — collect `hooks[event]` from the component config
 
-Module hooks run first so platform behavior executes before user customization.
+Extension hooks run first so platform behavior executes before user customization.
 
 ## Execution Details
 
@@ -170,9 +170,9 @@ is equivalent to:
 
 Both formats work. The `hooks` map is the canonical format going forward.
 
-## Module Hooks
+## Extension Hooks
 
-Modules declare hooks in their manifest using the same format:
+Extensions declare hooks in their manifest using the same format:
 
 ```json
 {
@@ -183,13 +183,13 @@ Modules declare hooks in their manifest using the same format:
 }
 ```
 
-Module hooks merge with component hooks at resolution time. They are not stored on the component.
+Extension hooks merge with component hooks at resolution time. They are not stored on the component.
 
 ## Hooks vs Release Pipeline Steps
 
 | Feature | Hooks | Release Steps |
 |---------|-------|---------------|
-| Configuration | `hooks` map on component/module | Release pipeline `steps` array |
+| Configuration | `hooks` map on component/extension | Release pipeline `steps` array |
 | Dependencies | None (sequential) | `needs` field for DAG ordering |
 | Failure handling | Fixed per event (fatal or non-fatal) | Configurable per step |
 | Execution point | Fixed lifecycle points | Custom ordering |
@@ -197,13 +197,13 @@ Module hooks merge with component hooks at resolution time. They are not stored 
 
 **Use hooks** for simple, component-specific commands that always run at the same lifecycle point.
 
-**Use release steps** for complex orchestration with dependencies, module integration, or custom failure handling.
+**Use release steps** for complex orchestration with dependencies, extension integration, or custom failure handling.
 
 ## Implementation
 
 The hook engine lives in `src/core/hooks.rs` and provides:
 
-- `resolve_hooks(component, event)` — merge module + component hooks for an event
+- `resolve_hooks(component, event)` — merge extension + component hooks for an event
 - `run_hooks(component, event, failure_mode)` — resolve and execute locally
 - `run_hooks_remote(ssh_client, component, event, failure_mode, vars)` — resolve, expand template variables, and execute via SSH
 - `run_commands(commands, working_dir, event, failure_mode)` — low-level local executor

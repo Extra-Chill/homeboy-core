@@ -135,7 +135,7 @@ pub fn ensure_app_dirs() -> Result<()> {
         paths::projects()?,
         paths::servers()?,
         paths::components()?,
-        paths::modules()?,
+        paths::extensions()?,
         paths::keys()?,
         paths::backups()?,
     ];

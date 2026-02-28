@@ -1,6 +1,6 @@
-# Module Manifest Schema
+# Extension Manifest Schema
 
-Module manifests define module metadata, runtime behavior, platform behaviors, and integration points. Stored as `<module_id>/<module_id>.json` in the module directory.
+Extension manifests define extension metadata, runtime behavior, platform behaviors, and integration points. Stored as `<extension_id>/<extension_id>.json` in the extension directory.
 
 ## Schema
 
@@ -25,25 +25,25 @@ Module manifests define module metadata, runtime behavior, platform behaviors, a
 
 ### Required Fields
 
-- **`name`** (string): Human-readable module name
-- **`id`** (string): Unique module identifier (must match directory name)
-- **`version`** (string): Module version (semantic versioning)
+- **`name`** (string): Human-readable extension name
+- **`id`** (string): Unique extension identifier (must match directory name)
+- **`version`** (string): Extension version (semantic versioning)
 
 ### Optional Fields
 
-- **`description`** (string): Module description
-- **`runtime`** (object): Executable module runtime configuration
+- **`description`** (string): Extension description
+- **`runtime`** (object): Executable extension runtime configuration
 - **`platform`** (object): Platform behavior definitions
-- **`commands`** (object): Additional CLI commands provided by module
-- **`actions`** (object): Action definitions for `homeboy module action`
+- **`commands`** (object): Additional CLI commands provided by extension
+- **`actions`** (object): Action definitions for `homeboy extension action`
 - **`release_actions`** (object): Release pipeline step definitions
 - **`docs`** (array): Documentation topic paths
-- **`capabilities`** (array): Capabilities provided by module (e.g., `["storage"]`)
+- **`capabilities`** (array): Capabilities provided by extension (e.g., `["storage"]`)
 - **`storage_backend`** (string): Storage backend identifier for storage capability
 
 ## Runtime Configuration
 
-Runtime configuration defines how executable modules are executed.
+Runtime configuration defines how executable extensions are executed.
 
 ```json
 {
@@ -59,19 +59,19 @@ Runtime configuration defines how executable modules are executed.
 
 ### Runtime Fields
 
-- **`run_command`** (string): Shell command to execute the module
-  - Template variables: `{{modulePath}}`, `{{entrypoint}}`, `{{args}}`, plus project context variables
+- **`run_command`** (string): Shell command to execute the extension
+  - Template variables: `{{extensionPath}}`, `{{entrypoint}}`, `{{args}}`, plus project context variables
   - Example: `"./venv/bin/python3 {{entrypoint}} {{args}}"`
 - **`setup_command`** (string): Command to run during install/update (optional)
   - Example: `"python3 -m venv venv && ./venv/bin/pip install -r requirements.txt"`
-- **`ready_check`** (string): Command to verify module readiness (optional)
+- **`ready_check`** (string): Command to verify extension readiness (optional)
   - Exit code 0 = ready, non-zero = not ready
   - Example: `"test -f ./venv/bin/python3"`
-- **`entrypoint`** (string): Module entrypoint script (optional)
+- **`entrypoint`** (string): Extension entrypoint script (optional)
   - Example: `"main.py"`
 - **`env`** (object): Environment variables to set during execution
   - Values can use template variables
-  - Example: `{"MY_VAR": "{{modulePath}}/data"}`
+  - Example: `{"MY_VAR": "{{extensionPath}}/data"}`
 
 ## Platform Configuration
 
@@ -165,7 +165,7 @@ Platform configuration defines database, deployment, and version detection behav
 
 ## Commands Configuration
 
-Modules can register additional top-level CLI commands.
+Extensions can register additional top-level CLI commands.
 
 ```json
 {
@@ -183,12 +183,12 @@ Modules can register additional top-level CLI commands.
 
 - **`description`** (string): Command description for help text
 - **`run_command`** (string): Execution template
-  - Template variables: `{{args}}`, plus module runtime variables
+  - Template variables: `{{args}}`, plus extension runtime variables
 - **`help`** (string): Detailed help text (optional)
 
 ## Actions Configuration
 
-Actions define executable operations accessible via `homeboy module action`.
+Actions define executable operations accessible via `homeboy extension action`.
 
 ```json
 {
@@ -254,7 +254,7 @@ Release actions define steps for release pipelines.
 {
   "release_actions": {
     "<step_type>": {
-      "type": "module.run|module.action",
+      "type": "extension.run|extension.action",
       "config": {}
     }
   }
@@ -263,8 +263,8 @@ Release actions define steps for release pipelines.
 
 ### Release Action Types
 
-- **`module.run`**: Execute module runtime command
-- **`module.action`**: Execute module action
+- **`extension.run`**: Execute extension runtime command
+- **`extension.action`**: Execute extension action
 
 #### Example
 
@@ -272,9 +272,9 @@ Release actions define steps for release pipelines.
 {
   "release_actions": {
     "publish": {
-      "type": "module.run",
+      "type": "extension.run",
       "config": {
-        "module": "github",
+        "extension": "github",
         "inputs": [
           {"id": "create_release", "value": "true"}
         ]
@@ -286,7 +286,7 @@ Release actions define steps for release pipelines.
 
 ## Hooks Configuration
 
-Modules can declare lifecycle hooks that run at named events. Module hooks execute before component hooks, providing platform-level behavior.
+Extensions can declare lifecycle hooks that run at named events. Extension hooks execute before component hooks, providing platform-level behavior.
 
 ```json
 {
@@ -317,7 +317,7 @@ See [hooks architecture](../architecture/hooks.md) for details on execution orde
 
 ## Documentation Configuration
 
-Modules can provide embedded documentation.
+Extensions can provide embedded documentation.
 
 ```json
 {
@@ -328,7 +328,7 @@ Modules can provide embedded documentation.
 }
 ```
 
-Documentation files live in the module's `docs/` directory. Topics resolve to `homeboy docs <module_id>/<topic>`.
+Documentation files live in the extension's `docs/` directory. Topics resolve to `homeboy docs <extension_id>/<topic>`.
 
 ## Capabilities and Storage Backend
 
@@ -392,11 +392,11 @@ Documentation files live in the module's `docs/` directory. Topics resolve to `h
 
 ## Storage Location
 
-Module manifests are stored in the module directory:
-- Git modules: `~/.config/homeboy/modules/<module_id>/<module_id>.json`
-- Symlinked modules: `<source_path>/<module_id>.json`
+Extension manifests are stored in the extension directory:
+- Git extensions: `~/.config/homeboy/extensions/<extension_id>/<extension_id>.json`
+- Symlinked extensions: `<source_path>/<extension_id>.json`
 
 ## Related
 
-- [Module command](../commands/module.md) - Manage module installation and execution
+- [Extension command](../commands/extension.md) - Manage extension installation and execution
 - [Template variables](../templates.md) - Variable reference for templates

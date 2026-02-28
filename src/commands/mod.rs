@@ -273,7 +273,7 @@ pub mod git;
 pub mod init;
 pub mod lint;
 pub mod logs;
-pub mod module;
+pub mod extension;
 pub mod project;
 pub mod refactor;
 pub mod release;
@@ -303,8 +303,8 @@ pub(crate) fn run_markdown(
 
 /// Dispatch a command to its handler and map result to JSON.
 macro_rules! dispatch {
-    ($args:expr, $global:expr, $module:ident) => {
-        crate::output::map_cmd_result_to_json($module::run($args, $global))
+    ($args:expr, $global:expr, $extension:ident) => {
+        crate::output::map_cmd_result_to_json($extension::run($args, $global))
     };
 }
 
@@ -332,7 +332,7 @@ pub(crate) fn run_json(
         crate::Commands::Deploy(args) => dispatch!(args, global, deploy),
         crate::Commands::Component(args) => dispatch!(args, global, component),
         crate::Commands::Config(args) => dispatch!(args, global, config),
-        crate::Commands::Module(args) => dispatch!(args, global, module),
+        crate::Commands::Extension(args) => dispatch!(args, global, extension),
         crate::Commands::Docs(args) => dispatch!(args, global, docs),
         crate::Commands::Changelog(args) => dispatch!(args, global, changelog),
         crate::Commands::Git(args) => dispatch!(args, global, git),

@@ -8,7 +8,7 @@ Standard patterns for organizing documentation files and directories.
 User-facing documentation lives in `/docs` at the project root. This directory is always included in documentation scans regardless of `.gitignore` patterns.
 
 ### Subdirectory Organization
-Create subdirectories that mirror actual code modules:
+Create subdirectories that mirror actual code extensions:
 
 ```
 docs/
@@ -23,7 +23,7 @@ docs/
 ```
 
 ### Hierarchical Depth
-Match the depth of code organization. If code has nested modules, documentation can have nested subdirectories. Avoid unnecessary nesting.
+Match the depth of code organization. If code has nested extensions, documentation can have nested subdirectories. Avoid unnecessary nesting.
 
 ## File Naming
 
@@ -41,14 +41,14 @@ When a directory needs an introductory file (architecture overview, component li
 
 ```
 blocks/
-├── blocks.md              # Entry point: "What is the blocks module?"
+├── blocks.md              # Entry point: "What is the blocks extension?"
 ├── class-wp-block.md      # Specific component
 ├── functions.md           # Function reference
 └── hooks.md               # Hook reference
 ```
 
 The pattern {directory}/{directory}.md serves as the natural entry point:
-- api/api.md — API module introduction
+- api/api.md — API extension introduction
 - cache/cache.md — Cache system overview
 - rest-api/rest-api.md — REST API architecture
 

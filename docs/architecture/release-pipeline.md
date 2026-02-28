@@ -7,7 +7,7 @@ The release pipeline provides configurable, local orchestration for managing com
 Homeboy's release pipeline is a local-first alternative to CI/CD, allowing developers to:
 - Define release workflows as configuration
 - Plan and review releases before execution
-- Integrate custom module actions
+- Integrate custom extension actions
 - Run releases from local development environment
 
 ## Pipeline Configuration
@@ -132,18 +132,18 @@ Push commits and tags to remote.
 **Config options:**
 - **`push_tags`** (boolean): Push tags along with commits
 
-#### `module_run`
+#### `extension_run`
 
-Execute a module runtime command.
+Execute a extension runtime command.
 
 ```json
 {
   "id": "test",
-  "type": "module_run",
+  "type": "extension_run",
   "label": "Run Tests",
   "needs": ["build"],
   "config": {
-    "module": "rust",
+    "extension": "rust",
     "command": "test",
     "inputs": [
       {"id": "release", "value": "true"}
@@ -153,22 +153,22 @@ Execute a module runtime command.
 ```
 
 **Config options:**
-- **`module`** (string): Module ID to execute
-- **`command`** (string): Command to pass to module
-- **`inputs`** (array): Input arguments for module
+- **`extension`** (string): Extension ID to execute
+- **`command`** (string): Command to pass to extension
+- **`inputs`** (array): Input arguments for extension
 
-#### `module_action`
+#### `extension_action`
 
-Execute a module action.
+Execute a extension action.
 
 ```json
 {
   "id": "publish",
-  "type": "module_action",
+  "type": "extension_action",
   "label": "Publish Release",
   "needs": ["push"],
   "config": {
-    "module": "github",
+    "extension": "github",
     "action": "create_release",
     "data": {}
   }
@@ -176,7 +176,7 @@ Execute a module action.
 ```
 
 **Config options:**
-- **`module`** (string): Module ID providing the action
+- **`extension`** (string): Extension ID providing the action
 - **`action`** (string): Action ID to execute
 - **`data`** (object): Data to pass to action
 
@@ -187,7 +187,7 @@ The `needs` field defines step execution order:
 ```json
 {
   "steps": [
-    {"id": "test", "type": "module_run", "needs": []},
+    {"id": "test", "type": "extension_run", "needs": []},
     {"id": "build", "type": "build", "needs": []},
     {"id": "bump", "type": "version_bump", "needs": ["test", "build"]},
     {"id": "commit", "type": "git_commit", "needs": ["bump"]},
@@ -198,17 +198,17 @@ The `needs` field defines step execution order:
 
 Steps with empty `needs` arrays run first. Steps wait for all dependencies to complete successfully before executing.
 
-## Module Actions in Pipelines
+## Extension Actions in Pipelines
 
-Modules can define `release_actions` in their manifest for pipeline integration:
+Extensions can define `release_actions` in their manifest for pipeline integration:
 
 ```json
 {
   "release_actions": {
     "publish": {
-      "type": "module_run",
+      "type": "extension_run",
       "config": {
-        "module": "github",
+        "extension": "github",
         "inputs": [
           {"id": "create_release", "value": "true"}
         ]
@@ -223,7 +223,7 @@ These can be referenced in pipeline steps:
 ```json
 {
   "id": "publish",
-  "type": "module.run",
+  "type": "extension.run",
   "label": "Publish",
   "needs": ["push"],
   "config": {}
@@ -270,21 +270,21 @@ Execution:
     "steps": [
       {
         "id": "lint",
-        "type": "module_run",
+        "type": "extension_run",
         "label": "Lint Code",
         "needs": [],
         "config": {
-          "module": "rust",
+          "extension": "rust",
           "command": "clippy"
         }
       },
       {
         "id": "test",
-        "type": "module_run",
+        "type": "extension_run",
         "label": "Run Tests",
         "needs": [],
         "config": {
-          "module": "rust",
+          "extension": "rust",
           "command": "test"
         }
       },
@@ -335,11 +335,11 @@ Execution:
       },
       {
         "id": "publish",
-        "type": "module_action",
+        "type": "extension_action",
         "label": "Create GitHub Release",
         "needs": ["push"],
         "config": {
-          "module": "github",
+          "extension": "github",
           "action": "create_release"
         }
       }
@@ -374,7 +374,7 @@ Release pipeline supports global settings:
 Pipeline execution stops on first failure. Failed steps are reported with:
 - Step ID and label
 - Error message
-- Exit code (for module steps)
+- Exit code (for extension steps)
 
 Resume from a specific step is not supported. Rerun the entire pipeline after fixing issues.
 
@@ -382,4 +382,4 @@ Resume from a specific step is not supported. Rerun the entire pipeline after fi
 
 - [Release command](../commands/release.md) - Plan and run releases
 - [Component schema](../schemas/component-schema.md) - Release configuration structure
-- [Module manifest schema](../schemas/module-manifest-schema.md) - Module action definitions
+- [Extension manifest schema](../schemas/extension-manifest-schema.md) - Extension action definitions

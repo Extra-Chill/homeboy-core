@@ -248,7 +248,7 @@ homeboy changes --project myproject --git-diffs
 
 ## Post-Deploy Hooks
 
-After a successful deploy, Homeboy runs `post:deploy` hooks remotely via SSH on the deployment target. Hooks are resolved from modules and components (see [hooks](../architecture/hooks.md)).
+After a successful deploy, Homeboy runs `post:deploy` hooks remotely via SSH on the deployment target. Hooks are resolved from extensions and components (see [hooks](../architecture/hooks.md)).
 
 Template variables available:
 
@@ -258,9 +258,9 @@ Template variables available:
 | `{{install_dir}}` | Remote install directory |
 | `{{base_path}}` | Project base path on the remote server |
 
-### Module-level hooks
+### Extension-level hooks
 
-Modules like WordPress define `post:deploy` hooks in their manifest. These run for every component using that module:
+Extensions like WordPress define `post:deploy` hooks in their manifest. These run for every component using that extension:
 
 ```json
 {
@@ -285,7 +285,7 @@ Components can add their own `post:deploy` hooks for custom automation:
 }
 ```
 
-Module hooks run first, then component hooks. All `post:deploy` hooks are non-fatal — failures are logged but do not affect the deploy result.
+Extension hooks run first, then component hooks. All `post:deploy` hooks are non-fatal — failures are logged but do not affect the deploy result.
 
 ## Related
 

@@ -21,16 +21,16 @@ Used in component configuration for archive extraction after upload.
 }
 ```
 
-### Module Runtime Commands
+### Extension Runtime Commands
 
-Used in module definitions for runtime execution.
+Used in extension definitions for runtime execution.
 
 **Variables:**
 | Variable | Description |
 |----------|-------------|
-| `{{entrypoint}}` | Module entrypoint script |
+| `{{entrypoint}}` | Extension entrypoint script |
 | `{{args}}` | Runtime arguments |
-| `{{modulePath}}` | Module installation path |
+| `{{extensionPath}}` | Extension installation path |
 
 **Example:**
 ```json
@@ -43,7 +43,7 @@ Used in module definitions for runtime execution.
 
 ### CLI Tool Templates
 
-Used in module CLI configurations for wrapping commands.
+Used in extension CLI configurations for wrapping commands.
 
 **Variables:**
 | Variable | Description |
@@ -54,28 +54,28 @@ Used in module CLI configurations for wrapping commands.
 
 ### Environment Variables
 
-Used in module runtime environment configuration.
+Used in extension runtime environment configuration.
 
 **Variables:**
 | Variable | Description |
 |----------|-------------|
-| `{{modulePath}}` | Module installation path |
+| `{{extensionPath}}` | Extension installation path |
 | `{{projectId}}` | Project identifier |
 
-### Special Module Variables
+### Special Extension Variables
 
-Available in module install/cleanup commands:
+Available in extension install/cleanup commands:
 
 | Variable | Description |
 |----------|-------------|
 | `{{selected}}` | Array of selected rows from `--data` |
-| `{{settings.<key>}}` | Module settings value |
+| `{{settings.<key>}}` | Extension settings value |
 | `{{payload.<key>}}` | Action payload data |
 | `{{release.<key>}}` | Release configuration data |
 
 ### Deploy Override Commands
 
-Used in module deploy override configurations.
+Used in extension deploy override configurations.
 
 **Variables:**
 | Variable | Description |

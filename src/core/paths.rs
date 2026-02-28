@@ -45,9 +45,9 @@ pub fn components() -> Result<PathBuf> {
     Ok(homeboy()?.join("components"))
 }
 
-/// Modules directory
-pub fn modules() -> Result<PathBuf> {
-    Ok(homeboy()?.join("modules"))
+/// Extensions directory
+pub fn extensions() -> Result<PathBuf> {
+    Ok(homeboy()?.join("extensions"))
 }
 
 /// Keys directory
@@ -60,14 +60,14 @@ pub fn backups() -> Result<PathBuf> {
     Ok(homeboy()?.join("backups"))
 }
 
-/// Module directory path
-pub fn module(id: &str) -> Result<PathBuf> {
-    Ok(modules()?.join(id))
+/// Extension directory path
+pub fn extension(id: &str) -> Result<PathBuf> {
+    Ok(extensions()?.join(id))
 }
 
-/// Module manifest file path
-pub fn module_manifest(id: &str) -> Result<PathBuf> {
-    Ok(modules()?.join(id).join(format!("{}.json", id)))
+/// Extension manifest file path
+pub fn extension_manifest(id: &str) -> Result<PathBuf> {
+    Ok(extensions()?.join(id).join(format!("{}.json", id)))
 }
 
 /// Key file path

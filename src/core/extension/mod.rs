@@ -8,29 +8,29 @@ pub mod version;
 pub mod exec_context;
 
 // Re-export runner types
-pub use runner::{ModuleRunner, RunnerOutput};
+pub use runner::{ExtensionRunner, RunnerOutput};
 
 // Re-export manifest types
 pub use manifest::{
     ActionConfig, ActionType, AuditCapability, BuildConfig, CliConfig, DatabaseCliConfig,
     DatabaseConfig, DeployCapability, DeployOverride, DeployVerification, DiscoveryConfig,
-    ExecutableCapability, HttpMethod, InputConfig, LintConfig, ModuleManifest, OutputConfig,
+    ExecutableCapability, HttpMethod, InputConfig, LintConfig, ExtensionManifest, OutputConfig,
     OutputSchema, PlatformCapability, ProvidesConfig, RequirementsConfig, RuntimeConfig,
     ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig, TestConfig, VersionPatternConfig,
 };
 
 // Re-export version types
-pub use version::{VersionConstraint, parse_module_version};
+pub use version::{VersionConstraint, parse_extension_version};
 
 // Re-export execution types and functions
 pub(crate) use execution::execute_action;
 pub use execution::{
-    is_module_compatible, module_ready_status, run_action, run_module, run_setup,
-    ModuleExecutionMode, ModuleReadyStatus, ModuleRunResult, ModuleSetupResult, ModuleStepFilter,
+    is_extension_compatible, extension_ready_status, run_action, run_extension, run_setup,
+    ExtensionExecutionMode, ExtensionReadyStatus, ExtensionRunResult, ExtensionSetupResult, ExtensionStepFilter,
 };
 
 // Re-export scope types
-pub use scope::ModuleScope;
+pub use scope::ExtensionScope;
 
 // Re-export lifecycle types and functions
 pub use lifecycle::{
@@ -38,7 +38,7 @@ pub use lifecycle::{
     InstallResult, UpdateAvailable, UpdateResult,
 };
 
-// Module loader functions
+// Extension loader functions
 
 use crate::config;
 use crate::error::Result;
@@ -46,41 +46,41 @@ use crate::output::MergeOutput;
 use crate::paths;
 use std::path::PathBuf;
 
-pub fn load_module(id: &str) -> Result<ModuleManifest> {
-    let mut manifest = config::load::<ModuleManifest>(id)?;
-    let module_dir = paths::module(id)?;
-    manifest.module_path = Some(module_dir.to_string_lossy().to_string());
+pub fn load_extension(id: &str) -> Result<ExtensionManifest> {
+    let mut manifest = config::load::<ExtensionManifest>(id)?;
+    let extension_dir = paths::extension(id)?;
+    manifest.extension_path = Some(extension_dir.to_string_lossy().to_string());
     Ok(manifest)
 }
 
-pub fn load_all_modules() -> Result<Vec<ModuleManifest>> {
-    let modules = config::list::<ModuleManifest>()?;
-    let mut modules_with_paths = Vec::new();
-    for mut module in modules {
-        let module_dir = paths::module(&module.id)?;
-        module.module_path = Some(module_dir.to_string_lossy().to_string());
-        modules_with_paths.push(module);
+pub fn load_all_extensions() -> Result<Vec<ExtensionManifest>> {
+    let extensions = config::list::<ExtensionManifest>()?;
+    let mut extensions_with_paths = Vec::new();
+    for mut extension in extensions {
+        let extension_dir = paths::extension(&extension.id)?;
+        extension.extension_path = Some(extension_dir.to_string_lossy().to_string());
+        extensions_with_paths.push(extension);
     }
-    Ok(modules_with_paths)
+    Ok(extensions_with_paths)
 }
 
-pub fn find_module_by_tool(tool: &str) -> Option<ModuleManifest> {
-    load_all_modules().ok().and_then(|modules| {
-        modules
+pub fn find_extension_by_tool(tool: &str) -> Option<ExtensionManifest> {
+    load_all_extensions().ok().and_then(|extensions| {
+        extensions
             .into_iter()
             .find(|m| m.cli.as_ref().is_some_and(|c| c.tool == tool))
     })
 }
 
-/// Find a module that handles a given file extension and has a specific capability script.
+/// Find a extension that handles a given file extension and has a specific capability script.
 ///
-/// Looks through all installed modules for one whose `provides.file_extensions` includes
+/// Looks through all installed extensions for one whose `provides.file_extensions` includes
 /// the given extension and whose `scripts` has the requested capability configured.
 ///
-/// Returns the module manifest with `module_path` populated.
-pub fn find_module_for_file_extension(ext: &str, capability: &str) -> Option<ModuleManifest> {
-    load_all_modules().ok().and_then(|modules| {
-        modules.into_iter().find(|m| {
+/// Returns the extension manifest with `extension_path` populated.
+pub fn find_extension_for_file_ext(ext: &str, capability: &str) -> Option<ExtensionManifest> {
+    load_all_extensions().ok().and_then(|extensions| {
+        extensions.into_iter().find(|m| {
             if !m.handles_file_extension(ext) {
                 return false;
             }
@@ -93,7 +93,7 @@ pub fn find_module_for_file_extension(ext: &str, capability: &str) -> Option<Mod
     })
 }
 
-/// Run a module's fingerprint script on file content.
+/// Run a extension's fingerprint script on file content.
 ///
 /// The script receives a JSON object on stdin:
 /// ```json
@@ -112,13 +112,13 @@ pub fn find_module_for_file_extension(ext: &str, capability: &str) -> Option<Mod
 /// }
 /// ```
 pub fn run_fingerprint_script(
-    module: &ModuleManifest,
+    extension: &ExtensionManifest,
     file_path: &str,
     content: &str,
 ) -> Option<FingerprintOutput> {
-    let module_path = module.module_path.as_deref()?;
-    let script_rel = module.fingerprint_script()?;
-    let script_path = std::path::Path::new(module_path).join(script_rel);
+    let extension_path = extension.extension_path.as_deref()?;
+    let script_rel = extension.fingerprint_script()?;
+    let script_path = std::path::Path::new(extension_path).join(script_rel);
 
     if !script_path.exists() {
         return None;
@@ -171,44 +171,44 @@ pub struct FingerprintOutput {
     pub imports: Vec<String>,
 }
 
-pub fn module_path(id: &str) -> PathBuf {
-    paths::module(id).unwrap_or_else(|_| PathBuf::from(id))
+pub fn extension_path(id: &str) -> PathBuf {
+    paths::extension(id).unwrap_or_else(|_| PathBuf::from(id))
 }
 
-pub fn available_module_ids() -> Vec<String> {
-    config::list_ids::<ModuleManifest>().unwrap_or_default()
+pub fn available_extension_ids() -> Vec<String> {
+    config::list_ids::<ExtensionManifest>().unwrap_or_default()
 }
 
-pub fn save_manifest(manifest: &ModuleManifest) -> Result<()> {
+pub fn save_manifest(manifest: &ExtensionManifest) -> Result<()> {
     config::save(manifest)
 }
 
 pub fn merge(id: Option<&str>, json_spec: &str, replace_fields: &[String]) -> Result<MergeOutput> {
-    config::merge::<ModuleManifest>(id, json_spec, replace_fields)
+    config::merge::<ExtensionManifest>(id, json_spec, replace_fields)
 }
 
-/// Check if a module is a symlink (linked, not installed).
-pub fn is_module_linked(module_id: &str) -> bool {
-    paths::module(module_id)
+/// Check if a extension is a symlink (linked, not installed).
+pub fn is_extension_linked(extension_id: &str) -> bool {
+    paths::extension(extension_id)
         .map(|p| p.is_symlink())
         .unwrap_or(false)
 }
 
-/// Validate that all modules declared in a component's `modules` field are installed.
+/// Validate that all extensions declared in a component's `extensions` field are installed.
 ///
-/// If `component.modules` contains keys like `{"wordpress": {}}`, those modules
+/// If `component.extensions` contains keys like `{"wordpress": {}}`, those extensions
 /// are implicitly required. Returns an actionable error with install commands
 /// when any are missing.
-pub fn validate_required_modules(component: &crate::component::Component) -> Result<()> {
-    let modules = match &component.modules {
+pub fn validate_required_extensions(component: &crate::component::Component) -> Result<()> {
+    let extensions = match &component.extensions {
         Some(m) if !m.is_empty() => m,
         _ => return Ok(()),
     };
 
     let mut missing: Vec<String> = Vec::new();
-    for module_id in modules.keys() {
-        if load_module(module_id).is_err() {
-            missing.push(module_id.clone());
+    for extension_id in extensions.keys() {
+        if load_extension(extension_id).is_err() {
+            missing.push(extension_id.clone());
         }
     }
 
@@ -218,12 +218,12 @@ pub fn validate_required_modules(component: &crate::component::Component) -> Res
 
     missing.sort();
 
-    let module_list = missing.join(", ");
+    let extension_list = missing.join(", ");
     let install_hints: Vec<String> = missing
         .iter()
         .map(|id| {
             format!(
-                "homeboy module install https://github.com/Extra-Chill/homeboy-modules --id {}",
+                "homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id {}",
                 id
             )
         })
@@ -231,22 +231,22 @@ pub fn validate_required_modules(component: &crate::component::Component) -> Res
 
     let message = if missing.len() == 1 {
         format!(
-            "Component '{}' requires module '{}' which is not installed",
+            "Component '{}' requires extension '{}' which is not installed",
             component.id, missing[0]
         )
     } else {
         format!(
-            "Component '{}' requires modules not installed: {}",
-            component.id, module_list
+            "Component '{}' requires extensions not installed: {}",
+            component.id, extension_list
         )
     };
 
     let mut err = crate::error::Error::new(
-        crate::error::ErrorCode::ModuleNotFound,
+        crate::error::ErrorCode::ExtensionNotFound,
         message,
         serde_json::json!({
             "component_id": component.id,
-            "missing_modules": missing,
+            "missing_extensions": missing,
         }),
     );
 
@@ -254,7 +254,7 @@ pub fn validate_required_modules(component: &crate::component::Component) -> Res
         err = err.with_hint(hint.to_string());
     }
 
-    err = err.with_hint("Browse available modules: https://github.com/Extra-Chill/homeboy-modules".to_string());
+    err = err.with_hint("Browse available extensions: https://github.com/Extra-Chill/homeboy-extensions".to_string());
 
     Err(err)
 }
@@ -272,46 +272,51 @@ pub fn validate_extension_requirements(component: &crate::component::Component) 
     let mut errors: Vec<String> = Vec::new();
     let mut hints: Vec<String> = Vec::new();
 
-    for (module_id, constraint_str) in extensions {
+    for (extension_id, ext_config) in extensions {
+        let constraint_str = match &ext_config.version {
+            Some(v) => v.as_str(),
+            None => continue, // No version constraint, skip validation
+        };
+
         let constraint = match version::VersionConstraint::parse(constraint_str) {
             Ok(c) => c,
             Err(_) => {
                 errors.push(format!(
                     "Invalid version constraint '{}' for extension '{}'",
-                    constraint_str, module_id
+                    constraint_str, extension_id
                 ));
                 continue;
             }
         };
 
-        match load_module(module_id) {
-            Ok(module) => {
-                match module.semver() {
+        match load_extension(extension_id) {
+            Ok(extension) => {
+                match extension.semver() {
                     Ok(installed_version) => {
                         if !constraint.matches(&installed_version) {
                             errors.push(format!(
                                 "'{}' requires {}, but {} is installed",
-                                module_id, constraint, installed_version
+                                extension_id, constraint, installed_version
                             ));
                             hints.push(format!(
-                                "Run `homeboy module update {}` to get the latest version",
-                                module_id
+                                "Run `homeboy extension update {}` to get the latest version",
+                                extension_id
                             ));
                         }
                     }
                     Err(_) => {
                         errors.push(format!(
                             "Extension '{}' has invalid version '{}'",
-                            module_id, module.version
+                            extension_id, extension.version
                         ));
                     }
                 }
             }
             Err(_) => {
-                errors.push(format!("Extension '{}' is not installed", module_id));
+                errors.push(format!("Extension '{}' is not installed", extension_id));
                 hints.push(format!(
-                    "homeboy module install https://github.com/Extra-Chill/homeboy-modules --id {}",
-                    module_id
+                    "homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id {}",
+                    extension_id
                 ));
             }
         }
@@ -336,7 +341,7 @@ pub fn validate_extension_requirements(component: &crate::component::Component) 
     };
 
     let mut err = crate::error::Error::new(
-        crate::error::ErrorCode::ModuleNotFound,
+        crate::error::ErrorCode::ExtensionNotFound,
         message,
         serde_json::json!({
             "component_id": component.id,
@@ -351,17 +356,17 @@ pub fn validate_extension_requirements(component: &crate::component::Component) 
     Err(err)
 }
 
-/// Check if any of the component's linked modules provide build configuration.
+/// Check if any of the component's linked extensions provide build configuration.
 /// When true, the component's explicit build_command becomes optional.
-pub fn module_provides_build(component: &crate::component::Component) -> bool {
-    let modules = match &component.modules {
+pub fn extension_provides_build(component: &crate::component::Component) -> bool {
+    let extensions = match &component.extensions {
         Some(m) => m,
         None => return false,
     };
 
-    for module_id in modules.keys() {
-        if let Ok(module) = load_module(module_id) {
-            if module.has_build() {
+    for extension_id in extensions.keys() {
+        if let Ok(extension) = load_extension(extension_id) {
+            if extension.has_build() {
                 return true;
             }
         }
@@ -372,71 +377,71 @@ pub fn module_provides_build(component: &crate::component::Component) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::{Component, ScopedModuleConfig};
+    use crate::component::{Component, ScopedExtensionConfig};
     use std::collections::HashMap;
 
     #[test]
-    fn validate_required_modules_passes_with_no_modules() {
+    fn validate_required_extensions_passes_with_no_modules() {
         let comp = Component {
             id: "test-component".to_string(),
             ..Default::default()
         };
-        assert!(validate_required_modules(&comp).is_ok());
+        assert!(validate_required_extensions(&comp).is_ok());
     }
 
     #[test]
-    fn validate_required_modules_passes_with_empty_modules() {
+    fn validate_required_extensions_passes_with_empty_modules() {
         let comp = Component {
             id: "test-component".to_string(),
-            modules: Some(HashMap::new()),
+            extensions: Some(HashMap::new()),
             ..Default::default()
         };
-        assert!(validate_required_modules(&comp).is_ok());
+        assert!(validate_required_extensions(&comp).is_ok());
     }
 
     #[test]
-    fn validate_required_modules_fails_with_missing_module() {
-        let mut modules = HashMap::new();
-        modules.insert(
-            "nonexistent-module-abc123".to_string(),
-            ScopedModuleConfig::default(),
+    fn validate_required_extensions_fails_with_missing_module() {
+        let mut extensions = HashMap::new();
+        extensions.insert(
+            "nonexistent-extension-abc123".to_string(),
+            ScopedExtensionConfig::default(),
         );
         let comp = Component {
             id: "test-component".to_string(),
-            modules: Some(modules),
+            extensions: Some(extensions),
             ..Default::default()
         };
-        let err = validate_required_modules(&comp).unwrap_err();
-        assert_eq!(err.code, crate::error::ErrorCode::ModuleNotFound);
-        assert!(err.message.contains("nonexistent-module-abc123"));
+        let err = validate_required_extensions(&comp).unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::ExtensionNotFound);
+        assert!(err.message.contains("nonexistent-extension-abc123"));
         assert!(err.message.contains("test-component"));
         // Should have install hint + browse hint
         assert!(err.hints.len() >= 2);
-        assert!(err.hints.iter().any(|h| h.message.contains("homeboy module install")));
+        assert!(err.hints.iter().any(|h| h.message.contains("homeboy extension install")));
         assert!(err
             .hints
             .iter()
-            .any(|h| h.message.contains("homeboy-modules")));
+            .any(|h| h.message.contains("homeboy-extensions")));
     }
 
     #[test]
-    fn validate_required_modules_reports_all_missing() {
-        let mut modules = HashMap::new();
-        modules.insert(
+    fn validate_required_extensions_reports_all_missing() {
+        let mut extensions = HashMap::new();
+        extensions.insert(
             "missing-mod-a".to_string(),
-            ScopedModuleConfig::default(),
+            ScopedExtensionConfig::default(),
         );
-        modules.insert(
+        extensions.insert(
             "missing-mod-b".to_string(),
-            ScopedModuleConfig::default(),
+            ScopedExtensionConfig::default(),
         );
         let comp = Component {
             id: "multi-dep".to_string(),
-            modules: Some(modules),
+            extensions: Some(extensions),
             ..Default::default()
         };
-        let err = validate_required_modules(&comp).unwrap_err();
-        // Error should mention both missing modules
+        let err = validate_required_extensions(&comp).unwrap_err();
+        // Error should mention both missing extensions
         assert!(err.message.contains("missing-mod-a"));
         assert!(err.message.contains("missing-mod-b"));
         // Should have install hint for each + browse hint

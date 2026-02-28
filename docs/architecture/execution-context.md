@@ -1,12 +1,12 @@
 # Execution Context
 
-Execution context provides runtime information to modules during execution via environment variables and template variable resolution.
+Execution context provides runtime information to extensions during execution via environment variables and template variable resolution.
 
 ## Overview
 
-When Homeboy executes modules (via `homeboy module run` or release pipeline steps), it builds an execution context containing:
+When Homeboy executes extensions (via `homeboy extension run` or release pipeline steps), it builds an execution context containing:
 
-- Module metadata
+- Extension metadata
 - Project and component information (when available)
 - Resolved settings
 - Template variables
@@ -14,16 +14,16 @@ When Homeboy executes modules (via `homeboy module run` or release pipeline step
 
 ## Environment Variables
 
-Homeboy sets the following environment variables before executing modules:
+Homeboy sets the following environment variables before executing extensions:
 
 ### Base Context Variables
 
 - **`HOMEBOY_EXEC_CONTEXT_VERSION`**: Execution context protocol version (currently `"1"`)
 
-### Module Variables
+### Extension Variables
 
-- **`HOMEBOY_MODULE_ID`**: Module identifier
-- **`HOMEBOY_MODULE_PATH`**: Absolute path to module directory
+- **`HOMEBOY_MODULE_ID`**: Extension identifier
+- **`HOMEBOY_MODULE_PATH`**: Absolute path to extension directory
 
 ### Project Context (when project is specified)
 
@@ -44,13 +44,13 @@ Homeboy sets the following environment variables before executing modules:
 
 Homeboy resolves execution context in the following order:
 
-### 1. Module Resolution
+### 1. Extension Resolution
 
-Module is loaded from:
-- Installed modules directory (`~/.config/homeboy/modules/<module_id>/`)
+Extension is loaded from:
+- Installed extensions directory (`~/.config/homeboy/extensions/<extension_id>/`)
 - Or directly referenced via path (for development)
 
-Module metadata is extracted from `<module_id>.json` manifest.
+Extension metadata is extracted from `<extension_id>.json` manifest.
 
 ### 2. Project Resolution (optional)
 
@@ -64,7 +64,7 @@ If `--project` is specified:
 If `--component` is specified:
 - Component configuration is loaded (`components/<component_id>.json`)
 - Component path is validated
-- Component module associations are identified
+- Component extension associations are identified
 
 If `--component` is omitted:
 - Homeboy attempts to resolve component from project's `component_ids`
@@ -73,10 +73,10 @@ If `--component` is omitted:
 
 ### 4. Settings Merge
 
-Module settings are merged from multiple scopes in order (later scopes override earlier ones):
+Extension settings are merged from multiple scopes in order (later scopes override earlier ones):
 
-1. **Project settings**: `projects/<project_id>.json` -> `modules.<module_id>.settings`
-2. **Component settings**: `components/<component_id>.json` -> `modules.<module_id>.settings`
+1. **Project settings**: `projects/<project_id>.json` -> `extensions.<extension_id>.settings`
+2. **Component settings**: `components/<component_id>.json` -> `extensions.<extension_id>.settings`
 
 Merged settings are available as:
 - Environment variable: `HOMEBOY_SETTINGS_JSON`
@@ -86,8 +86,8 @@ Merged settings are available as:
 
 Template variables are resolved from:
 - Execution context variables
-- Module manifest `runtime.env` definitions
-- Module `platform` configuration
+- Extension manifest `runtime.env` definitions
+- Extension `platform` configuration
 - CLI input parameters
 
 ## Template Variables Available in Execution
@@ -100,11 +100,11 @@ Available in most contexts:
 - **`{{sitePath}}`**: Site root path
 - **`{{cliPath}}`**: CLI executable path
 
-### Module Runtime Variables
+### Extension Runtime Variables
 
 Available in `runtime.run_command`:
-- **`{{modulePath}}`**: Module installation path
-- **`{{entrypoint}}`**: Module entrypoint file
+- **`{{extensionPath}}`**: Extension installation path
+- **`{{entrypoint}}`**: Extension entrypoint file
 - **`{{args}}`**: Command-line arguments
 
 ### Project Context Variables
@@ -120,52 +120,52 @@ Available when project is resolved:
 
 Available in specific contexts:
 - **`{{selected}}`**: Selected result rows (from `--data` flag)
-- **`{{settings.<key>}}`**: Module settings value
+- **`{{settings.<key>}}`**: Extension settings value
 - **`{{payload.<key>}}`**: Action payload data
 - **`{{release.<key>}}`**: Release configuration data
 
 ## CLI Command Resolution
 
-When module provides top-level CLI commands, execution context is resolved similarly to `homeboy module run`.
+When extension provides top-level CLI commands, execution context is resolved similarly to `homeboy extension run`.
 
-### Module Command Execution
+### Extension Command Execution
 
 ```bash
 homeboy wp <project_id> plugin list
 ```
 
 Context resolution:
-1. Module is loaded (wordpress)
+1. Extension is loaded (wordpress)
 2. Project is resolved (`<project_id>`)
 3. Component is resolved (if component specified or project has single component)
 4. Settings are merged
 5. Environment variables are set
 6. Command is executed with template resolution
 
-## Module Execution vs Release Pipeline Execution
+## Extension Execution vs Release Pipeline Execution
 
-Both `homeboy module run` and `module.run` pipeline steps share the same execution context behavior:
+Both `homeboy extension run` and `extension.run` pipeline steps share the same execution context behavior:
 
 - Same template variable resolution
 - Same settings merge logic
 - Same environment variable setting
 - Same CLI output contract
 
-This ensures consistent behavior regardless of how modules are invoked.
+This ensures consistent behavior regardless of how extensions are invoked.
 
 ## Example Contexts
 
-### Simple Module Execution
+### Simple Extension Execution
 
 ```bash
-homeboy module run rust --component mycomponent
+homeboy extension run rust --component mycomponent
 ```
 
 Environment variables:
 ```bash
 HOMEBOY_EXEC_CONTEXT_VERSION=1
 HOMEBOY_MODULE_ID=rust
-HOMEBOY_MODULE_PATH=/home/user/.config/homeboy/modules/rust
+HOMEBOY_MODULE_PATH=/home/user/.config/homeboy/extensions/rust
 HOMEBOY_COMPONENT_ID=mycomponent
 HOMEBOY_COMPONENT_PATH=/home/user/dev/mycomponent
 HOMEBOY_SETTINGS_JSON={}
@@ -174,14 +174,14 @@ HOMEBOY_SETTINGS_JSON={}
 ### Full Context with Project
 
 ```bash
-homeboy module run wordpress --project mysite --component mytheme
+homeboy extension run wordpress --project mysite --component mytheme
 ```
 
 Environment variables:
 ```bash
 HOMEBOY_EXEC_CONTEXT_VERSION=1
 HOMEBOY_MODULE_ID=wordpress
-HOMEBOY_MODULE_PATH=/home/user/.config/homeboy/modules/wordpress
+HOMEBOY_MODULE_PATH=/home/user/.config/homeboy/extensions/wordpress
 HOMEBOY_PROJECT_ID=mysite
 HOMEBOY_DOMAIN=mysite.com
 HOMEBOY_SITE_PATH=/var/www/mysite
@@ -191,24 +191,24 @@ HOMEBOY_SETTINGS_JSON={"php_version":"8.1"}
 ```
 
 Template variables in `run_command`:
-- `{{modulePath}}` → `/home/user/.config/homeboy/modules/wordpress`
+- `{{extensionPath}}` → `/home/user/.config/homeboy/extensions/wordpress`
 - `{{entrypoint}}` → `main.py` (from manifest)
-- `{{args}}` → CLI arguments passed to module
+- `{{args}}` → CLI arguments passed to extension
 - `{{projectId}}` → `mysite`
 - `{{domain}}` → `mysite.com`
 - `{{settings.php_version}}` → `8.1`
 
-## Module Environment Variables
+## Extension Environment Variables
 
-Modules can define additional environment variables in their manifest:
+Extensions can define additional environment variables in their manifest:
 
 ```json
 {
   "runtime": {
     "run_command": "python3 {{entrypoint}} {{args}}",
     "env": {
-      "PYTHON_PATH": "{{modulePath}}/lib",
-      "CACHE_DIR": "{{modulePath}}/cache"
+      "PYTHON_PATH": "{{extensionPath}}/lib",
+      "CACHE_DIR": "{{extensionPath}}/cache"
     }
   }
 }
@@ -223,17 +223,17 @@ These are set alongside Homeboy's standard environment variables.
 - **Required context**: Some commands require project or component context
 - **Ambiguity resolution**: Multiple components in project require explicit `--component`
 - **Path validation**: Component paths must exist and be directories
-- **Module validation**: Module must be installed or specified via path
+- **Extension validation**: Extension must be installed or specified via path
 
 ### Error Conditions
 
-- **Module not found**: Module ID not in modules directory
+- **Extension not found**: Extension ID not in extensions directory
 - **Project not found**: Project ID not in projects directory
 - **Component not found**: Component ID not in components directory
 - **Context missing**: Command requires project/component but none provided
 
 ## Related
 
-- [Module command](../commands/module.md) - Module execution
-- [Module manifest schema](../schemas/module-manifest-schema.md) - Runtime configuration
+- [Extension command](../commands/extension.md) - Extension execution
+- [Extension manifest schema](../schemas/extension-manifest-schema.md) - Runtime configuration
 - [Template variables](../templates.md) - Template variable reference

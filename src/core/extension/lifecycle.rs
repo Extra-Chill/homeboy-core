@@ -8,28 +8,28 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::execution::run_setup;
-use super::manifest::ModuleManifest;
-use super::{is_module_linked, load_module};
+use super::manifest::ExtensionManifest;
+use super::{is_extension_linked, load_extension};
 
 #[derive(Debug, Clone)]
 pub struct InstallResult {
-    pub module_id: String,
+    pub extension_id: String,
     pub url: String,
     pub path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 pub struct UpdateResult {
-    pub module_id: String,
+    pub extension_id: String,
     pub url: String,
     pub path: PathBuf,
 }
 
 pub fn slugify_id(value: &str) -> Result<String> {
-    slugify::slugify_id(value, "module_id")
+    slugify::slugify_id(value, "extension_id")
 }
 
-/// Derive a module ID from a git URL.
+/// Derive a extension ID from a git URL.
 pub fn derive_id_from_url(url: &str) -> Result<String> {
     let trimmed = url.trim_end_matches('/');
     let segment = trimmed
@@ -63,12 +63,12 @@ fn is_workdir_clean(path: &Path) -> bool {
     }
 }
 
-/// Returns the path to a module's manifest file: {module_dir}/{id}.json
-fn manifest_path_for_module(module_dir: &Path, id: &str) -> PathBuf {
-    module_dir.join(format!("{}.json", id))
+/// Returns the path to a extension's manifest file: {extension_dir}/{id}.json
+fn manifest_path_for_extension(extension_dir: &Path, id: &str) -> PathBuf {
+    extension_dir.join(format!("{}.json", id))
 }
 
-/// Install a module from a git URL or link a local directory.
+/// Install a extension from a git URL or link a local directory.
 /// Automatically detects whether source is a URL (git clone) or local path (symlink).
 pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult> {
     if is_git_url(source) {
@@ -78,23 +78,23 @@ pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult>
     }
 }
 
-/// Install a module by cloning from a git repository URL.
+/// Install a extension by cloning from a git repository URL.
 ///
-/// Handles both single-module repos (manifest at repo root) and monorepos
-/// (manifest in a subdirectory matching the module ID). For monorepos,
+/// Handles both single-extension repos (manifest at repo root) and monorepos
+/// (manifest in a subdirectory matching the extension ID). For monorepos,
 /// extracts just the target subdirectory.
 fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResult> {
-    let module_id = match id_override {
+    let extension_id = match id_override {
         Some(id) => slugify_id(id)?,
         None => derive_id_from_url(url)?,
     };
 
-    let module_dir = paths::module(&module_id)?;
-    if module_dir.exists() {
+    let extension_dir = paths::extension(&extension_id)?;
+    if extension_dir.exists() {
         return Err(Error::validation_invalid_argument(
-            "module_id",
-            format!("Module {} already exists", module_id),
-            Some(module_id),
+            "extension_id",
+            format!("Extension {} already exists", extension_id),
+            Some(extension_id),
             None,
         ));
     }
@@ -102,9 +102,9 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
     local_files::ensure_app_dirs()?;
 
     // Clone to a temp directory first so we can detect monorepos before
-    // committing to the final module location.
-    let modules_dir = paths::modules()?;
-    let temp_dir = modules_dir.join(format!(".clone-tmp-{}", module_id));
+    // committing to the final extension location.
+    let extensions_dir = paths::extensions()?;
+    let temp_dir = extensions_dir.join(format!(".clone-tmp-{}", extension_id));
     if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).map_err(|e| {
             Error::internal_io(e.to_string(), Some("clean stale temp dir".to_string()))
@@ -114,73 +114,73 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
     git::clone_repo(url, &temp_dir)?;
 
     // Determine what was cloned and install accordingly.
-    let result = resolve_cloned_module(&temp_dir, &module_id, &module_dir, url);
+    let result = resolve_cloned_extension(&temp_dir, &extension_id, &extension_dir, url);
 
     // Always clean up the temp clone dir (may already be renamed on success).
     if temp_dir.exists() {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    let module_id = result?;
+    let extension_id = result?;
 
-    // Auto-run setup if module defines a setup_command
+    // Auto-run setup if extension defines a setup_command
     // Setup is best-effort: install succeeds even if setup fails
-    if let Ok(module) = load_module(&module_id) {
-        if module.runtime().is_some_and(|r| r.setup_command.is_some()) {
-            let _ = run_setup(&module_id);
+    if let Ok(extension) = load_extension(&extension_id) {
+        if extension.runtime().is_some_and(|r| r.setup_command.is_some()) {
+            let _ = run_setup(&extension_id);
         }
     }
 
     Ok(InstallResult {
-        module_id,
+        extension_id,
         url: url.to_string(),
-        path: module_dir,
+        path: extension_dir,
     })
 }
 
-/// After cloning a repo to a temp dir, figure out whether it's a single-module
-/// repo or a monorepo and move the right content to the final module directory.
+/// After cloning a repo to a temp dir, figure out whether it's a single-extension
+/// repo or a monorepo and move the right content to the final extension directory.
 ///
-/// Returns the installed module ID on success.
-fn resolve_cloned_module(
+/// Returns the installed extension ID on success.
+fn resolve_cloned_extension(
     temp_dir: &Path,
-    module_id: &str,
-    module_dir: &Path,
+    extension_id: &str,
+    extension_dir: &Path,
     _url: &str,
 ) -> Result<String> {
-    let manifest_at_root = temp_dir.join(format!("{}.json", module_id));
+    let manifest_at_root = temp_dir.join(format!("{}.json", extension_id));
 
-    // Case 1: Single-module repo — manifest at clone root.
+    // Case 1: Single-extension repo — manifest at clone root.
     if manifest_at_root.exists() {
-        std::fs::rename(temp_dir, module_dir).map_err(|e| {
-            Error::internal_io(e.to_string(), Some("move cloned module".to_string()))
+        std::fs::rename(temp_dir, extension_dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("move cloned extension".to_string()))
         })?;
-        return Ok(module_id.to_string());
+        return Ok(extension_id.to_string());
     }
 
-    // Case 2: Monorepo — target module exists as a subdirectory.
-    let subdir = temp_dir.join(module_id);
-    let manifest_in_subdir = subdir.join(format!("{}.json", module_id));
+    // Case 2: Monorepo — target extension exists as a subdirectory.
+    let subdir = temp_dir.join(extension_id);
+    let manifest_in_subdir = subdir.join(format!("{}.json", extension_id));
 
     if subdir.is_dir() && manifest_in_subdir.exists() {
         // Validate the manifest is parseable before moving.
         let content = local_files::local().read(&manifest_in_subdir)?;
-        let _manifest: ModuleManifest = from_str(&content)?;
+        let _manifest: ExtensionManifest = from_str(&content)?;
 
-        // Move just the subdirectory to the final module location.
-        rename_dir(&subdir, module_dir)?;
-        return Ok(module_id.to_string());
+        // Move just the subdirectory to the final extension location.
+        rename_dir(&subdir, extension_dir)?;
+        return Ok(extension_id.to_string());
     }
 
-    // Case 3: No matching module found. Scan for available modules to help the user.
-    let available = scan_available_modules(temp_dir);
+    // Case 3: No matching extension found. Scan for available extensions to help the user.
+    let available = scan_available_extensions(temp_dir);
 
     if available.is_empty() {
         return Err(Error::validation_invalid_argument(
             "source",
             format!(
-                "No module manifest '{}.json' found in cloned repository",
-                module_id
+                "No extension manifest '{}.json' found in cloned repository",
+                extension_id
             ),
             None,
             None,
@@ -191,21 +191,21 @@ fn resolve_cloned_module(
     Err(Error::validation_invalid_argument(
         "id",
         format!(
-            "Module '{}' not found in repository. Available modules: {}",
-            module_id, list
+            "Extension '{}' not found in repository. Available extensions: {}",
+            extension_id, list
         ),
-        Some(module_id.to_string()),
+        Some(extension_id.to_string()),
         None,
     )
     .with_hint(format!(
-        "Install a specific module with: homeboy module install <url> --id <module>\nAvailable: {}",
+        "Install a specific extension with: homeboy extension install <url> --id <extension>\nAvailable: {}",
         list
     )))
 }
 
 /// Scan a cloned repo for subdirectories that contain a matching manifest file.
-/// Returns a sorted list of module IDs found.
-fn scan_available_modules(repo_dir: &Path) -> Vec<String> {
+/// Returns a sorted list of extension IDs found.
+fn scan_available_extensions(repo_dir: &Path) -> Vec<String> {
     let mut found = Vec::new();
     if let Ok(entries) = std::fs::read_dir(repo_dir) {
         for entry in entries.flatten() {
@@ -266,7 +266,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Install a module by symlinking a local directory.
+/// Install a extension by symlinking a local directory.
 fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<InstallResult> {
     let source = Path::new(source_path);
 
@@ -288,7 +288,7 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
         ));
     }
 
-    // Derive module ID from directory name or override
+    // Derive extension ID from directory name or override
     let dir_name = source.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
         Error::validation_invalid_argument(
             "source",
@@ -298,16 +298,16 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
         )
     })?;
 
-    let module_id = match id_override {
+    let extension_id = match id_override {
         Some(id) => slugify_id(id)?,
         None => slugify_id(dir_name)?,
     };
 
-    let manifest_path = manifest_path_for_module(&source, &module_id);
+    let manifest_path = manifest_path_for_extension(&source, &extension_id);
     if !manifest_path.exists() {
         return Err(Error::validation_invalid_argument(
             "source",
-            format!("No {}.json found at {}", module_id, source.display()),
+            format!("No {}.json found at {}", extension_id, source.display()),
             Some(source_path.to_string()),
             None,
         ));
@@ -315,18 +315,18 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
 
     // Validate manifest is parseable
     let manifest_content = local_files::local().read(&manifest_path)?;
-    let _manifest: ModuleManifest = from_str(&manifest_content)?;
+    let _manifest: ExtensionManifest = from_str(&manifest_content)?;
 
-    let module_dir = paths::module(&module_id)?;
-    if module_dir.exists() {
+    let extension_dir = paths::extension(&extension_id)?;
+    if extension_dir.exists() {
         return Err(Error::validation_invalid_argument(
-            "module_id",
+            "extension_id",
             format!(
-                "Module '{}' already exists at {}",
-                module_id,
-                module_dir.display()
+                "Extension '{}' already exists at {}",
+                extension_id,
+                extension_dir.display()
             ),
-            Some(module_id),
+            Some(extension_id),
             None,
         ));
     }
@@ -335,121 +335,121 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
 
     // Create symlink
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, &module_dir)
+    std::os::unix::fs::symlink(&source, &extension_dir)
         .map_err(|e| Error::internal_io(e.to_string(), Some("create symlink".to_string())))?;
 
     #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&source, &module_dir)
+    std::os::windows::fs::symlink_dir(&source, &extension_dir)
         .map_err(|e| Error::internal_io(e.to_string(), Some("create symlink".to_string())))?;
 
     Ok(InstallResult {
-        module_id,
+        extension_id,
         url: source.to_string_lossy().to_string(),
-        path: module_dir,
+        path: extension_dir,
     })
 }
 
-/// Update an installed module by pulling latest changes.
-pub fn update(module_id: &str, force: bool) -> Result<UpdateResult> {
-    let module_dir = paths::module(module_id)?;
-    if !module_dir.exists() {
-        return Err(Error::module_not_found(module_id.to_string(), vec![]));
+/// Update an installed extension by pulling latest changes.
+pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
+    let extension_dir = paths::extension(extension_id)?;
+    if !extension_dir.exists() {
+        return Err(Error::extension_not_found(extension_id.to_string(), vec![]));
     }
 
-    // Linked modules are managed externally
-    if is_module_linked(module_id) {
+    // Linked extensions are managed externally
+    if is_extension_linked(extension_id) {
         return Err(Error::validation_invalid_argument(
-            "module_id",
+            "extension_id",
             format!(
-                "Module '{}' is linked. Update the source directory directly.",
-                module_id
+                "Extension '{}' is linked. Update the source directory directly.",
+                extension_id
             ),
-            Some(module_id.to_string()),
+            Some(extension_id.to_string()),
             None,
         ));
     }
 
-    if !force && !is_workdir_clean(&module_dir) {
+    if !force && !is_workdir_clean(&extension_dir) {
         return Err(Error::validation_invalid_argument(
-            "module_id",
-            "Module has uncommitted changes; update may overwrite them. Use --force to proceed.",
-            Some(module_id.to_string()),
+            "extension_id",
+            "Extension has uncommitted changes; update may overwrite them. Use --force to proceed.",
+            Some(extension_id.to_string()),
             None,
         ));
     }
 
-    let module = load_module(module_id)?;
+    let extension = load_extension(extension_id)?;
 
-    let source_url = module.source_url.ok_or_else(|| {
+    let source_url = extension.source_url.ok_or_else(|| {
         Error::validation_invalid_argument(
-            "module_id",
+            "extension_id",
             format!(
-                "Module '{}' has no sourceUrl. Reinstall with 'homeboy module install <url>'.",
-                module_id
+                "Extension '{}' has no sourceUrl. Reinstall with 'homeboy extension install <url>'.",
+                extension_id
             ),
-            Some(module_id.to_string()),
+            Some(extension_id.to_string()),
             None,
         )
     })?;
 
-    git::pull_repo(&module_dir)?;
+    git::pull_repo(&extension_dir)?;
 
-    // Auto-run setup if module defines a setup_command
+    // Auto-run setup if extension defines a setup_command
     // Setup is best-effort: update succeeds even if setup fails
-    if let Ok(module) = load_module(module_id) {
-        if module.runtime().is_some_and(|r| r.setup_command.is_some()) {
-            let _ = run_setup(module_id);
+    if let Ok(extension) = load_extension(extension_id) {
+        if extension.runtime().is_some_and(|r| r.setup_command.is_some()) {
+            let _ = run_setup(extension_id);
         }
     }
 
     Ok(UpdateResult {
-        module_id: module_id.to_string(),
+        extension_id: extension_id.to_string(),
         url: source_url,
-        path: module_dir,
+        path: extension_dir,
     })
 }
 
-/// Uninstall a module. Automatically detects symlinks vs cloned directories.
-/// - Symlinked modules: removes symlink only (source preserved)
-/// - Cloned modules: removes directory entirely
-pub fn uninstall(module_id: &str) -> Result<PathBuf> {
-    let module_dir = paths::module(module_id)?;
-    if !module_dir.exists() {
-        return Err(Error::module_not_found(module_id.to_string(), vec![]));
+/// Uninstall a extension. Automatically detects symlinks vs cloned directories.
+/// - Symlinked extensions: removes symlink only (source preserved)
+/// - Cloned extensions: removes directory entirely
+pub fn uninstall(extension_id: &str) -> Result<PathBuf> {
+    let extension_dir = paths::extension(extension_id)?;
+    if !extension_dir.exists() {
+        return Err(Error::extension_not_found(extension_id.to_string(), vec![]));
     }
 
-    if module_dir.is_symlink() {
-        // Symlinked module: just remove the symlink, source directory is preserved
-        std::fs::remove_file(&module_dir)
+    if extension_dir.is_symlink() {
+        // Symlinked extension: just remove the symlink, source directory is preserved
+        std::fs::remove_file(&extension_dir)
             .map_err(|e| Error::internal_io(e.to_string(), Some("remove symlink".to_string())))?;
     } else {
-        // Cloned module: remove the directory
-        std::fs::remove_dir_all(&module_dir).map_err(|e| {
-            Error::internal_io(e.to_string(), Some("remove module directory".to_string()))
+        // Cloned extension: remove the directory
+        std::fs::remove_dir_all(&extension_dir).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("remove extension directory".to_string()))
         })?;
     }
 
-    Ok(module_dir)
+    Ok(extension_dir)
 }
 
-/// Check if a git-cloned module has updates available.
+/// Check if a git-cloned extension has updates available.
 /// Runs `git fetch` then checks if HEAD is behind the remote tracking branch.
-/// Returns None for linked modules or if check fails.
-pub fn check_update_available(module_id: &str) -> Option<UpdateAvailable> {
-    let module_dir = paths::module(module_id).ok()?;
-    if !module_dir.exists() || is_module_linked(module_id) {
+/// Returns None for linked extensions or if check fails.
+pub fn check_update_available(extension_id: &str) -> Option<UpdateAvailable> {
+    let extension_dir = paths::extension(extension_id).ok()?;
+    if !extension_dir.exists() || is_extension_linked(extension_id) {
         return None;
     }
 
     // Check it's a git repo
-    if !module_dir.join(".git").exists() {
+    if !extension_dir.join(".git").exists() {
         return None;
     }
 
     // Fetch latest (best-effort, short timeout)
     Command::new("git")
         .args(["fetch", "--quiet"])
-        .current_dir(&module_dir)
+        .current_dir(&extension_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -459,7 +459,7 @@ pub fn check_update_available(module_id: &str) -> Option<UpdateAvailable> {
     // Check how many commits we're behind
     let output = Command::new("git")
         .args(["rev-list", "HEAD..@{u}", "--count"])
-        .current_dir(&module_dir)
+        .current_dir(&extension_dir)
         .stdin(std::process::Stdio::null())
         .output()
         .ok()?;
@@ -472,11 +472,11 @@ pub fn check_update_available(module_id: &str) -> Option<UpdateAvailable> {
     }
 
     // Get installed version
-    let module = load_module(module_id).ok()?;
-    let installed_version = module.version.clone();
+    let extension = load_extension(extension_id).ok()?;
+    let installed_version = extension.version.clone();
 
     Some(UpdateAvailable {
-        module_id: module_id.to_string(),
+        extension_id: extension_id.to_string(),
         installed_version,
         behind_count,
     })
@@ -484,7 +484,7 @@ pub fn check_update_available(module_id: &str) -> Option<UpdateAvailable> {
 
 #[derive(Debug, Clone)]
 pub struct UpdateAvailable {
-    pub module_id: String,
+    pub extension_id: String,
     pub installed_version: String,
     pub behind_count: usize,
 }

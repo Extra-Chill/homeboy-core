@@ -22,7 +22,7 @@ The component ID is derived from the `--local-path` (or `--from-repo`) directory
 
 Options:
 
-- `--from-repo <path>`: create from a repo containing `homeboy.json` ([portable config](../schemas/portable-config.md)). Reads version targets, modules, changelog, etc. from the file. CLI flags override `homeboy.json` values.
+- `--from-repo <path>`: create from a repo containing `homeboy.json` ([portable config](../schemas/portable-config.md)). Reads version targets, extensions, changelog, etc. from the file. CLI flags override `homeboy.json` values.
 - `--json <spec>`: JSON input spec for create/update (supports single or bulk)
 - `--skip-existing`: skip items that already exist (JSON mode only)
 - `--local-path <path>`: absolute path to local **source / git checkout** directory (required unless `--from-repo`; ID derived from directory name; `~` is expanded). Must be a git repo — not the production deploy target (see [component schema](../schemas/component-schema.md#local_path-vs-remote_path))
@@ -93,10 +93,10 @@ Components may define a `release` block for component-scoped release planning. Y
 homeboy component set <id> --json '{"release": {"enabled": true, "steps": []}}'
 ```
 
-Components also define module usage via `modules`:
+Components also define extension usage via `extensions`:
 
 ```sh
-homeboy component set <id> --json '{"modules": {"github": {"settings": {}}, "rust": {"settings": {}}}}'
+homeboy component set <id> --json '{"extensions": {"github": {"settings": {}}, "rust": {"settings": {}}}}'
 ```
 
 ```json

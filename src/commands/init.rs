@@ -7,8 +7,8 @@ use homeboy::component::{self, Component};
 use homeboy::context::{
     self, build_component_info, path_is_parent_of, ComponentGap, ContextOutput,
 };
-use homeboy::module::{
-    is_module_compatible, is_module_linked, load_all_modules, module_ready_status,
+use homeboy::extension::{
+    is_extension_compatible, is_extension_linked, load_all_extensions, extension_ready_status,
 };
 use homeboy::project::{self, Project};
 use homeboy::server::{self, Server};
@@ -21,7 +21,7 @@ use super::CmdResult;
 
 #[derive(Args)]
 pub struct InitArgs {
-    /// Show all components, modules, projects, and servers
+    /// Show all components, extensions, projects, and servers
     #[arg(long, short = 'a')]
     pub all: bool,
 
@@ -61,7 +61,7 @@ fn is_zero(n: &usize) -> bool {
 #[derive(Debug, Serialize)]
 pub struct InitSummary {
     pub total_components: usize,
-    pub by_module: HashMap<String, usize>,
+    pub by_extension: HashMap<String, usize>,
     pub by_status: HashMap<String, usize>,
 }
 
@@ -70,7 +70,7 @@ pub struct ComponentSummary {
     pub id: String,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module: Option<String>,
+    pub extension: Option<String>,
     pub status: String,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub commits_since_version: u32,
@@ -97,7 +97,7 @@ pub struct InitOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub projects: Vec<ProjectListItem>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub modules: Vec<ModuleEntry>,
+    pub extensions: Vec<ExtensionEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<VersionSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,7 +136,7 @@ impl From<Project> for ProjectListItem {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ModuleEntry {
+pub struct ExtensionEntry {
     pub id: String,
     pub name: String,
     pub version: String,
@@ -231,7 +231,7 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
     let all_components = component::list().unwrap_or_default();
     let all_projects = project::list().unwrap_or_default();
     let all_servers = server::list().unwrap_or_default();
-    let all_modules = load_all_modules().unwrap_or_default();
+    let all_extensions = load_all_extensions().unwrap_or_default();
 
     // Determine if we should show focused output
     let show_all = args.all || relevant_ids.is_empty();
@@ -276,20 +276,20 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
     // Compute summary
     let summary = compute_summary(&components_with_state);
 
-    // Get module IDs linked to matched components
-    let linked_module_ids: HashSet<String> = components_with_state
+    // Get extension IDs linked to matched components
+    let linked_extension_ids: HashSet<String> = components_with_state
         .iter()
-        .filter_map(|c| c.component.modules.as_ref())
+        .filter_map(|c| c.component.extensions.as_ref())
         .flat_map(|m| m.keys().cloned())
         .collect();
 
-    // Filter modules: linked modules + platform modules (runtime.is_none())
-    let modules: Vec<ModuleEntry> = all_modules
+    // Filter extensions: linked extensions + platform extensions (runtime.is_none())
+    let extensions: Vec<ExtensionEntry> = all_extensions
         .iter()
-        .filter(|m| show_all || linked_module_ids.contains(&m.id) || m.executable.is_none())
+        .filter(|m| show_all || linked_extension_ids.contains(&m.id) || m.executable.is_none())
         .map(|m| {
-            let ready_status = module_ready_status(m);
-            ModuleEntry {
+            let ready_status = extension_ready_status(m);
+            ExtensionEntry {
                 id: m.id.clone(),
                 name: m.name.clone(),
                 version: m.version.clone(),
@@ -305,11 +305,11 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
                     "platform"
                 }
                 .to_string(),
-                compatible: is_module_compatible(m, None),
+                compatible: is_extension_compatible(m, None),
                 ready: ready_status.ready,
                 ready_reason: ready_status.reason,
                 ready_detail: ready_status.detail,
-                linked: is_module_linked(&m.id),
+                linked: is_extension_linked(&m.id),
             }
         })
         .collect();
@@ -352,8 +352,8 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
         &context_output,
         &components_with_state,
         &projects,
-        &linked_module_ids,
-        &all_modules,
+        &linked_extension_ids,
+        &all_extensions,
     );
 
     let version_snapshot = if context_output.managed {
@@ -389,7 +389,7 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
             components,
             servers,
             projects,
-            modules,
+            extensions,
             version: version_snapshot,
             git: git_snapshot,
             last_release,
@@ -447,14 +447,14 @@ fn compute_status(components: &[ComponentWithState]) -> InitStatus {
 }
 
 fn compute_summary(components: &[ComponentWithState]) -> InitSummary {
-    let mut by_module: HashMap<String, usize> = HashMap::new();
+    let mut by_extension: HashMap<String, usize> = HashMap::new();
     let mut by_status: HashMap<String, usize> = HashMap::new();
 
     for comp in components {
-        // Count by module
-        if let Some(ref modules) = comp.component.modules {
-            for module_id in modules.keys() {
-                *by_module.entry(module_id.clone()).or_insert(0) += 1;
+        // Count by extension
+        if let Some(ref extensions) = comp.component.extensions {
+            for extension_id in extensions.keys() {
+                *by_extension.entry(extension_id.clone()).or_insert(0) += 1;
             }
         }
 
@@ -465,7 +465,7 @@ fn compute_summary(components: &[ComponentWithState]) -> InitSummary {
 
     InitSummary {
         total_components: components.len(),
-        by_module,
+        by_extension,
         by_status,
     }
 }
@@ -515,17 +515,17 @@ fn build_component_summaries(
                 .map(|s| (s.commits_since_version, s.code_commits, s.docs_only_commits))
                 .unwrap_or((0, 0, 0));
 
-            // Get primary module
-            let module = comp
+            // Get primary extension
+            let extension = comp
                 .component
-                .modules
+                .extensions
                 .as_ref()
                 .and_then(|m| m.keys().next().cloned());
 
             ComponentSummary {
                 id: comp.component.id.clone(),
                 path: shorten_path(&comp.component.local_path, cwd),
-                module,
+                extension,
                 status,
                 commits_since_version: commits,
                 code_commits: code,
@@ -540,8 +540,8 @@ fn build_actionable_next_steps(
     context_output: &ContextOutput,
     components: &[ComponentWithState],
     projects: &[ProjectListItem],
-    linked_module_ids: &HashSet<String>,
-    all_modules: &[homeboy::module::ModuleManifest],
+    linked_extension_ids: &HashSet<String>,
+    all_extensions: &[homeboy::extension::ExtensionManifest],
 ) -> Vec<String> {
     let mut next_steps = Vec::new();
 
@@ -633,10 +633,10 @@ fn build_actionable_next_steps(
         );
     }
 
-    // CLI tools from linked modules
-    let cli_modules: Vec<_> = all_modules
+    // CLI tools from linked extensions
+    let cli_extensions: Vec<_> = all_extensions
         .iter()
-        .filter(|m| linked_module_ids.contains(&m.id))
+        .filter(|m| linked_extension_ids.contains(&m.id))
         .filter_map(|m| {
             m.cli
                 .as_ref()
@@ -644,9 +644,9 @@ fn build_actionable_next_steps(
         })
         .collect();
 
-    if !cli_modules.is_empty() && !projects.is_empty() {
+    if !cli_extensions.is_empty() && !projects.is_empty() {
         let project_id = &projects[0].id;
-        for (tool, display_name) in &cli_modules {
+        for (tool, display_name) in &cli_extensions {
             next_steps.push(format!(
                 "Run remote {} commands: `homeboy {} {} <command>`.",
                 display_name, tool, project_id
@@ -659,22 +659,22 @@ fn build_actionable_next_steps(
         next_steps.push(format!("Suggestion: {}", suggestion));
     }
 
-    // Check for outdated modules (git-cloned only, skips linked)
-    let mut outdated_modules = Vec::new();
-    for module in all_modules {
-        if let Some(update) = homeboy::module::check_update_available(&module.id) {
-            outdated_modules.push(update);
+    // Check for outdated extensions (git-cloned only, skips linked)
+    let mut outdated_extensions = Vec::new();
+    for extension in all_extensions {
+        if let Some(update) = homeboy::extension::check_update_available(&extension.id) {
+            outdated_extensions.push(update);
         }
     }
-    if !outdated_modules.is_empty() {
-        for update in &outdated_modules {
+    if !outdated_extensions.is_empty() {
+        for update in &outdated_extensions {
             next_steps.push(format!(
-                "Module '{}' is outdated (v{}, {} commit{} behind). Run: `homeboy module update {}`",
-                update.module_id,
+                "Extension '{}' is outdated (v{}, {} commit{} behind). Run: `homeboy extension update {}`",
+                update.extension_id,
                 update.installed_version,
                 update.behind_count,
                 if update.behind_count == 1 { "" } else { "s" },
-                update.module_id,
+                update.extension_id,
             ));
         }
     }
@@ -682,7 +682,7 @@ fn build_actionable_next_steps(
     // Fallback for empty repos
     if components.is_empty() && !context_output.managed {
         next_steps.push(
-            "Create a project: `homeboy project create <name> <domain> --server <id> --module <id>`.".to_string(),
+            "Create a project: `homeboy project create <name> <domain> --server <id> --extension <id>`.".to_string(),
         );
         next_steps.push(
             "Create a component: `homeboy component create <name> --local-path . --remote-path <path> --project <id>`.".to_string(),
@@ -920,7 +920,7 @@ fn validate_version_targets(components: &[ComponentWithState]) -> Vec<String> {
                     && version::default_pattern_for_file(&target.file).is_none()
                 {
                     warnings.push(format!(
-                        "Component '{}' has version target '{}' with no pattern and no module default. Run: homeboy component set {} --version-targets @file.json",
+                        "Component '{}' has version target '{}' with no pattern and no extension default. Run: homeboy component set {} --version-targets @file.json",
                         comp.id, target.file, comp.id
                     ));
                 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Type of action that can be executed by a module.
+/// Type of action that can be executed by a extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ActionType {
@@ -67,7 +67,7 @@ pub struct AuditCapability {
 }
 
 /// Executable tool: runtime, inputs, and output schema.
-/// Represents a module that can be run as a standalone tool.
+/// Represents a extension that can be run as a standalone tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutableCapability {
     pub runtime: RuntimeConfig,
@@ -95,22 +95,22 @@ pub struct PlatformCapability {
 }
 
 // ============================================================================
-// ModuleManifest
+// ExtensionManifest
 // ============================================================================
 
-/// What a module provides: file extensions it handles and capabilities it supports.
+/// What a extension provides: file extensions it handles and capabilities it supports.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvidesConfig {
-    /// File extensions this module can process (e.g., ["php", "inc"]).
+    /// File extensions this extension can process (e.g., ["php", "inc"]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_extensions: Vec<String>,
-    /// Capabilities this module supports (e.g., ["fingerprint", "refactor"]).
+    /// Capabilities this extension supports (e.g., ["fingerprint", "refactor"]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
 }
 
 /// Scripts that implement extension capabilities.
-/// Each key maps a capability name to a script path relative to the module directory.
+/// Each key maps a capability name to a script path relative to the extension directory.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScriptsConfig {
     /// Script that extracts structural fingerprints from source files.
@@ -123,19 +123,19 @@ pub struct ScriptsConfig {
     pub refactor: Option<String>,
 }
 
-/// Unified module manifest decomposed into capability groups.
+/// Unified extension manifest decomposed into capability groups.
 ///
-/// Module JSON files use nested capability groups that map directly to these fields.
+/// Extension JSON files use nested capability groups that map directly to these fields.
 /// Convenience methods provide ergonomic access to nested data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleManifest {
+pub struct ExtensionManifest {
     // Identity
     #[serde(default, skip_serializing)]
     pub id: String,
     pub name: String,
     pub version: String,
 
-    // What this module provides
+    // What this extension provides
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provides: Option<ProvidesConfig>,
 
@@ -175,12 +175,12 @@ pub struct ModuleManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test: Option<TestConfig>,
 
-    // Actions (cross-cutting: used by both platform and executable modules)
+    // Actions (cross-cutting: used by both platform and executable extensions)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionConfig>,
 
     // Lifecycle hooks: event name -> list of shell commands.
-    // Module hooks run before component hooks at each event.
+    // Extension hooks run before component hooks at each event.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub hooks: HashMap<String, Vec<String>>,
 
@@ -196,10 +196,10 @@ pub struct ModuleManifest {
 
     // Internal path (not serialized)
     #[serde(skip)]
-    pub module_path: Option<String>,
+    pub extension_path: Option<String>,
 }
 
-impl ModuleManifest {
+impl ExtensionManifest {
     pub fn has_cli(&self) -> bool {
         self.cli.is_some()
     }
@@ -211,23 +211,23 @@ impl ModuleManifest {
     pub fn has_lint(&self) -> bool {
         self.lint
             .as_ref()
-            .and_then(|c| c.module_script.as_ref())
+            .and_then(|c| c.extension_script.as_ref())
             .is_some()
     }
 
     pub fn has_test(&self) -> bool {
         self.test
             .as_ref()
-            .and_then(|c| c.module_script.as_ref())
+            .and_then(|c| c.extension_script.as_ref())
             .is_some()
     }
 
     pub fn lint_script(&self) -> Option<&str> {
-        self.lint.as_ref().and_then(|c| c.module_script.as_deref())
+        self.lint.as_ref().and_then(|c| c.extension_script.as_deref())
     }
 
     pub fn test_script(&self) -> Option<&str> {
-        self.test.as_ref().and_then(|c| c.module_script.as_deref())
+        self.test.as_ref().and_then(|c| c.extension_script.as_deref())
     }
 
     /// Convenience: get deploy verifications (empty if no deploy capability).
@@ -295,10 +295,10 @@ impl ModuleManifest {
 
     /// Parse the version string as semver.
     pub fn semver(&self) -> crate::error::Result<semver::Version> {
-        super::version::parse_module_version(&self.version, &self.id)
+        super::version::parse_extension_version(&self.version, &self.id)
     }
 
-    /// Get file extensions this module provides (empty if not specified).
+    /// Get file extensions this extension provides (empty if not specified).
     pub fn provided_file_extensions(&self) -> &[String] {
         self.provides
             .as_ref()
@@ -306,7 +306,7 @@ impl ModuleManifest {
             .unwrap_or(&[])
     }
 
-    /// Get capabilities this module provides (empty if not specified).
+    /// Get capabilities this extension provides (empty if not specified).
     pub fn provided_capabilities(&self) -> &[String] {
         self.provides
             .as_ref()
@@ -314,25 +314,25 @@ impl ModuleManifest {
             .unwrap_or(&[])
     }
 
-    /// Check if this module handles a given file extension.
+    /// Check if this extension handles a given file extension.
     pub fn handles_file_extension(&self, ext: &str) -> bool {
         self.provided_file_extensions().iter().any(|e| e == ext)
     }
 
-    /// Get the fingerprint script path (relative to module dir), if configured.
+    /// Get the fingerprint script path (relative to extension dir), if configured.
     pub fn fingerprint_script(&self) -> Option<&str> {
         self.scripts.as_ref().and_then(|s| s.fingerprint.as_deref())
     }
 
-    /// Get the refactor script path (relative to module dir), if configured.
+    /// Get the refactor script path (relative to extension dir), if configured.
     pub fn refactor_script(&self) -> Option<&str> {
         self.scripts.as_ref().and_then(|s| s.refactor.as_deref())
     }
 }
 
-impl ConfigEntity for ModuleManifest {
-    const ENTITY_TYPE: &'static str = "module";
-    const DIR_NAME: &'static str = "modules";
+impl ConfigEntity for ExtensionManifest {
+    const ENTITY_TYPE: &'static str = "extension";
+    const DIR_NAME: &'static str = "extensions";
 
     fn id(&self) -> &str {
         &self.id
@@ -341,12 +341,12 @@ impl ConfigEntity for ModuleManifest {
         self.id = id;
     }
     fn not_found_error(id: String, suggestions: Vec<String>) -> Error {
-        Error::module_not_found(id, suggestions)
+        Error::extension_not_found(id, suggestions)
     }
 
-    /// Override: modules use `{dir}/{id}/{id}.json` pattern.
+    /// Override: extensions use `{dir}/{id}/{id}.json` pattern.
     fn config_path(id: &str) -> Result<PathBuf> {
-        paths::module_manifest(id)
+        paths::extension_manifest(id)
     }
 }
 
@@ -357,7 +357,7 @@ impl ConfigEntity for ModuleManifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequirementsConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub modules: Vec<String>,
+    pub extensions: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<String>,
 }
@@ -461,7 +461,7 @@ pub struct BuildConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command_template: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_script: Option<String>,
+    pub extension_script: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pre_build_script: Option<String>,
     /// Default artifact path pattern with template support.
@@ -476,13 +476,13 @@ pub struct BuildConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_script: Option<String>,
+    pub extension_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_script: Option<String>,
+    pub extension_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,20 +491,20 @@ pub struct RuntimeConfig {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub runtime_type: Option<String>,
 
-    /// Shell command to execute when running the module.
-    /// Template variables: {{entrypoint}}, {{args}}, {{modulePath}}, plus project context vars.
+    /// Shell command to execute when running the extension.
+    /// Template variables: {{entrypoint}}, {{args}}, {{extensionPath}}, plus project context vars.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_command: Option<String>,
 
-    /// Shell command to set up the module (e.g., create venv, install deps).
+    /// Shell command to set up the extension (e.g., create venv, install deps).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup_command: Option<String>,
 
-    /// Shell command to check if module is ready. Exit 0 = ready.
+    /// Shell command to check if extension is ready. Exit 0 = ready.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ready_check: Option<String>,
 
-    /// Environment variables to set when running the module.
+    /// Environment variables to set when running the extension.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
 
@@ -516,7 +516,7 @@ pub struct RuntimeConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<String>,
 
-    /// Default site for this module (used by some CLI modules).
+    /// Default site for this extension (used by some CLI extensions).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_site: Option<String>,
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::component;
 use crate::error::{Error, Result};
-use crate::module;
+use crate::extension;
 use crate::paths;
 use crate::project::{self, Project};
 use crate::server::{self, Server};
@@ -247,19 +247,19 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
     // Check for build configuration gaps
     // Skip gap detection if:
     // 1. Component has explicit buildCommand, OR
-    // 2. Component's module provides a bundled build script
+    // 2. Component's extension provides a bundled build script
     if component.build_command.is_none() {
-        let module_provides_build = component
-            .modules
+        let extension_provides_build = component
+            .extensions
             .as_ref()
-            .map(|modules| {
-                modules.keys().any(|module_id| {
-                    module::load_module(module_id)
+            .map(|extensions| {
+                extensions.keys().any(|extension_id| {
+                    extension::load_extension(extension_id)
                         .ok()
                         .and_then(|m| m.build)
-                        .and_then(|b| b.module_script)
+                        .and_then(|b| b.extension_script)
                         .and_then(|script| {
-                            paths::module(module_id)
+                            paths::extension(extension_id)
                                 .ok()
                                 .map(|dir| dir.join(&script).exists())
                         })
@@ -268,8 +268,8 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
             })
             .unwrap_or(false);
 
-        // Only flag as gap if module doesn't provide build and local build.sh exists
-        if !module_provides_build && local_path.join("build.sh").exists() {
+        // Only flag as gap if extension doesn't provide build and local build.sh exists
+        if !extension_provides_build && local_path.join("build.sh").exists() {
             gaps.push(ComponentGap {
                 field: "buildCommand".to_string(),
                 reason: "build.sh exists".to_string(),
@@ -283,12 +283,12 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
 
     // Check for missing build artifact when component appears deployable
     if component.build_artifact.is_none() && !component.remote_path.is_empty() {
-        // Check if module provides a pattern (would be resolved at deploy time)
-        if !component::module_provides_artifact_pattern(component) {
+        // Check if extension provides a pattern (would be resolved at deploy time)
+        if !component::extension_provides_artifact_pattern(component) {
             // Component has remote_path but no artifact source
             gaps.push(ComponentGap {
                 field: "buildArtifact".to_string(),
-                reason: "Component has remotePath but no buildArtifact or module pattern"
+                reason: "Component has remotePath but no buildArtifact or extension pattern"
                     .to_string(),
                 command: format!(
                     "homeboy component set {} --build-artifact \"build/{}.zip\"",
@@ -298,9 +298,9 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
         }
     }
 
-    // Check for missing module configuration
-    if component.modules.is_none() || component.modules.as_ref().map_or(true, |m| m.is_empty()) {
-        // Suggest a module based on project file indicators
+    // Check for missing extension configuration
+    if component.extensions.is_none() || component.extensions.as_ref().map_or(true, |m| m.is_empty()) {
+        // Suggest a extension based on project file indicators
         let suggestion =
             if local_path.join("style.css").exists() && local_path.join("functions.php").exists() {
                 Some("wordpress")
@@ -312,14 +312,14 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
                 None
             };
 
-        let module_hint = suggestion.unwrap_or("MODULE_ID");
+        let extension_hint = suggestion.unwrap_or("EXTENSION_ID");
         gaps.push(ComponentGap {
-            field: "modules".to_string(),
-            reason: "No module configured. Module commands (lint, test, build) require a module."
+            field: "extensions".to_string(),
+            reason: "No extension configured. Extension commands (lint, test, build) require a extension."
                 .to_string(),
             command: format!(
-                "homeboy component set {} --module {}",
-                component.id, module_hint
+                "homeboy component set {} --extension {}",
+                component.id, extension_hint
             ),
         });
     }

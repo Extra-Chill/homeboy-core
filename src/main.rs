@@ -22,10 +22,10 @@ mod tty;
 
 use commands::{
     api, audit, auth, build, changelog, changes, cleanup, cli, component, config, db, deploy, file,
-    fleet, git, init, lint, logs, module, project, refactor, release, server, ssh, status, test,
+    fleet, git, init, lint, logs, extension, project, refactor, release, server, ssh, status, test,
     transfer, upgrade, version,
 };
-use homeboy::module::load_all_modules;
+use homeboy::extension::load_all_extensions;
 use homeboy::utils::args;
 use homeboy::utils::entity_suggest::{find_entity_match, generate_entity_hints};
 
@@ -74,9 +74,9 @@ enum Commands {
     Component(component::ComponentArgs),
     /// Manage global Homeboy configuration
     Config(config::ConfigArgs),
-    /// Execute CLI-compatible modules
-    #[command(visible_alias = "modules")]
-    Module(module::ModuleArgs),
+    /// Execute CLI-compatible extensions
+    #[command(visible_alias = "extensions")]
+    Extension(extension::ExtensionArgs),
     /// Get repo context (read-only, creates no state)
     Init(init::InitArgs),
     /// Actionable component status overview
@@ -133,32 +133,32 @@ fn response_mode(command: &Commands) -> ResponseMode {
     }
 }
 
-struct ModuleCliCommand {
+struct ExtensionCliCommand {
     tool: String,
     project_id: String,
     args: Vec<String>,
 }
 
-struct ModuleCliInfo {
+struct ExtensionCliInfo {
     tool: String,
     display_name: String,
-    module_name: String,
+    extension_name: String,
     project_id_help: Option<String>,
     args_help: Option<String>,
     examples: Vec<String>,
 }
 
-fn collect_module_cli_info() -> Vec<ModuleCliInfo> {
-    load_all_modules()
+fn collect_extension_cli_info() -> Vec<ExtensionCliInfo> {
+    load_all_extensions()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|m| {
             m.cli.map(|cli| {
                 let help = cli.help.unwrap_or_default();
-                ModuleCliInfo {
+                ExtensionCliInfo {
                     tool: cli.tool,
                     display_name: cli.display_name,
-                    module_name: m.name,
+                    extension_name: m.name,
                     project_id_help: help.project_id_help,
                     args_help: help.args_help,
                     examples: help.examples,
@@ -168,10 +168,10 @@ fn collect_module_cli_info() -> Vec<ModuleCliInfo> {
         .collect()
 }
 
-fn build_augmented_command(module_info: &[ModuleCliInfo]) -> Command {
+fn build_augmented_command(extension_info: &[ExtensionCliInfo]) -> Command {
     let mut cmd = Cli::command();
 
-    for info in module_info {
+    for info in extension_info {
         let project_id_help = info
             .project_id_help
             .clone()
@@ -184,7 +184,7 @@ fn build_augmented_command(module_info: &[ModuleCliInfo]) -> Command {
         let mut subcommand = Command::new(info.tool.clone())
             .about(format!(
                 "Run {} commands via {}",
-                info.display_name, info.module_name
+                info.display_name, info.extension_name
             ))
             .arg(
                 clap::Arg::new("project_id")
@@ -212,13 +212,13 @@ fn build_augmented_command(module_info: &[ModuleCliInfo]) -> Command {
     cmd
 }
 
-fn try_parse_module_cli_command(
+fn try_parse_extension_cli_command(
     matches: &ArgMatches,
-    module_info: &[ModuleCliInfo],
-) -> Option<ModuleCliCommand> {
+    extension_info: &[ExtensionCliInfo],
+) -> Option<ExtensionCliCommand> {
     let (tool, sub_matches) = matches.subcommand()?;
 
-    if !module_info.iter().any(|m| m.tool == tool) {
+    if !extension_info.iter().any(|m| m.tool == tool) {
         return None;
     }
 
@@ -228,7 +228,7 @@ fn try_parse_module_cli_command(
         .map(|vals| vals.cloned().collect())
         .unwrap_or_default();
 
-    Some(ModuleCliCommand {
+    Some(ExtensionCliCommand {
         tool: tool.to_string(),
         project_id,
         args,
@@ -236,8 +236,8 @@ fn try_parse_module_cli_command(
 }
 
 fn main() -> std::process::ExitCode {
-    let module_info = collect_module_cli_info();
-    let cmd = build_augmented_command(&module_info);
+    let extension_info = collect_extension_cli_info();
+    let cmd = build_augmented_command(&extension_info);
 
     let args: Vec<String> = std::env::args().collect();
     let normalized = args::normalize(args);
@@ -255,11 +255,11 @@ fn main() -> std::process::ExitCode {
 
     let global = GlobalArgs {};
 
-    if let Some(module_cmd) = try_parse_module_cli_command(&matches, &module_info) {
+    if let Some(extension_cmd) = try_parse_extension_cli_command(&matches, &extension_info) {
         let cli_args = cli::CliArgs {
-            tool: module_cmd.tool,
-            identifier: module_cmd.project_id,
-            args: module_cmd.args,
+            tool: extension_cmd.tool,
+            identifier: extension_cmd.project_id,
+            args: extension_cmd.args,
         };
         let result = cli::run(cli_args, &global);
 
@@ -276,7 +276,7 @@ fn main() -> std::process::ExitCode {
     // Startup update checks — skip for upgrade/update commands (they handle this themselves)
     if !matches!(&cli.command, Commands::Upgrade(_) | Commands::Update(_)) {
         homeboy::update_check::run_startup_check();
-        homeboy::module_update_check::run_startup_check();
+        homeboy::extension_update_check::run_startup_check();
     }
 
     let mode = response_mode(&cli.command);
@@ -300,7 +300,7 @@ fn main() -> std::process::ExitCode {
     }
 
     if matches!(cli.command, Commands::List) {
-        let mut cmd = build_augmented_command(&module_info);
+        let mut cmd = build_augmented_command(&extension_info);
         cmd.print_help().expect("Failed to print help");
         println!();
         return std::process::ExitCode::SUCCESS;
@@ -309,7 +309,7 @@ fn main() -> std::process::ExitCode {
     // Show help for changelog when neither subcommand nor --self is provided
     if let Commands::Changelog(ref args) = cli.command {
         if args.command.is_none() && !args.show_self {
-            let cmd = build_augmented_command(&module_info);
+            let cmd = build_augmented_command(&extension_info);
             if let Some(mut changelog_cmd) = cmd.find_subcommand("changelog").cloned() {
                 changelog_cmd.print_help().expect("Failed to print help");
                 println!();

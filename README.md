@@ -6,7 +6,7 @@ Development and deployment automation CLI built in Rust — manage projects, ser
 
 Homeboy replaces scattered scripts, FTP clients, and manual SSH sessions with one tool:
 
-- **Deploy anything** — Push plugins, themes, CLIs, and modules to remote servers
+- **Deploy anything** — Push plugins, themes, CLIs, and extensions to remote servers
 - **Fleet management** — Group projects, detect shared components, deploy everywhere at once
 - **Release pipelines** — Version bump, changelog, build, tag, publish — one command
 - **Remote operations** — SSH, file management, database queries, log tailing
@@ -75,7 +75,7 @@ homeboy deploy my-site my-plugin
 | `logs` | Remote log viewing and searching |
 | `fleet` | Group projects, coordinated operations |
 | `docs` | Embedded documentation, codebase auditing |
-| `module` | Install and manage extension modules |
+| `extension` | Install and manage extension extensions |
 
 Run `homeboy docs commands/commands-index` for the full reference.
 
@@ -85,7 +85,7 @@ Homeboy is built for agentic workflows. Every command returns structured JSON, a
 
 **OpenClaw Skill:** Install `skills/homeboy/` for AI agents using OpenClaw.
 
-**Agent Hooks:** Use [Agent Hooks](https://github.com/Extra-Chill/homeboy-modules/tree/main/agent-hooks) to guide Claude Code or OpenCode to use Homeboy effectively.
+**Agent Hooks:** Use [Agent Hooks](https://github.com/Extra-Chill/homeboy-extensions/tree/main/agent-hooks) to guide Claude Code or OpenCode to use Homeboy effectively.
 
 ```bash
 homeboy docs list                      # Browse available topics
@@ -94,11 +94,11 @@ homeboy docs scaffold my-component     # Analyze codebase for doc gaps
 homeboy docs audit my-component        # Verify docs match code
 ```
 
-## Modules
+## Extensions
 
-Modules extend Homeboy with project-type support — WordPress, Node.js, Rust, and more. Browse all available modules at [homeboy-modules](https://github.com/Extra-Chill/homeboy-modules).
+Extensions extend Homeboy with project-type support — WordPress, Node.js, Rust, and more. Browse all available extensions at [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions).
 
-| Module | Purpose |
+| Extension | Purpose |
 |--------|---------|
 | **wordpress** | WP-CLI integration, build, test, lint |
 | **nodejs** | PM2 process management |
@@ -107,20 +107,20 @@ Modules extend Homeboy with project-type support — WordPress, Node.js, Rust, a
 | **homebrew** | Tap publishing |
 | **agent-hooks** | AI agent guardrails |
 
-Install from the [homeboy-modules](https://github.com/Extra-Chill/homeboy-modules) monorepo:
+Install from the [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions) monorepo:
 
 ```bash
-# Install a module by name
-homeboy module install https://github.com/Extra-Chill/homeboy-modules --id wordpress
+# Install a extension by name
+homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id wordpress
 
-# List installed modules
-homeboy module list
+# List installed extensions
+homeboy extension list
 
-# Use a module's commands
-homeboy wp my-site plugin list         # WordPress via module
+# Use a extension's commands
+homeboy wp my-site plugin list         # WordPress via extension
 ```
 
-Homeboy auto-detects monorepo layout — just pass `--id` with the module name. For single-module repos, `--id` is optional.
+Homeboy auto-detects monorepo layout — just pass `--id` with the extension name. For single-extension repos, `--id` is optional.
 
 ## Configuration
 
@@ -131,7 +131,7 @@ All config lives in `~/.config/homeboy/`:
 ├── projects/          # Project definitions
 ├── servers/           # Server connections
 ├── components/        # Component definitions
-├── modules/           # Installed modules
+├── extensions/           # Installed extensions
 ├── keys/              # SSH keys
 └── homeboy.json       # Global defaults
 ```
@@ -155,7 +155,7 @@ cd homeboy && cargo install --path .
 - `homeboy docs list` — Browse all embedded topics
 - `homeboy docs commands/commands-index` — Full command reference
 - [docs/](docs/) — Detailed documentation
-- [homeboy-modules](https://github.com/Extra-Chill/homeboy-modules) — Public modules
+- [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions) — Public extensions
 - [Homeboy Desktop](../homeboy-desktop/) — Native macOS app with a visual dashboard (early development)
 
 ## License

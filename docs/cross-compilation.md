@@ -33,7 +33,7 @@ Use homeboy for orchestration, GitHub Actions for cross-platform builds:
 
 ```
 homeboy version bump → triggers GitHub Actions → builds all platforms → uploads release
-homeboy module run homebrew → publishes formula to tap
+homeboy extension run homebrew → publishes formula to tap
 ```
 
 cargo-dist handles the cross-platform builds and generates the Homebrew formula with correct sha256 hashes.
@@ -81,9 +81,9 @@ cargo zigbuild --release --target x86_64-apple-darwin
 # Fails for crates needing Security.framework, etc.
 ```
 
-## Homebrew Module
+## Homebrew Extension
 
-The `homebrew` module publishes formulas to your tap. It does **not** build binaries or generate formulas — it assumes:
+The `homebrew` extension publishes formulas to your tap. It does **not** build binaries or generate formulas — it assumes:
 
 1. Binaries are already built and uploaded (to GitHub Releases, etc.)
 2. A formula file exists with correct download URLs and sha256 hashes
@@ -91,7 +91,7 @@ The `homebrew` module publishes formulas to your tap. It does **not** build bina
 For full automation with cargo-dist:
 1. cargo-dist builds binaries and generates `homeboy.rb`
 2. Formula is uploaded as a release asset
-3. `homeboy module run homebrew` or post-release hook publishes to tap
+3. `homeboy extension run homebrew` or post-release hook publishes to tap
 
 ## Recommended Setup
 
@@ -99,7 +99,7 @@ For Rust CLI projects distributing via Homebrew:
 
 1. **cargo-dist** in GitHub Actions for cross-platform builds
 2. **homeboy** for release orchestration (bump, changelog, deploy)
-3. **homebrew module** for tap publishing
+3. **homebrew extension** for tap publishing
 
 This separates concerns:
 - GitHub provides free macOS/Windows runners

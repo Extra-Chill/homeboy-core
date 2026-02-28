@@ -54,9 +54,9 @@ enum ComponentCommand {
         /// Path to changelog file relative to localPath
         #[arg(long)]
         changelog_target: Option<String>,
-        /// Module(s) this component uses (e.g., "wordpress"). Repeatable.
-        #[arg(long = "module", value_name = "MODULE")]
-        modules: Vec<String>,
+        /// Extension(s) this component uses (e.g., "wordpress"). Repeatable.
+        #[arg(long = "extension", value_name = "EXTENSION")]
+        extensions: Vec<String>,
     },
     /// Display component configuration
     Show {
@@ -97,9 +97,9 @@ enum ComponentCommand {
         #[arg(long = "version-target", value_name = "TARGET")]
         version_targets: Vec<String>,
 
-        /// Module(s) this component uses (e.g., "wordpress"). Repeatable.
-        #[arg(long = "module", value_name = "MODULE")]
-        modules: Vec<String>,
+        /// Extension(s) this component uses (e.g., "wordpress"). Repeatable.
+        #[arg(long = "extension", value_name = "EXTENSION")]
+        extensions: Vec<String>,
     },
     /// Delete a component configuration
     Delete {
@@ -165,7 +165,7 @@ pub fn run(
             build_command,
             extract_command,
             changelog_target,
-            modules,
+            extensions,
         } => {
             let json_spec = if let Some(spec) = json {
                 spec
@@ -223,12 +223,12 @@ pub fn run(
                 new_component.extract_command = extract_command;
                 new_component.changelog_target = changelog_target;
 
-                if !modules.is_empty() {
-                    let mut module_map = std::collections::HashMap::new();
-                    for module_id in modules {
-                        module_map.insert(module_id, component::ScopedModuleConfig::default());
+                if !extensions.is_empty() {
+                    let mut extension_map = std::collections::HashMap::new();
+                    for extension_id in extensions {
+                        extension_map.insert(extension_id, component::ScopedExtensionConfig::default());
                     }
-                    new_component.modules = Some(module_map);
+                    new_component.extensions = Some(extension_map);
                 }
 
                 homeboy::config::serialize_with_id(&new_component, &id)?
@@ -267,7 +267,7 @@ pub fn run(
             extract_command,
             changelog_target,
             version_targets,
-            modules,
+            extensions,
         } => set(
             args,
             ComponentSetFlags {
@@ -279,7 +279,7 @@ pub fn run(
                 changelog_target,
             },
             version_targets,
-            modules,
+            extensions,
         ),
         ComponentCommand::Delete { id } => delete(&id),
         ComponentCommand::Rename { id, new_id } => rename(&id, &new_id),
@@ -353,14 +353,14 @@ fn set(
     args: DynamicSetArgs,
     flags: ComponentSetFlags,
     version_targets: Vec<String>,
-    modules: Vec<String>,
+    extensions: Vec<String>,
 ) -> CmdResult<ComponentOutput> {
     // Check if there's any input at all
     let has_dynamic = args.json_spec()?.is_some() || !args.effective_extra().is_empty();
-    if !has_dynamic && !flags.has_any() && version_targets.is_empty() && modules.is_empty() {
+    if !has_dynamic && !flags.has_any() && version_targets.is_empty() && extensions.is_empty() {
         return Err(homeboy::Error::validation_invalid_argument(
             "spec",
-            "Provide a flag (e.g., --local-path), --json spec, --base64, --key value, --version-target, or --module",
+            "Provide a flag (e.g., --local-path), --json spec, --base64, --key value, --version-target, or --extension",
             None,
             None,
         ));
@@ -389,14 +389,14 @@ fn set(
         }
     }
 
-    // Support --module flag. Builds modules map with default empty configs.
-    if !modules.is_empty() {
-        let mut module_map = serde_json::Map::new();
-        for module_id in &modules {
-            module_map.insert(module_id.clone(), serde_json::json!({}));
+    // Support --extension flag. Builds extensions map with default empty configs.
+    if !extensions.is_empty() {
+        let mut extension_map = serde_json::Map::new();
+        for extension_id in &extensions {
+            extension_map.insert(extension_id.clone(), serde_json::json!({}));
         }
         if let serde_json::Value::Object(ref mut obj) = merged {
-            obj.insert("modules".to_string(), serde_json::Value::Object(module_map));
+            obj.insert("extensions".to_string(), serde_json::Value::Object(extension_map));
         }
     }
 

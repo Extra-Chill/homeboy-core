@@ -1,17 +1,17 @@
-/// Environment variable names for module execution context.
-/// Modules receive these variables when executed via `homeboy module run`.
-/// Version of the exec context protocol. Modules can check this for compatibility.
+/// Environment variable names for extension execution context.
+/// Extensions receive these variables when executed via `homeboy extension run`.
+/// Version of the exec context protocol. Extensions can check this for compatibility.
 pub const VERSION: &str = "HOMEBOY_EXEC_CONTEXT_VERSION";
-/// ID of the module being executed.
-pub const MODULE_ID: &str = "HOMEBOY_MODULE_ID";
+/// ID of the extension being executed.
+pub const EXTENSION_ID: &str = "HOMEBOY_MODULE_ID";
 /// JSON-serialized settings (merged from app, project, and component levels).
 pub const SETTINGS_JSON: &str = "HOMEBOY_SETTINGS_JSON";
-/// Project ID (only set when module requires project context).
+/// Project ID (only set when extension requires project context).
 pub const PROJECT_ID: &str = "HOMEBOY_PROJECT_ID";
-/// Component ID (only set when module requires component context).
+/// Component ID (only set when extension requires component context).
 pub const COMPONENT_ID: &str = "HOMEBOY_COMPONENT_ID";
-/// Filesystem path to the module directory.
-pub const MODULE_PATH: &str = "HOMEBOY_MODULE_PATH";
+/// Filesystem path to the extension directory.
+pub const EXTENSION_PATH: &str = "HOMEBOY_MODULE_PATH";
 /// Filesystem path to the project directory (base_path).
 pub const PROJECT_PATH: &str = "HOMEBOY_PROJECT_PATH";
 /// Filesystem path to the component directory.

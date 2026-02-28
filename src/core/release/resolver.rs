@@ -1,28 +1,28 @@
 use crate::component::Component;
 use crate::engine::pipeline::PipelineCapabilityResolver;
 use crate::error::{Error, Result};
-use crate::module::{self, ModuleManifest};
+use crate::extension::{self, ExtensionManifest};
 
 use super::types::ReleaseStepType;
 
 pub(crate) struct ReleaseCapabilityResolver {
-    modules: Vec<ModuleManifest>,
+    extensions: Vec<ExtensionManifest>,
 }
 
 impl ReleaseCapabilityResolver {
-    pub fn new(modules: Vec<ModuleManifest>) -> Self {
-        Self { modules }
+    pub fn new(extensions: Vec<ExtensionManifest>) -> Self {
+        Self { extensions }
     }
 
     fn supports_package(&self) -> bool {
-        self.modules
+        self.extensions
             .iter()
-            .any(|module| module.actions.iter().any(|a| a.id == "release.package"))
+            .any(|extension| extension.actions.iter().any(|a| a.id == "release.package"))
     }
 
     fn supports_publish_target(&self, target: &str) -> bool {
-        self.modules.iter().any(|module| {
-            module.id == target && module.actions.iter().any(|a| a.id == "release.publish")
+        self.extensions.iter().any(|extension| {
+            extension.id == target && extension.actions.iter().any(|a| a.id == "release.publish")
         })
     }
 }
@@ -47,14 +47,14 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
         match st {
             ReleaseStepType::Package => {
                 if !self.supports_package() {
-                    vec!["Missing module with action 'release.package'".to_string()]
+                    vec!["Missing extension with action 'release.package'".to_string()]
                 } else {
                     Vec::new()
                 }
             }
             ReleaseStepType::Publish(ref target) => {
                 vec![format!(
-                    "Missing module '{}' with action 'release.publish'",
+                    "Missing extension '{}' with action 'release.publish'",
                     target
                 )]
             }
@@ -63,30 +63,30 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
     }
 }
 
-pub(crate) fn resolve_modules(
+pub(crate) fn resolve_extensions(
     component: &Component,
-    module_id: Option<&str>,
-) -> Result<Vec<ModuleManifest>> {
-    if module_id.is_some() {
+    extension_id: Option<&str>,
+) -> Result<Vec<ExtensionManifest>> {
+    if extension_id.is_some() {
         return Err(Error::validation_invalid_argument(
-            "module",
-            "Module selection is configured via component.modules; --module is not supported",
+            "extension",
+            "Extension selection is configured via component.extensions; --extension is not supported",
             None,
             None,
         ));
     }
 
-    let mut modules = Vec::new();
-    if let Some(configured) = component.modules.as_ref() {
-        let mut module_ids: Vec<String> = configured.keys().cloned().collect();
-        module_ids.sort();
-        let suggestions = module::available_module_ids();
-        for module_id in module_ids {
-            let manifest = module::load_module(&module_id)
-                .map_err(|_| Error::module_not_found(module_id.to_string(), suggestions.clone()))?;
-            modules.push(manifest);
+    let mut extensions = Vec::new();
+    if let Some(configured) = component.extensions.as_ref() {
+        let mut extension_ids: Vec<String> = configured.keys().cloned().collect();
+        extension_ids.sort();
+        let suggestions = extension::available_extension_ids();
+        for extension_id in extension_ids {
+            let manifest = extension::load_extension(&extension_id)
+                .map_err(|_| Error::extension_not_found(extension_id.to_string(), suggestions.clone()))?;
+            extensions.push(manifest);
         }
     }
 
-    Ok(modules)
+    Ok(extensions)
 }

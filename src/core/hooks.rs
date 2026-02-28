@@ -1,7 +1,7 @@
 //! General hook/event system for lifecycle extensibility.
 //!
 //! Hooks are shell commands that run at named lifecycle events. Both components
-//! and modules can declare hooks. Module hooks run first (platform behavior),
+//! and extensions can declare hooks. Extension hooks run first (platform behavior),
 //! then component hooks (user customization).
 //!
 //! Event naming convention: `pre:operation` / `post:operation`
@@ -9,7 +9,7 @@
 
 use crate::component::Component;
 use crate::error::{Error, Result};
-use crate::module;
+use crate::extension;
 use crate::ssh::{execute_local_command_in_dir, SshClient};
 use crate::utils::template;
 use serde::Serialize;
@@ -45,10 +45,10 @@ pub enum HookFailureMode {
     NonFatal,
 }
 
-/// Resolve all hooks for a given event by merging module-level and component-level hooks.
+/// Resolve all hooks for a given event by merging extension-level and component-level hooks.
 ///
 /// Execution order:
-/// 1. Module hooks (platform behavior) — from all linked modules, in module iteration order
+/// 1. Extension hooks (platform behavior) — from all linked extensions, in extension iteration order
 /// 2. Component hooks (user customization)
 ///
 /// Legacy fields (`pre_version_bump_commands`, etc.) are migrated into the `hooks` map
@@ -56,12 +56,12 @@ pub enum HookFailureMode {
 pub fn resolve_hooks(component: &Component, event: &str) -> Vec<String> {
     let mut commands = Vec::new();
 
-    // Module hooks first
-    if let Some(ref modules) = component.modules {
-        for module_id in modules.keys() {
-            if let Ok(manifest) = module::load_module(module_id) {
-                if let Some(module_commands) = manifest.hooks.get(event) {
-                    commands.extend(module_commands.clone());
+    // Extension hooks first
+    if let Some(ref extensions) = component.extensions {
+        for extension_id in extensions.keys() {
+            if let Ok(manifest) = extension::load_extension(extension_id) {
+                if let Some(extension_commands) = manifest.hooks.get(event) {
+                    commands.extend(extension_commands.clone());
                 }
             }
         }
@@ -79,7 +79,7 @@ pub fn resolve_hooks(component: &Component, event: &str) -> Vec<String> {
 
 /// Run all hooks for a given event.
 ///
-/// Resolves hooks from modules and the component, then executes each command
+/// Resolves hooks from extensions and the component, then executes each command
 /// sequentially in the component's `local_path`.
 pub fn run_hooks(
     component: &Component,
@@ -142,9 +142,9 @@ pub fn run_commands(
 
 /// Run all hooks for a given event remotely via SSH.
 ///
-/// Resolves hooks from modules and the component, expands template variables
+/// Resolves hooks from extensions and the component, expands template variables
 /// (using `{{key}}` syntax), then executes each command on the remote server.
-/// Uses the same resolution order as `run_hooks` (module hooks first, then
+/// Uses the same resolution order as `run_hooks` (extension hooks first, then
 /// component hooks).
 pub fn run_hooks_remote(
     ssh_client: &SshClient,

@@ -5,7 +5,7 @@ use crate::component::{self, Component};
 use crate::context::resolve_project_ssh;
 use crate::engine::executor;
 use crate::error::ErrorCode;
-use crate::module::{find_module_by_tool, CliConfig};
+use crate::extension::{find_extension_by_tool, CliConfig};
 use crate::project::{self, Project};
 use crate::server;
 use crate::ssh::{execute_local_command, CommandOutput};
@@ -18,7 +18,7 @@ use crate::{Error, Result};
 
 pub struct CliToolResult {
     pub tool: String,
-    pub module_id: String,
+    pub extension_id: String,
     pub identifier: String,
     pub target_domain: Option<String>,
     pub executed_command: String,
@@ -60,15 +60,15 @@ fn try_run_for_component(
 ) -> Option<Result<CliToolResult>> {
     match component::load(identifier) {
         Ok(component) => {
-            let module = find_module_by_tool(tool)?;
-            let cli_config = module.cli.as_ref()?;
+            let extension = find_extension_by_tool(tool)?;
+            let cli_config = extension.cli.as_ref()?;
 
-            let command = build_component_command(&component, cli_config, &module, args);
+            let command = build_component_command(&component, cli_config, &extension, args);
             let output = execute_local_command(&command);
 
             Some(Ok(CliToolResult {
                 tool: tool.to_string(),
-                module_id: module.id.clone(),
+                extension_id: extension.id.clone(),
                 identifier: identifier.to_string(),
                 target_domain: None,
                 executed_command: command,
@@ -85,7 +85,7 @@ fn try_run_for_component(
 fn build_component_command(
     component: &Component,
     cli_config: &CliConfig,
-    module: &crate::module::ModuleManifest,
+    extension: &crate::extension::ExtensionManifest,
     args: &[String],
 ) -> String {
     let mut variables = HashMap::new();
@@ -102,8 +102,8 @@ fn build_component_command(
     );
     variables.insert(TemplateVars::ARGS.to_string(), shell::quote_args(args));
 
-    if let Some(ref path) = module.module_path {
-        variables.insert(TemplateVars::MODULE_PATH.to_string(), path.clone());
+    if let Some(ref path) = extension.extension_path {
+        variables.insert(TemplateVars::EXTENSION_PATH.to_string(), path.clone());
     }
 
     render_map(&cli_config.command_template, &variables)
@@ -124,13 +124,13 @@ fn run_for_project_with_executor(
         return Err(Error::validation_missing_argument(vec!["command".to_string()]));
     }
 
-    let module = find_module_by_tool(tool)
-        .ok_or_else(|| Error::validation_invalid_argument("tool", format!("No module provides tool '{}'", tool), Some(tool.to_string()), None))?;
+    let extension = find_extension_by_tool(tool)
+        .ok_or_else(|| Error::validation_invalid_argument("tool", format!("No extension provides tool '{}'", tool), Some(tool.to_string()), None))?;
 
-    let cli_config = module.cli.as_ref().ok_or_else(|| {
+    let cli_config = extension.cli.as_ref().ok_or_else(|| {
         Error::config(format!(
-            "Module '{}' does not have CLI configuration",
-            module.id
+            "Extension '{}' does not have CLI configuration",
+            extension.id
         ))
     })?;
 
@@ -147,7 +147,7 @@ fn run_for_project_with_executor(
         let result = executor::execute_for_project_direct(
             &project,
             cli_config,
-            &module.id,
+            &extension.id,
             &command_args,
             &target_domain,
         );
@@ -159,20 +159,20 @@ fn run_for_project_with_executor(
             Err(_) => {
                 // Fallback to shell execution if direct fails
                 let (_, rendered_cmd) =
-                    build_project_command(&project, cli_config, &module.id, args)?;
+                    build_project_command(&project, cli_config, &extension.id, args)?;
                 (local_executor(&rendered_cmd), rendered_cmd)
             }
         }
     } else {
         let ctx = resolve_project_ssh(project_id)?;
-        let (_, rendered_cmd) = build_project_command(&project, cli_config, &module.id, args)?;
+        let (_, rendered_cmd) = build_project_command(&project, cli_config, &extension.id, args)?;
         let cmd_output = ctx.client.execute(&rendered_cmd);
         (cmd_output, rendered_cmd)
     };
 
     Ok(CliToolResult {
         tool: tool.to_string(),
-        module_id: module.id,
+        extension_id: extension.id,
         identifier: project_id.to_string(),
         target_domain: Some(target_domain),
         executed_command,
@@ -185,7 +185,7 @@ fn run_for_project_with_executor(
 fn build_project_command(
     project: &Project,
     cli_config: &CliConfig,
-    module_id: &str,
+    extension_id: &str,
     args: &[String],
 ) -> Result<(String, String)> {
     let base_path = project
@@ -215,21 +215,21 @@ fn build_project_command(
     variables.insert(TemplateVars::SITE_PATH.to_string(), base_path);
     variables.insert(TemplateVars::CLI_PATH.to_string(), cli_path);
 
-    // Add module_path so {{module_path}} resolves in command templates
-    let module_dir = crate::module::module_path(module_id);
-    if module_dir.exists() {
+    // Add extension_path so {{extension_path}} resolves in command templates
+    let extension_dir = crate::extension::extension_path(extension_id);
+    if extension_dir.exists() {
         variables.insert(
-            TemplateVars::MODULE_PATH.to_string(),
-            module_dir.to_string_lossy().to_string(),
+            TemplateVars::EXTENSION_PATH.to_string(),
+            extension_dir.to_string_lossy().to_string(),
         );
     }
 
     let mut rendered = render_map(&cli_config.command_template, &variables);
 
-    // Append settings-based flags from module config
-    if let Some(module_config) = project.modules.as_ref().and_then(|m| m.get(module_id)) {
+    // Append settings-based flags from extension config
+    if let Some(extension_config) = project.extensions.as_ref().and_then(|m| m.get(extension_id)) {
         for (setting_key, flag_template) in &cli_config.settings_flags {
-            if let Some(flag) = module_config
+            if let Some(flag) = extension_config
                 .settings
                 .get(setting_key)
                 .and_then(|v| v.as_str())
@@ -243,7 +243,7 @@ fn build_project_command(
     }
 
     // Auto-inject --allow-root when SSH user is root (WP-CLI only)
-    if module_id == "wordpress" {
+    if extension_id == "wordpress" {
         if let Some(ref server_id) = project.server_id {
             if !server_id.is_empty() {
                 if let Ok(svr) = server::load(server_id) {

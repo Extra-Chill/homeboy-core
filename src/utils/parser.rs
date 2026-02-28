@@ -1,6 +1,6 @@
 //! Core parsing primitives for text extraction and validation.
 //!
-//! This module provides the foundational layer for extracting structured data
+//! This extension provides the foundational layer for extracting structured data
 //! from text content. All parsing operations in homeboy (versions, changelogs,
 //! command output, git tags) are built on these primitives.
 

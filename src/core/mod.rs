@@ -1,4 +1,4 @@
-// Public modules (config first — exports entity_crud! macro used by entity modules)
+// Public extensions (config first — exports entity_crud! macro used by entity extensions)
 #[macro_use]
 pub mod config;
 pub mod api;
@@ -20,8 +20,8 @@ pub mod fleet;
 pub mod git;
 pub mod hooks;
 pub mod logs;
-pub mod module;
-pub mod module_update_check;
+pub mod extension;
+pub mod extension_update_check;
 pub mod output;
 pub mod project;
 pub mod refactor;
@@ -33,14 +33,14 @@ pub mod update_check;
 pub mod upgrade;
 pub mod version;
 
-// Internal modules - not part of public API
+// Internal extensions - not part of public API
 pub(crate) mod http;
 pub(crate) mod keychain;
 pub(crate) mod local_files;
 pub(crate) mod paths;
 pub(crate) mod permissions;
 
-// Public modules for CLI access
+// Public extensions for CLI access
 pub mod defaults;
 
 // Re-export common types for convenience

@@ -1,27 +1,27 @@
-//! Startup module update check — warns users when installed modules have updates available.
+//! Startup extension update check — warns users when installed extensions have updates available.
 //!
 //! Same pattern as the CLI update check (`update_check.rs`):
 //! - Check on first run of the day (24h cache)
-//! - Print notice to stderr if any module has updates
-//! - `homeboy module update <name>` to apply
+//! - Print notice to stderr if any extension has updates
+//! - `homeboy extension update <name>` to apply
 //!
 //! Shares the disable mechanisms with CLI update check:
 //! - `HOMEBOY_NO_UPDATE_CHECK=1`
 //! - `homeboy config set /update_check false`
 
-use crate::module;
+use crate::extension;
 use crate::paths;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CACHE_FILENAME: &str = "module_update_check.json";
+const CACHE_FILENAME: &str = "extension_update_check.json";
 const CHECK_INTERVAL_SECS: u64 = 86400; // 24 hours
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleUpdateCache {
-    /// Module ID -> number of commits behind
-    pub modules_behind: HashMap<String, usize>,
+pub struct ExtensionUpdateCache {
+    /// Extension ID -> number of commits behind
+    pub extensions_behind: HashMap<String, usize>,
     pub checked_at: u64,
 }
 
@@ -29,13 +29,13 @@ fn cache_path() -> Option<std::path::PathBuf> {
     paths::homeboy().ok().map(|p| p.join(CACHE_FILENAME))
 }
 
-fn read_cache() -> Option<ModuleUpdateCache> {
+fn read_cache() -> Option<ExtensionUpdateCache> {
     let path = cache_path()?;
     let content = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
-fn write_cache(cache: &ModuleUpdateCache) {
+fn write_cache(cache: &ExtensionUpdateCache) {
     let Some(path) = cache_path() else { return };
     let Ok(content) = serde_json::to_string_pretty(cache) else {
         return;
@@ -50,7 +50,7 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-fn is_cache_fresh(cache: &ModuleUpdateCache) -> bool {
+fn is_cache_fresh(cache: &ExtensionUpdateCache) -> bool {
     let elapsed = now_unix().saturating_sub(cache.checked_at);
     elapsed < CHECK_INTERVAL_SECS
 }
@@ -65,27 +65,27 @@ fn is_disabled_by_config() -> bool {
     !crate::defaults::load_config().update_check
 }
 
-fn print_module_hints(modules_behind: &HashMap<String, usize>) {
-    if modules_behind.is_empty() {
+fn print_extension_hints(extensions_behind: &HashMap<String, usize>) {
+    if extensions_behind.is_empty() {
         return;
     }
 
-    if modules_behind.len() == 1 {
-        let (id, count) = modules_behind.iter().next().unwrap();
+    if extensions_behind.len() == 1 {
+        let (id, count) = extensions_behind.iter().next().unwrap();
         log_status!(
             "update",
-            "Module '{}' has {} new commit{}. Run `homeboy module update {}` to update.",
+            "Extension '{}' has {} new commit{}. Run `homeboy extension update {}` to update.",
             id,
             count,
             if *count == 1 { "" } else { "s" },
             id
         );
     } else {
-        let names: Vec<&String> = modules_behind.keys().collect();
+        let names: Vec<&String> = extensions_behind.keys().collect();
         log_status!(
             "update",
-            "{} modules have updates: {}. Run `homeboy module update <name>` to update.",
-            modules_behind.len(),
+            "{} extensions have updates: {}. Run `homeboy extension update <name>` to update.",
+            extensions_behind.len(),
             names
                 .iter()
                 .map(|n| n.as_str())
@@ -95,7 +95,7 @@ fn print_module_hints(modules_behind: &HashMap<String, usize>) {
     }
 }
 
-/// Run the startup module update check. Prints hints to stderr if updates are available.
+/// Run the startup extension update check. Prints hints to stderr if updates are available.
 ///
 /// Silently returns on any error. Call from main.rs alongside the CLI update check.
 pub fn run_startup_check() {
@@ -109,8 +109,8 @@ pub fn run_startup_check() {
     let cached = read_cache();
 
     if let Some(ref cache) = cached {
-        if !cache.modules_behind.is_empty() {
-            print_module_hints(&cache.modules_behind);
+        if !cache.extensions_behind.is_empty() {
+            print_extension_hints(&cache.extensions_behind);
             already_printed = true;
         }
 
@@ -119,25 +119,25 @@ pub fn run_startup_check() {
         }
     }
 
-    // Cache stale or missing — check all modules
-    let module_ids = module::available_module_ids();
-    let mut modules_behind: HashMap<String, usize> = HashMap::new();
+    // Cache stale or missing — check all extensions
+    let extension_ids = extension::available_extension_ids();
+    let mut extensions_behind: HashMap<String, usize> = HashMap::new();
 
-    for id in &module_ids {
-        if let Some(update) = module::check_update_available(id) {
-            modules_behind.insert(update.module_id, update.behind_count);
+    for id in &extension_ids {
+        if let Some(update) = extension::check_update_available(id) {
+            extensions_behind.insert(update.extension_id, update.behind_count);
         }
     }
 
     // Write refreshed cache
-    write_cache(&ModuleUpdateCache {
-        modules_behind: modules_behind.clone(),
+    write_cache(&ExtensionUpdateCache {
+        extensions_behind: extensions_behind.clone(),
         checked_at: now_unix(),
     });
 
     // Print hint if updates found and we haven't already
-    if !already_printed && !modules_behind.is_empty() {
-        print_module_hints(&modules_behind);
+    if !already_printed && !extensions_behind.is_empty() {
+        print_extension_hints(&extensions_behind);
     }
 }
 
@@ -147,8 +147,8 @@ mod tests {
 
     #[test]
     fn cache_freshness_within_24h() {
-        let cache = ModuleUpdateCache {
-            modules_behind: HashMap::new(),
+        let cache = ExtensionUpdateCache {
+            extensions_behind: HashMap::new(),
             checked_at: now_unix() - 100,
         };
         assert!(is_cache_fresh(&cache));
@@ -156,8 +156,8 @@ mod tests {
 
     #[test]
     fn cache_stale_after_24h() {
-        let cache = ModuleUpdateCache {
-            modules_behind: HashMap::new(),
+        let cache = ExtensionUpdateCache {
+            extensions_behind: HashMap::new(),
             checked_at: now_unix() - CHECK_INTERVAL_SECS - 1,
         };
         assert!(!is_cache_fresh(&cache));
@@ -167,14 +167,14 @@ mod tests {
     fn cache_roundtrip() {
         let mut behind = HashMap::new();
         behind.insert("wordpress".to_string(), 3);
-        let cache = ModuleUpdateCache {
-            modules_behind: behind,
+        let cache = ExtensionUpdateCache {
+            extensions_behind: behind,
             checked_at: 1700000000,
         };
         let json = serde_json::to_string(&cache).unwrap();
-        let parsed: ModuleUpdateCache = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.modules_behind.len(), 1);
-        assert_eq!(parsed.modules_behind["wordpress"], 3);
+        let parsed: ExtensionUpdateCache = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.extensions_behind.len(), 1);
+        assert_eq!(parsed.extensions_behind["wordpress"], 3);
         assert_eq!(parsed.checked_at, 1700000000);
     }
 }

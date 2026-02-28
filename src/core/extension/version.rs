@@ -1,4 +1,4 @@
-//! Version constraint parsing and matching for module/extension versioning.
+//! Version constraint parsing and matching for extension/extension versioning.
 //!
 //! Supports semver version constraints used in component configs to declare
 //! required extension versions:
@@ -175,14 +175,14 @@ fn tilde_matches(constraint: &Version, version: &Version) -> bool {
     version.major == constraint.major && version.minor == constraint.minor
 }
 
-/// Parse a module's version string, returning a useful error if invalid.
-pub fn parse_module_version(version_str: &str, module_id: &str) -> Result<Version> {
+/// Parse a extension's version string, returning a useful error if invalid.
+pub fn parse_extension_version(version_str: &str, extension_id: &str) -> Result<Version> {
     Version::parse(version_str).map_err(|e| {
         Error::validation_invalid_argument(
             "version",
             format!(
-                "Module '{}' has invalid semver version '{}': {}",
-                module_id, version_str, e
+                "Extension '{}' has invalid semver version '{}': {}",
+                extension_id, version_str, e
             ),
             Some(version_str.to_string()),
             None,
@@ -404,19 +404,19 @@ mod tests {
     }
 
     // ========================================================================
-    // Module version parsing
+    // Extension version parsing
     // ========================================================================
 
     #[test]
-    fn parse_module_version_valid() {
-        let v = parse_module_version("1.2.3", "test-module").unwrap();
+    fn parse_extension_version_valid() {
+        let v = parse_extension_version("1.2.3", "test-extension").unwrap();
         assert_eq!(v, Version::new(1, 2, 3));
     }
 
     #[test]
-    fn parse_module_version_invalid() {
-        let err = parse_module_version("not-a-version", "test-module").unwrap_err();
-        assert!(err.message.contains("test-module"));
+    fn parse_extension_version_invalid() {
+        let err = parse_extension_version("not-a-version", "test-extension").unwrap_err();
+        assert!(err.message.contains("test-extension"));
         assert!(err.message.contains("not-a-version"));
     }
 }

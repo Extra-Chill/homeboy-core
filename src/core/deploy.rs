@@ -12,8 +12,8 @@ use crate::defaults;
 use crate::error::{Error, Result};
 use crate::git;
 use crate::hooks::{self, HookFailureMode};
-use crate::module::{
-    self, load_all_modules, DeployOverride, DeployVerification, ModuleManifest,
+use crate::extension::{
+    self, load_all_extensions, DeployOverride, DeployVerification, ExtensionManifest,
 };
 use crate::permissions;
 use crate::project::{self, Project};
@@ -1022,7 +1022,7 @@ fn execute_git_deploy(
     }
 }
 
-/// Deploy a component via artifact upload (rsync / module override).
+/// Deploy a component via artifact upload (rsync / extension override).
 fn execute_artifact_deploy(
     component: &Component,
     config: &DeployConfig,
@@ -1070,18 +1070,18 @@ fn execute_artifact_deploy(
         artifact_path
     };
 
-    // Look up verification from modules
+    // Look up verification from extensions
     let verification = find_deploy_verification(install_dir);
 
-    // Check for module-defined deploy override
+    // Check for extension-defined deploy override
     let deploy_result =
-        if let Some((override_config, module)) = find_deploy_override(install_dir) {
+        if let Some((override_config, extension)) = find_deploy_override(install_dir) {
             deploy_with_override(
                 &ctx.client,
                 &artifact_path,
                 install_dir,
                 &override_config,
-                &module,
+                &extension,
                 verification.as_ref(),
                 Some(base_path),
                 project.domain.as_deref(),
@@ -1154,11 +1154,11 @@ fn cleanup_build_dependencies(
         return Ok(Some("skipped (--keep-deps flag)".to_string()));
     }
 
-    // Collect cleanup paths from linked modules
+    // Collect cleanup paths from linked extensions
     let mut cleanup_paths = Vec::new();
-    if let Some(ref modules) = component.modules {
-        for module_id in modules.keys() {
-            if let Ok(manifest) = crate::module::load_module(module_id) {
+    if let Some(ref extensions) = component.extensions {
+        for extension_id in extensions.keys() {
+            if let Ok(manifest) = crate::extension::load_extension(extension_id) {
                 if let Some(ref build) = manifest.build {
                     cleanup_paths.extend(build.cleanup_paths.iter().cloned());
                 }
@@ -1168,7 +1168,7 @@ fn cleanup_build_dependencies(
 
     if cleanup_paths.is_empty() {
         return Ok(Some(
-            "skipped (no cleanup paths configured in modules)".to_string(),
+            "skipped (no cleanup paths configured in extensions)".to_string(),
         ));
     }
 
@@ -1412,10 +1412,10 @@ fn calculate_release_state(component: &Component) -> Option<ReleaseState> {
     })
 }
 
-/// Load components by ID, resolve artifact paths via module patterns, and filter non-deployable.
+/// Load components by ID, resolve artifact paths via extension patterns, and filter non-deployable.
 ///
-/// Validates that any modules declared in the component's `modules` field are installed.
-/// Returns an actionable error with install instructions when modules are missing,
+/// Validates that any extensions declared in the component's `extensions` field are installed.
+/// Returns an actionable error with install instructions when extensions are missing,
 /// rather than silently skipping the component.
 fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
     let mut components = Vec::new();
@@ -1423,12 +1423,12 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
     for id in component_ids {
         let mut loaded = component::load(id)?;
 
-        // Validate required modules are installed before attempting artifact resolution.
-        // Without this check, missing modules cause resolve_artifact() to silently
+        // Validate required extensions are installed before attempting artifact resolution.
+        // Without this check, missing extensions cause resolve_artifact() to silently
         // return None, and the component gets skipped with a vague "no artifact" message.
-        module::validate_required_modules(&loaded)?;
+        extension::validate_required_extensions(&loaded)?;
 
-        // Resolve effective artifact (component value OR module pattern)
+        // Resolve effective artifact (component value OR extension pattern)
         let effective_artifact = component::resolve_artifact(&loaded);
 
         // Git-deploy components don't need a build artifact
@@ -1600,7 +1600,7 @@ fn fetch_remote_versions(
     versions
 }
 
-/// Parse version from content using pattern or module defaults.
+/// Parse version from content using pattern or extension defaults.
 fn parse_component_version(content: &str, pattern: Option<&str>, filename: &str) -> Option<String> {
     let pattern_str = match pattern {
         Some(p) => p.replace("\\\\", "\\"),
@@ -1610,10 +1610,10 @@ fn parse_component_version(content: &str, pattern: Option<&str>, filename: &str)
     version::parse_version(content, &pattern_str)
 }
 
-/// Find deploy verification config from modules.
+/// Find deploy verification config from extensions.
 fn find_deploy_verification(target_path: &str) -> Option<DeployVerification> {
-    for module in load_all_modules().unwrap_or_default() {
-        for verification in module.deploy_verifications() {
+    for extension in load_all_extensions().unwrap_or_default() {
+        for verification in extension.deploy_verifications() {
             if target_path.contains(&verification.path_pattern) {
                 return Some(verification.clone());
             }
@@ -1622,25 +1622,25 @@ fn find_deploy_verification(target_path: &str) -> Option<DeployVerification> {
     None
 }
 
-/// Find deploy override config from modules.
-fn find_deploy_override(target_path: &str) -> Option<(DeployOverride, ModuleManifest)> {
-    for module in load_all_modules().unwrap_or_default() {
-        for override_config in module.deploy_overrides() {
+/// Find deploy override config from extensions.
+fn find_deploy_override(target_path: &str) -> Option<(DeployOverride, ExtensionManifest)> {
+    for extension in load_all_extensions().unwrap_or_default() {
+        for override_config in extension.deploy_overrides() {
             if target_path.contains(&override_config.path_pattern) {
-                return Some((override_config.clone(), module));
+                return Some((override_config.clone(), extension));
             }
         }
     }
     None
 }
 
-/// Deploy using module-defined override strategy.
+/// Deploy using extension-defined override strategy.
 fn deploy_with_override(
     ssh_client: &SshClient,
     local_path: &Path,
     remote_path: &str,
     override_config: &DeployOverride,
-    module: &ModuleManifest,
+    extension: &ExtensionManifest,
     verification: Option<&DeployVerification>,
     site_root: Option<&str>,
     domain: Option<&str>,
@@ -1665,7 +1665,7 @@ fn deploy_with_override(
         "mkdir -p {}",
         shell::quote_path(&override_config.staging_path)
     );
-    log_status!("deploy", "Using module deploy override: {}", module.id);
+    log_status!("deploy", "Using extension deploy override: {}", extension.id);
     log_status!(
         "deploy",
         "Creating staging directory: {}",
@@ -1689,7 +1689,7 @@ fn deploy_with_override(
     }
 
     // Step 3: Render and execute install command
-    let cli_path = module
+    let cli_path = extension
         .cli
         .as_ref()
         .and_then(|c| c.default_cli_path.as_deref())

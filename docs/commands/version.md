@@ -113,7 +113,7 @@ Errors:
 ## Notes
 
 - Components must have `version_targets` configured (non-empty). Homeboy uses the first target as the primary version source.
-- Each `version_targets[]` entry has `file` and optional `pattern`. When `pattern` is omitted, Homeboy checks module-provided version patterns for that file type; if none are provided, the command errors.
+- Each `version_targets[]` entry has `file` and optional `pattern`. When `pattern` is omitted, Homeboy checks extension-provided version patterns for that file type; if none are provided, the command errors.
 
 ### Changelog Requirements
 

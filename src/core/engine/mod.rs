@@ -1,6 +1,6 @@
 //! Generic pipeline execution infrastructure.
 //!
-//! This module provides the core pipeline framework:
+//! This extension provides the core pipeline framework:
 //! - `pipeline` - Traits, topological sorting, batch execution
 //! - `executor` - Command routing (local vs SSH), CLI tool templating
 //!

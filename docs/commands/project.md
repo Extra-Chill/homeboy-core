@@ -57,7 +57,7 @@ Options:
 - `--skip-existing`: skip items that already exist (JSON mode only)
 - `--server-id <server_id>`: optional server ID
 - `--base-path <path>`: optional base path (local or remote depending on server configuration)
-- `--table-prefix <prefix>`: optional table prefix (only used by modules that care about table naming)
+- `--table-prefix <prefix>`: optional table prefix (only used by extensions that care about table naming)
 
 Arguments (CLI mode):
 
@@ -136,10 +136,10 @@ homeboy project create my-site my-site.local \
 All commands execute locally when no `server_id` is configured:
 
 - **CLI tools** (`homeboy wp`, `homeboy composer`) - execute in local shell
-- **Database** (`homeboy db`) - uses module templates, executes locally
+- **Database** (`homeboy db`) - uses extension templates, executes locally
 - **Logs** (`homeboy logs`) - reads files from `base_path`
 - **Files** (`homeboy file`) - browses/edits files at `base_path`
-- **Module platform behaviors** - project discovery, version patterns, etc.
+- **Extension platform behaviors** - project discovery, version patterns, etc.
 
 ### What Requires a Server
 

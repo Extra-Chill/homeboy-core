@@ -228,7 +228,7 @@ fn generate_import_statement(import_path: &str, language: &Language) -> String {
 ///
 /// Finds the last existing import/use line and inserts after it.
 /// If no imports exist, inserts after the first non-comment, non-blank line
-/// (e.g., after `<?php` or after module-level attributes).
+/// (e.g., after `<?php` or after extension-level attributes).
 fn insert_import(content: &str, import_line: &str, language: &Language) -> String {
     let lines: Vec<&str> = content.lines().collect();
 
@@ -1443,7 +1443,7 @@ pub fn run() {}
 
     #[test]
     fn insert_import_when_no_existing_imports() {
-        let content = r#"// A module with no imports
+        let content = r#"// A extension with no imports
 
 pub struct Output {}
 "#;

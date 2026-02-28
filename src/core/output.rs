@@ -1,6 +1,6 @@
 //! Public output types for Homeboy command responses.
 //!
-//! This module contains all types that are part of the public API
+//! This extension contains all types that are part of the public API
 //! for command output. These are used by CLI commands and consumers
 //! of the homeboy library.
 
