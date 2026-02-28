@@ -57,6 +57,8 @@ pub struct RenameSpec {
     pub to: String,
     pub scope: RenameScope,
     pub variants: Vec<CaseVariant>,
+    /// When true, use exact string matching (no boundary detection).
+    pub literal: bool,
 }
 
 impl RenameSpec {
@@ -118,6 +120,25 @@ impl RenameSpec {
             to: to.to_string(),
             scope,
             variants,
+            literal: false,
+        }
+    }
+
+    /// Create a literal rename spec — exact string match, no boundary detection,
+    /// no case variant generation. The `from` string is matched as-is.
+    pub fn literal(from: &str, to: &str, scope: RenameScope) -> Self {
+        let variants = vec![CaseVariant {
+            from: from.to_string(),
+            to: to.to_string(),
+            label: "literal".to_string(),
+        }];
+
+        RenameSpec {
+            from: from.to_string(),
+            to: to.to_string(),
+            scope,
+            variants,
+            literal: true,
         }
     }
 }
@@ -279,6 +300,25 @@ fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
     matches
 }
 
+/// Find all occurrences of `term` in `text` using exact substring matching.
+/// No boundary detection — every occurrence is returned.
+fn find_literal_matches(text: &str, term: &str) -> Vec<usize> {
+    let mut matches = Vec::new();
+    let term_len = term.len();
+
+    if term_len == 0 || term_len > text.len() {
+        return matches;
+    }
+
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(term) {
+        matches.push(start + pos);
+        start += pos + 1;
+    }
+
+    matches
+}
+
 // ============================================================================
 // File walking
 // ============================================================================
@@ -375,6 +415,8 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
     let mut sorted_variants = spec.variants.clone();
     sorted_variants.sort_by(|a, b| b.from.len().cmp(&a.from.len()));
 
+    let use_literal = spec.literal;
+
     for file_path in &files {
         let Ok(content) = std::fs::read_to_string(file_path) else {
             continue;
@@ -392,7 +434,11 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
             let mut claimed: Vec<(usize, usize)> = Vec::new();
 
             for variant in &sorted_variants {
-                let positions = find_term_matches(line, &variant.from);
+                let positions = if use_literal {
+                    find_literal_matches(line, &variant.from)
+                } else {
+                    find_term_matches(line, &variant.from)
+                };
                 for pos in positions {
                     let end = pos + variant.from.len();
                     // Skip if this range overlaps with an already-claimed match
@@ -433,6 +479,7 @@ pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
     // Generate file content edits using reverse-offset replacement
     let mut edits = Vec::new();
     let mut affected_files: HashMap<String, bool> = HashMap::new();
+    let use_literal = spec.literal;
 
     for file_path in &files {
         let Ok(content) = std::fs::read_to_string(file_path) else {
@@ -449,7 +496,11 @@ pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
         let mut all_matches: Vec<(usize, usize, String)> = Vec::new(); // (start, end, replacement)
 
         for variant in &sorted_variants {
-            let positions = find_term_matches(&content, &variant.from);
+            let positions = if use_literal {
+                find_literal_matches(&content, &variant.from)
+            } else {
+                find_term_matches(&content, &variant.from)
+            };
             for pos in positions {
                 let end = pos + variant.from.len();
                 // Skip if overlapping with an already-claimed longer match
@@ -1054,5 +1105,141 @@ mod tests {
         assert!(refs.is_empty(), "Should NOT find refs in root-level build/ dir");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ====================================================================
+    // Literal mode tests
+    // ====================================================================
+
+    #[test]
+    fn literal_spec_has_single_variant() {
+        let spec = RenameSpec::literal("datamachine-events", "data-machine-events", RenameScope::All);
+        assert!(spec.literal);
+        assert_eq!(spec.variants.len(), 1);
+        assert_eq!(spec.variants[0].from, "datamachine-events");
+        assert_eq!(spec.variants[0].to, "data-machine-events");
+        assert_eq!(spec.variants[0].label, "literal");
+    }
+
+    #[test]
+    fn find_literal_matches_exact() {
+        // Should find exact substring — no boundary detection
+        let matches = find_literal_matches("datamachine-events is great", "datamachine-events");
+        assert_eq!(matches, vec![0]);
+
+        // Should match inside larger strings (no boundary filtering)
+        let matches = find_literal_matches("the-datamachine-events-plugin", "datamachine-events");
+        assert_eq!(matches, vec![4]);
+
+        // Multiple occurrences
+        let matches = find_literal_matches("datamachine-events and datamachine-events", "datamachine-events");
+        assert_eq!(matches, vec![0, 23]);
+
+        // No match
+        let matches = find_literal_matches("data-machine-events", "datamachine-events");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn literal_mode_finds_references_in_file() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_literal_refs_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(
+            dir.join("plugin.php"),
+            "// Plugin: datamachine-events\ndefine('DATAMACHINE_EVENTS_VERSION', '1.0');\nfunction datamachine_events_init() {}\n",
+        )
+        .unwrap();
+
+        // Literal mode: only exact match, no case variants
+        let spec = RenameSpec::literal("datamachine-events", "data-machine-events", RenameScope::All);
+        let refs = find_references(&spec, &dir);
+
+        // Should find only the hyphenated form, not DATAMACHINE_EVENTS or datamachine_events
+        assert_eq!(refs.len(), 1, "Should find exactly 1 literal match, got: {:?}",
+            refs.iter().map(|r| &r.matched).collect::<Vec<_>>());
+        assert_eq!(refs[0].matched, "datamachine-events");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn literal_mode_generates_correct_edits() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_literal_edit_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(
+            dir.join("plugin.php"),
+            "Text Domain: datamachine-events\nSlug: datamachine-events\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::literal("datamachine-events", "data-machine-events", RenameScope::All);
+        let result = generate_renames(&spec, &dir);
+
+        assert_eq!(result.edits.len(), 1);
+        assert_eq!(result.edits[0].replacements, 2);
+        assert_eq!(
+            result.edits[0].new_content,
+            "Text Domain: data-machine-events\nSlug: data-machine-events\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn literal_mode_renames_files() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_literal_file_rename_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(
+            dir.join("datamachine-events.php"),
+            "// main file\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::literal("datamachine-events", "data-machine-events", RenameScope::All);
+        let result = generate_renames(&spec, &dir);
+
+        assert!(!result.file_renames.is_empty(), "Should rename datamachine-events.php");
+        let rename = &result.file_renames[0];
+        assert_eq!(rename.from, "datamachine-events.php");
+        assert_eq!(rename.to, "data-machine-events.php");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn literal_mode_apply_writes_to_disk() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_literal_apply_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(
+            dir.join("test.php"),
+            "slug: datamachine-events\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::literal("datamachine-events", "data-machine-events", RenameScope::All);
+        let mut result = generate_renames(&spec, &dir);
+
+        apply_renames(&mut result, &dir).unwrap();
+        assert!(result.applied);
+
+        let content = std::fs::read_to_string(dir.join("test.php")).unwrap();
+        assert_eq!(content, "slug: data-machine-events\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn literal_mode_no_boundary_filtering() {
+        // Normal mode would NOT match "widget" inside "widgetry" — literal mode SHOULD
+        let matches = find_literal_matches("widgetry", "widget");
+        assert_eq!(matches, vec![0], "Literal should match 'widget' inside 'widgetry'");
+
+        // Normal mode boundary test for comparison
+        let boundary_matches = find_term_matches("widgetry", "widget");
+        assert!(boundary_matches.is_empty(), "Boundary mode should NOT match 'widget' inside 'widgetry'");
     }
 }
