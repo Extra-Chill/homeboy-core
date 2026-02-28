@@ -903,8 +903,10 @@ pub fn detect_unconfigured_patterns(component: &Component) -> Vec<UnconfiguredPa
     let mut unconfigured = Vec::new();
     let base_path = &component.local_path;
 
-    // Get configured file/pattern combinations
-    let configured: HashSet<(String, String)> = component
+    // Get configured file/pattern combinations as compiled regexes for fuzzy matching.
+    // We can't use exact string comparison because the user's configured pattern
+    // may differ textually from the detected pattern while matching the same content.
+    let configured_patterns: Vec<(String, Option<Regex>)> = component
         .version_targets
         .as_ref()
         .map(|targets| {
@@ -915,7 +917,8 @@ pub fn detect_unconfigured_patterns(component: &Component) -> Vec<UnconfiguredPa
                         .pattern
                         .clone()
                         .or_else(|| default_pattern_for_file(&t.file))?;
-                    Some((t.file.clone(), pattern))
+                    let compiled = Regex::new(&pattern).ok();
+                    Some((t.file.clone(), compiled))
                 })
                 .collect()
         })
@@ -952,10 +955,15 @@ pub fn detect_unconfigured_patterns(component: &Component) -> Vec<UnconfiguredPa
                                         regex::escape(const_name.as_str())
                                     );
 
-                                    // Check if already configured
-                                    if !configured
-                                        .contains(&(filename.clone(), specific_pattern.clone()))
-                                    {
+                                    // Check if already configured by testing whether
+                                    // any configured pattern for this file matches the
+                                    // define() line. This avoids false positives from
+                                    // textual pattern differences (e.g. ['\"] vs ['\"]).
+                                    let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+                                    let already_configured = configured_patterns.iter().any(|(f, re)| {
+                                        f == &filename && re.as_ref().is_some_and(|r| r.is_match(full_match))
+                                    });
+                                    if !already_configured {
                                         unconfigured.push(UnconfiguredPattern {
                                             file: filename.clone(),
                                             pattern: specific_pattern,
