@@ -1,38 +1,18 @@
 use clap::{Args, Subcommand};
-use homeboy::log_status;
 use serde::Serialize;
 
 use homeboy::component;
-use homeboy::git::{commit_at, tag_at, CommitOptions};
 use homeboy::release::{self, ReleasePlan, ReleaseRun};
-use homeboy::version::{
-    read_component_version, read_version, set_component_version, VersionTargetInfo,
-};
+use homeboy::version::{read_component_version, read_version, VersionTargetInfo};
 
 use super::release::BumpType;
 
 use super::CmdResult;
 
 #[derive(Serialize)]
-pub struct GitCommitInfo {
-    pub success: bool,
-    pub message: String,
-    pub files_staged: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stdout: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stderr: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag_created: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag_name: Option<String>,
-}
-
-#[derive(Serialize)]
 #[serde(untagged)]
 pub enum VersionOutput {
     Show(VersionShowOutput),
-    Set(VersionSetOutput),
     Bump(VersionBumpOutput),
 }
 
@@ -53,7 +33,7 @@ enum VersionCommand {
         #[arg(long)]
         path: Option<String>,
     },
-    /// Set version directly (without incrementing or changelog finalization)
+    /// [DEPRECATED] Use 'homeboy version bump' or 'homeboy release' instead. See issue #259.
     #[command(visible_aliases = ["edit", "merge"])]
     Set {
         /// Component ID
@@ -92,24 +72,6 @@ pub struct VersionShowOutput {
     component_id: Option<String>,
     pub version: String,
     targets: Vec<VersionTargetInfo>,
-}
-
-#[derive(Serialize)]
-
-pub struct VersionSetOutput {
-    command: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    component_id: Option<String>,
-    old_version: String,
-    new_version: String,
-    targets: Vec<VersionTargetInfo>,
-    changelog_path: String,
-    changelog_finalized: bool,
-    changelog_changed: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    git_commit: Option<GitCommitInfo>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -163,45 +125,21 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             ))
         }
         VersionCommand::Set {
-            component_id,
-            new_version,
-            path,
+            component_id: _,
+            new_version: _,
+            path: _,
         } => {
-            let result = {
-                let mut comp = component::resolve(component_id.as_deref())?;
-                if let Some(ref p) = path {
-                    comp.local_path = p.clone();
-                }
-                set_component_version(&comp, &new_version)?
-            };
-
-            // Auto-commit version and changelog changes
-            // Use override path for git operations if provided
-            let commit_path = path.as_deref();
-            let git_commit = create_version_commit(
-                component_id.as_deref(),
-                &result.new_version,
-                &result.targets,
-                &result.changelog_path,
-                true,
-                commit_path,
-            );
-
-            Ok((
-                VersionOutput::Set(VersionSetOutput {
-                    command: "version.set".to_string(),
-                    component_id,
-                    old_version: result.old_version,
-                    new_version: result.new_version,
-                    targets: result.targets,
-                    changelog_path: result.changelog_path,
-                    changelog_finalized: result.changelog_finalized,
-                    changelog_changed: result.changelog_changed,
-                    git_commit,
-                    warnings: result.warnings,
-                }),
-                0,
-            ))
+            Err(homeboy::Error::validation_invalid_argument(
+                "version set",
+                "'version set' has been deprecated. It skips changelog finalization, hooks, \
+                 and push — producing incomplete releases. Use 'homeboy version bump' or \
+                 'homeboy release' instead, which handle the full release pipeline atomically.",
+                None,
+                None,
+            )
+            .with_hint("homeboy version bump <component> patch".to_string())
+            .with_hint("homeboy release <component> patch".to_string())
+            .with_hint("See: https://github.com/Extra-Chill/homeboy/issues/259".to_string()))
         }
         VersionCommand::Bump {
             component_id,
@@ -255,124 +193,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
     }
 }
 
-/// Creates a git commit and optionally a tag for version changes.
-fn create_version_commit(
-    component_id: Option<&str>,
-    new_version: &str,
-    targets: &[VersionTargetInfo],
-    changelog_path: &str,
-    create_tag: bool,
-    path_override: Option<&str>,
-) -> Option<GitCommitInfo> {
-    // Get component's local_path and git repo root for path relativization
-    let local_path = if let Some(path) = path_override {
-        path.to_string()
-    } else {
-        component_id
-            .and_then(|id| homeboy::component::load(id).ok())
-            .map(|c| c.local_path)
-            .unwrap_or_default()
-    };
 
-    // Use git repo root for path relativization (handles components in subdirectories)
-    let repo_root = homeboy::git::get_git_root(&local_path).unwrap_or(local_path.clone());
-
-    // Convert absolute paths to relative paths (relative to git repo root) for staging
-    let files_to_stage: Vec<String> = targets
-        .iter()
-        .map(|t| {
-            std::path::Path::new(&t.full_path)
-                .strip_prefix(&repo_root)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| t.full_path.clone())
-        })
-        .chain(
-            // Also relativize changelog path if non-empty
-            (!changelog_path.is_empty())
-                .then(|| {
-                    std::path::Path::new(changelog_path)
-                        .strip_prefix(&repo_root)
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| changelog_path.to_string())
-                })
-                .into_iter(),
-        )
-        .collect();
-
-    let commit_message = format!("release: v{}", new_version);
-
-    let options = CommitOptions {
-        staged_only: false,
-        files: Some(files_to_stage.clone()),
-        exclude: None,
-        amend: false,
-    };
-
-    // Use repo_root as the path override for git operations so commit and tag
-    // run in the correct directory when --path is provided.
-    let git_path = Some(repo_root.as_str());
-
-    match commit_at(component_id, Some(&commit_message), options, git_path) {
-        Ok(output) => {
-            let stdout = if output.stdout.is_empty() {
-                None
-            } else {
-                Some(output.stdout)
-            };
-            let stderr = if output.stderr.is_empty() {
-                None
-            } else {
-                Some(output.stderr)
-            };
-
-            // Create tag after successful commit
-            let (tag_created, tag_name) = if create_tag && output.success {
-                let tag_name = format!("v{}", new_version);
-                let tag_message = format!("Release {}", tag_name);
-                match tag_at(component_id, Some(&tag_name), Some(&tag_message), git_path) {
-                    Ok(tag_output) => {
-                        if tag_output.success {
-                            log_status!(
-                                "version",
-                                "Tagged {}. For automated packaging/publishing, configure a release pipeline: homeboy docs release",
-                                tag_name
-                            );
-                        }
-                        (Some(tag_output.success), Some(tag_name))
-                    }
-                    Err(_) => (Some(false), Some(tag_name)),
-                }
-            } else {
-                (None, None)
-            };
-
-            Some(GitCommitInfo {
-                success: output.success,
-                message: commit_message,
-                files_staged: files_to_stage,
-                stdout,
-                stderr,
-                tag_created,
-                tag_name,
-            })
-        }
-        Err(e) => Some(GitCommitInfo {
-            success: false,
-            message: commit_message.clone(),
-            files_staged: files_to_stage.clone(),
-            stdout: None,
-            stderr: Some(format!(
-                "Commit failed: {}. Version files modified but not committed: {}. Recovery: git add -A && git commit -m \"{}\" OR git checkout -- {}",
-                e,
-                files_to_stage.join(", "),
-                commit_message,
-                files_to_stage.join(" ")
-            )),
-            tag_created: None,
-            tag_name: None,
-        }),
-    }
-}
 
 pub fn show_version_output(component_id: &str) -> homeboy::Result<(VersionShowOutput, i32)> {
     let info = read_version(Some(component_id))?;
