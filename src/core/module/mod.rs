@@ -16,7 +16,7 @@ pub use manifest::{
     DatabaseConfig, DeployCapability, DeployOverride, DeployVerification, DiscoveryConfig,
     ExecutableCapability, HttpMethod, InputConfig, LintConfig, ModuleManifest, OutputConfig,
     OutputSchema, PlatformCapability, ProvidesConfig, RequirementsConfig, RuntimeConfig,
-    SelectOption, SettingConfig, SinceTagConfig, TestConfig, VersionPatternConfig,
+    ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig, TestConfig, VersionPatternConfig,
 };
 
 // Re-export version types
@@ -70,6 +70,105 @@ pub fn find_module_by_tool(tool: &str) -> Option<ModuleManifest> {
             .into_iter()
             .find(|m| m.cli.as_ref().is_some_and(|c| c.tool == tool))
     })
+}
+
+/// Find a module that handles a given file extension and has a specific capability script.
+///
+/// Looks through all installed modules for one whose `provides.file_extensions` includes
+/// the given extension and whose `scripts` has the requested capability configured.
+///
+/// Returns the module manifest with `module_path` populated.
+pub fn find_module_for_file_extension(ext: &str, capability: &str) -> Option<ModuleManifest> {
+    load_all_modules().ok().and_then(|modules| {
+        modules.into_iter().find(|m| {
+            if !m.handles_file_extension(ext) {
+                return false;
+            }
+            match capability {
+                "fingerprint" => m.fingerprint_script().is_some(),
+                "refactor" => m.refactor_script().is_some(),
+                _ => false,
+            }
+        })
+    })
+}
+
+/// Run a module's fingerprint script on file content.
+///
+/// The script receives a JSON object on stdin:
+/// ```json
+/// {"file_path": "src/core/foo.rs", "content": "...file content..."}
+/// ```
+///
+/// The script must output a JSON object on stdout matching the FileFingerprint schema:
+/// ```json
+/// {
+///   "methods": ["foo", "bar"],
+///   "type_name": "MyStruct",
+///   "implements": ["SomeTrait"],
+///   "registrations": [],
+///   "namespace": null,
+///   "imports": ["crate::error::Result"]
+/// }
+/// ```
+pub fn run_fingerprint_script(
+    module: &ModuleManifest,
+    file_path: &str,
+    content: &str,
+) -> Option<FingerprintOutput> {
+    let module_path = module.module_path.as_deref()?;
+    let script_rel = module.fingerprint_script()?;
+    let script_path = std::path::Path::new(module_path).join(script_rel);
+
+    if !script_path.exists() {
+        return None;
+    }
+
+    let input = serde_json::json!({
+        "file_path": file_path,
+        "content": content,
+    });
+
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(script_path.to_string_lossy().as_ref())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(input.to_string().as_bytes());
+            }
+            child.wait_with_output().ok()
+        })?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout).ok()
+}
+
+/// Output from a fingerprint extension script.
+/// Matches the structural data extracted from a source file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FingerprintOutput {
+    #[serde(default)]
+    pub methods: Vec<String>,
+    #[serde(default)]
+    pub type_name: Option<String>,
+    #[serde(default)]
+    pub implements: Vec<String>,
+    #[serde(default)]
+    pub registrations: Vec<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub imports: Vec<String>,
 }
 
 pub fn module_path(id: &str) -> PathBuf {

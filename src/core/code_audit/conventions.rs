@@ -245,17 +245,17 @@ fn contains_word(text: &str, word: &str) -> bool {
 }
 
 // ============================================================================
-// Fingerprinting
+// Fingerprinting — Extension-powered
 // ============================================================================
 
 /// Extract a structural fingerprint from a source file.
+///
+/// Dispatches to an installed extension module that handles the file's extension
+/// and has a fingerprint script configured. No extension = no fingerprint.
 pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
-    let ext = path.extension()?.to_str()?;
-    let language = Language::from_extension(ext);
-    if language == Language::Unknown {
-        return None;
-    }
+    use crate::module;
 
+    let ext = path.extension()?.to_str()?;
     let content = std::fs::read_to_string(path).ok()?;
     let relative_path = path
         .strip_prefix(root)
@@ -263,227 +263,22 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
         .to_string_lossy()
         .to_string();
 
-    let (methods, type_name, implements) = match language {
-        Language::Php => extract_php(&content),
-        Language::Rust => extract_rust(&content),
-        Language::JavaScript | Language::TypeScript => extract_js(&content),
-        Language::Unknown => return None,
-    };
+    let extension_module = module::find_module_for_file_extension(ext, "fingerprint")?;
+    let output = module::run_fingerprint_script(&extension_module, &relative_path, &content)?;
 
-    let registrations = extract_registrations(&content, &language);
-    let (namespace, imports) = extract_namespace_imports(&content, &language);
+    let language = Language::from_extension(ext);
 
     Some(FileFingerprint {
         relative_path,
         language,
-        methods,
-        registrations,
-        type_name,
-        implements,
-        namespace,
-        imports,
+        methods: output.methods,
+        registrations: output.registrations,
+        type_name: output.type_name,
+        implements: output.implements,
+        namespace: output.namespace,
+        imports: output.imports,
         content,
     })
-}
-
-/// Extract methods, class name, and implements from PHP.
-fn extract_php(content: &str) -> (Vec<String>, Option<String>, Vec<String>) {
-    let method_re = Regex::new(r"(?m)^\s*(?:(?:public|protected|private|static|abstract|final)\s+)*function\s+(\w+)")
-        .unwrap();
-    let class_re =
-        Regex::new(r"(?m)^\s*(?:abstract\s+)?class\s+(\w+)").unwrap();
-    let implements_re =
-        Regex::new(r"(?m)implements\s+([\w\\,\s]+)").unwrap();
-
-    let methods: Vec<String> = method_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    let type_name = class_re
-        .captures(content)
-        .map(|c| c[1].to_string());
-
-    let implements: Vec<String> = implements_re
-        .captures(content)
-        .map(|c| {
-            c[1].split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    (methods, type_name, implements)
-}
-
-/// Extract functions, struct name, and trait impls from Rust.
-fn extract_rust(content: &str) -> (Vec<String>, Option<String>, Vec<String>) {
-    let fn_re = Regex::new(r"(?m)^\s*pub(?:\(crate\))?\s+fn\s+(\w+)").unwrap();
-    let struct_re = Regex::new(r"(?m)^\s*pub\s+struct\s+(\w+)").unwrap();
-    let impl_re = Regex::new(r"(?m)^\s*impl\s+(\w+)\s+for\s+").unwrap();
-
-    let methods: Vec<String> = fn_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    let type_name = struct_re.captures(content).map(|c| c[1].to_string());
-
-    let implements: Vec<String> = impl_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    (methods, type_name, implements)
-}
-
-/// Extract functions and class/export name from JS/TS.
-fn extract_js(content: &str) -> (Vec<String>, Option<String>, Vec<String>) {
-    let fn_re =
-        Regex::new(r"(?m)(?:export\s+)?(?:async\s+)?function\s+(\w+)").unwrap();
-    let method_re = Regex::new(r"(?m)^\s+(?:async\s+)?(\w+)\s*\(").unwrap();
-    let class_re =
-        Regex::new(r"(?m)(?:export\s+)?class\s+(\w+)").unwrap();
-    let extends_re = Regex::new(r"extends\s+(\w+)").unwrap();
-
-    let mut methods: Vec<String> = fn_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    // Also grab class methods
-    for cap in method_re.captures_iter(content) {
-        let name = cap[1].to_string();
-        if !methods.contains(&name)
-            && name != "if"
-            && name != "for"
-            && name != "while"
-            && name != "switch"
-            && name != "catch"
-            && name != "return"
-        {
-            methods.push(name);
-        }
-    }
-
-    let type_name = class_re.captures(content).map(|c| c[1].to_string());
-
-    let implements: Vec<String> = extends_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    (methods, type_name, implements)
-}
-
-/// Extract registration/hook calls that indicate architectural patterns.
-fn extract_registrations(content: &str, language: &Language) -> Vec<String> {
-    let patterns: Vec<&str> = match language {
-        Language::Php => vec![
-            r#"add_action\s*\(\s*['"](\w+)['"]"#,
-            r#"add_filter\s*\(\s*['"](\w+)['"]"#,
-            r"register_rest_route\s*\(",
-            r"register_post_type\s*\(",
-            r"register_taxonomy\s*\(",
-            r"register_block_type\s*\(",
-            r"wp_enqueue_script\s*\(",
-            r"wp_enqueue_style\s*\(",
-        ],
-        Language::Rust => vec![
-            r"\.subcommand\s*\(",
-            r"\.arg\s*\(",
-            r"Command::new\s*\(",
-        ],
-        Language::JavaScript | Language::TypeScript => vec![
-            r"module\.exports",
-            r"export\s+default",
-            r"registerBlockType\s*\(",
-            r"addEventListener\s*\(",
-        ],
-        Language::Unknown => vec![],
-    };
-
-    let mut registrations = Vec::new();
-    for pattern in patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            for cap in re.captures_iter(content) {
-                let matched = if cap.len() > 1 {
-                    cap.get(1).map(|m| m.as_str()).unwrap_or(pattern)
-                } else {
-                    pattern
-                };
-                let registration = matched.to_string();
-                if !registrations.contains(&registration) {
-                    registrations.push(registration);
-                }
-            }
-        }
-    }
-    registrations
-}
-
-// ============================================================================
-// Namespace and Import Extraction
-// ============================================================================
-
-/// Extract namespace declaration and import/use statements from source content.
-fn extract_namespace_imports(content: &str, language: &Language) -> (Option<String>, Vec<String>) {
-    match language {
-        Language::Php => extract_php_namespace_imports(content),
-        Language::Rust => extract_rust_namespace_imports(content),
-        Language::JavaScript | Language::TypeScript => extract_js_namespace_imports(content),
-        Language::Unknown => (None, vec![]),
-    }
-}
-
-fn extract_php_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
-    let ns_re = Regex::new(r"(?m)^\s*namespace\s+([\w\\]+)\s*;").unwrap();
-    let use_re = Regex::new(r"(?m)^\s*use\s+([\w\\]+)(?:\s+as\s+\w+)?\s*;").unwrap();
-
-    let namespace = ns_re.captures(content).map(|c| c[1].to_string());
-
-    let imports: Vec<String> = use_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    (namespace, imports)
-}
-
-fn extract_rust_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
-    // Rust doesn't have namespace declarations per-file, but we can track the module path
-    // from `mod` declarations in the same directory
-    let use_re = Regex::new(r"(?m)^\s*use\s+((?:\w+::)*(?:\w+|\{[^}]+\}))").unwrap();
-
-    let imports: Vec<String> = use_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    (None, imports)
-}
-
-fn extract_js_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
-    // JS/TS import statements
-    let import_re =
-        Regex::new(r#"(?m)^\s*import\s+.*?\s+from\s+['"]([@\w/.!-]+)['"]"#).unwrap();
-    let require_re =
-        Regex::new(r#"(?m)(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"]([@\w/.!-]+)['"]"#).unwrap();
-
-    let mut imports: Vec<String> = import_re
-        .captures_iter(content)
-        .map(|c| c[1].to_string())
-        .collect();
-
-    for cap in require_re.captures_iter(content) {
-        let imp = cap[1].to_string();
-        if !imports.contains(&imp) {
-            imports.push(imp);
-        }
-    }
-
-    (None, imports)
 }
 
 // ============================================================================
@@ -1224,6 +1019,15 @@ fn is_index_file(path: &Path) -> bool {
 
 /// Walk source files under a root, skipping common non-source directories
 /// and module index files.
+/// Collect all file extensions that installed extension modules can handle.
+fn extension_provided_file_extensions() -> Vec<String> {
+    crate::module::load_all_modules()
+        .unwrap_or_default()
+        .into_iter()
+        .flat_map(|m| m.provided_file_extensions().to_vec())
+        .collect()
+}
+
 fn walk_source_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let skip_dirs = [
         "node_modules",
@@ -1237,7 +1041,8 @@ fn walk_source_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
         "cache",
         "tmp",
     ];
-    let source_extensions = ["php", "rs", "js", "jsx", "ts", "tsx", "mjs"];
+    let dynamic_extensions = extension_provided_file_extensions();
+    let source_extensions: Vec<&str> = dynamic_extensions.iter().map(|s| s.as_str()).collect();
 
     let mut files = Vec::new();
     walk_recursive(root, &skip_dirs, &source_extensions, &mut files)?;
@@ -1286,67 +1091,6 @@ fn walk_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_php_methods() {
-        let content = r#"
-class MyStep {
-    public function register() {}
-    protected function validate($input) {}
-    public function execute($context) {}
-    private function helper() {}
-}
-"#;
-        let (methods, type_name, _) = extract_php(content);
-        assert_eq!(methods, vec!["register", "validate", "execute", "helper"]);
-        assert_eq!(type_name, Some("MyStep".to_string()));
-    }
-
-    #[test]
-    fn extract_php_implements() {
-        let content = r#"
-class MyStep extends Base implements StepInterface, Loggable {
-    public function run() {}
-}
-"#;
-        let (_, _, implements) = extract_php(content);
-        assert!(implements.contains(&"StepInterface".to_string()));
-        assert!(implements.contains(&"Loggable".to_string()));
-    }
-
-    #[test]
-    fn extract_rust_functions() {
-        let content = r#"
-pub struct MyCommand;
-
-impl MyCommand {
-    pub fn run() {}
-    pub(crate) fn validate() {}
-    fn private_helper() {}
-}
-
-impl Display for MyCommand {}
-"#;
-        let (methods, type_name, implements) = extract_rust(content);
-        assert!(methods.contains(&"run".to_string()));
-        assert!(methods.contains(&"validate".to_string()));
-        assert!(!methods.contains(&"private_helper".to_string()));
-        assert_eq!(type_name, Some("MyCommand".to_string()));
-        assert!(implements.contains(&"Display".to_string()));
-    }
-
-    #[test]
-    fn extract_php_registrations() {
-        let content = r#"
-add_action('init', [$this, 'register']);
-add_filter('the_content', [$this, 'filter']);
-register_rest_route('api/v1', '/data', []);
-"#;
-        let regs = extract_registrations(content, &Language::Php);
-        assert!(regs.contains(&"init".to_string()));
-        assert!(regs.contains(&"the_content".to_string()));
-        assert!(regs.iter().any(|r| r.contains("register_rest_route")));
-    }
 
     #[test]
     fn discover_convention_from_fingerprints() {
@@ -1942,53 +1686,6 @@ class AgentPing {
         assert_eq!(conv.outliers[0].file, "steps/C.php");
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // ========================================================================
-    // Namespace and import tests
-    // ========================================================================
-
-    #[test]
-    fn extract_php_namespace() {
-        let content = r#"<?php
-namespace DataMachine\Abilities\Flow;
-
-use DataMachine\Core\BaseAbility;
-use DataMachine\Traits\Registrable;
-
-class CreateFlowAbility extends BaseAbility {
-    public function execute() {}
-}
-"#;
-        let (ns, imports) = extract_php_namespace_imports(content);
-        assert_eq!(ns, Some("DataMachine\\Abilities\\Flow".to_string()));
-        assert_eq!(imports.len(), 2);
-        assert!(imports.contains(&"DataMachine\\Core\\BaseAbility".to_string()));
-        assert!(imports.contains(&"DataMachine\\Traits\\Registrable".to_string()));
-    }
-
-    #[test]
-    fn extract_php_no_namespace() {
-        let content = "<?php\nclass SimpleClass {}\n";
-        let (ns, imports) = extract_php_namespace_imports(content);
-        assert!(ns.is_none());
-        assert!(imports.is_empty());
-    }
-
-    #[test]
-    fn extract_js_imports() {
-        let content = r#"
-import React from 'react';
-import { useState } from 'react';
-import FlowCard from '../components/FlowCard';
-
-const App = () => {};
-export default App;
-"#;
-        let (ns, imports) = extract_js_namespace_imports(content);
-        assert!(ns.is_none());
-        assert!(imports.contains(&"react".to_string()));
-        assert!(imports.contains(&"../components/FlowCard".to_string()));
     }
 
     #[test]
