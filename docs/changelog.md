@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.50.1] - 2026-02-28
+
+### Changed
+- Replace scp -r with rsync for directory deploys (mirrors source exactly)
+
+### Fixed
+- Deploy uses rsync --delete to clean up stale files on target servers (#253)
+- Detect local IPs on deploy to skip SSH when agent runs on the same server (#236)
+
 ## [0.50.0] - 2026-02-27
 
 ### Added
