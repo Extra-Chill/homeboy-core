@@ -107,7 +107,7 @@ Homeboy builds an **effective settings** map for each extension by merging setti
 When running a extension, Homeboy passes an execution context via environment variables:
 
 - `HOMEBOY_EXEC_CONTEXT_VERSION`: currently `1`
-- `HOMEBOY_MODULE_ID`
+- `HOMEBOY_EXTENSION_ID`
 - `HOMEBOY_SETTINGS_JSON`: merged effective settings (JSON)
 - `HOMEBOY_PROJECT_ID` (optional; when a project context is used)
 - `HOMEBOY_COMPONENT_ID` (optional; when a component context is resolved)

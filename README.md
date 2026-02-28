@@ -1,6 +1,6 @@
 # Homeboy
 
-Development and deployment automation CLI built in Rust — manage projects, servers, and fleets from the terminal.
+Opinionated CLI for managing codebases at scale — versioning, refactoring, auditing, deploying.
 
 ## What It Does
 
@@ -9,6 +9,8 @@ Homeboy replaces scattered scripts, FTP clients, and manual SSH sessions with on
 - **Deploy anything** — Push plugins, themes, CLIs, and extensions to remote servers
 - **Fleet management** — Group projects, detect shared components, deploy everywhere at once
 - **Release pipelines** — Version bump, changelog, build, tag, publish — one command
+- **Structural refactoring** — Rename terms across a codebase with case-variant awareness and collision detection
+- **Code auditing** — Discover conventions from your codebase and flag drift automatically
 - **Remote operations** — SSH, file management, database queries, log tailing
 - **Structured output** — JSON for scripting and AI agents, human-readable for terminals
 
@@ -37,9 +39,11 @@ Homeboy replaces scattered scripts, FTP clients, and manual SSH sessions with on
 | Deploy a plugin | `homeboy deploy my-site my-plugin` |
 | Deploy to all sites | `homeboy deploy my-plugin --shared` |
 | Fleet rollout | `homeboy deploy my-plugin --fleet production` |
-| Deploy across fleet | `homeboy deploy my-plugin --fleet fleet-servers` |
 | Release a new version | `homeboy release run my-plugin` |
+| Rename a term | `homeboy refactor rename --from widget --to gadget -c my-plugin` |
+| Rename exact string | `homeboy refactor rename --literal --from old-slug --to new-slug --path .` |
 | Check what's outdated | `homeboy deploy my-site --check --outdated` |
+| Audit docs vs code | `homeboy docs audit my-component` |
 | Tail remote logs | `homeboy logs show my-site error.log --follow` |
 | Query remote DB | `homeboy db query my-site "SELECT * FROM wp_posts LIMIT 5"` |
 
@@ -66,6 +70,7 @@ homeboy deploy my-site my-plugin
 | `init` | Environment discovery and setup guidance |
 | `deploy` | Push components to projects/fleets |
 | `release` | Version bump → changelog → build → tag → publish |
+| `refactor` | Structural refactoring (rename terms across codebase) |
 | `version` | Semantic version management |
 | `changelog` | Add entries, finalize releases |
 | `git` | Status, commit, push, pull with component awareness |
@@ -75,17 +80,41 @@ homeboy deploy my-site my-plugin
 | `logs` | Remote log viewing and searching |
 | `fleet` | Group projects, coordinated operations |
 | `docs` | Embedded documentation, codebase auditing |
-| `extension` | Install and manage extension extensions |
+| `extension` | Install and manage extensions |
 
 Run `homeboy docs commands/commands-index` for the full reference.
+
+## Refactoring
+
+The `refactor rename` command finds and replaces terms across a codebase with automatic case-variant generation and word-boundary awareness.
+
+```bash
+# Dry run (default) — preview what would change
+homeboy refactor rename --from widget --to gadget --path .
+
+# Apply changes
+homeboy refactor rename --from widget --to gadget --path . --write
+
+# Literal mode — exact string match, no boundary detection
+homeboy refactor rename --literal --from old-slug --to new-slug --path . --write
+```
+
+**Standard mode** generates case variants automatically:
+- `widget` → `gadget` (lowercase)
+- `Widget` → `Gadget` (PascalCase)
+- `WIDGET` → `GADGET` (UPPER_CASE)
+- `widgets` → `gadgets` (plural)
+- Snake_case compounds like `load_widget` → `load_gadget`
+
+**Literal mode** (`--literal`) matches the exact string with no boundary detection or case variants. Useful for compound renames like `datamachine-events` → `data-machine-events` where inserting characters breaks boundary rules.
+
+Both modes include **collision detection** — warnings when a rename would create duplicate identifiers or overwrite existing files.
 
 ## For AI Agents
 
 Homeboy is built for agentic workflows. Every command returns structured JSON, and embedded docs give agents full context without leaving the terminal.
 
-**OpenClaw Skill:** Install `skills/homeboy/` for AI agents using OpenClaw.
-
-**Agent Hooks:** Use [Agent Hooks](https://github.com/Extra-Chill/homeboy-extensions/tree/main/agent-hooks) to guide Claude Code or OpenCode to use Homeboy effectively.
+**Agent Hooks:** Install [Agent Hooks](https://github.com/Extra-Chill/homeboy-extensions/tree/main/agent-hooks) to guide Claude Code or OpenCode to use Homeboy effectively.
 
 ```bash
 homeboy docs list                      # Browse available topics
@@ -96,10 +125,10 @@ homeboy docs audit my-component        # Verify docs match code
 
 ## Extensions
 
-Extensions extend Homeboy with project-type support — WordPress, Node.js, Rust, and more. Browse all available extensions at [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions).
+Extensions add project-type support — WordPress, Node.js, Rust, and more. Browse all available extensions at [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions).
 
 | Extension | Purpose |
-|--------|---------|
+|-----------|---------|
 | **wordpress** | WP-CLI integration, build, test, lint |
 | **nodejs** | PM2 process management |
 | **rust** | Cargo CLI integration |
@@ -107,20 +136,18 @@ Extensions extend Homeboy with project-type support — WordPress, Node.js, Rust
 | **homebrew** | Tap publishing |
 | **agent-hooks** | AI agent guardrails |
 
-Install from the [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions) monorepo:
-
 ```bash
-# Install a extension by name
+# Install an extension by name
 homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id wordpress
 
 # List installed extensions
 homeboy extension list
 
-# Use a extension's commands
+# Use extension commands
 homeboy wp my-site plugin list         # WordPress via extension
 ```
 
-Homeboy auto-detects monorepo layout — just pass `--id` with the extension name. For single-extension repos, `--id` is optional.
+Extensions support **versioning** with constraint matching (`^1.0`, `>=2.0`, `~1.2`), **auto-update checks** on startup, and **language extractors** for fingerprinting project files.
 
 ## Configuration
 
@@ -131,7 +158,7 @@ All config lives in `~/.config/homeboy/`:
 ├── projects/          # Project definitions
 ├── servers/           # Server connections
 ├── components/        # Component definitions
-├── extensions/           # Installed extensions
+├── extensions/        # Installed extensions
 ├── keys/              # SSH keys
 └── homeboy.json       # Global defaults
 ```
@@ -156,7 +183,6 @@ cd homeboy && cargo install --path .
 - `homeboy docs commands/commands-index` — Full command reference
 - [docs/](docs/) — Detailed documentation
 - [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions) — Public extensions
-- [Homeboy Desktop](../homeboy-desktop/) — Native macOS app with a visual dashboard (early development)
 
 ## License
 
