@@ -54,40 +54,40 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### Added
 - Remote hook execution for post:deploy hooks via SSH with template variable expansion
-- Module dependency validation with actionable install error messages
+- Extension dependency validation with actionable install error messages
 - Path override flag for build, lint, test, and version commands
 - Portable homeboy.json config for component creation from repo root
 
 ### Changed
-- Improve modules section in README and clarify local_path vs deploy target docs
+- Improve extensions section in README and clarify local_path vs deploy target docs
 
 ### Fixed
 - CLI create commands losing component id during serde serialization
-- Module install from monorepo URL creating ghost state
+- Extension install from monorepo URL creating ghost state
 
 ## [0.48.0] - 2026-02-25
 
 ### Added
-- Cleanup command for config health checks (missing modules, invalid paths, stale version targets)
+- Cleanup command for config health checks (missing extensions, invalid paths, stale version targets)
 - Startup update check with 24h cache notifies when newer version available
 - Sibling section inference in docs generate auto-detects heading patterns from adjacent files
-- Module exec command for direct tool access without component context
+- Extension exec command for direct tool access without component context
 - Replace @since placeholder tags during version bump
-- Step and skip flags for module run step filtering
+- Step and skip flags for extension run step filtering
 - Docs audit supports direct filesystem paths without component registration
 - Local flag on logs commands for agent/on-server mode
 - Dedicated flags on component set for common fields
 
 ### Changed
-- Module manifests use nested capability groups (deploy, audit, executable, platform) — breaking JSON schema change
+- Extension manifests use nested capability groups (deploy, audit, executable, platform) — breaking JSON schema change
 - Remove RawModuleManifest bridge (270 lines); capability structs deserialize directly
 - General hook system replaces per-lifecycle hook executors (pre:version:bump, post:version:bump, post:release, post:deploy)
 - entity_crud! macro generates standard CRUD wrappers, replacing per-entity output structs
-- Remove Box::leak from dynamic module CLI registration
+- Remove Box::leak from dynamic extension CLI registration
 
 ### Fixed
 - Entity set commands replace array fields by default instead of merging
-- Lint changed-only passes absolute paths to module runners
+- Lint changed-only passes absolute paths to extension runners
 - Enable multiline mode for version target regex patterns
 - Dynamic key-value flags on entity set commands fail with JSON parse error
 - Fetch tags before baseline detection to prevent stale baseline_ref
@@ -119,21 +119,21 @@ All notable changes to Homeboy CLI are documented in this file.
 ### Added
 - Dedicated `status` command for focused, actionable component overview with filtering flags (`--uncommitted`, `--needs-bump`, `--ready`, `--docs-only`, `--all`) (#121, #119)
 - `transfer` command supports local-to-remote (push) and remote-to-local (pull) in addition to server-to-server (#115)
-- Post-deploy cleanup of build dependencies via module-defined `cleanup_paths` and component `auto_cleanup` flag (#105)
+- Post-deploy cleanup of build dependencies via extension-defined `cleanup_paths` and component `auto_cleanup` flag (#105)
 - Configurable `docs_dir` and `docs_dirs` fields for component documentation audit
 - Multi-directory docs scanning with automatic README inclusion
 - `remote_owner` chown support in deploy for explicit file ownership
 
 ### Fixed
-- `component set` now rejects unknown fields instead of silently dropping them; prevents false success when using `module` (singular) instead of `modules` (plural) (#124)
+- `component set` now rejects unknown fields instead of silently dropping them; prevents false success when using `extension` (singular) instead of `extensions` (plural) (#124)
 - Deploy command accepts component-only target like build command (#120)
 - Double-escaped backslashes in version patterns are normalized at both parse and load time (#116)
 - Audit feature patterns now scan all source files, not just changed ones
 - Git-deploy components skip artifact resolution (#108)
 
 ### Improved
-- Missing-module errors on lint/test/build now include remediation hint: "Add a module: homeboy component set <id> --module <module_id>" (#123)
-- Init detects missing module configuration as a config gap with auto-suggested module type
+- Missing-extension errors on lint/test/build now include remediation hint: "Add a extension: homeboy component set <id> --extension <extension_id>" (#123)
+- Init detects missing extension configuration as a config gap with auto-suggested extension type
 - Clearer error message when changelog is not configured (#117)
 - Usage examples added to `changelog add --help` (#118)
 
@@ -145,13 +145,13 @@ All notable changes to Homeboy CLI are documented in this file.
 ## [0.45.1] - 2026-02-17
 
 ### Added
-- Undocumented feature detection in docs audit via module audit_feature_patterns (#104)
+- Undocumented feature detection in docs audit via extension audit_feature_patterns (#104)
 
 ## [0.45.0] - 2026-02-16
 
 ### Added
-- Module flag for component create and set (--module)
-- Auto-detect module from component context in homeboy test
+- Extension flag for component create and set (--extension)
+- Auto-detect extension from component context in homeboy test
 
 ### Removed
 - Fleet sync command deprecated — use homeboy deploy instead
@@ -193,7 +193,7 @@ All notable changes to Homeboy CLI are documented in this file.
 ### Fixed
 - Handle uncommitted changelog gracefully in version bump (#78)
 
-- fix: scope --allow-root injection to wordpress module only
+- fix: scope --allow-root injection to wordpress extension only
 - Better error message for missing unreleased changelog section
 - Revert Stdio::null on git commands (broke HTTPS credential helper)
 
@@ -201,14 +201,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### Added
 - Support aliases for components, projects, and servers (#34)
-- Detect and warn about outdated modules in homeboy init (#26)
+- Detect and warn about outdated extensions in homeboy init (#26)
 - Automatic retry with backoff for transient SSH failures (#51)
 - Release --recover for interrupted releases (#38)
 - Git-based deployment strategy (#52)
 
 ### Fixed
 - Clarify local file permissions message with path and chmod modes (#9)
-- Expand {{module_path}} in project CLI command templates (#44)
+- Expand {{extension_path}} in project CLI command templates (#44)
 - Fix environment-dependent docs audit test
 
 ## [0.42.0] - 2026-02-13
@@ -221,7 +221,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### Fixed
 - use non-existent path in docs audit test
-- expand {{module_path}} in project CLI command templates
+- expand {{extension_path}} in project CLI command templates
 - clarify local file permissions message with path and modes
 
 ## [0.41.2] - 2026-02-10
@@ -247,7 +247,7 @@ All notable changes to Homeboy CLI are documented in this file.
 ## [0.40.4] - 2026-02-10
 
 ### Added
-- Module manifest: add Desktop runtime fields (dependencies, playwrightBrowsers, builtin actions)
+- Extension manifest: add Desktop runtime fields (dependencies, playwrightBrowsers, builtin actions)
 
 ### Fixed
 - Parser: trim content in replace_all to match extract_all behavior (fixes version bump on files with trailing newlines)
@@ -311,7 +311,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - add --fix flag for auto-fixing lint issues
 
 ### Fixed
-- fix(docs-audit): filter false positives via module-level ignore patterns
+- fix(docs-audit): filter false positives via extension-level ignore patterns
 
 ## [0.38.5] - 2026-01-28
 
@@ -368,7 +368,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.37.0] - 2026-01-25
 
-- Add configurable lint and test script paths via module manifest (lint.module_script, test.module_script)
+- Add configurable lint and test script paths via extension manifest (lint.extension_script, test.extension_script)
 
 ## [0.36.4] - 2026-01-24
 
@@ -414,7 +414,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.33.12] - 2026-01-22
 
-- feat: add module-defined CLI help configuration
+- feat: add extension-defined CLI help configuration
 
 ## [0.33.11] - 2026-01-22
 
@@ -446,21 +446,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.33.5] - 2026-01-21
 
-- Create engine/ directory with pipeline and executor modules
+- Create engine/ directory with pipeline and executor extensions
 - Move base_path.rs and slugify.rs to utils/
 
 ## [0.33.4] - 2026-01-21
 
-- Remove ReleaseConfig - publish targets now derived purely from modules with release.publish action
+- Remove ReleaseConfig - publish targets now derived purely from extensions with release.publish action
 
 ## [0.33.3] - 2026-01-21
 
-- Fix publish step module lookup by parsing prefix once in from_str (single source of truth)
+- Fix publish step extension lookup by parsing prefix once in from_str (single source of truth)
 - Add cleanup step to release pipeline to remove target/distrib/ after publish
 
 ## [0.33.2] - 2026-01-21
 
-- **Release Pipeline**: Fixed architecture to use module's `release.package` action for artifact creation instead of direct build
+- **Release Pipeline**: Fixed architecture to use extension's `release.package` action for artifact creation instead of direct build
 
 ## [0.33.1] - 2026-01-21
 
@@ -483,7 +483,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.32.5] - 2026-01-20
 
-- Add 'homeboy module show' command for detailed module inspection
+- Add 'homeboy extension show' command for detailed extension inspection
 
 ## [0.32.4] - 2026-01-20
 
@@ -505,7 +505,7 @@ All notable changes to Homeboy CLI are documented in this file.
 ## [0.32.1] - 2026-01-20
 
 ### Refactored
-- Refactor release module into cleaner module structure
+- Refactor release extension into cleaner extension structure
 
 ## [0.32.0] - 2026-01-20
 
@@ -541,7 +541,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - Add --project/-p flag to deploy command for explicit project specification
 
 ### Refactored
-- Add utils/io module with read_file and write_file helpers for consistent error handling
+- Add utils/io extension with read_file and write_file helpers for consistent error handling
 
 ### Refactored
 - Add json_path_str helper for nested JSON value extraction
@@ -621,7 +621,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.30.3] - 2026-01-20
 
-- Add plural aliases for entity commands (servers, components, modules)
+- Add plural aliases for entity commands (servers, components, extensions)
 
 ## [0.30.2] - 2026-01-20
 
@@ -646,7 +646,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - Remove redundant fields from init JSON output (context.contained_components, context.components, context.command)
 - Add gaps field to components array in init output for parent context
 - Make version block conditional on managed context in init output
-- Skip empty settings HashMap serialization in module configs
+- Skip empty settings HashMap serialization in extension configs
 - Skip null suggestion field serialization in context output
 
 ## [0.29.2] - 2026-01-19
@@ -681,7 +681,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - Add shell quoting documentation to wp command docs
 - Display subtargets in homeboy init output for project discoverability
 - Support both argument orders for deploy command (project-first or component-first)
-- Add CLI tool suggestions to homeboy init next_steps when modules have CLI tools
+- Add CLI tool suggestions to homeboy init next_steps when extensions have CLI tools
 
 ## [0.27.11] - 2026-01-19
 
@@ -727,11 +727,11 @@ All notable changes to Homeboy CLI are documented in this file.
 ## [0.27.5] - 2026-01-19
 
 ### Added
-- Add ModuleRunner builder for unified test/lint script orchestration
+- Add ExtensionRunner builder for unified test/lint script orchestration
 - Add ReleaseStepType enum for typed release pipeline steps
 
 ### Changed
-- Refactor lint and test commands to use ModuleRunner, reducing code duplication
+- Refactor lint and test commands to use ExtensionRunner, reducing code duplication
 - Simplify deploy, version, and SSH commands with shared utilities
 
 ## [0.27.4] - 2026-01-18
@@ -765,17 +765,17 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.27.0] - 2026-01-18
 
-- feat: make build_artifact optional—modules can provide artifact_pattern for automatic resolution
+- feat: make build_artifact optional—extensions can provide artifact_pattern for automatic resolution
 - feat: deploy command supports --project flag as alternative to positional argument
 - feat: context gaps now detect missing buildArtifact when remotePath is configured
 - fix: version parsing now trims content for VERSION files with trailing newlines
-- docs: comprehensive README overhaul with workflow examples and module system documentation
+- docs: comprehensive README overhaul with workflow examples and extension system documentation
 
 ## [0.26.7] - 2026-01-18
 
-- Add `homeboy lint` command for standalone code linting via module scripts
+- Add `homeboy lint` command for standalone code linting via extension scripts
 - Add `--skip-lint` flag to `homeboy test` to run tests without linting
-- Add `pre_build_script` hook to module BuildConfig for pre-build validation
+- Add `pre_build_script` hook to extension BuildConfig for pre-build validation
 
 ## [0.26.6] - 2026-01-18
 
@@ -783,7 +783,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - NullableUpdate<T> type alias for three-state update semantics in CLI commands
 
 ### Changed
-- refactor module.rs into module/ directory with focused submodules (manifest, execution, scope, lifecycle, exec_context)
+- refactor extension.rs into extension/ directory with focused submodules (manifest, execution, scope, lifecycle, exec_context)
 - replace .unwrap() calls with .expect() for safer error handling across codebase
 - extract duplicate template variable building into DbContext::base_template_vars()
 - unify scp_file and scp_recursive into shared scp_transfer() function
@@ -794,17 +794,17 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.26.5] - 2026-01-18
 
-- feat: add --stream and --no-stream flags to module run command for explicit output control
+- feat: add --stream and --no-stream flags to extension run command for explicit output control
 - feat: add HOMEBOY_COMPONENT_PATH environment variable to test runners
-- feat: make ModuleExecutionMode enum public for module integration
+- feat: make ExtensionExecutionMode enum public for extension integration
 
 ## [0.26.4] - 2026-01-18
 
-- feat: new test command for running component test suites with module-based infrastructure
+- feat: new test command for running component test suites with extension-based infrastructure
 
 ## [0.26.3] - 2026-01-18
 
-- feat: enhanced module list JSON output with CLI tool info, available actions, and runtime status flags
+- feat: enhanced extension list JSON output with CLI tool info, available actions, and runtime status flags
 - feat: added context-aware error hints suggesting 'homeboy init' when project context is missing
 
 ## [0.26.2] - 2026-01-18
@@ -851,11 +851,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.24.0] - 2026-01-17
 
-- feat: Add module-provided build script support with priority-based command resolution
+- feat: Add extension-provided build script support with priority-based command resolution
 
 ## [0.23.0] - 2026-01-16
 
-- feat: Add settings_flags to CLI modules for automatic flag injection from project settings
+- feat: Add settings_flags to CLI extensions for automatic flag injection from project settings
 
 ## [0.22.10] - 2026-01-16
 
@@ -916,7 +916,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.21.0] - 2026-01-16
 
-- Add generic module-based deploy override system for platform-specific install commands
+- Add generic extension-based deploy override system for platform-specific install commands
 - Add `heck` crate for automatic camelCase/snake_case key normalization in config merges
 - Fix SIGPIPE panic when piping CLI output to commands like `head`
 - Fix `success: true` missing from component set single-item responses
@@ -929,7 +929,7 @@ All notable changes to Homeboy CLI are documented in this file.
 ## [0.20.8] - 2026-01-15
 
 - Add init snapshots for version, git status, last release, and changelog preview
-- Surface module readiness details with failure reason and output
+- Surface extension readiness details with failure reason and output
 - Omit empty Unreleased section when finalizing releases
 
 ## [0.20.7] - 2026-01-15
@@ -957,24 +957,24 @@ All notable changes to Homeboy CLI are documented in this file.
 ## [0.20.3] - 2026-01-15
 
 - **Release system now fully replaces GitHub Actions** - Complete local release pipeline with package, GitHub release, Homebrew tap, and crates.io publishing
-- Fix module template variable to use snake_case convention (`module_path`)
-- Fix macOS bash 3.x compatibility in module publish scripts (replace `readarray` with POSIX `while read`)
+- Fix extension template variable to use snake_case convention (`extension_path`)
+- Fix macOS bash 3.x compatibility in extension publish scripts (replace `readarray` with POSIX `while read`)
 - Add `dist-manifest.json` to .gitignore for cleaner working directory
 
 ## [0.20.2] - 2026-01-15
 
-- Prepare release pipeline for module-driven publishing
+- Prepare release pipeline for extension-driven publishing
 
 ## [0.20.1] - 2026-01-15
 
-- Fix release pipeline executor and module action runtime
+- Fix release pipeline executor and extension action runtime
 
 ## [0.20.0] - 2026-01-15
 
 - Add parallel pipeline planner/executor for releases
 - Add component-scoped release planner and runner
-- Support module actions for release payloads and command execution
-- Add module-driven release payload context (version/tag/notes/artifacts)
+- Support extension actions for release payloads and command execution
+- Add extension-driven release payload context (version/tag/notes/artifacts)
 - Add git include/exclude file scoping
 - Add config replace option for set commands
 - Improve changelog CLI help and detection
@@ -1013,15 +1013,15 @@ All notable changes to Homeboy CLI are documented in this file.
 ## 0.17.0
 
 - Agnostic local/remote command execution - db, logs, files now work for local projects
-- Init command returns structured JSON with context, servers, projects, components, and modules
+- Init command returns structured JSON with context, servers, projects, components, and extensions
 - New executor.rs provides unified command routing based on project config
-- Renamed remote_files module to files (environment-agnostic)
+- Renamed remote_files extension to files (environment-agnostic)
 
 ## 0.16.0
 
 - **BREAKING**: JSON output now uses native snake_case field names (e.g., project_id, server_id, base_path)
 - Remove all serde camelCase conversion annotations
-- Consolidate json module into config and output modules
+- Consolidate json extension into config and output extensions
 
 ## 0.15.0
 
@@ -1060,7 +1060,7 @@ All notable changes to Homeboy CLI are documented in this file.
 ## 0.10.0
 
 - Refactor ID resolution and standardize resolving IDs from directory names
-- Add `homeboy module set` to merge module manifest JSON
+- Add `homeboy extension set` to merge extension manifest JSON
 - Centralize config entity rename logic
 - Refactor project pin/unpin API with unified options
 
@@ -1068,15 +1068,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 - Add remote find and grep commands for server file search
 - Add helpful hints to not-found error messages
-- Refactor git module for cleaner baseline detection
-- Add slugify module
+- Refactor git extension for cleaner baseline detection
+- Add slugify extension
 - Documentation updates across commands
 
 ## 0.8.0
 
 - Refactor JSON output envelope (remove warnings payload; simplify command JSON mapping)
 - Unify bulk command outputs under BulkResult/ItemOutcome with success/failure summaries
-- Remove per-project module enablement checks; use global module manifests for build/deploy/db/version defaults
+- Remove per-project extension enablement checks; use global extension manifests for build/deploy/db/version defaults
 - Deploy output: rename components -> results and add total to summary
 
 ## 0.7.5
@@ -1105,8 +1105,8 @@ All notable changes to Homeboy CLI are documented in this file.
 ## 0.7.0
 
 - Refactor CLI commands to delegate business logic to the core library
-- Add core git module for component-scoped git operations
-- Add core version module for version target read/update utilities
+- Add core git extension for component-scoped git operations
+- Add core version extension for version target read/update utilities
 - Improve changes command output for local working tree state
 - Refresh embedded CLI docs and JSON output contract
 
@@ -1117,7 +1117,7 @@ All notable changes to Homeboy CLI are documented in this file.
 - Refactor core into a headless/public API; treat the CLI as one interface
 - Move business logic into the `homeboy` core library and reduce CLI responsibilities
 - Standardize command/output layers and keep TTY concerns in the CLI
-- Introduce/expand the module system and module settings
+- Introduce/expand the extension system and extension settings
 - Add generic auth support plus a generic API client/command
 - Remove/adjust doctor and error commands during stabilization
 
@@ -1125,20 +1125,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 - Refactor deploy to use a generic core implementation
 - Replace component isNetwork flag with extractCommand for post-upload extraction
-- Unify module runtime config around runCommand/setupCommand/readyCheck/env and remove plugin-specific fields
-- Update docs and examples for new generic deployment and module behavior
+- Unify extension runtime config around runCommand/setupCommand/readyCheck/env and remove plugin-specific fields
+- Update docs and examples for new generic deployment and extension behavior
 
 ## 0.4.1
 
-- Rename plugin terminology to module across CLI/docs
+- Rename plugin terminology to extension across CLI/docs
 - Remove active project concept; require explicit --project where needed
-- Update module manifest filename to `<module_id>.json`
+- Update extension manifest filename to `<extension_id>.json`
 
 ## 0.4.0
 
-- Unify plugins and modules under a single module manifest and config surface
-- Remove plugin command and plugin manifest subsystem; migrate CLI/db/deploy/version/build to module-based lookups
-- Rename config fields: plugins→modules, plugin_settings→module_settings, modules→scoped_modules (superseded by modules field in current releases)
+- Unify plugins and extensions under a single extension manifest and config surface
+- Remove plugin command and plugin manifest subsystem; migrate CLI/db/deploy/version/build to extension-based lookups
+- Rename config fields: plugins→extensions, plugin_settings→extension_settings, extensions→scoped_modules (superseded by extensions field in current releases)
 
 ## 0.3.0
 
@@ -1153,7 +1153,7 @@ All notable changes to Homeboy CLI are documented in this file.
 ## 0.2.18
 
 - Fix shell argument escaping for wp and pm2 commands with special characters
-- Centralize shell escaping in shell.rs module with quote_arg, quote_args, quote_path functions
+- Centralize shell escaping in shell.rs extension with quote_arg, quote_args, quote_path functions
 - Fix unescaped file paths in logs and file commands
 - Remove redundant escaping functions from template.rs, ssh/client.rs, and deploy.rs
 
@@ -1189,7 +1189,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## 0.2.9
 
-- Fix clippy warnings (argument bundling, test module ordering)
+- Fix clippy warnings (argument bundling, test extension ordering)
 
 ## 0.2.8
 
@@ -1207,7 +1207,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 - added overlooked config command back in
 - docs updated
-- module standardized data contract
+- extension standardized data contract
 
 ## 0.2.4
 
@@ -1221,9 +1221,9 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## 0.2.2
 
-- Add scan_json_dir<T>() helper to json module for directory scanning
+- Add scan_json_dir<T>() helper to json extension for directory scanning
 - Refactor config list functions to use centralized json helpers
-- Refactor module loading to use read_json_file_typed()
+- Refactor extension loading to use read_json_file_typed()
 - Internal refactor
 
 ## 0.2.1
@@ -1236,9 +1236,9 @@ All notable changes to Homeboy CLI are documented in this file.
 ### Improvements
 - **Config schema**: Introduce `homeboy config` command group + `ConfigKeys` schema listing to standardize how config keys are described/exposed.
 - **Config records**: Standardize config identity via `slugify_id()` + `SlugIdentifiable::slug_id()` and enforce id/name consistency in `ConfigManager::save_server()` and `ConfigManager::save_component()`.
-- **App config**: Extend `AppConfig` with `installedModules: HashMap<String, InstalledModuleConfig>`; each module stores `settings: HashMap<String, Value>` and optional `sourceUrl` (stored in the module manifest).
-- **Module scoping**: Add `ModuleScope::{effective_settings, validate_project_compatibility, resolve_component_scope}` to merge settings across app/project/component and validate `ModuleManifest.requires` (for example: `components`).
-- **Module execution**: Tighten `homeboy module run` to require an installed/configured entry and resolve project/component context when CLI templates reference project variables.
+- **App config**: Extend `AppConfig` with `installedModules: HashMap<String, InstalledModuleConfig>`; each extension stores `settings: HashMap<String, Value>` and optional `sourceUrl` (stored in the extension manifest).
+- **Extension scoping**: Add `ExtensionScope::{effective_settings, validate_project_compatibility, resolve_component_scope}` to merge settings across app/project/component and validate `ExtensionManifest.requires` (for example: `components`).
+- **Extension execution**: Tighten `homeboy extension run` to require an installed/configured entry and resolve project/component context when CLI templates reference project variables.
 - **Command context**: Refactor SSH/base-path resolution to shared context helpers (used by `db`/`deploy`) for more consistent configuration errors.
 - **Docs**: Normalize docs placeholders (`<project_id>`, `<server_id>`, `<component_id>`) across embedded CLI documentation.
 
@@ -1268,8 +1268,8 @@ All notable changes to Homeboy CLI are documented in this file.
 ## 0.1.10
 
 ### Improvements
-- **Modules**: Added git-based module workflows: `homeboy module install`, `homeboy module update`, and `homeboy module uninstall`.
-- **Modules**: Added `.install.json` metadata (stored inside each module directory) to enable reliable updates from the original source.
+- **Extensions**: Added git-based extension workflows: `homeboy extension install`, `homeboy extension update`, and `homeboy extension uninstall`.
+- **Extensions**: Added `.install.json` metadata (stored inside each extension directory) to enable reliable updates from the original source.
 - **Docs/Positioning**: Updated README and docs index to reflect LLM-first focus and Homeboy data directory layout.
 
 ## 0.1.9
@@ -1354,7 +1354,7 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ### Improvements
 - **Deploy Command**: Improved deployment workflow.
-- **Module Command**: Enhanced CLI module execution with better variable substitution.
+- **Extension Command**: Enhanced CLI extension execution with better variable substitution.
 - **PM2 Command**: Improved PM2 command handling for Node.js projects.
 - **WP Command**: Improved WP-CLI command handling for WordPress projects.
 
@@ -1364,5 +1364,5 @@ Initial release.
 - Project, server, and component management
 - Remote SSH operations (wp, pm2, ssh, db, file, logs)
 - Deploy and pin commands
-- CLI module execution
+- CLI extension execution
 - Shared configuration across clients

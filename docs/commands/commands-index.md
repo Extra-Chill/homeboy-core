@@ -16,7 +16,7 @@
 - [auth](auth.md)
 - [list](list.md)
 - [logs](logs.md)
-- [module](module.md)
+- [extension](extension.md)
 - [project](project.md)
 - [release](release.md) (local release pipeline)
 - [server](server.md)
@@ -26,13 +26,13 @@
 
 This list covers built-in CLI commands.
 
-Note: some modules also expose additional top-level CLI commands at runtime (loaded from installed modules).
+Note: some extensions also expose additional top-level CLI commands at runtime (loaded from installed extensions).
 
 Related:
 
 - [Root command](../cli/homeboy-root-command.md)
 - [JSON output contract](../architecture/output-system.md) (global output envelope)
 - [Embedded docs](../architecture/embedded-docs/embedded-docs-topic-resolution.md)
-- [Schema Reference](../schemas/) - JSON configuration schemas (component, project, server, module)
+- [Schema Reference](../schemas/) - JSON configuration schemas (component, project, server, extension)
 - [Architecture](../architecture/) - System internals (API client, keychain, SSH, release pipeline, execution context)
 - [Developer Guide](../developer-guide/) - Contributing guides (architecture overview, config directory, error handling)

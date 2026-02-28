@@ -1,6 +1,6 @@
 # Lint Command
 
-Lint a component using its configured module's linting infrastructure.
+Lint a component using its configured extension's linting infrastructure.
 
 ## Synopsis
 
@@ -10,7 +10,7 @@ homeboy lint <component> [options]
 
 ## Description
 
-The `lint` command runs code style validation for a component using the linting tools provided by its configured module. For WordPress components, this uses PHPCS (PHP CodeSniffer) with WordPress coding standards.
+The `lint` command runs code style validation for a component using the linting tools provided by its configured extension. For WordPress components, this uses PHPCS (PHP CodeSniffer) with WordPress coding standards.
 
 ## Arguments
 
@@ -24,7 +24,7 @@ The `lint` command runs code style validation for a component using the linting 
 - `--changed-only`: Lint only files modified in the working tree (staged, unstaged, untracked)
 - `--errors-only`: Show only errors, suppress warnings
 - `--summary`: Show compact summary instead of full output
-- `--setting <key=value>`: Override module settings (can be used multiple times)
+- `--setting <key=value>`: Override extension settings (can be used multiple times)
 
 ## Examples
 
@@ -48,18 +48,18 @@ homeboy lint extrachill-api --glob "inc/**/*.php"
 homeboy lint extrachill-api --setting some_option=value
 ```
 
-## Module Requirements
+## Extension Requirements
 
 For a component to be lintable, it must have:
 
-- A module configured (e.g., `wordpress`)
-- The module must provide a lint-runner script (at scripts/lint-runner.sh within the module)
+- A extension configured (e.g., `wordpress`)
+- The extension must provide a lint-runner script (at scripts/lint-runner.sh within the extension)
 
 ## Environment Variables
 
 The following environment variables are set for lint runners:
 
-- `HOMEBOY_MODULE_PATH`: Absolute path to module directory
+- `HOMEBOY_MODULE_PATH`: Absolute path to extension directory
 - `HOMEBOY_COMPONENT_PATH`: Absolute path to component directory
 - `HOMEBOY_PLUGIN_PATH`: Same as component path
 - `HOMEBOY_AUTO_FIX`: Set to `1` when `--fix` flag is used
@@ -89,7 +89,7 @@ The `hints` field appears when linting fails without `--fix`, suggesting the aut
 
 - `0`: Linting passed
 - `1`: Linting failed (style violations found)
-- `2`: Infrastructure error (component not found, missing module, etc.)
+- `2`: Infrastructure error (component not found, missing extension, etc.)
 
 ## Related
 

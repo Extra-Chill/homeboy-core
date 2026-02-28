@@ -4,7 +4,7 @@ use crate::engine::pipeline::{
     PipelineRunStatus, PipelineStep, PipelineStepExecutor, PipelineStepResult,
 };
 use crate::error::{Error, Result};
-use crate::module::{self, ModuleManifest};
+use crate::extension::{self, ExtensionManifest};
 use crate::utils::validation;
 use crate::{changelog, version};
 
@@ -13,15 +13,15 @@ use super::utils::extract_latest_notes;
 
 pub(crate) struct ReleaseStepExecutor {
     component_id: String,
-    modules: Vec<ModuleManifest>,
+    extensions: Vec<ExtensionManifest>,
     pub(crate) context: std::sync::Mutex<ReleaseContext>,
 }
 
 impl ReleaseStepExecutor {
-    pub fn new(component_id: String, modules: Vec<ModuleManifest>) -> Self {
+    pub fn new(component_id: String, extensions: Vec<ExtensionManifest>) -> Self {
         Self {
             component_id,
-            modules,
+            extensions,
             context: std::sync::Mutex::new(ReleaseContext::default()),
         }
     }
@@ -196,30 +196,30 @@ impl ReleaseStepExecutor {
     }
 
     fn run_package(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
-        let module = self
-            .modules
+        let extension = self
+            .extensions
             .iter()
             .find(|m| m.actions.iter().any(|a| a.id == "release.package"))
             .ok_or_else(|| {
                 Error::validation_invalid_argument(
                     "release.package",
-                    "No module provides release.package action",
+                    "No extension provides release.package action",
                     None,
                     Some(vec![
-                        "Add a module with release.package action to the component".to_string(),
-                        "For Rust projects, add: \"modules\": { \"rust\": {} }".to_string(),
+                        "Add a extension with release.package action to the component".to_string(),
+                        "For Rust projects, add: \"extensions\": { \"rust\": {} }".to_string(),
                     ]),
                 )
             })?;
 
         let payload = self.build_release_payload(step)?;
         let response =
-            module::execute_action(&module.id, "release.package", None, None, Some(&payload))?;
+            extension::execute_action(&extension.id, "release.package", None, None, Some(&payload))?;
 
         self.store_artifacts_from_output(&response)?;
 
         let data = serde_json::json!({
-            "module": module.id,
+            "extension": extension.id,
             "action": "release.package",
             "response": response
         });
@@ -306,31 +306,31 @@ impl ReleaseStepExecutor {
         Ok(self.step_result(step, status, Some(data), None, Vec::new()))
     }
 
-    /// Execute a publish step by calling the target module's release.publish action.
+    /// Execute a publish step by calling the target extension's release.publish action.
     fn run_publish(&self, step: &PipelineStep, target: &str) -> Result<PipelineStepResult> {
-        let module = self
-            .modules
+        let extension = self
+            .extensions
             .iter()
             .find(|m| m.id == target)
             .ok_or_else(|| {
                 Error::validation_invalid_argument(
                     "release.publish",
-                    format!("No module '{}' found for publish target", target),
+                    format!("No extension '{}' found for publish target", target),
                     None,
                     Some(vec![format!(
-                        "Add module to component config: \"modules\": {{ \"{}\": {{}} }}",
+                        "Add extension to component config: \"extensions\": {{ \"{}\": {{}} }}",
                         target
                     )]),
                 )
             })?;
 
         let action_id = "release.publish";
-        let has_action = module.actions.iter().any(|a| a.id == action_id);
+        let has_action = extension.actions.iter().any(|a| a.id == action_id);
         if !has_action {
             return Err(Error::validation_invalid_argument(
                 "release.publish",
                 format!(
-                    "Module '{}' does not provide action '{}'",
+                    "Extension '{}' does not provide action '{}'",
                     target, action_id
                 ),
                 None,
@@ -339,16 +339,16 @@ impl ReleaseStepExecutor {
         }
 
         let payload = self.build_release_payload(step)?;
-        let response = module::execute_action(&module.id, action_id, None, None, Some(&payload))?;
-        let module_data = serde_json::to_value(&response).map_err(|e| {
-            Error::internal_json(e.to_string(), Some("module action output".to_string()))
+        let response = extension::execute_action(&extension.id, action_id, None, None, Some(&payload))?;
+        let extension_data = serde_json::to_value(&response).map_err(|e| {
+            Error::internal_json(e.to_string(), Some("extension action output".to_string()))
         })?;
 
         let data = serde_json::json!({
             "target": target,
-            "module": module.id,
+            "extension": extension.id,
             "action": action_id,
-            "response": module_data
+            "response": extension_data
         });
 
         Ok(self.step_result(

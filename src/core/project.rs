@@ -1,4 +1,4 @@
-use crate::component::ScopedModuleConfig;
+use crate::component::ScopedExtensionConfig;
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::output::{CreateOutput, MergeOutput, RemoveResult};
@@ -20,7 +20,7 @@ pub struct Project {
     pub domain: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub modules: Option<HashMap<String, ScopedModuleConfig>>,
+    pub extensions: Option<HashMap<String, ScopedExtensionConfig>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_id: Option<String>,

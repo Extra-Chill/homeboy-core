@@ -42,7 +42,7 @@ The release command coordinates versioning, committing, tagging, and pushing.
 Release pipelines support two step types:
 
 - **Core steps**: `build`, `changes`, `version`, `git.commit`, `git.tag`, `git.push`
-- **Module-backed steps**: any custom step type implemented as a module action named `release.<step_type>`
+- **Extension-backed steps**: any custom step type implemented as a extension action named `release.<step_type>`
 
 ### Core step: `git.commit`
 
@@ -74,19 +74,19 @@ These files are modified during the release anyway and included in the release c
 
 Any other uncommitted changes will cause the release to fail with guidance to commit first.
 
-### Pipeline step: `module.run`
+### Pipeline step: `extension.run`
 
-Use `module.run` to execute a module runtime command as part of the release pipeline.
+Use `extension.run` to execute a extension runtime command as part of the release pipeline.
 
 Example step configuration:
 
 ```json
 {
   "id": "scrape",
-  "type": "module.run",
+  "type": "extension.run",
   "needs": ["build"],
   "config": {
-    "module": "bandcamp-scraper",
+    "extension": "bandcamp-scraper",
     "inputs": [
       { "id": "artist", "value": "some-artist" }
     ],
@@ -95,14 +95,14 @@ Example step configuration:
 }
 ```
 
-- `config.module` is required.
+- `config.extension` is required.
 - `config.inputs` is optional; each entry must include `id` and `value`.
 - `config.args` is optional; each entry is a CLI arg string.
 - Output includes `stdout`, `stderr`, `exitCode`, `success`, and the release payload.
 
 ### Release payload
 
-All module-backed release steps receive a shared payload:
+All extension-backed release steps receive a shared payload:
 
 ```json
 {
@@ -181,7 +181,7 @@ Without `--dry-run`:
 - `partial_success` - Some steps succeeded, others failed (idempotent retry is safe)
 - `failed` - All executed steps failed
 - `skipped` - Pipeline disabled or all steps skipped due to failed dependencies
-- `missing` - Required module actions not found
+- `missing` - Required extension actions not found
 
 ### Idempotent retry
 
@@ -196,5 +196,5 @@ This allows safe retry after `partial_success` without manual cleanup.
 ## Related
 
 - [component](component.md)
-- [module](module.md)
+- [extension](extension.md)
 

@@ -25,7 +25,7 @@
 // - Deploy install commands with subshells and conditional logic
 // - Discovery commands with fallback operators (||)
 //
-// Module runtime and build commands use shell execution by design:
+// Extension runtime and build commands use shell execution by design:
 // - Runtime commands execute bash scripts (set -euo pipefail, arrays, jq)
 // - Build commands use shell scripts (rsync, composer, npm, etc.)
 // - These scripts require shell features and cannot use direct execution
@@ -37,7 +37,7 @@
 
 use crate::context::resolve_project_ssh;
 use crate::error::{Error, Result};
-use crate::module::CliConfig;
+use crate::extension::CliConfig;
 use crate::project::Project;
 use crate::ssh::{execute_local_command, execute_local_command_interactive, CommandOutput};
 use crate::utils::shell;
@@ -48,7 +48,7 @@ use std::process::Command;
 /// When `server_id` is not configured: executes command locally via shell
 /// When `server_id` is configured: executes command via SSH to that server
 ///
-/// This is the same pattern used by cli_tool.rs for module CLI commands.
+/// This is the same pattern used by cli_tool.rs for extension CLI commands.
 pub fn execute_for_project(project: &Project, command: &str) -> Result<CommandOutput> {
     if project.server_id.as_ref().is_none_or(|s| s.is_empty()) {
         // Local execution
@@ -85,7 +85,7 @@ pub fn execute_for_project_interactive(project: &Project, command: &str) -> Resu
 pub fn execute_for_project_direct(
     project: &Project,
     cli_config: &CliConfig,
-    module_id: &str,
+    extension_id: &str,
     args: &[String],
     target_domain: &str,
 ) -> Result<CommandOutput> {
@@ -102,7 +102,7 @@ pub fn execute_for_project_direct(
         base_path.clone(),
         cli_config,
         project,
-        module_id,
+        extension_id,
         args,
         target_domain,
     ) {
@@ -118,7 +118,7 @@ fn try_execute_direct(
     base_path: String,
     cli_config: &CliConfig,
     project: &Project,
-    module_id: &str,
+    extension_id: &str,
     args: &[String],
     target_domain: &str,
 ) -> Result<CommandOutput> {
@@ -134,7 +134,7 @@ fn try_execute_direct(
         base_path,
         cli_config,
         project,
-        module_id,
+        extension_id,
         args,
         target_domain,
     )?;
@@ -190,7 +190,7 @@ fn parse_direct_template(
     base_path: String,
     cli_config: &CliConfig,
     project: &Project,
-    module_id: &str,
+    extension_id: &str,
     args: &[String],
     target_domain: &str,
 ) -> Result<ParsedDirectCommand> {
@@ -203,10 +203,10 @@ fn parse_direct_template(
         .unwrap_or_else(|| cli_config.tool.clone());
     template = template.replace("{{cliPath}}", &cli_path);
 
-    // Expand {{module_path}}
-    let module_dir = crate::module::module_path(module_id);
-    if module_dir.exists() {
-        template = template.replace("{{module_path}}", &module_dir.to_string_lossy());
+    // Expand {{extension_path}}
+    let extension_dir = crate::extension::extension_path(extension_id);
+    if extension_dir.exists() {
+        template = template.replace("{{extension_path}}", &extension_dir.to_string_lossy());
     }
 
     // Expand {{domain}} in --url={{domain}}
@@ -228,10 +228,10 @@ fn parse_direct_template(
             command_parts
         };
 
-    // Apply settings_flags from project module config
-    if let Some(module_config) = project.modules.as_ref().and_then(|m| m.get(module_id)) {
+    // Apply settings_flags from project extension config
+    if let Some(extension_config) = project.extensions.as_ref().and_then(|m| m.get(extension_id)) {
         for (setting_key, flag_template) in &cli_config.settings_flags {
-            if let Some(flag) = module_config
+            if let Some(flag) = extension_config
                 .settings
                 .get(setting_key)
                 .and_then(|v| v.as_str())

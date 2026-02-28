@@ -302,7 +302,7 @@ fn find_source_directories(source_path: &Path) -> Vec<String> {
         "inc",
         "app",
         "components",
-        "modules",
+        "extensions",
         "crates",
     ];
 

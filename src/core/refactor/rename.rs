@@ -1,6 +1,6 @@
 //! Rename engine — find and replace terms across a codebase with case awareness.
 //!
-//! Given a `RenameSpec` (from → to), this module:
+//! Given a `RenameSpec` (from → to), this extension:
 //! 1. Generates all case variants (snake, camel, Pascal, UPPER, plural)
 //! 2. Walks the codebase finding word-boundary matches
 //! 3. Generates file content edits and file/directory renames
@@ -62,14 +62,14 @@ pub struct RenameSpec {
 impl RenameSpec {
     /// Create a rename spec, auto-generating case variants.
     ///
-    /// From a base term like "module", generates:
-    /// - `module` → `extension` (lowercase)
-    /// - `Module` → `Extension` (PascalCase)
-    /// - `MODULE` → `EXTENSION` (UPPER_CASE)
-    /// - `modules` → `extensions` (plural)
-    /// - `Modules` → `Extensions` (plural PascalCase)
-    /// - `MODULES` → `EXTENSIONS` (plural UPPER)
-    /// - `module_` → `extension_` (snake prefix, catches snake_case compounds)
+    /// From a base term like "extension", generates:
+    /// - `extension` → `extension` (lowercase)
+    /// - `Extension` → `Extension` (PascalCase)
+    /// - `EXTENSION` → `EXTENSION` (UPPER_CASE)
+    /// - `extensions` → `extensions` (plural)
+    /// - `Extensions` → `Extensions` (plural PascalCase)
+    /// - `EXTENSIONS` → `EXTENSIONS` (plural UPPER)
+    /// - `extension_` → `extension_` (snake prefix, catches snake_case compounds)
     /// - `_module` → `_extension` (snake suffix)
     pub fn new(from: &str, to: &str, scope: RenameScope) -> Self {
         let mut variants = Vec::new();
@@ -221,10 +221,10 @@ fn is_boundary_char(c: u8) -> bool {
 /// - Right: end of string, non-alphanumeric, underscore, or uppercase letter (camelCase)
 ///
 /// This handles:
-/// - `module` in `pub mod module;` (word boundary)
-/// - `Module` in `ModuleManifest` (uppercase letter follows = camelCase boundary)
-/// - `MODULE` in `MODULE_DIR` (underscore follows)
-/// - Won't match `module` inside `modular` (lowercase letter follows)
+/// - `extension` in `pub mod extension;` (word boundary)
+/// - `Extension` in `ExtensionManifest` (uppercase letter follows = camelCase boundary)
+/// - `EXTENSION` in `EXTENSION_DIR` (underscore follows)
+/// - Won't match `extension` inside `modular` (lowercase letter follows)
 fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
     let text_bytes = text.as_bytes();
     let term_bytes = term.as_bytes();
@@ -246,8 +246,8 @@ fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
 
         // Right boundary: end of string, or next char is:
         // - not alphanumeric (space, punctuation, etc.)
-        // - uppercase letter (camelCase boundary: ModuleManifest → Module|Manifest)
-        // - underscore (snake boundary: MODULE_DIR → MODULE|_DIR)
+        // - uppercase letter (camelCase boundary: ExtensionManifest → Extension|Manifest)
+        // - underscore (snake boundary: EXTENSION_DIR → EXTENSION|_DIR)
         let right_ok = end >= text_len || {
             let next = text_bytes[end];
             is_boundary_char(next) || next.is_ascii_uppercase() || next == b'_'
@@ -541,15 +541,15 @@ mod tests {
 
     #[test]
     fn capitalize_works() {
-        assert_eq!(capitalize("module"), "Module");
+        assert_eq!(capitalize("widget"), "Widget");
         assert_eq!(capitalize(""), "");
         assert_eq!(capitalize("a"), "A");
     }
 
     #[test]
     fn pluralize_regular() {
-        assert_eq!(pluralize("module"), "modules");
-        assert_eq!(pluralize("extension"), "extensions");
+        assert_eq!(pluralize("widget"), "widgets");
+        assert_eq!(pluralize("gadget"), "gadgets");
     }
 
     #[test]
@@ -571,22 +571,22 @@ mod tests {
 
     #[test]
     fn rename_spec_generates_variants() {
-        let spec = RenameSpec::new("module", "extension", RenameScope::All);
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
         let from_values: Vec<&str> = spec.variants.iter().map(|v| v.from.as_str()).collect();
-        assert!(from_values.contains(&"module"));
-        assert!(from_values.contains(&"Module"));
-        assert!(from_values.contains(&"MODULE"));
-        assert!(from_values.contains(&"modules"));
-        assert!(from_values.contains(&"Modules"));
-        assert!(from_values.contains(&"MODULES"));
+        assert!(from_values.contains(&"widget"));
+        assert!(from_values.contains(&"Widget"));
+        assert!(from_values.contains(&"WIDGET"));
+        assert!(from_values.contains(&"widgets"));
+        assert!(from_values.contains(&"Widgets"));
+        assert!(from_values.contains(&"WIDGETS"));
 
         let to_values: Vec<&str> = spec.variants.iter().map(|v| v.to.as_str()).collect();
-        assert!(to_values.contains(&"extension"));
-        assert!(to_values.contains(&"Extension"));
-        assert!(to_values.contains(&"EXTENSION"));
-        assert!(to_values.contains(&"extensions"));
-        assert!(to_values.contains(&"Extensions"));
-        assert!(to_values.contains(&"EXTENSIONS"));
+        assert!(to_values.contains(&"gadget"));
+        assert!(to_values.contains(&"Gadget"));
+        assert!(to_values.contains(&"GADGET"));
+        assert!(to_values.contains(&"gadgets"));
+        assert!(to_values.contains(&"Gadgets"));
+        assert!(to_values.contains(&"GADGETS"));
     }
 
     #[test]
@@ -596,21 +596,21 @@ mod tests {
 
         std::fs::write(
             dir.join("test.rs"),
-            "pub mod module;\nuse crate::module::ModuleManifest;\nconst MODULE_DIR: &str = \"modules\";\n",
+            "pub mod widget;\nuse crate::widget::WidgetManifest;\nconst WIDGET_DIR: &str = \"widgets\";\n",
         )
         .unwrap();
 
-        let spec = RenameSpec::new("module", "extension", RenameScope::All);
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
         let refs = find_references(&spec, &dir);
 
         assert!(!refs.is_empty());
 
-        // Should find: module (2x), Module (1x), MODULE (1x), modules (1x)
+        // Should find: widget (2x), Widget (1x), WIDGET (1x), widgets (1x)
         let matched: Vec<&str> = refs.iter().map(|r| r.matched.as_str()).collect();
-        assert!(matched.contains(&"module"), "Expected 'module' in {:?}", matched);
-        assert!(matched.contains(&"Module"), "Expected 'Module' in {:?}", matched);
-        assert!(matched.contains(&"MODULE"), "Expected 'MODULE' in {:?}", matched);
-        assert!(matched.contains(&"modules"), "Expected 'modules' in {:?}", matched);
+        assert!(matched.contains(&"widget"), "Expected 'widget' in {:?}", matched);
+        assert!(matched.contains(&"Widget"), "Expected 'Widget' in {:?}", matched);
+        assert!(matched.contains(&"WIDGET"), "Expected 'WIDGET' in {:?}", matched);
+        assert!(matched.contains(&"widgets"), "Expected 'widgets' in {:?}", matched);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -620,13 +620,13 @@ mod tests {
         let dir = std::env::temp_dir().join("homeboy_refactor_gen_test");
         let _ = std::fs::create_dir_all(&dir);
 
-        std::fs::write(dir.join("test.rs"), "pub mod module;\n").unwrap();
+        std::fs::write(dir.join("test.rs"), "pub mod widget;\n").unwrap();
 
-        let spec = RenameSpec::new("module", "extension", RenameScope::All);
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
         let result = generate_renames(&spec, &dir);
 
         assert!(!result.edits.is_empty());
-        assert_eq!(result.edits[0].new_content, "pub mod extension;\n");
+        assert_eq!(result.edits[0].new_content, "pub mod gadget;\n");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -634,18 +634,18 @@ mod tests {
     #[test]
     fn generate_renames_detects_file_renames() {
         let dir = std::env::temp_dir().join("homeboy_refactor_file_rename_test");
-        let sub = dir.join("module");
+        let sub = dir.join("widget");
         let _ = std::fs::create_dir_all(&sub);
 
-        std::fs::write(sub.join("module.rs"), "fn module_init() {}\n").unwrap();
+        std::fs::write(sub.join("widget.rs"), "fn widget_init() {}\n").unwrap();
 
-        let spec = RenameSpec::new("module", "extension", RenameScope::All);
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
         let result = generate_renames(&spec, &dir);
 
         assert!(!result.file_renames.is_empty());
-        // Should want to rename module/module.rs → extension/extension.rs
-        let rename = result.file_renames.iter().find(|r| r.from.contains("module.rs")).unwrap();
-        assert!(rename.to.contains("extension.rs"));
+        // Should want to rename widget/widget.rs → gadget/gadget.rs
+        let rename = result.file_renames.iter().find(|r| r.from.contains("widget.rs")).unwrap();
+        assert!(rename.to.contains("gadget.rs"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -655,13 +655,14 @@ mod tests {
         let dir = std::env::temp_dir().join("homeboy_refactor_boundary_test");
         let _ = std::fs::create_dir_all(&dir);
 
-        // "modular" should NOT be renamed when renaming "module"
-        std::fs::write(dir.join("test.rs"), "let modular = true;\n").unwrap();
+        // "widgets_plus" should NOT be matched as "widget" — the 's' makes it "widgets" (plural variant)
+        // but "widgetry" should NOT be matched when renaming "widget"
+        std::fs::write(dir.join("test.rs"), "let widgetry = true;\n").unwrap();
 
-        let spec = RenameSpec::new("module", "extension", RenameScope::All);
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
         let refs = find_references(&spec, &dir);
 
-        assert!(refs.is_empty(), "Should not match 'modular' when renaming 'module'");
+        assert!(refs.is_empty(), "Should not match 'widgetry' when renaming 'widget'");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -671,16 +672,16 @@ mod tests {
         let dir = std::env::temp_dir().join("homeboy_refactor_apply_test");
         let _ = std::fs::create_dir_all(&dir);
 
-        std::fs::write(dir.join("test.rs"), "pub mod module;\n").unwrap();
+        std::fs::write(dir.join("test.rs"), "pub mod widget;\n").unwrap();
 
-        let spec = RenameSpec::new("module", "extension", RenameScope::All);
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
         let mut result = generate_renames(&spec, &dir);
 
         apply_renames(&mut result, &dir).unwrap();
         assert!(result.applied);
 
         let content = std::fs::read_to_string(dir.join("test.rs")).unwrap();
-        assert_eq!(content, "pub mod extension;\n");
+        assert_eq!(content, "pub mod gadget;\n");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -133,11 +133,11 @@ homeboy api --json <spec>
 }
 ```
 
-## Module Integration
+## Extension Integration
 
-Modules can define API actions in their manifest for automated API interactions.
+Extensions can define API actions in their manifest for automated API interactions.
 
-### Module Action API
+### Extension Action API
 
 ```json
 {
@@ -155,9 +155,9 @@ Modules can define API actions in their manifest for automated API interactions.
 }
 ```
 
-### Template Variables in Module Actions
+### Template Variables in Extension Actions
 
-Module API actions can use template variables:
+Extension API actions can use template variables:
 
 ```json
 {

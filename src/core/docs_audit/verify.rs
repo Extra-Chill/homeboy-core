@@ -296,7 +296,7 @@ mod tests {
 
         let claim = Claim {
             claim_type: ClaimType::FilePath,
-            value: "/var/lib/sweatpants/modules.yaml".to_string(),
+            value: "/var/lib/sweatpants/extensions.yaml".to_string(),
             doc_file: "docs/test.md".to_string(),
             line: 1,
             confidence: ClaimConfidence::Real,

@@ -16,13 +16,13 @@ Homeboy is a config-driven automation engine for development and deployment auto
 
 ## Schemas
 
-JSON configuration schemas for components, projects, servers, fleets, and modules:
+JSON configuration schemas for components, projects, servers, fleets, and extensions:
 
 - [Component schema](schemas/component-schema.md) - Buildable/deployable units
 - [Project schema](schemas/project-schema.md) - Deployable environments
 - [Server schema](schemas/server-schema.md) - SSH connection settings
 - [Fleet schema](schemas/fleet-schema.md) - Named groups of projects
-- [Module manifest schema](schemas/module-manifest-schema.md) - Module configuration
+- [Extension manifest schema](schemas/extension-manifest-schema.md) - Extension configuration
 
 ## Architecture
 
@@ -33,7 +33,7 @@ Internal system architecture and internals:
 - [Keychain/secrets management](architecture/keychain-secrets.md) - Secure credential storage
 - [SSH key management](architecture/ssh-key-management.md) - SSH key handling
 - [Release pipeline system](architecture/release-pipeline.md) - Local release orchestration
-- [Execution context](architecture/execution-context.md) - Runtime context for modules
+- [Execution context](architecture/execution-context.md) - Runtime context for extensions
 - [Embedded docs](architecture/embedded-docs/embedded-docs-topic-resolution.md) - Documentation system internals
 
 ## Developer Guide
@@ -70,14 +70,14 @@ Common paths:
 - ~/.config/homeboy/servers/
 - ~/.config/homeboy/components/
 - ~/.config/homeboy/fleets/
-- ~/.config/homeboy/modules/
+- ~/.config/homeboy/extensions/
 - ~/.config/homeboy/keys/
 - ~/.config/homeboy/backups/
 
 Notes:
 
 - Embedded CLI docs ship inside the binary (see [Embedded docs topic resolution](architecture/embedded-docs/embedded-docs-topic-resolution.md)).
-- Module docs load from each installed module's `docs/` folder under the Homeboy config root: `~/.config/homeboy/modules/<module_id>/docs/` (same topic-key rules as core docs).
+- Extension docs load from each installed extension's `docs/` folder under the Homeboy config root: `~/.config/homeboy/extensions/<extension_id>/docs/` (same topic-key rules as core docs).
 - The CLI does not write documentation into `~/.config/homeboy/docs/`.
 
 

@@ -1,9 +1,9 @@
 //! Entity suggestion utilities for unrecognized CLI subcommands.
 //!
-//! Provides fuzzy matching against known entities (components, projects, servers, modules)
+//! Provides fuzzy matching against known entities (components, projects, servers, extensions)
 //! and generates helpful hints when users mistype command syntax.
 
-use crate::{component, module, project, server};
+use crate::{component, extension, project, server};
 
 /// Types of entities that can be suggested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub enum EntityType {
     Component,
     Project,
     Server,
-    Module,
+    Extension,
 }
 
 impl EntityType {
@@ -20,7 +20,7 @@ impl EntityType {
             EntityType::Component => "component",
             EntityType::Project => "project",
             EntityType::Server => "server",
-            EntityType::Module => "module",
+            EntityType::Extension => "extension",
         }
     }
 }
@@ -34,7 +34,7 @@ pub struct EntityMatch {
 }
 
 /// Check if a string matches any known entity (exact or fuzzy).
-/// Returns the first match found, checking in order: components, projects, servers, modules.
+/// Returns the first match found, checking in order: components, projects, servers, extensions.
 pub fn find_entity_match(input: &str) -> Option<EntityMatch> {
     let input_lower = input.to_lowercase();
 
@@ -72,11 +72,11 @@ pub fn find_entity_match(input: &str) -> Option<EntityMatch> {
         }
     }
 
-    // Check modules
-    let module_ids = module::available_module_ids();
-    if let Some(m) = find_match_in_list(&input_lower, &module_ids) {
+    // Check extensions
+    let extension_ids = extension::available_extension_ids();
+    if let Some(m) = find_match_in_list(&input_lower, &extension_ids) {
         return Some(EntityMatch {
-            entity_type: EntityType::Module,
+            entity_type: EntityType::Extension,
             entity_id: m.0,
             exact: m.1,
         });
@@ -305,6 +305,6 @@ mod tests {
         assert_eq!(EntityType::Component.label(), "component");
         assert_eq!(EntityType::Project.label(), "project");
         assert_eq!(EntityType::Server.label(), "server");
-        assert_eq!(EntityType::Module.label(), "module");
+        assert_eq!(EntityType::Extension.label(), "extension");
     }
 }

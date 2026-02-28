@@ -12,9 +12,9 @@ Configuration is the authoritative source for all system behavior. No hard-coded
 
 Homeboy runs on your local machine and orchestrates remote operations. It does not run as a remote server service. All state is stored locally in your OS config directory.
 
-### Module System
+### Extension System
 
-Extensibility through a module system that allows:
+Extensibility through a extension system that allows:
 - Platform-specific behaviors (WordPress, Node.js, Rust)
 - Custom CLI commands
 - Release pipeline actions
@@ -24,9 +24,9 @@ Extensibility through a module system that allows:
 
 All behavior is configurable via JSON:
 - Projects, servers, components
-- Module manifests
+- Extension manifests
 - Release pipelines
-- Module settings per project/component
+- Extension settings per project/component
 
 ## Core Systems
 
@@ -44,7 +44,7 @@ Config entities:
 - **Projects**: Deployable environments
 - **Servers**: SSH connection settings
 - **Components**: Buildable/deployable units
-- **Modules**: Extensible behaviors and tools
+- **Extensions**: Extensible behaviors and tools
 
 ### Storage Layer
 
@@ -63,8 +63,8 @@ File-based storage for configurations:
 
 Variable substitution in templates:
 - Both `{var}` and `{{var}}` syntax supported
-- Context-aware resolution (project, component, module variables)
-- Used in: deploy commands, module runtime, platform behaviors
+- Context-aware resolution (project, component, extension variables)
+- Used in: deploy commands, extension runtime, platform behaviors
 
 ### Execution System
 
@@ -79,8 +79,8 @@ Executes shell commands with:
 Supports:
 - Local commands (builds, tests)
 - Remote commands via SSH
-- Module runtime execution
-- Module actions (CLI or API)
+- Extension runtime execution
+- Extension actions (CLI or API)
 
 ### SSH Operations
 
@@ -100,7 +100,7 @@ HTTP client for API operations:
 - Template-based URL construction
 - Keychain-stored authentication
 - JSON request/response handling
-- Module action API integration
+- Extension action API integration
 
 ### Keychain Integration
 
@@ -145,11 +145,11 @@ Changelog operations:
 - Finalize for release
 - Extract for git commits
 
-### Module System
+### Extension System
 
-**Location:** `src/core/module/mod.rs`
+**Location:** `src/core/extension/mod.rs`
 
-Module management:
+Extension management:
 - Install from git or local path
 - Load manifests
 - Resolve settings
@@ -168,7 +168,7 @@ Local orchestration system:
 
 Step types:
 - Built-in: build, version_bump, git_commit, git_tag, git_push
-- Module: module_run, module_action
+- Extension: extension_run, extension_action
 
 ### Fleet Management
 
@@ -200,7 +200,7 @@ Command-line interface built with `clap`:
 Embedded documentation:
 - Markdown files embedded at compile time (`build.rs`)
 - Runtime topic resolution
-- Module-provided docs support
+- Extension-provided docs support
 
 ## Data Flow
 
@@ -221,15 +221,15 @@ Embedded documentation:
      - Execute extract command
 7. Return results in JSON envelope
 
-### Module Execution Flow
+### Extension Execution Flow
 
-1. CLI parses `homeboy module run <module> --project <project> --component <component>`
-2. Load module manifest
+1. CLI parses `homeboy extension run <extension> --project <project> --component <component>`
+2. Load extension manifest
 3. Resolve project configuration (if provided)
 4. Resolve component configuration (if provided)
 5. Merge settings from project and component scopes
 6. Build execution context:
-   - Module metadata
+   - Extension metadata
    - Project context (domain, paths)
    - Component context (paths)
    - Merged settings
@@ -246,15 +246,15 @@ Embedded documentation:
 4. Validate step dependencies
 5. Execute steps in order:
    - Wait for dependencies to complete
-   - Execute step (build, module, git, etc.)
+   - Execute step (build, extension, git, etc.)
    - Stop on failure
 6. Return results with status for each step
 
-## Module Integration
+## Extension Integration
 
-### Module Manifest
+### Extension Manifest
 
-Module manifest defines:
+Extension manifest defines:
 - Runtime configuration
 - Platform behaviors (database, deployment, version patterns)
 - CLI commands
@@ -262,18 +262,18 @@ Module manifest defines:
 - Release actions
 - Documentation topics
 
-### Module Loading
+### Extension Loading
 
-Modules are loaded from:
-- Git-cloned directories in `~/.config/homeboy/modules/`
+Extensions are loaded from:
+- Git-cloned directories in `~/.config/homeboy/extensions/`
 - Symlinked local directories
-- Module manifest: `<module_id>/<module_id>.json`
+- Extension manifest: `<extension_id>/<extension_id>.json`
 
-### Module Execution
+### Extension Execution
 
 Two execution paths:
-1. **Direct execution**: `homeboy module run <module_id>`
-2. **Pipeline step**: `module.run` step in release pipeline
+1. **Direct execution**: `homeboy extension run <extension_id>`
+2. **Pipeline step**: `extension.run` step in release pipeline
 
 Both paths use the same execution context builder and template resolver.
 
@@ -282,7 +282,7 @@ Both paths use the same execution context builder and template resolver.
 **Location:** `src/core/error/mod.rs`
 
 Centralized error system:
-- Error categories (validation, io, module, etc.)
+- Error categories (validation, io, extension, etc.)
 - Error context (file path, component ID, etc.)
 - Error messages for CLI output
 - Error conversion for JSON envelope

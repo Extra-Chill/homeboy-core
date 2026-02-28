@@ -1,6 +1,6 @@
 //! Documentation audit system for extracting and verifying claims from markdown files.
 //!
-//! This module provides a doc-centric approach to documentation auditing:
+//! This extension provides a doc-centric approach to documentation auditing:
 //! 1. Extract claims from documentation (file paths, identifiers, code examples)
 //! 2. Verify claims against the actual codebase
 //! 3. Correlate docs with git changes to identify priority docs needing review
@@ -20,7 +20,7 @@ pub use verify::VerifyResult;
 
 use regex::Regex;
 
-use crate::{component, git, module, Result};
+use crate::{component, git, extension, Result};
 
 /// Helper for `skip_serializing_if` on zero-value usize fields.
 fn is_zero(v: &usize) -> bool {
@@ -66,7 +66,7 @@ pub struct AlignmentSummary {
     pub priority_docs: usize,
     pub broken_references: usize,
     pub unchanged_docs: usize,
-    /// Total features detected by module-defined patterns (omitted when 0).
+    /// Total features detected by extension-defined patterns (omitted when 0).
     #[serde(skip_serializing_if = "is_zero")]
     pub total_features: usize,
     /// Features with at least one mention in documentation (omitted when 0).
@@ -92,7 +92,7 @@ pub struct AuditResult {
 /// Audit documentation at a direct filesystem path without a registered component.
 ///
 /// Uses the directory name as the label and defaults to "docs" for the docs
-/// directory. Module patterns and changelog exclusion are not available.
+/// directory. Extension patterns and changelog exclusion are not available.
 pub fn audit_path(path: &str, docs_dir_override: Option<&str>) -> Result<AuditResult> {
     let source_path = Path::new(path);
     if !source_path.is_dir() {
@@ -202,11 +202,11 @@ pub fn audit_component(component_id: &str, docs_dir_override: Option<&str>) -> R
     // Default to CHANGELOG.md since changelogs inherently contain historical paths.
     let changelog_exclude = comp.changelog_target.as_deref().or(Some("CHANGELOG.md"));
 
-    // Collect ignore patterns from all linked modules
-    let ignore_patterns = collect_module_ignore_patterns(&comp);
+    // Collect ignore patterns from all linked extensions
+    let ignore_patterns = collect_extension_ignore_patterns(&comp);
 
-    // Collect feature patterns from all linked modules
-    let feature_patterns = collect_module_feature_patterns(&comp);
+    // Collect feature patterns from all linked extensions
+    let feature_patterns = collect_extension_feature_patterns(&comp);
 
     // Find all documentation files (excluding changelog)
     let doc_files = find_doc_files(&docs_path, changelog_exclude);
@@ -535,12 +535,12 @@ fn extract_doc_context(
     }
 }
 
-/// Collect feature detection patterns from all linked modules.
-fn collect_module_feature_patterns(comp: &component::Component) -> Vec<String> {
+/// Collect feature detection patterns from all linked extensions.
+fn collect_extension_feature_patterns(comp: &component::Component) -> Vec<String> {
     let mut patterns = Vec::new();
-    if let Some(ref modules) = comp.modules {
-        for module_id in modules.keys() {
-            if let Ok(manifest) = module::load_module(module_id) {
+    if let Some(ref extensions) = comp.extensions {
+        for extension_id in extensions.keys() {
+            if let Ok(manifest) = extension::load_extension(extension_id) {
                 patterns.extend(manifest.audit_feature_patterns().to_vec());
             }
         }
@@ -722,12 +722,12 @@ fn collect_source_files(base: &Path, dir: &Path, files: &mut Vec<String>) {
     }
 }
 
-/// Collect audit ignore patterns from all linked modules.
-fn collect_module_ignore_patterns(comp: &component::Component) -> Vec<String> {
+/// Collect audit ignore patterns from all linked extensions.
+fn collect_extension_ignore_patterns(comp: &component::Component) -> Vec<String> {
     let mut patterns = Vec::new();
-    if let Some(ref modules) = comp.modules {
-        for module_id in modules.keys() {
-            if let Ok(manifest) = module::load_module(module_id) {
+    if let Some(ref extensions) = comp.extensions {
+        for extension_id in extensions.keys() {
+            if let Ok(manifest) = extension::load_extension(extension_id) {
                 patterns.extend(manifest.audit_ignore_claim_patterns().to_vec());
             }
         }

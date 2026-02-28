@@ -36,19 +36,19 @@ homeboy component show nonexistent
 # Error: Component not found: nonexistent
 ```
 
-### Module Errors
+### Extension Errors
 
-Errors related to module execution:
+Errors related to extension execution:
 
-- **Module not found**: Module ID not in modules directory
-- **Module execution failed**: Module returned non-zero exit code
-- **Module not ready**: Module ready_check failed
-- **Module manifest invalid**: Module manifest has errors
+- **Extension not found**: Extension ID not in extensions directory
+- **Extension execution failed**: Extension returned non-zero exit code
+- **Extension not ready**: Extension ready_check failed
+- **Extension manifest invalid**: Extension manifest has errors
 
 **Example:**
 ```bash
-homeboy module run nonexistent --project mysite
-# Error: Module not found: nonexistent
+homeboy extension run nonexistent --project mysite
+# Error: Extension not found: nonexistent
 ```
 
 ### Configuration Errors
@@ -81,7 +81,7 @@ Errors include contextual information to aid debugging:
 - **File path**: Which file caused I/O error
 - **Component ID**: Which component is being processed
 - **Project ID**: Which project is being processed
-- **Module ID**: Which module is being executed
+- **Extension ID**: Which extension is being executed
 - **Command**: Which command failed
 - **Underlying error**: Original error message
 
@@ -166,26 +166,26 @@ homeboy deploy mysite
 3. Check server configuration
 ```
 
-### Module Errors
+### Extension Errors
 
-**Cause:** Module execution issues
+**Cause:** Extension execution issues
 
 **Recovery:**
-1. Verify module is installed: `homeboy module list`
-2. Check module manifest for errors
-3. Run module setup: `homeboy module setup <module_id>`
-4. Review module output for specific error
-5. Check module dependencies
+1. Verify extension is installed: `homeboy extension list`
+2. Check extension manifest for errors
+3. Run extension setup: `homeboy extension setup <extension_id>`
+4. Review extension output for specific error
+5. Check extension dependencies
 
 **Example:**
 ```bash
-homeboy module run python-script --project mysite
-# Error: Module execution failed: exit code 1
+homeboy extension run python-script --project mysite
+# Error: Extension execution failed: exit code 1
 
 # Recovery:
-1. Check module logs for error details
+1. Check extension logs for error details
 2. Verify dependencies: python3 -m pip install -r requirements.txt
-3. Test module locally
+3. Test extension locally
 ```
 
 ### Configuration Errors
@@ -224,7 +224,7 @@ Configuration files are validated against schemas on load:
 - Component schema
 - Project schema
 - Server schema
-- Module manifest schema
+- Extension manifest schema
 
 ### Pre-flight Checks
 
@@ -258,19 +258,19 @@ Homeboy uses safe defaults:
 3. Verify server configuration
 4. Check firewall rules
 
-### Module Not Found
+### Extension Not Found
 
-**Error:** `Module not found: <module_id>`
+**Error:** `Extension not found: <extension_id>`
 
 **Common causes:**
-- Module not installed
-- Typo in module ID
-- Module directory name differs from manifest ID
+- Extension not installed
+- Typo in extension ID
+- Extension directory name differs from manifest ID
 
 **Resolution:**
-1. List installed modules: `homeboy module list`
-2. Install missing module: `homeboy module install <url>`
-3. Verify module ID spelling
+1. List installed extensions: `homeboy extension list`
+2. Install missing extension: `homeboy extension install <url>`
+3. Verify extension ID spelling
 
 ### Configuration Not Found
 

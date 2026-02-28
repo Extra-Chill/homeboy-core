@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use homeboy::module::load_all_modules;
+use homeboy::extension::load_all_extensions;
 use homeboy::token;
 
 include!(concat!(env!("OUT_DIR"), "/generated_docs.rs"));
@@ -28,8 +28,8 @@ pub fn resolve(topic: &[String]) -> homeboy::Result<ResolvedDoc> {
         });
     }
 
-    // Then check module docs (existing behavior)
-    if let Some((content, _module_id)) = load_module_doc(&key) {
+    // Then check extension docs (existing behavior)
+    if let Some((content, _extension_id)) = load_extension_doc(&key) {
         return Ok(ResolvedDoc { content });
     }
 
@@ -47,7 +47,7 @@ pub fn resolve(topic: &[String]) -> homeboy::Result<ResolvedDoc> {
             });
         }
 
-        if let Some((content, _module_id)) = load_module_doc(&fallback_key) {
+        if let Some((content, _extension_id)) = load_extension_doc(&fallback_key) {
             return Ok(ResolvedDoc { content });
         }
     }
@@ -55,16 +55,16 @@ pub fn resolve(topic: &[String]) -> homeboy::Result<ResolvedDoc> {
     Err(homeboy::Error::docs_topic_not_found(&key))
 }
 
-fn load_module_doc(topic: &str) -> Option<(String, String)> {
-    for module in load_all_modules().unwrap_or_default() {
-        let Some(module_path) = &module.module_path else {
+fn load_extension_doc(topic: &str) -> Option<(String, String)> {
+    for extension in load_all_extensions().unwrap_or_default() {
+        let Some(extension_path) = &extension.extension_path else {
             continue;
         };
-        let doc_file = Path::new(module_path)
+        let doc_file = Path::new(extension_path)
             .join("docs")
             .join(format!("{}.md", topic));
         if let Ok(content) = std::fs::read_to_string(&doc_file) {
-            return Some((content, module.id));
+            return Some((content, extension.id));
         }
     }
     None
@@ -114,10 +114,10 @@ pub fn available_topics() -> Vec<String> {
         .map(|(key, _)| key.to_string())
         .collect();
 
-    // Add module docs (integrated namespace)
-    for module in load_all_modules().unwrap_or_default() {
-        if let Some(module_path) = &module.module_path {
-            let docs_dir = Path::new(module_path).join("docs");
+    // Add extension docs (integrated namespace)
+    for extension in load_all_extensions().unwrap_or_default() {
+        if let Some(extension_path) = &extension.extension_path {
+            let docs_dir = Path::new(extension_path).join("docs");
             if docs_dir.exists() {
                 collect_doc_topics(&docs_dir, "", &mut topics);
             }

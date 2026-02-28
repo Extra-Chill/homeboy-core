@@ -1,7 +1,7 @@
 //! Project cleanup system for identifying config drift, stale state, and hygiene issues.
 //!
-//! This module provides project-level health checks that only Homeboy can see:
-//! 1. Config health - broken paths, dead version targets, unused modules
+//! This extension provides project-level health checks that only Homeboy can see:
+//! 1. Config health - broken paths, dead version targets, unused extensions
 //! 2. Future: git staleness, orphan detection, unused registrations
 
 pub mod config;

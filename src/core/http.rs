@@ -5,7 +5,7 @@
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::keychain;
-use crate::module::HttpMethod;
+use crate::extension::HttpMethod;
 use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use reqwest::blocking::{Client, RequestBuilder, Response};
 use serde_json::{json, Value};
@@ -18,7 +18,7 @@ fn config_error(msg: impl Into<String>) -> Error {
 }
 
 fn not_found_error(msg: impl Into<String>) -> Error {
-    Error::new(ErrorCode::ModuleNotFound, msg, Value::Null)
+    Error::new(ErrorCode::ExtensionNotFound, msg, Value::Null)
 }
 
 fn http_error(e: reqwest::Error) -> Error {

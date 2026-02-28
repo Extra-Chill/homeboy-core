@@ -2,11 +2,11 @@
 
 Homeboy embeds markdown files from `homeboy/docs/` into the CLI binary at build time.
 
-In addition, `homeboy docs` reads documentation provided by installed modules. For each installed module, it looks under:
+In addition, `homeboy docs` reads documentation provided by installed extensions. For each installed extension, it looks under:
 
-- `dirs::config_dir()/homeboy/modules/<module_id>/docs/`
+- `dirs::config_dir()/homeboy/extensions/<extension_id>/docs/`
 
-Module docs use the same key format as embedded docs (relative path within the module's `docs/` directory, without `.md`).
+Extension docs use the same key format as embedded docs (relative path within the extension's `docs/` directory, without `.md`).
 
 ## Key mapping (topic → embedded key)
 
@@ -34,7 +34,7 @@ Examples:
 
 If normalization yields no segments (for example: topic args are only whitespace or only `/`), the command behaves as if no topic was provided (defaults to `index`). In this case `topic_label` is set to `"unknown"` (the resolved key still becomes `index`).
 
-If the resolved key does not exist in embedded core docs or module docs, `homeboy docs` returns an error (`config_missing_key("docs.<topic>")`).
+If the resolved key does not exist in embedded core docs or extension docs, `homeboy docs` returns an error (`config_missing_key("docs.<topic>")`).
 
 Note: the internal resolver now returns an error directly instead of returning an empty `ResolvedDoc`.
 

@@ -14,7 +14,7 @@ pub struct CleanupArgs {
     #[arg(long)]
     pub severity: Option<String>,
 
-    /// Show only issues in a specific category: local_path, remote_path, version_targets, modules
+    /// Show only issues in a specific category: local_path, remote_path, version_targets, extensions
     #[arg(long)]
     pub category: Option<String>,
 }

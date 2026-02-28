@@ -1,34 +1,34 @@
 use std::path::{Path, PathBuf};
 
-use crate::component::{self, Component, ScopedModuleConfig};
+use crate::component::{self, Component, ScopedExtensionConfig};
 use crate::error::{Error, Result};
 use crate::ssh::{execute_local_command_passthrough, CommandOutput};
 use crate::utils::{io, shell};
 
-/// Output from a module runner script execution.
+/// Output from a extension runner script execution.
 pub struct RunnerOutput {
     pub exit_code: i32,
     pub success: bool,
 }
 
-/// Orchestrates module script execution for test/lint runners.
+/// Orchestrates extension script execution for test/lint runners.
 ///
-/// Encapsulates the shared logic for finding components, resolving modules,
+/// Encapsulates the shared logic for finding components, resolving extensions,
 /// loading manifests, merging settings, and executing runner scripts.
-pub struct ModuleRunner {
+pub struct ExtensionRunner {
     component_id: String,
-    script_path: String, // Relative to module root (e.g., "scripts/lint/lint-runner.sh")
+    script_path: String, // Relative to extension root (e.g., "scripts/lint/lint-runner.sh")
     settings_overrides: Vec<(String, String)>,
     env_vars: Vec<(String, String)>,
     script_args: Vec<String>,
     path_override: Option<String>,
 }
 
-impl ModuleRunner {
-    /// Create a new ModuleRunner for a component and script.
+impl ExtensionRunner {
+    /// Create a new ExtensionRunner for a component and script.
     ///
     /// - `component_id`: The component to run the script for
-    /// - `script_path`: Path to the script relative to module root (e.g., "scripts/lint/lint-runner.sh")
+    /// - `script_path`: Path to the script relative to extension root (e.g., "scripts/lint/lint-runner.sh")
     pub fn new(component_id: &str, script_path: &str) -> Self {
         Self {
             component_id: component_id.to_string(),
@@ -83,12 +83,12 @@ impl ModuleRunner {
         self
     }
 
-    /// Execute the module runner script.
+    /// Execute the extension runner script.
     ///
     /// Performs the full orchestration:
     /// 1. Load component configuration
-    /// 2. Determine module from component config
-    /// 3. Find module path
+    /// 2. Determine extension from component config
+    /// 3. Find extension path
     /// 4. Validate script exists
     /// 5. Load manifest
     /// 6. Merge settings (manifest defaults → component → overrides)
@@ -96,17 +96,17 @@ impl ModuleRunner {
     /// 8. Execute via shell
     pub fn run(&self) -> Result<RunnerOutput> {
         let component = self.find_component()?;
-        let (module_name, module_settings) = self.determine_module(&component)?;
-        let module_path = self.find_module_path(&module_name)?;
+        let (extension_name, extension_settings) = self.determine_extension(&component)?;
+        let extension_path = self.find_extension_path(&extension_name)?;
 
-        self.validate_script_exists(&module_path)?;
+        self.validate_script_exists(&extension_path)?;
 
-        let manifest = self.load_module_manifest(&module_path)?;
-        let settings_json = self.merge_settings(&manifest, &module_settings)?;
+        let manifest = self.load_extension_manifest(&extension_path)?;
+        let settings_json = self.merge_settings(&manifest, &extension_settings)?;
         let project_path = PathBuf::from(&component.local_path);
-        let env_vars = self.prepare_env_vars(&module_path, &project_path, &settings_json);
+        let env_vars = self.prepare_env_vars(&extension_path, &project_path, &settings_json);
 
-        let output = self.execute_script(&module_path, &env_vars)?;
+        let output = self.execute_script(&extension_path, &env_vars)?;
 
         Ok(RunnerOutput {
             exit_code: output.exit_code,
@@ -122,12 +122,12 @@ impl ModuleRunner {
         Ok(comp)
     }
 
-    fn determine_module(&self, component: &Component) -> Result<(String, Vec<(String, String)>)> {
-        let modules = component.modules.as_ref().ok_or_else(|| {
+    fn determine_extension(&self, component: &Component) -> Result<(String, Vec<(String, String)>)> {
+        let extensions = component.extensions.as_ref().ok_or_else(|| {
             Error::validation_invalid_argument(
                 "component",
                 format!(
-                    "Component '{}' has no modules configured for {}",
+                    "Component '{}' has no extensions configured for {}",
                     component.id,
                     self.script_description()
                 ),
@@ -135,31 +135,31 @@ impl ModuleRunner {
                 None,
             )
             .with_hint(format!(
-                "Add a module: homeboy component set {} --module <module_id>",
+                "Add a extension: homeboy component set {} --extension <extension_id>",
                 component.id
             ))
         })?;
 
-        // Prefer wordpress module if available
-        if modules.contains_key("wordpress") {
-            let settings = extract_module_settings(
-                modules
+        // Prefer wordpress extension if available
+        if extensions.contains_key("wordpress") {
+            let settings = extract_extension_settings(
+                extensions
                     .get("wordpress")
-                    .expect("wordpress module checked above"),
+                    .expect("wordpress extension checked above"),
             );
             return Ok(("wordpress".to_string(), settings));
         }
 
-        // Otherwise use the first available module
-        if let Some((module_name, module_config)) = modules.iter().next() {
-            let settings = extract_module_settings(module_config);
-            return Ok((module_name.clone(), settings));
+        // Otherwise use the first available extension
+        if let Some((extension_name, extension_config)) = extensions.iter().next() {
+            let settings = extract_extension_settings(extension_config);
+            return Ok((extension_name.clone(), settings));
         }
 
         Err(Error::validation_invalid_argument(
             "component",
             format!(
-                "Component '{}' has no modules configured for {}",
+                "Component '{}' has no extensions configured for {}",
                 component.id,
                 self.script_description()
             ),
@@ -167,22 +167,22 @@ impl ModuleRunner {
             None,
         )
         .with_hint(format!(
-            "Add a module: homeboy component set {} --module <module_id>",
+            "Add a extension: homeboy component set {} --extension <extension_id>",
             component.id
         )))
     }
 
-    fn find_module_path(&self, module_name: &str) -> Result<PathBuf> {
-        let module_path = super::module_path(module_name);
+    fn find_extension_path(&self, extension_name: &str) -> Result<PathBuf> {
+        let extension_path = super::extension_path(extension_name);
 
-        if module_path.exists() {
-            Ok(module_path)
+        if extension_path.exists() {
+            Ok(extension_path)
         } else {
             Err(Error::validation_invalid_argument(
-                "module",
+                "extension",
                 format!(
-                    "Module '{}' not found in ~/.config/homeboy/modules/",
-                    module_name
+                    "Extension '{}' not found in ~/.config/homeboy/extensions/",
+                    extension_name
                 ),
                 None,
                 None,
@@ -190,14 +190,14 @@ impl ModuleRunner {
         }
     }
 
-    fn validate_script_exists(&self, module_path: &Path) -> Result<()> {
-        let script_path = module_path.join(&self.script_path);
+    fn validate_script_exists(&self, extension_path: &Path) -> Result<()> {
+        let script_path = extension_path.join(&self.script_path);
         if !script_path.exists() {
             return Err(Error::validation_invalid_argument(
-                "module",
+                "extension",
                 format!(
-                    "Module at {} does not have {} infrastructure (missing {})",
-                    module_path.display(),
+                    "Extension at {} does not have {} infrastructure (missing {})",
+                    extension_path.display(),
                     self.script_description(),
                     self.script_path
                 ),
@@ -208,16 +208,16 @@ impl ModuleRunner {
         Ok(())
     }
 
-    fn load_module_manifest(&self, module_path: &Path) -> Result<serde_json::Value> {
-        let module_name = module_path
+    fn load_extension_manifest(&self, extension_path: &Path) -> Result<serde_json::Value> {
+        let extension_name = extension_path
             .file_name()
-            .ok_or_else(|| Error::internal_io("Module path has no file name".to_string(), None))?
+            .ok_or_else(|| Error::internal_io("Extension path has no file name".to_string(), None))?
             .to_string_lossy();
-        let manifest_path = module_path.join(format!("{}.json", module_name));
+        let manifest_path = extension_path.join(format!("{}.json", extension_name));
 
         if !manifest_path.exists() {
             return Err(Error::internal_io(
-                format!("Module manifest not found: {}", manifest_path.display()),
+                format!("Extension manifest not found: {}", manifest_path.display()),
                 None,
             ));
         }
@@ -232,7 +232,7 @@ impl ModuleRunner {
     fn merge_settings(
         &self,
         manifest: &serde_json::Value,
-        module_settings: &[(String, String)],
+        extension_settings: &[(String, String)],
     ) -> Result<String> {
         let mut settings = serde_json::json!({});
 
@@ -256,8 +256,8 @@ impl ModuleRunner {
         }
 
         if let serde_json::Value::Object(ref mut obj) = settings {
-            // Add module settings from component config
-            for (key, value) in module_settings {
+            // Add extension settings from component config
+            for (key, value) in extension_settings {
                 obj.insert(key.clone(), serde_json::Value::String(value.clone()));
             }
 
@@ -272,22 +272,22 @@ impl ModuleRunner {
 
     fn prepare_env_vars(
         &self,
-        module_path: &Path,
+        extension_path: &Path,
         project_path: &Path,
         settings_json: &str,
     ) -> Vec<(String, String)> {
-        let module_name = module_path
+        let extension_name = extension_path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
 
         let component_path = project_path.to_string_lossy();
         let mut env = super::execution::build_exec_env(
-            &module_name,
+            &extension_name,
             None, // no project context in runner
             Some(&self.component_id),
             settings_json,
-            Some(&module_path.to_string_lossy()),
+            Some(&extension_path.to_string_lossy()),
             None, // no project base_path in runner
             None, // no individual settings
             Some(&component_path), // path_override (respects --path flag)
@@ -301,10 +301,10 @@ impl ModuleRunner {
 
     fn execute_script(
         &self,
-        module_path: &Path,
+        extension_path: &Path,
         env_vars: &[(String, String)],
     ) -> Result<CommandOutput> {
-        let script_path = module_path.join(&self.script_path);
+        let script_path = extension_path.join(&self.script_path);
         let mut command = shell::quote_path(&script_path.to_string_lossy());
 
         // Append script arguments if any
@@ -336,9 +336,9 @@ impl ModuleRunner {
     }
 }
 
-fn extract_module_settings(module_config: &ScopedModuleConfig) -> Vec<(String, String)> {
+fn extract_extension_settings(extension_config: &ScopedExtensionConfig) -> Vec<(String, String)> {
     let mut settings = Vec::new();
-    for (key, value) in &module_config.settings {
+    for (key, value) in &extension_config.settings {
         if let Some(str_val) = value.as_str() {
             settings.push((key.clone(), str_val.to_string()));
         }

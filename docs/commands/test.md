@@ -1,6 +1,6 @@
 # Test Command
 
-Run test suites for Homeboy components/modules.
+Run test suites for Homeboy components/extensions.
 
 ## Synopsis
 
@@ -14,7 +14,7 @@ The `test` command executes test suites for specified Homeboy components. It aut
 
 ## Arguments
 
-- `<component>`: Name of the component to test (must have a module configured)
+- `<component>`: Name of the component to test (must have a extension configured)
 
 ## Options
 
@@ -39,14 +39,14 @@ homeboy test wordpress --setting database_type=mysql --setting mysql_database=te
 
 ## Passthrough Arguments
 
-Arguments after `--` are passed directly to the module's test runner script:
+Arguments after `--` are passed directly to the extension's test runner script:
 
 ```bash
 # Pass a single argument
-homeboy test my-module -- --filter=SomeTest
+homeboy test my-extension -- --filter=SomeTest
 
 # Pass multiple arguments
-homeboy test my-module -- --filter=SomeTest --verbose
+homeboy test my-extension -- --filter=SomeTest --verbose
 ```
 
 Supported arguments depend on the underlying test framework.
@@ -55,9 +55,9 @@ Supported arguments depend on the underlying test framework.
 
 For a component to be testable, it must have:
 
-- A linked module with test support
-- A manifest file for the module (e.g., wordpress.json)
-- A test-runner script provided by the module (at scripts/test-runner.sh within the module)
+- A linked extension with test support
+- A manifest file for the extension (e.g., wordpress.json)
+- A test-runner script provided by the extension (at scripts/test-runner.sh within the extension)
 
 ## Supported Components
 
@@ -100,7 +100,7 @@ The following environment variables are set for test runners:
 
 - `HOMEBOY_EXEC_CONTEXT_VERSION`: Protocol version (`"1"`)
 - `HOMEBOY_MODULE_ID`: Component name
-- `HOMEBOY_MODULE_PATH`: Absolute path to module directory
+- `HOMEBOY_MODULE_PATH`: Absolute path to extension directory
 - `HOMEBOY_PROJECT_PATH`: Absolute path to project directory
 - `HOMEBOY_COMPONENT_ID`: Component identifier
 - `HOMEBOY_COMPONENT_PATH`: Absolute path to component directory

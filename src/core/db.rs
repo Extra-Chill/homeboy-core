@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 
 use crate::context::{require_project_base_path, resolve_project_ssh};
 use crate::engine::executor::execute_for_project;
-use crate::module::{load_all_modules, DatabaseCliConfig};
+use crate::extension::{load_all_extensions, DatabaseCliConfig};
 use crate::project::{self, Project};
 use crate::utils::template::{render_map, TemplateVars};
 use crate::utils::token;
@@ -91,16 +91,16 @@ fn build_context(project_id: &str, subtarget: Option<&str>) -> Result<DbContext>
 
     let domain = resolve_domain(&project, subtarget, project_id)?;
 
-    let modules = load_all_modules().unwrap_or_default();
+    let extensions = load_all_extensions().unwrap_or_default();
 
-    let db_cli = modules
+    let db_cli = extensions
         .iter()
         .find_map(|m| m.database().and_then(|db| db.cli.clone()))
         .ok_or_else(|| {
-            Error::config("No module with database CLI configuration found".to_string())
+            Error::config("No extension with database CLI configuration found".to_string())
         })?;
 
-    let cli_path = modules
+    let cli_path = extensions
         .iter()
         .find_map(|m| m.cli.as_ref().and_then(|cli| cli.default_cli_path.clone()))
         .unwrap_or_default();
@@ -256,7 +256,7 @@ pub fn query(project_id: &str, sql: &str, subtarget: Option<&str>) -> Result<DbR
         .any(|keyword| trimmed_sql.starts_with(keyword))
     {
         return Err(Error::config(
-            "Write operations not allowed via query. Use the module CLI directly for writes."
+            "Write operations not allowed via query. Use the extension CLI directly for writes."
                 .to_string(),
         ));
     }

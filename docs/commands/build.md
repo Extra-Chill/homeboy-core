@@ -27,20 +27,20 @@ This is useful for:
 
 The override is transient — it does not modify the stored component config.
 
-Requires `build_command` to be configured on the component, or a module with build support. If neither is set, the command errors.
+Requires `build_command` to be configured on the component, or a extension with build support. If neither is set, the command errors.
 
 ## Pre-Build Validation
 
-If a component's module defines a `pre_build_script` in its build configuration, that script runs before the build. If the pre-build script exits with a non-zero code, the build fails.
+If a component's extension defines a `pre_build_script` in its build configuration, that script runs before the build. If the pre-build script exits with a non-zero code, the build fails.
 
 For WordPress components, this runs PHP syntax validation to catch errors before building.
 
-Example module configuration:
+Example extension configuration:
 ```json
 {
   "build": {
     "script_names": ["build.sh"],
-    "module_script": "scripts/build.sh",
+    "extension_script": "scripts/build.sh",
     "pre_build_script": "scripts/validate-build.sh"
   }
 }

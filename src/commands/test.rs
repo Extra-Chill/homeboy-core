@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use homeboy::component::{self, Component};
 use homeboy::error::Error;
-use homeboy::module::{self, ModuleRunner};
+use homeboy::extension::{self, ExtensionRunner};
 
 use super::CmdResult;
 
@@ -46,11 +46,11 @@ pub struct TestOutput {
     hints: Option<Vec<String>>,
 }
 
-/// Attempt to auto-detect the module for a component based on contextual clues.
-fn auto_detect_module(component: &Component) -> Option<String> {
-    // Check build_command for module references (e.g., "modules/wordpress/scripts/build")
+/// Attempt to auto-detect the extension for a component based on contextual clues.
+fn auto_detect_extension(component: &Component) -> Option<String> {
+    // Check build_command for extension references (e.g., "extensions/wordpress/scripts/build")
     if let Some(ref cmd) = component.build_command {
-        if cmd.contains("modules/wordpress") {
+        if cmd.contains("extensions/wordpress") {
             return Some("wordpress".to_string());
         }
     }
@@ -65,53 +65,53 @@ fn auto_detect_module(component: &Component) -> Option<String> {
     None
 }
 
-fn no_modules_error(component: &Component) -> Error {
+fn no_extensions_error(component: &Component) -> Error {
     Error::validation_invalid_argument(
         "component",
         format!(
-            "Component '{}' has no modules configured and none could be auto-detected",
+            "Component '{}' has no extensions configured and none could be auto-detected",
             component.id
         ),
         None,
         None,
     )
     .with_hint(format!(
-        "Add a module: homeboy component set {} --module wordpress",
+        "Add a extension: homeboy component set {} --extension wordpress",
         component.id
     ))
 }
 
 fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> {
-    let module_id_owned: String;
-    let module_id: &str = if let Some(ref modules) = component.modules {
-        if modules.contains_key("wordpress") {
+    let extension_id_owned: String;
+    let extension_id: &str = if let Some(ref extensions) = component.extensions {
+        if extensions.contains_key("wordpress") {
             "wordpress"
-        } else if let Some(key) = modules.keys().next() {
+        } else if let Some(key) = extensions.keys().next() {
             key.as_str()
-        } else if let Some(detected) = auto_detect_module(component) {
-            module_id_owned = detected;
-            &module_id_owned
+        } else if let Some(detected) = auto_detect_extension(component) {
+            extension_id_owned = detected;
+            &extension_id_owned
         } else {
-            return Err(no_modules_error(component));
+            return Err(no_extensions_error(component));
         }
-    } else if let Some(detected) = auto_detect_module(component) {
-        module_id_owned = detected;
-        &module_id_owned
+    } else if let Some(detected) = auto_detect_extension(component) {
+        extension_id_owned = detected;
+        &extension_id_owned
     } else {
-        return Err(no_modules_error(component));
+        return Err(no_extensions_error(component));
     };
 
-    let manifest = module::load_module(module_id)?;
+    let manifest = extension::load_extension(extension_id)?;
 
     manifest
         .test_script()
         .map(|s| s.to_string())
         .ok_or_else(|| {
             Error::validation_invalid_argument(
-                "module",
+                "extension",
                 format!(
-                    "Module '{}' does not have test infrastructure configured (missing test.module_script)",
-                    module_id
+                    "Extension '{}' does not have test infrastructure configured (missing test.extension_script)",
+                    extension_id
                 ),
                 None,
                 None,
@@ -126,7 +126,7 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
     }
     let script_path = resolve_test_script(&component)?;
 
-    let output = ModuleRunner::new(&args.component, &script_path)
+    let output = ExtensionRunner::new(&args.component, &script_path)
         .path_override(args.path.clone())
         .settings(&args.setting)
         .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")

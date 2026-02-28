@@ -18,7 +18,7 @@ Document every code component (function, class, API, hook, configuration) with o
 Each discrete component gets its own dedicated file with complete coverage of all its methods, properties, and functionality.
 
 ### Code Structure Mirroring
-Documentation structure must directly mirror actual code organization. Each subdirectory corresponds to actual code modules.
+Documentation structure must directly mirror actual code organization. Each subdirectory corresponds to actual code extensions.
 
 ### End User Focus
 Write for people who need to USE the system, not build it. Make technical concepts accessible.
@@ -38,7 +38,7 @@ Distinguish main user-facing APIs from internal helper functions. Prioritize doc
 Find actual usage workflows in existing code, tests, and examples. Document real patterns, not theoretical usage.
 
 ### 5. Create Directory Structure
-Create subdirectories in `/docs` that directly correspond to actual code modules and components.
+Create subdirectories in `/docs` that directly correspond to actual code extensions and components.
 
 ### 6. Create Documentation Files
 Use `homeboy docs scaffold <component>` to analyze the component and create the file structure with H1 titles, or create files manually following the structure standards in `homeboy docs documentation/structure`.
@@ -136,8 +136,8 @@ Returns JSON with `files_created`, `files_updated`, and `hints` arrays. Files th
 
 Do not mark generation complete until:
 - Every discoverable handler, tool, API, filter, action, and component has dedicated documentation
-- All code modules identified in discovery phase have corresponding documentation files
-- All subdirectories in `/docs` correspond to actual code modules
+- All code extensions identified in discovery phase have corresponding documentation files
+- All subdirectories in `/docs` correspond to actual code extensions
 - All documented workflows correspond to actual code patterns
 
 ## Quality Gates
@@ -145,7 +145,7 @@ Do not mark generation complete until:
 Before completion, verify:
 - All documented features verified to exist in current codebase
 - Present-tense language throughout
-- All code modules have corresponding documentation
+- All code extensions have corresponding documentation
 - User-focused explanations that remain technically accurate
 - Complete usage examples from actual implementation
 - Hierarchical structure mirrors actual code organization

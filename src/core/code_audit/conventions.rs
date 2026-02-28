@@ -250,10 +250,10 @@ fn contains_word(text: &str, word: &str) -> bool {
 
 /// Extract a structural fingerprint from a source file.
 ///
-/// Dispatches to an installed extension module that handles the file's extension
+/// Dispatches to an installed extension extension that handles the file's extension
 /// and has a fingerprint script configured. No extension = no fingerprint.
 pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
-    use crate::module;
+    use crate::extension;
 
     let ext = path.extension()?.to_str()?;
     let content = std::fs::read_to_string(path).ok()?;
@@ -263,8 +263,8 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
         .to_string_lossy()
         .to_string();
 
-    let extension_module = module::find_module_for_file_extension(ext, "fingerprint")?;
-    let output = module::run_fingerprint_script(&extension_module, &relative_path, &content)?;
+    let matched_extension = extension::find_extension_for_file_ext(ext, "fingerprint")?;
+    let output = extension::run_fingerprint_script(&matched_extension, &relative_path, &content)?;
 
     let language = Language::from_extension(ext);
 
@@ -515,7 +515,7 @@ pub fn discover_conventions(
 /// Normalize a signature string before tokenization.
 ///
 /// Collapses whitespace/newlines, removes trailing commas before closing
-/// parens, and normalizes module path references to just the final segment.
+/// parens, and normalizes extension path references to just the final segment.
 /// This is language-agnostic — works on any signature string.
 fn normalize_signature(sig: &str) -> String {
     // Collapse all whitespace (including newlines) into single spaces
@@ -527,7 +527,7 @@ fn normalize_signature(sig: &str) -> String {
         .replace_all(&normalized, ")")
         .to_string();
 
-    // Normalize module paths to final segment: crate::commands::GlobalArgs → GlobalArgs
+    // Normalize extension paths to final segment: crate::commands::GlobalArgs → GlobalArgs
     // Also handles super::GlobalArgs → GlobalArgs
     // This is generic: any sequence of word::word::...::Word keeps only the last part
     let normalized = Regex::new(r"\b(?:\w+::)+(\w+)")
@@ -994,7 +994,7 @@ pub fn discover_cross_directory(
     results
 }
 
-/// Module index/entry-point filenames that should be excluded from convention
+/// Extension index/entry-point filenames that should be excluded from convention
 /// sibling detection. These files organize other files rather than being
 /// peers — including them produces false "missing method" findings.
 const INDEX_FILES: &[&str] = &[
@@ -1009,7 +1009,7 @@ const INDEX_FILES: &[&str] = &[
     "__init__.py",
 ];
 
-/// Returns true if the filename is a module index/entry-point file.
+/// Returns true if the filename is a extension index/entry-point file.
 fn is_index_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -1018,10 +1018,10 @@ fn is_index_file(path: &Path) -> bool {
 }
 
 /// Walk source files under a root, skipping common non-source directories
-/// and module index files.
-/// Collect all file extensions that installed extension modules can handle.
+/// and extension index files.
+/// Collect all file extensions that installed extension extensions can handle.
 fn extension_provided_file_extensions() -> Vec<String> {
-    crate::module::load_all_modules()
+    crate::extension::load_all_extensions()
         .unwrap_or_default()
         .into_iter()
         .flat_map(|m| m.provided_file_extensions().to_vec())
@@ -1047,7 +1047,7 @@ fn walk_source_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut files = Vec::new();
     walk_recursive(root, &skip_dirs, &source_extensions, &mut files)?;
 
-    // Exclude module index files from convention sibling detection
+    // Exclude extension index files from convention sibling detection
     files.retain(|f| !is_index_file(f));
 
     Ok(files)
@@ -1362,8 +1362,8 @@ mod tests {
     fn cross_directory_skips_when_no_shared_methods() {
         // Sibling directories have completely different method sets
         let conventions = vec![
-            make_convention("Flow", "inc/Modules/Flow/*", &["run_flow", "validate_flow"], &[]),
-            make_convention("Job", "inc/Modules/Job/*", &["dispatch_job", "cancel_job"], &[]),
+            make_convention("Flow", "inc/Extensions/Flow/*", &["run_flow", "validate_flow"], &[]),
+            make_convention("Job", "inc/Extensions/Job/*", &["dispatch_job", "cancel_job"], &[]),
         ];
 
         let results = discover_cross_directory(&conventions);

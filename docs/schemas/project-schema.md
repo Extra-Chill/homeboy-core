@@ -26,7 +26,7 @@ Project configuration defines deployable environments stored in `projects/<id>.j
   "sub_targets": [],
   "component_groupings": [],
   "tools": {},
-  "modules": {}
+  "extensions": {}
 }
 ```
 
@@ -84,9 +84,9 @@ Project configuration defines deployable environments stored in `projects/<id>.j
 - **`tools`** (object): Project-specific tool configurations
   - Keys are tool identifiers (e.g., `"newsletter"`, `"bandcamp_scraper"`)
   - Values are tool-specific setting objects
-- **`modules`** (object): Module-specific settings for this project
-  - Keys are module IDs
-  - Values are module setting objects
+- **`extensions`** (object): Extension-specific settings for this project
+  - Keys are extension IDs
+  - Values are extension setting objects
 
 ## Example
 
@@ -144,7 +144,7 @@ Project configuration defines deployable environments stored in `projects/<id>.j
       "sort_order": 0
     }
   ],
-  "modules": {
+  "extensions": {
     "wordpress": {
       "settings": {
         "wp_cli_path": "/usr/local/bin/wp"

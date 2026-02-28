@@ -26,7 +26,7 @@ pub enum ErrorCode {
     ServerNotFound,
     ComponentNotFound,
     FleetNotFound,
-    ModuleNotFound,
+    ExtensionNotFound,
     DocsTopicNotFound,
 
     SshServerInvalid,
@@ -66,7 +66,7 @@ impl ErrorCode {
             ErrorCode::ServerNotFound => "server.not_found",
             ErrorCode::ComponentNotFound => "component.not_found",
             ErrorCode::FleetNotFound => "fleet.not_found",
-            ErrorCode::ModuleNotFound => "module.not_found",
+            ErrorCode::ExtensionNotFound => "extension.not_found",
             ErrorCode::DocsTopicNotFound => "docs.topic_not_found",
 
             ErrorCode::SshServerInvalid => "ssh.server_invalid",
@@ -348,8 +348,8 @@ impl Error {
         Self::entity_not_found(ErrorCode::ComponentNotFound, "Component", id, suggestions)
     }
 
-    pub fn module_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
-        Self::entity_not_found(ErrorCode::ModuleNotFound, "Module", id, suggestions)
+    pub fn extension_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
+        Self::entity_not_found(ErrorCode::ExtensionNotFound, "Extension", id, suggestions)
     }
 
     pub fn fleet_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {

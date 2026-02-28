@@ -4,12 +4,12 @@ use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::error::{Error, Result};
 use crate::git::{self, UncommittedChanges};
-use crate::module::ModuleManifest;
+use crate::extension::ExtensionManifest;
 use crate::utils::validation::ValidationCollector;
 use crate::version;
 
 use super::executor::ReleaseStepExecutor;
-use super::resolver::{resolve_modules, ReleaseCapabilityResolver};
+use super::resolver::{resolve_extensions, ReleaseCapabilityResolver};
 use super::types::{ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun};
 
 /// Execute a release by computing the plan and executing it.
@@ -21,9 +21,9 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     if let Some(ref path) = options.path_override {
         component.local_path = path.clone();
     }
-    let modules = resolve_modules(&component, None)?;
-    let resolver = ReleaseCapabilityResolver::new(modules.clone());
-    let executor = ReleaseStepExecutor::new(component_id.to_string(), modules);
+    let extensions = resolve_extensions(&component, None)?;
+    let resolver = ReleaseCapabilityResolver::new(extensions.clone());
+    let executor = ReleaseStepExecutor::new(component_id.to_string(), extensions);
 
     let pipeline_steps: Vec<PipelineStep> = release_plan
         .steps
@@ -52,7 +52,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     })
 }
 
-/// Plan a release with built-in core steps and module-derived publish targets.
+/// Plan a release with built-in core steps and extension-derived publish targets.
 ///
 /// Requires a clean working tree (uncommitted changes will cause an error).
 ///
@@ -62,15 +62,15 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
 /// 3. Git tag
 /// 4. Git push (commits AND tags)
 ///
-/// Publish steps (derived from modules):
-/// - From component's modules that have `release.publish` action
+/// Publish steps (derived from extensions):
+/// - From component's extensions that have `release.publish` action
 /// - Or explicit `release.publish` array if configured
 pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan> {
     let mut component = component::load(component_id)?;
     if let Some(ref path) = options.path_override {
         component.local_path = path.clone();
     }
-    let modules = resolve_modules(&component, None)?;
+    let extensions = resolve_extensions(&component, None)?;
 
     let mut v = ValidationCollector::new();
 
@@ -166,7 +166,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     let steps = build_release_steps(
         &component,
-        &modules,
+        &extensions,
         &version_info.version,
         &new_version,
         options,
@@ -346,26 +346,26 @@ fn auto_generate_changelog_entries(
     Ok(())
 }
 
-/// Derive publish targets from modules that have `release.publish` action.
-fn get_publish_targets(modules: &[ModuleManifest]) -> Vec<String> {
-    modules
+/// Derive publish targets from extensions that have `release.publish` action.
+fn get_publish_targets(extensions: &[ExtensionManifest]) -> Vec<String> {
+    extensions
         .iter()
         .filter(|m| m.actions.iter().any(|a| a.id == "release.publish"))
         .map(|m| m.id.clone())
         .collect()
 }
 
-/// Check if any module provides the `release.package` action.
-fn has_package_capability(modules: &[ModuleManifest]) -> bool {
-    modules
+/// Check if any extension provides the `release.package` action.
+fn has_package_capability(extensions: &[ExtensionManifest]) -> bool {
+    extensions
         .iter()
         .any(|m| m.actions.iter().any(|a| a.id == "release.package"))
 }
 
-/// Build all release steps: core steps (non-configurable) + publish steps (module-derived).
+/// Build all release steps: core steps (non-configurable) + publish steps (extension-derived).
 fn build_release_steps(
     component: &Component,
-    modules: &[ModuleManifest],
+    extensions: &[ExtensionManifest],
     current_version: &str,
     new_version: &str,
     options: &ReleaseOptions,
@@ -373,13 +373,13 @@ fn build_release_steps(
     _hints: &mut Vec<String>,
 ) -> Result<Vec<ReleasePlanStep>> {
     let mut steps = Vec::new();
-    let publish_targets = get_publish_targets(modules);
+    let publish_targets = get_publish_targets(extensions);
 
     // === WARNING: No package capability ===
-    if !publish_targets.is_empty() && !has_package_capability(modules) {
+    if !publish_targets.is_empty() && !has_package_capability(extensions) {
         warnings.push(
-            "Publish targets derived from modules but no module provides 'release.package'. \
-             Add a module like 'rust' that provides packaging."
+            "Publish targets derived from extensions but no extension provides 'release.package'. \
+             Add a extension like 'rust' that provides packaging."
                 .to_string(),
         );
     }
@@ -459,7 +459,7 @@ fn build_release_steps(
         missing: vec![],
     });
 
-    // === PUBLISH STEPS (module-derived, only if publish targets exist) ===
+    // === PUBLISH STEPS (extension-derived, only if publish targets exist) ===
 
     if !publish_targets.is_empty() {
         // 5. Package (produces artifacts for publish steps)

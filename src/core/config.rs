@@ -642,7 +642,7 @@ pub(crate) fn parse_bulk_ids(json_spec: &str) -> Result<BulkIdsInput> {
 // ============================================================================
 
 pub(crate) trait ConfigEntity: Serialize + DeserializeOwned {
-    /// The entity type name (e.g., "project", "server", "component", "module").
+    /// The entity type name (e.g., "project", "server", "component", "extension").
     const ENTITY_TYPE: &'static str;
 
     /// The directory name within the config root (e.g., "projects", "servers").
@@ -750,7 +750,7 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
         .filter_map(|e| {
             // Determine the path to the JSON file and the ID
             let (json_path, id) = if e.is_dir {
-                // For directories (module structure): look for {dir}/{dir}.json
+                // For directories (extension structure): look for {dir}/{dir}.json
                 let dir_name = e.path.file_name()?.to_string_lossy().to_string();
                 let nested_json = e.path.join(format!("{}.json", dir_name));
                 if nested_json.exists() {
@@ -1462,7 +1462,7 @@ mod tests {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub tags: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub modules: Option<std::collections::HashMap<String, serde_json::Value>>,
+        pub extensions: Option<std::collections::HashMap<String, serde_json::Value>>,
     }
 
     #[test]
@@ -1471,7 +1471,7 @@ mod tests {
             name: "test".to_string(),
             ..Default::default()
         };
-        let patch = serde_json::json!({"module": "wordpress"});
+        let patch = serde_json::json!({"extension": "wordpress"});
         let result = merge_config(&mut config, patch, &[]);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1482,8 +1482,8 @@ mod tests {
             problem
         );
         assert!(
-            problem.contains("'module'"),
-            "Expected 'module' in error, got: {}",
+            problem.contains("'extension'"),
+            "Expected 'extension' in error, got: {}",
             problem
         );
     }
@@ -1521,9 +1521,9 @@ mod tests {
             name: "test".to_string(),
             ..Default::default()
         };
-        let patch = serde_json::json!({"modules": {"wordpress": {}}});
+        let patch = serde_json::json!({"extensions": {"wordpress": {}}});
         let result = merge_config(&mut config, patch, &[]);
         assert!(result.is_ok());
-        assert!(config.modules.is_some());
+        assert!(config.extensions.is_some());
     }
 }

@@ -3,31 +3,31 @@ use crate::error::{Error, Result};
 use crate::project::Project;
 use std::collections::HashMap;
 
-use super::load_module;
-use super::manifest::ModuleManifest;
+use super::load_extension;
+use super::manifest::ExtensionManifest;
 
-/// Settings resolution for modules with project/component context.
-pub struct ModuleScope;
+/// Settings resolution for extensions with project/component context.
+pub struct ExtensionScope;
 
-impl ModuleScope {
+impl ExtensionScope {
     pub fn effective_settings(
-        module_id: &str,
+        extension_id: &str,
         project: Option<&Project>,
         component: Option<&Component>,
     ) -> Result<HashMap<String, serde_json::Value>> {
         let mut settings = HashMap::new();
 
         if let Some(project) = project {
-            if let Some(project_modules) = project.modules.as_ref() {
-                if let Some(project_config) = project_modules.get(module_id) {
+            if let Some(project_extensions) = project.extensions.as_ref() {
+                if let Some(project_config) = project_extensions.get(extension_id) {
                     settings.extend(project_config.settings.clone());
                 }
             }
         }
 
         if let Some(component) = component {
-            if let Some(component_modules) = component.modules.as_ref() {
-                if let Some(component_config) = component_modules.get(module_id) {
+            if let Some(component_extensions) = component.extensions.as_ref() {
+                if let Some(component_config) = component_extensions.get(extension_id) {
                     settings.extend(component_config.settings.clone());
                 }
             }
@@ -37,21 +37,21 @@ impl ModuleScope {
     }
 
     pub fn validate_project_compatibility(
-        module: &ModuleManifest,
+        extension: &ExtensionManifest,
         project: &Project,
     ) -> Result<()> {
-        let Some(requires) = module.requires.as_ref() else {
+        let Some(requires) = extension.requires.as_ref() else {
             return Ok(());
         };
 
-        // Required modules must be installed globally
-        for required_module in &requires.modules {
-            if load_module(required_module).is_err() {
+        // Required extensions must be installed globally
+        for required_extension in &requires.extensions {
+            if load_extension(required_extension).is_err() {
                 return Err(Error::validation_invalid_argument(
-                    "modules",
+                    "extensions",
                     format!(
-                        "Module '{}' requires module '{}', but it is not installed",
-                        module.id, required_module
+                        "Extension '{}' requires extension '{}', but it is not installed",
+                        extension.id, required_extension
                     ),
                     None,
                     None,
@@ -65,8 +65,8 @@ impl ModuleScope {
                 return Err(Error::validation_invalid_argument(
                     "project.componentIds",
                     format!(
-                        "Module '{}' requires component '{}', but project does not include it",
-                        module.id, required
+                        "Extension '{}' requires component '{}', but project does not include it",
+                        extension.id, required
                     ),
                     None,
                     None,
@@ -78,11 +78,11 @@ impl ModuleScope {
     }
 
     pub fn resolve_component_scope(
-        module: &ModuleManifest,
+        extension: &ExtensionManifest,
         project: &Project,
         component_id: Option<&str>,
     ) -> Result<Option<String>> {
-        let required_components = module
+        let required_components = extension
             .requires
             .as_ref()
             .map(|r| &r.components)
@@ -102,8 +102,8 @@ impl ModuleScope {
             return Err(Error::validation_invalid_argument(
                 "project.componentIds",
                 format!(
-                    "Module '{}' requires components {:?}; none are configured for this project",
-                    module.id, required_components
+                    "Extension '{}' requires components {:?}; none are configured for this project",
+                    extension.id, required_components
                 ),
                 None,
                 None,
@@ -115,8 +115,8 @@ impl ModuleScope {
                 return Err(Error::validation_invalid_argument(
                     "component",
                     format!(
-                        "Module '{}' only supports project components {:?}; --component '{}' is not compatible",
-                        module.id, matching_component_ids, component_id
+                        "Extension '{}' only supports project components {:?}; --component '{}' is not compatible",
+                        extension.id, matching_component_ids, component_id
                     ),
                     Some(component_id.to_string()),
                     None,
@@ -133,8 +133,8 @@ impl ModuleScope {
         Err(Error::validation_invalid_argument(
             "component",
             format!(
-                "Module '{}' matches multiple project components {:?}; pass --component <id>",
-                module.id, matching_component_ids
+                "Extension '{}' matches multiple project components {:?}; pass --component <id>",
+                extension.id, matching_component_ids
             ),
             None,
             None,

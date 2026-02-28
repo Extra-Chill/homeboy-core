@@ -1,37 +1,37 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use homeboy::module::{
-    self, is_module_compatible, is_module_linked, load_all_modules, load_module,
-    module_ready_status, run_setup,
+use homeboy::extension::{
+    self, is_extension_compatible, is_extension_linked, load_all_extensions, load_extension,
+    extension_ready_status, run_setup,
 };
 use homeboy::project::{self, Project};
 
 use crate::commands::CmdResult;
 
 #[derive(Args)]
-pub struct ModuleArgs {
+pub struct ExtensionArgs {
     #[command(subcommand)]
-    command: ModuleCommand,
+    command: ExtensionCommand,
 }
 
 #[derive(Subcommand)]
-enum ModuleCommand {
-    /// Show available modules with compatibility status
+enum ExtensionCommand {
+    /// Show available extensions with compatibility status
     List {
-        /// Project ID to filter compatible modules
+        /// Project ID to filter compatible extensions
         #[arg(short, long)]
         project: Option<String>,
     },
-    /// Show detailed information about a module
+    /// Show detailed information about a extension
     Show {
-        /// Module ID
-        module_id: String,
+        /// Extension ID
+        extension_id: String,
     },
-    /// Execute a module
+    /// Execute a extension
     Run {
-        /// Module ID
-        module_id: String,
+        /// Extension ID
+        extension_id: String,
         /// Project ID (defaults to active project)
         #[arg(short, long)]
         project: Option<String>,
@@ -47,7 +47,7 @@ enum ModuleCommand {
         /// Skip specific steps (comma-separated, e.g. --skip phpstan,lint)
         #[arg(long)]
         skip: Option<String>,
-        /// Arguments to pass to the module (for CLI modules)
+        /// Arguments to pass to the extension (for CLI extensions)
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
         /// Stream output directly to terminal (default: auto-detect based on TTY)
@@ -57,39 +57,39 @@ enum ModuleCommand {
         #[arg(long)]
         no_stream: bool,
     },
-    /// Run the module's setup command (if defined)
+    /// Run the extension's setup command (if defined)
     Setup {
-        /// Module ID
-        module_id: String,
+        /// Extension ID
+        extension_id: String,
     },
-    /// Install a module from a git URL or local path
+    /// Install a extension from a git URL or local path
     Install {
-        /// Git URL or local path to module directory
+        /// Git URL or local path to extension directory
         source: String,
-        /// Override module id
+        /// Override extension id
         #[arg(long)]
         id: Option<String>,
     },
-    /// Update an installed module (git pull)
+    /// Update an installed extension (git pull)
     Update {
-        /// Module ID (omit with --all to update everything)
-        module_id: Option<String>,
-        /// Update all installed modules
+        /// Extension ID (omit with --all to update everything)
+        extension_id: Option<String>,
+        /// Update all installed extensions
         #[arg(long)]
         all: bool,
         /// Force update even with uncommitted changes
         #[arg(long)]
         force: bool,
     },
-    /// Uninstall a module
+    /// Uninstall a extension
     Uninstall {
-        /// Module ID
-        module_id: String,
+        /// Extension ID
+        extension_id: String,
     },
-    /// Execute a module action (API call or builtin)
+    /// Execute a extension action (API call or builtin)
     Action {
-        /// Module ID
-        module_id: String,
+        /// Extension ID
+        extension_id: String,
         /// Action ID
         action_id: String,
         /// Project ID (required for API actions)
@@ -99,10 +99,10 @@ enum ModuleCommand {
         #[arg(long)]
         data: Option<String>,
     },
-    /// Run a tool from a module's vendor directory
+    /// Run a tool from a extension's vendor directory
     Exec {
-        /// Module ID
-        module_id: String,
+        /// Extension ID
+        extension_id: String,
         /// Component ID (sets working directory to component path)
         #[arg(short, long)]
         component: Option<String>,
@@ -110,11 +110,11 @@ enum ModuleCommand {
         #[arg(trailing_var_arg = true, required = true)]
         args: Vec<String>,
     },
-    /// Update module manifest fields
+    /// Update extension manifest fields
     #[command(visible_aliases = ["edit", "merge"])]
     Set {
-        /// Module ID (optional if provided in JSON body)
-        module_id: Option<String>,
+        /// Extension ID (optional if provided in JSON body)
+        extension_id: Option<String>,
         /// JSON object to merge into manifest (supports @file and - for stdin)
         #[arg(long, value_name = "JSON")]
         json: String,
@@ -124,12 +124,12 @@ enum ModuleCommand {
     },
 }
 
-pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ModuleOutput> {
+pub fn run(args: ExtensionArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ExtensionOutput> {
     match args.command {
-        ModuleCommand::List { project } => list(project),
-        ModuleCommand::Show { module_id } => show_module(&module_id),
-        ModuleCommand::Run {
-            module_id,
+        ExtensionCommand::List { project } => list(project),
+        ExtensionCommand::Show { extension_id } => show_extension(&extension_id),
+        ExtensionCommand::Run {
+            extension_id,
             project,
             component,
             input,
@@ -138,67 +138,67 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             args,
             stream,
             no_stream,
-        } => run_module(
-            &module_id, project, component, input, args, stream, no_stream, step, skip,
+        } => run_extension(
+            &extension_id, project, component, input, args, stream, no_stream, step, skip,
         ),
-        ModuleCommand::Setup { module_id } => setup_module(&module_id),
-        ModuleCommand::Install { source, id } => install_module(&source, id),
-        ModuleCommand::Update {
-            module_id,
+        ExtensionCommand::Setup { extension_id } => setup_extension(&extension_id),
+        ExtensionCommand::Install { source, id } => install_extension(&source, id),
+        ExtensionCommand::Update {
+            extension_id,
             all,
             force,
-        } => update_module(module_id.as_deref(), all, force),
-        ModuleCommand::Uninstall { module_id } => uninstall_module(&module_id),
-        ModuleCommand::Action {
-            module_id,
+        } => update_extension(extension_id.as_deref(), all, force),
+        ExtensionCommand::Uninstall { extension_id } => uninstall_extension(&extension_id),
+        ExtensionCommand::Action {
+            extension_id,
             action_id,
             project,
             data,
-        } => run_action(&module_id, &action_id, project, data),
-        ModuleCommand::Exec {
-            module_id,
+        } => run_action(&extension_id, &action_id, project, data),
+        ExtensionCommand::Exec {
+            extension_id,
             component,
             args,
-        } => exec_module_tool(&module_id, component, args),
-        ModuleCommand::Set {
-            module_id,
+        } => exec_extension_tool(&extension_id, component, args),
+        ExtensionCommand::Set {
+            extension_id,
             json,
             replace,
-        } => set_module(module_id.as_deref(), &json, &replace),
+        } => set_extension(extension_id.as_deref(), &json, &replace),
     }
 }
 
 #[derive(Serialize)]
 #[serde(tag = "command")]
-pub enum ModuleOutput {
-    #[serde(rename = "module.list")]
+pub enum ExtensionOutput {
+    #[serde(rename = "extension.list")]
     List {
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
-        modules: Vec<ModuleEntry>,
+        extensions: Vec<ExtensionEntry>,
     },
-    #[serde(rename = "module.show")]
-    Show { module: ModuleDetail },
-    #[serde(rename = "module.run")]
+    #[serde(rename = "extension.show")]
+    Show { extension: ExtensionDetail },
+    #[serde(rename = "extension.run")]
     Run {
-        module_id: String,
+        extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", flatten)]
         output: Option<homeboy::utils::command::CapturedOutput>,
     },
-    #[serde(rename = "module.setup")]
-    Setup { module_id: String },
-    #[serde(rename = "module.install")]
+    #[serde(rename = "extension.setup")]
+    Setup { extension_id: String },
+    #[serde(rename = "extension.install")]
     Install {
-        module_id: String,
+        extension_id: String,
         source: String,
         path: String,
         linked: bool,
     },
-    #[serde(rename = "module.update")]
+    #[serde(rename = "extension.update")]
     Update {
-        module_id: String,
+        extension_id: String,
         url: String,
         path: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,43 +206,43 @@ pub enum ModuleOutput {
         #[serde(skip_serializing_if = "Option::is_none")]
         new_version: Option<String>,
     },
-    #[serde(rename = "module.update_all")]
+    #[serde(rename = "extension.update_all")]
     UpdateAll {
-        updated: Vec<ModuleUpdateEntry>,
+        updated: Vec<ExtensionUpdateEntry>,
         skipped: Vec<String>,
     },
-    #[serde(rename = "module.uninstall")]
+    #[serde(rename = "extension.uninstall")]
     Uninstall {
-        module_id: String,
+        extension_id: String,
         path: String,
         was_linked: bool,
     },
-    #[serde(rename = "module.action")]
+    #[serde(rename = "extension.action")]
     Action {
-        module_id: String,
+        extension_id: String,
         action_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
         response: serde_json::Value,
     },
-    #[serde(rename = "module.set")]
+    #[serde(rename = "extension.set")]
     Set {
-        module_id: String,
+        extension_id: String,
         updated_fields: Vec<String>,
     },
-    #[serde(rename = "module.exec")]
+    #[serde(rename = "extension.exec")]
     Exec {
-        module_id: String,
+        extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none", flatten)]
         output: Option<homeboy::utils::command::CapturedOutput>,
     },
-    #[serde(rename = "module.set")]
+    #[serde(rename = "extension.set")]
     SetBatch { batch: homeboy::BatchResult },
 }
 
 #[derive(Serialize)]
-pub struct ModuleUpdateEntry {
-    pub module_id: String,
+pub struct ExtensionUpdateEntry {
+    pub extension_id: String,
     pub old_version: String,
     pub new_version: String,
 }
@@ -252,12 +252,12 @@ pub struct ActionSummary {
     pub id: String,
     pub label: String,
     #[serde(rename = "type")]
-    pub action_type: homeboy::module::ActionType,
+    pub action_type: homeboy::extension::ActionType,
 }
 
 #[derive(Serialize)]
 
-pub struct ModuleEntry {
+pub struct ExtensionEntry {
     pub id: String,
     pub name: String,
     pub version: String,
@@ -285,7 +285,7 @@ pub struct ModuleEntry {
 }
 
 #[derive(Serialize)]
-pub struct ModuleDetail {
+pub struct ExtensionDetail {
     pub id: String,
     pub name: String,
     pub version: String,
@@ -314,9 +314,9 @@ pub struct ModuleDetail {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionDetail>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<homeboy::module::InputConfig>,
+    pub inputs: Vec<homeboy::extension::InputConfig>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub settings: Vec<homeboy::module::SettingConfig>,
+    pub settings: Vec<homeboy::extension::SettingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires: Option<RequiresDetail>,
 }
@@ -335,11 +335,11 @@ pub struct ActionDetail {
     pub id: String,
     pub label: String,
     #[serde(rename = "type")]
-    pub action_type: homeboy::module::ActionType,
+    pub action_type: homeboy::extension::ActionType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub method: Option<homeboy::module::HttpMethod>,
+    pub method: Option<homeboy::extension::HttpMethod>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
 }
@@ -347,30 +347,30 @@ pub struct ActionDetail {
 #[derive(Serialize)]
 pub struct RequiresDetail {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub modules: Vec<String>,
+    pub extensions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<String>,
 }
 
-fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
-    let modules = load_all_modules().unwrap_or_default();
+fn list(project: Option<String>) -> CmdResult<ExtensionOutput> {
+    let extensions = load_all_extensions().unwrap_or_default();
 
     let project_config: Option<Project> = project.as_ref().and_then(|id| project::load(id).ok());
 
-    let entries: Vec<ModuleEntry> = modules
+    let entries: Vec<ExtensionEntry> = extensions
         .iter()
-        .map(|module| {
-            let ready_status = module_ready_status(module);
-            let compatible = is_module_compatible(module, project_config.as_ref());
-            let linked = is_module_linked(&module.id);
+        .map(|extension| {
+            let ready_status = extension_ready_status(extension);
+            let compatible = is_extension_compatible(extension, project_config.as_ref());
+            let linked = is_extension_linked(&extension.id);
 
-            let (cli_tool, cli_display_name) = module
+            let (cli_tool, cli_display_name) = extension
                 .cli
                 .as_ref()
                 .map(|cli| (Some(cli.tool.clone()), Some(cli.display_name.clone())))
                 .unwrap_or((None, None));
 
-            let actions: Vec<ActionSummary> = module
+            let actions: Vec<ActionSummary> = extension
                 .actions
                 .iter()
                 .map(|a| ActionSummary {
@@ -380,26 +380,26 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                 })
                 .collect();
 
-            let has_setup = module
+            let has_setup = extension
                 .runtime()
                 .and_then(|r| r.setup_command.as_ref())
                 .map(|_| true);
-            let has_ready_check = module
+            let has_ready_check = extension
                 .runtime()
                 .and_then(|r| r.ready_check.as_ref())
                 .map(|_| true);
 
-            ModuleEntry {
-                id: module.id.clone(),
-                name: module.name.clone(),
-                version: module.version.clone(),
-                description: module
+            ExtensionEntry {
+                id: extension.id.clone(),
+                name: extension.name.clone(),
+                version: extension.version.clone(),
+                description: extension
                     .description
                     .as_ref()
                     .and_then(|d| d.lines().next())
                     .unwrap_or("")
                     .to_string(),
-                runtime: if module.executable.is_some() {
+                runtime: if extension.executable.is_some() {
                     "executable".to_string()
                 } else {
                     "platform".to_string()
@@ -410,7 +410,7 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
                 ready_detail: ready_status.detail,
                 configured: true,
                 linked,
-                path: module.module_path.clone().unwrap_or_default(),
+                path: extension.extension_path.clone().unwrap_or_default(),
                 cli_tool,
                 cli_display_name,
                 actions,
@@ -421,36 +421,36 @@ fn list(project: Option<String>) -> CmdResult<ModuleOutput> {
         .collect();
 
     Ok((
-        ModuleOutput::List {
+        ExtensionOutput::List {
             project_id: project,
-            modules: entries,
+            extensions: entries,
         },
         0,
     ))
 }
 
-fn show_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    let module = load_module(module_id)?;
-    let ready_status = module_ready_status(&module);
-    let linked = is_module_linked(&module.id);
+fn show_extension(extension_id: &str) -> CmdResult<ExtensionOutput> {
+    let extension = load_extension(extension_id)?;
+    let ready_status = extension_ready_status(&extension);
+    let linked = is_extension_linked(&extension.id);
 
-    let has_setup = module
+    let has_setup = extension
         .runtime()
         .and_then(|r| r.setup_command.as_ref())
         .map(|_| true);
-    let has_ready_check = module
+    let has_ready_check = extension
         .runtime()
         .and_then(|r| r.ready_check.as_ref())
         .map(|_| true);
 
-    let cli = module.cli.as_ref().map(|c| CliDetail {
+    let cli = extension.cli.as_ref().map(|c| CliDetail {
         tool: c.tool.clone(),
         display_name: c.display_name.clone(),
         command_template: c.command_template.clone(),
         default_cli_path: c.default_cli_path.clone(),
     });
 
-    let actions: Vec<ActionDetail> = module
+    let actions: Vec<ActionDetail> = extension
         .actions
         .iter()
         .map(|a| ActionDetail {
@@ -463,20 +463,20 @@ fn show_module(module_id: &str) -> CmdResult<ModuleOutput> {
         })
         .collect();
 
-    let requires = module.requires.as_ref().map(|r| RequiresDetail {
-        modules: r.modules.clone(),
+    let requires = extension.requires.as_ref().map(|r| RequiresDetail {
+        extensions: r.extensions.clone(),
         components: r.components.clone(),
     });
 
-    let detail = ModuleDetail {
-        id: module.id.clone(),
-        name: module.name.clone(),
-        version: module.version.clone(),
-        description: module.description.clone(),
-        author: module.author.clone(),
-        homepage: module.homepage.clone(),
-        source_url: module.source_url.clone(),
-        runtime: if module.executable.is_some() {
+    let detail = ExtensionDetail {
+        id: extension.id.clone(),
+        name: extension.name.clone(),
+        version: extension.version.clone(),
+        description: extension.description.clone(),
+        author: extension.author.clone(),
+        homepage: extension.homepage.clone(),
+        source_url: extension.source_url.clone(),
+        runtime: if extension.executable.is_some() {
             "executable".to_string()
         } else {
             "platform".to_string()
@@ -487,19 +487,19 @@ fn show_module(module_id: &str) -> CmdResult<ModuleOutput> {
         ready_reason: ready_status.reason,
         ready_detail: ready_status.detail,
         linked,
-        path: module.module_path.clone().unwrap_or_default(),
+        path: extension.extension_path.clone().unwrap_or_default(),
         cli,
         actions,
-        inputs: module.inputs().to_vec(),
-        settings: module.settings.clone(),
+        inputs: extension.inputs().to_vec(),
+        settings: extension.settings.clone(),
         requires,
     };
 
-    Ok((ModuleOutput::Show { module: detail }, 0))
+    Ok((ExtensionOutput::Show { extension: detail }, 0))
 }
 
-fn run_module(
-    module_id: &str,
+fn run_extension(
+    extension_id: &str,
     project: Option<String>,
     component: Option<String>,
     inputs: Vec<(String, String)>,
@@ -508,21 +508,21 @@ fn run_module(
     no_stream: bool,
     step: Option<String>,
     skip: Option<String>,
-) -> CmdResult<ModuleOutput> {
-    use homeboy::module::{ModuleExecutionMode, ModuleStepFilter};
+) -> CmdResult<ExtensionOutput> {
+    use homeboy::extension::{ExtensionExecutionMode, ExtensionStepFilter};
 
     let mode = if no_stream {
-        ModuleExecutionMode::Captured
+        ExtensionExecutionMode::Captured
     } else if stream || crate::tty::is_stdout_tty() {
-        ModuleExecutionMode::Interactive
+        ExtensionExecutionMode::Interactive
     } else {
-        ModuleExecutionMode::Captured
+        ExtensionExecutionMode::Captured
     };
 
-    let filter = ModuleStepFilter { step, skip };
+    let filter = ExtensionStepFilter { step, skip };
 
-    let result = homeboy::module::run_module(
-        module_id,
+    let result = homeboy::extension::run_extension(
+        extension_id,
         project.as_deref(),
         component.as_deref(),
         inputs,
@@ -532,8 +532,8 @@ fn run_module(
     )?;
 
     Ok((
-        ModuleOutput::Run {
-            module_id: module_id.to_string(),
+        ExtensionOutput::Run {
+            extension_id: extension_id.to_string(),
             project_id: result.project_id,
             output: result.output,
         },
@@ -541,13 +541,13 @@ fn run_module(
     ))
 }
 
-fn install_module(source: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
-    let result = homeboy::module::install(source, id.as_deref())?;
-    let linked = is_module_linked(&result.module_id);
+fn install_extension(source: &str, id: Option<String>) -> CmdResult<ExtensionOutput> {
+    let result = homeboy::extension::install(source, id.as_deref())?;
+    let linked = is_extension_linked(&result.extension_id);
 
     Ok((
-        ModuleOutput::Install {
-            module_id: result.module_id,
+        ExtensionOutput::Install {
+            extension_id: result.extension_id,
             source: result.url,
             path: result.path.to_string_lossy().to_string(),
             linked,
@@ -556,33 +556,33 @@ fn install_module(source: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
     ))
 }
 
-fn update_module(module_id: Option<&str>, all: bool, force: bool) -> CmdResult<ModuleOutput> {
+fn update_extension(extension_id: Option<&str>, all: bool, force: bool) -> CmdResult<ExtensionOutput> {
     if all {
-        return update_all_modules(force);
+        return update_all_extensions(force);
     }
 
-    let module_id = module_id.ok_or_else(|| {
+    let extension_id = extension_id.ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
-            "module_id",
-            "Provide a module ID or use --all to update all modules",
+            "extension_id",
+            "Provide a extension ID or use --all to update all extensions",
             None,
             None,
         )
     })?;
 
     // Capture version before update
-    let old_version = load_module(module_id).ok().map(|m| m.version.clone());
+    let old_version = load_extension(extension_id).ok().map(|m| m.version.clone());
 
-    let result = module::update(module_id, force)?;
+    let result = extension::update(extension_id, force)?;
 
     // Capture version after update
-    let new_version = load_module(&result.module_id)
+    let new_version = load_extension(&result.extension_id)
         .ok()
         .map(|m| m.version.clone());
 
     Ok((
-        ModuleOutput::Update {
-            module_id: result.module_id,
+        ExtensionOutput::Update {
+            extension_id: result.extension_id,
             url: result.url,
             path: result.path.to_string_lossy().to_string(),
             old_version,
@@ -592,29 +592,29 @@ fn update_module(module_id: Option<&str>, all: bool, force: bool) -> CmdResult<M
     ))
 }
 
-fn update_all_modules(force: bool) -> CmdResult<ModuleOutput> {
-    let module_ids = module::available_module_ids();
+fn update_all_extensions(force: bool) -> CmdResult<ExtensionOutput> {
+    let extension_ids = extension::available_extension_ids();
     let mut updated = Vec::new();
     let mut skipped = Vec::new();
 
-    for id in &module_ids {
-        // Skip linked modules (they're managed externally)
-        if is_module_linked(id) {
+    for id in &extension_ids {
+        // Skip linked extensions (they're managed externally)
+        if is_extension_linked(id) {
             skipped.push(id.clone());
             continue;
         }
 
-        let old_version = load_module(id).ok().map(|m| m.version.clone());
+        let old_version = load_extension(id).ok().map(|m| m.version.clone());
 
-        match module::update(id, force) {
+        match extension::update(id, force) {
             Ok(_) => {
-                let new_version = load_module(id)
+                let new_version = load_extension(id)
                     .ok()
                     .map(|m| m.version.clone())
                     .unwrap_or_default();
 
-                updated.push(ModuleUpdateEntry {
-                    module_id: id.clone(),
+                updated.push(ExtensionUpdateEntry {
+                    extension_id: id.clone(),
                     old_version: old_version.unwrap_or_default(),
                     new_version,
                 });
@@ -625,16 +625,16 @@ fn update_all_modules(force: bool) -> CmdResult<ModuleOutput> {
         }
     }
 
-    Ok((ModuleOutput::UpdateAll { updated, skipped }, 0))
+    Ok((ExtensionOutput::UpdateAll { updated, skipped }, 0))
 }
 
-fn uninstall_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    let was_linked = is_module_linked(module_id);
-    let path = homeboy::module::uninstall(module_id)?;
+fn uninstall_extension(extension_id: &str) -> CmdResult<ExtensionOutput> {
+    let was_linked = is_extension_linked(extension_id);
+    let path = homeboy::extension::uninstall(extension_id)?;
 
     Ok((
-        ModuleOutput::Uninstall {
-            module_id: module_id.to_string(),
+        ExtensionOutput::Uninstall {
+            extension_id: extension_id.to_string(),
             path: path.to_string_lossy().to_string(),
             was_linked,
         },
@@ -642,29 +642,29 @@ fn uninstall_module(module_id: &str) -> CmdResult<ModuleOutput> {
     ))
 }
 
-fn setup_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    let result = run_setup(module_id)?;
+fn setup_extension(extension_id: &str) -> CmdResult<ExtensionOutput> {
+    let result = run_setup(extension_id)?;
 
     Ok((
-        ModuleOutput::Setup {
-            module_id: module_id.to_string(),
+        ExtensionOutput::Setup {
+            extension_id: extension_id.to_string(),
         },
         result.exit_code,
     ))
 }
 
 fn run_action(
-    module_id: &str,
+    extension_id: &str,
     action_id: &str,
     project_id: Option<String>,
     data: Option<String>,
-) -> CmdResult<ModuleOutput> {
+) -> CmdResult<ExtensionOutput> {
     let response =
-        homeboy::module::run_action(module_id, action_id, project_id.as_deref(), data.as_deref())?;
+        homeboy::extension::run_action(extension_id, action_id, project_id.as_deref(), data.as_deref())?;
 
     Ok((
-        ModuleOutput::Action {
-            module_id: module_id.to_string(),
+        ExtensionOutput::Action {
+            extension_id: extension_id.to_string(),
             action_id: action_id.to_string(),
             project_id,
             response,
@@ -673,36 +673,36 @@ fn run_action(
     ))
 }
 
-fn set_module(
-    module_id: Option<&str>,
+fn set_extension(
+    extension_id: Option<&str>,
     json: &str,
     replace_fields: &[String],
-) -> CmdResult<ModuleOutput> {
-    match homeboy::module::merge(module_id, json, replace_fields)? {
+) -> CmdResult<ExtensionOutput> {
+    match homeboy::extension::merge(extension_id, json, replace_fields)? {
         homeboy::MergeOutput::Single(result) => Ok((
-            ModuleOutput::Set {
-                module_id: result.id,
+            ExtensionOutput::Set {
+                extension_id: result.id,
                 updated_fields: result.updated_fields,
             },
             0,
         )),
         homeboy::MergeOutput::Bulk(batch) => {
             let exit_code = batch.exit_code();
-            Ok((ModuleOutput::SetBatch { batch }, exit_code))
+            Ok((ExtensionOutput::SetBatch { batch }, exit_code))
         }
     }
 }
 
-fn exec_module_tool(
-    module_id: &str,
+fn exec_extension_tool(
+    extension_id: &str,
     component: Option<String>,
     args: Vec<String>,
-) -> CmdResult<ModuleOutput> {
-    let module = load_module(module_id)?;
-    let module_path = module
-        .module_path
+) -> CmdResult<ExtensionOutput> {
+    let extension = load_extension(extension_id)?;
+    let extension_path = extension
+        .extension_path
         .as_deref()
-        .ok_or_else(|| homeboy::Error::config_missing_key("module_path", Some(module_id.into())))?;
+        .ok_or_else(|| homeboy::Error::config_missing_key("extension_path", Some(extension_id.into())))?;
 
     // Resolve working directory: component path if given, otherwise current dir
     let working_dir = if let Some(ref cid) = component {
@@ -714,16 +714,16 @@ fn exec_module_tool(
             .unwrap_or_else(|_| ".".to_string())
     };
 
-    // Build PATH with module's vendor/bin prepended
-    let vendor_bin = format!("{}/vendor/bin", module_path);
-    let node_bin = format!("{}/node_modules/.bin", module_path);
+    // Build PATH with extension's vendor/bin prepended
+    let vendor_bin = format!("{}/vendor/bin", extension_path);
+    let node_bin = format!("{}/node_modules/.bin", extension_path);
     let current_path = std::env::var("PATH").unwrap_or_default();
     let enriched_path = format!("{}:{}:{}", vendor_bin, node_bin, current_path);
 
     let env = vec![
         ("PATH", enriched_path.as_str()),
-        ("HOMEBOY_MODULE_PATH", module_path),
-        ("HOMEBOY_MODULE_ID", module_id),
+        ("HOMEBOY_MODULE_PATH", extension_path),
+        ("HOMEBOY_MODULE_ID", extension_id),
     ];
 
     let command = args.join(" ");
@@ -731,8 +731,8 @@ fn exec_module_tool(
         homeboy::ssh::execute_local_command_interactive(&command, Some(&working_dir), Some(&env));
 
     Ok((
-        ModuleOutput::Exec {
-            module_id: module_id.to_string(),
+        ExtensionOutput::Exec {
+            extension_id: extension_id.to_string(),
             output: None,
         },
         exit_code,

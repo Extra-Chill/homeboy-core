@@ -17,8 +17,8 @@ A `homeboy.json` file in a repo root defines portable component configuration th
     }
   ],
   "changelog_target": "string",
-  "modules": {
-    "module_id": {}
+  "extensions": {
+    "extension_id": {}
   }
 }
 ```
@@ -37,7 +37,7 @@ All fields are optional. The component `id` is derived from the directory name, 
     }
   ],
   "changelog_target": "docs/CHANGELOG.md",
-  "modules": {
+  "extensions": {
     "wordpress": {}
   }
 }
@@ -75,7 +75,7 @@ homeboy component create --from-repo /path/to/repo --build-command "npm run buil
 | `extract_command` | Post-upload command (supports `{artifact}`, `{targetDir}`) |
 | `version_targets` | Version detection patterns |
 | `changelog_target` | Path to changelog file |
-| `modules` | Module configuration (e.g., `{"wordpress": {}}`) |
+| `extensions` | Extension configuration (e.g., `{"wordpress": {}}`) |
 
 ## Precedence
 

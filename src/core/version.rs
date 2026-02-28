@@ -4,7 +4,7 @@ use crate::config::{from_str, set_json_pointer, to_string_pretty};
 use crate::error::{Error, Result};
 use crate::hooks::{self, HookFailureMode};
 use crate::local_files::{self, FileSystem};
-use crate::module::{load_all_modules, ModuleManifest};
+use crate::extension::{load_all_extensions, ExtensionManifest};
 use crate::utils::{io, parser, validation};
 use regex::Regex;
 use serde::Serialize;
@@ -33,19 +33,19 @@ pub fn replace_versions(
     parser::replace_all(content, pattern, new_version)
 }
 
-/// Get version pattern from module configuration.
-/// Returns None if no module defines a pattern for this file type.
+/// Get version pattern from extension configuration.
+/// Returns None if no extension defines a pattern for this file type.
 pub fn default_pattern_for_file(filename: &str) -> Option<String> {
-    for module in load_all_modules().unwrap_or_default() {
-        if let Some(pattern) = find_version_pattern_in_module(&module, filename) {
+    for extension in load_all_extensions().unwrap_or_default() {
+        if let Some(pattern) = find_version_pattern_in_extension(&extension, filename) {
             return Some(pattern);
         }
     }
     None
 }
 
-fn find_version_pattern_in_module(module: &ModuleManifest, filename: &str) -> Option<String> {
-    for vp in module.version_patterns() {
+fn find_version_pattern_in_extension(extension: &ExtensionManifest, filename: &str) -> Option<String> {
+    for vp in extension.version_patterns() {
         if filename.ends_with(&vp.extension) {
             return Some(vp.pattern.clone());
         }
@@ -218,7 +218,7 @@ fn is_zero(v: &usize) -> bool {
     *v == 0
 }
 
-/// Resolve pattern for a version target, using explicit pattern or module default.
+/// Resolve pattern for a version target, using explicit pattern or extension default.
 fn resolve_target_pattern(target: &VersionTarget) -> Result<String> {
     let pattern = target
         .pattern
@@ -228,7 +228,7 @@ fn resolve_target_pattern(target: &VersionTarget) -> Result<String> {
             Error::validation_invalid_argument(
                 "versionTargets[].pattern",
                 format!(
-                    "No version pattern configured for '{}' and no module provides one",
+                    "No version pattern configured for '{}' and no extension provides one",
                     target.file
                 ),
                 None,
@@ -833,7 +833,7 @@ pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<
         }
     }
 
-    // Replace @since placeholder tags with the new version (module-driven).
+    // Replace @since placeholder tags with the new version (extension-driven).
     let since_tags_replaced = replace_since_tag_placeholders(component, &new_version)?;
 
     // Run lifecycle hooks that may update/stage generated artifacts impacted by the bump.
@@ -993,15 +993,15 @@ const DEFAULT_SINCE_PLACEHOLDER: &str = r"0\.0\.0|NEXT|TBD|TODO|UNRELEASED|x\.x\
 /// Replace `@since` placeholder tags in source files with the actual version.
 /// Returns the total number of replacements made across all files.
 ///
-/// This is module-driven: the component's module must define `since_tag` config
+/// This is extension-driven: the component's extension must define `since_tag` config
 /// specifying which file extensions to scan and optionally a custom placeholder pattern.
 fn replace_since_tag_placeholders(component: &Component, new_version: &str) -> Result<usize> {
-    use crate::module::load_module;
+    use crate::extension::load_extension;
 
-    // Find the module's since_tag config
-    let since_tag = component.modules.as_ref().and_then(|modules| {
-        modules.keys().find_map(|module_id| {
-            load_module(module_id)
+    // Find the extension's since_tag config
+    let since_tag = component.extensions.as_ref().and_then(|extensions| {
+        extensions.keys().find_map(|extension_id| {
+            load_extension(extension_id)
                 .ok()
                 .and_then(|m| m.since_tag().cloned())
         })

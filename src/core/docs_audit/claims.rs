@@ -556,7 +556,7 @@ Supported types: `text/plain`, `image/png`, `audio/mpeg`, `video/mp4`.
 
     #[test]
     fn test_prose_file_path_is_real_confidence() {
-        let content = "See `src/core/config.rs` for the configuration module.";
+        let content = "See `src/core/config.rs` for the configuration extension.";
         let claims = extract_claims(content, "test.md", &[]);
 
         let claim = claims

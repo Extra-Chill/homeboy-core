@@ -5,14 +5,14 @@
 Refactor homeboy's storage architecture from direct file I/O to a trait-based system where:
 - **Core** depends only on a `Storage` trait (completely agnostic)
 - **Implementations** are Rust structs that implement the trait
-- **Config-driven** module selection via `homeboy.json`
-- **Modules declare capabilities** in their manifest
+- **Config-driven** extension selection via `homeboy.json`
+- **Extensions declare capabilities** in their manifest
 
 ## Goals
 
 - **Decoupling**: Core doesn't know storage implementations, only the trait
 - **Performance**: Direct function calls, no subprocess overhead
-- **Config-driven**: Explicit module selection, no filesystem scanning
+- **Config-driven**: Explicit extension selection, no filesystem scanning
 - **Extensibility**: New storage backends = implement the Rust trait
 - **No breaking changes**: Filesystem behavior preserved as default
 
@@ -73,13 +73,13 @@ pub struct StorageEntry {
 }
 ```
 
-- `storage`: Module ID that provides storage (must declare `storage` capability)
-- `installedModules`: Explicit list of active modules (no directory scanning)
+- `storage`: Extension ID that provides storage (must declare `storage` capability)
+- `installedModules`: Explicit list of active extensions (no directory scanning)
 
-### Module Manifest (Capability Declaration)
+### Extension Manifest (Capability Declaration)
 
 ```json
-// modules/builtin-filesystem/builtin-filesystem.json
+// extensions/builtin-filesystem/builtin-filesystem.json
 {
   "name": "Filesystem Storage",
   "version": "1.0.0",
@@ -88,7 +88,7 @@ pub struct StorageEntry {
 }
 ```
 
-- `capabilities`: Array of capabilities this module provides
+- `capabilities`: Array of capabilities this extension provides
 - `storageBackend`: Identifies which Rust implementation to use
 
 ---
@@ -215,12 +215,12 @@ impl Default for AppConfig {
 }
 ```
 
-### Phase 4: Module Capability Declaration
+### Phase 4: Extension Capability Declaration
 
-**Update `ModuleManifest` in `src/core/module.rs`**
+**Update `ExtensionManifest` in `src/core/extension.rs`**
 
 ```rust
-pub struct ModuleManifest {
+pub struct ExtensionManifest {
     // ... existing fields ...
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -230,7 +230,7 @@ pub struct ModuleManifest {
     pub storage_backend: Option<String>,
 }
 
-impl ModuleManifest {
+impl ExtensionManifest {
     pub fn has_capability(&self, capability: &str) -> bool {
         self.capabilities.iter().any(|c| c == capability)
     }
@@ -250,7 +250,7 @@ mod filesystem;
 pub use filesystem::FilesystemStorage;
 
 use crate::error::{Error, Result};
-use crate::module::load_module;
+use crate::extension::load_module;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -269,21 +269,21 @@ pub struct StorageEntry {
     pub is_directory: bool,
 }
 
-pub fn create_storage(module_id: &str) -> Result<Arc<dyn Storage>> {
-    let module = load_module(module_id).ok_or_else(|| {
-        Error::module_not_found(module_id.to_string(), vec![])
+pub fn create_storage(extension_id: &str) -> Result<Arc<dyn Storage>> {
+    let extension = load_module(extension_id).ok_or_else(|| {
+        Error::extension_not_found(extension_id.to_string(), vec![])
     })?;
 
-    if !module.provides_storage() {
+    if !extension.provides_storage() {
         return Err(Error::validation_invalid_argument(
             "storage",
-            format!("Module '{}' does not provide storage capability", module_id),
-            Some(module_id.to_string()),
+            format!("Extension '{}' does not provide storage capability", extension_id),
+            Some(extension_id.to_string()),
             None,
         ));
     }
 
-    let backend = module.storage_backend.as_deref().unwrap_or("filesystem");
+    let backend = extension.storage_backend.as_deref().unwrap_or("filesystem");
 
     match backend {
         "filesystem" => Ok(Arc::new(FilesystemStorage::new())),
@@ -348,12 +348,12 @@ let content = storage().read(&path)?;
 - `src/core/version.rs` (~10 locations)
 - `src/core/changelog.rs` (~3 locations)
 - `src/core/release.rs` (~1 location)
-- `src/core/module.rs` (~3 locations)
+- `src/core/extension.rs` (~3 locations)
 - `src/core/server.rs` (~3 locations)
 
-### Phase 8: Create Default Module
+### Phase 8: Create Default Extension
 
-**Create `modules/builtin-filesystem/builtin-filesystem.json`**
+**Create `extensions/builtin-filesystem/builtin-filesystem.json`**
 
 ```json
 {
@@ -366,13 +366,13 @@ let content = storage().read(&path)?;
 ```
 
 **Auto-install on first run** (in `ensure_default_storage_module()`):
-- Create module directory if missing
+- Create extension directory if missing
 - Write manifest file
 - Add to `installedModules` in `homeboy.json`
 
-### Phase 9: Update Module Install/Uninstall
+### Phase 9: Update Extension Install/Uninstall
 
-**Update `src/core/module.rs`**
+**Update `src/core/extension.rs`**
 
 ```rust
 pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult> {
@@ -380,22 +380,22 @@ pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult>
 
     // NEW: Add to installedModules in homeboy.json
     let mut app_config = load_app_config()?;
-    if !app_config.installed_modules.contains(&module_id) {
-        app_config.installed_modules.push(module_id.clone());
+    if !app_config.installed_modules.contains(&extension_id) {
+        app_config.installed_modules.push(extension_id.clone());
         save_app_config(&app_config)?;
     }
 
     Ok(result)
 }
 
-pub fn uninstall(module_id: &str) -> Result<PathBuf> {
-    // Prevent uninstalling active storage module
+pub fn uninstall(extension_id: &str) -> Result<PathBuf> {
+    // Prevent uninstalling active storage extension
     let app_config = load_app_config()?;
-    if app_config.storage == module_id {
+    if app_config.storage == extension_id {
         return Err(Error::validation_invalid_argument(
-            "module_id",
-            "Cannot uninstall active storage module. Change storage setting first.",
-            Some(module_id.to_string()),
+            "extension_id",
+            "Cannot uninstall active storage extension. Change storage setting first.",
+            Some(extension_id.to_string()),
             None,
         ));
     }
@@ -404,7 +404,7 @@ pub fn uninstall(module_id: &str) -> Result<PathBuf> {
 
     // NEW: Remove from installedModules in homeboy.json
     let mut app_config = load_app_config()?;
-    app_config.installed_modules.retain(|m| m != module_id);
+    app_config.installed_modules.retain(|m| m != extension_id);
     save_app_config(&app_config)?;
 
     Ok(path)
@@ -415,7 +415,7 @@ pub fn uninstall(module_id: &str) -> Result<PathBuf> {
 
 - Delete `src/core/local_files.rs`
 - Remove `FileSystem` trait
-- Update `src/core/mod.rs` to export `storage` module
+- Update `src/core/mod.rs` to export `storage` extension
 - Run `cargo test --release` to verify
 
 ---
@@ -430,7 +430,7 @@ src/core/
 │   └── filesystem.rs   (FilesystemStorage impl)
 ├── app_config.rs       (AppConfig struct)
 ├── config.rs           (updated to use storage())
-├── module.rs           (updated: capabilities, install/uninstall)
+├── extension.rs           (updated: capabilities, install/uninstall)
 └── ...
 ```
 
@@ -479,7 +479,7 @@ async fn main() {
 - **Decoupled**: Core only knows `trait Storage`
 - **Fast**: Direct function calls, no subprocess/IPC overhead
 - **Type-safe**: Compile-time guarantees
-- **Config-driven**: Explicit module selection in `homeboy.json`
+- **Config-driven**: Explicit extension selection in `homeboy.json`
 - **Extensible**: New backends = implement trait in Rust
 - **Testable**: Easy to mock storage in tests
 
@@ -490,10 +490,10 @@ async fn main() {
 - [ ] `FilesystemStorage` passes all existing tests
 - [ ] `storage()` global accessor works correctly
 - [ ] Bootstrap reads `homeboy.json` with direct fs (breaks chicken-egg)
-- [ ] Module capability validation works
+- [ ] Extension capability validation works
 - [ ] Install/uninstall updates `homeboy.json`
-- [ ] Cannot uninstall active storage module
-- [ ] Default module auto-created on first run
+- [ ] Cannot uninstall active storage extension
+- [ ] Default extension auto-created on first run
 - [ ] All `local_files::local()` calls migrated
 - [ ] `local_files.rs` deleted
 - [ ] `cargo test --release` passes
@@ -507,11 +507,11 @@ async fn main() {
 | 1 | Storage trait | Low | 0.5 day |
 | 2 | FilesystemStorage | Low | 0.5 day |
 | 3 | AppConfig schema | Low | 0.5 day |
-| 4 | Module capabilities | Low | 0.5 day |
+| 4 | Extension capabilities | Low | 0.5 day |
 | 5 | Storage initialization | Medium | 1 day |
 | 6 | Bootstrap flow | Medium | 0.5 day |
 | 7 | Migrate call sites | Medium | 2 days |
-| 8 | Default module | Low | 0.5 day |
+| 8 | Default extension | Low | 0.5 day |
 | 9 | Install/uninstall | Low | 0.5 day |
 | 10 | Cleanup | Low | 0.5 day |
 | **Total** | | | **7 days** |

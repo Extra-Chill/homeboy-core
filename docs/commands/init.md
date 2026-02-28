@@ -34,7 +34,7 @@ Most commands work without running `init` first. The `init` command is purely in
 
 Run `homeboy init` to gather all context in one call:
 - Current directory state (managed, components, gaps)
-- Available servers, projects, components, modules
+- Available servers, projects, components, extensions
 - Version alignment warnings and unconfigured patterns
 
 Then read workspace docs (CLAUDE.md, README.md) for project context.
@@ -77,9 +77,9 @@ Then read workspace docs (CLAUDE.md, README.md) for project context.
         "version_targets": [{ "file": "plugin.php", "pattern": "..." }]
       }
     ],
-    "modules": [
+    "extensions": [
       {
-        "id": "module-id",
+        "id": "extension-id",
         "name": "...",
         "version": "...",
         "ready": true,
@@ -130,7 +130,7 @@ Then read workspace docs (CLAUDE.md, README.md) for project context.
 | `context.components[].gaps` | Missing config with remediation commands |
 | `next_steps` | Actionable guidance for agents and onboarding |
 | `servers`, `projects`, `components` | Available resources for reference |
-| `modules` | Available Homeboy modules |
+| `extensions` | Available Homeboy extensions |
 | `version` | Current component version snapshot (first matched component) |
 | `git` | Branch + clean state + ahead/behind snapshot + release state |
 | `git.commits_since_version` | Number of commits since last version tag (indicates unreleased work) |
@@ -184,7 +184,7 @@ Create based on workspace docs:
 
 **Project** (deployable environment with domain):
 ```bash
-homeboy project create "<name>" <domain> --server <server_id> --module <module_id>
+homeboy project create "<name>" <domain> --server <server_id> --extension <extension_id>
 ```
 
 **Component** (buildable/deployable unit):

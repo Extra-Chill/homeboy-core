@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn is_docs_file_rejects_code() {
         assert!(!is_docs_file("src/main.rs"));
-        assert!(!is_docs_file("lib/module.js"));
+        assert!(!is_docs_file("lib/extension.js"));
         assert!(!is_docs_file("Cargo.toml"));
         assert!(!is_docs_file("package.json"));
         assert!(!is_docs_file("src/component.tsx"));

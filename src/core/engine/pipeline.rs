@@ -516,7 +516,7 @@ fn build_summary(results: &[PipelineStepResult], status: &PipelineRunStatus) -> 
             ]
         }
         PipelineRunStatus::Missing => {
-            vec!["Install missing modules or actions to resolve missing steps".to_string()]
+            vec!["Install missing extensions or actions to resolve missing steps".to_string()]
         }
         _ => Vec::new(),
     };

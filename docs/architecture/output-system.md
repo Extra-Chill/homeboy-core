@@ -91,7 +91,7 @@ Components are returned in compact `ComponentSummary` format:
     {
       "id": "extra-chill-blog",
       "path": "extrachill-plugins/extrachill-blog",
-      "module": "wordpress",
+      "extension": "wordpress",
       "status": "needs_bump",
       "commits_since_version": 2
     }
@@ -134,7 +134,7 @@ The `next_steps` array contains context-aware actionable guidance based on the c
 |---:|---|
 | 1 | internal errors (`internal.*`) |
 | 2 | config/validation errors (`config.*`, `validation.*`) |
-| 4 | not found / missing state (`project.not_found`, `server.not_found`, `component.not_found`, `module.not_found`, `project.no_active`) |
+| 4 | not found / missing state (`project.not_found`, `server.not_found`, `component.not_found`, `extension.not_found`, `project.no_active`) |
 | 10 | SSH errors (`ssh.*`) |
 | 20 | remote/deploy/git errors (`remote.*`, `deploy.*`, `git.*`) |
 
@@ -158,7 +158,7 @@ The `CapturedOutput` primitive (`src/utils/command.rs`) provides:
 - `stderr`: Captured standard error (omitted if empty)
 
 Commands using this primitive:
-- `module run` (captured mode only)
+- `extension run` (captured mode only)
 - `lint`
 - `test`
 - `build`

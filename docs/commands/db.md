@@ -99,9 +99,9 @@ Action-specific fields:
 
 ## Exit code
 
-- For remote-command actions: exit code of the underlying remote database CLI command (as defined by the enabled module's `database.cli` templates).
+- For remote-command actions: exit code of the underlying remote database CLI command (as defined by the enabled extension's `database.cli` templates).
 - For `tunnel`: exit code of the local `ssh -L` process.
 
 ## Related
 
-- [module](module.md)
+- [extension](extension.md)

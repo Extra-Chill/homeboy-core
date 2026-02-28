@@ -1,7 +1,7 @@
 //! Config health checks for components.
 //!
 //! Identifies configuration drift: broken paths, dead version targets,
-//! unused module links, and other config-level issues that accumulate
+//! unused extension links, and other config-level issues that accumulate
 //! as projects evolve.
 
 use std::path::Path;
@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::component::Component;
-use crate::module;
+use crate::extension;
 use crate::version;
 
 /// Severity of a config issue.
@@ -41,7 +41,7 @@ pub fn check_config(component: &Component) -> Vec<ConfigIssue> {
     check_local_path(component, &mut issues);
     check_remote_path(component, &mut issues);
     check_version_targets(component, &mut issues);
-    check_modules(component, &mut issues);
+    check_extensions(component, &mut issues);
 
     issues
 }
@@ -142,7 +142,7 @@ fn check_version_targets(component: &Component, issues: &mut Vec<ConfigIssue>) {
             continue;
         }
 
-        // Try to read version using configured or module-default pattern
+        // Try to read version using configured or extension-default pattern
         let pattern = target
             .pattern
             .clone()
@@ -173,7 +173,7 @@ fn check_version_targets(component: &Component, issues: &mut Vec<ConfigIssue>) {
                 severity: IssueSeverity::Warning,
                 category: "version_targets".to_string(),
                 message: format!(
-                    "Version target '{}' has no pattern and no module provides a default for this file type.",
+                    "Version target '{}' has no pattern and no extension provides a default for this file type.",
                     target.file
                 ),
                 fix_hint: Some(format!(
@@ -185,17 +185,17 @@ fn check_version_targets(component: &Component, issues: &mut Vec<ConfigIssue>) {
     }
 }
 
-/// Check that linked modules exist and have capabilities configured.
-fn check_modules(component: &Component, issues: &mut Vec<ConfigIssue>) {
-    let modules = match &component.modules {
+/// Check that linked extensions exist and have capabilities configured.
+fn check_extensions(component: &Component, issues: &mut Vec<ConfigIssue>) {
+    let extensions = match &component.extensions {
         Some(m) => m,
         None => return,
     };
 
-    for module_id in modules.keys() {
-        match module::load_module(module_id) {
+    for extension_id in extensions.keys() {
+        match extension::load_extension(extension_id) {
             Ok(manifest) => {
-                // Module exists — check if it provides any useful capabilities
+                // Extension exists — check if it provides any useful capabilities
                 let has_build = manifest.has_build();
                 let has_lint = manifest.has_lint();
                 let has_test = manifest.has_test();
@@ -204,10 +204,10 @@ fn check_modules(component: &Component, issues: &mut Vec<ConfigIssue>) {
                 if !has_build && !has_lint && !has_test && !has_cli {
                     issues.push(ConfigIssue {
                         severity: IssueSeverity::Info,
-                        category: "modules".to_string(),
+                        category: "extensions".to_string(),
                         message: format!(
-                            "Module '{}' is linked but has no build, lint, test, or CLI capabilities.",
-                            module_id
+                            "Extension '{}' is linked but has no build, lint, test, or CLI capabilities.",
+                            extension_id
                         ),
                         fix_hint: None,
                     });
@@ -216,13 +216,13 @@ fn check_modules(component: &Component, issues: &mut Vec<ConfigIssue>) {
             Err(_) => {
                 issues.push(ConfigIssue {
                     severity: IssueSeverity::Error,
-                    category: "modules".to_string(),
+                    category: "extensions".to_string(),
                     message: format!(
-                        "Module '{}' is linked but could not be loaded. Module may be missing or malformed.",
-                        module_id
+                        "Extension '{}' is linked but could not be loaded. Extension may be missing or malformed.",
+                        extension_id
                     ),
                     fix_hint: Some(format!(
-                        "Check installed modules: homeboy module list\nRemove dead link: homeboy component set {} --json '{{\"modules\": null}}'",
+                        "Check installed extensions: homeboy extension list\nRemove dead link: homeboy component set {} --json '{{\"extensions\": null}}'",
                         component.id
                     )),
                 });
@@ -295,18 +295,18 @@ mod tests {
     }
 
     #[test]
-    fn missing_module_is_error() {
-        use crate::component::ScopedModuleConfig;
+    fn missing_extension_is_error() {
+        use crate::component::ScopedExtensionConfig;
         use std::collections::HashMap;
         let mut comp = make_component("test", "/tmp");
-        let mut modules = HashMap::new();
-        modules.insert(
-            "nonexistent-module-xyz".to_string(),
-            ScopedModuleConfig::default(),
+        let mut extensions = HashMap::new();
+        extensions.insert(
+            "nonexistent-extension-xyz".to_string(),
+            ScopedExtensionConfig::default(),
         );
-        comp.modules = Some(modules);
+        comp.extensions = Some(extensions);
         let issues = check_config(&comp);
-        assert!(issues.iter().any(|i| i.category == "modules"
+        assert!(issues.iter().any(|i| i.category == "extensions"
             && i.severity == IssueSeverity::Error
             && i.message.contains("could not be loaded")));
     }

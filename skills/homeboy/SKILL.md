@@ -1,6 +1,6 @@
 ---
 name: homeboy
-description: "Use Homeboy CLI for version management, deployment, fleet operations, documentation tooling, database ops, module management, code auditing, and remote file/log access."
+description: "Use Homeboy CLI for version management, deployment, fleet operations, documentation tooling, database ops, extension management, code auditing, and remote file/log access."
 compatibility: "Cross-platform Rust CLI. Works with any language/framework. Requires SSH for remote operations."
 ---
 
@@ -11,11 +11,11 @@ Development and deployment automation. Generic — works with any language/frame
 ## Entity Hierarchy
 
 ```
-Component  →  versioned, deployable unit (plugin, CLI, module)
+Component  →  versioned, deployable unit (plugin, CLI, extension)
 Project    →  deployment target (site on a server, links to components)
 Server     →  SSH connection config
 Fleet      →  named group of projects (batch operations)
-Module     →  installable extension (CLI scripts, actions, docs)
+Extension     →  installable extension (CLI scripts, actions, docs)
 ```
 
 Storage: `~/.config/homeboy/{components,projects,servers,fleets}/<id>.json`
@@ -73,7 +73,7 @@ homeboy audit <component> --baseline      # save current state as baseline
 homeboy cleanup                     # all components
 homeboy cleanup <component>         # specific component
 homeboy cleanup --severity error    # only errors
-homeboy cleanup --category modules  # only module issues
+homeboy cleanup --category extensions  # only extension issues
 
 # Init — read-only repo context (creates no state)
 homeboy init                        # current context
@@ -92,23 +92,23 @@ homeboy docs list                   # available topics
 homeboy docs <topic>                # render topic
 ```
 
-**Audit** extracts claims from docs and verifies against code. Statuses: `verified`, `broken`, `needs_verification`. Scans for undocumented features via `audit_feature_patterns` in module manifests.
+**Audit** extracts claims from docs and verifies against code. Statuses: `verified`, `broken`, `needs_verification`. Scans for undocumented features via `audit_feature_patterns` in extension manifests.
 
 **Generate** spec: `{"output_dir": "docs", "files": [{"path": "f.md", "content": "..."}]}`
 
 **Workflow:** scaffold → learn (`docs documentation/generation`) → plan → generate → audit → maintain (`docs documentation/alignment`)
 
-## Modules
+## Extensions
 
 ```bash
-homeboy module list [-p <project>]
-homeboy module show <module>
-homeboy module run <module> [-p <project>] [-c <component>] [-i key=val]
-homeboy module setup <module>
-homeboy module install <source> [--id <id>]   # git URL or local path
-homeboy module update <module>
-homeboy module uninstall <module>
-homeboy module action <module> <action>
+homeboy extension list [-p <project>]
+homeboy extension show <extension>
+homeboy extension run <extension> [-p <project>] [-c <component>] [-i key=val]
+homeboy extension setup <extension>
+homeboy extension install <source> [--id <id>]   # git URL or local path
+homeboy extension update <extension>
+homeboy extension uninstall <extension>
+homeboy extension action <extension> <action>
 ```
 
 ## Remote Operations

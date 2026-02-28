@@ -18,7 +18,7 @@ This command renders documentation topics and provides tooling for documentation
 
 **Topic display** renders documentation from:
 1. Embedded core docs in the CLI binary
-2. Installed module docs under `<config dir>/homeboy/modules/<module_id>/docs/`
+2. Installed extension docs under `<config dir>/homeboy/extensions/<extension_id>/docs/`
 
 **Scaffold** analyzes a component's codebase and reports documentation status (read-only).
 
