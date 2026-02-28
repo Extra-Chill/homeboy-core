@@ -555,7 +555,15 @@ fn get_release_allowed_files(
     // Add version targets (convert to relative paths)
     for target in version_targets {
         if let Ok(relative) = std::path::Path::new(target).strip_prefix(repo_root) {
-            allowed.push(relative.to_string_lossy().to_string());
+            let rel_str = relative.to_string_lossy().to_string();
+            allowed.push(rel_str.clone());
+
+            // If a Cargo.toml is a version target, also allow Cargo.lock
+            // (version bump regenerates the lockfile to keep it in sync)
+            if rel_str.ends_with("Cargo.toml") {
+                let lock_path = relative.with_file_name("Cargo.lock");
+                allowed.push(lock_path.to_string_lossy().to_string());
+            }
         }
     }
 

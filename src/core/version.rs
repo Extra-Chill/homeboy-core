@@ -833,6 +833,21 @@ pub fn bump_component_version(component: &Component, bump_type: &str) -> Result<
         }
     }
 
+    // If any version target is Cargo.toml, regenerate Cargo.lock so it stays in sync.
+    // Without this, the release commit only includes Cargo.toml and post-release hooks
+    // like `cargo publish` fail because Cargo.lock is dirty.
+    let has_cargo_target = target_infos.iter().any(|t| t.file.ends_with("Cargo.toml"));
+    if has_cargo_target {
+        log_status!("version", "Regenerating Cargo.lock after Cargo.toml version bump");
+        let lockfile_result = std::process::Command::new("cargo")
+            .args(["generate-lockfile"])
+            .current_dir(&component.local_path)
+            .output();
+        if let Err(e) = lockfile_result {
+            log_status!("warning", "Failed to regenerate Cargo.lock: {}", e);
+        }
+    }
+
     // Replace @since placeholder tags with the new version (extension-driven).
     let since_tags_replaced = replace_since_tag_placeholders(component, &new_version)?;
 
