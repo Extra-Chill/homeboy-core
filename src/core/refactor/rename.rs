@@ -217,14 +217,15 @@ fn is_boundary_char(c: u8) -> bool {
 /// Find all occurrences of `term` in `text` that appear at sensible boundaries.
 ///
 /// Boundary rules:
-/// - Left: start of string, or non-alphanumeric char (space, ::, /, etc.), or underscore
+/// - Left: start of string, non-alphanumeric char, or underscore
 /// - Right: end of string, non-alphanumeric, underscore, or uppercase letter (camelCase)
 ///
 /// This handles:
-/// - `extension` in `pub mod extension;` (word boundary)
-/// - `Extension` in `ExtensionManifest` (uppercase letter follows = camelCase boundary)
-/// - `EXTENSION` in `EXTENSION_DIR` (underscore follows)
-/// - Won't match `extension` inside `modular` (lowercase letter follows)
+/// - `widget` in `pub mod widget;` (word boundary)
+/// - `Widget` in `WidgetManifest` (uppercase letter follows = camelCase boundary)
+/// - `WIDGET` in `WIDGET_DIR` (underscore follows)
+/// - `widget` in `load_widget` (underscore precedes = snake_case boundary)
+/// - Won't match `widget` inside `widgetry` (lowercase letter follows)
 fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
     let text_bytes = text.as_bytes();
     let term_bytes = term.as_bytes();
@@ -241,13 +242,13 @@ fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
         let abs = start + pos;
         let end = abs + term_len;
 
-        // Left boundary: start of string, or previous char is not alphanumeric/underscore
-        let left_ok = abs == 0 || is_boundary_char(text_bytes[abs - 1]);
+        // Left boundary: start of string, non-alphanumeric, or underscore
+        let left_ok = abs == 0 || is_boundary_char(text_bytes[abs - 1]) || text_bytes[abs - 1] == b'_';
 
         // Right boundary: end of string, or next char is:
         // - not alphanumeric (space, punctuation, etc.)
-        // - uppercase letter (camelCase boundary: ExtensionManifest → Extension|Manifest)
-        // - underscore (snake boundary: EXTENSION_DIR → EXTENSION|_DIR)
+        // - uppercase letter (camelCase boundary: WidgetManifest → Widget|Manifest)
+        // - underscore (snake boundary: WIDGET_DIR → WIDGET|_DIR)
         let right_ok = end >= text_len || {
             let next = text_bytes[end];
             is_boundary_char(next) || next.is_ascii_uppercase() || next == b'_'
@@ -684,5 +685,62 @@ mod tests {
         assert_eq!(content, "pub mod gadget;\n");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snake_case_compounds_match() {
+        // find_term_matches should match "widget" inside "load_widget", "is_widget_linked", etc.
+        let matches = find_term_matches("load_widget", "widget");
+        assert_eq!(matches, vec![5], "Should match 'widget' in 'load_widget'");
+
+        let matches = find_term_matches("is_widget_linked", "widget");
+        assert_eq!(matches, vec![3], "Should match 'widget' in 'is_widget_linked'");
+
+        let matches = find_term_matches("widget_init", "widget");
+        assert_eq!(matches, vec![0], "Should match 'widget' at start of 'widget_init'");
+
+        let matches = find_term_matches("WIDGET_DIR", "WIDGET");
+        assert_eq!(matches, vec![0], "Should match 'WIDGET' in 'WIDGET_DIR'");
+
+        let matches = find_term_matches("THE_WIDGET_CONFIG", "WIDGET");
+        assert_eq!(matches, vec![4], "Should match 'WIDGET' in 'THE_WIDGET_CONFIG'");
+    }
+
+    #[test]
+    fn snake_case_rename_in_file() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_snake_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(
+            dir.join("test.rs"),
+            "fn load_widget() {}\nfn is_widget_linked() -> bool { true }\nconst WIDGET_DIR: &str = \"widgets\";\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
+        let result = generate_renames(&spec, &dir);
+
+        assert!(!result.edits.is_empty());
+        let content = &result.edits[0].new_content;
+        assert!(content.contains("load_gadget"), "Expected 'load_gadget' in:\n{}", content);
+        assert!(content.contains("is_gadget_linked"), "Expected 'is_gadget_linked' in:\n{}", content);
+        assert!(content.contains("GADGET_DIR"), "Expected 'GADGET_DIR' in:\n{}", content);
+        assert!(content.contains("\"gadgets\""), "Expected '\"gadgets\"' in:\n{}", content);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn node_modules_not_matched() {
+        // "node_modules" should NOT have "module" matched inside it — the plural
+        // variant "modules" consumes it first, but we don't want partial matches either.
+        // "node_modules" as a directory name is handled by SKIP_DIRS, but in content
+        // the plural variant "modules" should match (not "module" partially).
+        let matches = find_term_matches("node_modules", "module");
+        assert!(matches.is_empty(), "Should not match 'module' inside 'node_modules' — 's' follows");
+
+        // But "modules" (plural) should match
+        let matches = find_term_matches("node_modules", "modules");
+        assert_eq!(matches, vec![5], "Should match 'modules' in 'node_modules'");
     }
 }
