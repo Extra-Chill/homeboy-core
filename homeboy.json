@@ -10,7 +10,7 @@
   "build_artifact": "target/release/homeboy",
   "hooks": {
     "post:release": [
-      "cargo publish"
+      ". $HOME/.cargo/env && cargo publish"
     ]
   },
   "docs_dir": "docs",
