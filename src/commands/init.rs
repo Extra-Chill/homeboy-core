@@ -215,7 +215,7 @@ pub struct ComponentWithState {
     pub gaps: Vec<ComponentGap>,
 }
 
-pub fn run_json(args: InitArgs) -> CmdResult<InitOutput> {
+pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput> {
     // Get context for current directory
     let (context_output, _) = context::run(None)?;
 

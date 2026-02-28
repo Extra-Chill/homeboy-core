@@ -33,7 +33,7 @@ pub struct CleanupOutput {
     pub hints: Vec<String>,
 }
 
-pub fn run_json(args: CleanupArgs) -> CmdResult<CleanupOutput> {
+pub fn run(args: CleanupArgs, _global: &super::GlobalArgs) -> CmdResult<CleanupOutput> {
     let severity_filter = args.severity.as_deref();
     let category_filter = args.category.as_deref();
 

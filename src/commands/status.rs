@@ -46,7 +46,7 @@ pub struct StatusOutput {
     pub clean: usize,
 }
 
-pub fn run_json(args: StatusArgs) -> CmdResult<StatusOutput> {
+pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusOutput> {
     let (context_output, _) = context::run(None)?;
 
     let relevant_ids: std::collections::HashSet<String> = context_output

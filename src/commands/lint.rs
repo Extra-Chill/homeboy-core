@@ -120,7 +120,7 @@ fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> 
         })
 }
 
-pub fn run_json(args: LintArgs) -> CmdResult<LintOutput> {
+pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput> {
     let mut component = component::load(&args.component)?;
     if let Some(ref path) = args.path {
         component.local_path = path.clone();
