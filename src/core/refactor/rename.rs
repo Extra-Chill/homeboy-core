@@ -283,15 +283,22 @@ fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
 // File walking
 // ============================================================================
 
-const SKIP_DIRS: &[&str] = &[
+/// Directories to always skip at any depth (dependency/VCS directories).
+const ALWAYS_SKIP_DIRS: &[&str] = &[
     "node_modules",
     "vendor",
     ".git",
+    ".svn",
+    ".hg",
+];
+
+/// Directories to skip only at the root level (build output directories).
+/// These are safe to skip at root because they're typically build artifacts,
+/// but at deeper levels (e.g., `scripts/build/`) they may contain source files.
+const ROOT_ONLY_SKIP_DIRS: &[&str] = &[
     "build",
     "dist",
     "target",
-    ".svn",
-    ".hg",
     "cache",
     "tmp",
 ];
@@ -303,7 +310,7 @@ const SOURCE_EXTENSIONS: &[&str] = &[
 
 fn walk_files(root: &Path, scope: &RenameScope) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    walk_recursive(root, &mut files);
+    walk_recursive(root, root, &mut files);
 
     match scope {
         RenameScope::Code => {
@@ -324,10 +331,12 @@ fn walk_files(root: &Path, scope: &RenameScope) -> Vec<PathBuf> {
     files
 }
 
-fn walk_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
+fn walk_recursive(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+
+    let is_root = dir == root;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -336,9 +345,15 @@ fn walk_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            if !SKIP_DIRS.contains(&name.as_str()) {
-                walk_recursive(&path, files);
+            // Always skip VCS/dependency dirs at any depth
+            if ALWAYS_SKIP_DIRS.contains(&name.as_str()) {
+                continue;
             }
+            // Skip build output dirs only at root level
+            if is_root && ROOT_ONLY_SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            walk_recursive(&path, root, files);
         } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             if SOURCE_EXTENSIONS.contains(&ext) {
                 files.push(path);
@@ -1003,6 +1018,40 @@ mod tests {
         assert!(!result.warnings.is_empty(), "Should detect duplicate 'gadgets' field");
         assert!(result.warnings.iter().any(|w| w.kind == "duplicate_identifier"));
         assert!(result.warnings.iter().any(|w| w.message.contains("gadgets")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nested_build_dir_not_skipped() {
+        // scripts/build/ should be scanned (build is only skipped at root level)
+        let dir = std::env::temp_dir().join("homeboy_refactor_build_dir_test");
+        let sub = dir.join("scripts").join("build");
+        let _ = std::fs::create_dir_all(&sub);
+
+        std::fs::write(sub.join("setup.sh"), "WIDGET_PATH=\"$HOME\"\n").unwrap();
+
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
+        let refs = find_references(&spec, &dir);
+
+        assert!(!refs.is_empty(), "Should find 'WIDGET' in scripts/build/setup.sh");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn root_build_dir_still_skipped() {
+        // build/ at root should still be skipped
+        let dir = std::env::temp_dir().join("homeboy_refactor_root_build_test");
+        let build_dir = dir.join("build");
+        let _ = std::fs::create_dir_all(&build_dir);
+
+        std::fs::write(build_dir.join("output.rs"), "let widget = true;\n").unwrap();
+
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
+        let refs = find_references(&spec, &dir);
+
+        assert!(refs.is_empty(), "Should NOT find refs in root-level build/ dir");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
