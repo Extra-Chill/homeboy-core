@@ -1,6 +1,6 @@
 ---
 name: homeboy
-description: "Use Homeboy CLI for version management, deployment, fleet operations, documentation tooling, database ops, module management, and remote file/log access."
+description: "Use Homeboy CLI for version management, deployment, fleet operations, documentation tooling, database ops, module management, code auditing, and remote file/log access."
 compatibility: "Cross-platform Rust CLI. Works with any language/framework. Requires SSH for remote operations."
 ---
 
@@ -50,6 +50,37 @@ homeboy fleet check prod            # drift detection (local vs remote)
 homeboy fleet add prod site-c
 homeboy fleet remove prod site-a
 ```
+
+## Status + Audit + Cleanup
+
+```bash
+# Status — actionable component overview
+homeboy status                      # components in current directory context
+homeboy status --all                # all components
+homeboy status --uncommitted        # components with uncommitted changes
+homeboy status --needs-bump         # components needing version bump
+homeboy status --ready              # components ready to deploy
+homeboy status --docs-only          # components with docs-only changes
+
+# Audit — detect architectural drift and convention violations
+homeboy audit <component>           # full audit (conventions + findings)
+homeboy audit <component> --conventions   # only show discovered conventions
+homeboy audit <component> --fix           # generate fix stubs (dry run)
+homeboy audit <component> --fix --write   # apply fixes to disk
+homeboy audit <component> --baseline      # save current state as baseline
+
+# Cleanup — identify config drift and stale state
+homeboy cleanup                     # all components
+homeboy cleanup <component>         # specific component
+homeboy cleanup --severity error    # only errors
+homeboy cleanup --category modules  # only module issues
+
+# Init — read-only repo context (creates no state)
+homeboy init                        # current context
+homeboy init --all                  # all entities
+```
+
+**Audit** discovers conventions per directory (naming, imports, methods, registrations), identifies conforming files and outliers, and reports findings with confidence scores. Statuses: `clean`, `drift`, `fragmented`. Run before any structural change.
 
 ## Documentation
 
@@ -115,6 +146,40 @@ homeboy ssh <project> -- <command>    # run remote command
 homeboy transfer <src-project> <dest-project> <path>
 ```
 
+## Remote Tool Bridges
+
+Run project-specific tools over SSH without logging in:
+
+```bash
+# WordPress CLI
+homeboy wp <project> plugin list
+homeboy wp <project> option get blogname
+homeboy wp <project>:<subtarget> datamachine pipelines list  # multisite
+
+# PM2 process manager
+homeboy pm2 <project> list
+homeboy pm2 <project> restart all
+
+# OpenClaw agent management
+homeboy openclaw <agent> gateway status
+homeboy openclaw <agent> config get
+homeboy openclaw <agent> cron list
+```
+
+## API Client
+
+```bash
+# Authentication
+homeboy auth login <project>
+homeboy auth status <project>
+homeboy auth logout <project>
+
+# REST requests (requires auth)
+homeboy api <project> get <endpoint>
+homeboy api <project> post <endpoint> --json '<body>'
+homeboy api <project> put|patch|delete <endpoint> [--json '<body>']
+```
+
 ## Git, Build, Test
 
 ```bash
@@ -122,19 +187,20 @@ homeboy git status|commit|push|pull|tag <component>
 homeboy build <component>
 homeboy test <component>
 homeboy lint <component>
+homeboy lint <component> --fix
 ```
 
-## API Client
-
-```bash
-homeboy auth login|status|clear <project>
-homeboy api get|post|put|patch|delete <project> <endpoint> [--json '<body>']
-```
-
-## Config
+## Config + Upgrade
 
 ```bash
 homeboy config show | set <pointer> <value> | unset <pointer> | reset | path
+
+# Self-upgrade
+homeboy upgrade                     # upgrade to latest
+homeboy upgrade --check             # check without installing
+homeboy upgrade --force             # force even if at latest
+homeboy upgrade --no-restart        # skip restart
+homeboy upgrade --method cargo      # override install method
 ```
 
 ## Common Patterns
@@ -150,6 +216,12 @@ homeboy deploy my-plugin --fleet production
 
 # Drift check before deploy
 homeboy fleet check production
+
+# Convention audit cycle
+homeboy audit my-component              # discover drift
+homeboy audit my-component --fix        # preview fixes
+homeboy audit my-component --fix --write  # apply fixes
+homeboy audit my-component --baseline   # save clean state
 
 # Docs audit cycle
 homeboy docs scaffold my-component
