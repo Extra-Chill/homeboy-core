@@ -281,6 +281,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires PHP module with fingerprint script installed"]
     fn audit_directory_with_convention() {
         let dir = std::env::temp_dir().join("homeboy_audit_test_conv");
         let steps = dir.join("steps");

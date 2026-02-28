@@ -109,6 +109,20 @@ pub struct ProvidesConfig {
     pub capabilities: Vec<String>,
 }
 
+/// Scripts that implement extension capabilities.
+/// Each key maps a capability name to a script path relative to the module directory.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScriptsConfig {
+    /// Script that extracts structural fingerprints from source files.
+    /// Receives file content on stdin, outputs FileFingerprint JSON on stdout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// Script that applies refactoring edits to source files.
+    /// Receives edit instructions on stdin, outputs transformed content on stdout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refactor: Option<String>,
+}
+
 /// Unified module manifest decomposed into capability groups.
 ///
 /// Module JSON files use nested capability groups that map directly to these fields.
@@ -124,6 +138,10 @@ pub struct ModuleManifest {
     // What this module provides
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provides: Option<ProvidesConfig>,
+
+    // Capability scripts
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<ScriptsConfig>,
 
     // Optional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -294,6 +312,21 @@ impl ModuleManifest {
             .as_ref()
             .map(|p| p.capabilities.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Check if this module handles a given file extension.
+    pub fn handles_file_extension(&self, ext: &str) -> bool {
+        self.provided_file_extensions().iter().any(|e| e == ext)
+    }
+
+    /// Get the fingerprint script path (relative to module dir), if configured.
+    pub fn fingerprint_script(&self) -> Option<&str> {
+        self.scripts.as_ref().and_then(|s| s.fingerprint.as_deref())
+    }
+
+    /// Get the refactor script path (relative to module dir), if configured.
+    pub fn refactor_script(&self) -> Option<&str> {
+        self.scripts.as_ref().and_then(|s| s.refactor.as_deref())
     }
 }
 
