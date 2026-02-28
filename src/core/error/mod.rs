@@ -272,16 +272,19 @@ impl Error {
         id: Option<String>,
         tried: Option<Vec<String>>,
     ) -> Self {
+        let field_str = field.into();
+        let problem_str = problem.into();
+        let message = format!("Invalid argument '{}': {}", field_str, problem_str);
         let details = to_details(InvalidArgumentDetails {
-            field: field.into(),
-            problem: problem.into(),
+            field: field_str,
+            problem: problem_str,
             id,
             tried,
         });
 
         Self::new(
             ErrorCode::ValidationInvalidArgument,
-            "Invalid argument",
+            message,
             details,
         )
     }
