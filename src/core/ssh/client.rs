@@ -350,8 +350,106 @@ pub fn execute_local_command_passthrough(
 }
 
 /// Check if a host address refers to the local machine.
+///
+/// Matches localhost aliases (localhost, 127.0.0.1, ::1) and also checks
+/// whether the host matches any IP address assigned to this machine's
+/// network interfaces. This handles the case where a server config uses
+/// the machine's public IP (e.g. a Hetzner VPS IP) — the agent running
+/// on that same machine should deploy locally instead of SSH-ing to itself.
 pub fn is_local_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+    if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+        return true;
+    }
+
+    // Check if host matches any local network interface address.
+    // Parse the host as an IP first; if it's a hostname we skip this check
+    // (DNS resolution would be slow and unreliable).
+    let target_ip: std::net::IpAddr = match host.parse() {
+        Ok(ip) => ip,
+        Err(_) => return false,
+    };
+
+    match get_local_ips() {
+        Some(ips) => ips.contains(&target_ip),
+        None => false,
+    }
+}
+
+/// Collect all IP addresses assigned to local network interfaces.
+///
+/// Uses `ip -o addr show` on Linux and `ifconfig` on macOS.
+/// Returns None if the command fails (graceful degradation — falls back
+/// to localhost-only matching).
+fn get_local_ips() -> Option<Vec<std::net::IpAddr>> {
+    #[cfg(target_os = "linux")]
+    {
+        // `ip -o addr show` outputs one line per address, e.g.:
+        // 2: eth0    inet 178.156.237.104/24 brd 178.156.237.255 scope global eth0
+        let output = std::process::Command::new("ip")
+            .args(["-o", "addr", "show"])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let ips: Vec<std::net::IpAddr> = stdout
+            .lines()
+            .filter_map(|line| {
+                // Fields: index, iface, family, addr/prefix, ...
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 4 {
+                    return None;
+                }
+                // The address is in field 3, formatted as "addr/prefix"
+                let addr_prefix = parts[3];
+                let addr_str = addr_prefix.split('/').next()?;
+                addr_str.parse().ok()
+            })
+            .collect();
+
+        Some(ips)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("ifconfig")
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let ips: Vec<std::net::IpAddr> = stdout
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("inet ") {
+                    // "inet 192.168.1.5 netmask ..."
+                    rest.split_whitespace().next()?.parse().ok()
+                } else if let Some(rest) = line.strip_prefix("inet6 ") {
+                    // "inet6 fe80::1%lo0 prefixlen ..."
+                    let addr_str = rest.split_whitespace().next()?;
+                    // Strip zone ID (e.g. %lo0)
+                    let addr_str = addr_str.split('%').next()?;
+                    addr_str.parse().ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Some(ips)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
 }
 
 /// Check if an SSH failure is a transient connection error worth retrying.
@@ -374,4 +472,38 @@ fn is_transient_ssh_error(output: &CommandOutput) -> bool {
     ];
 
     is_connection_exit || transient_patterns.iter().any(|p| stderr.contains(p))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_localhost_aliases() {
+        assert!(is_local_host("localhost"));
+        assert!(is_local_host("127.0.0.1"));
+        assert!(is_local_host("::1"));
+    }
+
+    #[test]
+    fn test_non_local_hosts() {
+        assert!(!is_local_host("example.com"));
+        assert!(!is_local_host("192.168.1.1")); // private but not this machine (unless it is)
+        assert!(!is_local_host("8.8.8.8"));
+    }
+
+    #[test]
+    fn test_own_ip_detected_as_local() {
+        // Get this machine's IPs and verify they're detected as local
+        if let Some(ips) = get_local_ips() {
+            for ip in &ips {
+                let ip_str = ip.to_string();
+                assert!(
+                    is_local_host(&ip_str),
+                    "Machine's own IP {} should be detected as local",
+                    ip_str
+                );
+            }
+        }
+    }
 }
