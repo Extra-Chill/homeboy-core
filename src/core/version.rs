@@ -9,7 +9,6 @@ use crate::utils::{io, parser, validation};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 

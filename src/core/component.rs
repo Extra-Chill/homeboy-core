@@ -55,6 +55,9 @@ pub struct Component {
     pub remote_path: String,
     pub build_artifact: Option<String>,
     pub modules: Option<HashMap<String, ScopedModuleConfig>>,
+    /// Extension version requirements: module_id -> version constraint string.
+    /// Example: `{"wordpress": ">=2.0.0", "php": "^1.0"}`
+    pub extensions: Option<HashMap<String, String>>,
     pub version_targets: Option<Vec<VersionTarget>>,
     pub changelog_target: Option<String>,
     pub changelog_next_section_label: Option<String>,
@@ -92,6 +95,8 @@ struct RawComponent {
     build_artifact: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     modules: Option<HashMap<String, ScopedModuleConfig>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extensions: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     version_targets: Option<Vec<VersionTarget>>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "changelog_targets")]
@@ -156,6 +161,7 @@ impl From<RawComponent> for Component {
             remote_path: raw.remote_path,
             build_artifact: raw.build_artifact,
             modules: raw.modules,
+            extensions: raw.extensions,
             version_targets: raw.version_targets,
             changelog_target: raw.changelog_target,
             changelog_next_section_label: raw.changelog_next_section_label,
@@ -182,6 +188,7 @@ impl From<Component> for RawComponent {
             remote_path: c.remote_path,
             build_artifact: c.build_artifact,
             modules: c.modules,
+            extensions: c.extensions,
             version_targets: c.version_targets,
             changelog_target: c.changelog_target,
             changelog_next_section_label: c.changelog_next_section_label,
@@ -251,6 +258,7 @@ impl Component {
             remote_path,
             build_artifact,
             modules: None,
+            extensions: None,
             version_targets: None,
             changelog_target: None,
             changelog_next_section_label: None,
