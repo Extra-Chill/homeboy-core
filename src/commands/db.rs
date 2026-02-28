@@ -5,6 +5,8 @@ use homeboy::db::{self, DbResult, DbTunnelResult};
 use homeboy::project;
 use homeboy::token;
 
+use super::CmdResult;
+
 #[derive(Args)]
 pub struct DbArgs {
     #[command(subcommand)]
@@ -103,7 +105,7 @@ pub enum DbResultVariant {
 pub fn run(
     args: DbArgs,
     _global: &crate::commands::GlobalArgs,
-) -> homeboy::Result<(DbOutput, i32)> {
+) -> CmdResult<DbOutput> {
     match args.command {
         DbCommand::Tables { project_id, args } => tables(&project_id, &args),
         DbCommand::Describe { project_id, args } => describe(&project_id, &args),
@@ -156,7 +158,7 @@ fn parse_subtarget(
     Ok((None, args.to_vec()))
 }
 
-fn tables(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
+fn tables(project_id: &str, args: &[String]) -> CmdResult<DbOutput> {
     let (subtarget, _) = parse_subtarget(project_id, args)?;
     let result = db::list_tables(project_id, subtarget.as_deref())?;
     let exit_code = result.exit_code;
@@ -170,7 +172,7 @@ fn tables(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)>
     ))
 }
 
-fn describe(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
+fn describe(project_id: &str, args: &[String]) -> CmdResult<DbOutput> {
     let (subtarget, remaining) = parse_subtarget(project_id, args)?;
 
     // Core validates table_name
@@ -187,7 +189,7 @@ fn describe(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32
     ))
 }
 
-fn query(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
+fn query(project_id: &str, args: &[String]) -> CmdResult<DbOutput> {
     let (subtarget, remaining) = parse_subtarget(project_id, args)?;
     let sql = remaining.join(" ");
 
@@ -211,7 +213,7 @@ fn search(
     exact: bool,
     limit: Option<u32>,
     subtarget: Option<&str>,
-) -> homeboy::Result<(DbOutput, i32)> {
+) -> CmdResult<DbOutput> {
     let result = db::search(project_id, table, column, pattern, exact, limit, subtarget)?;
     let exit_code = result.exit_code;
 
@@ -224,7 +226,7 @@ fn search(
     ))
 }
 
-fn delete_row(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
+fn delete_row(project_id: &str, args: &[String]) -> CmdResult<DbOutput> {
     let (subtarget, remaining) = parse_subtarget(project_id, args)?;
 
     // Core validates table_name and row_id
@@ -242,7 +244,7 @@ fn delete_row(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i
     ))
 }
 
-fn drop_table(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i32)> {
+fn drop_table(project_id: &str, args: &[String]) -> CmdResult<DbOutput> {
     let (subtarget, remaining) = parse_subtarget(project_id, args)?;
 
     // Core validates table_name
@@ -259,7 +261,7 @@ fn drop_table(project_id: &str, args: &[String]) -> homeboy::Result<(DbOutput, i
     ))
 }
 
-fn tunnel(project_id: &str, local_port: Option<u16>) -> homeboy::Result<(DbOutput, i32)> {
+fn tunnel(project_id: &str, local_port: Option<u16>) -> CmdResult<DbOutput> {
     let result = db::create_tunnel(project_id, local_port)?;
     let exit_code = result.exit_code;
 

@@ -3,21 +3,21 @@ use serde::Serialize;
 
 use super::CmdResult;
 
-#[derive(Serialize)]
+pub struct CliArgs {
+    pub tool: String,
+    pub identifier: String,
+    pub args: Vec<String>,
+}
 
+#[derive(Serialize)]
 pub struct CliOutput {
     pub command: String,
     #[serde(flatten)]
     pub result: CliToolResult,
 }
 
-pub fn run(
-    tool: &str,
-    identifier: &str,
-    args: Vec<String>,
-    _global: &crate::commands::GlobalArgs,
-) -> CmdResult<CliOutput> {
-    let result = cli_tool::run(tool, identifier, &args)?;
+pub fn run(args: CliArgs, _global: &super::GlobalArgs) -> CmdResult<CliOutput> {
+    let result = cli_tool::run(&args.tool, &args.identifier, &args.args)?;
     let exit_code = result.exit_code;
 
     Ok((

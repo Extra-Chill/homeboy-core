@@ -3,6 +3,8 @@ use serde::Serialize;
 
 use homeboy::files::{self, FileEntry, GrepMatch, LineChange};
 
+use super::CmdResult;
+
 #[derive(Args)]
 pub struct FileArgs {
     #[command(subcommand)]
@@ -253,7 +255,7 @@ pub fn is_raw_read(args: &FileArgs) -> bool {
 pub fn run(
     args: FileArgs,
     _global: &crate::commands::GlobalArgs,
-) -> homeboy::Result<(FileCommandOutput, i32)> {
+) -> CmdResult<FileCommandOutput> {
     match args.command {
         FileCommand::List { project_id, path } => {
             let (out, code) = list(&project_id, &path)?;
@@ -353,7 +355,7 @@ pub fn run(
     }
 }
 
-fn list(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
+fn list(project_id: &str, path: &str) -> CmdResult<FileOutput> {
     let result = files::list(project_id, path)?;
 
     Ok((
@@ -377,7 +379,7 @@ fn list(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
     ))
 }
 
-fn read(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
+fn read(project_id: &str, path: &str) -> CmdResult<FileOutput> {
     let result = files::read(project_id, path)?;
 
     Ok((
@@ -401,7 +403,7 @@ fn read(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
     ))
 }
 
-fn write(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
+fn write(project_id: &str, path: &str) -> CmdResult<FileOutput> {
     let content = files::read_stdin()?;
     let result = files::write(project_id, path, &content)?;
 
@@ -426,7 +428,7 @@ fn write(project_id: &str, path: &str) -> homeboy::Result<(FileOutput, i32)> {
     ))
 }
 
-fn delete(project_id: &str, path: &str, recursive: bool) -> homeboy::Result<(FileOutput, i32)> {
+fn delete(project_id: &str, path: &str, recursive: bool) -> CmdResult<FileOutput> {
     let result = files::delete(project_id, path, recursive)?;
 
     Ok((
@@ -450,7 +452,7 @@ fn delete(project_id: &str, path: &str, recursive: bool) -> homeboy::Result<(Fil
     ))
 }
 
-fn rename(project_id: &str, old_path: &str, new_path: &str) -> homeboy::Result<(FileOutput, i32)> {
+fn rename(project_id: &str, old_path: &str, new_path: &str) -> CmdResult<FileOutput> {
     let result = files::rename(project_id, old_path, new_path)?;
 
     Ok((
@@ -480,7 +482,7 @@ fn find(
     name_pattern: Option<&str>,
     file_type: Option<&str>,
     max_depth: Option<u32>,
-) -> homeboy::Result<(FileFindOutput, i32)> {
+) -> CmdResult<FileFindOutput> {
     let result = files::find(project_id, path, name_pattern, file_type, max_depth)?;
     let match_count = result.matches.len();
 
@@ -505,7 +507,7 @@ fn grep(
     name_filter: Option<&str>,
     max_depth: Option<u32>,
     case_insensitive: bool,
-) -> homeboy::Result<(FileGrepOutput, i32)> {
+) -> CmdResult<FileGrepOutput> {
     let result = files::grep(
         project_id,
         path,
@@ -530,7 +532,7 @@ fn grep(
     ))
 }
 
-fn edit(args: EditArgs) -> homeboy::Result<(FileEditOutput, i32)> {
+fn edit(args: EditArgs) -> CmdResult<FileEditOutput> {
     let EditArgs {
         project_id,
         file_path,

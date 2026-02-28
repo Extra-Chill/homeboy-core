@@ -6,6 +6,8 @@ use homeboy::project::{self, Project};
 use homeboy::server;
 use homeboy::EntityCrudOutput;
 
+use super::CmdResult;
+
 #[derive(Args)]
 pub struct ProjectArgs {
     #[command(subcommand)]
@@ -235,7 +237,7 @@ pub type ProjectOutput = EntityCrudOutput<Project, ProjectExtra>;
 pub fn run(
     args: ProjectArgs,
     _global: &crate::commands::GlobalArgs,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     match args.command {
         ProjectCommand::List => list(),
         ProjectCommand::Show { project_id } => show(&project_id),
@@ -318,7 +320,7 @@ pub fn run(
     }
 }
 
-fn list() -> homeboy::Result<(ProjectOutput, i32)> {
+fn list() -> CmdResult<ProjectOutput> {
     let projects = project::list()?;
 
     let items: Vec<ProjectListItem> = projects
@@ -349,7 +351,7 @@ fn list() -> homeboy::Result<(ProjectOutput, i32)> {
     ))
 }
 
-fn show(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+fn show(project_id: &str) -> CmdResult<ProjectOutput> {
     let project = project::load(project_id)?;
 
     let hint = if project.server_id.is_none() {
@@ -435,7 +437,7 @@ fn calculate_deploy_readiness(project: &Project) -> (bool, Vec<String>) {
     (deploy_ready, blockers)
 }
 
-fn set(args: super::DynamicSetArgs) -> homeboy::Result<(ProjectOutput, i32)> {
+fn set(args: super::DynamicSetArgs) -> CmdResult<ProjectOutput> {
     let merged = super::merge_dynamic_args(&args)?.ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
             "spec",
@@ -471,7 +473,7 @@ fn set(args: super::DynamicSetArgs) -> homeboy::Result<(ProjectOutput, i32)> {
     }
 }
 
-fn remove(project_id: Option<&str>, json: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+fn remove(project_id: Option<&str>, json: &str) -> CmdResult<ProjectOutput> {
     let result = project::remove_from_json(project_id, json)?;
     Ok((
         ProjectOutput {
@@ -488,7 +490,7 @@ fn remove(project_id: Option<&str>, json: &str) -> homeboy::Result<(ProjectOutpu
     ))
 }
 
-fn rename(project_id: &str, new_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+fn rename(project_id: &str, new_id: &str) -> CmdResult<ProjectOutput> {
     let project = project::rename(project_id, new_id)?;
 
     Ok((
@@ -503,7 +505,7 @@ fn rename(project_id: &str, new_id: &str) -> homeboy::Result<(ProjectOutput, i32
     ))
 }
 
-fn delete(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+fn delete(project_id: &str) -> CmdResult<ProjectOutput> {
     project::delete(project_id)?;
 
     Ok((
@@ -517,7 +519,7 @@ fn delete(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
     ))
 }
 
-fn components(command: ProjectComponentsCommand) -> homeboy::Result<(ProjectOutput, i32)> {
+fn components(command: ProjectComponentsCommand) -> CmdResult<ProjectOutput> {
     match command {
         ProjectComponentsCommand::List { project_id } => components_list(&project_id),
         ProjectComponentsCommand::Set {
@@ -536,7 +538,7 @@ fn components(command: ProjectComponentsCommand) -> homeboy::Result<(ProjectOutp
     }
 }
 
-fn components_list(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+fn components_list(project_id: &str) -> CmdResult<ProjectOutput> {
     let project = project::load(project_id)?;
 
     let mut components = Vec::new();
@@ -567,7 +569,7 @@ fn components_list(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
 fn components_set(
     project_id: &str,
     component_ids: Vec<String>,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     project::set_components(project_id, component_ids)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "set", &project)
@@ -576,7 +578,7 @@ fn components_set(
 fn components_add(
     project_id: &str,
     component_ids: Vec<String>,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     project::add_components(project_id, component_ids)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "add", &project)
@@ -585,13 +587,13 @@ fn components_add(
 fn components_remove(
     project_id: &str,
     component_ids: Vec<String>,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     project::remove_components(project_id, component_ids)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "remove", &project)
 }
 
-fn components_clear(project_id: &str) -> homeboy::Result<(ProjectOutput, i32)> {
+fn components_clear(project_id: &str) -> CmdResult<ProjectOutput> {
     let mut project = project::load(project_id)?;
     project.component_ids.clear();
 
@@ -602,7 +604,7 @@ fn write_project_components(
     project_id: &str,
     action: &str,
     project: &Project,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     project::save(project)?;
 
     let mut components = Vec::new();
@@ -631,7 +633,7 @@ fn write_project_components(
     ))
 }
 
-fn pin(command: ProjectPinCommand) -> homeboy::Result<(ProjectOutput, i32)> {
+fn pin(command: ProjectPinCommand) -> CmdResult<ProjectOutput> {
     match command {
         ProjectPinCommand::List { project_id, r#type } => pin_list(&project_id, r#type),
         ProjectPinCommand::Add {
@@ -649,7 +651,7 @@ fn pin(command: ProjectPinCommand) -> homeboy::Result<(ProjectOutput, i32)> {
     }
 }
 
-fn pin_list(project_id: &str, pin_type: ProjectPinType) -> homeboy::Result<(ProjectOutput, i32)> {
+fn pin_list(project_id: &str, pin_type: ProjectPinType) -> CmdResult<ProjectOutput> {
     let project = project::load(project_id)?;
 
     let (items, type_string) = match pin_type {
@@ -710,7 +712,7 @@ fn pin_add(
     pin_type: ProjectPinType,
     label: Option<String>,
     tail: u32,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     let (core_type, type_string) = match pin_type {
         ProjectPinType::File => (project::PinType::File, "file"),
         ProjectPinType::Log => (project::PinType::Log, "log"),
@@ -754,7 +756,7 @@ fn pin_remove(
     project_id: &str,
     path: &str,
     pin_type: ProjectPinType,
-) -> homeboy::Result<(ProjectOutput, i32)> {
+) -> CmdResult<ProjectOutput> {
     let (core_type, type_string) = match pin_type {
         ProjectPinType::File => (project::PinType::File, "file"),
         ProjectPinType::Log => (project::PinType::Log, "log"),

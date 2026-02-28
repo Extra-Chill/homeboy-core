@@ -119,7 +119,7 @@ fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> 
         })
 }
 
-pub fn run_json(args: TestArgs) -> CmdResult<TestOutput> {
+pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput> {
     let mut component = component::load(&args.component)?;
     if let Some(ref path) = args.path {
         component.local_path = path.clone();

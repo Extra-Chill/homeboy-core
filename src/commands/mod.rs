@@ -302,9 +302,6 @@ pub(crate) fn run_markdown(
 
 /// Dispatch a command to its handler and map result to JSON.
 macro_rules! dispatch {
-    ($args:expr, $module:ident) => {
-        crate::output::map_cmd_result_to_json($module::run_json($args))
-    };
     ($args:expr, $global:expr, $module:ident) => {
         crate::output::map_cmd_result_to_json($module::run($args, $global))
     };
@@ -317,14 +314,12 @@ pub(crate) fn run_json(
     crate::tty::status("homeboy is working...");
 
     match command {
-        // Commands without global context
-        crate::Commands::Init(args) => dispatch!(args, init),
-        crate::Commands::Status(args) => dispatch!(args, status),
-        crate::Commands::Test(args) => dispatch!(args, test),
-        crate::Commands::Lint(args) => dispatch!(args, lint),
-        crate::Commands::Cleanup(args) => dispatch!(args, cleanup),
-
-        // Commands with global context
+        // All commands use global context
+        crate::Commands::Init(args) => dispatch!(args, global, init),
+        crate::Commands::Status(args) => dispatch!(args, global, status),
+        crate::Commands::Test(args) => dispatch!(args, global, test),
+        crate::Commands::Lint(args) => dispatch!(args, global, lint),
+        crate::Commands::Cleanup(args) => dispatch!(args, global, cleanup),
         crate::Commands::Project(args) => dispatch!(args, global, project),
         crate::Commands::Ssh(args) => dispatch!(args, global, ssh),
         crate::Commands::Server(args) => dispatch!(args, global, server),
