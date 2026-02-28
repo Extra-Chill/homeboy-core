@@ -98,6 +98,17 @@ pub struct PlatformCapability {
 // ModuleManifest
 // ============================================================================
 
+/// What a module provides: file extensions it handles and capabilities it supports.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvidesConfig {
+    /// File extensions this module can process (e.g., ["php", "inc"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_extensions: Vec<String>,
+    /// Capabilities this module supports (e.g., ["fingerprint", "refactor"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+}
+
 /// Unified module manifest decomposed into capability groups.
 ///
 /// Module JSON files use nested capability groups that map directly to these fields.
@@ -109,6 +120,10 @@ pub struct ModuleManifest {
     pub id: String,
     pub name: String,
     pub version: String,
+
+    // What this module provides
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provides: Option<ProvidesConfig>,
 
     // Optional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -258,6 +273,27 @@ impl ModuleManifest {
     /// Convenience: get database config from platform capability.
     pub fn database(&self) -> Option<&DatabaseConfig> {
         self.platform.as_ref().and_then(|p| p.database.as_ref())
+    }
+
+    /// Parse the version string as semver.
+    pub fn semver(&self) -> crate::error::Result<semver::Version> {
+        super::version::parse_module_version(&self.version, &self.id)
+    }
+
+    /// Get file extensions this module provides (empty if not specified).
+    pub fn provided_file_extensions(&self) -> &[String] {
+        self.provides
+            .as_ref()
+            .map(|p| p.file_extensions.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get capabilities this module provides (empty if not specified).
+    pub fn provided_capabilities(&self) -> &[String] {
+        self.provides
+            .as_ref()
+            .map(|p| p.capabilities.as_slice())
+            .unwrap_or(&[])
     }
 }
 

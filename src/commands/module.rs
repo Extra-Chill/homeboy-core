@@ -72,8 +72,14 @@ enum ModuleCommand {
     },
     /// Update an installed module (git pull)
     Update {
-        /// Module ID
-        module_id: String,
+        /// Module ID (omit with --all to update everything)
+        module_id: Option<String>,
+        /// Update all installed modules
+        #[arg(long)]
+        all: bool,
+        /// Force update even with uncommitted changes
+        #[arg(long)]
+        force: bool,
     },
     /// Uninstall a module
     Uninstall {
@@ -137,7 +143,11 @@ pub fn run(args: ModuleArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         ),
         ModuleCommand::Setup { module_id } => setup_module(&module_id),
         ModuleCommand::Install { source, id } => install_module(&source, id),
-        ModuleCommand::Update { module_id } => update_module(&module_id),
+        ModuleCommand::Update {
+            module_id,
+            all,
+            force,
+        } => update_module(module_id.as_deref(), all, force),
         ModuleCommand::Uninstall { module_id } => uninstall_module(&module_id),
         ModuleCommand::Action {
             module_id,
@@ -191,6 +201,15 @@ pub enum ModuleOutput {
         module_id: String,
         url: String,
         path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        old_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        new_version: Option<String>,
+    },
+    #[serde(rename = "module.update_all")]
+    UpdateAll {
+        updated: Vec<ModuleUpdateEntry>,
+        skipped: Vec<String>,
     },
     #[serde(rename = "module.uninstall")]
     Uninstall {
@@ -219,6 +238,13 @@ pub enum ModuleOutput {
     },
     #[serde(rename = "module.set")]
     SetBatch { batch: homeboy::BatchResult },
+}
+
+#[derive(Serialize)]
+pub struct ModuleUpdateEntry {
+    pub module_id: String,
+    pub old_version: String,
+    pub new_version: String,
 }
 
 #[derive(Serialize)]
@@ -530,18 +556,76 @@ fn install_module(source: &str, id: Option<String>) -> CmdResult<ModuleOutput> {
     ))
 }
 
-fn update_module(module_id: &str) -> CmdResult<ModuleOutput> {
-    // Core handles all validation: module existence, linked check, sourceUrl requirement
-    let result = module::update(module_id, false)?;
+fn update_module(module_id: Option<&str>, all: bool, force: bool) -> CmdResult<ModuleOutput> {
+    if all {
+        return update_all_modules(force);
+    }
+
+    let module_id = module_id.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "module_id",
+            "Provide a module ID or use --all to update all modules",
+            None,
+            None,
+        )
+    })?;
+
+    // Capture version before update
+    let old_version = load_module(module_id).ok().map(|m| m.version.clone());
+
+    let result = module::update(module_id, force)?;
+
+    // Capture version after update
+    let new_version = load_module(&result.module_id)
+        .ok()
+        .map(|m| m.version.clone());
 
     Ok((
         ModuleOutput::Update {
             module_id: result.module_id,
             url: result.url,
             path: result.path.to_string_lossy().to_string(),
+            old_version,
+            new_version,
         },
         0,
     ))
+}
+
+fn update_all_modules(force: bool) -> CmdResult<ModuleOutput> {
+    let module_ids = module::available_module_ids();
+    let mut updated = Vec::new();
+    let mut skipped = Vec::new();
+
+    for id in &module_ids {
+        // Skip linked modules (they're managed externally)
+        if is_module_linked(id) {
+            skipped.push(id.clone());
+            continue;
+        }
+
+        let old_version = load_module(id).ok().map(|m| m.version.clone());
+
+        match module::update(id, force) {
+            Ok(_) => {
+                let new_version = load_module(id)
+                    .ok()
+                    .map(|m| m.version.clone())
+                    .unwrap_or_default();
+
+                updated.push(ModuleUpdateEntry {
+                    module_id: id.clone(),
+                    old_version: old_version.unwrap_or_default(),
+                    new_version,
+                });
+            }
+            Err(_) => {
+                skipped.push(id.clone());
+            }
+        }
+    }
+
+    Ok((ModuleOutput::UpdateAll { updated, skipped }, 0))
 }
 
 fn uninstall_module(module_id: &str) -> CmdResult<ModuleOutput> {

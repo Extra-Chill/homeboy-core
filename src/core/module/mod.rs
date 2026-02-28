@@ -3,6 +3,7 @@ mod lifecycle;
 mod manifest;
 mod runner;
 mod scope;
+pub mod version;
 
 pub mod exec_context;
 
@@ -14,9 +15,12 @@ pub use manifest::{
     ActionConfig, ActionType, AuditCapability, BuildConfig, CliConfig, DatabaseCliConfig,
     DatabaseConfig, DeployCapability, DeployOverride, DeployVerification, DiscoveryConfig,
     ExecutableCapability, HttpMethod, InputConfig, LintConfig, ModuleManifest, OutputConfig,
-    OutputSchema, PlatformCapability, RequirementsConfig, RuntimeConfig, SelectOption,
-    SettingConfig, SinceTagConfig, TestConfig, VersionPatternConfig,
+    OutputSchema, PlatformCapability, ProvidesConfig, RequirementsConfig, RuntimeConfig,
+    SelectOption, SettingConfig, SinceTagConfig, TestConfig, VersionPatternConfig,
 };
+
+// Re-export version types
+pub use version::{VersionConstraint, parse_module_version};
 
 // Re-export execution types and functions
 pub(crate) use execution::execute_action;
@@ -152,6 +156,98 @@ pub fn validate_required_modules(component: &crate::component::Component) -> Res
     }
 
     err = err.with_hint("Browse available modules: https://github.com/Extra-Chill/homeboy-modules".to_string());
+
+    Err(err)
+}
+
+/// Validate that all extensions declared in a component's `extensions` field are installed
+/// and satisfy the declared version constraints.
+///
+/// Returns an actionable error listing every unsatisfied requirement with install/update hints.
+pub fn validate_extension_requirements(component: &crate::component::Component) -> Result<()> {
+    let extensions = match &component.extensions {
+        Some(e) if !e.is_empty() => e,
+        _ => return Ok(()),
+    };
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut hints: Vec<String> = Vec::new();
+
+    for (module_id, constraint_str) in extensions {
+        let constraint = match version::VersionConstraint::parse(constraint_str) {
+            Ok(c) => c,
+            Err(_) => {
+                errors.push(format!(
+                    "Invalid version constraint '{}' for extension '{}'",
+                    constraint_str, module_id
+                ));
+                continue;
+            }
+        };
+
+        match load_module(module_id) {
+            Ok(module) => {
+                match module.semver() {
+                    Ok(installed_version) => {
+                        if !constraint.matches(&installed_version) {
+                            errors.push(format!(
+                                "'{}' requires {}, but {} is installed",
+                                module_id, constraint, installed_version
+                            ));
+                            hints.push(format!(
+                                "Run `homeboy module update {}` to get the latest version",
+                                module_id
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        errors.push(format!(
+                            "Extension '{}' has invalid version '{}'",
+                            module_id, module.version
+                        ));
+                    }
+                }
+            }
+            Err(_) => {
+                errors.push(format!("Extension '{}' is not installed", module_id));
+                hints.push(format!(
+                    "homeboy module install https://github.com/Extra-Chill/homeboy-modules --id {}",
+                    module_id
+                ));
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        return Ok(());
+    }
+
+    let message = if errors.len() == 1 {
+        format!(
+            "Component '{}' has an unsatisfied extension requirement: {}",
+            component.id, errors[0]
+        )
+    } else {
+        format!(
+            "Component '{}' has {} unsatisfied extension requirements:\n  - {}",
+            component.id,
+            errors.len(),
+            errors.join("\n  - ")
+        )
+    };
+
+    let mut err = crate::error::Error::new(
+        crate::error::ErrorCode::ModuleNotFound,
+        message,
+        serde_json::json!({
+            "component_id": component.id,
+            "unsatisfied": errors,
+        }),
+    );
+
+    for hint in &hints {
+        err = err.with_hint(hint.to_string());
+    }
 
     Err(err)
 }
