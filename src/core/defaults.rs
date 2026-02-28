@@ -208,9 +208,15 @@ else
 fi
 
 if [ ! -f "homeboy" ]; then
-  echo "Expected extracted binary named 'homeboy'" >&2
-  ls -la
-  exit 1
+  # cargo-dist packages the binary inside a subdirectory (e.g. homeboy-x86_64-unknown-linux-gnu/)
+  FOUND=$(find . -maxdepth 2 -name "homeboy" -type f ! -name "*.sha256" | head -1)
+  if [ -n "$FOUND" ]; then
+    cp "$FOUND" ./homeboy
+  else
+    echo "Expected extracted binary named 'homeboy'" >&2
+    ls -laR
+    exit 1
+  fi
 fi
 
 # Install with permission-aware behavior
