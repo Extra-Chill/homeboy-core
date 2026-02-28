@@ -454,7 +454,7 @@ fn extract_php_namespace_imports(content: &str) -> (Option<String>, Vec<String>)
 fn extract_rust_namespace_imports(content: &str) -> (Option<String>, Vec<String>) {
     // Rust doesn't have namespace declarations per-file, but we can track the module path
     // from `mod` declarations in the same directory
-    let use_re = Regex::new(r"(?m)^\s*use\s+([\w:]+(?:::\{[^}]+\})?)").unwrap();
+    let use_re = Regex::new(r"(?m)^\s*use\s+((?:\w+::)*(?:\w+|\{[^}]+\}))").unwrap();
 
     let imports: Vec<String> = use_re
         .captures_iter(content)
