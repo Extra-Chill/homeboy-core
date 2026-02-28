@@ -131,10 +131,25 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
         let run_result = release::run(&args.component_id, &options)?;
         display_release_summary(&run_result);
 
+        // Exit code 3 when release succeeded but post-release hooks failed.
+        // Distinct from 1 (release failure) so callers can distinguish.
+        let post_release_exit = if has_post_release_warnings(&run_result) {
+            3
+        } else {
+            0
+        };
+
         let (deployment, deploy_exit_code) = if args.deploy {
             execute_deployment(&args.component_id)
         } else {
             (None, 0)
+        };
+
+        // deploy failure (1) takes priority over post-release warning (3)
+        let exit_code = if deploy_exit_code != 0 {
+            deploy_exit_code
+        } else {
+            post_release_exit
         };
 
         Ok((
@@ -148,7 +163,7 @@ pub fn run(args: ReleaseArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                     deployment,
                 },
             },
-            deploy_exit_code,
+            exit_code,
         ))
     }
 }
@@ -163,6 +178,20 @@ pub fn display_release_summary(run: &ReleaseRun) {
             }
         }
     }
+}
+
+/// Returns true if any post-release step had hook failures.
+/// Checks the structured `all_succeeded` field in the step data.
+pub fn has_post_release_warnings(run: &ReleaseRun) -> bool {
+    run.result.steps.iter().any(|step| {
+        step.step_type == "post_release"
+            && step
+                .data
+                .as_ref()
+                .and_then(|d| d.get("all_succeeded"))
+                .and_then(|v| v.as_bool())
+                == Some(false)
+    })
 }
 
 fn plan_deployment(component_id: &str) -> DeploymentResult {

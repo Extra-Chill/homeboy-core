@@ -231,6 +231,14 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
             } else {
                 let run_result = release::run(&component_id, &options)?;
                 super::release::display_release_summary(&run_result);
+
+                // Exit code 3 when post-release hooks failed (matches `release` command behavior)
+                let exit_code = if super::release::has_post_release_warnings(&run_result) {
+                    3
+                } else {
+                    0
+                };
+
                 Ok((
                     VersionOutput::Bump(VersionBumpOutput {
                         command: "version.bump".to_string(),
@@ -240,7 +248,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                         plan: None,
                         run: Some(run_result),
                     }),
-                    0,
+                    exit_code,
                 ))
             }
         }
