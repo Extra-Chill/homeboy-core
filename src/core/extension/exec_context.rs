@@ -3,7 +3,7 @@
 /// Version of the exec context protocol. Extensions can check this for compatibility.
 pub const VERSION: &str = "HOMEBOY_EXEC_CONTEXT_VERSION";
 /// ID of the extension being executed.
-pub const EXTENSION_ID: &str = "HOMEBOY_MODULE_ID";
+pub const EXTENSION_ID: &str = "HOMEBOY_EXTENSION_ID";
 /// JSON-serialized settings (merged from app, project, and component levels).
 pub const SETTINGS_JSON: &str = "HOMEBOY_SETTINGS_JSON";
 /// Project ID (only set when extension requires project context).
@@ -11,7 +11,7 @@ pub const PROJECT_ID: &str = "HOMEBOY_PROJECT_ID";
 /// Component ID (only set when extension requires component context).
 pub const COMPONENT_ID: &str = "HOMEBOY_COMPONENT_ID";
 /// Filesystem path to the extension directory.
-pub const EXTENSION_PATH: &str = "HOMEBOY_MODULE_PATH";
+pub const EXTENSION_PATH: &str = "HOMEBOY_EXTENSION_PATH";
 /// Filesystem path to the project directory (base_path).
 pub const PROJECT_PATH: &str = "HOMEBOY_PROJECT_PATH";
 /// Filesystem path to the component directory.

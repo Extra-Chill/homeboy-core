@@ -444,7 +444,7 @@ fn run_pre_build_scripts(comp: &Component) -> Result<Option<(i32, String)>> {
         }
 
         let env: [(&str, &str); 4] = [
-            ("HOMEBOY_MODULE_PATH", &extension_path.to_string_lossy()),
+            (exec_context::EXTENSION_PATH, &extension_path.to_string_lossy()),
             (exec_context::COMPONENT_ID, &comp.id),
             (exec_context::COMPONENT_PATH, &comp.local_path),
             ("HOMEBOY_PLUGIN_PATH", &comp.local_path),
@@ -482,7 +482,7 @@ fn get_build_env_vars(comp: &Component) -> Vec<(String, String)> {
                 if extension.build.is_some() {
                     if let Ok(extension_path) = paths::extension(extension_id) {
                         let extension_path_str = extension_path.to_string_lossy().to_string();
-                        env.push(("HOMEBOY_MODULE_PATH".to_string(), extension_path_str));
+                        env.push((exec_context::EXTENSION_PATH.to_string(), extension_path_str));
                         env.push((
                             exec_context::COMPONENT_PATH.to_string(),
                             comp.local_path.clone(),

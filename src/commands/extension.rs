@@ -722,8 +722,8 @@ fn exec_extension_tool(
 
     let env = vec![
         ("PATH", enriched_path.as_str()),
-        ("HOMEBOY_MODULE_PATH", extension_path),
-        ("HOMEBOY_MODULE_ID", extension_id),
+        (homeboy::extension::exec_context::EXTENSION_PATH, extension_path),
+        (homeboy::extension::exec_context::EXTENSION_ID, extension_id),
     ];
 
     let command = args.join(" ");
