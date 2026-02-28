@@ -24,6 +24,7 @@ pub mod module;
 pub mod module_update_check;
 pub mod output;
 pub mod project;
+pub mod refactor;
 pub mod release;
 
 pub mod server;
