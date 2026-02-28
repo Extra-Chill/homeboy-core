@@ -254,12 +254,12 @@ fn main() -> std::process::ExitCode {
     let global = GlobalArgs {};
 
     if let Some(module_cmd) = try_parse_module_cli_command(&matches, &module_info) {
-        let result = cli::run(
-            &module_cmd.tool,
-            &module_cmd.project_id,
-            module_cmd.args,
-            &global,
-        );
+        let cli_args = cli::CliArgs {
+            tool: module_cmd.tool,
+            identifier: module_cmd.project_id,
+            args: module_cmd.args,
+        };
+        let result = cli::run(cli_args, &global);
 
         let (json_result, exit_code) = output::map_cmd_result_to_json(result);
         output::print_json_result(json_result).ok();
