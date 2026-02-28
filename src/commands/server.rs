@@ -4,7 +4,7 @@ use serde::Serialize;
 use homeboy::server::{self, Server};
 use homeboy::{EntityCrudOutput, MergeOutput};
 
-use super::DynamicSetArgs;
+use super::{CmdResult, DynamicSetArgs};
 
 /// Entity-specific fields for server commands.
 #[derive(Debug, Default, Serialize)]
@@ -119,7 +119,7 @@ enum KeyCommand {
 pub fn run(
     args: ServerArgs,
     _global: &crate::commands::GlobalArgs,
-) -> homeboy::Result<(ServerOutput, i32)> {
+) -> CmdResult<ServerOutput> {
     match args.command {
         ServerCommand::Create {
             json,
@@ -203,7 +203,7 @@ pub fn run(
     }
 }
 
-fn run_key(args: KeyArgs) -> homeboy::Result<(ServerOutput, i32)> {
+fn run_key(args: KeyArgs) -> CmdResult<ServerOutput> {
     match args.command {
         KeyCommand::Generate { server_id } => key_generate(&server_id),
         KeyCommand::Show { server_id } => key_show(&server_id),
@@ -219,7 +219,7 @@ fn run_key(args: KeyArgs) -> homeboy::Result<(ServerOutput, i32)> {
     }
 }
 
-fn show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn show(server_id: &str) -> CmdResult<ServerOutput> {
     let svr = server::load(server_id)
         .or_else(|original_error| server::find_by_host(server_id).ok_or(original_error))?;
 
@@ -234,7 +234,7 @@ fn show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
+fn set(args: DynamicSetArgs) -> CmdResult<ServerOutput> {
     let merged = super::merge_dynamic_args(&args)?.ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
             "spec",
@@ -273,7 +273,7 @@ fn set(args: DynamicSetArgs) -> homeboy::Result<(ServerOutput, i32)> {
     }
 }
 
-fn delete(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn delete(server_id: &str) -> CmdResult<ServerOutput> {
     server::delete_safe(server_id)?;
 
     Ok((
@@ -287,7 +287,7 @@ fn delete(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn list() -> homeboy::Result<(ServerOutput, i32)> {
+fn list() -> CmdResult<ServerOutput> {
     let servers = server::list()?;
 
     Ok((
@@ -300,7 +300,7 @@ fn list() -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn key_generate(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn key_generate(server_id: &str) -> CmdResult<ServerOutput> {
     let result = server::generate_key(server_id)?;
 
     Ok((
@@ -324,7 +324,7 @@ fn key_generate(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn key_show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn key_show(server_id: &str) -> CmdResult<ServerOutput> {
     let public_key = server::get_public_key(server_id)?;
 
     Ok((
@@ -346,7 +346,7 @@ fn key_show(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn key_use(server_id: &str, private_key_path: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn key_use(server_id: &str, private_key_path: &str) -> CmdResult<ServerOutput> {
     let server = server::use_key(server_id, private_key_path)?;
     let identity_file = server.identity_file.clone();
 
@@ -371,7 +371,7 @@ fn key_use(server_id: &str, private_key_path: &str) -> homeboy::Result<(ServerOu
     ))
 }
 
-fn key_unset(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn key_unset(server_id: &str) -> CmdResult<ServerOutput> {
     let server = server::unset_key(server_id)?;
 
     Ok((
@@ -395,7 +395,7 @@ fn key_unset(server_id: &str) -> homeboy::Result<(ServerOutput, i32)> {
     ))
 }
 
-fn key_import(server_id: &str, private_key_path: &str) -> homeboy::Result<(ServerOutput, i32)> {
+fn key_import(server_id: &str, private_key_path: &str) -> CmdResult<ServerOutput> {
     let result = server::import_key(server_id, private_key_path)?;
 
     Ok((

@@ -195,7 +195,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
 
 
 
-pub fn show_version_output(component_id: &str) -> homeboy::Result<(VersionShowOutput, i32)> {
+pub fn show_version_output(component_id: &str) -> CmdResult<VersionShowOutput> {
     let info = read_version(Some(component_id))?;
 
     Ok((
