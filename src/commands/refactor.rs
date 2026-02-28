@@ -64,6 +64,7 @@ pub enum RefactorOutput {
         total_files: usize,
         edits: Vec<EditSummary>,
         file_renames: Vec<RenameSummary>,
+        warnings: Vec<WarningSummary>,
         applied: bool,
     },
 }
@@ -85,6 +86,15 @@ pub struct EditSummary {
 pub struct RenameSummary {
     pub from: String,
     pub to: String,
+}
+
+#[derive(Serialize)]
+pub struct WarningSummary {
+    pub kind: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    pub message: String,
 }
 
 fn run_rename(
@@ -109,7 +119,23 @@ fn run_rename(
     let spec = RenameSpec::new(from, to, scope.clone());
     let mut result = refactor::generate_renames(&spec, &root);
 
+    // Print warnings to stderr before applying
+    for warning in &result.warnings {
+        let location = warning
+            .line
+            .map(|l| format!("{}:{}", warning.file, l))
+            .unwrap_or_else(|| warning.file.clone());
+        homeboy::log_status!("warning", "{}: {}", location, warning.message);
+    }
+
     if write {
+        if !result.warnings.is_empty() {
+            homeboy::log_status!(
+                "warning",
+                "{} collision warning(s) detected — applying anyway",
+                result.warnings.len()
+            );
+        }
         refactor::apply_renames(&mut result, &root)?;
     }
 
@@ -152,6 +178,16 @@ fn run_rename(
                 .map(|r| RenameSummary {
                     from: r.from.clone(),
                     to: r.to.clone(),
+                })
+                .collect(),
+            warnings: result
+                .warnings
+                .iter()
+                .map(|w| WarningSummary {
+                    kind: w.kind.clone(),
+                    file: w.file.clone(),
+                    line: w.line,
+                    message: w.message.clone(),
                 })
                 .collect(),
             applied: result.applied,

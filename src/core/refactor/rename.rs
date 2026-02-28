@@ -162,6 +162,19 @@ pub struct FileRename {
     pub to: String,
 }
 
+/// A warning about a potential collision or issue.
+#[derive(Debug, Clone, Serialize)]
+pub struct RenameWarning {
+    /// Warning category.
+    pub kind: String,
+    /// File path relative to root.
+    pub file: String,
+    /// Line number (if applicable).
+    pub line: Option<usize>,
+    /// Human-readable description.
+    pub message: String,
+}
+
 /// The full result of a rename operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RenameResult {
@@ -173,6 +186,8 @@ pub struct RenameResult {
     pub edits: Vec<FileEdit>,
     /// File/directory renames to apply.
     pub file_renames: Vec<FileRename>,
+    /// Warnings about potential collisions or issues.
+    pub warnings: Vec<RenameWarning>,
     /// Total reference count.
     pub total_references: usize,
     /// Total files affected.
@@ -480,14 +495,187 @@ pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
     let total_references = references.len();
     let total_files = affected_files.len() + file_renames.len();
 
+    // Detect collisions
+    let warnings = detect_collisions(&edits, &file_renames, root);
+
     RenameResult {
         variants: spec.variants.clone(),
         references,
         edits,
         file_renames,
+        warnings,
         total_references,
         total_files,
         applied: false,
+    }
+}
+
+// ============================================================================
+// Collision detection
+// ============================================================================
+
+/// Detect potential collisions in rename results.
+///
+/// Checks for:
+/// 1. File rename targets that already exist on disk
+/// 2. Duplicate identifiers within the same indentation block in edited files
+///    (e.g., two struct fields both named `extensions` after rename)
+fn detect_collisions(
+    edits: &[FileEdit],
+    file_renames: &[FileRename],
+    root: &Path,
+) -> Vec<RenameWarning> {
+    let mut warnings = Vec::new();
+
+    // Check file rename collisions — target already exists
+    for rename in file_renames {
+        let target = root.join(&rename.to);
+        if target.exists() {
+            warnings.push(RenameWarning {
+                kind: "file_collision".to_string(),
+                file: rename.to.clone(),
+                line: None,
+                message: format!(
+                    "Rename target '{}' already exists on disk (from '{}')",
+                    rename.to, rename.from
+                ),
+            });
+        }
+    }
+
+    // Check content collisions — duplicate identifiers at same indentation
+    for edit in edits {
+        detect_duplicate_identifiers(&edit.file, &edit.new_content, &mut warnings);
+    }
+
+    warnings
+}
+
+/// Scan edited content for lines at the same indentation that introduce
+/// duplicate field/identifier names. This catches the case where renaming
+/// `modules` → `extensions` creates a collision with an existing `extensions` field.
+fn detect_duplicate_identifiers(file: &str, content: &str, warnings: &mut Vec<RenameWarning>) {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Group lines by indentation level, looking for struct-like blocks
+    // (lines with the same leading whitespace that contain identifier patterns)
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        // Look for struct/enum/block openers
+        if trimmed.ends_with('{') || trimmed.ends_with("{{") {
+            let block_indent = leading_spaces(lines.get(i + 1).unwrap_or(&""));
+            if block_indent == 0 {
+                i += 1;
+                continue;
+            }
+
+            // Collect identifiers at this indent level until block closes
+            let mut seen: HashMap<String, usize> = HashMap::new();
+            let mut j = i + 1;
+
+            while j < lines.len() {
+                let block_line = lines[j];
+                let block_trimmed = block_line.trim();
+
+                // Block ended
+                if block_trimmed == "}" || block_trimmed == "}," {
+                    break;
+                }
+
+                // Only check lines at this exact indent level
+                if leading_spaces(block_line) == block_indent {
+                    if let Some(ident) = extract_field_identifier(block_trimmed) {
+                        if let Some(&first_line) = seen.get(&ident) {
+                            warnings.push(RenameWarning {
+                                kind: "duplicate_identifier".to_string(),
+                                file: file.to_string(),
+                                line: Some(j + 1),
+                                message: format!(
+                                    "Duplicate identifier '{}' at line {} (first at line {})",
+                                    ident,
+                                    j + 1,
+                                    first_line
+                                ),
+                            });
+                        } else {
+                            seen.insert(ident, j + 1);
+                        }
+                    }
+                }
+
+                j += 1;
+            }
+
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Count leading spaces on a line.
+fn leading_spaces(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+/// Extract the field/identifier name from a struct field or variable declaration line.
+/// Returns the identifier if the line looks like a field declaration.
+///
+/// Matches patterns like:
+/// - `pub field_name: Type,`
+/// - `field_name: Type,`
+/// - `pub(crate) field_name: Type,`
+/// - `let field_name = ...`
+/// - `fn field_name(...`
+fn extract_field_identifier(trimmed: &str) -> Option<String> {
+    // Skip attributes, comments, empty lines
+    if trimmed.starts_with('#')
+        || trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.is_empty()
+    {
+        return None;
+    }
+
+    // Strip visibility modifiers
+    let rest = trimmed
+        .strip_prefix("pub(crate) ")
+        .or_else(|| trimmed.strip_prefix("pub(super) "))
+        .or_else(|| trimmed.strip_prefix("pub "))
+        .unwrap_or(trimmed);
+
+    // Strip let/fn/const/static
+    let rest = rest
+        .strip_prefix("let mut ")
+        .or_else(|| rest.strip_prefix("let "))
+        .or_else(|| rest.strip_prefix("fn "))
+        .or_else(|| rest.strip_prefix("const "))
+        .or_else(|| rest.strip_prefix("static "))
+        .unwrap_or(rest);
+
+    // Extract identifier (alphanumeric + underscore until : or ( or = or space)
+    let ident: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+
+    if ident.is_empty() {
+        return None;
+    }
+
+    // Must be followed by : or ( or = or < (type params) to be an identifier
+    let after = &rest[ident.len()..].trim_start();
+    if after.starts_with(':')
+        || after.starts_with('(')
+        || after.starts_with('=')
+        || after.starts_with('<')
+    {
+        Some(ident)
+    } else {
+        None
     }
 }
 
@@ -742,5 +930,80 @@ mod tests {
         // But "modules" (plural) should match
         let matches = find_term_matches("node_modules", "modules");
         assert_eq!(matches, vec![5], "Should match 'modules' in 'node_modules'");
+    }
+
+    #[test]
+    fn extract_field_identifier_works() {
+        assert_eq!(extract_field_identifier("pub name: String,"), Some("name".to_string()));
+        assert_eq!(extract_field_identifier("pub(crate) id: u32,"), Some("id".to_string()));
+        assert_eq!(extract_field_identifier("count: usize,"), Some("count".to_string()));
+        assert_eq!(extract_field_identifier("let value = 42;"), Some("value".to_string()));
+        assert_eq!(extract_field_identifier("fn init("), Some("init".to_string()));
+        assert_eq!(extract_field_identifier("// a comment"), None);
+        assert_eq!(extract_field_identifier("#[serde(skip)]"), None);
+        assert_eq!(extract_field_identifier(""), None);
+    }
+
+    #[test]
+    fn detect_duplicate_identifiers_catches_collision() {
+        let content = "struct Foo {\n    pub name: String,\n    pub name: u32,\n}\n";
+        let mut warnings = Vec::new();
+        detect_duplicate_identifiers("test.rs", content, &mut warnings);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].kind, "duplicate_identifier");
+        assert!(warnings[0].message.contains("name"));
+    }
+
+    #[test]
+    fn detect_duplicate_identifiers_no_false_positive() {
+        let content = "struct Foo {\n    pub name: String,\n    pub age: u32,\n}\n";
+        let mut warnings = Vec::new();
+        detect_duplicate_identifiers("test.rs", content, &mut warnings);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn collision_detection_file_rename_target_exists() {
+        let dir = std::env::temp_dir().join("homeboy_collision_file_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        // Create both source and target files
+        std::fs::write(dir.join("old.rs"), "fn old() {}\n").unwrap();
+        std::fs::write(dir.join("new.rs"), "fn new() {}\n").unwrap();
+
+        let file_renames = vec![FileRename {
+            from: "old.rs".to_string(),
+            to: "new.rs".to_string(),
+        }];
+
+        let warnings = detect_collisions(&[], &file_renames, &dir);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].kind, "file_collision");
+        assert!(warnings[0].message.contains("new.rs"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collision_detection_in_generate_renames() {
+        let dir = std::env::temp_dir().join("homeboy_collision_gen_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        // This simulates the exact #284 bug: struct has both `widgets` and `gadgets` fields,
+        // and renaming widget → gadget would create two `gadgets` fields.
+        std::fs::write(
+            dir.join("test.rs"),
+            "struct Config {\n    pub widgets: Vec<String>,\n    pub gadgets: Vec<u32>,\n}\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::new("widget", "gadget", RenameScope::All);
+        let result = generate_renames(&spec, &dir);
+
+        assert!(!result.warnings.is_empty(), "Should detect duplicate 'gadgets' field");
+        assert!(result.warnings.iter().any(|w| w.kind == "duplicate_identifier"));
+        assert!(result.warnings.iter().any(|w| w.message.contains("gadgets")));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
