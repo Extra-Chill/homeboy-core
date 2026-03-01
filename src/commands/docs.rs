@@ -642,8 +642,20 @@ fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
 // ============================================================================
 
 fn run_generate_from_audit(source: &str, dry_run: bool) -> CmdResult<DocsOutput> {
-    // Read audit JSON from @file, stdin (-), or inline string
-    let json_content = super::merge_json_sources(Some(source), &[])?;
+    // Read audit JSON from @file, stdin (-), file path, or inline string.
+    // Auto-detect bare file paths: if it doesn't look like JSON or stdin
+    // and a file exists at that path, treat it as @file.
+    let effective_source = if !source.starts_with('{')
+        && !source.starts_with('[')
+        && source != "-"
+        && !source.starts_with('@')
+        && std::path::Path::new(source).exists()
+    {
+        format!("@{}", source)
+    } else {
+        source.to_string()
+    };
+    let json_content = super::merge_json_sources(Some(&effective_source), &[])?;
 
     // Parse audit result — handle both envelope and raw formats
     let audit: AuditResult = if let Some(data) = json_content.get("data") {
