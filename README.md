@@ -114,8 +114,6 @@ Both modes include **collision detection** — warnings when a rename would crea
 
 Homeboy is built for agentic workflows. Every command returns structured JSON, and embedded docs give agents full context without leaving the terminal.
 
-**Agent Hooks:** Install [Agent Hooks](https://github.com/Extra-Chill/homeboy-extensions/tree/main/agent-hooks) to guide Claude Code or OpenCode to use Homeboy effectively.
-
 ```bash
 homeboy docs list                      # Browse available topics
 homeboy docs commands/deploy           # Deep dive on any command
@@ -134,7 +132,6 @@ Extensions add project-type support — WordPress, Node.js, Rust, and more. Brow
 | **rust** | Cargo CLI integration |
 | **github** | Issues, PRs, releases |
 | **homebrew** | Tap publishing |
-| **agent-hooks** | AI agent guardrails |
 
 ```bash
 # Install an extension by name
