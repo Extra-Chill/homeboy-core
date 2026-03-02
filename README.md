@@ -140,7 +140,12 @@ Extensions add platform-specific behavior. Installed from git repos, stored in `
 | `wordpress` | WP-CLI integration, WordPress-aware build/test/lint, post-deploy hooks (activate plugin, flush cache) |
 | `nodejs` | PM2 process management |
 | `rust` | Cargo integration, crates.io publishing, release artifact packaging |
+| `github` | GitHub release publishing |
+| `homebrew` | Homebrew tap publishing |
+| `swift` | Swift testing infrastructure for macOS, iOS, and Swift CLI projects |
 | `openclaw` | AI agent platform management |
+| `sweatpants` | Bridge to Sweatpants automation engine |
+| `plasma-shield` | Network security control for AI agent fleets |
 
 ```bash
 homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id wordpress
