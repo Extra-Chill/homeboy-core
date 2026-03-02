@@ -222,6 +222,7 @@ fn plan_deployment(component_id: &str) -> DeploymentResult {
             total_projects: total,
             succeeded: 0,
             failed: 0,
+            skipped: 0,
         },
     }
 }
@@ -242,6 +243,7 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
                     total_projects: 0,
                     succeeded: 0,
                     failed: 0,
+                    skipped: 0,
                 },
             }),
             0,
@@ -323,6 +325,7 @@ fn execute_deployment(component_id: &str) -> (Option<DeploymentResult>, i32) {
                 total_projects: total,
                 succeeded,
                 failed,
+                skipped: 0,
             },
         }),
         exit_code,

@@ -11,6 +11,12 @@ pub struct ProjectsSummary {
     pub total_projects: u32,
     pub succeeded: u32,
     pub failed: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped: u32,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 /// Parse a `KEY=value` string into a (key, value) tuple.
