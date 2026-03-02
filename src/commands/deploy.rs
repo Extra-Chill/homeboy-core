@@ -294,38 +294,85 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
     if component_ids.is_empty() {
         return Err(homeboy::Error::validation_invalid_argument(
             "component_ids",
-            "At least one component ID is required when using --projects",
+            "At least one component ID is required for multi-project deployment",
             None,
             None,
         ));
     }
 
-    // Validate all specified projects exist
+    // Validate specified projects exist, skip unknown ones instead of aborting.
+    // Fleet configs can accumulate stale project references — one missing project
+    // should not block deploying to the rest.
     let known_projects = homeboy::project::list_ids().unwrap_or_default();
-    for project_id in project_ids {
-        if !known_projects.contains(project_id) {
-            return Err(homeboy::Error::validation_invalid_argument(
-                "projects",
-                &format!("Unknown project: '{}'", project_id),
-                None,
-                None,
-            ));
-        }
+    let mut unknown_projects = Vec::new();
+    let valid_project_ids: Vec<&String> = project_ids
+        .iter()
+        .filter(|pid| {
+            if known_projects.contains(pid) {
+                true
+            } else {
+                unknown_projects.push(pid.to_string());
+                false
+            }
+        })
+        .collect();
+
+    for pid in &unknown_projects {
+        log_status!(
+            "deploy",
+            "Skipping unknown project '{}' — remove from fleet with: homeboy fleet remove-project <fleet> {}",
+            pid,
+            pid
+        );
+    }
+
+    if valid_project_ids.is_empty() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "projects",
+            format!(
+                "No valid projects found — all specified projects are unknown: {}",
+                unknown_projects.join(", ")
+            ),
+            None,
+            None,
+        ));
     }
 
     log_status!(
         "deploy",
-        "Deploying {:?} to {} project(s)...",
+        "Deploying {:?} to {} project(s){}...",
         component_ids,
-        project_ids.len()
+        valid_project_ids.len(),
+        if unknown_projects.is_empty() {
+            String::new()
+        } else {
+            format!(" ({} skipped)", unknown_projects.len())
+        }
     );
 
     let mut project_results = Vec::new();
     let mut succeeded: u32 = 0;
     let mut failed: u32 = 0;
+    let skipped: u32 = unknown_projects.len() as u32;
     let mut first_project = true;
 
-    for project_id in project_ids {
+    // Add skipped results for unknown projects
+    for pid in &unknown_projects {
+        project_results.push(ProjectDeployResult {
+            project_id: pid.clone(),
+            status: "skipped".to_string(),
+            error: Some(format!("Project '{}' not found — skipped", pid)),
+            results: vec![],
+            summary: DeploySummary {
+                total: 0,
+                succeeded: 0,
+                skipped: 0,
+                failed: 0,
+            },
+        });
+    }
+
+    for project_id in &valid_project_ids {
         log_status!("deploy", "Deploying to project '{}'...", project_id);
 
         let config = DeployConfig {
@@ -351,7 +398,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
                         .unwrap_or_else(|| "Deployment failed".to_string());
 
                     project_results.push(ProjectDeployResult {
-                        project_id: project_id.clone(),
+                        project_id: project_id.to_string(),
                         status: "failed".to_string(),
                         error: Some(error_msg),
                         results: result.results,
@@ -360,7 +407,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
                     failed += 1;
                 } else {
                     project_results.push(ProjectDeployResult {
-                        project_id: project_id.clone(),
+                        project_id: project_id.to_string(),
                         status: "deployed".to_string(),
                         error: None,
                         results: result.results,
@@ -371,7 +418,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
             }
             Err(e) => {
                 project_results.push(ProjectDeployResult {
-                    project_id: project_id.clone(),
+                    project_id: project_id.to_string(),
                     status: "failed".to_string(),
                     error: Some(e.to_string()),
                     results: vec![],
@@ -401,6 +448,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
                 total_projects: total,
                 succeeded,
                 failed,
+                skipped,
             },
             dry_run: args.dry_run,
             check: args.check,
