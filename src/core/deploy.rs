@@ -757,17 +757,29 @@ fn deploy_components(
     ctx: &RemoteProjectContext,
     base_path: &str,
 ) -> Result<DeployOrchestrationResult> {
-    let all_components = load_project_components(&project.component_ids)?;
-    if all_components.is_empty() {
+    let loaded = load_project_components(&project.component_ids)?;
+    if loaded.deployable.is_empty() {
+        let message = if loaded.skipped.is_empty() {
+            "No components configured for project".to_string()
+        } else {
+            format!(
+                "No deployable components found — {} component(s) skipped (no build artifact or deploy strategy): {}",
+                loaded.skipped.len(),
+                loaded.skipped.join(", ")
+            )
+        };
         return Err(Error::validation_invalid_argument(
             "componentIds",
-            "No components configured for project",
+            message,
             None,
-            None,
+            Some(vec![
+                "Ensure components have a buildArtifact, an extension with artifact_pattern, or deploy_strategy: \"git\"".to_string(),
+                format!("Check with: homeboy component show <id>"),
+            ]),
         ));
     }
 
-    let components = plan_components(config, &all_components, base_path, &ctx.client)?;
+    let components = plan_components(config, &loaded.deployable, base_path, &ctx.client)?;
 
     if components.is_empty() {
         return Ok(DeployOrchestrationResult {
@@ -1408,13 +1420,23 @@ fn calculate_release_state(component: &Component) -> Option<ReleaseState> {
     })
 }
 
+/// Result of loading project components, including skipped (non-deployable) component IDs.
+struct LoadedComponents {
+    deployable: Vec<Component>,
+    skipped: Vec<String>,
+}
+
 /// Load components by ID, resolve artifact paths via extension patterns, and filter non-deployable.
 ///
 /// Validates that any extensions declared in the component's `extensions` field are installed.
 /// Returns an actionable error with install instructions when extensions are missing,
 /// rather than silently skipping the component.
-fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
-    let mut components = Vec::new();
+///
+/// Returns both the deployable components and the IDs of skipped (non-deployable) ones,
+/// so callers can produce accurate error messages.
+fn load_project_components(component_ids: &[String]) -> Result<LoadedComponents> {
+    let mut deployable = Vec::new();
+    let mut skipped = Vec::new();
 
     for id in component_ids {
         let mut loaded = component::load(id)?;
@@ -1434,11 +1456,11 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
             Some(artifact) if !is_git_deploy => {
                 let resolved_artifact = parser::resolve_path_string(&loaded.local_path, &artifact);
                 loaded.build_artifact = Some(resolved_artifact);
-                components.push(loaded);
+                deployable.push(loaded);
             }
             _ if is_git_deploy => {
                 // Git-deploy components are deployable without an artifact
-                components.push(loaded);
+                deployable.push(loaded);
             }
             Some(_) | None => {
                 // Skip - component is intentionally non-deployable
@@ -1447,12 +1469,13 @@ fn load_project_components(component_ids: &[String]) -> Result<Vec<Component>> {
                     "Skipping '{}': no artifact configured (non-deployable component)",
                     loaded.id
                 );
+                skipped.push(loaded.id.clone());
                 continue;
             }
         }
     }
 
-    Ok(components)
+    Ok(LoadedComponents { deployable, skipped })
 }
 
 /// Check if a component's build artifact is newer than its latest source commit.
