@@ -602,7 +602,37 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
     // Phase 2: Duplication fixes — extract shared code via extension protocol
     let mut new_files: Vec<NewFile> = Vec::new();
 
+    /// Minimum number of files (including canonical) before extracting to shared code.
+    /// Groups with fewer files are reported as findings but not auto-fixed —
+    /// the overhead of a trait/module for 2-3 files isn't worth it.
+    const MIN_EXTRACT_GROUP_SIZE: usize = 4;
+
+    /// Function names that shouldn't be extracted to traits/shared modules.
+    /// These are typically boilerplate that's better handled by inheritance
+    /// or factory patterns, not trait extraction.
+    const SKIP_EXTRACT_NAMES: &[&str] = &[
+        "__construct",
+        "constructor",
+        "new",
+        "set_up",
+        "setUp",
+        "tear_down",
+        "tearDown",
+    ];
+
     for group in &result.duplicate_groups {
+        let group_size = 1 + group.remove_from.len(); // canonical + duplicates
+
+        // Skip small groups — not worth extracting to shared code
+        if group_size < MIN_EXTRACT_GROUP_SIZE {
+            continue;
+        }
+
+        // Skip constructors and test lifecycle methods
+        if SKIP_EXTRACT_NAMES.contains(&group.function_name.as_str()) {
+            continue;
+        }
+
         let canonical_abs = root.join(&group.canonical_file);
         let ext = canonical_abs
             .extension()
@@ -611,7 +641,6 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
         let language = detect_language(&canonical_abs);
 
         // Only use extract_shared for PHP class methods (not tests, not JS/JSX).
-        // Test boilerplate (set_up, tear_down) isn't worth extracting to traits.
         let is_test_file = group.canonical_file.contains("/tests/")
             || group.canonical_file.contains("/Tests/")
             || group.canonical_file.starts_with("tests/");
@@ -671,6 +700,10 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         }
 
+        // Collect all file paths for common ancestor namespace computation
+        let mut all_paths: Vec<&str> = vec![group.canonical_file.as_str()];
+        all_paths.extend(group.remove_from.iter().map(|s| s.as_str()));
+
         // Call the extension's extract_shared command
         let extract_cmd = serde_json::json!({
             "command": "extract_shared",
@@ -678,7 +711,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             "canonical_file": group.canonical_file,
             "canonical_content": canonical_content,
             "files": file_entries,
-            "root_namespace_mapping": "inc:DataMachine",
+            "all_file_paths": all_paths,
         });
 
         let extract_result = crate::extension::run_refactor_script(&manifest, &extract_cmd);
@@ -691,7 +724,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         };
 
-        // Check for error
+        // Check for error or skip
         if result_val.get("error").is_some() {
             let err = result_val["error"].as_str().unwrap_or("unknown error");
             skipped.push(SkippedFile {
@@ -699,6 +732,20 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                 reason: format!(
                     "extract_shared failed for `{}`: {}",
                     group.function_name, err
+                ),
+            });
+            continue;
+        }
+        if result_val.get("skip").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let reason = result_val
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("extension decided to skip");
+            skipped.push(SkippedFile {
+                file: group.canonical_file.clone(),
+                reason: format!(
+                    "Skipped `{}`: {}",
+                    group.function_name, reason
                 ),
             });
             continue;
