@@ -13,6 +13,8 @@ pub struct ProjectsSummary {
     pub failed: u32,
     #[serde(skip_serializing_if = "is_zero")]
     pub skipped: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub planned: u32,
 }
 
 fn is_zero(v: &u32) -> bool {
