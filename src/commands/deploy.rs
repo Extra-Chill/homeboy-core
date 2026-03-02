@@ -356,6 +356,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
     let mut succeeded: u32 = 0;
     let mut failed: u32 = 0;
     let skipped: u32 = unknown_projects.len() as u32;
+    let mut planned: u32 = 0;
     let mut first_project = true;
 
     // Add skipped results for unknown projects
@@ -392,6 +393,11 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
             Ok(result) => {
                 let deploy_failed = result.summary.failed > 0;
 
+                // Determine the correct project-level status:
+                // - dry-run/check modes never actually deploy, so report "planned"
+                // - real deploys report "deployed" or "failed" based on results
+                let is_planned = args.dry_run || args.check;
+
                 if deploy_failed {
                     let error_msg = result
                         .results
@@ -407,6 +413,15 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
                         summary: result.summary,
                     });
                     failed += 1;
+                } else if is_planned {
+                    project_results.push(ProjectDeployResult {
+                        project_id: project_id.to_string(),
+                        status: "planned".to_string(),
+                        error: None,
+                        results: result.results,
+                        summary: result.summary,
+                    });
+                    planned += 1;
                 } else {
                     project_results.push(ProjectDeployResult {
                         project_id: project_id.to_string(),
@@ -451,6 +466,7 @@ fn run_multi_project(args: &DeployArgs, project_ids: &[String]) -> CmdResult<Dep
                 succeeded,
                 failed,
                 skipped,
+                planned,
             },
             dry_run: args.dry_run,
             check: args.check,
