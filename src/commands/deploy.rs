@@ -248,7 +248,9 @@ pub fn run(
     };
 
     let result = deploy::run(&project_id, &config).map_err(|e| {
-        if e.message.contains("No components configured for project") {
+        if e.message.contains("No components configured for project")
+            || e.message.contains("No deployable components found")
+        {
             e.with_hint(format!(
                 "Run 'homeboy project components add {} <component-id>' to add components",
                 project_id
