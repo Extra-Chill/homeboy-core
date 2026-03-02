@@ -13,7 +13,7 @@ use std::path::Path;
 use regex::Regex;
 
 use super::conventions::{DeviationKind, Language};
-use super::CodeAuditResult;
+use super::{duplication, CodeAuditResult};
 
 /// A planned fix for a single file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -53,6 +53,10 @@ pub enum InsertionKind {
         /// 1-indexed end line (inclusive).
         end_line: usize,
     },
+    /// Insert a trait `use` statement inside a class body (PHP `use TraitName;`).
+    /// Language-agnostic: for Rust this could be a trait impl, for JS a mixin.
+    /// The code is inserted after the class/struct opening brace.
+    TraitUse,
 }
 
 /// A file that was skipped by the fixer with a reason.
@@ -64,10 +68,26 @@ pub struct SkippedFile {
     pub reason: String,
 }
 
+/// A new file to create (e.g., a trait file for extracted duplicates).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NewFile {
+    /// Relative path for the new file.
+    pub file: String,
+    /// Content to write.
+    pub content: String,
+    /// Human-readable description.
+    pub description: String,
+    /// Whether the file was written to disk.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub written: bool,
+}
+
 /// Result of running the fixer.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FixResult {
     pub fixes: Vec<Fix>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub new_files: Vec<NewFile>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub skipped: Vec<SkippedFile>,
     pub total_insertions: usize,
@@ -579,116 +599,200 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
         }
     }
 
-    // Phase 2: Duplication fixes — remove duplicate functions and add imports
+    // Phase 2: Duplication fixes — extract shared code via extension protocol
+    let mut new_files: Vec<NewFile> = Vec::new();
+
     for group in &result.duplicate_groups {
-        for remove_file in &group.remove_from {
-            let abs_path = root.join(remove_file);
-            let ext = abs_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+        let canonical_abs = root.join(&group.canonical_file);
+        let ext = canonical_abs
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let language = detect_language(&canonical_abs);
 
-            // Use the refactor extension to find function boundaries
-            let ext_manifest = crate::extension::find_extension_for_file_ext(ext, "refactor");
-            let content = match std::fs::read_to_string(&abs_path) {
-                Ok(c) => c,
-                Err(_) => {
-                    skipped.push(SkippedFile {
-                        file: remove_file.clone(),
-                        reason: format!("Cannot read file to remove duplicate `{}`", group.function_name),
-                    });
-                    continue;
-                }
-            };
+        // Only use extract_shared for PHP class methods (not tests, not JS/JSX).
+        // Test boilerplate (set_up, tear_down) isn't worth extracting to traits.
+        let is_test_file = group.canonical_file.contains("/tests/")
+            || group.canonical_file.contains("/Tests/")
+            || group.canonical_file.starts_with("tests/");
+        let use_extract_shared = matches!(language, Language::Php) && !is_test_file;
 
-            let Some(manifest) = ext_manifest else {
+        let ext_manifest = crate::extension::find_extension_for_file_ext(ext, "refactor");
+
+        let canonical_content = match std::fs::read_to_string(&canonical_abs) {
+            Ok(c) => c,
+            Err(_) => {
                 skipped.push(SkippedFile {
-                    file: remove_file.clone(),
+                    file: group.canonical_file.clone(),
                     reason: format!(
-                        "No refactor extension for .{} files — cannot locate `{}` boundaries",
-                        ext, group.function_name
-                    ),
-                });
-                continue;
-            };
-
-            // Call parse_items to find the function boundaries
-            let parse_cmd = serde_json::json!({
-                "command": "parse_items",
-                "file_path": remove_file,
-                "content": content,
-                "items": [group.function_name],
-            });
-
-            let parsed: Option<Vec<crate::extension::ParsedItem>> =
-                crate::extension::run_refactor_script(&manifest, &parse_cmd)
-                    .and_then(|v| v.get("items").cloned())
-                    .and_then(|v| serde_json::from_value(v).ok());
-
-            let Some(items) = parsed else {
-                skipped.push(SkippedFile {
-                    file: remove_file.clone(),
-                    reason: format!(
-                        "Extension could not parse `{}` boundaries in {}",
-                        group.function_name, remove_file
-                    ),
-                });
-                continue;
-            };
-
-            let Some(item) = items.iter().find(|i| i.name == group.function_name) else {
-                skipped.push(SkippedFile {
-                    file: remove_file.clone(),
-                    reason: format!(
-                        "Function `{}` not found by parser in {}",
-                        group.function_name, remove_file
-                    ),
-                });
-                continue;
-            };
-
-            // Build the import path from the canonical file
-            let import_path = module_path_from_file(&group.canonical_file);
-            let import_stmt = match ext {
-                "rs" => format!("use crate::{}::{};", import_path, group.function_name),
-                "php" => format!("use {};", group.function_name), // simplified
-                _ => format!("import {{ {} }} from '{}';", group.function_name, import_path),
-            };
-
-            let mut insertions = vec![
-                Insertion {
-                    kind: InsertionKind::FunctionRemoval {
-                        start_line: item.start_line,
-                        end_line: item.end_line,
-                    },
-                    code: String::new(),
-                    description: format!(
-                        "Remove duplicate `{}` (canonical copy in {})",
-                        group.function_name, group.canonical_file
-                    ),
-                },
-            ];
-
-            // Only add the import if the file doesn't already have it
-            if !content.contains(&import_stmt) {
-                insertions.push(Insertion {
-                    kind: InsertionKind::ImportAdd,
-                    code: import_stmt,
-                    description: format!(
-                        "Import `{}` from canonical location",
+                        "Cannot read canonical file for duplicate `{}`",
                         group.function_name
                     ),
                 });
+                continue;
             }
+        };
 
-            fixes.push(Fix {
-                file: remove_file.clone(),
-                insertions,
-                applied: false,
+        let manifest = if use_extract_shared { ext_manifest } else { None };
+
+        let Some(manifest) = manifest else {
+            // Fall back to simple remove+import for languages without extract_shared
+            generate_simple_duplicate_fixes(
+                group, root, &mut fixes, &mut skipped,
+            );
+            continue;
+        };
+
+        // Read all duplicate file contents
+        let mut file_entries = Vec::new();
+        let mut any_read_failure = false;
+        for remove_file in &group.remove_from {
+            let abs_path = root.join(remove_file);
+            match std::fs::read_to_string(&abs_path) {
+                Ok(c) => {
+                    file_entries.push(serde_json::json!({
+                        "path": remove_file,
+                        "content": c,
+                    }));
+                }
+                Err(_) => {
+                    skipped.push(SkippedFile {
+                        file: remove_file.clone(),
+                        reason: format!(
+                            "Cannot read file to remove duplicate `{}`",
+                            group.function_name
+                        ),
+                    });
+                    any_read_failure = true;
+                }
+            }
+        }
+        if any_read_failure && file_entries.is_empty() {
+            continue;
+        }
+
+        // Call the extension's extract_shared command
+        let extract_cmd = serde_json::json!({
+            "command": "extract_shared",
+            "function_name": group.function_name,
+            "canonical_file": group.canonical_file,
+            "canonical_content": canonical_content,
+            "files": file_entries,
+            "root_namespace_mapping": "inc:DataMachine",
+        });
+
+        let extract_result = crate::extension::run_refactor_script(&manifest, &extract_cmd);
+
+        let Some(result_val) = extract_result else {
+            // Extension doesn't support extract_shared, fall back
+            generate_simple_duplicate_fixes(
+                group, root, &mut fixes, &mut skipped,
+            );
+            continue;
+        };
+
+        // Check for error
+        if result_val.get("error").is_some() {
+            let err = result_val["error"].as_str().unwrap_or("unknown error");
+            skipped.push(SkippedFile {
+                file: group.canonical_file.clone(),
+                reason: format!(
+                    "extract_shared failed for `{}`: {}",
+                    group.function_name, err
+                ),
             });
+            continue;
+        }
+
+        // Parse the trait/shared file info
+        if let (Some(trait_file), Some(trait_content)) = (
+            result_val.get("trait_file").and_then(|v| v.as_str()),
+            result_val.get("trait_content").and_then(|v| v.as_str()),
+        ) {
+            // Only add the new file once (avoid duplicates from multiple groups)
+            if !new_files.iter().any(|nf| nf.file == trait_file) {
+                let trait_name = result_val
+                    .get("trait_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("SharedTrait");
+                new_files.push(NewFile {
+                    file: trait_file.to_string(),
+                    content: trait_content.to_string(),
+                    description: format!(
+                        "Create trait `{}` for shared `{}` method",
+                        trait_name, group.function_name
+                    ),
+                    written: false,
+                });
+            }
+        }
+
+        // Parse the per-file edits
+        if let Some(file_edits) = result_val.get("file_edits").and_then(|v| v.as_array()) {
+            for edit in file_edits {
+                let file = match edit.get("file").and_then(|v| v.as_str()) {
+                    Some(f) => f.to_string(),
+                    None => continue,
+                };
+
+                let mut insertions = Vec::new();
+
+                // Function removal
+                if let Some(rl) = edit.get("remove_lines") {
+                    if let (Some(start), Some(end)) = (
+                        rl.get("start_line").and_then(|v| v.as_u64()),
+                        rl.get("end_line").and_then(|v| v.as_u64()),
+                    ) {
+                        insertions.push(Insertion {
+                            kind: InsertionKind::FunctionRemoval {
+                                start_line: start as usize,
+                                end_line: end as usize,
+                            },
+                            code: String::new(),
+                            description: format!(
+                                "Remove duplicate `{}` (extracted to shared trait)",
+                                group.function_name
+                            ),
+                        });
+                    }
+                }
+
+                // Import statement (namespace-level use)
+                if let Some(import) = edit.get("add_import").and_then(|v| v.as_str()) {
+                    insertions.push(Insertion {
+                        kind: InsertionKind::ImportAdd,
+                        code: import.to_string(),
+                        description: format!(
+                            "Import shared trait for `{}`",
+                            group.function_name
+                        ),
+                    });
+                }
+
+                // Trait use statement (inside class body)
+                if let Some(use_trait) = edit.get("add_use_trait").and_then(|v| v.as_str()) {
+                    insertions.push(Insertion {
+                        kind: InsertionKind::TraitUse,
+                        code: use_trait.to_string(),
+                        description: format!(
+                            "Use shared trait for `{}`",
+                            group.function_name
+                        ),
+                    });
+                }
+
+                if !insertions.is_empty() {
+                    fixes.push(Fix {
+                        file,
+                        insertions,
+                        applied: false,
+                    });
+                }
+            }
         }
     }
 
+    // Phase 2 complete — merge and return
     // Merge fixes that target the same file.
     //
     // Multiple phases (convention fixes, duplication fixes) or multiple
@@ -704,9 +808,128 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
 
     FixResult {
         fixes,
+        new_files,
         skipped,
         total_insertions,
         files_modified,
+    }
+}
+
+/// Fallback duplicate fix for languages without `extract_shared` support.
+///
+/// Uses `parse_items` to find function boundaries, removes the duplicate,
+/// and adds a simple import statement. This works for Rust (standalone fns)
+/// but is less ideal for OOP languages where the function is a class method.
+fn generate_simple_duplicate_fixes(
+    group: &duplication::DuplicateGroup,
+    root: &Path,
+    fixes: &mut Vec<Fix>,
+    skipped: &mut Vec<SkippedFile>,
+) {
+    for remove_file in &group.remove_from {
+        let abs_path = root.join(remove_file.as_str());
+        let ext = abs_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+
+        let ext_manifest = crate::extension::find_extension_for_file_ext(ext, "refactor");
+        let content = match std::fs::read_to_string(&abs_path) {
+            Ok(c) => c,
+            Err(_) => {
+                skipped.push(SkippedFile {
+                    file: remove_file.clone(),
+                    reason: format!(
+                        "Cannot read file to remove duplicate `{}`",
+                        group.function_name
+                    ),
+                });
+                continue;
+            }
+        };
+
+        let Some(manifest) = ext_manifest else {
+            skipped.push(SkippedFile {
+                file: remove_file.clone(),
+                reason: format!(
+                    "No refactor extension for .{} files — cannot locate `{}` boundaries",
+                    ext, group.function_name
+                ),
+            });
+            continue;
+        };
+
+        // Call parse_items to find the function boundaries
+        let parse_cmd = serde_json::json!({
+            "command": "parse_items",
+            "file_path": remove_file,
+            "content": content,
+            "items": [group.function_name],
+        });
+
+        let parsed: Option<Vec<crate::extension::ParsedItem>> =
+            crate::extension::run_refactor_script(&manifest, &parse_cmd)
+                .and_then(|v| v.get("items").cloned())
+                .and_then(|v| serde_json::from_value(v).ok());
+
+        let Some(items) = parsed else {
+            skipped.push(SkippedFile {
+                file: remove_file.clone(),
+                reason: format!(
+                    "Extension could not parse `{}` boundaries in {}",
+                    group.function_name, remove_file
+                ),
+            });
+            continue;
+        };
+
+        let Some(item) = items.iter().find(|i| i.name == group.function_name) else {
+            skipped.push(SkippedFile {
+                file: remove_file.clone(),
+                reason: format!(
+                    "Function `{}` not found by parser in {}",
+                    group.function_name, remove_file
+                ),
+            });
+            continue;
+        };
+
+        // Build the import path from the canonical file
+        let import_path = module_path_from_file(&group.canonical_file);
+        let import_stmt = match ext {
+            "rs" => format!("use crate::{}::{};", import_path, group.function_name),
+            _ => format!("import {{ {} }} from '{}';", group.function_name, import_path),
+        };
+
+        let mut insertions = vec![Insertion {
+            kind: InsertionKind::FunctionRemoval {
+                start_line: item.start_line,
+                end_line: item.end_line,
+            },
+            code: String::new(),
+            description: format!(
+                "Remove duplicate `{}` (canonical copy in {})",
+                group.function_name, group.canonical_file
+            ),
+        }];
+
+        // Only add the import if the file doesn't already have it
+        if !content.contains(&import_stmt) {
+            insertions.push(Insertion {
+                kind: InsertionKind::ImportAdd,
+                code: import_stmt,
+                description: format!(
+                    "Import `{}` from canonical location",
+                    group.function_name
+                ),
+            });
+        }
+
+        fixes.push(Fix {
+            file: remove_file.clone(),
+            insertions,
+            applied: false,
+        });
     }
 }
 
@@ -913,6 +1136,46 @@ pub fn apply_fixes(fixes: &mut [Fix], root: &Path) -> usize {
     applied_count
 }
 
+/// Write new files generated by the fixer (e.g., trait files for extracted duplicates).
+///
+/// Returns the number of files successfully created.
+pub fn apply_new_files(new_files: &mut [NewFile], root: &Path) -> usize {
+    let mut created = 0;
+
+    for nf in new_files.iter_mut() {
+        let abs_path = root.join(&nf.file);
+
+        // Create parent directories if needed
+        if let Some(parent) = abs_path.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    log_status!("fix", "Failed to create directory for {}: {}", nf.file, e);
+                    continue;
+                }
+            }
+        }
+
+        // Don't overwrite existing files
+        if abs_path.exists() {
+            log_status!("fix", "Skipping {} — file already exists", nf.file);
+            continue;
+        }
+
+        match std::fs::write(&abs_path, &nf.content) {
+            Ok(_) => {
+                nf.written = true;
+                created += 1;
+                log_status!("fix", "Created {}", nf.file);
+            }
+            Err(e) => {
+                log_status!("fix", "Failed to create {}: {}", nf.file, e);
+            }
+        }
+    }
+
+    created
+}
+
 /// Apply insertions to file content, returning the modified content.
 fn apply_insertions_to_content(
     content: &str,
@@ -926,6 +1189,7 @@ fn apply_insertions_to_content(
     let mut registration_stubs = Vec::new();
     let mut constructor_stubs = Vec::new();
     let mut import_adds = Vec::new();
+    let mut trait_uses = Vec::new();
     let mut removals: Vec<(usize, usize)> = Vec::new();
 
     for insertion in insertions {
@@ -934,6 +1198,7 @@ fn apply_insertions_to_content(
             InsertionKind::RegistrationStub => registration_stubs.push(&insertion.code),
             InsertionKind::ConstructorWithRegistration => constructor_stubs.push(&insertion.code),
             InsertionKind::ImportAdd => import_adds.push(&insertion.code),
+            InsertionKind::TraitUse => trait_uses.push(&insertion.code),
             InsertionKind::FunctionRemoval { start_line, end_line } => {
                 removals.push((*start_line, *end_line));
             }
@@ -968,6 +1233,11 @@ fn apply_insertions_to_content(
     // Apply import additions (they go at the top)
     for import_line in &import_adds {
         result = insert_import(&result, import_line, language);
+    }
+
+    // Insert trait use statements inside the class body (after opening brace)
+    if !trait_uses.is_empty() {
+        result = insert_trait_uses(&result, &trait_uses, language);
     }
 
     // Insert registration stubs into existing __construct
@@ -1015,6 +1285,40 @@ fn insert_into_constructor(content: &str, stubs: &[&String], language: &Language
         result
     } else {
         content.to_string()
+    }
+}
+
+/// Insert trait `use` statements inside the class body.
+///
+/// For PHP: inserts `use TraitName;` after the class opening brace.
+/// For Rust: would insert trait impl blocks (not yet implemented).
+/// For JS/TS: would insert mixin application (not yet implemented).
+fn insert_trait_uses(content: &str, stubs: &[&String], language: &Language) -> String {
+    match language {
+        Language::Php => {
+            // Find the class opening brace: `class Foo ... {`
+            let class_re = Regex::new(r"(?:class|trait|interface)\s+\w+[^{]*\{").unwrap();
+            if let Some(m) = class_re.find(content) {
+                let insert_pos = m.end();
+                let mut result = String::with_capacity(content.len() + stubs.len() * 40);
+                result.push_str(&content[..insert_pos]);
+                result.push('\n');
+                for stub in stubs {
+                    let trimmed = stub.trim_end();
+                    result.push_str(trimmed);
+                    result.push('\n');
+                }
+                result.push_str(&content[insert_pos..]);
+                result
+            } else {
+                content.to_string()
+            }
+        }
+        _ => {
+            // Other languages: fall back to inserting before closing brace
+            let combined: String = stubs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n");
+            insert_before_closing_brace(content, &combined, language)
+        }
     }
 }
 
@@ -1896,5 +2200,92 @@ fn last_keeper() {
 
         // Import should be added
         assert!(result.contains("use crate::utils::{remove_first, remove_second, remove_third};"));
+    }
+
+    #[test]
+    fn trait_use_inserted_after_class_brace_php() {
+        let content = r#"<?php
+namespace DataMachine\Abilities;
+
+use DataMachine\Abilities\PermissionHelper;
+
+class FlowAbilities extends BaseAbility {
+    public function checkPermission(): bool {
+        return PermissionHelper::can_manage();
+    }
+}
+"#;
+        let trait_use = "    use HasCheckPermission;".to_string();
+        let insertions = vec![Insertion {
+            kind: InsertionKind::TraitUse,
+            code: trait_use,
+            description: "Use shared trait".to_string(),
+        }];
+
+        let result = apply_insertions_to_content(content, &insertions, &Language::Php);
+
+        // Trait use should appear inside the class body
+        assert!(result.contains("class FlowAbilities extends BaseAbility {\n    use HasCheckPermission;\n"));
+        // Method should still be there (we only added trait use, no removal)
+        assert!(result.contains("checkPermission"));
+    }
+
+    #[test]
+    fn trait_use_plus_removal_php() {
+        let content = r#"<?php
+namespace DataMachine\Abilities;
+
+class FlowAbilities {
+    public function checkPermission(): bool {
+        return true;
+    }
+
+    public function execute(): void {
+    }
+}
+"#;
+        let insertions = vec![
+            Insertion {
+                kind: InsertionKind::FunctionRemoval {
+                    start_line: 5,
+                    end_line: 7,
+                },
+                code: String::new(),
+                description: "Remove duplicate".to_string(),
+            },
+            Insertion {
+                kind: InsertionKind::ImportAdd,
+                code: "use DataMachine\\Abilities\\Traits\\HasCheckPermission;".to_string(),
+                description: "Import trait".to_string(),
+            },
+            Insertion {
+                kind: InsertionKind::TraitUse,
+                code: "    use HasCheckPermission;".to_string(),
+                description: "Use trait".to_string(),
+            },
+        ];
+
+        let result = apply_insertions_to_content(content, &insertions, &Language::Php);
+
+        // Method should be removed
+        assert!(!result.contains("function checkPermission()"), "checkPermission should be removed");
+        // Trait use should be present
+        assert!(result.contains("use HasCheckPermission;"), "trait use should be added");
+        // Import should be present
+        assert!(result.contains("use DataMachine\\Abilities\\Traits\\HasCheckPermission;"));
+        // execute method should survive
+        assert!(result.contains("function execute()"), "execute should survive");
+    }
+
+    #[test]
+    fn new_file_struct() {
+        let nf = NewFile {
+            file: "inc/Abilities/Traits/HasCheckPermission.php".to_string(),
+            content: "<?php\ntrait HasCheckPermission {}".to_string(),
+            description: "Create trait".to_string(),
+            written: false,
+        };
+        assert!(!nf.written);
+        assert_eq!(nf.file, "inc/Abilities/Traits/HasCheckPermission.php");
     }
 }

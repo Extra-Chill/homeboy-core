@@ -98,9 +98,15 @@ pub fn run(args: AuditArgs, _global: &super::GlobalArgs) -> CmdResult<AuditOutpu
         let mut fix_result = fixer::generate_fixes(&result, root);
         let written = args.write;
 
-        if written && !fix_result.fixes.is_empty() {
-            let applied = fixer::apply_fixes(&mut fix_result.fixes, root);
-            fix_result.files_modified = applied;
+        if written {
+            let mut total_modified = 0;
+            if !fix_result.fixes.is_empty() {
+                total_modified += fixer::apply_fixes(&mut fix_result.fixes, root);
+            }
+            if !fix_result.new_files.is_empty() {
+                total_modified += fixer::apply_new_files(&mut fix_result.new_files, root);
+            }
+            fix_result.files_modified = total_modified;
         }
 
         let exit_code = if fix_result.total_insertions > 0 { 1 } else { 0 };
