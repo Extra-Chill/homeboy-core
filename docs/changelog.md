@@ -4,6 +4,22 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.53.0] - 2026-03-03
+
+### Added
+- add --coverage and --coverage-min flags (#392)
+- auto-pull and version verification before deploy (#381)
+- add pre-release code quality gate (lint + test) (#375)
+- add --path flag for CI-friendly path override (#379)
+- add --changed-since <ref> flag for CI-friendly changed-file linting (#377)
+
+### Changed
+- remove docs scaffold subcommand (#389)
+- Add structural test coverage gap detection (#373) (#388)
+- Add dead code detection to audit pipeline (#384) (#387)
+- add audit baseline ratchet — only fail on NEW findings (#383)
+- add PR workflow with build/test + homeboy audit dogfooding (#380)
+
 ## [0.52.1] - 2026-03-02
 
 - fix(test): --path and --fix flags now correctly parsed by test command (#366)
