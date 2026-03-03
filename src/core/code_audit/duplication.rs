@@ -402,6 +402,10 @@ mod tests {
             visibility: std::collections::HashMap::new(),
             properties: vec![],
             hooks: vec![],
+            unused_parameters: vec![],
+            dead_code_markers: vec![],
+            internal_calls: vec![],
+            public_api: vec![],
         }
     }
 

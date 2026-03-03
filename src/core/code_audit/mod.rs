@@ -14,6 +14,7 @@
 pub mod baseline;
 mod checks;
 pub(crate) mod conventions;
+mod dead_code;
 mod discovery;
 mod duplication;
 mod findings;
@@ -275,6 +276,17 @@ pub fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeA
             near_dup_findings.len()
         );
         all_findings.extend(near_dup_findings);
+    }
+
+    // Phase 4e: Dead code detection (unused params, unreferenced exports, orphaned internals)
+    let dead_code_findings = dead_code::analyze_dead_code(&all_fingerprints);
+    if !dead_code_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Dead code: {} finding(s) (unused params, unreferenced exports, orphaned internals)",
+            dead_code_findings.len()
+        );
+        all_findings.extend(dead_code_findings);
     }
 
     // Phase 5: Build report
