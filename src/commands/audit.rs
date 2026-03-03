@@ -30,6 +30,10 @@ pub struct AuditArgs {
     /// Skip baseline comparison even if a baseline exists
     #[arg(long)]
     pub ignore_baseline: bool,
+
+    /// Override local_path for this audit run (use a workspace clone or temp checkout)
+    #[arg(long)]
+    pub path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -75,7 +79,12 @@ pub enum AuditOutput {
 
 pub fn run(args: AuditArgs, _global: &super::GlobalArgs) -> CmdResult<AuditOutput> {
     let result = if Path::new(&args.component_id).is_dir() {
-        code_audit::audit_path(&args.component_id)?
+        // Raw path mode — use --path override if provided, otherwise use the positional arg
+        let effective_path = args.path.as_deref().unwrap_or(&args.component_id);
+        code_audit::audit_path(effective_path)?
+    } else if let Some(ref path) = args.path {
+        // Component mode with --path override — use component ID but audit at the given path
+        code_audit::audit_path_with_id(&args.component_id, path)?
     } else {
         code_audit::audit_component(&args.component_id)?
     };
