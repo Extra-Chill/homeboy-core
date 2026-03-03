@@ -52,6 +52,13 @@ pub struct Project {
     pub shared_tables: Vec<String>,
     #[serde(default)]
     pub component_ids: Vec<String>,
+    /// Per-component field overrides. Keys are component IDs, values are
+    /// partial JSON objects whose fields override the component's defaults
+    /// when deploying through this project.
+    ///
+    /// Example: `{"data-machine": {"extract_command": "...", "remote_owner": "opencode:opencode"}}`
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub component_overrides: HashMap<String, serde_json::Value>,
 }
 
 impl ConfigEntity for Project {
