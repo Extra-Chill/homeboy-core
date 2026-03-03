@@ -843,6 +843,46 @@ pub fn run(project_id: &str, config: &DeployConfig) -> Result<DeployOrchestratio
     deploy_components(config, &project, &ctx, &base_path)
 }
 
+/// Apply per-project component overrides to a cloned component.
+///
+/// If the project has `component_overrides` entries for this component,
+/// merge them onto a clone. Only deploy-relevant fields are applied:
+/// `extract_command`, `remote_owner`, `build_command`, `build_artifact`,
+/// `deploy_strategy`, and `hooks`.
+fn apply_component_overrides(component: &Component, project: &Project) -> Component {
+    let overrides = match project.component_overrides.get(&component.id) {
+        Some(v) if v.is_object() => v,
+        _ => return component.clone(),
+    };
+
+    // Serialize the component to JSON, merge overrides, deserialize back.
+    // This reuses serde for all field types without manual field-by-field code.
+    let mut base = match serde_json::to_value(component) {
+        Ok(v) => v,
+        Err(_) => return component.clone(),
+    };
+
+    if let (Some(base_obj), Some(override_obj)) = (base.as_object_mut(), overrides.as_object()) {
+        for (key, value) in override_obj {
+            // Skip identity fields — overriding id/local_path/remote_path per-project
+            // would break deploy targeting. Use project base_path for path changes.
+            if matches!(key.as_str(), "id" | "local_path" | "remote_path" | "aliases") {
+                continue;
+            }
+            base_obj.insert(key.clone(), value.clone());
+        }
+    }
+
+    match serde_json::from_value::<Component>(base) {
+        Ok(mut merged) => {
+            // Preserve identity fields from original
+            merged.id = component.id.clone();
+            merged
+        }
+        Err(_) => component.clone(),
+    }
+}
+
 /// Main deploy orchestration entry point.
 /// Handles component selection, building, and deployment.
 fn deploy_components(
@@ -937,8 +977,10 @@ fn deploy_components(
     let mut failed: u32 = 0;
 
     for component in &components {
+        // Apply per-project overrides (e.g. different extract_command or remote_owner)
+        let component = apply_component_overrides(component, project);
         let result = execute_component_deploy(
-            component,
+            &component,
             config,
             ctx,
             base_path,
@@ -2480,5 +2522,121 @@ mod tests {
             "Error should guide toward using a subdirectory: {}",
             err.message
         );
+    }
+
+    // =========================================================================
+    // Per-project component overrides (issue #386)
+    // =========================================================================
+
+    #[test]
+    fn apply_overrides_replaces_extract_command() {
+        let component = Component::new(
+            "data-machine".to_string(),
+            "/local/path".to_string(),
+            "wp-content/plugins/data-machine".to_string(),
+            Some("dist.zip".to_string()),
+        );
+        let mut project = Project::default();
+        project.component_overrides.insert(
+            "data-machine".to_string(),
+            serde_json::json!({
+                "extract_command": "unzip -o {artifact} && chown -R opencode:opencode data-machine"
+            }),
+        );
+
+        let result = apply_component_overrides(&component, &project);
+        assert_eq!(
+            result.extract_command.as_deref(),
+            Some("unzip -o {artifact} && chown -R opencode:opencode data-machine")
+        );
+        // Identity preserved
+        assert_eq!(result.id, "data-machine");
+        assert_eq!(result.local_path, "/local/path");
+        assert_eq!(result.remote_path, "wp-content/plugins/data-machine");
+    }
+
+    #[test]
+    fn apply_overrides_replaces_remote_owner() {
+        let mut component = Component::new(
+            "data-machine".to_string(),
+            "/local/path".to_string(),
+            "wp-content/plugins/data-machine".to_string(),
+            Some("dist.zip".to_string()),
+        );
+        component.remote_owner = Some("www-data:www-data".to_string());
+
+        let mut project = Project::default();
+        project.component_overrides.insert(
+            "data-machine".to_string(),
+            serde_json::json!({
+                "remote_owner": "opencode:opencode"
+            }),
+        );
+
+        let result = apply_component_overrides(&component, &project);
+        assert_eq!(result.remote_owner.as_deref(), Some("opencode:opencode"));
+    }
+
+    #[test]
+    fn apply_overrides_no_override_returns_clone() {
+        let component = Component::new(
+            "data-machine".to_string(),
+            "/local/path".to_string(),
+            "wp-content/plugins/data-machine".to_string(),
+            Some("dist.zip".to_string()),
+        );
+        let project = Project::default();
+
+        let result = apply_component_overrides(&component, &project);
+        assert_eq!(result.id, component.id);
+        assert_eq!(result.extract_command, component.extract_command);
+    }
+
+    #[test]
+    fn apply_overrides_skips_identity_fields() {
+        let component = Component::new(
+            "data-machine".to_string(),
+            "/local/path".to_string(),
+            "wp-content/plugins/data-machine".to_string(),
+            Some("dist.zip".to_string()),
+        );
+        let mut project = Project::default();
+        project.component_overrides.insert(
+            "data-machine".to_string(),
+            serde_json::json!({
+                "id": "evil-override",
+                "local_path": "/evil/path",
+                "remote_path": "/evil/remote",
+                "extract_command": "unzip {artifact}"
+            }),
+        );
+
+        let result = apply_component_overrides(&component, &project);
+        // Identity fields are protected
+        assert_eq!(result.id, "data-machine");
+        assert_eq!(result.local_path, "/local/path");
+        assert_eq!(result.remote_path, "wp-content/plugins/data-machine");
+        // Non-identity fields are applied
+        assert_eq!(result.extract_command.as_deref(), Some("unzip {artifact}"));
+    }
+
+    #[test]
+    fn apply_overrides_wrong_component_id_is_noop() {
+        let component = Component::new(
+            "data-machine".to_string(),
+            "/local/path".to_string(),
+            "wp-content/plugins/data-machine".to_string(),
+            Some("dist.zip".to_string()),
+        );
+        let mut project = Project::default();
+        project.component_overrides.insert(
+            "other-component".to_string(),
+            serde_json::json!({
+                "extract_command": "should not apply"
+            }),
+        );
+
+        let result = apply_component_overrides(&component, &project);
+        assert_eq!(result.extract_command, None);
     }
 }
