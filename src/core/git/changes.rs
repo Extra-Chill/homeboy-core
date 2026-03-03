@@ -73,9 +73,13 @@ pub fn get_uncommitted_changes(path: &str) -> Result<UncommittedChanges> {
 /// Uses `--diff-filter=ACMR` to include only Added, Copied, Modified, Renamed files
 /// (excludes Deleted files since there's nothing to lint).
 /// Returns repo-relative paths.
+///
+/// Prefers triple-dot (`ref...HEAD`) to get only changes on the current branch
+/// relative to the merge base. Falls back to two-dot (`ref..HEAD`) when the
+/// merge base is unavailable (e.g. shallow clones in CI).
 pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>> {
-    // Use triple-dot (merge-base) so we get only the changes on the current
-    // branch relative to the ref, not changes on the ref's branch.
+    // Try triple-dot first (merge-base diff) — shows only changes on the
+    // current branch, not changes on the ref's branch.
     let output = execute_git(
         path,
         &[
@@ -87,21 +91,48 @@ pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>>
     )
     .map_err(|e| Error::git_command_failed(e.to_string()))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        return parse_diff_output(&output.stdout);
+    }
+
+    // Triple-dot failed (likely shallow clone — no merge base available).
+    // Fall back to two-dot diff which only needs both commits to exist.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!(
+        "Three-dot diff failed ({}), falling back to two-dot diff",
+        stderr.trim()
+    );
+
+    let fallback = execute_git(
+        path,
+        &[
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMR",
+            &format!("{}..HEAD", git_ref),
+        ],
+    )
+    .map_err(|e| Error::git_command_failed(e.to_string()))?;
+
+    if !fallback.status.success() {
+        let fallback_stderr = String::from_utf8_lossy(&fallback.stderr);
         return Err(Error::git_command_failed(format!(
-            "git diff --name-only {}...HEAD failed: {}",
-            git_ref, stderr
+            "git diff --name-only {}..HEAD failed: {}",
+            git_ref, fallback_stderr
         )));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let files: Vec<String> = stdout
+    parse_diff_output(&fallback.stdout)
+}
+
+/// Parse `git diff --name-only` output into a list of file paths.
+fn parse_diff_output(stdout: &[u8]) -> Result<Vec<String>> {
+    let text = String::from_utf8_lossy(stdout);
+    let files: Vec<String> = text
         .lines()
         .filter(|l| !l.is_empty())
         .map(|l| l.to_string())
         .collect();
-
     Ok(files)
 }
 
