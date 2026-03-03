@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.55.0] - 2026-03-03
+
+### Added
+- add fleet exec — run commands across all projects via SSH
+
+### Fixed
+- docs audit now classifies example paths as Example confidence, not Unclear
+- enable audit baseline comparison in CI — only fail on new drift
+- hide --serial flag (reserved for future parallel mode) and fix description
+
 ## [0.54.1] - 2026-03-03
 
 ### Fixed
