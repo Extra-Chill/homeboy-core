@@ -30,8 +30,12 @@ pub struct LintArgs {
     glob: Option<String>,
 
     /// Lint only files modified in the working tree (staged, unstaged, untracked)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "changed_since")]
     changed_only: bool,
+
+    /// Lint only files changed since a git ref (branch, tag, or SHA) — CI-friendly
+    #[arg(long, conflicts_with = "changed_only")]
+    changed_since: Option<String>,
 
     /// Show only errors, suppress warnings
     #[arg(long)]
@@ -127,7 +131,7 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
     }
     let script_path = resolve_lint_script(&component)?;
 
-    // Resolve glob from --changed-only flag
+    // Resolve glob from --changed-only or --changed-since flags
     let effective_glob = if args.changed_only {
         let uncommitted = git::get_uncommitted_changes(&component.local_path)?;
 
@@ -158,6 +162,33 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
             .collect();
 
         // Pass ALL files to extension - let lint runner filter to relevant types
+        if abs_files.len() == 1 {
+            Some(abs_files[0].clone())
+        } else {
+            Some(format!("{{{}}}", abs_files.join(",")))
+        }
+    } else if let Some(ref git_ref) = args.changed_since {
+        let changed_files = git::get_files_changed_since(&component.local_path, git_ref)?;
+
+        if changed_files.is_empty() {
+            println!("No files changed since {}", git_ref);
+            return Ok((
+                LintOutput {
+                    status: "passed".to_string(),
+                    component: args.component,
+                    exit_code: 0,
+                    hints: None,
+                },
+                0,
+            ));
+        }
+
+        // Make paths absolute (git diff returns repo-relative paths)
+        let abs_files: Vec<String> = changed_files
+            .iter()
+            .map(|f| format!("{}/{}", component.local_path, f))
+            .collect();
+
         if abs_files.len() == 1 {
             Some(abs_files[0].clone())
         } else {
@@ -194,9 +225,13 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
     }
 
     // Capability hints when running component-wide lint (no targeting options used)
-    if args.file.is_none() && args.glob.is_none() && !args.changed_only {
+    if args.file.is_none()
+        && args.glob.is_none()
+        && !args.changed_only
+        && args.changed_since.is_none()
+    {
         hints.push(
-            "For targeted linting: --file <path>, --glob <pattern>, or --changed-only".to_string(),
+            "For targeted linting: --file <path>, --glob <pattern>, --changed-only, or --changed-since <ref>".to_string(),
         );
     }
 
