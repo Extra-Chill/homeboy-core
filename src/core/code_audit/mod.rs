@@ -158,7 +158,8 @@ pub fn audit_path(path: &str) -> Result<CodeAuditResult> {
 }
 
 /// Core audit logic shared by both entry points.
-fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAuditResult> {
+/// Also available for callers that have a component ID and an overridden path.
+pub fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeAuditResult> {
     let root = Path::new(source_path);
 
     log_status!("audit", "Scanning {} for conventions...", source_path);
