@@ -105,8 +105,8 @@ enum FleetCommand {
         #[arg(long)]
         check: bool,
 
-        /// Run sequentially instead of the default serial execution
-        #[arg(long)]
+        /// Reserved for future parallel mode. Currently all execution is serial.
+        #[arg(long, hide = true)]
         serial: bool,
     },
     /// [DEPRECATED] Use 'homeboy deploy' instead. See issue #101.
