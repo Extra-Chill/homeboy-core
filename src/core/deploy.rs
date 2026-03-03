@@ -866,7 +866,10 @@ fn apply_component_overrides(component: &Component, project: &Project) -> Compon
         for (key, value) in override_obj {
             // Skip identity fields — overriding id/local_path/remote_path per-project
             // would break deploy targeting. Use project base_path for path changes.
-            if matches!(key.as_str(), "id" | "local_path" | "remote_path" | "aliases") {
+            if matches!(
+                key.as_str(),
+                "id" | "local_path" | "remote_path" | "aliases"
+            ) {
                 continue;
             }
             base_obj.insert(key.clone(), value.clone());
