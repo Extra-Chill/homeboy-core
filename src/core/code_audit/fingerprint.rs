@@ -42,6 +42,14 @@ pub struct FileFingerprint {
     pub properties: Vec<String>,
     /// Hook references: do_action() and apply_filters() calls.
     pub hooks: Vec<crate::extension::HookRef>,
+    /// Function parameters that are declared but never used in the function body.
+    pub unused_parameters: Vec<crate::extension::UnusedParam>,
+    /// Dead code suppression markers (e.g., `#[allow(dead_code)]`).
+    pub dead_code_markers: Vec<crate::extension::DeadCodeMarker>,
+    /// Function/method names called within this file.
+    pub internal_calls: Vec<String>,
+    /// Public functions/methods exported from this file.
+    pub public_api: Vec<String>,
 }
 
 /// Extract a structural fingerprint from a source file.
@@ -80,5 +88,9 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
         visibility: output.visibility,
         properties: output.properties,
         hooks: output.hooks,
+        unused_parameters: output.unused_parameters,
+        dead_code_markers: output.dead_code_markers,
+        internal_calls: output.internal_calls,
+        public_api: output.public_api,
     })
 }

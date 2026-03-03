@@ -100,6 +100,14 @@ pub enum DeviationKind {
     DuplicateFunction,
     /// Function has identical structure but different identifiers/literals.
     NearDuplicate,
+    /// Function parameter is declared but never used in the function body.
+    UnusedParameter,
+    /// Developer has marked code with a dead code suppression attribute.
+    DeadCodeMarker,
+    /// Public function/method is never imported or called by any other file.
+    UnreferencedExport,
+    /// Private/internal function is never called within the same file.
+    OrphanedInternal,
 }
 
 // ============================================================================
@@ -558,6 +566,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "steps/webhook.php".to_string(),
@@ -579,6 +591,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "steps/agent-ping.php".to_string(),
@@ -596,6 +612,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
         ];
 
@@ -633,6 +653,10 @@ mod tests {
             visibility: std::collections::HashMap::new(),
             properties: vec![],
             hooks: vec![],
+            unused_parameters: vec![],
+            dead_code_markers: vec![],
+            internal_calls: vec![],
+            public_api: vec![],
         }];
 
         assert!(discover_conventions("Single", "*.php", &fingerprints).is_none());
@@ -666,6 +690,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "abilities/update.php".to_string(),
@@ -683,6 +711,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "abilities/helpers.php".to_string(),
@@ -700,6 +732,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
         ];
 
@@ -741,6 +777,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "b.php".to_string(),
@@ -758,6 +798,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "c.php".to_string(),
@@ -775,6 +819,10 @@ mod tests {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
         ];
 
@@ -1069,6 +1117,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "abilities/UpdateFlow.php".to_string(),
@@ -1086,6 +1138,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "abilities/DeleteFlow.php".to_string(),
@@ -1103,6 +1159,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
         ];
 
@@ -1140,6 +1200,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "abilities/B.php".to_string(),
@@ -1157,6 +1221,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "abilities/C.php".to_string(),
@@ -1175,6 +1243,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
         ];
 
@@ -1209,6 +1281,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "steps/B.php".to_string(),
@@ -1226,6 +1302,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
             FileFingerprint {
                 relative_path: "steps/C.php".to_string(),
@@ -1243,6 +1323,10 @@ class AgentPing {
                 visibility: std::collections::HashMap::new(),
                 properties: vec![],
                 hooks: vec![],
+                unused_parameters: vec![],
+                dead_code_markers: vec![],
+                internal_calls: vec![],
+                public_api: vec![],
             },
         ];
 

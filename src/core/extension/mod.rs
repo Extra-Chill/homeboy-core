@@ -165,6 +165,27 @@ pub struct HookRef {
     pub name: String,
 }
 
+/// A function parameter that is declared but never referenced in the function body.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct UnusedParam {
+    /// The function/method name containing the unused parameter.
+    pub function: String,
+    /// The parameter name (without type annotations or sigils).
+    pub param: String,
+}
+
+/// A marker indicating the developer has acknowledged dead code
+/// (e.g., `#[allow(dead_code)]` in Rust, `@codeCoverageIgnore` in PHP).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct DeadCodeMarker {
+    /// The item name (function, struct, const, etc.) that is marked.
+    pub item: String,
+    /// The line number where the marker appears (1-indexed).
+    pub line: usize,
+    /// The type of marker (e.g., "allow_dead_code", "coverage_ignore", "phpstan_ignore").
+    pub marker_type: String,
+}
+
 /// Output from a fingerprint extension script.
 /// Matches the structural data extracted from a source file.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -205,6 +226,18 @@ pub struct FingerprintOutput {
     /// Hook references: do_action() and apply_filters() calls.
     #[serde(default)]
     pub hooks: Vec<HookRef>,
+    /// Function parameters that are declared but never used in the function body.
+    #[serde(default)]
+    pub unused_parameters: Vec<UnusedParam>,
+    /// Dead code suppression markers (e.g., `#[allow(dead_code)]`, `@codeCoverageIgnore`).
+    #[serde(default)]
+    pub dead_code_markers: Vec<DeadCodeMarker>,
+    /// Function/method names called within this file (for cross-file reference analysis).
+    #[serde(default)]
+    pub internal_calls: Vec<String>,
+    /// Public functions/methods exported from this file (the file's API surface).
+    #[serde(default)]
+    pub public_api: Vec<String>,
 }
 
 // ============================================================================
