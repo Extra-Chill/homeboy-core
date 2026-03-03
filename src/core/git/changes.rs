@@ -66,6 +66,42 @@ pub fn get_uncommitted_changes(path: &str) -> Result<UncommittedChanges> {
     })
 }
 
+/// Get file paths changed between a ref and HEAD.
+/// Uses `--diff-filter=ACMR` to include only Added, Copied, Modified, Renamed files
+/// (excludes Deleted files since there's nothing to lint).
+/// Returns repo-relative paths.
+pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>> {
+    // Use triple-dot (merge-base) so we get only the changes on the current
+    // branch relative to the ref, not changes on the ref's branch.
+    let output = execute_git(
+        path,
+        &[
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMR",
+            &format!("{}...HEAD", git_ref),
+        ],
+    )
+    .map_err(|e| Error::git_command_failed(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::git_command_failed(format!(
+            "git diff --name-only {}...HEAD failed: {}",
+            git_ref, stderr
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let files: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    Ok(files)
+}
+
 /// Get diff of uncommitted changes.
 pub fn get_diff(path: &str) -> Result<String> {
     // Get both staged and unstaged diff
