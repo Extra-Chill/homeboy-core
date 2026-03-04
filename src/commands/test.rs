@@ -4,6 +4,7 @@ use serde::Serialize;
 use homeboy::component::Component;
 use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
+use homeboy::refactor::{self, TransformSet};
 use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
 use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};
 use homeboy::test_drift::{self, DriftOptions, DriftReport};
@@ -68,8 +69,8 @@ pub struct TestArgs {
     #[command(flatten)]
     setting_args: SettingArgs,
 
-    /// Additional arguments to pass to the test runner (after --)
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    /// Additional arguments to pass to the test runner (must follow --)
+    #[arg(last = true)]
     args: Vec<String>,
 
     #[command(flatten)]
@@ -95,6 +96,8 @@ pub struct TestOutput {
     drift: Option<DriftReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scaffold: Option<ScaffoldOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_fix_drift: Option<AutoFixDriftOutput>,
 }
 
 #[derive(Serialize)]
@@ -112,6 +115,17 @@ pub struct ScaffoldFileOutput {
     stub_count: usize,
     written: bool,
     skipped: bool,
+}
+
+#[derive(Serialize)]
+pub struct AutoFixDriftOutput {
+    since: String,
+    auto_fixable_changes: usize,
+    generated_rules: usize,
+    replacements: usize,
+    files_modified: usize,
+    written: bool,
+    rerun_recommended: bool,
 }
 
 #[derive(Serialize)]
@@ -163,6 +177,77 @@ fn no_extensions_error(component: &Component) -> Error {
         "Add a extension: homeboy component set {} --extension wordpress",
         component.id
     ))
+}
+
+/// Filter out homeboy-owned flags from trailing args before passing to extension scripts.
+///
+/// Clap's `trailing_var_arg = true` + `allow_hyphen_values = true` captures all arguments
+/// after the positional component arg — including flags that Clap also parsed into named
+/// fields. This means `--analyze`, `--drift`, etc. end up in both `args.analyze = true`
+/// AND `args.args = ["--analyze"]`. The extension test runner passes `args.args` through
+/// to the underlying tool (e.g. PHPUnit), which then fails on unknown flags.
+///
+/// This function strips homeboy-owned flags so only genuine passthrough args (like
+/// `--filter=TestName`) reach the extension script.
+fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
+    // Homeboy-owned boolean flags that should never reach the extension runner
+    const HOMEBOY_FLAGS: &[&str] = &[
+        "--analyze",
+        "--drift",
+        "--scaffold",
+        "--write",
+        "--baseline",
+        "--ignore-baseline",
+        "--ratchet",
+        "--skip-lint",
+        "--fix",
+        "--coverage",
+        "--json",
+    ];
+
+    // Homeboy-owned flags that take a value (--flag value or --flag=value)
+    const HOMEBOY_VALUE_FLAGS: &[&str] = &[
+        "--coverage-min",
+        "--since",
+        "--scaffold-file",
+        "--setting",
+        "--path",
+    ];
+
+    let mut filtered = Vec::new();
+    let mut skip_next = false;
+
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        // Check boolean flags (exact match)
+        if HOMEBOY_FLAGS.contains(&arg.as_str()) {
+            continue;
+        }
+
+        // Check value flags: --flag=value (single arg) or --flag value (two args)
+        let is_value_flag = HOMEBOY_VALUE_FLAGS.iter().any(|f| {
+            if arg.starts_with(&format!("{}=", f)) {
+                return true; // --flag=value form, skip this arg only
+            }
+            if arg == *f {
+                skip_next = true; // --flag value form, skip this and next
+                return true;
+            }
+            false
+        });
+
+        if is_value_flag {
+            continue;
+        }
+
+        filtered.push(arg.clone());
+    }
+
+    filtered
 }
 
 fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> {
@@ -218,6 +303,9 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
 
     // Drift detection mode — skip running tests, analyze git changes instead
     if args.drift {
+        if args.fix {
+            return run_auto_fix_drift(args.comp.id(), &component, &args.since, args.write, true);
+        }
         return run_drift(args.comp.id(), &component, &args.since);
     }
     let script_path = resolve_test_script(&component)?;
@@ -265,7 +353,8 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
         runner = runner.env("HOMEBOY_COVERAGE_MIN", &format!("{}", min));
     }
 
-    let output = runner.script_args(&args.args).run()?;
+    let passthrough_args = filter_homeboy_flags(&args.args);
+    let output = runner.script_args(&passthrough_args).run()?;
 
     let status = if output.success { "passed" } else { "failed" };
 
@@ -389,7 +478,7 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
     let comp_id = args.comp.id();
 
     // Filter hint when tests fail and no passthrough args were used
-    if !output.success && args.args.is_empty() {
+    if !output.success && passthrough_args.is_empty() {
         hints.push(format!(
             "To run specific tests: homeboy test {} -- --filter=TestName",
             comp_id
@@ -461,8 +550,145 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
             hints,
             drift: None,
             scaffold: None,
+            auto_fix_drift: None,
         },
         exit_code,
+    ))
+}
+
+/// Auto-fix test drift by generating transform rules from production changes.
+///
+/// This mode does NOT run tests. It inspects git changes since `since`, generates
+/// find/replace transform rules for auto-fixable drift types, and applies them to
+/// test files. Triggered by `homeboy test --drift --fix`.
+/// Use with `--write` to persist changes; default is dry-run.
+fn run_auto_fix_drift(
+    component_id: &str,
+    component: &Component,
+    since: &str,
+    write: bool,
+    include_report: bool,
+) -> CmdResult<TestOutput> {
+    let source_path = {
+        let expanded = shellexpand::tilde(&component.local_path);
+        std::path::PathBuf::from(expanded.as_ref())
+    };
+
+    let opts = if source_path.join("Cargo.toml").exists() {
+        DriftOptions::rust(&source_path, since)
+    } else {
+        DriftOptions::php(&source_path, since)
+    };
+
+    homeboy::log_status!(
+        "test",
+        "Auto-fixing drift since {} in {} ({})",
+        since,
+        component_id,
+        if write { "write" } else { "dry-run" }
+    );
+
+    let drift_report = test_drift::detect_drift(component_id, &opts)?;
+    let rules = test_drift::generate_transform_rules(&drift_report);
+
+    let output = if rules.is_empty() {
+        homeboy::log_status!("test", "No auto-fixable drift detected. Nothing to apply.");
+
+        AutoFixDriftOutput {
+            since: since.to_string(),
+            auto_fixable_changes: drift_report.auto_fixable,
+            generated_rules: 0,
+            replacements: 0,
+            files_modified: 0,
+            written: write,
+            rerun_recommended: false,
+        }
+    } else {
+        let set = TransformSet {
+            description: format!(
+                "Auto-generated drift fixes for {} since {}",
+                component_id, since
+            ),
+            rules,
+        };
+
+        let result =
+            refactor::apply_transforms(&source_path, "test_auto_fix_drift", &set, write, None)?;
+
+        homeboy::log_status!(
+            "test",
+            "Applied {} replacement{} across {} file{}",
+            result.total_replacements,
+            if result.total_replacements == 1 {
+                ""
+            } else {
+                "s"
+            },
+            result.total_files,
+            if result.total_files == 1 { "" } else { "s" },
+        );
+
+        if !write {
+            homeboy::log_status!(
+                "hint",
+                "Dry-run only. Re-run with --write to apply generated fixes."
+            );
+        } else if result.total_replacements > 0 {
+            homeboy::log_status!(
+                "hint",
+                "Re-run tests: homeboy test {} --analyze",
+                component_id
+            );
+        }
+
+        AutoFixDriftOutput {
+            since: since.to_string(),
+            auto_fixable_changes: drift_report.auto_fixable,
+            generated_rules: set.rules.len(),
+            replacements: result.total_replacements,
+            files_modified: result.total_files,
+            written: write,
+            rerun_recommended: write && result.total_replacements > 0,
+        }
+    };
+
+    Ok((
+        TestOutput {
+            status: if output.replacements > 0 {
+                if write {
+                    "auto_fixed"
+                } else {
+                    "auto_fix_preview"
+                }
+            } else {
+                "auto_fix_noop"
+            }
+            .to_string(),
+            component: component_id.to_string(),
+            exit_code: 0,
+            test_counts: None,
+            coverage: None,
+            baseline_comparison: None,
+            analysis: None,
+            hints: Some(vec![
+                format!(
+                    "Use --since <ref> to target a drift window (current: {})",
+                    since
+                ),
+                format!(
+                    "Use --write to apply fixes, then run: homeboy test {} --analyze",
+                    component_id
+                ),
+            ]),
+            drift: if include_report {
+                Some(drift_report)
+            } else {
+                None
+            },
+            scaffold: None,
+            auto_fix_drift: Some(output),
+        },
+        0,
     ))
 }
 
@@ -672,6 +898,7 @@ fn run_drift(component_id: &str, component: &Component, since: &str) -> CmdResul
             hints: None,
             drift: Some(report),
             scaffold: None,
+            auto_fix_drift: None,
         },
         exit_code,
     ))
@@ -766,6 +993,7 @@ fn run_scaffold(
                 hints: None,
                 drift: None,
                 scaffold: Some(scaffold_output),
+                auto_fix_drift: None,
             },
             0,
         ))
@@ -853,8 +1081,137 @@ fn run_scaffold(
                 hints: None,
                 drift: None,
                 scaffold: Some(scaffold_output),
+                auto_fix_drift: None,
             },
             0,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_strips_boolean_flags() {
+        let args = vec!["--analyze".to_string(), "--filter=SomeTest".to_string()];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+    }
+
+    #[test]
+    fn filter_strips_multiple_boolean_flags() {
+        let args = vec![
+            "--analyze".to_string(),
+            "--drift".to_string(),
+            "--scaffold".to_string(),
+            "--baseline".to_string(),
+            "--ignore-baseline".to_string(),
+            "--ratchet".to_string(),
+            "--skip-lint".to_string(),
+            "--fix".to_string(),
+            "--coverage".to_string(),
+            "--write".to_string(),
+            "--json".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_strips_value_flags_space_separated() {
+        let args = vec![
+            "--since".to_string(),
+            "v0.36.0".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+    }
+
+    #[test]
+    fn filter_strips_value_flags_equals_form() {
+        let args = vec![
+            "--since=v0.36.0".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+    }
+
+    #[test]
+    fn filter_strips_coverage_min() {
+        let args = vec![
+            "--coverage-min".to_string(),
+            "80".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+    }
+
+    #[test]
+    fn filter_strips_scaffold_file() {
+        let args = vec![
+            "--scaffold-file".to_string(),
+            "inc/Core/Foo.php".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_strips_setting() {
+        let args = vec![
+            "--setting".to_string(),
+            "database_type=mysql".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+    }
+
+    #[test]
+    fn filter_preserves_unknown_flags() {
+        let args = vec![
+            "--filter=SomeTest".to_string(),
+            "--group".to_string(),
+            "ajax".to_string(),
+            "--verbose".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(args, result);
+    }
+
+    #[test]
+    fn filter_handles_empty() {
+        let result = filter_homeboy_flags(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_handles_mixed() {
+        let args = vec![
+            "--analyze".to_string(),
+            "--skip-lint".to_string(),
+            "--since".to_string(),
+            "v0.35.0".to_string(),
+            "--filter=FlowAbilities".to_string(),
+            "--coverage-min=80".to_string(),
+            "--verbose".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=FlowAbilities", "--verbose"]);
+    }
+
+    #[test]
+    fn filter_strips_path_flag() {
+        let args = vec![
+            "--path".to_string(),
+            "/tmp/checkout".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
     }
 }
