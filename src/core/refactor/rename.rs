@@ -7,9 +7,12 @@
 //! 4. Applies changes to disk (or returns a dry-run preview)
 
 use crate::error::{Error, Result};
+use crate::utils::codebase_scan::{
+    self, discover_casing, find_boundary_matches, find_literal_matches, ExtensionFilter, ScanConfig,
+};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ============================================================================
 // Types
@@ -386,170 +389,34 @@ fn join_display(words: &[String]) -> String {
         .join(" ")
 }
 
-// ============================================================================
-// Boundary-aware regex
-// ============================================================================
-
-/// Check if a character is a boundary for matching purposes.
-/// A boundary exists at word starts/ends, camelCase joins (lowercase→uppercase),
-/// and underscore separators.
-fn is_boundary_char(c: u8) -> bool {
-    !c.is_ascii_alphanumeric() && c != b'_'
-}
-
-/// Find all occurrences of `term` in `text` that appear at sensible boundaries.
-///
-/// Boundary rules:
-/// - Left: start of string, non-alphanumeric char, underscore, or camelCase boundary
-/// - Right: end of string, non-alphanumeric, underscore, or uppercase letter (camelCase)
-///
-/// This handles:
-/// - `widget` in `pub mod widget;` (word boundary)
-/// - `Widget` in `WidgetManifest` (uppercase letter follows = camelCase boundary)
-/// - `WIDGET` in `WIDGET_DIR` (underscore follows)
-/// - `widget` in `load_widget` (underscore precedes = snake_case boundary)
-/// - `WP` in `WPAgent` (consecutive uppercase before lowercase = acronym boundary)
-/// - `Agent` in `WPAgent` (uppercase after uppercase = acronym→word boundary)
-/// - Won't match `widget` inside `widgetry` (lowercase letter follows)
-fn find_term_matches(text: &str, term: &str) -> Vec<usize> {
-    let text_bytes = text.as_bytes();
-    let term_bytes = term.as_bytes();
-    let term_len = term_bytes.len();
-    let text_len = text_bytes.len();
-    let mut matches = Vec::new();
-
-    if term_len == 0 || term_len > text_len {
-        return matches;
-    }
-
-    let mut start = 0;
-    while let Some(pos) = text[start..].find(term) {
-        let abs = start + pos;
-        let end = abs + term_len;
-
-        // Left boundary: start of string, non-alphanumeric, underscore, or camelCase join
-        let left_ok = abs == 0
-            || is_boundary_char(text_bytes[abs - 1])
-            || text_bytes[abs - 1] == b'_'
-            // camelCase boundary: lowercase/digit → uppercase (e.g., 'l' before 'W' in "loadWidget")
-            || (text_bytes[abs].is_ascii_uppercase()
-                && (text_bytes[abs - 1].is_ascii_lowercase()
-                    || text_bytes[abs - 1].is_ascii_digit()))
-            // Consecutive-uppercase boundary: uppercase → uppercase+lowercase
-            // e.g., 'P' before 'A' in "WPAgent" — the 'A' starts a new word because
-            // the current char is uppercase and the next char (if any) is lowercase
-            || (abs >= 2
-                && text_bytes[abs].is_ascii_uppercase()
-                && text_bytes[abs - 1].is_ascii_uppercase()
-                && term_len > 1
-                && term_bytes[1].is_ascii_lowercase());
-
-        // Right boundary: end of string, or next char is:
-        // - not alphanumeric (space, punctuation, etc.)
-        // - uppercase letter (camelCase boundary: WidgetManifest → Widget|Manifest)
-        // - underscore (snake boundary: WIDGET_DIR → WIDGET|_DIR)
-        let right_ok = end >= text_len || {
-            let next = text_bytes[end];
-            is_boundary_char(next) || next.is_ascii_uppercase() || next == b'_'
-        };
-
-        if left_ok && right_ok {
-            matches.push(abs);
-        }
-
-        start = abs + 1;
-    }
-
-    matches
-}
-
-/// Find all occurrences of `term` in `text` using exact substring matching.
-/// No boundary detection — every occurrence is returned.
-fn find_literal_matches(text: &str, term: &str) -> Vec<usize> {
-    let mut matches = Vec::new();
-    let term_len = term.len();
-
-    if term_len == 0 || term_len > text.len() {
-        return matches;
-    }
-
-    let mut start = 0;
-    while let Some(pos) = text[start..].find(term) {
-        matches.push(start + pos);
-        start += pos + 1;
-    }
-
-    matches
-}
+// Boundary matching and literal matching are provided by crate::utils::codebase_scan.
+// See: find_boundary_matches(), find_literal_matches()
 
 // ============================================================================
-// File walking
+// File walking — delegates to crate::utils::codebase_scan
 // ============================================================================
 
-/// Directories to always skip at any depth (dependency/VCS directories).
-const ALWAYS_SKIP_DIRS: &[&str] = &["node_modules", "vendor", ".git", ".svn", ".hg"];
-
-/// Directories to skip only at the root level (build output directories).
-/// These are safe to skip at root because they're typically build artifacts,
-/// but at deeper levels (e.g., `scripts/build/`) they may contain source files.
-const ROOT_ONLY_SKIP_DIRS: &[&str] = &["build", "dist", "target", "cache", "tmp"];
-
-const SOURCE_EXTENSIONS: &[&str] = &[
-    "rs", "php", "js", "jsx", "ts", "tsx", "mjs", "json", "toml", "yaml", "yml", "md", "txt", "sh",
-    "bash", "py", "rb", "go", "swift", "lock",
-];
-
-fn walk_files(root: &Path, scope: &RenameScope) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    walk_recursive(root, root, &mut files);
-
-    match scope {
-        RenameScope::Code => {
-            files.retain(|f| {
-                let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("");
-                !matches!(ext, "json" | "toml" | "yaml" | "yml")
-            });
-        }
-        RenameScope::Config => {
-            files.retain(|f| {
-                let ext = f.extension().and_then(|e| e.to_str()).unwrap_or("");
-                matches!(ext, "json" | "toml" | "yaml" | "yml")
-            });
-        }
-        RenameScope::All => {}
-    }
-
-    files
-}
-
-fn walk_recursive(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+/// Build a ScanConfig appropriate for rename operations.
+fn scan_config_for_scope(scope: &RenameScope) -> ScanConfig {
+    let extensions = match scope {
+        RenameScope::Code => ExtensionFilter::Except(vec![
+            "json".to_string(),
+            "toml".to_string(),
+            "yaml".to_string(),
+            "yml".to_string(),
+        ]),
+        RenameScope::Config => ExtensionFilter::Only(vec![
+            "json".to_string(),
+            "toml".to_string(),
+            "yaml".to_string(),
+            "yml".to_string(),
+        ]),
+        RenameScope::All => ExtensionFilter::SourceDefaults,
     };
 
-    let is_root = dir == root;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            // Always skip VCS/dependency dirs at any depth
-            if ALWAYS_SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            // Skip build output dirs only at root level
-            if is_root && ROOT_ONLY_SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            walk_recursive(&path, root, files);
-        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if SOURCE_EXTENSIONS.contains(&ext) {
-                files.push(path);
-            }
-        }
+    ScanConfig {
+        extensions,
+        ..ScanConfig::default()
     }
 }
 
@@ -558,13 +425,62 @@ fn walk_recursive(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
 // ============================================================================
 
 /// Find all references to the rename term across the codebase.
+///
+/// After the initial pass, discovers additional case variants that exist in the
+/// codebase but weren't generated (e.g., `WPAgent` when `WpAgent` was generated).
 pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
-    let files = walk_files(root, &spec.scope);
+    let config = scan_config_for_scope(&spec.scope);
+    let files = codebase_scan::walk_files(root, &config);
+
+    // Build the working variant list — may be extended by discovery
+    let mut all_variants = spec.variants.clone();
+
+    // Phase 1: Initial search with generated variants
+    if !spec.literal {
+        // Discover additional case variants for any generated variant with 0 matches.
+        // For example, if we generated "WpAgent" but the codebase uses "WPAgent",
+        // the case-insensitive scan will find it and add it as a discovered variant.
+        let mut discovered = Vec::new();
+        for variant in &spec.variants {
+            // Quick check: does this variant have any boundary matches?
+            let has_matches = files.iter().any(|f| {
+                std::fs::read_to_string(f)
+                    .map(|content| {
+                        content
+                            .lines()
+                            .any(|line| !find_boundary_matches(line, &variant.from).is_empty())
+                    })
+                    .unwrap_or(false)
+            });
+
+            if !has_matches {
+                // No matches — discover what casing actually exists
+                let casings = discover_casing(root, &variant.from, &config);
+                for (actual_casing, _count) in &casings {
+                    // Skip if it's the same as what we already have
+                    if actual_casing == &variant.from {
+                        continue;
+                    }
+                    // Skip if we already have this variant
+                    if all_variants.iter().any(|v| v.from == *actual_casing) {
+                        continue;
+                    }
+                    discovered.push(CaseVariant {
+                        from: actual_casing.clone(),
+                        to: variant.to.clone(),
+                        label: format!("discovered ({})", variant.label),
+                    });
+                }
+            }
+        }
+        all_variants.extend(discovered);
+    }
+
+    // Phase 2: Find all references using the full variant list
     let mut references = Vec::new();
 
     // Sort variants longest-first to prevent partial overlap
-    let mut sorted_variants = spec.variants.clone();
-    sorted_variants.sort_by(|a, b| b.from.len().cmp(&a.from.len()));
+    all_variants.sort_by(|a, b| b.from.len().cmp(&a.from.len()));
 
     let use_literal = spec.literal;
 
@@ -584,11 +500,11 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
             // to prevent overlapping matches from shorter variants
             let mut claimed: Vec<(usize, usize)> = Vec::new();
 
-            for variant in &sorted_variants {
+            for variant in &all_variants {
                 let positions = if use_literal {
                     find_literal_matches(line, &variant.from)
                 } else {
-                    find_term_matches(line, &variant.from)
+                    find_boundary_matches(line, &variant.from)
                 };
                 for pos in positions {
                     let end = pos + variant.from.len();
@@ -621,7 +537,8 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
 /// Generate file edits and file renames from found references.
 pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
     let references = find_references(spec, root);
-    let files = walk_files(root, &spec.scope);
+    let config = scan_config_for_scope(&spec.scope);
+    let files = codebase_scan::walk_files(root, &config);
 
     // Sort variants longest-first to prevent partial matches
     let mut sorted_variants = spec.variants.clone();
@@ -650,7 +567,7 @@ pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
             let positions = if use_literal {
                 find_literal_matches(&content, &variant.from)
             } else {
-                find_term_matches(&content, &variant.from)
+                find_boundary_matches(&content, &variant.from)
             };
             for pos in positions {
                 let end = pos + variant.from.len();
@@ -1122,28 +1039,28 @@ mod tests {
 
     #[test]
     fn snake_case_compounds_match() {
-        // find_term_matches should match "widget" inside "load_widget", "is_widget_linked", etc.
-        let matches = find_term_matches("load_widget", "widget");
+        // find_boundary_matches should match "widget" inside "load_widget", "is_widget_linked", etc.
+        let matches = find_boundary_matches("load_widget", "widget");
         assert_eq!(matches, vec![5], "Should match 'widget' in 'load_widget'");
 
-        let matches = find_term_matches("is_widget_linked", "widget");
+        let matches = find_boundary_matches("is_widget_linked", "widget");
         assert_eq!(
             matches,
             vec![3],
             "Should match 'widget' in 'is_widget_linked'"
         );
 
-        let matches = find_term_matches("widget_init", "widget");
+        let matches = find_boundary_matches("widget_init", "widget");
         assert_eq!(
             matches,
             vec![0],
             "Should match 'widget' at start of 'widget_init'"
         );
 
-        let matches = find_term_matches("WIDGET_DIR", "WIDGET");
+        let matches = find_boundary_matches("WIDGET_DIR", "WIDGET");
         assert_eq!(matches, vec![0], "Should match 'WIDGET' in 'WIDGET_DIR'");
 
-        let matches = find_term_matches("THE_WIDGET_CONFIG", "WIDGET");
+        let matches = find_boundary_matches("THE_WIDGET_CONFIG", "WIDGET");
         assert_eq!(
             matches,
             vec![4],
@@ -1197,14 +1114,14 @@ mod tests {
         // variant "modules" consumes it first, but we don't want partial matches either.
         // "node_modules" as a directory name is handled by SKIP_DIRS, but in content
         // the plural variant "modules" should match (not "module" partially).
-        let matches = find_term_matches("node_modules", "module");
+        let matches = find_boundary_matches("node_modules", "module");
         assert!(
             matches.is_empty(),
             "Should not match 'module' inside 'node_modules' — 's' follows"
         );
 
         // But "modules" (plural) should match
-        let matches = find_term_matches("node_modules", "modules");
+        let matches = find_boundary_matches("node_modules", "modules");
         assert_eq!(matches, vec![5], "Should match 'modules' in 'node_modules'");
     }
 
@@ -1505,7 +1422,7 @@ mod tests {
         );
 
         // Normal mode boundary test for comparison
-        let boundary_matches = find_term_matches("widgetry", "widget");
+        let boundary_matches = find_boundary_matches("widgetry", "widget");
         assert!(
             boundary_matches.is_empty(),
             "Boundary mode should NOT match 'widget' inside 'widgetry'"
@@ -1711,7 +1628,7 @@ mod tests {
     #[test]
     fn boundary_matches_consecutive_uppercase_pascal() {
         // WPAgent → should match "Agent" at position 2
-        let matches = find_term_matches("WPAgent", "Agent");
+        let matches = find_boundary_matches("WPAgent", "Agent");
         assert_eq!(
             matches,
             vec![2],
@@ -1719,25 +1636,25 @@ mod tests {
         );
 
         // WPAgent → should match "WP" at position 0
-        let matches = find_term_matches("WPAgent", "WP");
+        let matches = find_boundary_matches("WPAgent", "WP");
         assert_eq!(matches, vec![0], "Should match 'WP' at start of 'WPAgent'");
 
         // XMLParser → should match "XML" and "Parser"
-        let matches = find_term_matches("XMLParser", "XML");
+        let matches = find_boundary_matches("XMLParser", "XML");
         assert_eq!(
             matches,
             vec![0],
             "Should match 'XML' at start of 'XMLParser'"
         );
 
-        let matches = find_term_matches("XMLParser", "Parser");
+        let matches = find_boundary_matches("XMLParser", "Parser");
         assert_eq!(matches, vec![3], "Should match 'Parser' in 'XMLParser'");
     }
 
     #[test]
     fn boundary_matches_wp_agent_display_name() {
         // "WP Agent" with a space — should match at word boundaries
-        let matches = find_term_matches("Plugin: WP Agent v1", "WP Agent");
+        let matches = find_boundary_matches("Plugin: WP Agent v1", "WP Agent");
         assert_eq!(
             matches,
             vec![8],
