@@ -4,6 +4,7 @@ use serde::Serialize;
 use homeboy::component::{self, Component};
 use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
+use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
 use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};
 use homeboy::utils::io;
 
@@ -42,6 +43,10 @@ pub struct TestArgs {
     #[arg(long)]
     ratchet: bool,
 
+    /// Analyze test failures — cluster by root cause and suggest fixes
+    #[arg(long)]
+    analyze: bool,
+
     /// Override settings as key=value pairs
     #[arg(long, value_parser = super::parse_key_val)]
     setting: Vec<(String, String)>,
@@ -70,6 +75,8 @@ pub struct TestOutput {
     coverage: Option<CoverageOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     baseline_comparison: Option<TestBaselineComparison>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analysis: Option<TestAnalysis>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
 }
@@ -184,6 +191,16 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
     let results_file =
         std::env::temp_dir().join(format!("homeboy-test-results-{}.json", std::process::id()));
 
+    // Create temp file for test failures output (for --analyze)
+    let failures_file = if args.analyze {
+        Some(
+            std::env::temp_dir()
+                .join(format!("homeboy-test-failures-{}.json", std::process::id())),
+        )
+    } else {
+        None
+    };
+
     let mut runner = ExtensionRunner::new(&args.component, &script_path)
         .path_override(args.path.clone())
         .settings(&args.setting)
@@ -194,6 +211,10 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
 
     if let Some(ref file) = coverage_file {
         runner = runner.env("HOMEBOY_COVERAGE_FILE", &file.to_string_lossy());
+    }
+
+    if let Some(ref file) = failures_file {
+        runner = runner.env("HOMEBOY_TEST_FAILURES_FILE", &file.to_string_lossy());
     }
 
     if let Some(min) = args.coverage_min {
@@ -219,6 +240,50 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
     if let Some(ref f) = coverage_file {
         let _ = std::fs::remove_file(f);
     }
+
+    // Read and analyze test failures if --analyze
+    let analysis = if args.analyze {
+        let analysis_input = failures_file
+            .as_ref()
+            .and_then(|f| parse_failures_file(f))
+            .unwrap_or_else(|| TestAnalysisInput {
+                failures: Vec::new(),
+                total: test_counts.as_ref().map(|c| c.total).unwrap_or(0),
+                passed: test_counts.as_ref().map(|c| c.passed).unwrap_or(0),
+            });
+
+        // Clean up failures temp file
+        if let Some(ref f) = failures_file {
+            let _ = std::fs::remove_file(f);
+        }
+
+        let result = test_analyze::analyze(&args.component, &analysis_input);
+
+        if !result.clusters.is_empty() {
+            eprintln!(
+                "[test] Analysis: {} failure(s) in {} cluster(s)",
+                result.total_failures,
+                result.clusters.len(),
+            );
+            for (i, cluster) in result.clusters.iter().enumerate().take(5) {
+                eprintln!(
+                    "[test]   {}. {} ({} failures) — {:?}",
+                    i + 1,
+                    cluster.pattern,
+                    cluster.count,
+                    cluster.category,
+                );
+            }
+        }
+
+        Some(result)
+    } else {
+        // Clean up failures temp file (if somehow set)
+        if let Some(ref f) = failures_file {
+            let _ = std::fs::remove_file(f);
+        }
+        None
+    };
 
     // Resolve source path for baseline storage
     let source_path = if let Some(ref path) = args.path {
@@ -257,28 +322,23 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
                 let comparison = test_baseline::compare(counts, &existing_baseline);
 
                 if comparison.regression {
-                    eprintln!(
-                        "[test] REGRESSION: {}",
-                        comparison.reasons.join("; ")
-                    );
+                    eprintln!("[test] REGRESSION: {}", comparison.reasons.join("; "));
                     baseline_exit_override = Some(1);
-                } else {
-                    if comparison.passed_delta > 0 || comparison.failed_delta < 0 {
-                        eprintln!(
-                            "[test] Improvement: passed {} ({:+}), failed {} ({:+})",
-                            counts.passed, comparison.passed_delta,
-                            counts.failed, comparison.failed_delta,
-                        );
+                } else if comparison.passed_delta > 0 || comparison.failed_delta < 0 {
+                    eprintln!(
+                        "[test] Improvement: passed {} ({:+}), failed {} ({:+})",
+                        counts.passed, comparison.passed_delta, counts.failed,
+                        comparison.failed_delta,
+                    );
 
-                        // Auto-ratchet: update baseline when results improve
-                        if args.ratchet {
-                            let _ = test_baseline::save_baseline(
-                                &source_path,
-                                &args.component,
-                                counts,
-                            );
-                            eprintln!("[test] Baseline ratcheted forward");
-                        }
+                    // Auto-ratchet: update baseline when results improve
+                    if args.ratchet {
+                        let _ = test_baseline::save_baseline(
+                            &source_path,
+                            &args.component,
+                            counts,
+                        );
+                        eprintln!("[test] Baseline ratcheted forward");
                     }
                 }
 
@@ -329,6 +389,14 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
         ));
     }
 
+    // Analyze hint when tests fail and --analyze not used
+    if !output.success && !args.analyze {
+        hints.push(format!(
+            "Analyze failures: homeboy test {} --analyze",
+            args.component
+        ));
+    }
+
     // Capability hint when not using passthrough args
     if args.args.is_empty() {
         hints.push("Pass args to test runner: homeboy test <component> -- [args]".to_string());
@@ -350,10 +418,17 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
             test_counts,
             coverage,
             baseline_comparison,
+            analysis,
             hints,
         },
         exit_code,
     ))
+}
+
+/// Parse the test failures JSON file written by the extension test runner.
+fn parse_failures_file(path: &std::path::Path) -> Option<TestAnalysisInput> {
+    let content = io::read_file(path, "read test failures file").ok()?;
+    serde_json::from_str(&content).ok()
 }
 
 /// Parse the test results JSON file written by the extension test runner.
