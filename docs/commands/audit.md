@@ -58,7 +58,7 @@ homeboy audit my-component
 homeboy audit my-component --ignore-baseline
 ```
 
-The baseline file is saved at `.homeboy/audit-baseline.json` inside the component's `local_path`.
+The baseline is saved in `homeboy.json` under `baselines.audit` inside the component's `local_path`.
 
 When a baseline exists, the audit exit code reflects drift:
 - `0`: No drift increase (same or improved)
