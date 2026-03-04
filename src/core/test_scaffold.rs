@@ -5,14 +5,16 @@
 //! follows project conventions for test file naming, base classes, and
 //! assertion style.
 //!
-//! Phase 1: regex-based extraction, no extension scripts needed.
+//! Supports two extraction modes:
+//! - Grammar-based: uses extension-provided grammar.toml (preferred)
+//! - Legacy regex: hardcoded patterns as fallback
 
 use regex::Regex;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::utils::io;
+use crate::utils::{grammar, io};
 
 // ============================================================================
 // Models
@@ -693,6 +695,161 @@ fn namespace_root(ns: &str) -> &str {
 }
 
 // ============================================================================
+// Grammar-based extraction (preferred path)
+// ============================================================================
+
+/// Extract classes and methods using a grammar file.
+///
+/// This is the preferred extraction path. It delegates to `utils/grammar.rs`
+/// which applies the extension-provided grammar patterns with structural
+/// awareness (brace depth, comment/string skipping).
+pub fn extract_with_grammar(content: &str, grammar_def: &grammar::Grammar) -> Vec<ExtractedClass> {
+    let symbols = grammar::extract(content, grammar_def);
+
+    // Get namespace
+    let ns = grammar::namespace(&symbols).unwrap_or_default();
+
+    // Get classes/structs/traits
+    let type_symbols: Vec<_> = symbols
+        .iter()
+        .filter(|s| {
+            s.concept == "class"
+                || s.concept == "struct"
+                || s.concept == "trait"
+                || s.concept == "interface"
+                || s.concept == "type"
+        })
+        .collect();
+
+    // Get methods/functions
+    let method_symbols: Vec<_> = symbols
+        .iter()
+        .filter(|s| {
+            s.concept == "method" || s.concept == "function" || s.concept == "free_function"
+        })
+        .collect();
+
+    let mut classes = Vec::new();
+
+    if !type_symbols.is_empty() {
+        for ts in &type_symbols {
+            let name = ts.name().unwrap_or("").to_string();
+            let kind = ts.get("kind").unwrap_or(ts.concept.as_str()).to_string();
+
+            // Collect methods that belong to this type (inside its block)
+            // For now, associate all methods with each class (same as legacy behavior)
+            let methods: Vec<ExtractedMethod> = method_symbols
+                .iter()
+                .filter(|m| {
+                    let mname = m.name().unwrap_or("");
+                    // Skip magic methods except __construct
+                    if mname.starts_with("__") && mname != "__construct" {
+                        return false;
+                    }
+                    // Skip private methods for PHP
+                    if let Some(mods) = m.get("modifiers") {
+                        if mods.contains("private") {
+                            return false;
+                        }
+                    }
+                    true
+                })
+                .map(|m| {
+                    let mname = m.name().unwrap_or("").to_string();
+                    let vis = if let Some(mods) = m.get("modifiers") {
+                        if mods.contains("private") {
+                            "private"
+                        } else if mods.contains("protected") {
+                            "protected"
+                        } else {
+                            "public"
+                        }
+                    } else if let Some(v) = m.visibility() {
+                        if v.contains("pub") {
+                            "pub"
+                        } else {
+                            "private"
+                        }
+                    } else {
+                        "public"
+                    };
+
+                    ExtractedMethod {
+                        name: mname,
+                        visibility: vis.to_string(),
+                        is_static: m
+                            .get("modifiers")
+                            .map_or(false, |mods| mods.contains("static"))
+                            || m.get("params").map_or(false, |p| !p.contains("self")),
+                        line: m.line,
+                        params: m.get("params").unwrap_or("").to_string(),
+                    }
+                })
+                .collect();
+
+            classes.push(ExtractedClass {
+                name,
+                namespace: ns.clone(),
+                kind,
+                methods,
+            });
+        }
+    } else if !method_symbols.is_empty() {
+        // No classes — procedural/module level
+        let kind = if grammar_def.language.id == "rust" {
+            "module"
+        } else {
+            "procedural"
+        };
+        let methods: Vec<ExtractedMethod> = method_symbols
+            .iter()
+            .map(|m| {
+                let mname = m.name().unwrap_or("").to_string();
+                ExtractedMethod {
+                    name: mname,
+                    visibility: m.visibility().unwrap_or("public").to_string(),
+                    is_static: true,
+                    line: m.line,
+                    params: m.get("params").unwrap_or("").to_string(),
+                }
+            })
+            .collect();
+
+        classes.push(ExtractedClass {
+            name: String::new(),
+            namespace: ns,
+            kind: kind.to_string(),
+            methods,
+        });
+    }
+
+    classes
+}
+
+/// Try to load a grammar from the extension path.
+/// Returns None if the grammar file doesn't exist.
+pub fn load_extension_grammar(extension_path: &Path, language: &str) -> Option<grammar::Grammar> {
+    // Try TOML first, then JSON
+    let toml_path = extension_path.join("grammar.toml");
+    if toml_path.exists() {
+        return grammar::load_grammar(&toml_path).ok();
+    }
+
+    let json_path = extension_path.join("grammar.json");
+    if json_path.exists() {
+        return grammar::load_grammar_json(&json_path).ok();
+    }
+
+    // Try language-specific subdirectory
+    let lang_toml = extension_path.join(language).join("grammar.toml");
+    if lang_toml.exists() {
+        return grammar::load_grammar(&lang_toml).ok();
+    }
+
+    None
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -893,6 +1050,79 @@ fn internal_helper() {}
         assert_eq!(to_snake_case("register"), "register");
         assert_eq!(to_snake_case("HTMLParser"), "htmlparser"); // consecutive caps
         assert_eq!(to_snake_case("loadConfig"), "load_config");
+    }
+
+    #[test]
+    fn extract_with_grammar_php() {
+        let grammar_path = std::path::Path::new(
+            "/var/lib/datamachine/workspace/homeboy-modules/wordpress/grammar.toml",
+        );
+        if !grammar_path.exists() {
+            return; // Skip if not in dev environment
+        }
+        let grammar_def = grammar::load_grammar(grammar_path).unwrap();
+
+        let content = r#"<?php
+namespace App\Abilities;
+
+class FooAbilities {
+    public function register() {}
+    public function executeCreate($config) {}
+    protected function validate($input) {}
+    private function internal() {}
+}
+"#;
+
+        let classes = extract_with_grammar(content, &grammar_def);
+        assert!(!classes.is_empty(), "Should extract at least one class");
+
+        let foo = &classes[0];
+        assert_eq!(foo.name, "FooAbilities");
+        assert_eq!(foo.namespace, "App\\Abilities");
+
+        // Private methods should be filtered
+        let names: Vec<&str> = foo.methods.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"register"));
+        assert!(names.contains(&"executeCreate"));
+        assert!(names.contains(&"validate"));
+        assert!(!names.contains(&"internal"));
+    }
+
+    #[test]
+    fn extract_with_grammar_rust() {
+        let grammar_path = std::path::Path::new(
+            "/var/lib/datamachine/workspace/homeboy-modules/rust/grammar.toml",
+        );
+        if !grammar_path.exists() {
+            return;
+        }
+        let grammar_def = grammar::load_grammar(grammar_path).unwrap();
+
+        let content = r#"
+pub struct Config {
+    data: String,
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Self { data: String::new() }
+    }
+
+    pub fn load(path: &Path) -> Result<Self> {
+        todo!()
+    }
+
+    fn private_method(&self) {}
+}
+"#;
+
+        let classes = extract_with_grammar(content, &grammar_def);
+        assert!(!classes.is_empty());
+
+        let config = classes.iter().find(|c| c.name == "Config").unwrap();
+        let names: Vec<&str> = config.methods.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"new"));
+        assert!(names.contains(&"load"));
     }
 
     #[test]
