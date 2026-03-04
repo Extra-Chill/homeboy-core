@@ -4,6 +4,7 @@ use serde::Serialize;
 use homeboy::component::Component;
 use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
+use homeboy::refactor::{self, TransformSet};
 use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
 use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};
 use homeboy::test_drift::{self, DriftOptions, DriftReport};
@@ -44,6 +45,10 @@ pub struct TestArgs {
     /// Analyze test failures — cluster by root cause and suggest fixes
     #[arg(long)]
     analyze: bool,
+
+    /// Auto-fix test drift before running tests (uses generated transform rules)
+    #[arg(long)]
+    auto_fix_drift: bool,
 
     /// Detect test drift — cross-reference production changes with test files
     #[arg(long)]
@@ -95,6 +100,8 @@ pub struct TestOutput {
     drift: Option<DriftReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scaffold: Option<ScaffoldOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_fix_drift: Option<AutoFixDriftOutput>,
 }
 
 #[derive(Serialize)]
@@ -112,6 +119,17 @@ pub struct ScaffoldFileOutput {
     stub_count: usize,
     written: bool,
     skipped: bool,
+}
+
+#[derive(Serialize)]
+pub struct AutoFixDriftOutput {
+    since: String,
+    auto_fixable_changes: usize,
+    generated_rules: usize,
+    replacements: usize,
+    files_modified: usize,
+    written: bool,
+    rerun_recommended: bool,
 }
 
 #[derive(Serialize)]
@@ -179,6 +197,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
     // Homeboy-owned boolean flags that should never reach the extension runner
     const HOMEBOY_FLAGS: &[&str] = &[
         "--analyze",
+        "--auto-fix-drift",
         "--drift",
         "--scaffold",
         "--write",
@@ -276,6 +295,17 @@ fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> 
 
 pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput> {
     let component = args.comp.load()?;
+
+    // Auto-fix drift mode — generate and apply transform rules from git drift
+    if args.auto_fix_drift {
+        return run_auto_fix_drift(
+            args.comp.id(),
+            &component,
+            &args.since,
+            args.write,
+            args.drift,
+        );
+    }
 
     // Scaffold mode — generate test stubs without running tests
     if args.scaffold || args.scaffold_file.is_some() {
@@ -533,8 +563,144 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
             hints,
             drift: None,
             scaffold: None,
+            auto_fix_drift: None,
         },
         exit_code,
+    ))
+}
+
+/// Auto-fix test drift by generating transform rules from production changes.
+///
+/// This mode does NOT run tests. It inspects git changes since `since`, generates
+/// find/replace transform rules for auto-fixable drift types, and applies them to
+/// test files. Use with `--write` to persist changes; default is dry-run.
+fn run_auto_fix_drift(
+    component_id: &str,
+    component: &Component,
+    since: &str,
+    write: bool,
+    include_report: bool,
+) -> CmdResult<TestOutput> {
+    let source_path = {
+        let expanded = shellexpand::tilde(&component.local_path);
+        std::path::PathBuf::from(expanded.as_ref())
+    };
+
+    let opts = if source_path.join("Cargo.toml").exists() {
+        DriftOptions::rust(&source_path, since)
+    } else {
+        DriftOptions::php(&source_path, since)
+    };
+
+    homeboy::log_status!(
+        "test",
+        "Auto-fixing drift since {} in {} ({})",
+        since,
+        component_id,
+        if write { "write" } else { "dry-run" }
+    );
+
+    let drift_report = test_drift::detect_drift(component_id, &opts)?;
+    let rules = test_drift::generate_transform_rules(&drift_report);
+
+    let output = if rules.is_empty() {
+        homeboy::log_status!("test", "No auto-fixable drift detected. Nothing to apply.");
+
+        AutoFixDriftOutput {
+            since: since.to_string(),
+            auto_fixable_changes: drift_report.auto_fixable,
+            generated_rules: 0,
+            replacements: 0,
+            files_modified: 0,
+            written: write,
+            rerun_recommended: false,
+        }
+    } else {
+        let set = TransformSet {
+            description: format!(
+                "Auto-generated drift fixes for {} since {}",
+                component_id, since
+            ),
+            rules,
+        };
+
+        let result =
+            refactor::apply_transforms(&source_path, "test_auto_fix_drift", &set, write, None)?;
+
+        homeboy::log_status!(
+            "test",
+            "Applied {} replacement{} across {} file{}",
+            result.total_replacements,
+            if result.total_replacements == 1 {
+                ""
+            } else {
+                "s"
+            },
+            result.total_files,
+            if result.total_files == 1 { "" } else { "s" },
+        );
+
+        if !write {
+            homeboy::log_status!(
+                "hint",
+                "Dry-run only. Re-run with --write to apply generated fixes."
+            );
+        } else if result.total_replacements > 0 {
+            homeboy::log_status!(
+                "hint",
+                "Re-run tests: homeboy test {} --analyze",
+                component_id
+            );
+        }
+
+        AutoFixDriftOutput {
+            since: since.to_string(),
+            auto_fixable_changes: drift_report.auto_fixable,
+            generated_rules: set.rules.len(),
+            replacements: result.total_replacements,
+            files_modified: result.total_files,
+            written: write,
+            rerun_recommended: write && result.total_replacements > 0,
+        }
+    };
+
+    Ok((
+        TestOutput {
+            status: if output.replacements > 0 {
+                if write {
+                    "auto_fixed"
+                } else {
+                    "auto_fix_preview"
+                }
+            } else {
+                "auto_fix_noop"
+            }
+            .to_string(),
+            component: component_id.to_string(),
+            exit_code: 0,
+            test_counts: None,
+            coverage: None,
+            baseline_comparison: None,
+            analysis: None,
+            hints: Some(vec![
+                format!(
+                    "Use --since <ref> to target a drift window (current: {})",
+                    since
+                ),
+                format!(
+                    "Use --write to apply fixes, then run: homeboy test {} --analyze",
+                    component_id
+                ),
+            ]),
+            drift: if include_report {
+                Some(drift_report)
+            } else {
+                None
+            },
+            scaffold: None,
+            auto_fix_drift: Some(output),
+        },
+        0,
     ))
 }
 
@@ -744,6 +910,7 @@ fn run_drift(component_id: &str, component: &Component, since: &str) -> CmdResul
             hints: None,
             drift: Some(report),
             scaffold: None,
+            auto_fix_drift: None,
         },
         exit_code,
     ))
@@ -838,6 +1005,7 @@ fn run_scaffold(
                 hints: None,
                 drift: None,
                 scaffold: Some(scaffold_output),
+                auto_fix_drift: None,
             },
             0,
         ))
@@ -925,6 +1093,7 @@ fn run_scaffold(
                 hints: None,
                 drift: None,
                 scaffold: Some(scaffold_output),
+                auto_fix_drift: None,
             },
             0,
         ))
@@ -940,12 +1109,20 @@ mod tests {
         let args = vec!["--analyze".to_string(), "--filter=SomeTest".to_string()];
         let result = filter_homeboy_flags(&args);
         assert_eq!(result, vec!["--filter=SomeTest"]);
+
+        let args = vec![
+            "--auto-fix-drift".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
     }
 
     #[test]
     fn filter_strips_multiple_boolean_flags() {
         let args = vec![
             "--analyze".to_string(),
+            "--auto-fix-drift".to_string(),
             "--drift".to_string(),
             "--scaffold".to_string(),
             "--baseline".to_string(),

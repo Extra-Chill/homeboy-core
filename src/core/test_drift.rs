@@ -602,17 +602,69 @@ pub fn generate_transform_rules(report: &DriftReport) -> Vec<crate::refactor::Tr
             _ => format!("{} → {} ({})", change.old_symbol, new_symbol, change.file),
         };
 
+        let (find, replace) = match change.change_type {
+            // Identifier renames should use word boundaries to avoid partial matches.
+            ChangeType::MethodRename | ChangeType::ClassRename => {
+                if !is_identifier(&change.old_symbol) || !is_identifier(new_symbol) {
+                    continue;
+                }
+                (
+                    format!(r"\b{}\b", regex::escape(&change.old_symbol)),
+                    new_symbol.clone(),
+                )
+            }
+            // Error/string changes are prone to false positives when symbols are too generic
+            // (e.g. old="name", new="assistant"). Only auto-fix token-like literals.
+            ChangeType::ErrorCodeChange | ChangeType::StringChange => {
+                if !is_safe_literal_token(&change.old_symbol) || !is_safe_literal_token(new_symbol)
+                {
+                    continue;
+                }
+                (regex::escape(&change.old_symbol), new_symbol.clone())
+            }
+            // File moves should look like path-ish values.
+            ChangeType::FileMove => {
+                if !looks_like_path(&change.old_symbol) || !looks_like_path(new_symbol) {
+                    continue;
+                }
+                (regex::escape(&change.old_symbol), new_symbol.clone())
+            }
+            _ => continue,
+        };
+
         rules.push(crate::refactor::TransformRule {
             id,
             description,
-            find: regex::escape(&change.old_symbol),
-            replace: new_symbol.clone(),
+            find,
+            replace,
             files: "tests/**/*".to_string(),
             context: "line".to_string(),
         });
     }
 
     rules
+}
+
+fn is_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+fn is_safe_literal_token(s: &str) -> bool {
+    s.len() >= 4
+        && (s.contains('_')
+            || s.contains('-')
+            || s.contains('/')
+            || s.contains(':')
+            || s.contains('.'))
+}
+
+fn looks_like_path(s: &str) -> bool {
+    s.len() >= 5 && (s.contains('/') || s.contains('\\'))
 }
 
 // ============================================================================
@@ -753,9 +805,55 @@ mod tests {
 
         let rules = generate_transform_rules(&report);
         assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].find, "executeRunFlow");
+        assert_eq!(rules[0].find, r"\bexecuteRunFlow\b");
         assert_eq!(rules[0].replace, "executeWorkflow");
         assert_eq!(rules[0].files, "tests/**/*");
+    }
+
+    #[test]
+    fn generate_rules_skips_unsafe_generic_string_changes() {
+        let report = DriftReport {
+            component: "test".into(),
+            since: "v1.0".into(),
+            production_changes: vec![ProductionChange {
+                change_type: ChangeType::ErrorCodeChange,
+                file: "src/Foo.php".into(),
+                old_symbol: "name".into(),
+                new_symbol: Some("assistant".into()),
+                line: 10,
+            }],
+            drifted_tests: Vec::new(),
+            total_drifted_files: 0,
+            total_drift_references: 0,
+            auto_fixable: 1,
+        };
+
+        let rules = generate_transform_rules(&report);
+        assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn generate_rules_keeps_safe_error_code_tokens() {
+        let report = DriftReport {
+            component: "test".into(),
+            since: "v1.0".into(),
+            production_changes: vec![ProductionChange {
+                change_type: ChangeType::ErrorCodeChange,
+                file: "src/Foo.php".into(),
+                old_symbol: "rest_forbidden".into(),
+                new_symbol: Some("ability_invalid_permissions".into()),
+                line: 10,
+            }],
+            drifted_tests: Vec::new(),
+            total_drifted_files: 0,
+            total_drift_references: 0,
+            auto_fixable: 1,
+        };
+
+        let rules = generate_transform_rules(&report);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].find, "rest_forbidden");
+        assert_eq!(rules[0].replace, "ability_invalid_permissions");
     }
 
     #[test]
