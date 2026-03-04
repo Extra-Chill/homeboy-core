@@ -45,14 +45,14 @@ jobs:
   # Uses source build mode to compile from the PR branch, avoiding the
   # chicken-and-egg problem of needing a released binary to audit itself.
   # Falls back to latest release binary if source build fails.
+  # Runs independently of build job so PR comments are always posted.
   audit:
     name: Homeboy Audit
-    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Extra-Chill/homeboy-action@feat/source-build
+      - uses: Extra-Chill/homeboy-action@v1
         with:
           source: '.'
           extension: rust

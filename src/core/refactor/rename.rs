@@ -91,7 +91,12 @@ impl RenameSpec {
         if !from_words.is_empty() && !to_words.is_empty() {
             // Singular forms — all naming conventions
             let join_fns: [fn(&[String]) -> String; 6] = [
-                join_kebab, join_snake, join_upper_snake, join_pascal, join_camel, join_display,
+                join_kebab,
+                join_snake,
+                join_upper_snake,
+                join_pascal,
+                join_camel,
+                join_display,
             ];
             let labels = [
                 "kebab",
@@ -352,7 +357,11 @@ fn join_upper_snake(words: &[String]) -> String {
 
 /// Join words as PascalCase: `["data", "machine", "agent"]` → `"DataMachineAgent"`
 fn join_pascal(words: &[String]) -> String {
-    words.iter().map(|w| capitalize(w)).collect::<Vec<_>>().join("")
+    words
+        .iter()
+        .map(|w| capitalize(w))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// Join words as camelCase: `["data", "machine", "agent"]` → `"dataMachineAgent"`
@@ -1591,12 +1600,18 @@ mod tests {
         // Singular forms — all naming conventions
         assert!(from_values.contains(&"wp-agent"), "Missing kebab from");
         assert!(from_values.contains(&"wp_agent"), "Missing snake from");
-        assert!(from_values.contains(&"WP_AGENT"), "Missing UPPER_SNAKE from");
+        assert!(
+            from_values.contains(&"WP_AGENT"),
+            "Missing UPPER_SNAKE from"
+        );
         assert!(from_values.contains(&"WpAgent"), "Missing PascalCase from");
         assert!(from_values.contains(&"wpAgent"), "Missing camelCase from");
         assert!(from_values.contains(&"Wp Agent"), "Missing display from");
 
-        assert!(to_values.contains(&"data-machine-agent"), "Missing kebab to");
+        assert!(
+            to_values.contains(&"data-machine-agent"),
+            "Missing kebab to"
+        );
         assert!(
             to_values.contains(&"data_machine_agent"),
             "Missing snake to"
@@ -1645,7 +1660,10 @@ mod tests {
 
         assert!(from_values.contains(&"wp-agent"), "Missing kebab from");
         assert!(from_values.contains(&"wp_agent"), "Missing snake from");
-        assert!(from_values.contains(&"WP_AGENT"), "Missing UPPER_SNAKE from");
+        assert!(
+            from_values.contains(&"WP_AGENT"),
+            "Missing UPPER_SNAKE from"
+        );
         assert!(from_values.contains(&"WpAgent"), "Missing PascalCase from");
         assert!(from_values.contains(&"wpAgent"), "Missing camelCase from");
     }
@@ -1658,7 +1676,10 @@ mod tests {
 
         assert!(from_values.contains(&"wp-agent"), "Missing kebab from");
         assert!(from_values.contains(&"wp_agent"), "Missing snake from");
-        assert!(from_values.contains(&"WP_AGENT"), "Missing UPPER_SNAKE from");
+        assert!(
+            from_values.contains(&"WP_AGENT"),
+            "Missing UPPER_SNAKE from"
+        );
         assert!(from_values.contains(&"WpAgent"), "Missing PascalCase from");
     }
 
@@ -1679,11 +1700,7 @@ mod tests {
         // No duplicate entries
         let mut seen = std::collections::HashSet::new();
         for v in &spec.variants {
-            assert!(
-                seen.insert(&v.from),
-                "Duplicate variant 'from': {}",
-                v.from
-            );
+            assert!(seen.insert(&v.from), "Duplicate variant 'from': {}", v.from);
         }
     }
 
@@ -1703,11 +1720,7 @@ mod tests {
 
         // WPAgent → should match "WP" at position 0
         let matches = find_term_matches("WPAgent", "WP");
-        assert_eq!(
-            matches,
-            vec![0],
-            "Should match 'WP' at start of 'WPAgent'"
-        );
+        assert_eq!(matches, vec![0], "Should match 'WP' at start of 'WPAgent'");
 
         // XMLParser → should match "XML" and "Parser"
         let matches = find_term_matches("XMLParser", "XML");
