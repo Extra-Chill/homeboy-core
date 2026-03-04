@@ -937,10 +937,7 @@ mod tests {
 
     #[test]
     fn filter_strips_boolean_flags() {
-        let args = vec![
-            "--analyze".to_string(),
-            "--filter=SomeTest".to_string(),
-        ];
+        let args = vec!["--analyze".to_string(), "--filter=SomeTest".to_string()];
         let result = filter_homeboy_flags(&args);
         assert_eq!(result, vec!["--filter=SomeTest"]);
     }
