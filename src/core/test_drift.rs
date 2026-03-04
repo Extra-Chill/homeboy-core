@@ -655,12 +655,31 @@ fn is_identifier(s: &str) -> bool {
 }
 
 fn is_safe_literal_token(s: &str) -> bool {
-    s.len() >= 4
-        && (s.contains('_')
-            || s.contains('-')
-            || s.contains('/')
-            || s.contains(':')
-            || s.contains('.'))
+    if s.len() < 4 {
+        return false;
+    }
+
+    // Path-ish and namespaced/string tokens are usually safe for literal replacement.
+    if s.contains('/') || s.contains('\\') || s.contains(':') || s.contains('.') || s.contains('-')
+    {
+        return true;
+    }
+
+    // For underscore tokens, constrain to error-code-like vocabulary.
+    // This avoids unsafe schema/field rewrites (e.g. flow_id -> pipeline_id).
+    if s.contains('_') {
+        let lower = s.to_ascii_lowercase();
+        return lower.starts_with("rest_")
+            || lower.starts_with("ability_")
+            || lower.contains("error")
+            || lower.contains("invalid")
+            || lower.contains("forbidden")
+            || lower.contains("denied")
+            || lower.contains("not_found")
+            || lower.contains("failed");
+    }
+
+    false
 }
 
 fn looks_like_path(s: &str) -> bool {
@@ -854,6 +873,28 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].find, "rest_forbidden");
         assert_eq!(rules[0].replace, "ability_invalid_permissions");
+    }
+
+    #[test]
+    fn generate_rules_skips_non_error_underscore_tokens() {
+        let report = DriftReport {
+            component: "test".into(),
+            since: "v1.0".into(),
+            production_changes: vec![ProductionChange {
+                change_type: ChangeType::ErrorCodeChange,
+                file: "src/Foo.php".into(),
+                old_symbol: "flow_id".into(),
+                new_symbol: Some("pipeline_id".into()),
+                line: 10,
+            }],
+            drifted_tests: Vec::new(),
+            total_drifted_files: 0,
+            total_drift_references: 0,
+            auto_fixable: 1,
+        };
+
+        let rules = generate_transform_rules(&report);
+        assert!(rules.is_empty());
     }
 
     #[test]
