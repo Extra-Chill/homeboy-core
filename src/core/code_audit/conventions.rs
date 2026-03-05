@@ -116,6 +116,10 @@ pub enum DeviationKind {
     MissingTestMethod,
     /// Test file or test method has no corresponding source file/method.
     OrphanedTest,
+    /// Comment contains TODO/FIXME/HACK/XXX marker.
+    TodoMarker,
+    /// Comment appears stale or legacy (temporary/workaround/phase refs).
+    LegacyComment,
 }
 
 // ============================================================================

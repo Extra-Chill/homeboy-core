@@ -1,0 +1,172 @@
+//! Comment hygiene detection — identify stale/legacy comment markers.
+
+use super::conventions::{DeviationKind, Language};
+use super::findings::{Finding, Severity};
+use super::fingerprint::FileFingerprint;
+
+const TODO_MARKERS: &[&str] = &["TODO", "FIXME", "HACK", "XXX"];
+const LEGACY_MARKERS: &[&str] = &[
+    "temporary",
+    "workaround",
+    "remove after",
+    "phase 1",
+    "legacy",
+    "outdated",
+];
+
+pub fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for fp in fingerprints {
+        for (line_number, comment) in extract_comments(fp) {
+            let upper = comment.to_uppercase();
+            let lower = comment.to_lowercase();
+
+            if let Some(marker) = TODO_MARKERS.iter().find(|m| upper.contains(**m)) {
+                findings.push(Finding {
+                    convention: "comment_hygiene".to_string(),
+                    severity: Severity::Info,
+                    file: fp.relative_path.clone(),
+                    description: format!(
+                        "Comment marker '{}' found on line {}: {}",
+                        marker,
+                        line_number,
+                        truncate_comment(comment)
+                    ),
+                    suggestion:
+                        "Resolve or remove marker comments, or convert to a tracked issue reference"
+                            .to_string(),
+                    kind: DeviationKind::TodoMarker,
+                });
+            }
+
+            if LEGACY_MARKERS.iter().any(|m| lower.contains(m)) {
+                findings.push(Finding {
+                    convention: "comment_hygiene".to_string(),
+                    severity: Severity::Info,
+                    file: fp.relative_path.clone(),
+                    description: format!(
+                        "Potential legacy/stale comment on line {}: {}",
+                        line_number,
+                        truncate_comment(comment)
+                    ),
+                    suggestion:
+                        "Validate the comment is still accurate; remove or update stale implementation notes"
+                            .to_string(),
+                    kind: DeviationKind::LegacyComment,
+                });
+            }
+        }
+    }
+
+    findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.description.cmp(&b.description)));
+    findings
+}
+
+fn extract_comments(fp: &FileFingerprint) -> Vec<(usize, &str)> {
+    match fp.language {
+        Language::Rust | Language::JavaScript | Language::TypeScript => fp
+            .content
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    Some((idx + 1, trimmed.trim_start_matches('/').trim()))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Language::Php => fp
+            .content
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") || trimmed.starts_with('#') {
+                    Some((
+                        idx + 1,
+                        trimmed
+                            .trim_start_matches('/')
+                            .trim_start_matches('#')
+                            .trim(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn truncate_comment(comment: &str) -> String {
+    const MAX: usize = 120;
+    if comment.len() <= MAX {
+        comment.to_string()
+    } else {
+        format!("{}...", &comment[..MAX])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::code_audit::conventions::Language;
+    use crate::code_audit::fingerprint::FileFingerprint;
+    use std::collections::HashMap;
+
+    fn make_fp(path: &str, lang: Language, content: &str) -> FileFingerprint {
+        FileFingerprint {
+            relative_path: path.to_string(),
+            language: lang,
+            methods: vec![],
+            registrations: vec![],
+            type_name: None,
+            extends: None,
+            implements: vec![],
+            namespace: None,
+            imports: vec![],
+            content: content.to_string(),
+            method_hashes: HashMap::new(),
+            structural_hashes: HashMap::new(),
+            visibility: HashMap::new(),
+            properties: vec![],
+            hooks: vec![],
+            unused_parameters: vec![],
+            dead_code_markers: vec![],
+            internal_calls: vec![],
+            public_api: vec![],
+        }
+    }
+
+    #[test]
+    fn test_analyze_comment_hygiene() {
+        let fp = make_fp(
+            "src/example.rs",
+            Language::Rust,
+            "// TODO: clean this up\n// temporary workaround for old API\nfn x() {}",
+        );
+
+        let findings = analyze_comment_hygiene(&[&fp]);
+        assert!(findings.iter().any(|f| f.kind == DeviationKind::TodoMarker));
+        assert!(findings
+            .iter()
+            .any(|f| f.kind == DeviationKind::LegacyComment));
+    }
+
+    #[test]
+    fn test_extract_comments() {
+        let fp = make_fp(
+            "src/example.php",
+            Language::Php,
+            "<?php\n# FIXME: later\n// HACK: now\n$ok = true;",
+        );
+
+        let comments = extract_comments(&fp);
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].0, 2);
+        assert!(comments[0].1.contains("FIXME"));
+    }
+}

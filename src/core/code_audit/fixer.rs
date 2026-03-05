@@ -492,6 +492,9 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                         // Structural concern across directories; no safe automatic
                         // in-file patching yet. Leave for dedicated refactor planning.
                     }
+                    DeviationKind::TodoMarker | DeviationKind::LegacyComment => {
+                        // Comment hygiene requires human judgement; do not auto-edit.
+                    }
                     _ => {}
                 }
             }

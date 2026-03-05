@@ -13,6 +13,7 @@
 
 pub mod baseline;
 mod checks;
+mod comment_hygiene;
 pub(crate) mod conventions;
 mod dead_code;
 mod discovery;
@@ -321,7 +322,18 @@ fn audit_internal(
         all_findings.extend(dead_code_findings);
     }
 
-    // Phase 4f: Structural test coverage gap detection
+    // Phase 4f: Comment hygiene detection (TODO/FIXME/HACK + stale phrasing)
+    let comment_findings = comment_hygiene::analyze_comment_hygiene(&all_fingerprints);
+    if !comment_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Comment hygiene: {} finding(s) (TODO/FIXME/HACK markers, stale phrasing)",
+            comment_findings.len()
+        );
+        all_findings.extend(comment_findings);
+    }
+
+    // Phase 4g: Structural test coverage gap detection
     // Look up the extension's test mapping config for the component.
     if let Ok(comp) = component::load(component_id) {
         if let Some(extensions) = &comp.extensions {
@@ -348,7 +360,7 @@ fn audit_internal(
         }
     }
 
-    // Phase 4g: Scope filtering — when auditing changed files only, remove
+    // Phase 4h: Scope filtering — when auditing changed files only, remove
     // findings for files that weren't changed. Conventions are still discovered
     // from the full codebase so drift detection is accurate.
     if let Some(filter) = file_filter {
