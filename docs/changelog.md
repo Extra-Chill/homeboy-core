@@ -4,6 +4,23 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.56.1] - 2026-03-05
+
+### Added
+- include-fragment coverage handling and bulk JSON recipes (#468)
+- changed-since impact-scoped test execution (#448)
+
+### Changed
+- decompose core deploy orchestration into focused modules (#458)
+
+### Fixed
+- include explicit ids in component list output (#455)
+- honor flag-only project/component args and improve selection errors (#454)
+- support [Next] alias for unreleased section (#456)
+- fix(test-drift): tighten safe literal token filtering for auto-fix
+- prevent homeboy flags leaking into test runners (#446)
+- remove duplicate Next section from changelog
+
 ## [0.56.0] - 2026-03-04
 
 ### Added
