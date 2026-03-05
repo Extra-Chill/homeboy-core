@@ -1,5 +1,6 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
+use serde_json::Value;
 use std::path::Path;
 
 use homeboy::component::{self, Component};
@@ -147,23 +148,7 @@ pub struct ComponentExtra {
     pub shared: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct ComponentEntity {
-    pub id: String,
-    #[serde(flatten)]
-    pub component: Component,
-}
-
-impl From<Component> for ComponentEntity {
-    fn from(component: Component) -> Self {
-        Self {
-            id: component.id.clone(),
-            component,
-        }
-    }
-}
-
-pub type ComponentOutput = EntityCrudOutput<ComponentEntity, ComponentExtra>;
+pub type ComponentOutput = EntityCrudOutput<Value, ComponentExtra>;
 
 pub fn run(
     args: ComponentArgs,
@@ -256,7 +241,24 @@ pub fn run(
                     ComponentOutput {
                         command: "component.create".to_string(),
                         id: Some(result.id),
-                        entity: Some(result.entity.into()),
+                        entity: Some({
+                            let mut value =
+                                serde_json::to_value(&result.entity).map_err(|error| {
+                                    homeboy::Error::validation_invalid_argument(
+                                        "component",
+                                        "Failed to serialize component",
+                                        Some(error.to_string()),
+                                        None,
+                                    )
+                                })?;
+                            if let Value::Object(ref mut map) = value {
+                                map.insert(
+                                    "id".to_string(),
+                                    Value::String(result.entity.id.clone()),
+                                );
+                            }
+                            value
+                        }),
                         ..Default::default()
                     },
                     0,
@@ -316,7 +318,20 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
         ComponentOutput {
             command: "component.show".to_string(),
             id: Some(id.to_string()),
-            entity: Some(component.into()),
+            entity: Some({
+                let mut value = serde_json::to_value(&component).map_err(|error| {
+                    homeboy::Error::validation_invalid_argument(
+                        "component",
+                        "Failed to serialize component",
+                        Some(error.to_string()),
+                        None,
+                    )
+                })?;
+                if let Value::Object(ref mut map) = value {
+                    map.insert("id".to_string(), Value::String(component.id.clone()));
+                }
+                value
+            }),
             ..Default::default()
         },
         0,
@@ -430,7 +445,20 @@ fn set(
                     command: "component.set".to_string(),
                     id: Some(result.id),
                     updated_fields: result.updated_fields,
-                    entity: Some(comp.into()),
+                    entity: Some({
+                        let mut value = serde_json::to_value(&comp).map_err(|error| {
+                            homeboy::Error::validation_invalid_argument(
+                                "component",
+                                "Failed to serialize component",
+                                Some(error.to_string()),
+                                None,
+                            )
+                        })?;
+                        if let Value::Object(ref mut map) = value {
+                            map.insert("id".to_string(), Value::String(comp.id.clone()));
+                        }
+                        value
+                    }),
                     ..Default::default()
                 },
                 0,
@@ -479,7 +507,20 @@ fn add_version_target(id: &str, file: &str, pattern: &str) -> CmdResult<Componen
                     command: "component.add-version-target".to_string(),
                     id: Some(result.id),
                     updated_fields: result.updated_fields,
-                    entity: Some(comp.into()),
+                    entity: Some({
+                        let mut value = serde_json::to_value(&comp).map_err(|error| {
+                            homeboy::Error::validation_invalid_argument(
+                                "component",
+                                "Failed to serialize component",
+                                Some(error.to_string()),
+                                None,
+                            )
+                        })?;
+                        if let Value::Object(ref mut map) = value {
+                            map.insert("id".to_string(), Value::String(comp.id.clone()));
+                        }
+                        value
+                    }),
                     ..Default::default()
                 },
                 0,
@@ -513,7 +554,20 @@ fn rename(id: &str, new_id: &str) -> CmdResult<ComponentOutput> {
             command: "component.rename".to_string(),
             id: Some(component.id.clone()),
             updated_fields: vec!["id".to_string()],
-            entity: Some(component.into()),
+            entity: Some({
+                let mut value = serde_json::to_value(&component).map_err(|error| {
+                    homeboy::Error::validation_invalid_argument(
+                        "component",
+                        "Failed to serialize component",
+                        Some(error.to_string()),
+                        None,
+                    )
+                })?;
+                if let Value::Object(ref mut map) = value {
+                    map.insert("id".to_string(), Value::String(component.id.clone()));
+                }
+                value
+            }),
             ..Default::default()
         },
         0,
@@ -521,10 +575,23 @@ fn rename(id: &str, new_id: &str) -> CmdResult<ComponentOutput> {
 }
 
 fn list() -> CmdResult<ComponentOutput> {
-    let components: Vec<ComponentEntity> = component::list()?
+    let components: Vec<Value> = component::list()?
         .into_iter()
-        .map(ComponentEntity::from)
-        .collect();
+        .map(|component| {
+            let mut value = serde_json::to_value(&component).map_err(|error| {
+                homeboy::Error::validation_invalid_argument(
+                    "component",
+                    "Failed to serialize component",
+                    Some(error.to_string()),
+                    None,
+                )
+            })?;
+            if let Value::Object(ref mut map) = value {
+                map.insert("id".to_string(), Value::String(component.id.clone()));
+            }
+            Ok(value)
+        })
+        .collect::<homeboy::Result<Vec<Value>>>()?;
 
     Ok((
         ComponentOutput {
