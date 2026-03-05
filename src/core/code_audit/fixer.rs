@@ -610,7 +610,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
         }
     }
 
-    // Phase 1b: Missing test files from test_coverage findings.
+    // Handle missing test files reported by test_coverage findings.
     // These are mechanical and safe to scaffold.
     let mut new_files: Vec<NewFile> = Vec::new();
     for finding in &result.findings {
@@ -636,7 +636,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
         });
     }
 
-    // Phase 1c: Missing test methods from test_coverage findings.
+    // Handle missing test methods reported by test_coverage findings.
     // For deterministic safety, scaffold ignored stub tests instead of fake-pass assertions.
     for finding in &result.findings {
         if finding.kind != DeviationKind::MissingTestMethod {

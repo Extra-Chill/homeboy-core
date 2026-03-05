@@ -23,10 +23,7 @@ fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
 
     for fp in fingerprints {
         for (line_number, comment) in extract_comments(fp) {
-            if let Some(marker) = TODO_MARKERS
-                .iter()
-                .find(|m| has_todo_marker(comment, m))
-            {
+            if let Some(marker) = TODO_MARKERS.iter().find(|m| has_todo_marker(comment, m)) {
                 findings.push(Finding {
                     convention: "comment_hygiene".to_string(),
                     severity: Severity::Info,
@@ -44,10 +41,7 @@ fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
                 });
             }
 
-            if LEGACY_MARKERS
-                .iter()
-                .any(|m| has_legacy_marker(comment, m))
-            {
+            if LEGACY_MARKERS.iter().any(|m| has_legacy_marker(comment, m)) {
                 findings.push(Finding {
                     convention: "comment_hygiene".to_string(),
                     severity: Severity::Info,
