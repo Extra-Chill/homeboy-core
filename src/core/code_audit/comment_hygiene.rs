@@ -14,15 +14,19 @@ const LEGACY_MARKERS: &[&str] = &[
     "outdated",
 ];
 
-pub fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+pub(super) fn run(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+    analyze_comment_hygiene(fingerprints)
+}
+
+fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     for fp in fingerprints {
         for (line_number, comment) in extract_comments(fp) {
-            let upper = comment.to_uppercase();
-            let lower = comment.to_lowercase();
-
-            if let Some(marker) = TODO_MARKERS.iter().find(|m| upper.contains(**m)) {
+            if let Some(marker) = TODO_MARKERS
+                .iter()
+                .find(|m| has_todo_marker(comment, m))
+            {
                 findings.push(Finding {
                     convention: "comment_hygiene".to_string(),
                     severity: Severity::Info,
@@ -40,7 +44,10 @@ pub fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding
                 });
             }
 
-            if LEGACY_MARKERS.iter().any(|m| lower.contains(m)) {
+            if LEGACY_MARKERS
+                .iter()
+                .any(|m| has_legacy_marker(comment, m))
+            {
                 findings.push(Finding {
                     convention: "comment_hygiene".to_string(),
                     severity: Severity::Info,
@@ -71,7 +78,10 @@ fn extract_comments(fp: &FileFingerprint) -> Vec<(usize, &str)> {
             .enumerate()
             .filter_map(|(idx, line)| {
                 let trimmed = line.trim_start();
-                if trimmed.starts_with("//") {
+                if trimmed.starts_with("//")
+                    && !trimmed.starts_with("///")
+                    && !trimmed.starts_with("//!")
+                {
                     Some((idx + 1, trimmed.trim_start_matches('/').trim()))
                 } else {
                     None
@@ -110,6 +120,26 @@ fn truncate_comment(comment: &str) -> String {
         let truncated: String = comment.chars().take(MAX_CHARS).collect();
         format!("{}...", truncated)
     }
+}
+
+fn has_todo_marker(comment: &str, marker: &str) -> bool {
+    let normalized = normalized_comment(comment);
+    let upper = normalized.to_uppercase();
+
+    upper == marker
+        || upper.starts_with(&format!("{}:", marker))
+        || upper.starts_with(&format!("{} ", marker))
+}
+
+fn has_legacy_marker(comment: &str, marker: &str) -> bool {
+    let normalized = normalized_comment(comment);
+    let lower = normalized.to_lowercase();
+
+    lower.starts_with(marker)
+}
+
+fn normalized_comment(comment: &str) -> &str {
+    comment.trim_start_matches(['-', '*', ' ']).trim()
 }
 
 #[cfg(test)]
@@ -159,6 +189,17 @@ mod tests {
     }
 
     #[test]
+    fn test_run() {
+        let fp = make_fp(
+            "src/example.rs",
+            Language::Rust,
+            "// TODO: check\nfn x() {}",
+        );
+        let findings = run(&[&fp]);
+        assert!(!findings.is_empty());
+    }
+
+    #[test]
     fn test_extract_comments() {
         let fp = make_fp(
             "src/example.php",
@@ -178,5 +219,39 @@ mod tests {
         let truncated = truncate_comment(&comment);
         assert!(truncated.ends_with("..."));
         assert!(truncated.chars().count() <= 123);
+    }
+
+    #[test]
+    fn test_make_fp() {
+        let fp = make_fp("src/example.rs", Language::Rust, "fn x() {}");
+        assert_eq!(fp.relative_path, "src/example.rs");
+        assert_eq!(fp.language, Language::Rust);
+    }
+
+    #[test]
+    fn test_truncate_comment() {
+        let comment = "a".repeat(200);
+        let truncated = truncate_comment(&comment);
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.chars().count() <= 123);
+    }
+
+    #[test]
+    fn test_has_todo_marker() {
+        assert!(has_todo_marker("TODO: fix this", "TODO"));
+        assert!(!has_todo_marker("documentation TODO section", "TODO"));
+    }
+
+    #[test]
+    fn test_has_legacy_marker() {
+        assert!(has_legacy_marker("temporary workaround", "temporary"));
+        assert!(!has_legacy_marker("non temporary text", "temporary"));
+    }
+
+    #[test]
+    fn test_normalized_comment() {
+        assert_eq!(normalized_comment("// TODO: check"), "// TODO: check");
+        assert_eq!(normalized_comment("- TODO: check"), "TODO: check");
+        assert_eq!(normalized_comment("  * legacy note"), "legacy note");
     }
 }

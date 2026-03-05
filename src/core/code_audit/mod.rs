@@ -326,7 +326,7 @@ fn audit_internal(
     }
 
     // Phase 4f: Comment hygiene detection (TODO/FIXME/HACK + stale phrasing)
-    let comment_findings = comment_hygiene::analyze_comment_hygiene(&all_fingerprints);
+    let comment_findings = comment_hygiene::run(&all_fingerprints);
     if !comment_findings.is_empty() {
         log_status!(
             "audit",
