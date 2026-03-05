@@ -84,6 +84,10 @@ pub struct TestArgs {
 
     #[command(flatten)]
     _json: HiddenJsonArgs,
+
+    /// Print compact machine-readable summary (for CI wrappers)
+    #[arg(long)]
+    json_summary: bool,
 }
 
 #[derive(Serialize)]
@@ -109,6 +113,74 @@ pub struct TestOutput {
     auto_fix_drift: Option<AutoFixDriftOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     test_scope: Option<TestScopeOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<TestSummaryOutput>,
+}
+
+#[derive(Serialize)]
+pub struct TestFailureSummaryItem {
+    test_name: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct TestSummaryOutput {
+    total: u64,
+    passed: u64,
+    failed: u64,
+    skipped: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    failures: Vec<TestFailureSummaryItem>,
+    exit_code: i32,
+}
+
+fn build_test_summary(
+    test_counts: Option<&TestCounts>,
+    analysis: Option<&TestAnalysis>,
+    exit_code: i32,
+) -> TestSummaryOutput {
+    let (total, passed, failed, skipped) = if let Some(counts) = test_counts {
+        (counts.total, counts.passed, counts.failed, counts.skipped)
+    } else {
+        let total = analysis.map(|a| a.total_tests).unwrap_or(0);
+        let passed = analysis.map(|a| a.total_passed).unwrap_or(0);
+        let failed = analysis.map(|a| a.total_failures as u64).unwrap_or(0);
+        let skipped = total.saturating_sub(passed + failed);
+        (total, passed, failed, skipped)
+    };
+
+    let failures = analysis
+        .map(|a| {
+            a.clusters
+                .iter()
+                .flat_map(|cluster| {
+                    cluster
+                        .example_tests
+                        .iter()
+                        .map(|name| TestFailureSummaryItem {
+                            test_name: name.clone(),
+                            message: cluster.pattern.clone(),
+                            file: cluster.affected_files.first().cloned(),
+                            line: None,
+                        })
+                })
+                .take(20)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    TestSummaryOutput {
+        total,
+        passed,
+        failed,
+        skipped,
+        failures,
+        exit_code,
+    }
 }
 
 #[derive(Serialize)]
@@ -197,6 +269,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--drift",
         "--scaffold",
         "--write",
+        "--json-summary",
         "--baseline",
         "--ignore-baseline",
         "--ratchet",
@@ -394,6 +467,11 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
                     scaffold: None,
                     auto_fix_drift: None,
                     test_scope: Some(scope.clone()),
+                    summary: if args.json_summary {
+                        Some(build_test_summary(None, None, 0))
+                    } else {
+                        None
+                    },
                 },
                 0,
             ));
@@ -593,6 +671,15 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
 
     // Exit code: baseline regression overrides test exit code
     let exit_code = baseline_exit_override.unwrap_or(output.exit_code);
+    let summary = if args.json_summary {
+        Some(build_test_summary(
+            test_counts.as_ref(),
+            analysis.as_ref(),
+            exit_code,
+        ))
+    } else {
+        None
+    };
 
     Ok((
         TestOutput {
@@ -608,6 +695,7 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
             scaffold: None,
             auto_fix_drift: None,
             test_scope: changed_scope,
+            summary,
         },
         exit_code,
     ))
@@ -744,6 +832,7 @@ fn run_auto_fix_drift(
                 ..output
             }),
             test_scope: None,
+            summary: None,
         },
         0,
     ))
@@ -889,6 +978,7 @@ fn run_drift(component_id: &str, component: &Component, since: &str) -> CmdResul
             scaffold: None,
             auto_fix_drift: None,
             test_scope: None,
+            summary: None,
         },
         exit_code,
     ))
@@ -985,6 +1075,7 @@ fn run_scaffold(
                 scaffold: Some(scaffold_output),
                 auto_fix_drift: None,
                 test_scope: None,
+                summary: None,
             },
             0,
         ))
@@ -1074,6 +1165,7 @@ fn run_scaffold(
                 scaffold: Some(scaffold_output),
                 auto_fix_drift: None,
                 test_scope: None,
+                summary: None,
             },
             0,
         ))
@@ -1209,6 +1301,16 @@ mod tests {
         let args = vec![
             "--path".to_string(),
             "/tmp/checkout".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+    }
+
+    #[test]
+    fn filter_strips_json_summary_flag() {
+        let args = vec![
+            "--json-summary".to_string(),
             "--filter=SomeTest".to_string(),
         ];
         let result = filter_homeboy_flags(&args);
