@@ -102,7 +102,6 @@ pub fn run(
     mut args: DeployArgs,
     _global: &crate::commands::GlobalArgs,
 ) -> CmdResult<DeployCommandOutput> {
-    // Resolve fleet to project IDs if specified
     if let Some(ref fleet_id) = args.fleet {
         let fl = homeboy::fleet::load(fleet_id)?;
         return run_multi_project(&args, &fl.project_ids);
@@ -110,11 +109,9 @@ pub fn run(
 
     // Resolve --shared: find all projects using the specified component(s)
     if args.shared {
-        // Get component IDs from args
         let component_ids: Vec<String> = if let Some(ref comps) = args.component {
             comps.clone()
         } else if let Some(ref target) = args.target_id {
-            // First positional arg is the component when using --shared
             vec![target.clone()]
         } else {
             return Err(homeboy::Error::validation_invalid_argument(
@@ -134,7 +131,6 @@ pub fn run(
             ));
         }
 
-        // Find all projects using any of these components
         let mut project_ids: Vec<String> = Vec::new();
         for component_id in &component_ids {
             let using = homeboy::component::projects_using(component_id).unwrap_or_default();
@@ -156,9 +152,8 @@ pub fn run(
             ));
         }
 
-        // Override component_ids for multi-project deploy
         args.component_ids = component_ids;
-        args.target_id = None; // Clear since we're using component_ids directly
+        args.target_id = None;
 
         return run_multi_project(&args, &project_ids);
     }
