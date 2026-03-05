@@ -275,6 +275,7 @@ pub mod component;
 pub mod config;
 pub mod db;
 pub mod deploy;
+pub mod deploy_validation;
 pub mod docs;
 pub mod extension;
 pub mod file;

@@ -6,6 +6,7 @@ use homeboy::deploy::{self, ComponentDeployResult, DeployConfig, DeploySummary};
 use homeboy::resolve::{infer_project_for_components, resolve_project_components};
 
 use super::{CmdResult, ProjectsSummary};
+use crate::commands::deploy_validation::validate_project_component_selection;
 
 #[derive(Args)]
 pub struct DeployArgs {
@@ -197,18 +198,7 @@ pub fn run(
             }
             comps.extend(args.component_ids.clone());
 
-            if comps.is_empty() && !(args.all || args.outdated || args.check || args.json.is_some())
-            {
-                return Err(homeboy::Error::validation_invalid_argument(
-                    "input",
-                    "Provide component IDs with --project, or add --all/--outdated/--check",
-                    None,
-                    Some(vec![
-                        "Deploy selected components: homeboy deploy --project <project> --component <id> --component <id>".to_string(),
-                        "Deploy all project components: homeboy deploy --project <project> --all".to_string(),
-                    ]),
-                ));
-            }
+            validate_project_component_selection(&args)?;
 
             (proj.clone(), comps)
         }
