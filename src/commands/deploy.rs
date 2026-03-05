@@ -27,10 +27,7 @@ pub struct DeployArgs {
     /// Explicit component IDs (takes precedence over positional)
     #[arg(long, short = 'c')]
     pub component: Option<Vec<String>>,
-    /// JSON input spec for bulk operations
-    /// Accepts either:
-    /// - JSON array: '["component-a","component-b"]'
-    /// - JSON object: '{"component_ids":["component-a","component-b"]}'
+    /// JSON input spec for bulk operations (array or {"component_ids": [...]})
     #[arg(long)]
     pub json: Option<String>,
     /// Deploy all configured components
