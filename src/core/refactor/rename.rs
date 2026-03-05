@@ -435,7 +435,7 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
     // Build the working variant list — may be extended by discovery
     let mut all_variants = spec.variants.clone();
 
-    // Phase 1: Initial search with generated variants
+    // Initial search with generated variants.
     if !spec.literal {
         // Discover additional case variants for any generated variant with 0 matches.
         // For example, if we generated "WpAgent" but the codebase uses "WPAgent",

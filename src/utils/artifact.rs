@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 /// - If path contains no glob chars (`*`, `?`, `[`, `]`), returns it unchanged after existence check
 /// - If path is a glob, expands and returns most recently modified match
 /// - Returns error if no files match or path doesn't exist
-pub fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
+pub(crate) fn resolve_artifact_path(pattern: &str) -> Result<PathBuf> {
     if !contains_glob_chars(pattern) {
         let path = PathBuf::from(pattern);
         if path.exists() {

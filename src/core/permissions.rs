@@ -37,7 +37,7 @@ pub fn fix_local_permissions(local_path: &str) {
 }
 
 /// Fix file permissions after deployment.
-pub fn fix_deployed_permissions(
+pub(crate) fn fix_deployed_permissions(
     ssh_client: &SshClient,
     remote_path: &str,
     remote_owner: Option<&str>,
