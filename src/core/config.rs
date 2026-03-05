@@ -627,13 +627,23 @@ pub(crate) struct BulkIdsInput {
 /// Parse JSON spec into a BulkIdsInput.
 pub(crate) fn parse_bulk_ids(json_spec: &str) -> Result<BulkIdsInput> {
     let raw = read_json_spec_to_string(json_spec)?;
-    serde_json::from_str(&raw).map_err(|e| {
-        Error::validation_invalid_json(
-            e,
-            Some("parse bulk IDs input".to_string()),
-            Some(raw.chars().take(200).collect::<String>()),
-        )
-    })
+    if let Ok(ids) = serde_json::from_str::<Vec<String>>(&raw) {
+        return Ok(BulkIdsInput { component_ids: ids });
+    }
+
+    serde_json::from_str::<BulkIdsInput>(&raw)
+        .map_err(|e| {
+            Error::validation_invalid_json(
+                e,
+                Some("parse bulk IDs input".to_string()),
+                Some(raw.chars().take(200).collect::<String>()),
+            )
+        })
+        .map_err(|err| {
+            err.with_hint(
+                "Expected JSON array: '[\"component-a\",\"component-b\"]' OR JSON object: '{\"component_ids\":[\"component-a\",\"component-b\"]}'",
+            )
+        })
 }
 
 // ============================================================================
@@ -1524,5 +1534,30 @@ mod tests {
         let result = merge_config(&mut config, patch, &[]);
         assert!(result.is_ok());
         assert!(config.extensions.is_some());
+    }
+
+    #[test]
+    fn parse_bulk_ids_accepts_json_array() {
+        let parsed = parse_bulk_ids(r#"["api","web"]"#).unwrap();
+        assert_eq!(parsed.component_ids, vec!["api", "web"]);
+    }
+
+    #[test]
+    fn parse_bulk_ids_accepts_json_object() {
+        let parsed = parse_bulk_ids(r#"{"component_ids":["api","web"]}"#).unwrap();
+        assert_eq!(parsed.component_ids, vec!["api", "web"]);
+    }
+
+    #[test]
+    fn parse_bulk_ids_invalid_input_has_shape_hint() {
+        let err = parse_bulk_ids("api, web").unwrap_err();
+        let hints = err.hints;
+        assert!(
+            hints
+                .iter()
+                .any(|h| h.message.contains("Expected JSON array")),
+            "expected parse hint, got: {:?}",
+            hints
+        );
     }
 }

@@ -7,6 +7,14 @@ use homeboy::resolve::{infer_project_for_components, resolve_project_components}
 
 use super::{CmdResult, ProjectsSummary};
 
+const DEPLOY_RECIPES: &[&str] = &[
+    "Deploy single component: homeboy deploy <component-id>",
+    "Deploy all in project: homeboy deploy <project-id> --all",
+    "Flag style: homeboy deploy --project <project> --component <component>",
+    "Bulk JSON array: homeboy deploy --project <project> --json '[\"component-a\",\"component-b\"]'",
+    "Bulk JSON object: homeboy deploy --project <project> --json '{\"component_ids\":[\"component-a\",\"component-b\"]}'",
+];
+
 #[derive(Args)]
 pub struct DeployArgs {
     /// Target ID: project ID or component ID (order is auto-detected)
@@ -20,6 +28,9 @@ pub struct DeployArgs {
     #[arg(long, short = 'c')]
     pub component: Option<Vec<String>>,
     /// JSON input spec for bulk operations
+    /// Accepts either:
+    /// - JSON array: '["component-a","component-b"]'
+    /// - JSON object: '{"component_ids":["component-a","component-b"]}'
     #[arg(long)]
     pub json: Option<String>,
     /// Deploy all configured components
@@ -182,10 +193,7 @@ pub fn run(
                     "input",
                     "Provide component IDs with --project, or add --all/--outdated/--check",
                     None,
-                    Some(vec![
-                        "Deploy selected components: homeboy deploy --project <project> --component <id> --component <id>".to_string(),
-                        "Deploy all project components: homeboy deploy --project <project> --all".to_string(),
-                    ]),
+                    Some(DEPLOY_RECIPES.iter().map(|r| (*r).to_string()).collect()),
                 ));
             }
 
@@ -234,12 +242,7 @@ pub fn run(
                 "input",
                 "Provide component ID, project ID with --all, or use flags",
                 None,
-                Some(vec![
-                    "Deploy a single component: homeboy deploy <component-id>".to_string(),
-                    "Deploy to a project: homeboy deploy <project-id> --all".to_string(),
-                    "Flag style: homeboy deploy --project <project> --component <component>"
-                        .to_string(),
-                ]),
+                Some(DEPLOY_RECIPES.iter().map(|r| (*r).to_string()).collect()),
             ));
         }
     };

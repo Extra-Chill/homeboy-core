@@ -238,7 +238,7 @@ fn partition_fingerprints<'a>(
 
 /// Check if a file path is within one of the configured source directories.
 fn is_source_file(path: &str, config: &TestMappingConfig) -> bool {
-    config.source_dirs.iter().any(|dir| path.starts_with(dir))
+    config.source_dirs.iter().any(|dir| path.starts_with(dir)) || path.ends_with(".inc")
 }
 
 /// Check if a file path is within one of the configured test directories.
@@ -250,6 +250,10 @@ fn is_test_file(path: &str, config: &TestMappingConfig) -> bool {
 ///
 /// Template variables: `{dir}` (relative dir within source_dir), `{name}` (stem), `{ext}` (extension).
 fn source_to_test_path(source_path: &str, config: &TestMappingConfig) -> Option<String> {
+    if source_path.ends_with(".inc") {
+        return None;
+    }
+
     // Find which source_dir this file is in
     let source_dir = config
         .source_dirs
@@ -448,6 +452,16 @@ mod tests {
         assert_eq!(
             source_to_test_path("src/main.rs", &config),
             Some("tests/main_test.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn include_fragment_is_source_but_has_no_direct_test_path() {
+        let config = make_config();
+        assert!(is_source_file("src/core/deploy/types.inc", &config));
+        assert_eq!(
+            source_to_test_path("src/core/deploy/types.inc", &config),
+            None
         );
     }
 
