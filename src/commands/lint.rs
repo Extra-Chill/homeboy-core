@@ -1,10 +1,12 @@
 use clap::Args;
 use serde::Serialize;
+use std::collections::HashSet;
 
 use homeboy::component::Component;
 use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
 use homeboy::git;
+use homeboy::utils::autofix::{self, AutofixMode};
 
 use super::args::{HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::CmdResult;
@@ -67,7 +69,15 @@ pub struct LintOutput {
     component: String,
     exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    autofix: Option<LintAutofixOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+pub struct LintAutofixOutput {
+    files_modified: usize,
+    rerun_recommended: bool,
 }
 
 fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> {
@@ -123,6 +133,12 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
     let component = args.comp.load()?;
     let script_path = resolve_lint_script(&component)?;
 
+    let before_fix_files = if args.fix {
+        Some(changed_file_set(&component.local_path)?)
+    } else {
+        None
+    };
+
     // Resolve glob from --changed-only or --changed-since flags
     let effective_glob = if args.changed_only {
         let uncommitted = git::get_uncommitted_changes(&component.local_path)?;
@@ -140,6 +156,7 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
                     status: "passed".to_string(),
                     component: args.comp.component,
                     exit_code: 0,
+                    autofix: None,
                     hints: None,
                 },
                 0,
@@ -169,6 +186,7 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
                     status: "passed".to_string(),
                     component: args.comp.component,
                     exit_code: 0,
+                    autofix: None,
                     hints: None,
                 },
                 0,
@@ -203,9 +221,35 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
         .env_opt("HOMEBOY_CATEGORY", &args.category)
         .run()?;
 
-    let status = if output.success { "passed" } else { "failed" };
+    let mut status = if output.success { "passed" } else { "failed" }.to_string();
+    let mut autofix = None;
 
     let mut hints = Vec::new();
+
+    if args.fix {
+        let after_fix_files = changed_file_set(&component.local_path)?;
+        let files_modified = before_fix_files
+            .as_ref()
+            .map(|before| count_newly_changed(before, &after_fix_files))
+            .unwrap_or(0);
+
+        let outcome = autofix::standard_outcome(
+            AutofixMode::Write,
+            files_modified,
+            Some(format!("homeboy test {} --analyze", args.comp.component)),
+            vec![],
+        );
+
+        if output.success && outcome.status == "auto_fixed" {
+            status = outcome.status.clone();
+        }
+
+        hints.extend(outcome.hints.clone());
+        autofix = Some(LintAutofixOutput {
+            files_modified,
+            rerun_recommended: outcome.rerun_recommended,
+        });
+    }
 
     // Fix hint when linting fails
     if !output.success && !args.fix {
@@ -234,11 +278,48 @@ pub fn run(args: LintArgs, _global: &super::GlobalArgs) -> CmdResult<LintOutput>
 
     Ok((
         LintOutput {
-            status: status.to_string(),
+            status,
             component: args.comp.component,
             exit_code: output.exit_code,
+            autofix,
             hints,
         },
         output.exit_code,
     ))
+}
+
+fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
+    let uncommitted = git::get_uncommitted_changes(local_path)?;
+    let mut files = HashSet::new();
+    files.extend(uncommitted.staged);
+    files.extend(uncommitted.unstaged);
+    files.extend(uncommitted.untracked);
+    Ok(files)
+}
+
+fn count_newly_changed(before: &HashSet<String>, after: &HashSet<String>) -> usize {
+    after.difference(before).count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_newly_changed_only_counts_new_entries() {
+        let before = HashSet::from([
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+            "README.md".to_string(),
+        ]);
+        let after = HashSet::from([
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+            "README.md".to_string(),
+            "src/c.rs".to_string(),
+            "tests/a_test.rs".to_string(),
+        ]);
+
+        assert_eq!(count_newly_changed(&before, &after), 2);
+    }
 }
