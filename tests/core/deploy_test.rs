@@ -2,6 +2,12 @@ use homeboy::deploy::parse_bulk_component_ids;
 
 #[test]
 fn test_parse_bulk_component_ids_supports_json_array() {
+    let ids = parse_bulk_component_ids(r#"["api","web"]"#).unwrap();
+    assert_eq!(ids, vec!["api", "web"]);
+}
+
+#[test]
+fn test_parse_bulk_component_ids_supports_json_object() {
     let ids = parse_bulk_component_ids(r#"{"component_ids":["api","web"]}"#).unwrap();
     assert_eq!(ids, vec!["api", "web"]);
 }
