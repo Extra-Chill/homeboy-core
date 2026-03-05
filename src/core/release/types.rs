@@ -125,4 +125,7 @@ pub struct ReleaseOptions {
     /// Skip lint/test code quality checks before release.
     #[serde(default)]
     pub skip_checks: bool,
+    /// Allow requested bump to be lower than commit-derived recommendation.
+    #[serde(default)]
+    pub allow_underbump: bool,
 }

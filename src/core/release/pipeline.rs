@@ -86,6 +86,10 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     // === Stage 1: Independent validations ===
     v.capture(validate_commits_vs_changelog(&component), "commits");
+    v.capture(
+        validate_bump_guardrail(&component, &options.bump_type, options.allow_underbump),
+        "semver_bump",
+    );
     v.capture(validate_changelog(&component), "changelog");
     let version_info = v.capture(version::read_version(Some(component_id)), "version");
 
@@ -195,6 +199,78 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         warnings,
         hints,
     })
+}
+
+/// Enforce semver floor from commits since latest tag.
+///
+/// Blocks under-bumps by default (e.g., requesting patch when commits include feat).
+fn validate_bump_guardrail(
+    component: &Component,
+    requested_bump: &str,
+    allow_underbump: bool,
+) -> Result<()> {
+    let requested = git::SemverBump::from_str(requested_bump).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "bump_type",
+            format!("Invalid bump type: {}", requested_bump),
+            None,
+            Some(vec!["Use one of: patch, minor, major".to_string()]),
+        )
+    })?;
+
+    let latest_tag = git::get_latest_tag(&component.local_path)?;
+    let commits = git::get_commits_since_tag(&component.local_path, latest_tag.as_deref())?;
+    let Some(recommended) = git::recommended_bump_from_commits(&commits) else {
+        return Ok(());
+    };
+
+    if requested.rank() >= recommended.rank() || allow_underbump {
+        return Ok(());
+    }
+
+    let mut triggers: Vec<String> = commits
+        .iter()
+        .filter(|c| match recommended {
+            git::SemverBump::Major => c.category == git::CommitCategory::Breaking,
+            git::SemverBump::Minor => {
+                c.category == git::CommitCategory::Breaking
+                    || c.category == git::CommitCategory::Feature
+            }
+            git::SemverBump::Patch => {
+                matches!(
+                    c.category,
+                    git::CommitCategory::Breaking
+                        | git::CommitCategory::Feature
+                        | git::CommitCategory::Fix
+                        | git::CommitCategory::Other
+                )
+            }
+        })
+        .take(5)
+        .map(|c| format!("{} {}", c.hash, c.subject))
+        .collect();
+
+    if triggers.is_empty() {
+        triggers.push("No trigger commits found (unexpected state)".to_string());
+    }
+
+    Err(Error::validation_invalid_argument(
+        "bump_type",
+        format!(
+            "Requested '{}' but commits since {} require at least '{}'",
+            requested.as_str(),
+            latest_tag.unwrap_or_else(|| "initial commit".to_string()),
+            recommended.as_str()
+        ),
+        None,
+        Some(vec![
+            format!("Trigger commits:\n  - {}", triggers.join("\n  - ")),
+            format!(
+                "Use '{}' or higher, or pass --allow-underbump to override intentionally",
+                recommended.as_str()
+            ),
+        ]),
+    ))
 }
 
 fn validate_changelog(component: &Component) -> Result<()> {
