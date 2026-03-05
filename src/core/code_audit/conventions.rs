@@ -120,6 +120,8 @@ pub enum DeviationKind {
     TodoMarker,
     /// Comment appears stale or legacy (temporary/workaround/phase refs).
     LegacyComment,
+    /// File violates a configured architecture/layer ownership rule.
+    LayerOwnershipViolation,
 }
 
 // ============================================================================
