@@ -147,7 +147,23 @@ pub struct ComponentExtra {
     pub shared: Option<std::collections::HashMap<String, Vec<String>>>,
 }
 
-pub type ComponentOutput = EntityCrudOutput<Component, ComponentExtra>;
+#[derive(Debug, Serialize, Clone)]
+pub struct ComponentEntity {
+    pub id: String,
+    #[serde(flatten)]
+    pub component: Component,
+}
+
+impl From<Component> for ComponentEntity {
+    fn from(component: Component) -> Self {
+        Self {
+            id: component.id.clone(),
+            component,
+        }
+    }
+}
+
+pub type ComponentOutput = EntityCrudOutput<ComponentEntity, ComponentExtra>;
 
 pub fn run(
     args: ComponentArgs,
@@ -240,7 +256,7 @@ pub fn run(
                     ComponentOutput {
                         command: "component.create".to_string(),
                         id: Some(result.id),
-                        entity: Some(result.entity),
+                        entity: Some(result.entity.into()),
                         ..Default::default()
                     },
                     0,
@@ -300,7 +316,7 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
         ComponentOutput {
             command: "component.show".to_string(),
             id: Some(id.to_string()),
-            entity: Some(component),
+            entity: Some(component.into()),
             ..Default::default()
         },
         0,
@@ -414,7 +430,7 @@ fn set(
                     command: "component.set".to_string(),
                     id: Some(result.id),
                     updated_fields: result.updated_fields,
-                    entity: Some(comp),
+                    entity: Some(comp.into()),
                     ..Default::default()
                 },
                 0,
@@ -463,7 +479,7 @@ fn add_version_target(id: &str, file: &str, pattern: &str) -> CmdResult<Componen
                     command: "component.add-version-target".to_string(),
                     id: Some(result.id),
                     updated_fields: result.updated_fields,
-                    entity: Some(comp),
+                    entity: Some(comp.into()),
                     ..Default::default()
                 },
                 0,
@@ -497,7 +513,7 @@ fn rename(id: &str, new_id: &str) -> CmdResult<ComponentOutput> {
             command: "component.rename".to_string(),
             id: Some(component.id.clone()),
             updated_fields: vec!["id".to_string()],
-            entity: Some(component),
+            entity: Some(component.into()),
             ..Default::default()
         },
         0,
@@ -505,7 +521,10 @@ fn rename(id: &str, new_id: &str) -> CmdResult<ComponentOutput> {
 }
 
 fn list() -> CmdResult<ComponentOutput> {
-    let components = component::list()?;
+    let components: Vec<ComponentEntity> = component::list()?
+        .into_iter()
+        .map(ComponentEntity::from)
+        .collect();
 
     Ok((
         ComponentOutput {
