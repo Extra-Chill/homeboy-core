@@ -7,7 +7,7 @@ use homeboy::git;
 use homeboy::utils::autofix::{self, AutofixMode};
 
 use super::args::BaselineArgs;
-use super::CmdResult;
+use super::{CmdResult, GlobalArgs};
 
 #[derive(Args)]
 pub struct AuditArgs {
@@ -113,6 +113,10 @@ pub enum AuditOutput {
     Summary(AuditSummaryOutput),
 }
 
+pub fn run(args: AuditArgs, _global: &GlobalArgs) -> CmdResult<AuditOutput> {
+    run_inner(args)
+}
+
 fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSummaryOutput {
     let warnings = result
         .findings
@@ -147,7 +151,7 @@ fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSummary
     }
 }
 
-pub fn run(args: AuditArgs, _global: &super::GlobalArgs) -> CmdResult<AuditOutput> {
+fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
     // Resolve component ID and source path
     let (resolved_id, resolved_path) = if Path::new(&args.component_id).is_dir() {
         let effective = args

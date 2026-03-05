@@ -13,11 +13,12 @@ use homeboy::utils::autofix::{self, AutofixMode};
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::test_scope::{build_phpunit_filter_regex, compute_changed_test_scope, TestScopeOutput};
-use super::CmdResult;
+use super::{CmdResult, GlobalArgs};
 
 mod parsing;
 
 pub use parsing::CoverageOutput;
+use parsing::{build_test_summary, TestSummaryOutput};
 
 #[derive(Args)]
 pub struct TestArgs {
@@ -115,72 +116,6 @@ pub struct TestOutput {
     test_scope: Option<TestScopeOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<TestSummaryOutput>,
-}
-
-#[derive(Serialize)]
-pub struct TestFailureSummaryItem {
-    test_name: String,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<u32>,
-}
-
-#[derive(Serialize)]
-pub struct TestSummaryOutput {
-    total: u64,
-    passed: u64,
-    failed: u64,
-    skipped: u64,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    failures: Vec<TestFailureSummaryItem>,
-    exit_code: i32,
-}
-
-fn build_test_summary(
-    test_counts: Option<&TestCounts>,
-    analysis: Option<&TestAnalysis>,
-    exit_code: i32,
-) -> TestSummaryOutput {
-    let (total, passed, failed, skipped) = if let Some(counts) = test_counts {
-        (counts.total, counts.passed, counts.failed, counts.skipped)
-    } else {
-        let total = analysis.map(|a| a.total_tests).unwrap_or(0);
-        let passed = analysis.map(|a| a.total_passed).unwrap_or(0);
-        let failed = analysis.map(|a| a.total_failures as u64).unwrap_or(0);
-        let skipped = total.saturating_sub(passed + failed);
-        (total, passed, failed, skipped)
-    };
-
-    let failures = analysis
-        .map(|a| {
-            a.clusters
-                .iter()
-                .flat_map(|cluster| {
-                    cluster
-                        .example_tests
-                        .iter()
-                        .map(|name| TestFailureSummaryItem {
-                            test_name: name.clone(),
-                            message: cluster.pattern.clone(),
-                            file: cluster.affected_files.first().cloned(),
-                            line: None,
-                        })
-                })
-                .take(20)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    TestSummaryOutput {
-        total,
-        passed,
-        failed,
-        skipped,
-        failures,
-        exit_code,
-    }
 }
 
 #[derive(Serialize)]
@@ -363,7 +298,8 @@ fn resolve_test_script(component: &Component) -> homeboy::error::Result<String> 
         })
 }
 
-pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput> {
+pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
+    let source_path = args.comp.source_path()?;
     let component = args.comp.load()?;
 
     // Scaffold mode — generate test stubs without running tests
@@ -551,9 +487,6 @@ pub fn run(args: TestArgs, _global: &super::GlobalArgs) -> CmdResult<TestOutput>
         }
         None
     };
-
-    // Resolve source path for baseline storage
-    let source_path = args.comp.source_path()?;
 
     // --baseline: save current state
     if args.baseline_args.baseline {

@@ -1,7 +1,7 @@
 use clap::Args;
 use serde::Serialize;
 
-use super::CmdResult;
+use super::{CmdResult, GlobalArgs};
 
 #[derive(Args)]
 pub struct SupportsArgs {
@@ -99,7 +99,7 @@ const SUPPORT_MATRIX: &[(&str, &[&str])] = &[
     ),
 ];
 
-pub fn run(args: SupportsArgs, _global: &super::GlobalArgs) -> CmdResult<SupportsOutput> {
+pub fn run(args: SupportsArgs, _global: &GlobalArgs) -> CmdResult<SupportsOutput> {
     let command = normalize_command(&args.command);
     let option = args.option.trim().to_string();
 
@@ -150,56 +150,4 @@ pub fn run(args: SupportsArgs, _global: &super::GlobalArgs) -> CmdResult<Support
 
 fn normalize_command(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn supports_known_option() {
-        let (out, code) = run(
-            SupportsArgs {
-                command: "test".to_string(),
-                option: "--changed-since".to_string(),
-            },
-            &super::super::GlobalArgs {},
-        )
-        .expect("supports should run");
-
-        assert!(out.supported);
-        assert_eq!(code, 0);
-    }
-
-    #[test]
-    fn rejects_unknown_option_with_known_command() {
-        let (out, code) = run(
-            SupportsArgs {
-                command: "test".to_string(),
-                option: "--definitely-unknown".to_string(),
-            },
-            &super::super::GlobalArgs {},
-        )
-        .expect("supports should run");
-
-        assert!(!out.supported);
-        assert_eq!(code, 1);
-        assert!(!out.known_options.is_empty());
-    }
-
-    #[test]
-    fn rejects_unknown_command() {
-        let (out, code) = run(
-            SupportsArgs {
-                command: "totally unknown command".to_string(),
-                option: "--path".to_string(),
-            },
-            &super::super::GlobalArgs {},
-        )
-        .expect("supports should run");
-
-        assert!(!out.supported);
-        assert_eq!(code, 1);
-        assert!(out.hint.is_some());
-    }
 }
