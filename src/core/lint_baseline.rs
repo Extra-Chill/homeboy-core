@@ -31,11 +31,11 @@ impl Fingerprintable for LintFingerprint<'_> {
     }
 
     fn description(&self) -> String {
-        self.0.message.clone()
+        format!("{}", self.0.message)
     }
 
     fn context_label(&self) -> String {
-        self.0.category.clone()
+        format!("lint:{}", self.0.category)
     }
 }
 
@@ -87,12 +87,51 @@ pub fn save_baseline(
 
 pub fn load_baseline(source_path: &Path) -> Option<LintBaseline> {
     let config = BaselineConfig::new(source_path, BASELINE_KEY);
-    generic::load::<LintBaselineMetadata>(&config)
-        .ok()
-        .flatten()
+    match generic::load::<LintBaselineMetadata>(&config) {
+        Ok(value) => value,
+        Err(_) => None,
+    }
 }
 
 pub fn compare(findings: &[LintFinding], baseline: &LintBaseline) -> BaselineComparison {
     let items: Vec<LintFingerprint> = findings.iter().map(LintFingerprint).collect();
     generic::compare(&items, baseline)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fingerprint() {
+        let finding = LintFinding {
+            id: "id-1".to_string(),
+            message: "message".to_string(),
+            category: "security".to_string(),
+        };
+        let fp = LintFingerprint(&finding);
+        assert_eq!(fp.fingerprint(), "id-1");
+    }
+
+    #[test]
+    fn test_description() {
+        let finding = LintFinding {
+            id: "id-1".to_string(),
+            message: "message".to_string(),
+            category: "security".to_string(),
+        };
+        let fp = LintFingerprint(&finding);
+        assert_eq!(fp.description(), "message");
+    }
+
+    #[test]
+    fn test_context_label() {
+        let finding = LintFinding {
+            id: "id-1".to_string(),
+            message: "message".to_string(),
+            category: "security".to_string(),
+        };
+        let fp = LintFingerprint(&finding);
+        assert_eq!(fp.context_label(), "lint:security");
+    }
 }

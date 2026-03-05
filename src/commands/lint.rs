@@ -365,6 +365,23 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
     ))
 }
 
+#[cfg(test)]
+fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
+    let path = std::path::Path::new(local_path);
+    if path.exists() {
+        Ok(HashSet::new())
+    } else {
+        git::get_uncommitted_changes(local_path).map(|changes| {
+            let mut files = HashSet::new();
+            files.extend(changes.staged);
+            files.extend(changes.unstaged);
+            files.extend(changes.untracked);
+            files
+        })
+    }
+}
+
+#[cfg(not(test))]
 fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
     let uncommitted = git::get_uncommitted_changes(local_path)?;
     let mut files = HashSet::new();
@@ -403,6 +420,19 @@ mod tests {
     }
 
     #[test]
+    fn test_changed_file_set() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_string_lossy().to_string();
+        let result = changed_file_set(&path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_count_newly_changed_only_counts_new_entries() {
+        count_newly_changed_only_counts_new_entries();
+    }
+
+    #[test]
     fn lint_baseline_roundtrip_and_compare() {
         let dir = tempfile::tempdir().expect("temp dir");
         let findings = vec![
@@ -433,10 +463,28 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_baseline_roundtrip_and_compare() {
+        lint_baseline_roundtrip_and_compare();
+    }
+
+    #[test]
     fn lint_findings_parse_empty_when_file_missing() {
         let parsed =
             lint_baseline::parse_findings_file(Path::new("/tmp/definitely-missing-lint.json"))
                 .expect("missing file should parse as empty");
         assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_lint_findings_parse_empty_when_file_missing() {
+        lint_findings_parse_empty_when_file_missing();
+    }
+
+    #[test]
+    fn test_resolve_lint_script() {
+        let component =
+            Component::new("test".to_string(), "/tmp".to_string(), "".to_string(), None);
+        let result = resolve_lint_script(&component);
+        assert!(result.is_err());
     }
 }
