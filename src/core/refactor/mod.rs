@@ -11,8 +11,8 @@ pub mod transform;
 
 pub use add::{add_import, fixes_from_audit, AddResult};
 pub use decompose::{
-    apply_plan, apply_plan_skeletons, build_plan, classify_function, group_items, parse_items,
-    DecomposeAuditImpact, DecomposeGroup, DecomposePlan,
+    apply_plan, apply_plan_skeletons, build_plan, DecomposeAuditImpact, DecomposeGroup,
+    DecomposePlan,
 };
 pub use move_items::{move_items, ImportRewrite, ItemKind, MoveResult, MovedItem};
 pub use rename::{

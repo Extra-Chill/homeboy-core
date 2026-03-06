@@ -227,7 +227,7 @@ fn source_to_test_file(target: &str) -> Option<String> {
     Some(format!("tests/{}_test.rs", without_ext))
 }
 
-pub fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
+fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
     let ext = Path::new(file).extension()?.to_str()?;
     let manifest = extension::find_extension_for_file_ext(ext, "refactor")?;
     let command = serde_json::json!({
@@ -239,7 +239,7 @@ pub fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
     serde_json::from_value(result.get("items")?.clone()).ok()
 }
 
-pub fn group_items(file: &str, items: &[ParsedItem], audit_safe: bool) -> Vec<DecomposeGroup> {
+fn group_items(file: &str, items: &[ParsedItem], audit_safe: bool) -> Vec<DecomposeGroup> {
     let source = PathBuf::from(file);
     let stem = source
         .file_stem()
@@ -309,7 +309,7 @@ fn dedupe_parsed_items(items: Vec<ParsedItem>) -> Vec<ParsedItem> {
     deduped
 }
 
-pub fn classify_function(name: &str) -> &'static str {
+fn classify_function(name: &str) -> &'static str {
     if name.starts_with("validate") || name.starts_with("check") {
         "validation"
     } else if name.starts_with("parse") || name.starts_with("resolve") {
