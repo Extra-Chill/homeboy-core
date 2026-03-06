@@ -126,6 +126,8 @@ pub enum DeviationKind {
     InlineTestModule,
     /// Test files are placed under source directories instead of the central tests tree.
     ScatteredTestFile,
+    /// Duplicated code block found within the same method/function body.
+    IntraMethodDuplicate,
 }
 
 // ============================================================================
