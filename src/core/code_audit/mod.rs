@@ -26,6 +26,7 @@ mod layer_ownership;
 mod signatures;
 mod structural;
 mod test_coverage;
+mod test_topology;
 pub(crate) mod walker;
 
 #[cfg(test)]
@@ -374,7 +375,18 @@ fn audit_internal(
         all_findings.extend(layer_findings);
     }
 
-    // Phase 4i: Scope filtering — when auditing changed files only, remove
+    // Phase 4i: Test topology checks (extension-driven classification + central policy)
+    let topology_findings = test_topology::run(root);
+    if !topology_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Test topology: {} finding(s) (inline/scattered test placement)",
+            topology_findings.len()
+        );
+        all_findings.extend(topology_findings);
+    }
+
+    // Phase 4j: Scope filtering — when auditing changed files only, remove
     // findings for files that weren't changed. Conventions are still discovered
     // from the full codebase so drift detection is accurate.
     if let Some(filter) = file_filter {

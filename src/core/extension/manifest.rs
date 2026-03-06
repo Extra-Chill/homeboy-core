@@ -194,6 +194,10 @@ pub struct ScriptsConfig {
     /// Receives edit instructions on stdin, outputs transformed content on stdout.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refactor: Option<String>,
+    /// Script that classifies files/artifacts for test topology auditing.
+    /// Receives `{file_path, content}` on stdin and outputs `{artifacts:[...]}` on stdout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topology: Option<String>,
 }
 
 /// Unified extension manifest decomposed into capability groups.
@@ -439,6 +443,11 @@ impl ExtensionManifest {
     /// Get the refactor script path (relative to extension dir), if configured.
     pub fn refactor_script(&self) -> Option<&str> {
         self.scripts.as_ref().and_then(|s| s.refactor.as_deref())
+    }
+
+    /// Get the topology script path (relative to extension dir), if configured.
+    pub fn topology_script(&self) -> Option<&str> {
+        self.scripts.as_ref().and_then(|s| s.topology.as_deref())
     }
 }
 

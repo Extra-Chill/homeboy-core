@@ -203,6 +203,16 @@ mod tests {
 
         fs::write(root.join("tests/scope_test.rs"), "#[test]\nfn smoke(){}\n")
             .expect("test file should be written");
+        Command::new("git")
+            .args(["add", "tests/scope_test.rs"])
+            .current_dir(root)
+            .output()
+            .expect("git add test file should run");
+        Command::new("git")
+            .args(["commit", "-m", "add test"])
+            .current_dir(root)
+            .output()
+            .expect("git commit test file should run");
 
         let component = Component::new(
             "scope-test".to_string(),

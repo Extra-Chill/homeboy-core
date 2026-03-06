@@ -122,6 +122,10 @@ pub enum DeviationKind {
     LegacyComment,
     /// File violates a configured architecture/layer ownership rule.
     LayerOwnershipViolation,
+    /// Inline test modules are present in source files instead of centralized tests.
+    InlineTestModule,
+    /// Test files are placed under source directories instead of the central tests tree.
+    ScatteredTestFile,
 }
 
 // ============================================================================
