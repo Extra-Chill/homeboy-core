@@ -3404,6 +3404,13 @@ pub struct TestOutput {}
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src/utils")).unwrap();
 
+        // Source file must exist so scaffold generates above-placeholder content
+        std::fs::write(
+            dir.join("src/utils/slugify.rs"),
+            "pub fn slugify_id(name: &str) -> String { name.to_lowercase() }\n",
+        )
+        .unwrap();
+
         let finding = super::super::findings::Finding {
             convention: "test_coverage".to_string(),
             severity: super::super::findings::Severity::Info,
