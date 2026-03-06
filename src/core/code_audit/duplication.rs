@@ -1,15 +1,16 @@
 //! Duplication detection — find identical and near-identical functions across
-//! source files.
+//! source files, and duplicated code blocks within a single method.
 //!
 //! Uses method body hashes from fingerprinting to detect exact duplicates,
 //! and structural hashes (identifiers/literals normalized to positional tokens)
 //! to detect near-duplicates — functions with identical control flow that differ
 //! only in variable names, constant references, or string values.
 //!
-//! Three outputs:
+//! Four outputs:
 //! - `detect_duplicates()` → flat `Vec<Finding>` for exact duplicates
 //! - `detect_duplicate_groups()` → structured `Vec<DuplicateGroup>` for the fixer
 //! - `detect_near_duplicates()` → flat `Vec<Finding>` for structural near-duplicates
+//! - `detect_intra_method_duplicates()` → duplicated blocks within a single method
 
 use std::collections::HashMap;
 
@@ -359,6 +360,235 @@ pub fn detect_near_duplicates(fingerprints: &[&FileFingerprint]) -> Vec<Finding>
             .then_with(|| a.description.cmp(&b.description))
     });
     findings
+}
+
+// ============================================================================
+// Intra-Method Duplication Detection
+// ============================================================================
+
+/// Minimum number of non-blank, non-comment lines for a block to be
+/// considered meaningful. Blocks shorter than this are too trivial to flag.
+const MIN_INTRA_BLOCK_LINES: usize = 5;
+
+/// Detect duplicated code blocks within the same method/function.
+///
+/// For each method in each file, extracts the method body from the file
+/// content and uses a sliding window of `MIN_INTRA_BLOCK_LINES` normalized
+/// lines. When the same window hash appears at two non-overlapping positions
+/// within one method, it means a block of code was copy-pasted (merge
+/// artifacts, copy-paste errors, etc.).
+pub fn detect_intra_method_duplicates(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for fp in fingerprints {
+        if fp.content.is_empty() {
+            continue;
+        }
+
+        let file_lines: Vec<&str> = fp.content.lines().collect();
+
+        for method_name in &fp.methods {
+            let Some((body_start, body_end)) = find_method_body(&file_lines, method_name) else {
+                continue;
+            };
+
+            // Extract body lines (excluding the opening/closing brace lines)
+            if body_start + 1 >= body_end {
+                continue;
+            }
+            let body_lines: Vec<&str> = file_lines[body_start + 1..body_end].to_vec();
+
+            if body_lines.len() < MIN_INTRA_BLOCK_LINES * 2 {
+                // Body too short to contain two meaningful duplicate blocks
+                continue;
+            }
+
+            // Build list of (original_body_index, normalized_text) for non-blank
+            // non-comment lines
+            let normalized: Vec<(usize, String)> = body_lines
+                .iter()
+                .enumerate()
+                .filter_map(|(i, line)| {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || is_comment_only(trimmed) {
+                        None
+                    } else {
+                        Some((i, normalize_line(trimmed)))
+                    }
+                })
+                .collect();
+
+            if normalized.len() < MIN_INTRA_BLOCK_LINES * 2 {
+                continue;
+            }
+
+            // Hash each sliding window of MIN_INTRA_BLOCK_LINES consecutive
+            // normalized lines. Store (hash, start_body_idx, end_body_idx).
+            let mut window_hashes: Vec<(u64, usize, usize)> = Vec::new();
+
+            for win_start in 0..=normalized.len() - MIN_INTRA_BLOCK_LINES {
+                let win_end = win_start + MIN_INTRA_BLOCK_LINES;
+                let mut hasher = std::hash::DefaultHasher::new();
+                for (_, norm_line) in &normalized[win_start..win_end] {
+                    std::hash::Hash::hash(norm_line, &mut hasher);
+                }
+                let hash = std::hash::Hasher::finish(&hasher);
+
+                let orig_start = normalized[win_start].0;
+                let orig_end = normalized[win_end - 1].0;
+
+                window_hashes.push((hash, orig_start, orig_end));
+            }
+
+            // Group by hash, look for non-overlapping pairs
+            let mut hash_positions: HashMap<u64, Vec<(usize, usize)>> = HashMap::new();
+            for (hash, start, end) in &window_hashes {
+                hash_positions
+                    .entry(*hash)
+                    .or_default()
+                    .push((*start, *end));
+            }
+
+            let mut reported = false;
+
+            for positions in hash_positions.values() {
+                if reported || positions.len() < 2 {
+                    continue;
+                }
+
+                let first = positions[0];
+                for other in &positions[1..] {
+                    // Non-overlapping: second block starts after first block ends
+                    if other.0 <= first.1 {
+                        continue;
+                    }
+
+                    // Extend the match: keep sliding forward while lines match
+                    let first_norm_idx = normalized
+                        .iter()
+                        .position(|(i, _)| *i == first.0)
+                        .unwrap_or(0);
+                    let other_norm_idx = normalized
+                        .iter()
+                        .position(|(i, _)| *i == other.0)
+                        .unwrap_or(0);
+
+                    let mut match_len = MIN_INTRA_BLOCK_LINES;
+                    while first_norm_idx + match_len < normalized.len()
+                        && other_norm_idx + match_len < normalized.len()
+                        && first_norm_idx + match_len < other_norm_idx
+                    {
+                        if normalized[first_norm_idx + match_len].1
+                            == normalized[other_norm_idx + match_len].1
+                        {
+                            match_len += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // Convert body-relative line numbers to 1-indexed file lines
+                    let first_file_line = body_start + 1 + first.0 + 1;
+                    let other_file_line = body_start + 1 + other.0 + 1;
+
+                    findings.push(Finding {
+                        convention: "intra-method-duplication".to_string(),
+                        severity: Severity::Warning,
+                        file: fp.relative_path.clone(),
+                        description: format!(
+                            "Duplicated block in `{}` — {} identical lines at line {} and line {}",
+                            method_name, match_len, first_file_line, other_file_line
+                        ),
+                        suggestion: format!(
+                            "Function `{}` contains a duplicated code block ({} lines). \
+                             This is often a merge artifact or copy-paste error. \
+                             Remove the duplicate or extract shared logic.",
+                            method_name, match_len
+                        ),
+                        kind: DeviationKind::IntraMethodDuplicate,
+                    });
+                    reported = true;
+                    break;
+                }
+
+                if reported {
+                    break;
+                }
+            }
+        }
+    }
+
+    findings.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| a.description.cmp(&b.description))
+    });
+    findings
+}
+
+/// Find the body of a method/function in the file lines.
+///
+/// Returns `(open_brace_line, close_brace_line)` — the line indices of the
+/// opening and closing braces. Searches for `function <name>` or `fn <name>`.
+fn find_method_body(lines: &[&str], method_name: &str) -> Option<(usize, usize)> {
+    let fn_pattern_php = format!("function {}", method_name);
+    let fn_pattern_rust = format!("fn {}", method_name);
+
+    let mut start_line = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains(&fn_pattern_php) || line.contains(&fn_pattern_rust) {
+            start_line = Some(i);
+            break;
+        }
+    }
+
+    let start = start_line?;
+
+    // Find opening brace from the function declaration line
+    let mut brace_line = None;
+    for (offset, line) in lines[start..].iter().enumerate() {
+        if line.contains('{') {
+            brace_line = Some(start + offset);
+            break;
+        }
+    }
+
+    let open_line = brace_line?;
+
+    // Track brace depth to find closing brace
+    let mut depth = 0i32;
+    let mut found_open = false;
+    for (i, line) in lines[open_line..].iter().enumerate() {
+        for ch in line.chars() {
+            if ch == '{' {
+                depth += 1;
+                found_open = true;
+            } else if ch == '}' {
+                depth -= 1;
+            }
+        }
+        if found_open && depth == 0 {
+            return Some((open_line, open_line + i));
+        }
+    }
+
+    None
+}
+
+/// Check if a line is comment-only (PHP, Rust, or shell style).
+fn is_comment_only(trimmed: &str) -> bool {
+    trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with('#')
+}
+
+/// Normalize a line for hashing: collapse whitespace, lowercase.
+fn normalize_line(line: &str) -> String {
+    line.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 // ============================================================================
@@ -720,5 +950,98 @@ mod tests {
 
         let findings = detect_near_duplicates(&[&fp1, &fp2]);
         assert!(findings.is_empty(), "All-commands group should be skipped");
+    }
+
+    // ========================================================================
+    // Intra-method duplication tests
+    // ========================================================================
+
+    #[test]
+    fn intra_method_detects_duplicated_block() {
+        // Simulate a merge artifact: same 5-line block appears twice
+        let content = "<?php\nclass PipelineSteps {\n    public function handle_update( $request ) {\n        $config = array();\n        $has_provider = $request->has_param( 'provider' );\n        $has_model = $request->has_param( 'model' );\n        $has_prompt = $request->has_param( 'system_prompt' );\n        $has_disabled = $request->has_param( 'disabled_tools' );\n        $has_key = $request->has_param( 'ai_api_key' );\n\n        if ( $has_provider ) {\n            $config['provider'] = sanitize_text_field( $request->get_param( 'provider' ) );\n        }\n\n        $has_provider = $request->has_param( 'provider' );\n        $has_model = $request->has_param( 'model' );\n        $has_prompt = $request->has_param( 'system_prompt' );\n        $has_disabled = $request->has_param( 'disabled_tools' );\n        $has_key = $request->has_param( 'ai_api_key' );\n\n        if ( $has_provider ) {\n            $config['provider'] = sanitize_text_field( $request->get_param( 'provider' ) );\n        }\n\n        return $config;\n    }\n}\n";
+
+        let mut fp = make_fingerprint(
+            "inc/Api/Pipelines/PipelineSteps.php",
+            &["handle_update"],
+            &[],
+        );
+        fp.content = content.to_string();
+
+        let findings = detect_intra_method_duplicates(&[&fp]);
+
+        assert!(
+            !findings.is_empty(),
+            "Should detect duplicated block within handle_update"
+        );
+        assert!(findings[0].kind == DeviationKind::IntraMethodDuplicate);
+        assert!(findings[0].description.contains("handle_update"));
+    }
+
+    #[test]
+    fn intra_method_no_false_positive_on_unique_code() {
+        let content = "<?php\nclass Handler {\n    public function process( $data ) {\n        $name = sanitize_text_field( $data['name'] );\n        $email = sanitize_email( $data['email'] );\n        $phone = sanitize_text_field( $data['phone'] );\n        $address = sanitize_text_field( $data['address'] );\n        $city = sanitize_text_field( $data['city'] );\n\n        $result = $this->save( $name, $email );\n        $this->notify( $result );\n        $this->log_action( $result );\n        $this->update_cache( $result );\n        $this->send_confirmation( $email );\n\n        return $result;\n    }\n}\n";
+
+        let mut fp = make_fingerprint("inc/Handler.php", &["process"], &[]);
+        fp.content = content.to_string();
+
+        let findings = detect_intra_method_duplicates(&[&fp]);
+        assert!(
+            findings.is_empty(),
+            "Unique code should not trigger intra-method duplication"
+        );
+    }
+
+    #[test]
+    fn intra_method_skips_short_methods() {
+        let content = "fn short() {\n    let a = 1;\n    let b = 2;\n    let c = a + b;\n    println!(\"{}\", c);\n}\n";
+
+        let mut fp = make_fingerprint("src/short.rs", &["short"], &[]);
+        fp.content = content.to_string();
+
+        let findings = detect_intra_method_duplicates(&[&fp]);
+        assert!(findings.is_empty(), "Short methods should be skipped");
+    }
+
+    #[test]
+    fn intra_method_rust_function_duplicated_block() {
+        let content = "fn process_items(items: &[Item]) -> Vec<Result> {\n    let mut results = Vec::new();\n    let config = load_config();\n    let validator = Validator::new(&config);\n    let processor = Processor::new(&config);\n    let output = processor.run(&items[0]);\n\n    results.push(output);\n\n    let config = load_config();\n    let validator = Validator::new(&config);\n    let processor = Processor::new(&config);\n    let output = processor.run(&items[0]);\n\n    results.push(output);\n\n    results\n}\n";
+
+        let mut fp = make_fingerprint("src/core/pipeline.rs", &["process_items"], &[]);
+        fp.content = content.to_string();
+
+        let findings = detect_intra_method_duplicates(&[&fp]);
+        assert!(
+            !findings.is_empty(),
+            "Should detect duplicated block in Rust function"
+        );
+    }
+
+    #[test]
+    fn find_method_body_php() {
+        let content =
+            "<?php\nclass Foo {\n    public function bar() {\n        return 1;\n    }\n}\n";
+        let lines: Vec<&str> = content.lines().collect();
+        let result = find_method_body(&lines, "bar");
+        assert!(result.is_some());
+        let (open, close) = result.unwrap();
+        assert!(lines[open].contains('{'));
+        assert!(lines[close].contains('}'));
+    }
+
+    #[test]
+    fn find_method_body_rust() {
+        let content = "fn hello() {\n    println!(\"hi\");\n}\n";
+        let lines: Vec<&str> = content.lines().collect();
+        let result = find_method_body(&lines, "hello");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn find_method_body_missing() {
+        let content = "fn other() {\n    println!(\"hi\");\n}\n";
+        let lines: Vec<&str> = content.lines().collect();
+        let result = find_method_body(&lines, "nonexistent");
+        assert!(result.is_none());
     }
 }
