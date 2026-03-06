@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use homeboy::code_audit::{fixer, CodeAuditResult};
 use homeboy::component;
 use homeboy::extension;
-use homeboy::refactor::{self, AddResult, MoveResult, RenameScope, RenameSpec};
+use homeboy::refactor::{self, AddResult, MoveResult, RenameScope, RenameSpec, RenameTargeting};
 
 use super::args::{ComponentArgs, WriteModeArgs};
 use crate::commands::CmdResult;
@@ -34,6 +34,15 @@ enum RefactorCommand {
         /// Exact string matching (no boundary detection, no case variants)
         #[arg(long)]
         literal: bool,
+        /// Include only files matching this glob (repeatable)
+        #[arg(long = "files", value_name = "GLOB")]
+        files: Vec<String>,
+        /// Exclude files matching this glob (repeatable)
+        #[arg(long, value_name = "GLOB")]
+        exclude: Vec<String>,
+        /// Disable file/directory path renames (content edits only)
+        #[arg(long)]
+        no_file_renames: bool,
         #[command(flatten)]
         write_mode: WriteModeArgs,
     },
@@ -169,6 +178,9 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             component,
             scope,
             literal,
+            files,
+            exclude,
+            no_file_renames,
             write_mode,
         } => run_rename(
             &from,
@@ -177,6 +189,9 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             component.path.as_deref(),
             &scope,
             literal,
+            &files,
+            &exclude,
+            no_file_renames,
             write_mode.write,
         ),
 
@@ -379,6 +394,9 @@ fn run_rename(
     path: Option<&str>,
     scope: &str,
     literal: bool,
+    include_globs: &[String],
+    exclude_globs: &[String],
+    no_file_renames: bool,
     write: bool,
 ) -> CmdResult<RefactorOutput> {
     let scope = RenameScope::from_str(scope)?;
@@ -396,7 +414,12 @@ fn run_rename(
     } else {
         RenameSpec::new(from, to, scope.clone())
     };
-    let mut result = refactor::generate_renames(&spec, &root);
+    let targeting = RenameTargeting {
+        include_globs: include_globs.to_vec(),
+        exclude_globs: exclude_globs.to_vec(),
+        rename_files: !no_file_renames,
+    };
+    let mut result = refactor::generate_renames_with_targeting(&spec, &root, &targeting);
 
     // Print warnings to stderr before applying
     for warning in &result.warnings {
