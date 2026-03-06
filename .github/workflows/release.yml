@@ -182,6 +182,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Rust toolchain needed so run-release.sh can regenerate Cargo.lock
+      # after bumping Cargo.toml version
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - uses: Extra-Chill/homeboy-action@v1
         id: release
         with:
