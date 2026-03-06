@@ -229,6 +229,9 @@ Publish steps are designed to be idempotent:
 - **GitHub releases**: If tag exists, assets are updated via `--clobber`
 - **crates.io**: If version already published, step skips gracefully
 
+GitHub release CI publishes to crates.io when the repository has a `CARGO_REGISTRY_TOKEN`
+secret configured.
+
 This allows safe retry after `partial_success` without manual cleanup.
 ```
 

@@ -370,8 +370,8 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
 #[cfg(test)]
 mod tests {
     use super::default_audit_exit_code;
-    use homeboy::code_audit::{AuditSummary, CodeAuditResult, Finding, Severity};
     use homeboy::code_audit::DeviationKind;
+    use homeboy::code_audit::{AuditSummary, CodeAuditResult, Finding, Severity};
 
     fn mk_result(outliers_found: usize, findings_len: usize) -> CodeAuditResult {
         CodeAuditResult {
