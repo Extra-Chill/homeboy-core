@@ -42,12 +42,48 @@ fn test_apply_plan_skeletons() {
             suggested_target: "src/core/deploy/execution.inc".to_string(),
             item_names: vec!["run".to_string()],
         }],
+        projected_audit_impact: refactor::DecomposeAuditImpact {
+            estimated_new_files: 1,
+            estimated_new_test_files: 0,
+            recommended_test_files: vec![],
+            likely_findings: vec![],
+        },
         checklist: vec![],
         warnings: vec![],
     };
 
     let created = refactor::apply_plan_skeletons(&plan, &root).expect("apply skeletons");
     assert_eq!(created, vec!["src/core/deploy/execution.inc".to_string()]);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn test_apply_plan_empty_groups() {
+    let root = tmp_dir("apply-plan-empty");
+    fs::create_dir_all(&root).expect("create root");
+
+    let plan = DecomposePlan {
+        file: "src/core/deploy.rs".to_string(),
+        strategy: "grouped".to_string(),
+        audit_safe: true,
+        total_items: 0,
+        groups: vec![],
+        projected_audit_impact: refactor::DecomposeAuditImpact {
+            estimated_new_files: 0,
+            estimated_new_test_files: 0,
+            recommended_test_files: vec![],
+            likely_findings: vec![],
+        },
+        checklist: vec![],
+        warnings: vec![],
+    };
+
+    let preview = refactor::apply_plan(&plan, &root, false).expect("preview apply");
+    assert!(preview.is_empty());
+
+    let applied = refactor::apply_plan(&plan, &root, true).expect("apply");
+    assert!(applied.is_empty());
 
     let _ = fs::remove_dir_all(root);
 }
