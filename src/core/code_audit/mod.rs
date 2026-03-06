@@ -306,6 +306,17 @@ fn audit_internal(
         all_findings.extend(duplication_findings);
     }
 
+    // Phase 4c2: Intra-method duplication (duplicated blocks within a single method)
+    let intra_dup_findings = duplication::detect_intra_method_duplicates(&all_fingerprints);
+    if !intra_dup_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Intra-method duplication: {} finding(s) (duplicated blocks within methods)",
+            intra_dup_findings.len()
+        );
+        all_findings.extend(intra_dup_findings);
+    }
+
     // Phase 4d: Near-duplicate detection (structural similarity)
     let near_dup_findings = duplication::detect_near_duplicates(&all_fingerprints);
     if !near_dup_findings.is_empty() {
