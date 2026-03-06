@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.62.0] - 2026-03-06
+
+### Added
+- audit autofix enabled on PR and release CI workflows
+- enable audit autofix on PRs and release pre-gate (#527)
+
+### Fixed
+- version bump dry-run no longer mutates changelog or bypasses lint baseline
+- version bump dry-run no longer mutates changelog or bypasses lint baseline (#526)
+
 ## [0.61.0] - 2026-03-06
 
 ### Added
