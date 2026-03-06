@@ -124,6 +124,35 @@ fn test_group_items() {
 }
 
 #[test]
+fn test_group_items_dedupes_duplicate_names() {
+    let items = vec![
+        ParsedItem {
+            kind: "enum".to_string(),
+            name: "InstallMethod".to_string(),
+            start_line: 1,
+            end_line: 10,
+            source: "pub enum InstallMethod { A }".to_string(),
+            visibility: "pub".to_string(),
+        },
+        ParsedItem {
+            kind: "enum".to_string(),
+            name: "InstallMethod".to_string(),
+            start_line: 1,
+            end_line: 10,
+            source: "pub enum InstallMethod { A }".to_string(),
+            visibility: "pub".to_string(),
+        },
+    ];
+
+    let groups = refactor::group_items("src/core/upgrade.rs", &items, true);
+    let types = groups
+        .iter()
+        .find(|group| group.name == "types")
+        .expect("types group");
+    assert_eq!(types.item_names, vec!["InstallMethod".to_string()]);
+}
+
+#[test]
 fn test_parse_items() {
     // Unknown extension should return None without trying extension scripts.
     let result = refactor::parse_items("src/example.unknown", "content");

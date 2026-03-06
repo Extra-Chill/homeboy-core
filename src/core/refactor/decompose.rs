@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -71,6 +71,7 @@ pub fn build_plan(
         warnings.push("No refactor parser available for file type; plan may be sparse".to_string());
         vec![]
     });
+    let items = dedupe_parsed_items(items);
 
     let groups = group_items(file, &items, audit_safe);
     let projected_audit_impact = project_audit_impact(&groups, audit_safe);
@@ -149,9 +150,21 @@ fn run_moves(plan: &DecomposePlan, root: &Path, write: bool) -> Result<Vec<MoveR
     let mut results = Vec::new();
 
     for group in &plan.groups {
-        let item_refs: Vec<&str> = group.item_names.iter().map(String::as_str).collect();
+        let mut seen = HashSet::new();
+        let deduped_item_names: Vec<&str> = group
+            .item_names
+            .iter()
+            .filter_map(|name| {
+                if seen.insert(name.clone()) {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let result = super::move_items::move_items(
-            &item_refs,
+            &deduped_item_names,
             &plan.file,
             &group.suggested_target,
             root,
@@ -254,6 +267,11 @@ pub fn group_items(file: &str, items: &[ParsedItem], audit_safe: bool) -> Vec<De
             .push(item.name.clone());
     }
 
+    for names in buckets.values_mut() {
+        let mut seen = HashSet::new();
+        names.retain(|name| seen.insert(name.clone()));
+    }
+
     let ext = if audit_safe { "inc" } else { "rs" };
 
     buckets
@@ -269,6 +287,26 @@ pub fn group_items(file: &str, items: &[ParsedItem], audit_safe: bool) -> Vec<De
             item_names: names,
         })
         .collect()
+}
+
+fn dedupe_parsed_items(items: Vec<ParsedItem>) -> Vec<ParsedItem> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+
+    for item in items {
+        let key = (
+            item.kind.clone(),
+            item.name.clone(),
+            item.start_line,
+            item.end_line,
+        );
+
+        if seen.insert(key) {
+            deduped.push(item);
+        }
+    }
+
+    deduped
 }
 
 pub fn classify_function(name: &str) -> &'static str {
