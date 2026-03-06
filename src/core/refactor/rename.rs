@@ -8,11 +8,12 @@
 
 use crate::error::{Error, Result};
 use crate::utils::codebase_scan::{
-    self, discover_casing, find_boundary_matches, find_literal_matches, ExtensionFilter, ScanConfig,
+    self, find_boundary_matches, find_case_insensitive_matches, find_literal_matches,
+    ExtensionFilter, ScanConfig,
 };
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ============================================================================
 // Types
@@ -63,6 +64,27 @@ pub struct RenameSpec {
     pub variants: Vec<CaseVariant>,
     /// When true, use exact string matching (no boundary detection).
     pub literal: bool,
+}
+
+/// Optional file-targeting controls for rename operations.
+#[derive(Debug, Clone)]
+pub struct RenameTargeting {
+    /// Include only files matching at least one glob. Empty = include all.
+    pub include_globs: Vec<String>,
+    /// Exclude files matching any glob.
+    pub exclude_globs: Vec<String>,
+    /// Whether file/directory renames should be generated/applied.
+    pub rename_files: bool,
+}
+
+impl Default for RenameTargeting {
+    fn default() -> Self {
+        Self {
+            include_globs: Vec::new(),
+            exclude_globs: Vec::new(),
+            rename_files: true,
+        }
+    }
 }
 
 impl RenameSpec {
@@ -429,8 +451,17 @@ fn scan_config_for_scope(scope: &RenameScope) -> ScanConfig {
 /// After the initial pass, discovers additional case variants that exist in the
 /// codebase but weren't generated (e.g., `WPAgent` when `WpAgent` was generated).
 pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
+    find_references_with_targeting(spec, root, &RenameTargeting::default())
+}
+
+/// Find references using optional include/exclude targeting controls.
+pub fn find_references_with_targeting(
+    spec: &RenameSpec,
+    root: &Path,
+    targeting: &RenameTargeting,
+) -> Vec<Reference> {
     let config = scan_config_for_scope(&spec.scope);
-    let files = codebase_scan::walk_files(root, &config);
+    let files = target_files(codebase_scan::walk_files(root, &config), root, targeting);
 
     // Build the working variant list — may be extended by discovery
     let mut all_variants = spec.variants.clone();
@@ -455,7 +486,7 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
 
             if !has_matches {
                 // No matches — discover what casing actually exists
-                let casings = discover_casing(root, &variant.from, &config);
+                let casings = discover_casing_in_files(&files, &variant.from, spec.literal);
                 for (actual_casing, _count) in &casings {
                     // Skip if it's the same as what we already have
                     if actual_casing == &variant.from {
@@ -530,15 +561,56 @@ pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
     references
 }
 
+fn discover_casing_in_files(
+    files: &[PathBuf],
+    pattern: &str,
+    literal: bool,
+) -> Vec<(String, usize)> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+
+    for file in files {
+        let Ok(content) = std::fs::read_to_string(file) else {
+            continue;
+        };
+
+        for line in content.lines() {
+            if literal {
+                for pos in find_literal_matches(line, pattern) {
+                    let matched = &line[pos..pos + pattern.len()];
+                    *counts.entry(matched.to_string()).or_insert(0) += 1;
+                }
+                continue;
+            }
+
+            for (_start, matched) in find_case_insensitive_matches(line, pattern) {
+                *counts.entry(matched).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut out: Vec<(String, usize)> = counts.into_iter().collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
+}
+
 // ============================================================================
 // Rename generation
 // ============================================================================
 
 /// Generate file edits and file renames from found references.
 pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
-    let references = find_references(spec, root);
+    generate_renames_with_targeting(spec, root, &RenameTargeting::default())
+}
+
+/// Generate renames using optional include/exclude targeting controls.
+pub fn generate_renames_with_targeting(
+    spec: &RenameSpec,
+    root: &Path,
+    targeting: &RenameTargeting,
+) -> RenameResult {
+    let references = find_references_with_targeting(spec, root, targeting);
     let config = scan_config_for_scope(&spec.scope);
-    let files = codebase_scan::walk_files(root, &config);
+    let files = target_files(codebase_scan::walk_files(root, &config), root, targeting);
 
     // Sort variants longest-first to prevent partial matches
     let mut sorted_variants = spec.variants.clone();
@@ -602,24 +674,26 @@ pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
 
     // Generate file/directory renames
     let mut file_renames = Vec::new();
-    for file_path in &files {
-        let relative = file_path
-            .strip_prefix(root)
-            .unwrap_or(file_path)
-            .to_string_lossy()
-            .to_string();
+    if targeting.rename_files {
+        for file_path in &files {
+            let relative = file_path
+                .strip_prefix(root)
+                .unwrap_or(file_path)
+                .to_string_lossy()
+                .to_string();
 
-        let mut new_relative = relative.clone();
-        for variant in &sorted_variants {
-            // Replace in path segments (word-boundary aware in file names)
-            new_relative = new_relative.replace(&variant.from, &variant.to);
-        }
+            let mut new_relative = relative.clone();
+            for variant in &sorted_variants {
+                // Replace in path segments (word-boundary aware in file names)
+                new_relative = new_relative.replace(&variant.from, &variant.to);
+            }
 
-        if new_relative != relative {
-            file_renames.push(FileRename {
-                from: relative,
-                to: new_relative,
-            });
+            if new_relative != relative {
+                file_renames.push(FileRename {
+                    from: relative,
+                    to: new_relative,
+                });
+            }
         }
     }
 
@@ -642,6 +716,38 @@ pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
         total_files,
         applied: false,
     }
+}
+
+fn target_files(files: Vec<PathBuf>, root: &Path, targeting: &RenameTargeting) -> Vec<PathBuf> {
+    files
+        .into_iter()
+        .filter(|file| {
+            let relative = file
+                .strip_prefix(root)
+                .unwrap_or(file)
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            if !targeting.include_globs.is_empty()
+                && !targeting
+                    .include_globs
+                    .iter()
+                    .any(|glob| glob_match::glob_match(glob, &relative))
+            {
+                return false;
+            }
+
+            if targeting
+                .exclude_globs
+                .iter()
+                .any(|glob| glob_match::glob_match(glob, &relative))
+            {
+                return false;
+            }
+
+            true
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -1710,6 +1816,95 @@ mod tests {
             content.contains("data-machine-agents"),
             "Should rename plural kebab: {}",
             content
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn include_glob_limits_edits_to_targeted_files() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_target_include_test");
+        let _ = std::fs::create_dir_all(dir.join("src"));
+        let _ = std::fs::create_dir_all(dir.join("tests"));
+
+        std::fs::write(dir.join("src/lib.rs"), "fn mark_item_processed() {}\n").unwrap();
+        std::fs::write(
+            dir.join("tests/lib_test.rs"),
+            "fn test_mark_item_processed() {}\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::new(
+            "mark_item_processed",
+            "add_processed_item",
+            RenameScope::All,
+        );
+        let targeting = RenameTargeting {
+            include_globs: vec!["tests/**/*.rs".to_string()],
+            ..RenameTargeting::default()
+        };
+
+        let result = generate_renames_with_targeting(&spec, &dir, &targeting);
+
+        assert_eq!(result.edits.len(), 1, "Should only edit tests files");
+        assert_eq!(result.edits[0].file, "tests/lib_test.rs");
+        assert!(result.edits[0].new_content.contains("add_processed_item"));
+        assert!(!result.edits[0].new_content.contains("mark_item_processed"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exclude_glob_omits_matching_files() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_target_exclude_test");
+        let _ = std::fs::create_dir_all(dir.join("src"));
+        let _ = std::fs::create_dir_all(dir.join("tests"));
+
+        std::fs::write(dir.join("src/lib.rs"), "fn mark_item_processed() {}\n").unwrap();
+        std::fs::write(
+            dir.join("tests/lib_test.rs"),
+            "fn test_mark_item_processed() {}\n",
+        )
+        .unwrap();
+
+        let spec = RenameSpec::new(
+            "mark_item_processed",
+            "add_processed_item",
+            RenameScope::All,
+        );
+        let targeting = RenameTargeting {
+            exclude_globs: vec!["src/**/*.rs".to_string()],
+            ..RenameTargeting::default()
+        };
+
+        let result = generate_renames_with_targeting(&spec, &dir, &targeting);
+
+        assert_eq!(result.edits.len(), 1, "Should skip excluded src files");
+        assert_eq!(result.edits[0].file, "tests/lib_test.rs");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn no_file_renames_suppresses_path_renames() {
+        let dir = std::env::temp_dir().join("homeboy_refactor_no_file_rename_test");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("mark_item_processed_test.rs"), "fn ok() {}\n").unwrap();
+
+        let spec = RenameSpec::new(
+            "mark_item_processed",
+            "add_processed_item",
+            RenameScope::All,
+        );
+        let targeting = RenameTargeting {
+            rename_files: false,
+            ..RenameTargeting::default()
+        };
+
+        let result = generate_renames_with_targeting(&spec, &dir, &targeting);
+        assert!(
+            result.file_renames.is_empty(),
+            "File renames should be disabled when rename_files=false"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
