@@ -1092,4 +1092,60 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn discover_from_portable_with_baselines_and_extensions() {
+        // Mirrors data-machine's real homeboy.json — includes baselines (unknown field)
+        // and extensions (known field). This must not silently fail.
+        let dir = std::env::temp_dir().join("homeboy_test_baselines");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let config = serde_json::json!({
+            "auto_cleanup": false,
+            "baselines": {
+                "lint": {
+                    "context_id": "data-machine",
+                    "created_at": "2026-03-06T04:47:29Z",
+                    "item_count": 0,
+                    "known_fingerprints": [],
+                    "metadata": {
+                        "findings_count": 0
+                    }
+                }
+            },
+            "changelog_target": "docs/CHANGELOG.md",
+            "extensions": {
+                "wordpress": {}
+            },
+            "id": "data-machine",
+            "version_targets": [
+                {"file": "data-machine.php", "pattern": "(?m)^\\s*\\*?\\s*Version:\\s*([0-9.]+)"}
+            ]
+        });
+        std::fs::write(dir.join("homeboy.json"), config.to_string()).unwrap();
+
+        let result = discover_from_portable(&dir);
+        assert!(
+            result.is_some(),
+            "Should discover component even with baselines field in homeboy.json"
+        );
+
+        let comp = result.unwrap();
+        // id derived from dir name, not portable
+        assert_eq!(comp.id, "homeboy-test-baselines");
+        assert_eq!(comp.local_path, dir.to_string_lossy());
+        // extensions must be present
+        assert!(
+            comp.extensions.is_some(),
+            "extensions should be set from portable config"
+        );
+        assert!(
+            comp.extensions.as_ref().unwrap().contains_key("wordpress"),
+            "wordpress extension should be present"
+        );
+        assert_eq!(comp.changelog_target.as_deref(), Some("docs/CHANGELOG.md"));
+        assert!(comp.version_targets.is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
