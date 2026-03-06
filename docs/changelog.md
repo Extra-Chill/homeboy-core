@@ -6,8 +6,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 ## [0.59.0] - 2026-03-06
 
+### Added
+- add audit impact projection for refactor decompose plans
+
+### Changed
+- decompose the upgrade core into include fragments for a smaller, more modular implementation
+
 ### Fixed
+- add targeted rename controls for safer refactor test migrations (#503)
+- dedupe decompose items before grouped moves
+- keep decompose tests black-box while removing unused exports
 - Fixed scoped audit exit codes to ignore unchanged legacy outliers in changed-since runs
+- restore crates.io publishing in release CI
 
 ## [0.58.1] - 2026-03-06
 
