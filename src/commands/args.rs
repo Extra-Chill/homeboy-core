@@ -201,6 +201,93 @@ mod tests {
 }
 
 // ============================================================================
+// OptionalPositionalComponentArgs: optional positional component + --path
+// ============================================================================
+
+/// Like PositionalComponentArgs but with an optional component ID.
+/// For commands where the component can be inferred from CWD (version, changelog, git, cleanup).
+/// See: https://github.com/Extra-Chill/homeboy/issues/523
+#[allow(dead_code)]
+#[derive(Args, Debug, Clone)]
+pub struct OptionalPositionalComponentArgs {
+    /// Component ID (auto-detected from CWD if omitted)
+    pub component: Option<String>,
+
+    /// Override local_path for this run
+    #[arg(long)]
+    pub path: Option<String>,
+}
+
+#[allow(dead_code)]
+impl OptionalPositionalComponentArgs {
+    /// Load the component, applying path override if provided.
+    /// Falls back to CWD auto-discovery when component ID is None.
+    pub fn load(&self) -> homeboy::Result<Component> {
+        if let Some(ref path) = self.path {
+            match self.component.as_deref() {
+                Some(id) => match component::load(id) {
+                    Ok(mut comp) => {
+                        comp.local_path = path.clone();
+                        Ok(comp)
+                    }
+                    Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
+                        if let Some(mut discovered) =
+                            component::discover_from_portable(Path::new(path))
+                        {
+                            discovered.id = id.to_string();
+                            discovered.local_path = path.clone();
+                            Ok(discovered)
+                        } else {
+                            Ok(Component::new(
+                                id.to_string(),
+                                path.clone(),
+                                String::new(),
+                                None,
+                            ))
+                        }
+                    }
+                    Err(err) => Err(err),
+                },
+                None => {
+                    // No component ID — try portable config at path
+                    if let Some(mut discovered) = component::discover_from_portable(Path::new(path))
+                    {
+                        discovered.local_path = path.clone();
+                        Ok(discovered)
+                    } else {
+                        Ok(Component::new(
+                            String::new(),
+                            path.clone(),
+                            String::new(),
+                            None,
+                        ))
+                    }
+                }
+            }
+        } else {
+            // No --path: resolve via registered component or CWD
+            component::resolve(self.component.as_deref())
+        }
+    }
+
+    /// Get the component ID, if provided.
+    pub fn id(&self) -> Option<&str> {
+        self.component.as_deref()
+    }
+
+    /// Resolve the effective source path (--path override or component's local_path).
+    pub fn source_path(&self) -> homeboy::Result<PathBuf> {
+        if let Some(ref path) = self.path {
+            Ok(PathBuf::from(path))
+        } else {
+            let comp = component::resolve(self.component.as_deref())?;
+            let expanded = shellexpand::tilde(&comp.local_path);
+            Ok(PathBuf::from(expanded.as_ref()))
+        }
+    }
+}
+
+// ============================================================================
 // BaselineArgs: --baseline + --ignore-baseline
 // ============================================================================
 
