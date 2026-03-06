@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.59.0] - 2026-03-06
+
+### Fixed
+- Fixed scoped audit exit codes to ignore unchanged legacy outliers in changed-since runs
+
 ## [0.58.1] - 2026-03-06
 
 ### Fixed
