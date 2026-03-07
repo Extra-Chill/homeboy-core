@@ -91,6 +91,7 @@ pub fn find_extension_for_file_ext(ext: &str, capability: &str) -> Option<Extens
             match capability {
                 "fingerprint" => m.fingerprint_script().is_some(),
                 "refactor" => m.refactor_script().is_some(),
+                "audit" => m.test_mapping().is_some(),
                 _ => false,
             }
         })
