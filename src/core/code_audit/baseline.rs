@@ -342,7 +342,7 @@ mod tests {
             convention: "structural".to_string(),
             severity: Severity::Warning,
             file: "deploy.rs".to_string(),
-            description: "File has 2484 lines (threshold: 500)".to_string(),
+            description: "File has 2484 lines (threshold: 1000)".to_string(),
             suggestion: String::new(),
             kind: DeviationKind::GodFile,
         };
@@ -350,7 +350,7 @@ mod tests {
             convention: "structural".to_string(),
             severity: Severity::Warning,
             file: "deploy.rs".to_string(),
-            description: "File has 2645 lines (threshold: 500)".to_string(),
+            description: "File has 2645 lines (threshold: 1000)".to_string(),
             suggestion: String::new(),
             kind: DeviationKind::GodFile,
         };

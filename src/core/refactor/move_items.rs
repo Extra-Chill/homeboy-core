@@ -13,9 +13,11 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::core::test_scaffold::load_extension_grammar;
 use crate::extension::{
     self, AdjustedItem, ExtensionManifest, ParsedItem, RelatedTests, ResolvedImports,
 };
+use crate::utils::grammar_items;
 use crate::{component, Result};
 
 /// Result of a move operation.
@@ -108,6 +110,18 @@ impl ItemKind {
 fn find_refactor_extension(file_path: &str) -> Option<ExtensionManifest> {
     let ext = Path::new(file_path).extension().and_then(|e| e.to_str())?;
     extension::find_extension_for_file_ext(ext, "refactor")
+}
+
+/// Try parsing items using the core grammar engine (no extension script needed).
+fn core_parse_items(ext: &ExtensionManifest, content: &str) -> Option<Vec<ParsedItem>> {
+    let ext_path = ext.extension_path.as_deref()?;
+    let file_ext = ext.provided_file_extensions().first()?.clone();
+    let grammar = load_extension_grammar(Path::new(ext_path), &file_ext)?;
+    let items = grammar_items::parse_items(content, &grammar);
+    if items.is_empty() {
+        return None;
+    }
+    Some(items.into_iter().map(ParsedItem::from).collect())
 }
 
 /// Ask an extension to parse all top-level items in a source file.
@@ -259,10 +273,13 @@ pub fn move_items_with_options(
     let mut warnings: Vec<String> = Vec::new();
 
     // ── Phase 1: Parse items ────────────────────────────────────────────
+    // Try core grammar engine first (faster, more robust), fall back to extension script
     let all_items: Vec<ParsedItem> = if let Some(ref ext) = ext {
-        ext_parse_items(ext, &content, from).unwrap_or_else(|| {
-            warnings.push("Extension parse_items failed, using fallback parser".to_string());
-            Vec::new()
+        core_parse_items(ext, &content).unwrap_or_else(|| {
+            ext_parse_items(ext, &content, from).unwrap_or_else(|| {
+                warnings.push("Extension parse_items failed, using fallback parser".to_string());
+                Vec::new()
+            })
         })
     } else {
         warnings.push(
