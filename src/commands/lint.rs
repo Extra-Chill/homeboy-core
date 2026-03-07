@@ -230,6 +230,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
     };
 
     let output = ExtensionRunner::new(args.comp.id(), &script_path)
+        .component(component.clone())
         .path_override(args.comp.path.clone())
         .settings(&args.setting_args.setting)
         .env_if(args.fix, "HOMEBOY_AUTO_FIX", "1")

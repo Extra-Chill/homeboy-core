@@ -352,6 +352,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
     };
 
     let mut runner = ExtensionRunner::new(args.comp.id(), &script_path)
+        .component(component.clone())
         .path_override(args.comp.path.clone())
         .settings(&args.setting_args.setting)
         .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")

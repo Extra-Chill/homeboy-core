@@ -492,6 +492,7 @@ fn validate_code_quality(component: &Component) -> Result<()> {
         ));
 
         match ExtensionRunner::new(&component.id, lint_script)
+            .component(component.clone())
             .env(
                 "HOMEBOY_LINT_FINDINGS_FILE",
                 &lint_findings_file.to_string_lossy(),
@@ -552,7 +553,10 @@ fn validate_code_quality(component: &Component) -> Result<()> {
     // Run tests if extension provides them
     if let Some(test_script) = manifest.test_script() {
         log_status!("release", "Running tests ({})...", extension_id);
-        match ExtensionRunner::new(&component.id, test_script).run() {
+        match ExtensionRunner::new(&component.id, test_script)
+            .component(component.clone())
+            .run()
+        {
             Ok(output) if output.success => {
                 log_status!("release", "Tests passed");
                 checks_run += 1;

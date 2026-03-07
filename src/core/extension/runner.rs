@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::component::{self, Component, ScopedExtensionConfig};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorCode, Result};
 use crate::ssh::{execute_local_command_passthrough, CommandOutput};
 use crate::utils::{io, shell};
 
@@ -24,6 +24,7 @@ pub struct ExtensionRunner {
     env_vars: Vec<(String, String)>,
     script_args: Vec<String>,
     path_override: Option<String>,
+    pre_loaded_component: Option<Component>,
 }
 
 impl ExtensionRunner {
@@ -39,7 +40,17 @@ impl ExtensionRunner {
             env_vars: Vec::new(),
             script_args: Vec::new(),
             path_override: None,
+            pre_loaded_component: None,
         }
+    }
+
+    /// Use a pre-loaded component instead of loading by ID.
+    ///
+    /// This avoids re-loading from config when the caller already has a
+    /// resolved component (e.g., from portable config discovery in CI).
+    pub fn component(mut self, comp: Component) -> Self {
+        self.pre_loaded_component = Some(comp);
+        self
     }
 
     /// Override the component's `local_path` for this execution.
@@ -119,7 +130,35 @@ impl ExtensionRunner {
     }
 
     fn find_component(&self) -> Result<Component> {
-        let mut comp = component::load(&self.component_id)?;
+        let mut comp = if let Some(ref pre_loaded) = self.pre_loaded_component {
+            pre_loaded.clone()
+        } else {
+            match component::load(&self.component_id) {
+                Ok(c) => c,
+                Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
+                    // Fall back to portable config discovery when --path is provided
+                    if let Some(ref path) = self.path_override {
+                        if let Some(mut discovered) =
+                            component::discover_from_portable(Path::new(path))
+                        {
+                            discovered.id = self.component_id.clone();
+                            discovered.local_path = path.clone();
+                            discovered
+                        } else {
+                            Component::new(
+                                self.component_id.clone(),
+                                path.clone(),
+                                String::new(),
+                                None,
+                            )
+                        }
+                    } else {
+                        return Err(err);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        };
         if let Some(ref path) = self.path_override {
             comp.local_path = path.clone();
         }

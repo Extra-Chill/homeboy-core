@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use homeboy::code_audit::{self, baseline, fixer, CodeAuditResult};
-use homeboy::component;
+use homeboy::component::{self, Component};
 use homeboy::extension::ExtensionRunner;
 use homeboy::git;
 use homeboy::utils::autofix::{self, AutofixMode};
@@ -651,12 +651,22 @@ fn findings_fingerprint(result: &CodeAuditResult) -> Vec<String> {
     fingerprints
 }
 
+/// Load a component by ID, falling back to portable config discovery.
+fn load_or_discover(component_id: &str, source_path: &str) -> Option<Component> {
+    component::load(component_id).ok().or_else(|| {
+        let mut comp = component::discover_from_portable(Path::new(source_path))?;
+        comp.id = component_id.to_string();
+        comp.local_path = source_path.to_string();
+        Some(comp)
+    })
+}
+
 fn build_smoke_verifier<'a>(
     component_id: &'a str,
     source_path: &'a str,
     changed_files: &'a [String],
 ) -> Option<impl Fn(&fixer::ApplyChunkResult) -> Result<String, String> + 'a> {
-    let component = component::load(component_id).ok()?;
+    let component = load_or_discover(component_id, source_path)?;
     let script_path = super::lint::resolve_lint_script(&component).ok()?;
     let root = PathBuf::from(source_path);
     Some(move |chunk: &fixer::ApplyChunkResult| {
@@ -708,7 +718,7 @@ fn build_test_smoke_verifier<'a>(
     source_path: &'a str,
     changed_files: &'a [String],
 ) -> Option<impl Fn(&fixer::ApplyChunkResult) -> Result<String, String> + 'a> {
-    let component = component::load(component_id).ok()?;
+    let component = load_or_discover(component_id, source_path)?;
     let script_path = super::test::resolve_test_script(&component).ok()?;
     let changed_scope = compute_changed_test_scope(&component, "HEAD~1").ok();
 
