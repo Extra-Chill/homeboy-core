@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.68.0] - 2026-03-07
+### Added
+- call-site impact tracing for scoped audit (#564) (#565) (audit)
+### Fixed
+- scoped audit exits 0 when no baseline exists anywhere (#563)
+
 ## [0.67.0] - 2026-03-07
 ### Added
 - differential CI — only fail on findings introduced by the PR (#562)
