@@ -317,6 +317,19 @@ pub struct ParsedItem {
     pub visibility: String,
 }
 
+impl From<crate::utils::grammar_items::GrammarItem> for ParsedItem {
+    fn from(gi: crate::utils::grammar_items::GrammarItem) -> Self {
+        Self {
+            name: gi.name,
+            kind: gi.kind,
+            start_line: gi.start_line,
+            end_line: gi.end_line,
+            source: gi.source,
+            visibility: gi.visibility,
+        }
+    }
+}
+
 /// Output from a `resolve_imports` refactor command.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedImports {

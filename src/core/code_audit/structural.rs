@@ -10,7 +10,7 @@ use super::conventions::DeviationKind;
 use super::findings::{Finding, Severity};
 
 /// Thresholds for structural findings.
-const GOD_FILE_LINE_THRESHOLD: usize = 500;
+const GOD_FILE_LINE_THRESHOLD: usize = 1000;
 const HIGH_ITEM_COUNT_THRESHOLD: usize = 15;
 const DIRECTORY_SPRAWL_FILE_THRESHOLD: usize = 25;
 
@@ -398,9 +398,9 @@ export default function main() {}
         let dir = std::env::temp_dir().join("homeboy_structural_god_test");
         let _ = std::fs::create_dir_all(&dir);
 
-        // Create a file with 600 lines
+        // Create a file with 1100 lines (above 1000-line threshold)
         let mut content = String::new();
-        for i in 0..600 {
+        for i in 0..1100 {
             content.push_str(&format!("fn func_{}() {{}}\n", i));
         }
         std::fs::write(dir.join("big.rs"), &content).unwrap();
@@ -416,7 +416,7 @@ export default function main() {}
 
         assert_eq!(god_findings.len(), 1, "Should flag big.rs as god file");
         assert_eq!(god_findings[0].file, "big.rs");
-        assert!(god_findings[0].description.contains("600 lines"));
+        assert!(god_findings[0].description.contains("1100 lines"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

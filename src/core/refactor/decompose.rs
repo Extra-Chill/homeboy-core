@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::core::test_scaffold::load_extension_grammar;
 use crate::extension::{self, ParsedItem};
+use crate::utils::grammar_items;
 use crate::Result;
 
 use super::move_items::MoveOptions;
@@ -104,6 +106,11 @@ pub fn build_plan(
 }
 
 pub fn apply_plan(plan: &DecomposePlan, root: &Path, write: bool) -> Result<Vec<MoveResult>> {
+    // Pre-write validation: check brace balance on all source files involved
+    if write {
+        validate_plan_sources(plan, root)?;
+    }
+
     let preview = run_moves(plan, root, false)?;
     if !write {
         return Ok(preview);
@@ -233,14 +240,30 @@ fn source_to_test_file(target: &str) -> Option<String> {
 
 fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
     let ext = Path::new(file).extension()?.to_str()?;
-    let manifest = extension::find_extension_for_file_ext(ext, "refactor")?;
-    let command = serde_json::json!({
-        "command": "parse_items",
-        "file_path": file,
-        "content": content,
-    });
-    let result = extension::run_refactor_script(&manifest, &command)?;
-    serde_json::from_value(result.get("items")?.clone()).ok()
+
+    // Try core grammar engine first — faster and more robust than extension scripts
+    if let Some(manifest) = extension::find_extension_for_file_ext(ext, "refactor") {
+        if let Some(ext_path) = &manifest.extension_path {
+            let grammar = load_extension_grammar(Path::new(ext_path), ext);
+            if let Some(grammar) = grammar {
+                let items = grammar_items::parse_items(content, &grammar);
+                if !items.is_empty() {
+                    return Some(items.into_iter().map(ParsedItem::from).collect());
+                }
+            }
+        }
+
+        // Fall back to extension script
+        let command = serde_json::json!({
+            "command": "parse_items",
+            "file_path": file,
+            "content": content,
+        });
+        let result = extension::run_refactor_script(&manifest, &command)?;
+        return serde_json::from_value(result.get("items")?.clone()).ok();
+    }
+
+    None
 }
 
 fn group_items(file: &str, items: &[ParsedItem], audit_safe: bool) -> Vec<DecomposeGroup> {
@@ -291,6 +314,48 @@ fn group_items(file: &str, items: &[ParsedItem], audit_safe: bool) -> Vec<Decomp
             item_names: names,
         })
         .collect()
+}
+
+/// Validate that parsed items have balanced braces before writing.
+///
+/// This prevents the kind of corruption that killed upgrade.rs — if the parser
+/// produced items with unbalanced braces, we abort before writing anything.
+fn validate_plan_sources(plan: &DecomposePlan, root: &Path) -> Result<()> {
+    let source_path = root.join(&plan.file);
+    let content = std::fs::read_to_string(&source_path).map_err(|e| {
+        crate::Error::internal_io(e.to_string(), Some("pre-write validation".to_string()))
+    })?;
+
+    let ext = Path::new(&plan.file).extension().and_then(|e| e.to_str());
+    let grammar = ext.and_then(|ext| {
+        let manifest = extension::find_extension_for_file_ext(ext, "refactor")?;
+        let ext_path = manifest.extension_path.as_deref()?;
+        load_extension_grammar(Path::new(ext_path), ext)
+    });
+
+    if let Some(grammar) = grammar {
+        // Re-parse and validate each item's source has balanced braces
+        let items = grammar_items::parse_items(&content, &grammar);
+        for item in &items {
+            if !grammar_items::validate_brace_balance(&item.source, &grammar) {
+                return Err(crate::Error::validation_invalid_argument(
+                    "file",
+                    format!(
+                        "Pre-write validation failed: item '{}' (lines {}-{}) has unbalanced braces. \
+                         Aborting to prevent file corruption.",
+                        item.name, item.start_line, item.end_line
+                    ),
+                    None,
+                    Some(vec![
+                        "This usually means the parser misjudged item boundaries".to_string(),
+                        "Try running without --write to inspect the plan first".to_string(),
+                    ]),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn dedupe_parsed_items(items: Vec<ParsedItem>) -> Vec<ParsedItem> {
