@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.67.0] - 2026-03-07
+### Added
+- differential CI — only fail on findings introduced by the PR (#562)
+- add version undo command (#406) (#553)
+- smart decompose grouping with 5-phase semantic clustering (#552) (refactor)
+- expose core runner helper (#517) (extension)
+### Fixed
+- deploy from latest tag by default, fleet status checks live versions (#561)
+- reduce helper-file precision noise (#515) (audit)
+
 ## [0.66.0] - 2026-03-07
 ### Added
 - grammar-driven parse_items in core + pre-write validation + god file threshold (#551)
