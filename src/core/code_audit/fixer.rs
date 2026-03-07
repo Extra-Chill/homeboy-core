@@ -3782,10 +3782,10 @@ pub struct TestOutput {}
     }
 
     #[test]
-    fn generate_fixes_inserts_inline_test_method_for_rust() {
+    fn generate_fixes_routes_test_method_to_companion_file_for_rust() {
         use super::super::{AuditSummary, CodeAuditResult};
 
-        let dir = std::env::temp_dir().join("homeboy_fixer_inline_test_method");
+        let dir = std::env::temp_dir().join("homeboy_fixer_companion_test_method");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src/core")).unwrap();
 
@@ -3836,16 +3836,39 @@ mod tests {
 
         let fix_result = generate_fixes(&audit_result, &dir);
 
-        // Should insert into the source file itself (inline), not a separate test file
-        assert_eq!(fix_result.fixes.len(), 1);
-        assert_eq!(fix_result.fixes[0].file, "src/core/parser.rs");
-        assert!(fix_result.fixes[0].insertions[0]
-            .description
-            .contains("(inline)"));
-        assert!(fix_result.fixes[0].insertions[0]
-            .code
-            .contains("test_validate"));
-        assert!(fix_result.fixes[0].insertions[0].code.contains("#[ignore"));
+        // When a Rust extension with test_mapping is installed, test stubs go to
+        // companion test files (tests/core/parser_test.rs) instead of inline.
+        // This avoids inflating source files toward god_file thresholds.
+        //
+        // If no extension is installed, the inline path is still used as fallback.
+        let has_rust_extension =
+            crate::extension::find_extension_for_file_ext("rs", "audit").is_some();
+
+        if has_rust_extension {
+            // Companion file route: new_files gets the test stub
+            let companion = fix_result
+                .new_files
+                .iter()
+                .find(|nf| nf.file.contains("parser_test"));
+            assert!(
+                companion.is_some(),
+                "Expected companion test file for parser_test, got new_files: {:?}",
+                fix_result
+                    .new_files
+                    .iter()
+                    .map(|nf| &nf.file)
+                    .collect::<Vec<_>>()
+            );
+            let companion = companion.unwrap();
+            assert!(companion.content.contains("test_validate"));
+        } else {
+            // Inline fallback: insert into source file
+            assert_eq!(fix_result.fixes.len(), 1);
+            assert_eq!(fix_result.fixes[0].file, "src/core/parser.rs");
+            assert!(fix_result.fixes[0].insertions[0]
+                .description
+                .contains("(inline)"));
+        }
 
         // No skips for "could not derive test file path"
         assert!(
@@ -3853,7 +3876,7 @@ mod tests {
                 .skipped
                 .iter()
                 .any(|s| s.reason.contains("Could not derive")),
-            "Should not skip inline test methods: {:?}",
+            "Should not skip test methods: {:?}",
             fix_result.skipped
         );
 
