@@ -650,8 +650,23 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
         }
     }
 
-    // No baseline at all — standard output
-    let exit_code = default_audit_exit_code(&result, args.changed_since.is_some());
+    // No baseline at all
+    //
+    // When --changed-since is active but no baseline exists anywhere (neither
+    // explicit file nor at the base ref), we cannot determine which findings
+    // are new vs pre-existing. In this case, pass — the correct fix is to
+    // add a baseline, not to fail PRs on unattributable debt.
+    let exit_code = if args.changed_since.is_some() {
+        if !result.findings.is_empty() {
+            eprintln!(
+                "[audit] {} finding(s) in changed files — no baseline to compare against, treating as pre-existing",
+                result.findings.len()
+            );
+        }
+        0
+    } else {
+        default_audit_exit_code(&result, false)
+    };
     if args.json_summary {
         Ok((
             AuditOutput::Summary(build_audit_summary(&result, exit_code)),
