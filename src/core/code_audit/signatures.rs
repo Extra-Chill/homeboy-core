@@ -5,8 +5,8 @@ use regex::Regex;
 /// Normalize a signature string before tokenization.
 ///
 /// Collapses whitespace/newlines, removes trailing commas before closing
-/// parens, and normalizes extension path references to just the final segment.
-/// This is language-agnostic — works on any signature string.
+/// parens, normalizes extension path references, and strips return type
+/// declarations. This is language-agnostic — works on any signature string.
 pub(crate) fn normalize_signature(sig: &str) -> String {
     // Collapse all whitespace (including newlines) into single spaces
     let normalized: String = sig.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -33,7 +33,38 @@ pub(crate) fn normalize_signature(sig: &str) -> String {
         .replace_all(&normalized, "")
         .to_string();
 
+    // Strip return type declarations — they don't change the calling convention
+    // and shouldn't cause structural mismatches.
+    // PHP:  "function foo(): void" → "function foo()"
+    // PHP:  "function foo(): ?array" → "function foo()"
+    // Rust: "fn foo() -> Result<T>" → "fn foo()"
+    let normalized = strip_return_type(&normalized);
+
+    // Strip PHP parameter type hints — typed and untyped parameters should
+    // be structurally equivalent. "WP_REST_Request $request" → "$request"
+    let normalized = Regex::new(r"(?:\??\w[\w\\]*\s+)(\$\w+)")
+        .unwrap()
+        .replace_all(&normalized, "$1")
+        .to_string();
+
     normalized
+}
+
+/// Strip return type declaration from a signature string.
+///
+/// Finds the last closing paren (end of parameter list) and removes
+/// everything after it that looks like a return type annotation.
+fn strip_return_type(sig: &str) -> String {
+    // Find the last ')' — that's the end of the parameter list
+    if let Some(paren_pos) = sig.rfind(')') {
+        let after_paren = &sig[paren_pos + 1..].trim_start();
+        // PHP return type: ": void", ": ?array", ": \Namespace\Type"
+        // Rust return type: "-> Result<T>", "-> bool"
+        if after_paren.starts_with(':') || after_paren.starts_with("->") {
+            return sig[..=paren_pos].to_string();
+        }
+    }
+    sig.to_string()
 }
 
 /// Split a signature string into tokens for structural comparison.
@@ -116,4 +147,98 @@ pub(crate) fn compute_signature_skeleton(
     }
 
     Some(skeleton)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_return_type_php_void() {
+        let sig = "public function register(): void";
+        let normalized = normalize_signature(sig);
+        assert!(
+            !normalized.contains("void"),
+            "Return type should be stripped: {}",
+            normalized
+        );
+    }
+
+    #[test]
+    fn strip_return_type_php_nullable() {
+        let sig = "public function get_items(): ?array";
+        let normalized = normalize_signature(sig);
+        assert!(
+            !normalized.contains("array"),
+            "Return type should be stripped: {}",
+            normalized
+        );
+    }
+
+    #[test]
+    fn strip_return_type_rust() {
+        let sig = "pub fn run(args: FooArgs) -> CmdResult<FooOutput>";
+        let normalized = normalize_signature(sig);
+        assert!(
+            !normalized.contains("CmdResult"),
+            "Return type should be stripped: {}",
+            normalized
+        );
+    }
+
+    #[test]
+    fn strip_return_type_preserves_params() {
+        let sig = "pub fn run(args: FooArgs)";
+        let normalized = normalize_signature(sig);
+        assert!(
+            normalized.contains("FooArgs"),
+            "Params should be preserved: {}",
+            normalized
+        );
+    }
+
+    #[test]
+    fn same_tokens_with_and_without_return_type() {
+        let with_return = tokenize_signature("public function register(): void");
+        let without_return = tokenize_signature("public function register()");
+        assert_eq!(
+            with_return.len(),
+            without_return.len(),
+            "Token count should match regardless of return type: {:?} vs {:?}",
+            with_return,
+            without_return
+        );
+    }
+
+    #[test]
+    fn php_type_hints_stripped() {
+        let typed = tokenize_signature("public function check(WP_REST_Request $request)");
+        let untyped = tokenize_signature("public function check($request)");
+        assert_eq!(
+            typed.len(),
+            untyped.len(),
+            "Token count should match regardless of type hints: {:?} vs {:?}",
+            typed,
+            untyped
+        );
+    }
+
+    #[test]
+    fn rust_return_type_stripped_in_skeleton() {
+        let sigs = vec![
+            tokenize_signature("pub fn run(args: RunArgs) -> Result<Output>"),
+            tokenize_signature("pub fn run(args: RunArgs)"),
+        ];
+        let skeleton = compute_signature_skeleton(&sigs);
+        assert!(
+            skeleton.is_some(),
+            "Skeleton should compute successfully after return type stripping"
+        );
+    }
+
+    #[test]
+    fn tokenize_preserves_function_name() {
+        let tokens = tokenize_signature("pub fn do_stuff(x: i32)");
+        assert!(tokens.contains(&"do_stuff".to_string()));
+    }
 }
