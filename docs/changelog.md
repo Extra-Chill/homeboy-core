@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.65.0] - 2026-03-07
+### Added
+- autofix unreferenced exports with visibility narrowing (#548) (audit)
+### Fixed
+- tighten visibility for 51 unreferenced exports (#547) (audit)
+
 ## [0.64.0] - 2026-03-07
 ### Added
 - expand autofix coverage for inline tests and placeholder scaffolds (#532) (audit)
