@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.64.0] - 2026-03-07
+### Added
+- expand autofix coverage for inline tests and placeholder scaffolds (#532) (audit)
+- detect duplicated code blocks within methods (#531) (audit)
+
 ## [0.63.0] - 2026-03-06
 ### Added
 - cron-triggered continuous release workflow (#530)
