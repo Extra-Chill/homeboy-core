@@ -17,6 +17,7 @@ use crate::core::test_scaffold::load_extension_grammar;
 use crate::extension::{
     self, AdjustedItem, ExtensionManifest, ParsedItem, RelatedTests, ResolvedImports,
 };
+use crate::utils::codebase_scan::{self, ExtensionFilter, ScanConfig};
 use crate::utils::grammar_items;
 use crate::{component, Result};
 
@@ -548,7 +549,13 @@ pub fn move_items_with_options(
         let dest_module = module_path_from_file(to);
 
         if source_module != dest_module {
-            let all_files = walk_source_files(root);
+            let all_files = codebase_scan::walk_files(
+                root,
+                &ScanConfig {
+                    extensions: ExtensionFilter::All,
+                    ..Default::default()
+                },
+            );
             for file_path in &all_files {
                 let rel_path = file_path
                     .strip_prefix(root)
@@ -734,46 +741,6 @@ fn module_path_from_file(file_path: &str) -> String {
     let p = p.strip_suffix(".rs").unwrap_or(p);
     let p = p.strip_suffix("/mod").unwrap_or(p);
     p.replace('/', "::")
-}
-
-/// Walk source files recursively, skipping common non-source directories.
-fn walk_source_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    walk_recursive(root, root, &mut files);
-    files
-}
-
-/// Directories to always skip at any depth.
-const ALWAYS_SKIP_DIRS: &[&str] = &["node_modules", "vendor", ".git", ".svn", ".hg"];
-
-/// Directories to skip only at root level.
-const ROOT_ONLY_SKIP_DIRS: &[&str] = &["build", "dist", "target", "cache", "tmp"];
-
-fn walk_recursive(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-
-    let is_root = dir == root;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if ALWAYS_SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            if is_root && ROOT_ONLY_SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            walk_recursive(&path, root, files);
-        } else if path.is_file() {
-            files.push(path);
-        }
-    }
 }
 
 // ============================================================================
