@@ -7,7 +7,6 @@ use super::conventions::Language;
 
 /// A structural fingerprint extracted from a single source file.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct FileFingerprint {
     /// Path relative to component root.
     pub relative_path: String,
