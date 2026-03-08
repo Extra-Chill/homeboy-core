@@ -99,40 +99,95 @@ fn fetch_remote_versions(
     let mut versions = HashMap::new();
 
     for component in components {
-        let Some(version_file) = component
-            .version_targets
-            .as_ref()
-            .and_then(|targets| targets.first())
-            .map(|t| t.file.as_str())
-        else {
+        // Try standard version-file approach first
+        if let Some(ver) = fetch_version_from_file(component, base_path, client) {
+            versions.insert(component.id.clone(), ver);
             continue;
-        };
+        }
 
-        let remote_path = match base_path::join_remote_child(
-            Some(base_path),
-            &component.remote_path,
-            version_file,
-        ) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        let output = client.execute(&format!("cat '{}' 2>/dev/null", remote_path));
-
-        if output.success {
-            let pattern = component
-                .version_targets
-                .as_ref()
-                .and_then(|targets| targets.first())
-                .and_then(|t| t.pattern.as_deref());
-
-            if let Some(ver) = parse_component_version(&output.stdout, pattern, version_file) {
-                versions.insert(component.id.clone(), ver);
-            }
+        // Fallback: for CLI binaries (has build_artifact, no remote_path),
+        // try running the binary with --version on the remote server.
+        if let Some(ver) = fetch_version_from_binary(component, client) {
+            versions.insert(component.id.clone(), ver);
         }
     }
 
     versions
+}
+
+/// Try to fetch version by reading a version file on the remote server.
+fn fetch_version_from_file(
+    component: &Component,
+    base_path: &str,
+    client: &SshClient,
+) -> Option<String> {
+    let version_file = component
+        .version_targets
+        .as_ref()
+        .and_then(|targets| targets.first())
+        .map(|t| t.file.as_str())?;
+
+    let remote_path =
+        base_path::join_remote_child(Some(base_path), &component.remote_path, version_file)
+            .ok()?;
+
+    let output = client.execute(&format!("cat '{}' 2>/dev/null", remote_path));
+
+    if output.success {
+        let pattern = component
+            .version_targets
+            .as_ref()
+            .and_then(|targets| targets.first())
+            .and_then(|t| t.pattern.as_deref());
+
+        parse_component_version(&output.stdout, pattern, version_file)
+    } else {
+        None
+    }
+}
+
+/// Try to fetch version by running `<binary> --version` on the remote server.
+///
+/// This handles CLI binary components (like homeboy itself) that are installed
+/// as executables without a parseable version file on the remote server.
+fn fetch_version_from_binary(component: &Component, client: &SshClient) -> Option<String> {
+    let artifact = component.build_artifact.as_ref()?;
+
+    // Extract binary name from build_artifact path (e.g., "target/release/homeboy" → "homeboy")
+    let binary_name = Path::new(artifact).file_name()?.to_str()?;
+
+    // Try common install locations
+    let candidates = [
+        format!("/usr/local/bin/{}", binary_name),
+        format!("/usr/bin/{}", binary_name),
+        binary_name.to_string(), // Relies on PATH
+    ];
+
+    for candidate in &candidates {
+        let output =
+            client.execute(&format!("{} --version 2>/dev/null", shell::quote_path(candidate)));
+        if output.success {
+            let stdout = output.stdout.trim();
+            // Parse "binary_name X.Y.Z" or just "X.Y.Z"
+            if let Some(ver) = parse_cli_version_output(stdout) {
+                return Some(ver);
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse version from CLI `--version` output.
+///
+/// Handles common formats:
+/// - "homeboy 0.71.1"
+/// - "v0.71.1"
+/// - "0.71.1"
+fn parse_cli_version_output(output: &str) -> Option<String> {
+    // Try "name X.Y.Z" pattern (e.g., "homeboy 0.71.1")
+    let re = regex::Regex::new(r"(\d+\.\d+\.\d+)").ok()?;
+    re.find(output).map(|m| m.as_str().to_string())
 }
 
 /// Parse version from content using pattern or extension defaults.
