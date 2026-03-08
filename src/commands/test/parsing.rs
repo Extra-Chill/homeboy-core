@@ -119,6 +119,10 @@ pub fn parse_test_results_file(path: &std::path::Path) -> Option<TestCounts> {
 }
 
 /// Parse human-readable test runner output (fallback when sidecar JSON isn't present).
+///
+/// Tries standard PHPUnit summary patterns first ("OK (N tests...)", "Tests: N, ...").
+/// Falls back to counting testdox ✔/✘ marks when PHPUnit crashed before printing
+/// its summary (e.g., a test called exit()).
 pub fn parse_test_results_text(text: &str) -> Option<TestCounts> {
     let spec = ParseSpec {
         rules: vec![
@@ -166,13 +170,25 @@ pub fn parse_test_results_text(text: &str) -> Option<TestCounts> {
 
     let parsed = spec.parse(text);
     let total = parsed.get("total").copied().unwrap_or(0.0).max(0.0) as u64;
-    if total == 0 {
-        return None;
+    if total > 0 {
+        let passed = parsed.get("passed").copied().unwrap_or(0.0).max(0.0) as u64;
+        let failed = parsed.get("failed").copied().unwrap_or(0.0).max(0.0) as u64;
+        let skipped = parsed.get("skipped").copied().unwrap_or(0.0).max(0.0) as u64;
+        return Some(TestCounts::new(total, passed, failed, skipped));
     }
-    let passed = parsed.get("passed").copied().unwrap_or(0.0).max(0.0) as u64;
-    let failed = parsed.get("failed").copied().unwrap_or(0.0).max(0.0) as u64;
-    let skipped = parsed.get("skipped").copied().unwrap_or(0.0).max(0.0) as u64;
-    Some(TestCounts::new(total, passed, failed, skipped))
+
+    // Fallback: count testdox marks (✔ = passed, ✘ = failed).
+    // PHPUnit --testdox outputs " ✔ Test name" / " ✘ Test name" per test.
+    // When PHPUnit crashes mid-run (a test calls exit()), no summary line
+    // is printed, but the testdox marks still appear for completed tests.
+    let pass_count = text.lines().filter(|l| l.contains('✔')).count() as u64;
+    let fail_count = text.lines().filter(|l| l.contains('✘')).count() as u64;
+    let testdox_total = pass_count + fail_count;
+    if testdox_total > 0 {
+        return Some(TestCounts::new(testdox_total, pass_count, fail_count, 0));
+    }
+
+    None
 }
 
 /// Parse the coverage JSON file written by the extension test runner.
@@ -361,5 +377,52 @@ mod tests {
 
         let parsed = spec.parse("Errors: 2\nErrors: 3\n");
         assert_eq!(parsed.get("errors").copied().unwrap_or(0.0), 5.0);
+    }
+
+    #[test]
+    fn parse_test_results_text_testdox_fallback_all_pass() {
+        let text = "\
+ ✔ Test one passes
+ ✔ Test two passes
+ ✔ Test three passes
+";
+        let counts = parse_test_results_text(text).expect("should parse testdox marks");
+        assert_eq!(counts.total, 3);
+        assert_eq!(counts.passed, 3);
+        assert_eq!(counts.failed, 0);
+    }
+
+    #[test]
+    fn parse_test_results_text_testdox_fallback_mixed() {
+        let text = "\
+ ✔ Test one passes
+ ✘ Test two fails
+ ✔ Test three passes
+";
+        let counts = parse_test_results_text(text).expect("should parse testdox marks");
+        assert_eq!(counts.total, 3);
+        assert_eq!(counts.passed, 2);
+        assert_eq!(counts.failed, 1);
+    }
+
+    #[test]
+    fn parse_test_results_text_prefers_summary_over_testdox() {
+        // When both summary and testdox marks are present, use the summary
+        let text = "\
+ ✔ Test one passes
+ ✔ Test two passes
+
+OK (2 tests, 5 assertions)
+";
+        let counts = parse_test_results_text(text).expect("should parse summary line");
+        assert_eq!(counts.total, 2);
+        assert_eq!(counts.passed, 2);
+        assert_eq!(counts.failed, 0);
+    }
+
+    #[test]
+    fn parse_test_results_text_returns_none_for_empty() {
+        assert!(parse_test_results_text("").is_none());
+        assert!(parse_test_results_text("no test output here").is_none());
     }
 }
