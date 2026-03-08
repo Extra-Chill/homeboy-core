@@ -427,14 +427,28 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
 
     let output = runner.script_args(&passthrough_args).run()?;
 
-    let status = if output.success { "passed" } else { "failed" };
-
     // Read test results if available
     let test_counts = parsing::parse_test_results_file(&results_file)
         .or_else(|| parsing::parse_test_results_text(&output.stdout));
 
     // Clean up test results temp file
     let _ = std::fs::remove_file(&results_file);
+
+    // Determine actual test status: when parsed results show 0 failures,
+    // treat as passed even if the runner script exited non-zero (e.g., lint
+    // failures, deprecation notices, or PHPUnit warnings that don't indicate
+    // actual test failures).
+    let status = if let Some(ref counts) = test_counts {
+        if counts.failed == 0 {
+            "passed"
+        } else {
+            "failed"
+        }
+    } else if output.success {
+        "passed"
+    } else {
+        "failed"
+    };
 
     // Read coverage results if available
     let coverage = coverage_file
@@ -569,7 +583,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
     let comp_id = args.comp.id();
 
     // Filter hint when tests fail and no passthrough args were used
-    if !output.success && passthrough_args.is_empty() {
+    if status == "failed" && passthrough_args.is_empty() {
         hints.push(format!(
             "To run specific tests: homeboy test {} -- --filter=TestName",
             comp_id
@@ -609,7 +623,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
     }
 
     // Analyze hint when tests fail and --analyze not used
-    if !output.success && !args.analyze {
+    if status == "failed" && !args.analyze {
         hints.push(format!(
             "Analyze failures: homeboy test {} --analyze",
             comp_id
@@ -626,8 +640,15 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
 
     let hints = if hints.is_empty() { None } else { Some(hints) };
 
-    // Exit code: baseline regression overrides test exit code
-    let exit_code = baseline_exit_override.unwrap_or(output.exit_code);
+    // Exit code: when parsed test results show 0 failures, force exit code 0
+    // even if the runner script exited non-zero (lint failures, deprecation notices).
+    // Baseline regression still overrides.
+    let test_exit_code = if status == "passed" {
+        0
+    } else {
+        output.exit_code
+    };
+    let exit_code = baseline_exit_override.unwrap_or(test_exit_code);
     let summary = if args.json_summary {
         Some(build_test_summary(
             test_counts.as_ref(),
