@@ -841,15 +841,33 @@ fn insert_import(content: &str, import_line: &str, language: &Language) -> Strin
     };
 
     let rust_definition_starts = [
-        "fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn ",
-        "struct ", "pub struct ", "pub(crate) struct ",
-        "enum ", "pub enum ", "pub(crate) enum ",
-        "impl ", "impl<",
-        "mod ", "pub mod ", "pub(crate) mod ",
-        "trait ", "pub trait ", "pub(crate) trait ",
-        "const ", "pub const ", "pub(crate) const ",
-        "static ", "pub static ", "pub(crate) static ",
-        "type ", "pub type ", "pub(crate) type ",
+        "fn ",
+        "pub fn ",
+        "pub(crate) fn ",
+        "pub(super) fn ",
+        "struct ",
+        "pub struct ",
+        "pub(crate) struct ",
+        "enum ",
+        "pub enum ",
+        "pub(crate) enum ",
+        "impl ",
+        "impl<",
+        "mod ",
+        "pub mod ",
+        "pub(crate) mod ",
+        "trait ",
+        "pub trait ",
+        "pub(crate) trait ",
+        "const ",
+        "pub const ",
+        "pub(crate) const ",
+        "static ",
+        "pub static ",
+        "pub(crate) static ",
+        "type ",
+        "pub type ",
+        "pub(crate) type ",
         "#[cfg(test)]",
     ];
 
@@ -859,7 +877,9 @@ fn insert_import(content: &str, import_line: &str, language: &Language) -> Strin
 
         // For Rust, stop at the first top-level definition
         if *language == Language::Rust
-            && rust_definition_starts.iter().any(|prefix| trimmed.starts_with(prefix))
+            && rust_definition_starts
+                .iter()
+                .any(|prefix| trimmed.starts_with(prefix))
         {
             break;
         }
@@ -2149,11 +2169,7 @@ fn rewrite_callers_after_dedup(fix: &Fix, root: &Path) {
 
         // Extract function name and canonical file from the description.
         // Description format: "Remove duplicate `foo` (canonical copy in src/bar.rs)"
-        let Some(fn_name) = insertion
-            .description
-            .split('`')
-            .nth(1)
-        else {
+        let Some(fn_name) = insertion.description.split('`').nth(1) else {
             continue;
         };
         let Some(canonical_file) = insertion

@@ -104,11 +104,7 @@ pub fn module_path_from_file(file_path: &str) -> String {
 /// Returns structured `ImportRef`s with module paths and imported names.
 /// For Rust, handles both simple (`use crate::mod::Item;`) and grouped
 /// (`use crate::mod::{A, B};`) imports.
-pub fn parse_imports(
-    content: &str,
-    grammar: &Grammar,
-    relative_path: &str,
-) -> Vec<ImportRef> {
+pub fn parse_imports(content: &str, grammar: &Grammar, relative_path: &str) -> Vec<ImportRef> {
     let symbols = grammar::extract(content, grammar);
     let lines: Vec<&str> = content.lines().collect();
     let language_id = grammar.language.id.as_str();
@@ -209,9 +205,7 @@ pub fn trace_symbol_callers(
     file_extensions: &[&str],
 ) -> Vec<CallerRef> {
     let config = ScanConfig {
-        extensions: ExtensionFilter::Only(
-            file_extensions.iter().map(|e| e.to_string()).collect(),
-        ),
+        extensions: ExtensionFilter::Only(file_extensions.iter().map(|e| e.to_string()).collect()),
         skip_hidden: true,
         ..Default::default()
     };
@@ -236,10 +230,7 @@ pub fn trace_symbol_callers(
             continue;
         }
 
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         // Parse imports using grammar
         let matching_import = if let Some(grammar) = load_grammar_for_ext(ext) {
@@ -284,12 +275,16 @@ fn import_matches_module(import_module: &str, source_module: &str) -> bool {
         return true;
     }
     // Match without crate:: prefix
-    let without_crate = source_module.strip_prefix("crate::").unwrap_or(source_module);
+    let without_crate = source_module
+        .strip_prefix("crate::")
+        .unwrap_or(source_module);
     if import_module == without_crate {
         return true;
     }
     // Import has crate:: but source doesn't
-    let import_without = import_module.strip_prefix("crate::").unwrap_or(import_module);
+    let import_without = import_module
+        .strip_prefix("crate::")
+        .unwrap_or(import_module);
     import_without == source_module || import_without == without_crate
 }
 
@@ -402,18 +397,17 @@ fn compute_import_rewrite(
             };
 
             let remaining_str = if remaining.len() == 1 {
-                format!(
-                    "{}use {}::{};",
-                    indent,
-                    old_module_with_crate,
-                    remaining[0]
-                )
+                format!("{}use {}::{};", indent, old_module_with_crate, remaining[0])
             } else {
                 format!(
                     "{}use {}::{{{}}};",
                     indent,
                     old_module_with_crate,
-                    remaining.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    remaining
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             };
 
@@ -440,7 +434,10 @@ fn apply_rewrites(rewrites: &[ImportRewrite], root: &Path) {
     // Group rewrites by file
     let mut by_file: HashMap<&str, Vec<&ImportRewrite>> = HashMap::new();
     for rewrite in rewrites {
-        by_file.entry(rewrite.file.as_str()).or_default().push(rewrite);
+        by_file
+            .entry(rewrite.file.as_str())
+            .or_default()
+            .push(rewrite);
     }
 
     for (file, file_rewrites) in &by_file {
@@ -656,15 +653,13 @@ pub fn hello() {}
                 .to_string(),
         };
 
-        let rewrite = compute_import_rewrite(
-            &import,
-            "module_path_from_file",
-            "core::symbol_graph",
-        )
-        .unwrap();
+        let rewrite =
+            compute_import_rewrite(&import, "module_path_from_file", "core::symbol_graph").unwrap();
 
         // Should keep remaining in old group and add new import
-        assert!(rewrite.replacement.contains("use crate::core::fixer::{insertion, Fix};"));
+        assert!(rewrite
+            .replacement
+            .contains("use crate::core::fixer::{insertion, Fix};"));
         assert!(rewrite
             .replacement
             .contains("use crate::core::symbol_graph::module_path_from_file;"));

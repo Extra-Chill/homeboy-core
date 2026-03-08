@@ -1688,10 +1688,7 @@ mod tests {
             AuditOutput::Fix { iterations, .. } => {
                 // The fix loop should apply duplicate removals and then converge.
                 // First iteration applies fixes, second finds no more duplicates.
-                assert!(
-                    !iterations.is_empty(),
-                    "expected at least one iteration"
-                );
+                assert!(!iterations.is_empty(), "expected at least one iteration");
                 // At least one iteration should have applied changes
                 let any_applied = iterations.iter().any(|i| i.applied_chunks > 0);
                 assert!(
