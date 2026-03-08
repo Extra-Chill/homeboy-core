@@ -501,6 +501,9 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
         // automatically update the baseline to remove resolved findings.
         // This makes the baseline self-dissolving — it shrinks on every CI run
         // as autofix eliminates fixable findings.
+        //
+        // When --changed-since is active, use scoped baseline update to avoid
+        // touching fingerprints for files outside the change set.
         let mut ratchet_summary = None;
         if written && !args.baseline_args.ignore_baseline {
             if let Some(existing_baseline) =
@@ -509,7 +512,17 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
                 let comparison = baseline::compare(&current_result, &existing_baseline);
                 if !comparison.resolved_fingerprints.is_empty() {
                     // Findings were eliminated — save updated baseline
-                    match baseline::save_baseline(&current_result) {
+                    let save_result = if let Some(ref git_ref) = args.changed_since {
+                        let changed = git::get_files_changed_since(
+                            &current_result.source_path,
+                            git_ref,
+                        )
+                        .unwrap_or_default();
+                        baseline::save_baseline_scoped(&current_result, &changed)
+                    } else {
+                        baseline::save_baseline(&current_result)
+                    };
+                    match save_result {
                         Ok(_path) => {
                             homeboy::log_status!(
                                 "ratchet",
@@ -596,8 +609,25 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
 
     // --baseline: save current state
     if args.baseline_args.baseline {
-        let saved =
-            baseline::save_baseline(&result).map_err(homeboy::Error::internal_unexpected)?;
+        let saved = if let Some(ref git_ref) = args.changed_since {
+            // Scoped baseline: only update fingerprints for changed files
+            let changed = git::get_files_changed_since(&resolved_path, git_ref)?;
+            if changed.is_empty() {
+                homeboy::log_status!("baseline", "No files changed since {} — baseline unchanged", git_ref);
+            } else {
+                homeboy::log_status!(
+                    "baseline",
+                    "Scoped baseline update: {} file(s) in scope",
+                    changed.len()
+                );
+            }
+            baseline::save_baseline_scoped(&result, &changed)
+                .map_err(homeboy::Error::internal_unexpected)?
+        } else {
+            // Full baseline: replace everything
+            baseline::save_baseline(&result)
+                .map_err(homeboy::Error::internal_unexpected)?
+        };
 
         let baseline_data =
             baseline::load_baseline(Path::new(&result.source_path)).ok_or_else(|| {
