@@ -1,4 +1,4 @@
-use crate::config::from_str;
+use crate::config::{self, from_str};
 use crate::error::{Error, Result};
 use crate::git;
 use crate::local_files::{self, FileSystem};
@@ -88,6 +88,9 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
         Some(id) => slugify_id(id)?,
         None => derive_id_from_url(url)?,
     };
+
+    // Check cross-entity name collision before checking extension-specific existence
+    config::check_id_collision(&extension_id, "extension")?;
 
     let extension_dir = paths::extension(&extension_id)?;
     if extension_dir.exists() {
@@ -304,6 +307,9 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
         Some(id) => slugify_id(id)?,
         None => slugify_id(dir_name)?,
     };
+
+    // Check cross-entity name collision before checking extension-specific existence
+    config::check_id_collision(&extension_id, "extension")?;
 
     let manifest_path = manifest_path_for_extension(&source, &extension_id);
     if !manifest_path.exists() {
