@@ -1751,7 +1751,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
         if is_test {
             continue;
         }
-        match decompose::build_plan(&finding.file, root, "grouped", false) {
+        match decompose::build_plan(&finding.file, root, "grouped") {
             Ok(plan) => {
                 if plan.groups.len() > 1 {
                     decompose_plans.push(DecomposeFixPlan {
