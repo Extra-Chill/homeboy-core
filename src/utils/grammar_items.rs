@@ -493,6 +493,22 @@ pub fn validate_brace_balance(source: &str, grammar: &Grammar) -> bool {
                 }
                 continue;
             }
+            // Skip char literals: 'x', '\\', '\''
+            if chars[j] == '\'' {
+                j += 1;
+                if j < chars.len() && chars[j] == escape_char {
+                    // Escaped char: '\x' (2 chars after quote)
+                    j += 2;
+                } else if j < chars.len() {
+                    // Normal char: 'x' (1 char after quote)
+                    j += 1;
+                }
+                // Skip closing quote
+                if j < chars.len() && chars[j] == '\'' {
+                    j += 1;
+                }
+                continue;
+            }
             if chars[j] == open {
                 depth += 1;
             } else if chars[j] == close {
@@ -826,5 +842,35 @@ pub fn after() {}";
         ));
         assert!(!validate_brace_balance("fn foo() {", &grammar));
         assert!(!validate_brace_balance("fn foo() { { }", &grammar));
+    }
+
+    #[test]
+    fn validate_brace_balance_char_literals() {
+        let grammar = full_rust_grammar();
+        // Char literal containing close brace — should NOT count as a real brace
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '}'; }",
+            &grammar
+        ));
+        // Char literal containing open brace
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '{'; }",
+            &grammar
+        ));
+        // Escaped char literal (backslash)
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '\\\\'; }",
+            &grammar
+        ));
+        // Escaped single quote char literal
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '\\''; }",
+            &grammar
+        ));
+        // rfind pattern that triggered the original bug
+        assert!(validate_brace_balance(
+            "fn insert_before_closing_brace(content: &str) {\n    content.rfind('}');\n}",
+            &grammar
+        ));
     }
 }
