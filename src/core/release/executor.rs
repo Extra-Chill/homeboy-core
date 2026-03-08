@@ -67,7 +67,17 @@ impl ReleaseStepExecutor {
             .and_then(|v| v.as_str())
             .unwrap_or("patch");
         let component = component::load(&self.component_id)?;
-        let result = version::bump_component_version(&component, bump_type)?;
+
+        // Extract auto-generated changelog entries from step config (if any).
+        // These were computed during plan() from conventional commits and embedded
+        // here to avoid a ## Unreleased disk round-trip.
+        let changelog_entries = step
+            .config
+            .get("changelog_entries")
+            .and_then(super::pipeline::changelog_entries_from_json);
+
+        let result =
+            version::bump_component_version(&component, bump_type, changelog_entries.as_ref())?;
         let data = serde_json::to_value(&result)
             .map_err(|e| Error::internal_json(e.to_string(), Some("version output".to_string())))?;
         self.store_version_context(&result.new_version)?;

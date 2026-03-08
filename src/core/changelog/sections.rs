@@ -176,6 +176,39 @@ pub fn finalize_next_section(
     Ok((out, true))
 }
 
+/// Generate changelog entries from grouped commit data and finalize into a versioned section
+/// in a single pass. No `## Unreleased` section is written to disk — entries are built in
+/// memory and written directly as `## [version] - date`.
+///
+/// `entries_by_type` maps changelog type names (e.g. "added", "fixed") to lists of messages.
+pub fn finalize_with_generated_entries(
+    changelog_content: &str,
+    aliases: &[String],
+    entries_by_type: &std::collections::HashMap<&str, Vec<String>>,
+    new_version: &str,
+) -> Result<(String, bool)> {
+    if entries_by_type.is_empty() || entries_by_type.values().all(|msgs| msgs.is_empty()) {
+        return Ok((changelog_content.to_string(), false));
+    }
+
+    // Build entries in memory: ensure next section exists, add typed entries
+    let (mut content, _) = ensure_next_section(changelog_content, aliases)?;
+
+    for (entry_type, messages) in entries_by_type {
+        for message in messages {
+            let trimmed = message.trim();
+            if !trimmed.is_empty() {
+                let (new_content, _) =
+                    append_item_to_subsection(&content, aliases, trimmed, entry_type)?;
+                content = new_content;
+            }
+        }
+    }
+
+    // Finalize directly into versioned section — no intermediate disk write
+    finalize_next_section(&content, aliases, new_version, false)
+}
+
 fn normalize_heading_label(label: &str) -> String {
     label.trim().trim_matches(['[', ']']).trim().to_string()
 }

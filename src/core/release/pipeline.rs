@@ -120,18 +120,18 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     // validation paths share a single source of truth.
     let semver_recommendation = build_semver_recommendation(&component, &options.bump_type)?;
 
-    // === Stage 1: Auto-generate changelog entries from conventional commits ===
-    // This must run BEFORE changelog validation so entries exist when validated.
-    // Returns true when entries were auto-generated (real run) or would be (dry-run).
-    // When auto-generation handles the changelog, skip downstream changelog
-    // validations — they would false-fail in dry-run (entries not on disk yet)
-    // and are redundant in real runs (entries just written).
-    let will_auto_generate = v
+    // === Stage 1: Determine changelog entries from conventional commits ===
+    // Returns Some(entries) when commits need changelog entries generated.
+    // Never writes to disk — entries are passed to the executor via step config.
+    // When auto-generation will handle the changelog, skip downstream changelog
+    // validations (they would false-fail since entries don't exist on disk yet).
+    let pending_entries = v
         .capture(
             validate_commits_vs_changelog(&component, options.dry_run),
             "commits",
         )
-        .unwrap_or(false);
+        .flatten();
+    let will_auto_generate = pending_entries.is_some();
 
     if !will_auto_generate {
         v.capture(validate_changelog(&component), "changelog");
@@ -226,7 +226,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let mut warnings = Vec::new();
     let mut hints = Vec::new();
 
-    let steps = build_release_steps(
+    let mut steps = build_release_steps(
         &component,
         &extensions,
         &version_info.version,
@@ -235,6 +235,17 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         &mut warnings,
         &mut hints,
     )?;
+
+    // Embed pending changelog entries in the version step config so the executor
+    // can generate and finalize them atomically — no ## Unreleased disk round-trip.
+    if let Some(ref entries) = pending_entries {
+        if let Some(version_step) = steps.iter_mut().find(|s| s.id == "version") {
+            version_step.config.insert(
+                "changelog_entries".to_string(),
+                changelog_entries_to_json(entries),
+            );
+        }
+    }
 
     if options.dry_run {
         hints.push("Dry run: no changes will be made".to_string());
@@ -558,10 +569,13 @@ fn validate_code_quality(component: &Component) -> Result<()> {
 }
 
 /// Validate that commits since the last tag have corresponding changelog entries.
-/// Returns Ok(true) if changelog entries were auto-generated (or would be in dry-run),
-/// Ok(false) if all entries already existed, or Err on failure.
-/// When `dry_run` is true, reports what would be generated without writing to disk.
-fn validate_commits_vs_changelog(component: &Component, dry_run: bool) -> Result<bool> {
+/// Returns Ok(Some(entries)) when entries need to be auto-generated (passed to executor),
+/// Ok(None) if all entries already exist, or Err on failure.
+/// Never writes to disk — the executor handles writes via finalize_with_generated_entries.
+fn validate_commits_vs_changelog(
+    component: &Component,
+    dry_run: bool,
+) -> Result<Option<std::collections::HashMap<String, Vec<String>>>> {
     // Get latest tag
     let latest_tag = git::get_latest_tag(&component.local_path)?;
 
@@ -570,7 +584,7 @@ fn validate_commits_vs_changelog(component: &Component, dry_run: bool) -> Result
 
     // If no commits, nothing to validate
     if commits.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
     // Read unreleased changelog entries
@@ -584,7 +598,7 @@ fn validate_commits_vs_changelog(component: &Component, dry_run: bool) -> Result
 
     // If all relevant commits are represented, validation passes.
     if missing_commits.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
     // Check if changelog is already finalized ahead of the latest tag
@@ -598,30 +612,30 @@ fn validate_commits_vs_changelog(component: &Component, dry_run: bool) -> Result
         ) {
             // If changelog version is newer than tag, it's already finalized for pending changes
             if cl_ver > tag_ver {
-                return Ok(false);
+                return Ok(None);
             }
         }
     }
 
-    // In dry-run mode, report what would be generated without writing to disk.
+    // Build entries from commits — pure computation, no disk writes.
+    let entries = group_commits_for_changelog(&missing_commits);
+    let count: usize = entries.values().map(|v| v.len()).sum();
+
     if dry_run {
-        let count = missing_commits
-            .iter()
-            .filter(|c| c.category.to_changelog_entry_type().is_some())
-            .count();
-        if count > 0 {
-            log_status!(
-                "release",
-                "Would auto-generate {} changelog entries from commits (dry run)",
-                count
-            );
-        }
-        return Ok(true);
+        log_status!(
+            "release",
+            "Would auto-generate {} changelog entries from commits (dry run)",
+            count
+        );
+    } else {
+        log_status!(
+            "release",
+            "Will auto-generate {} changelog entries from commits",
+            count
+        );
     }
 
-    // Auto-generate changelog entries only for uncovered commits.
-    auto_generate_changelog_entries(component, &missing_commits)?;
-    Ok(true)
+    Ok(Some(entries))
 }
 
 fn normalize_changelog_text(value: &str) -> String {
@@ -684,21 +698,20 @@ fn find_uncovered_commits(
 }
 
 /// Generate changelog entries from conventional commit messages.
-fn auto_generate_changelog_entries(
-    component: &Component,
+/// Group conventional commits into changelog entries by type.
+/// Returns a map of entry_type -> messages (e.g. "added" -> ["feature X", "feature Y"]).
+/// Pure function — no I/O. Skips docs, chore, and merge commits.
+fn group_commits_for_changelog(
     commits: &[git::CommitInfo],
-) -> Result<()> {
-    let settings = changelog::resolve_effective_settings(Some(component));
-
-    // Group commits by changelog entry type (skips docs, chore, merge)
-    let mut entries_by_type: std::collections::HashMap<&str, Vec<String>> =
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut entries_by_type: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
 
     for commit in commits {
         if let Some(entry_type) = commit.category.to_changelog_entry_type() {
             let message = git::strip_conventional_prefix(&commit.subject);
             entries_by_type
-                .entry(entry_type)
+                .entry(entry_type.to_string())
                 .or_default()
                 .push(message.to_string());
         }
@@ -719,23 +732,24 @@ fn auto_generate_changelog_entries(
             .map(|c| git::strip_conventional_prefix(&c.subject).to_string())
             .unwrap_or_else(|| "Internal improvements".to_string());
 
-        changelog::read_and_add_next_section_items_typed(
-            component,
-            &settings,
-            &[fallback],
-            "changed",
-        )?;
-        return Ok(());
+        entries_by_type.insert("changed".to_string(), vec![fallback]);
     }
 
-    // Add entries to changelog grouped by type
-    for (entry_type, messages) in entries_by_type {
-        changelog::read_and_add_next_section_items_typed(
-            component, &settings, &messages, entry_type,
-        )?;
-    }
+    entries_by_type
+}
 
-    Ok(())
+/// Serialize changelog entries to JSON for embedding in step config.
+fn changelog_entries_to_json(
+    entries: &std::collections::HashMap<String, Vec<String>>,
+) -> serde_json::Value {
+    serde_json::to_value(entries).unwrap_or_default()
+}
+
+/// Deserialize changelog entries from step config JSON.
+pub(super) fn changelog_entries_from_json(
+    value: &serde_json::Value,
+) -> Option<std::collections::HashMap<String, Vec<String>>> {
+    serde_json::from_value(value.clone()).ok()
 }
 
 #[cfg(test)]

@@ -372,11 +372,18 @@ pub fn validate_changelog_for_bump(
 
 /// Validate and finalize changelog for a version operation.
 /// Ensures changelog is in sync with current version and has valid unreleased content.
-/// Finalizes the next section to the new version.
+///
+/// When `generated_entries` is provided (from the release pipeline's commit analysis),
+/// entries are generated and finalized into a versioned section in a single disk write —
+/// no intermediate `## Unreleased` section is ever persisted.
+///
+/// When `generated_entries` is None (standalone `homeboy version bump`), falls back to
+/// finalizing an existing `## Unreleased` section.
 pub(crate) fn validate_and_finalize_changelog(
     component: &Component,
     current_version: &str,
     new_version: &str,
+    generated_entries: Option<&std::collections::HashMap<String, Vec<String>>>,
 ) -> Result<ChangelogValidationResult> {
     let settings = changelog::resolve_effective_settings(Some(component));
     let changelog_path = changelog::resolve_changelog_path(component)?;
@@ -464,12 +471,28 @@ pub(crate) fn validate_and_finalize_changelog(
         _ => {}
     }
 
-    let (finalized_changelog, changelog_changed) = changelog::finalize_next_section(
-        &changelog_content,
-        &settings.next_section_aliases,
-        new_version,
-        false,
-    )?;
+    let (finalized_changelog, changelog_changed) = if let Some(entries) = generated_entries {
+        // Atomic path: generate entries and finalize into versioned section in one pass.
+        // No ## Unreleased section is ever written to disk.
+        let entries_ref: std::collections::HashMap<&str, Vec<String>> = entries
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.clone()))
+            .collect();
+        changelog::finalize_with_generated_entries(
+            &changelog_content,
+            &settings.next_section_aliases,
+            &entries_ref,
+            new_version,
+        )?
+    } else {
+        // Legacy path: finalize an existing ## Unreleased section.
+        changelog::finalize_next_section(
+            &changelog_content,
+            &settings.next_section_aliases,
+            new_version,
+            false,
+        )?
+    };
 
     if changelog_changed {
         local_files::local().write(&changelog_path, &finalized_changelog)?;
@@ -611,7 +634,11 @@ pub fn read_version(component_id: Option<&str>) -> Result<ComponentVersionInfo> 
 
 /// Bump a component's version and finalize changelog.
 /// bump_type: "patch", "minor", or "major"
-pub(crate) fn bump_component_version(component: &Component, bump_type: &str) -> Result<BumpResult> {
+pub(crate) fn bump_component_version(
+    component: &Component,
+    bump_type: &str,
+    changelog_entries: Option<&std::collections::HashMap<String, Vec<String>>>,
+) -> Result<BumpResult> {
     // Validate local_path is absolute and exists before any file operations
     component::validate_local_path(component)?;
 
@@ -667,7 +694,7 @@ pub(crate) fn bump_component_version(component: &Component, bump_type: &str) -> 
 
     // Now safe to finalize changelog - all targets validated
     let changelog_validation =
-        validate_and_finalize_changelog(component, &old_version, &new_version)?;
+        validate_and_finalize_changelog(component, &old_version, &new_version, changelog_entries)?;
 
     // Update all version files (validation already done, just write new versions)
     for info in &target_infos {
