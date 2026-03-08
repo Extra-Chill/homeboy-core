@@ -229,6 +229,108 @@ pub fn save<M: Serialize>(
     Ok(json_path)
 }
 
+/// Save a scoped baseline update into `homeboy.json`.
+///
+/// Unlike [`save`], this merges with the existing baseline instead of
+/// replacing it. Only fingerprints for files in `scope` are updated:
+///
+/// 1. Load the existing baseline (if any)
+/// 2. Remove all fingerprints whose file path matches any file in `scope`
+/// 3. Add fingerprints from `current_items` (which should be scoped findings)
+/// 4. Preserve all fingerprints outside the scope untouched
+///
+/// This prevents CI/local environment parity issues from causing baseline
+/// churn on files that weren't part of the current change set.
+///
+/// `file_from_fingerprint` extracts the file path from a fingerprint string.
+/// This is domain-specific — the caller knows how their fingerprints are
+/// structured (e.g., `convention::file::kind` for audit).
+pub fn save_scoped<M: Serialize + for<'de> Deserialize<'de> + Clone>(
+    config: &BaselineConfig,
+    context_id: &str,
+    current_items: &[impl Fingerprintable],
+    metadata: M,
+    scope: &[String],
+    file_from_fingerprint: impl Fn(&str) -> Option<String>,
+) -> Result<PathBuf> {
+    let json_path = config.json_path();
+
+    // If no existing baseline, fall back to full save
+    let existing: Option<Baseline<M>> = load(config)?;
+    let Some(existing) = existing else {
+        return save(config, context_id, current_items, metadata);
+    };
+
+    // Build a set of scoped file paths for fast lookup
+    let scope_set: HashSet<&str> = scope.iter().map(|s| s.as_str()).collect();
+
+    // Keep fingerprints that are outside the scope
+    let mut merged_fingerprints: Vec<String> = existing
+        .known_fingerprints
+        .into_iter()
+        .filter(|fp| {
+            file_from_fingerprint(fp)
+                .as_deref()
+                .is_none_or(|file| !scope_set.contains(file))
+        })
+        .collect();
+
+    // Add fingerprints from the current scoped items
+    for item in current_items {
+        merged_fingerprints.push(item.fingerprint());
+    }
+
+    // Sort for deterministic output
+    merged_fingerprints.sort();
+    merged_fingerprints.dedup();
+
+    let baseline = Baseline {
+        created_at: utc_now_iso8601(),
+        context_id: context_id.to_string(),
+        item_count: merged_fingerprints.len(),
+        known_fingerprints: merged_fingerprints,
+        metadata,
+    };
+
+    let baseline_value = serde_json::to_value(&baseline).map_err(|e| {
+        Error::internal_io(
+            format!("Failed to serialize baseline: {}", e),
+            Some("baseline.save_scoped".to_string()),
+        )
+    })?;
+
+    // Read existing homeboy.json or start fresh
+    let mut root = read_json_or_empty(&json_path)?;
+
+    // Ensure baselines object exists
+    let baselines = root
+        .as_object_mut()
+        .ok_or_else(|| {
+            Error::internal_io(
+                "homeboy.json root is not an object".to_string(),
+                Some("baseline.save_scoped".to_string()),
+            )
+        })?
+        .entry(BASELINES_KEY)
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+
+    // Set the specific baseline key
+    baselines
+        .as_object_mut()
+        .ok_or_else(|| {
+            Error::internal_io(
+                "baselines key is not an object".to_string(),
+                Some("baseline.save_scoped".to_string()),
+            )
+        })?
+        .insert(config.key.clone(), baseline_value);
+
+    // Write back
+    write_json(&json_path, &root)?;
+
+    Ok(json_path)
+}
+
 /// Load a baseline if one exists in `homeboy.json`.
 ///
 /// Returns `Ok(None)` if:
@@ -897,5 +999,192 @@ mod tests {
 
         let result = load_from_git_ref::<()>(path, "HEAD", "audit");
         assert!(result.is_none());
+    }
+
+    // -- Scoped save ----------------------------------------------------------
+
+    /// Helper to extract file from fingerprints of format `category::file`.
+    fn test_file_from_fingerprint(fp: &str) -> Option<String> {
+        let first = fp.find("::")?;
+        Some(fp[first + 2..].to_string())
+    }
+
+    #[test]
+    fn save_scoped_preserves_out_of_scope_fingerprints() {
+        let dir = TempDir::new().unwrap();
+        let config = BaselineConfig::new(dir.path(), "audit");
+
+        // Initial full baseline: findings in a.rs, b.rs, c.rs
+        let original = vec![
+            item("lint", "a.rs", "unused import"),
+            item("lint", "b.rs", "dead code"),
+            item("lint", "c.rs", "missing docs"),
+        ];
+        save(&config, "test", &original, ()).unwrap();
+
+        // Scoped update: only a.rs is in scope, with a new finding
+        let scoped_items = vec![item("lint", "a.rs", "new finding in a")];
+        let scope = vec!["a.rs".to_string()];
+        save_scoped(
+            &config,
+            "test",
+            &scoped_items,
+            (),
+            &scope,
+            test_file_from_fingerprint,
+        )
+        .unwrap();
+
+        let loaded = load::<()>(&config).unwrap().unwrap();
+        // a.rs replaced (1 finding), b.rs + c.rs preserved (2 findings) = 3 total
+        assert_eq!(loaded.item_count, 3);
+        assert!(loaded.known_fingerprints.contains(&"lint::a.rs".to_string()));
+        assert!(loaded.known_fingerprints.contains(&"lint::b.rs".to_string()));
+        assert!(loaded.known_fingerprints.contains(&"lint::c.rs".to_string()));
+    }
+
+    #[test]
+    fn save_scoped_removes_resolved_findings_in_scope() {
+        let dir = TempDir::new().unwrap();
+        let config = BaselineConfig::new(dir.path(), "audit");
+
+        // Initial: findings in a.rs and b.rs
+        let original = vec![
+            item("lint", "a.rs", "unused import"),
+            item("lint", "b.rs", "dead code"),
+        ];
+        save(&config, "test", &original, ()).unwrap();
+
+        // Scoped update: a.rs is in scope but has no findings (resolved)
+        let scoped_items: Vec<TestItem> = vec![];
+        let scope = vec!["a.rs".to_string()];
+        save_scoped(
+            &config,
+            "test",
+            &scoped_items,
+            (),
+            &scope,
+            test_file_from_fingerprint,
+        )
+        .unwrap();
+
+        let loaded = load::<()>(&config).unwrap().unwrap();
+        // a.rs findings removed, b.rs preserved
+        assert_eq!(loaded.item_count, 1);
+        assert!(!loaded.known_fingerprints.contains(&"lint::a.rs".to_string()));
+        assert!(loaded.known_fingerprints.contains(&"lint::b.rs".to_string()));
+    }
+
+    #[test]
+    fn save_scoped_adds_new_findings_in_scope() {
+        let dir = TempDir::new().unwrap();
+        let config = BaselineConfig::new(dir.path(), "audit");
+
+        // Initial: only a.rs
+        let original = vec![item("lint", "a.rs", "unused import")];
+        save(&config, "test", &original, ()).unwrap();
+
+        // Scoped update: b.rs is in scope with a new finding
+        let scoped_items = vec![item("lint", "b.rs", "new finding")];
+        let scope = vec!["b.rs".to_string()];
+        save_scoped(
+            &config,
+            "test",
+            &scoped_items,
+            (),
+            &scope,
+            test_file_from_fingerprint,
+        )
+        .unwrap();
+
+        let loaded = load::<()>(&config).unwrap().unwrap();
+        assert_eq!(loaded.item_count, 2);
+        assert!(loaded.known_fingerprints.contains(&"lint::a.rs".to_string()));
+        assert!(loaded.known_fingerprints.contains(&"lint::b.rs".to_string()));
+    }
+
+    #[test]
+    fn save_scoped_falls_back_to_full_save_when_no_baseline_exists() {
+        let dir = TempDir::new().unwrap();
+        let config = BaselineConfig::new(dir.path(), "audit");
+
+        // No existing baseline — should create one from scratch
+        let scoped_items = vec![
+            item("lint", "a.rs", "finding"),
+            item("lint", "b.rs", "finding"),
+        ];
+        let scope = vec!["a.rs".to_string()];
+        save_scoped(
+            &config,
+            "test",
+            &scoped_items,
+            (),
+            &scope,
+            test_file_from_fingerprint,
+        )
+        .unwrap();
+
+        let loaded = load::<()>(&config).unwrap().unwrap();
+        assert_eq!(loaded.item_count, 2);
+    }
+
+    #[test]
+    fn save_scoped_deduplicates_fingerprints() {
+        let dir = TempDir::new().unwrap();
+        let config = BaselineConfig::new(dir.path(), "audit");
+
+        // Initial: a.rs finding
+        let original = vec![item("lint", "a.rs", "unused import")];
+        save(&config, "test", &original, ()).unwrap();
+
+        // Scoped update with b.rs in scope but also including a.rs item
+        // (shouldn't create duplicates)
+        let scoped_items = vec![
+            item("lint", "b.rs", "new finding"),
+        ];
+        let scope = vec!["b.rs".to_string()];
+        save_scoped(
+            &config,
+            "test",
+            &scoped_items,
+            (),
+            &scope,
+            test_file_from_fingerprint,
+        )
+        .unwrap();
+
+        let loaded = load::<()>(&config).unwrap().unwrap();
+        assert_eq!(loaded.item_count, 2);
+        // Verify no duplicates
+        let unique: HashSet<&String> = loaded.known_fingerprints.iter().collect();
+        assert_eq!(unique.len(), loaded.known_fingerprints.len());
+    }
+
+    #[test]
+    fn save_scoped_produces_sorted_output() {
+        let dir = TempDir::new().unwrap();
+        let config = BaselineConfig::new(dir.path(), "audit");
+
+        // Initial: z.rs finding
+        let original = vec![item("lint", "z.rs", "finding")];
+        save(&config, "test", &original, ()).unwrap();
+
+        // Scoped: add a.rs finding
+        let scoped_items = vec![item("lint", "a.rs", "finding")];
+        let scope = vec!["a.rs".to_string()];
+        save_scoped(
+            &config,
+            "test",
+            &scoped_items,
+            (),
+            &scope,
+            test_file_from_fingerprint,
+        )
+        .unwrap();
+
+        let loaded = load::<()>(&config).unwrap().unwrap();
+        let fps = &loaded.known_fingerprints;
+        assert_eq!(fps[0], "lint::a.rs");
+        assert_eq!(fps[1], "lint::z.rs");
     }
 }

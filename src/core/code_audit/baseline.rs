@@ -109,6 +109,58 @@ pub fn save_baseline(result: &CodeAuditResult) -> Result<std::path::PathBuf, Str
     generic::save(&config, &result.component_id, &items, metadata).map_err(|e| e.message)
 }
 
+/// Save a scoped baseline update — merges with existing baseline instead of replacing.
+///
+/// Only fingerprints for files in `changed_files` are updated:
+/// - Removes old fingerprints for files in scope
+/// - Adds current fingerprints from the scoped audit result
+/// - Preserves all fingerprints outside the scope untouched
+///
+/// This prevents CI/local environment parity from causing baseline churn
+/// on files that weren't part of the current change set.
+pub fn save_baseline_scoped(
+    result: &CodeAuditResult,
+    changed_files: &[String],
+) -> Result<std::path::PathBuf, String> {
+    let source = Path::new(&result.source_path);
+    let config = BaselineConfig::new(source, BASELINE_KEY);
+
+    let known_outliers: Vec<String> = result
+        .conventions
+        .iter()
+        .flat_map(|c| c.outliers.iter().map(|o| o.file.clone()))
+        .collect();
+
+    let metadata = AuditBaselineMetadata {
+        outliers_count: known_outliers.len(),
+        alignment_score: result.summary.alignment_score,
+        known_outliers,
+    };
+
+    let items: Vec<AuditFinding> = result.findings.iter().map(AuditFinding).collect();
+
+    generic::save_scoped(
+        &config,
+        &result.component_id,
+        &items,
+        metadata,
+        changed_files,
+        file_from_audit_fingerprint,
+    )
+    .map_err(|e| e.message)
+}
+
+/// Extract the file path from an audit fingerprint.
+///
+/// Audit fingerprints have the format `convention::file::kind`.
+/// The file path is the middle segment between the first `::` and the last `::`.
+fn file_from_audit_fingerprint(fingerprint: &str) -> Option<String> {
+    let first = fingerprint.find("::")?;
+    let rest = &fingerprint[first + 2..];
+    let last = rest.rfind("::")?;
+    Some(rest[..last].to_string())
+}
+
 /// Load a baseline if one exists for the given source path.
 pub fn load_baseline(source_path: &Path) -> Option<AuditBaseline> {
     let config = BaselineConfig::new(source_path, BASELINE_KEY);
@@ -439,5 +491,102 @@ mod tests {
             AuditFinding(&f2).fingerprint(),
             "fingerprint should not change when line count changes"
         );
+    }
+
+    #[test]
+    fn file_from_audit_fingerprint_extracts_file_path() {
+        assert_eq!(
+            file_from_audit_fingerprint("Commands::src/commands/version.rs::NamingMismatch"),
+            Some("src/commands/version.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn file_from_audit_fingerprint_handles_nested_paths() {
+        assert_eq!(
+            file_from_audit_fingerprint(
+                "test_coverage::src/core/code_audit/baseline.rs::MissingTestMethod"
+            ),
+            Some("src/core/code_audit/baseline.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn file_from_audit_fingerprint_returns_none_for_invalid() {
+        assert_eq!(file_from_audit_fingerprint("no_separators"), None);
+        assert_eq!(file_from_audit_fingerprint("only::one"), None);
+    }
+
+    #[test]
+    fn save_baseline_scoped_preserves_out_of_scope() {
+        let result_initial = make_result(
+            vec![
+                make_finding("Flow", "a.php", "Missing method: execute"),
+                make_finding("Flow", "b.php", "Missing method: validate"),
+                make_finding("Flow", "c.php", "Missing method: register"),
+            ],
+            "scoped_preserve",
+        );
+        let _ = save_baseline(&result_initial).unwrap();
+        let baseline_before = load_baseline(Path::new(&result_initial.source_path)).unwrap();
+        assert_eq!(baseline_before.item_count, 3);
+
+        // Scoped update: only a.php changed, finding resolved
+        let mut result_scoped = make_result(vec![], "scoped_preserve_update");
+        result_scoped.source_path = result_initial.source_path.clone();
+
+        let changed = vec!["a.php".to_string()];
+        let _ = save_baseline_scoped(&result_scoped, &changed).unwrap();
+
+        let baseline_after = load_baseline(Path::new(&result_initial.source_path)).unwrap();
+        // a.php removed (was in scope, no new findings), b.php + c.php preserved
+        assert_eq!(baseline_after.item_count, 2);
+        assert!(!baseline_after
+            .known_fingerprints
+            .iter()
+            .any(|fp| fp.contains("a.php")));
+        assert!(baseline_after
+            .known_fingerprints
+            .iter()
+            .any(|fp| fp.contains("b.php")));
+        assert!(baseline_after
+            .known_fingerprints
+            .iter()
+            .any(|fp| fp.contains("c.php")));
+
+        let _ = std::fs::remove_dir_all(Path::new(&result_initial.source_path));
+    }
+
+    #[test]
+    fn save_baseline_scoped_adds_new_in_scope() {
+        let result_initial = make_result(
+            vec![make_finding("Flow", "a.php", "Missing method: execute")],
+            "scoped_add",
+        );
+        let _ = save_baseline(&result_initial).unwrap();
+
+        // Scoped update: b.php is in scope with a new finding
+        let mut result_scoped = make_result(
+            vec![make_finding("Flow", "b.php", "Missing method: validate")],
+            "scoped_add_update",
+        );
+        result_scoped.source_path = result_initial.source_path.clone();
+
+        let changed = vec!["b.php".to_string()];
+        let _ = save_baseline_scoped(&result_scoped, &changed).unwrap();
+
+        let baseline_after = load_baseline(Path::new(&result_initial.source_path)).unwrap();
+        // a.php preserved, b.php added
+        assert_eq!(baseline_after.item_count, 2);
+        assert!(baseline_after
+            .known_fingerprints
+            .iter()
+            .any(|fp| fp.contains("a.php")));
+        assert!(baseline_after
+            .known_fingerprints
+            .iter()
+            .any(|fp| fp.contains("b.php")));
+
+        let _ = std::fs::remove_dir_all(Path::new(&result_initial.source_path));
     }
 }
