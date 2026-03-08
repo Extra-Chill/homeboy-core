@@ -204,6 +204,7 @@ jobs:
       - uses: Extra-Chill/homeboy-action@v1
         id: release
         with:
+          source: '.'
           extension: rust
           component: homeboy
           commands: release
