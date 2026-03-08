@@ -337,6 +337,17 @@ fn audit_internal(
         all_findings.extend(near_dup_findings);
     }
 
+    // Phase 4d2: Parallel implementation detection (similar call patterns across files)
+    let parallel_findings = duplication::detect_parallel_implementations(&all_fingerprints);
+    if !parallel_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Parallel implementations: {} finding(s) (similar call patterns in different functions)",
+            parallel_findings.len()
+        );
+        all_findings.extend(parallel_findings);
+    }
+
     // Phase 4e: Dead code detection (unused params, unreferenced exports, orphaned internals)
     let dead_code_findings = dead_code::analyze_dead_code(&all_fingerprints);
     if !dead_code_findings.is_empty() {

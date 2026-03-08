@@ -132,6 +132,10 @@ pub enum DeviationKind {
     ScatteredTestFile,
     /// Duplicated code block found within the same method/function body.
     IntraMethodDuplicate,
+    /// Two functions in different files follow the same call pattern —
+    /// they invoke a parallel sequence of helpers, suggesting the shared
+    /// workflow should be abstracted into a single parameterized function.
+    ParallelImplementation,
 }
 
 // ============================================================================
