@@ -4,6 +4,10 @@ This directory contains the markdown docs embedded into the `homeboy` binary and
 
 Homeboy is a config-driven automation engine for development and deployment automation, with standardized patterns and a stable JSON output envelope for most commands.
 
+## Code Factory
+
+- [Code Factory](code-factory.md) - Automated code maintenance: lint+fix → test+fix → audit+fix → release → deploy
+
 ## CLI
 
 - Root command + global flags: [Root command](cli/homeboy-root-command.md)
