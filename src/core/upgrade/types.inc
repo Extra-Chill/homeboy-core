@@ -29,6 +29,17 @@ pub struct UpgradeResult {
     pub upgraded: bool,
     pub message: String,
     pub restart_required: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions_updated: Vec<ExtensionUpgradeEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions_skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionUpgradeEntry {
+    pub extension_id: String,
+    pub old_version: String,
+    pub new_version: String,
 }
 
 #[derive(Deserialize)]
