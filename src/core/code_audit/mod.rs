@@ -18,6 +18,7 @@ pub(crate) mod conventions;
 pub(crate) mod core_fingerprint;
 mod dead_code;
 mod discovery;
+mod docs;
 mod duplication;
 mod findings;
 pub mod fingerprint;
@@ -420,6 +421,18 @@ fn audit_internal(
         all_findings.extend(topology_findings);
     }
 
+    // Phase 4k: Documentation drift detection (broken/stale references in markdown)
+    let ignore_patterns = load_doc_ignore_patterns(component_id);
+    let doc_findings = docs::detect_doc_drift(root, &ignore_patterns);
+    if !doc_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Docs: {} finding(s) (broken references, stale paths)",
+            doc_findings.len()
+        );
+        all_findings.extend(doc_findings);
+    }
+
     // Phase 4j: Impact-scoped filtering — when auditing changed files only,
     // expand scope to include call sites affected by symbol changes, then
     // filter findings to that expanded scope.
@@ -559,6 +572,27 @@ fn audit_internal(
         findings: all_findings,
         duplicate_groups,
     })
+}
+
+/// Load extension-configured ignore patterns for doc claim filtering.
+fn load_doc_ignore_patterns(component_id: &str) -> Vec<String> {
+    let comp = match component::load(component_id) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let extensions = match &comp.extensions {
+        Some(exts) => exts,
+        None => return Vec::new(),
+    };
+
+    let mut patterns = Vec::new();
+    for ext_id in extensions.keys() {
+        if let Ok(manifest) = crate::extension::load_extension(ext_id) {
+            patterns.extend(manifest.audit_ignore_claim_patterns().to_vec());
+        }
+    }
+    patterns
 }
 
 // ============================================================================
