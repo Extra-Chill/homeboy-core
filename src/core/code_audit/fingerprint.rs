@@ -69,11 +69,9 @@ pub fn fingerprint_file(path: &Path, root: &Path) -> Option<FileFingerprint> {
 
     // Try core grammar engine first
     if let Some(grammar) = super::core_fingerprint::load_grammar_for_ext(ext) {
-        if let Some(fp) = super::core_fingerprint::fingerprint_from_grammar(
-            &content,
-            &grammar,
-            &relative_path,
-        ) {
+        if let Some(fp) =
+            super::core_fingerprint::fingerprint_from_grammar(&content, &grammar, &relative_path)
+        {
             return Some(fp);
         }
     }

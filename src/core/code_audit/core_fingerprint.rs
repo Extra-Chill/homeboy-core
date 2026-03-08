@@ -52,45 +52,198 @@ use super::fingerprint::FileFingerprint;
 /// Keywords preserved during structural normalization (not replaced with ID_N).
 /// These are language-specific; we detect the language from the grammar ID.
 const RUST_KEYWORDS: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
-    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
-    "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-    "type", "unsafe", "use", "where", "while", "yield",
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while", "yield",
     // Common types kept as structural markers
-    "Some", "None", "Ok", "Err", "Result", "Option", "Vec", "String", "Box", "Arc", "Rc",
-    "HashMap", "HashSet", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16",
-    "i32", "i64", "i128", "isize", "f32", "f64", "str", "char",
+    "Some", "None", "Ok", "Err", "Result", "Option", "Vec", "String", "Box", "Arc", "Rc", "HashMap",
+    "HashSet", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
+    "i128", "isize", "f32", "f64", "str", "char",
 ];
 
 const PHP_KEYWORDS: &[&str] = &[
-    "abstract", "and", "array", "as", "break", "callable", "case", "catch", "class", "clone",
-    "const", "continue", "declare", "default", "do", "echo", "else", "elseif", "empty",
-    "enddeclare", "endfor", "endforeach", "endif", "endswitch", "endwhile", "eval", "exit",
-    "extends", "final", "finally", "fn", "for", "foreach", "function", "global", "goto", "if",
-    "implements", "include", "include_once", "instanceof", "insteadof", "interface", "isset",
-    "list", "match", "namespace", "new", "or", "print", "private", "protected", "public",
-    "readonly", "require", "require_once", "return", "static", "switch", "throw", "trait", "try",
-    "unset", "use", "var", "while", "xor", "yield", "null", "true", "false", "self", "parent",
+    "abstract",
+    "and",
+    "array",
+    "as",
+    "break",
+    "callable",
+    "case",
+    "catch",
+    "class",
+    "clone",
+    "const",
+    "continue",
+    "declare",
+    "default",
+    "do",
+    "echo",
+    "else",
+    "elseif",
+    "empty",
+    "enddeclare",
+    "endfor",
+    "endforeach",
+    "endif",
+    "endswitch",
+    "endwhile",
+    "eval",
+    "exit",
+    "extends",
+    "final",
+    "finally",
+    "fn",
+    "for",
+    "foreach",
+    "function",
+    "global",
+    "goto",
+    "if",
+    "implements",
+    "include",
+    "include_once",
+    "instanceof",
+    "insteadof",
+    "interface",
+    "isset",
+    "list",
+    "match",
+    "namespace",
+    "new",
+    "or",
+    "print",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "require",
+    "require_once",
+    "return",
+    "static",
+    "switch",
+    "throw",
+    "trait",
+    "try",
+    "unset",
+    "use",
+    "var",
+    "while",
+    "xor",
+    "yield",
+    "null",
+    "true",
+    "false",
+    "self",
+    "parent",
     // Common types
-    "int", "float", "string", "bool", "void", "mixed", "object", "iterable", "never",
+    "int",
+    "float",
+    "string",
+    "bool",
+    "void",
+    "mixed",
+    "object",
+    "iterable",
+    "never",
 ];
 
 /// Generic names too common to flag as near-duplicates.
 /// These are the same as in duplication.rs — kept here for internal_calls filtering.
 const SKIP_CALLS_RUST: &[&str] = &[
-    "if", "while", "for", "match", "loop", "return", "Some", "None", "Ok", "Err", "Box", "Vec",
-    "Arc", "Rc", "String", "println", "eprintln", "format", "write", "writeln", "panic", "assert",
-    "assert_eq", "assert_ne", "todo", "unimplemented", "unreachable", "dbg", "cfg", "include",
-    "include_str", "concat", "env", "compile_error", "stringify", "vec", "hashmap", "bail",
-    "ensure", "anyhow", "matches", "debug_assert", "debug_assert_eq", "allow", "deny", "warn",
-    "derive", "serde", "test", "inline", "must_use", "doc", "feature", "pub", "crate", "super",
+    "if",
+    "while",
+    "for",
+    "match",
+    "loop",
+    "return",
+    "Some",
+    "None",
+    "Ok",
+    "Err",
+    "Box",
+    "Vec",
+    "Arc",
+    "Rc",
+    "String",
+    "println",
+    "eprintln",
+    "format",
+    "write",
+    "writeln",
+    "panic",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "todo",
+    "unimplemented",
+    "unreachable",
+    "dbg",
+    "cfg",
+    "include",
+    "include_str",
+    "concat",
+    "env",
+    "compile_error",
+    "stringify",
+    "vec",
+    "hashmap",
+    "bail",
+    "ensure",
+    "anyhow",
+    "matches",
+    "debug_assert",
+    "debug_assert_eq",
+    "allow",
+    "deny",
+    "warn",
+    "derive",
+    "serde",
+    "test",
+    "inline",
+    "must_use",
+    "doc",
+    "feature",
+    "pub",
+    "crate",
+    "super",
 ];
 
 const SKIP_CALLS_PHP: &[&str] = &[
-    "if", "while", "for", "foreach", "switch", "match", "catch", "return", "echo", "print",
-    "isset", "unset", "empty", "list", "array", "function", "class", "interface", "trait", "new",
-    "require", "require_once", "include", "include_once", "define", "defined", "die", "exit",
-    "eval", "compact", "extract", "var_dump", "print_r", "var_export",
+    "if",
+    "while",
+    "for",
+    "foreach",
+    "switch",
+    "match",
+    "catch",
+    "return",
+    "echo",
+    "print",
+    "isset",
+    "unset",
+    "empty",
+    "list",
+    "array",
+    "function",
+    "class",
+    "interface",
+    "trait",
+    "new",
+    "require",
+    "require_once",
+    "include",
+    "include_once",
+    "define",
+    "defined",
+    "die",
+    "exit",
+    "eval",
+    "compact",
+    "extract",
+    "var_dump",
+    "print_r",
+    "var_export",
 ];
 
 // ============================================================================
@@ -113,7 +266,12 @@ pub fn fingerprint_from_grammar(
 
     let lang_id = grammar.language.id.as_str();
     let language = Language::from_extension(
-        grammar.language.extensions.first().map(|s| s.as_str()).unwrap_or(""),
+        grammar
+            .language
+            .extensions
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or(""),
     );
 
     // Extract all symbols using the grammar engine
@@ -127,13 +285,7 @@ pub fn fingerprint_from_grammar(
     let impl_contexts = build_impl_contexts(&symbols);
 
     // Extract functions with full context
-    let functions = extract_functions(
-        &symbols,
-        &lines,
-        &impl_contexts,
-        test_range,
-        grammar,
-    );
+    let functions = extract_functions(&symbols, &lines, &impl_contexts, test_range, grammar);
 
     // --- Methods list ---
     let mut methods = Vec::new();
@@ -412,7 +564,10 @@ fn extract_functions(
 
     let mut functions = Vec::new();
 
-    for symbol in symbols.iter().filter(|s| fn_concepts.contains(&s.concept.as_str())) {
+    for symbol in symbols
+        .iter()
+        .filter(|s| fn_concepts.contains(&s.concept.as_str()))
+    {
         let name = match symbol.name() {
             Some(n) => n.to_string(),
             None => continue,
@@ -424,8 +579,9 @@ fn extract_functions(
         }
 
         // Determine if this is a test function
-        let has_test_attr = (1..=3)
-            .any(|offset| symbol.line >= offset && test_attr_lines.contains(&(symbol.line - offset)));
+        let has_test_attr = (1..=3).any(|offset| {
+            symbol.line >= offset && test_attr_lines.contains(&(symbol.line - offset))
+        });
         let in_test_mod = is_in_test_range(symbol.line, test_range);
         let is_test = has_test_attr || in_test_mod;
 
@@ -720,7 +876,7 @@ fn extract_extends(symbols: &[Symbol]) -> Option<String> {
         .find_map(|s| {
             s.get("extends").map(|e| {
                 // PHP: take last segment of backslash-separated name
-                e.split('\\').last().unwrap_or(e).to_string()
+                e.split('\\').next_back().unwrap_or(e).to_string()
             })
         })
 }
@@ -747,7 +903,7 @@ fn extract_implements(symbols: &[Symbol]) -> Vec<String> {
             for iface in interfaces.split(',') {
                 let iface = iface.trim();
                 if !iface.is_empty() {
-                    let short = iface.split('\\').last().unwrap_or(iface);
+                    let short = iface.split('\\').next_back().unwrap_or(iface);
                     if seen.insert(short.to_string()) {
                         implements.push(short.to_string());
                     }
@@ -759,7 +915,7 @@ fn extract_implements(symbols: &[Symbol]) -> Vec<String> {
     // From trait_use pattern (PHP: use SomeTrait;)
     for s in symbols.iter().filter(|s| s.concept == "trait_use") {
         if let Some(name) = s.name() {
-            let short = name.split('\\').last().unwrap_or(name);
+            let short = name.split('\\').next_back().unwrap_or(name);
             if seen.insert(short.to_string()) {
                 implements.push(short.to_string());
             }
@@ -843,13 +999,57 @@ fn extract_registrations(symbols: &[Symbol]) -> Vec<String> {
     ];
 
     let skip_macros: HashSet<&str> = [
-        "println", "eprintln", "format", "vec", "assert", "assert_eq", "assert_ne", "panic",
-        "todo", "unimplemented", "cfg", "derive", "include", "include_str", "include_bytes",
-        "concat", "stringify", "env", "option_env", "compile_error", "write", "writeln", "matches",
-        "dbg", "debug_assert", "debug_assert_eq", "debug_assert_ne", "unreachable", "cfg_if",
-        "lazy_static", "thread_local", "once_cell", "macro_rules", "serde_json", "if_chain",
-        "bail", "anyhow", "ensure", "Ok", "Err", "Some", "None", "Box", "Arc", "Rc", "RefCell",
-        "Mutex", "map", "hashmap", "btreemap", "hashset",
+        "println",
+        "eprintln",
+        "format",
+        "vec",
+        "assert",
+        "assert_eq",
+        "assert_ne",
+        "panic",
+        "todo",
+        "unimplemented",
+        "cfg",
+        "derive",
+        "include",
+        "include_str",
+        "include_bytes",
+        "concat",
+        "stringify",
+        "env",
+        "option_env",
+        "compile_error",
+        "write",
+        "writeln",
+        "matches",
+        "dbg",
+        "debug_assert",
+        "debug_assert_eq",
+        "debug_assert_ne",
+        "unreachable",
+        "cfg_if",
+        "lazy_static",
+        "thread_local",
+        "once_cell",
+        "macro_rules",
+        "serde_json",
+        "if_chain",
+        "bail",
+        "anyhow",
+        "ensure",
+        "Ok",
+        "Err",
+        "Some",
+        "None",
+        "Box",
+        "Arc",
+        "Rc",
+        "RefCell",
+        "Mutex",
+        "map",
+        "hashmap",
+        "btreemap",
+        "hashset",
     ]
     .iter()
     .copied()
