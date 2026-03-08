@@ -4,6 +4,35 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## Unreleased
+
+### Added
+- validate entity name uniqueness across all types (#598)
+- detect parallel implementations across files (#593)
+- auto-update extensions after homeboy upgrade
+- smart decompose grouping with section headers, call graph, and multi-word clustering (#587)
+- enable autofix on all CI jobs + release autofix PRs (#585)
+- auto-detect bump type from conventional commits (#581)
+- auto-ratchet baseline after audit --fix --write resolves findings (#580)
+
+### Refactored
+- rename .inc include fragments to .rs (#588)
+
+### Fixed
+- resolve all clippy warnings to unblock continuous release
+- resolve naming mismatch false positives via type_names (#554) (#599)
+- reject build_command when extension provides build lifecycle (#597)
+- fetch CLI binary versions via --version fallback (#596)
+- remove unnecessary #[allow(dead_code)] from FileFingerprint (#595)
+- don't misattribute lint failures as test failures (#594)
+- scoped baseline updates to prevent merge conflicts
+- decompose: add char literal handling to find_matching_brace
+- decompose: handle multi-line raw strings in brace tracking
+- decompose: handle char literals in brace balance validator
+- decompose rollback now covers caller files, unify snapshot systems (#582)
+- repair broken imports from squash merge of feat/auto-release
+- separate test files from convention groups and normalize signatures (#578)
+
 ## [0.71.1] - 2026-03-07
 ### Fixed
 - improve test coverage precision with visibility filtering and skip patterns (#577) (audit)
