@@ -409,10 +409,7 @@ pub fn status(component_id: Option<&str>) -> Result<GitOutput> {
 }
 
 /// Like [`status`] but with an explicit path override for git operations.
-pub fn status_at(
-    component_id: Option<&str>,
-    path_override: Option<&str>,
-) -> Result<GitOutput> {
+pub fn status_at(component_id: Option<&str>, path_override: Option<&str>) -> Result<GitOutput> {
     let (id, path) = resolve_target(component_id, path_override)?;
     let output = execute_git(&path, &["status", "--porcelain=v1"])
         .map_err(|e| Error::git_command_failed(e.to_string()))?;
