@@ -9,6 +9,7 @@ use std::path::Path;
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use crate::extension::{self, ExtensionManifest};
+use crate::utils::codebase_scan::{self, ExtensionFilter, ScanConfig};
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct AuditRulesConfig {
@@ -81,7 +82,22 @@ fn analyze_test_topology(root: &Path) -> Vec<Finding> {
             continue;
         };
 
-        let files = walk_files(root);
+        let files = codebase_scan::walk_files(
+            root,
+            &ScanConfig {
+                // Use extra_skip_dirs so build dirs are skipped at all depths
+                // (matching prior flat skip-list behavior)
+                extra_skip_dirs: vec![
+                    "build".into(),
+                    "dist".into(),
+                    "target".into(),
+                    "cache".into(),
+                    "tmp".into(),
+                ],
+                extensions: ExtensionFilter::All,
+                ..Default::default()
+            },
+        );
         for file in files {
             let rel = match file.strip_prefix(root) {
                 Ok(p) => p.to_string_lossy().replace('\\', "/"),
@@ -204,54 +220,6 @@ fn matches_any(path: &str, globs: &[String]) -> bool {
     globs.iter().any(|g| glob_match::glob_match(g, path))
 }
 
-fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {
-    const SKIP_DIRS: &[&str] = &[
-        "node_modules",
-        "vendor",
-        ".git",
-        "build",
-        "dist",
-        "target",
-        ".svn",
-        ".hg",
-        "cache",
-        "tmp",
-    ];
-
-    fn recurse(
-        dir: &Path,
-        skip_dirs: &[&str],
-        files: &mut Vec<std::path::PathBuf>,
-    ) -> std::io::Result<()> {
-        if !dir.is_dir() {
-            return Ok(());
-        }
-
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default();
-                if !skip_dirs.contains(&name) {
-                    recurse(&path, skip_dirs, files)?;
-                }
-            } else {
-                files.push(path);
-            }
-        }
-
-        Ok(())
-    }
-
-    let mut files = Vec::new();
-    let _ = recurse(root, SKIP_DIRS, &mut files);
-    files
-}
-
 fn load_rules(root: &Path) -> Option<TestTopologyRules> {
     let homeboy_json = root.join("homeboy.json");
     let content = std::fs::read_to_string(homeboy_json).ok()?;
@@ -359,7 +327,13 @@ mod tests {
         std::fs::create_dir_all(&src_dir).expect("src dir should be created");
         std::fs::write(src_dir.join("lib.rs"), "pub fn x(){}\n").expect("file should be written");
 
-        let files = walk_files(dir.path());
+        let files = codebase_scan::walk_files(
+            dir.path(),
+            &ScanConfig {
+                extensions: ExtensionFilter::All,
+                ..Default::default()
+            },
+        );
         assert!(
             files
                 .iter()

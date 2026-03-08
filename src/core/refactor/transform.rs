@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::utils::codebase_scan::{self, ExtensionFilter, ScanConfig};
 use crate::utils::io;
 
 // ============================================================================
@@ -217,7 +218,13 @@ pub fn apply_transforms(
     }
 
     // Walk all files once
-    let files = walk_source_files(root);
+    let files = codebase_scan::walk_files(
+        root,
+        &ScanConfig {
+            extensions: ExtensionFilter::All,
+            ..Default::default()
+        },
+    );
 
     // Apply each rule
     let mut rule_results = Vec::new();
@@ -364,48 +371,6 @@ fn apply_file_context(
 
     let new_content = regex.replace_all(content, replace).to_string();
     (new_content, matches)
-}
-
-// ============================================================================
-// File walking
-// ============================================================================
-
-const ALWAYS_SKIP_DIRS: &[&str] = &["node_modules", "vendor", ".git", ".svn", ".hg"];
-const ROOT_ONLY_SKIP_DIRS: &[&str] = &["build", "dist", "target", "cache", "tmp"];
-
-/// Walk all files in a directory tree (excluding VCS/dependency dirs).
-fn walk_source_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    walk_recursive(root, root, &mut files);
-    files
-}
-
-fn walk_recursive(dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-
-    let is_root = dir == root;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if ALWAYS_SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            if is_root && ROOT_ONLY_SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            walk_recursive(&path, root, files);
-        } else if path.is_file() {
-            // No extension filter — glob pattern handles file selection
-            files.push(path);
-        }
-    }
 }
 
 // ============================================================================
