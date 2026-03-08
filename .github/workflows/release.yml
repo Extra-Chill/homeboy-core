@@ -122,9 +122,12 @@ jobs:
             echo "::notice::${COUNT} releasable commits → ${BUMP} bump"
           fi
 
-  # ── Step 2: Quality gate ──
-  gate:
-    name: Quality Gate
+  # ── Step 2: Quality gate (lint + fix whole codebase) ──
+  # Unlike PR CI (scoped to changed files), release quality gate runs
+  # unscoped — fixes the entire codebase before releasing.
+  # Serial pipeline: lint+fix → test+fix → audit+fix → release.
+  gate-lint:
+    name: Lint + Fix
     needs: check
     if: needs.check.outputs.should-release == 'true'
     runs-on: ubuntu-latest
@@ -133,29 +136,69 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        continue-on-error: true
         with:
-          components: clippy, rustfmt
+          app-id: ${{ secrets.HOMEBOY_APP_ID }}
+          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Extra-Chill/homeboy-action@v1
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          source: '.'
+          extension: rust
+          component: homeboy
+          commands: lint
+          autofix: 'true'
+          autofix-mode: 'on-failure'
+          autofix-open-pr: 'true'
+          autofix-max-commits: '3'
+          app-token: ${{ steps.app-token.outputs.token || '' }}
 
-      - name: cargo fmt --check
-        run: cargo fmt --check
+  gate-test:
+    name: Test + Fix
+    needs:
+      - check
+      - gate-lint
+    if: needs.check.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: cargo clippy
-        run: cargo clippy --all-targets -- -W clippy::all
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.HOMEBOY_APP_ID }}
+          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
 
-      - name: cargo test
-        run: cargo test
+      - uses: Extra-Chill/homeboy-action@v1
+        with:
+          source: '.'
+          extension: rust
+          component: homeboy
+          commands: test
+          autofix: 'true'
+          autofix-mode: 'on-failure'
+          autofix-open-pr: 'true'
+          autofix-max-commits: '3'
+          app-token: ${{ steps.app-token.outputs.token || '' }}
+
+  gate-audit:
+    name: Audit + Fix
+    needs:
+      - check
+      - gate-test
+    if: needs.check.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Generate GitHub App token
         id: app-token
@@ -175,7 +218,7 @@ jobs:
           autofix: 'true'
           autofix-mode: 'always'
           autofix-open-pr: 'true'
-          autofix-commands: 'lint --fix,audit --fix --write'
+          autofix-commands: 'audit --fix --write'
           autofix-max-commits: '3'
           app-token: ${{ steps.app-token.outputs.token || '' }}
 
@@ -184,7 +227,9 @@ jobs:
     name: Prepare Release
     needs:
       - check
-      - gate
+      - gate-lint
+      - gate-test
+      - gate-audit
     runs-on: ubuntu-latest
     outputs:
       release-version: ${{ steps.release.outputs.release-version }}
@@ -548,9 +593,11 @@ jobs:
     name: Record failure
     needs:
       - check
-      - gate
+      - gate-lint
+      - gate-test
+      - gate-audit
       - prepare
-    if: ${{ always() && needs.check.outputs.should-release == 'true' && (needs.gate.result == 'failure' || needs.prepare.result == 'failure') }}
+    if: ${{ always() && needs.check.outputs.should-release == 'true' && (needs.gate-lint.result == 'failure' || needs.gate-test.result == 'failure' || needs.gate-audit.result == 'failure' || needs.prepare.result == 'failure') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

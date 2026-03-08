@@ -1,3 +1,10 @@
+# PR quality pipeline.
+#
+# Strict serial pipeline: lint+fix → test+fix → audit+fix
+# Each stage fixes what it can and commits back. If anything was fixed,
+# the App token push triggers a full re-run to verify the fixes.
+# Scoped to changed files only (--changed-since / lint-changed-only).
+
 name: CI
 
 on:
@@ -9,6 +16,9 @@ permissions:
   pull-requests: write
 
 jobs:
+  # ── Stage 1: Lint + Fix ──
+  # Runs cargo fmt and clippy. Autofixes formatting and clippy warnings.
+  # If fixes are committed, App token push triggers re-run of all stages.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -34,11 +44,15 @@ jobs:
           commands: lint
           autofix: 'true'
           autofix-mode: 'on-failure'
-          autofix-max-commits: '2'
+          autofix-max-commits: '3'
           app-token: ${{ steps.app-token.outputs.token || '' }}
 
+  # ── Stage 2: Test + Fix ──
+  # Runs after lint passes. If tests fail and fixes are available,
+  # commits and triggers re-run.
   test:
     name: Test
+    needs: [lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,19 +76,16 @@ jobs:
           commands: test
           autofix: 'true'
           autofix-mode: 'on-failure'
-          autofix-max-commits: '2'
+          autofix-max-commits: '3'
           app-token: ${{ steps.app-token.outputs.token || '' }}
 
-  # ── Homeboy audit (dogfooding via homeboy-action) ──
-  # Uses source build mode to compile from the PR branch, avoiding the
-  # chicken-and-egg problem of needing a released binary to audit itself.
-  # Falls back to latest release binary if source build fails.
-  # Runs independently of build job so PR comments are always posted.
-  # Autofix mode "always": runs autofix on every PR (not just failures),
-  # so the baseline auto-ratchets as the factory eliminates fixable findings.
-  # App token: autofix pushes use the GitHub App token so CI re-triggers on the new commit.
+  # ── Stage 3: Audit + Fix ──
+  # Runs after test passes. Autofix mode "always" — grinds down the
+  # baseline on every PR, not just failures.
+  # Uses source build so the audit binary matches the PR code.
   audit:
-    name: Homeboy Audit
+    name: Audit
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,5 +110,5 @@ jobs:
           autofix: 'true'
           autofix-mode: 'always'
           autofix-commands: 'audit --fix --write'
-          autofix-max-commits: '2'
+          autofix-max-commits: '3'
           app-token: ${{ steps.app-token.outputs.token || '' }}
