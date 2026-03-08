@@ -1339,6 +1339,12 @@ mod tests {
                 [patterns.impl_block.captures]
                 trait_name = 1
                 type_name = 2
+                [patterns.test_attribute]
+                regex = '#\[test\]'
+                context = "any"
+                [patterns.cfg_test]
+                regex = '#\[cfg\(test\)\]'
+                context = "any"
                 "#,
             )
             .expect("Failed to parse minimal grammar")
