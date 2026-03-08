@@ -15,7 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.HOMEBOY_APP_ID }}
+          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
 
       - uses: Extra-Chill/homeboy-action@v1
         with:
@@ -23,6 +32,10 @@ jobs:
           extension: rust
           component: homeboy
           commands: lint
+          autofix: 'true'
+          autofix-mode: 'on-failure'
+          autofix-max-commits: '2'
+          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   test:
     name: Test
@@ -30,7 +43,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.HOMEBOY_APP_ID }}
+          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
 
       - uses: Extra-Chill/homeboy-action@v1
         with:
@@ -38,6 +60,10 @@ jobs:
           extension: rust
           component: homeboy
           commands: test
+          autofix: 'true'
+          autofix-mode: 'on-failure'
+          autofix-max-commits: '2'
+          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   # ── Homeboy audit (dogfooding via homeboy-action) ──
   # Uses source build mode to compile from the PR branch, avoiding the
