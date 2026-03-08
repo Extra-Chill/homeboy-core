@@ -157,6 +157,14 @@ jobs:
       - name: cargo test
         run: cargo test
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.HOMEBOY_APP_ID }}
+          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
+
       - uses: Extra-Chill/homeboy-action@v1
         with:
           source: '.'
@@ -164,6 +172,12 @@ jobs:
           component: homeboy
           commands: audit
           auto-issue: 'true'
+          autofix: 'true'
+          autofix-mode: 'always'
+          autofix-open-pr: 'true'
+          autofix-commands: 'lint --fix,audit --fix --write'
+          autofix-max-commits: '3'
+          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   # ── Step 3: Version bump + changelog + tag ──
   prepare:
