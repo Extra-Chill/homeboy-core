@@ -807,24 +807,24 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
     Ok(items)
 }
 
-fn check_id_collision(id: &str, saving_type: &str) -> Result<()> {
-    let entity_types = [
-        ("project", paths::projects()),
-        ("server", paths::servers()),
-        ("component", paths::components()),
-    ];
-
-    for (entity_type, dir_result) in entity_types {
-        if entity_type == saving_type {
-            continue;
+pub(crate) fn check_id_collision(id: &str, saving_type: &str) -> Result<()> {
+    // Check each entity type using exists::<T>() which handles custom config_path
+    // (e.g., extensions use {dir}/{id}/{id}.json instead of {dir}/{id}.json)
+    fn check<T: ConfigEntity>(id: &str, saving_type: &str) -> Result<()> {
+        if T::ENTITY_TYPE == saving_type {
+            return Ok(());
         }
-        if let Ok(dir) = dir_result {
-            let path = dir.join(format!("{}.json", id));
-            if path.exists() {
-                return Err(Error::config_id_collision(id, saving_type, entity_type));
-            }
+        if exists::<T>(id) {
+            return Err(Error::config_id_collision(id, saving_type, T::ENTITY_TYPE));
         }
+        Ok(())
     }
+
+    check::<crate::project::Project>(id, saving_type)?;
+    check::<crate::server::Server>(id, saving_type)?;
+    check::<crate::component::Component>(id, saving_type)?;
+    check::<crate::extension::ExtensionManifest>(id, saving_type)?;
+    check::<crate::fleet::Fleet>(id, saving_type)?;
 
     // Check if the ID collides with any existing alias
     check_alias_collision_all(id, saving_type)?;
@@ -861,6 +861,8 @@ fn check_alias_collision_all(id: &str, saving_type: &str) -> Result<()> {
     check_aliases_in::<crate::project::Project>(&id_lower, saving_type)?;
     check_aliases_in::<crate::server::Server>(&id_lower, saving_type)?;
     check_aliases_in::<crate::component::Component>(&id_lower, saving_type)?;
+    check_aliases_in::<crate::extension::ExtensionManifest>(&id_lower, saving_type)?;
+    check_aliases_in::<crate::fleet::Fleet>(&id_lower, saving_type)?;
 
     Ok(())
 }
@@ -1212,10 +1214,13 @@ pub(crate) fn rename<T: ConfigEntity>(id: &str, new_id: &str) -> Result<()> {
                 id,
                 new_id
             ),
-            Some(new_id),
+            Some(new_id.clone()),
             None,
         ));
     }
+
+    // Check cross-entity name collision
+    check_id_collision(&new_id, T::entity_type())?;
 
     let mut entity: T = load(id)?;
     entity.set_id(new_id.clone());
