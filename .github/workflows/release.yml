@@ -28,11 +28,11 @@ on:
         type: boolean
         default: false
 
-# Only one release at a time. Newer run cancels older pending run,
-# picking up all accumulated commits since last tag.
-concurrency:
-  group: release
-  cancel-in-progress: true
+# No concurrency group — let overlapping runs race. The check job exits
+# in seconds when there are no releasable commits (the common case when
+# an in-flight release already tagged HEAD). The failure cache prevents
+# retrying the same broken SHA. This avoids both canceling in-flight
+# releases (wastes work) and queuing idle runners (wastes capacity).
 
 jobs:
   # ── Step 1: Check for releasable commits ──
