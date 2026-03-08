@@ -123,12 +123,22 @@ pub enum InsertionKind {
         /// Replacement text (e.g., "pub(crate) fn").
         to: String,
     },
+    /// Replace a stale path reference in a documentation file.
+    /// Finds `old_ref` in backticks and replaces with `new_ref`.
+    DocReferenceUpdate {
+        /// 1-indexed line number where the reference appears.
+        line: usize,
+        /// The old path text to find (e.g., "src/old/config.rs").
+        old_ref: String,
+        /// The new path text to replace with (e.g., "src/new/config.rs").
+        new_ref: String,
+    },
 }
 
 impl InsertionKind {
     pub fn safety_tier(&self) -> FixSafetyTier {
         match self {
-            Self::ImportAdd => FixSafetyTier::SafeAuto,
+            Self::ImportAdd | Self::DocReferenceUpdate { .. } => FixSafetyTier::SafeAuto,
             Self::MethodStub
             | Self::RegistrationStub
             | Self::ConstructorWithRegistration
@@ -1780,7 +1790,52 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
         }
     }
 
-    // Phase 3 complete — merge and return
+    // Phase 4: Stale doc reference fixes — update moved paths in documentation.
+    // When a file/dir was moved and fuzzy matching found the new location,
+    // generate a text replacement to update the markdown.
+    for finding in &result.findings {
+        if finding.kind != AuditFinding::StaleDocReference {
+            continue;
+        }
+
+        let Some(new_path) = extract_suggested_path(&finding.suggestion) else {
+            continue;
+        };
+
+        // The old path is in the description: "Stale file reference `old/path` (line N) — target has moved"
+        let Some(old_path) = extract_stale_ref_path(&finding.description) else {
+            continue;
+        };
+
+        // Extract line number from description: "(line N)"
+        let line_num = extract_line_number(&finding.description).unwrap_or(0);
+
+        if line_num == 0 {
+            continue;
+        }
+
+        fixes.push(Fix {
+            file: finding.file.clone(),
+            required_methods: vec![],
+            required_registrations: vec![],
+            insertions: vec![insertion(
+                InsertionKind::DocReferenceUpdate {
+                    line: line_num,
+                    old_ref: old_path.clone(),
+                    new_ref: new_path.clone(),
+                },
+                AuditFinding::StaleDocReference,
+                format!("{} → {}", old_path, new_path),
+                format!(
+                    "Update stale reference: `{}` → `{}` (line {})",
+                    old_path, new_path, line_num
+                ),
+            )],
+            applied: false,
+        });
+    }
+
+    // All phases complete — merge and return
     // Merge fixes that target the same file.
     //
     // Multiple phases (convention fixes, duplication fixes) or multiple
@@ -2302,6 +2357,36 @@ fn generate_fallback_signature(method_name: &str, language: &Language) -> Method
 // Unreferenced Export Helpers
 // ============================================================================
 
+/// Extract the suggested new path from a StaleDocReference suggestion.
+///
+/// Example: "Did you mean `src/new/config.rs`? File 'src/old/config.rs' no longer exists."
+/// Returns: Some("src/new/config.rs")
+fn extract_suggested_path(suggestion: &str) -> Option<String> {
+    let start = suggestion.find("Did you mean `")? + "Did you mean `".len();
+    let rest = &suggestion[start..];
+    let end = rest.find('`')?;
+    Some(rest[..end].to_string())
+}
+
+/// Extract the old reference path from a StaleDocReference description.
+///
+/// Example: "Stale file reference `src/old/config.rs` (line 5) — target has moved"
+/// Returns: Some("src/old/config.rs")
+fn extract_stale_ref_path(description: &str) -> Option<String> {
+    let start = description.find('`')? + 1;
+    let rest = &description[start..];
+    let end = rest.find('`')?;
+    Some(rest[..end].to_string())
+}
+
+/// Extract line number from a description containing "(line N)".
+fn extract_line_number(description: &str) -> Option<usize> {
+    let start = description.find("(line ")? + "(line ".len();
+    let rest = &description[start..];
+    let end = rest.find(')')?;
+    rest[..end].parse().ok()
+}
+
 /// Extract function name from an unreferenced export finding description.
 ///
 /// Example: "Public function 'compute' is not referenced by any other file" → "compute"
@@ -2817,6 +2902,7 @@ pub(crate) fn apply_insertions_to_content(
     let mut trait_uses = Vec::new();
     let mut removals: Vec<(usize, usize)> = Vec::new();
     let mut visibility_changes: Vec<(usize, &str, &str)> = Vec::new();
+    let mut doc_ref_updates: Vec<(usize, &str, &str)> = Vec::new();
 
     for insertion in insertions {
         match &insertion.kind {
@@ -2834,6 +2920,13 @@ pub(crate) fn apply_insertions_to_content(
             InsertionKind::VisibilityChange { line, from, to } => {
                 visibility_changes.push((*line, from.as_str(), to.as_str()));
             }
+            InsertionKind::DocReferenceUpdate {
+                line,
+                old_ref,
+                new_ref,
+            } => {
+                doc_ref_updates.push((*line, old_ref.as_str(), new_ref.as_str()));
+            }
         }
     }
 
@@ -2844,6 +2937,21 @@ pub(crate) fn apply_insertions_to_content(
             let idx = line_num.saturating_sub(1); // 1-indexed → 0-indexed
             if idx < lines.len() {
                 lines[idx] = lines[idx].replacen(from, to, 1);
+            }
+        }
+        result = lines.join("\n");
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+    }
+
+    // Apply doc reference updates (line-level text replacements, no line shifts)
+    if !doc_ref_updates.is_empty() {
+        let mut lines: Vec<String> = result.lines().map(String::from).collect();
+        for (line_num, old_ref, new_ref) in &doc_ref_updates {
+            let idx = line_num.saturating_sub(1); // 1-indexed → 0-indexed
+            if idx < lines.len() {
+                lines[idx] = lines[idx].replacen(old_ref, new_ref, 1);
             }
         }
         result = lines.join("\n");
@@ -5157,5 +5265,235 @@ class FlowAbilities {
         assert!(has_pub_use_of(content, "derive_id"));
         assert!(has_pub_use_of(content, "install"));
         assert!(!has_pub_use_of(content, "missing"));
+    }
+
+    // ========================================================================
+    // Doc reference update tests
+    // ========================================================================
+
+    #[test]
+    fn extract_suggested_path_from_suggestion() {
+        let suggestion =
+            "Did you mean `src/new/config.rs`? File 'src/old/config.rs' no longer exists at the documented path.";
+        assert_eq!(
+            extract_suggested_path(suggestion),
+            Some("src/new/config.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_suggested_path_returns_none_without_marker() {
+        let suggestion = "File 'src/old/config.rs' no longer exists.";
+        assert_eq!(extract_suggested_path(suggestion), None);
+    }
+
+    #[test]
+    fn extract_stale_ref_path_from_description() {
+        let desc = "Stale file reference `src/old/config.rs` (line 5) — target has moved";
+        assert_eq!(
+            extract_stale_ref_path(desc),
+            Some("src/old/config.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_line_number_from_description() {
+        let desc = "Stale file reference `src/old/config.rs` (line 42) — target has moved";
+        assert_eq!(extract_line_number(desc), Some(42));
+    }
+
+    #[test]
+    fn extract_line_number_returns_none_without_marker() {
+        let desc = "Stale file reference `src/old/config.rs` — target has moved";
+        assert_eq!(extract_line_number(desc), None);
+    }
+
+    #[test]
+    fn apply_doc_reference_update_replaces_path() {
+        let content = "# Guide\n\nSee `src/old/config.rs` for details.\n\nMore text here.\n";
+        let insertions = vec![Insertion {
+            kind: InsertionKind::DocReferenceUpdate {
+                line: 3,
+                old_ref: "src/old/config.rs".to_string(),
+                new_ref: "src/new/config.rs".to_string(),
+            },
+            finding: AuditFinding::StaleDocReference,
+            safety_tier: FixSafetyTier::SafeAuto,
+            auto_apply: false,
+            blocked_reason: None,
+            preflight: None,
+            code: "src/old/config.rs → src/new/config.rs".to_string(),
+            description: "Update stale reference".to_string(),
+        }];
+
+        let result = apply_insertions_to_content(content, &insertions, &Language::Unknown);
+        assert!(
+            result.contains("src/new/config.rs"),
+            "Should contain the new path, got: {}",
+            result
+        );
+        assert!(
+            !result.contains("src/old/config.rs"),
+            "Should not contain the old path, got: {}",
+            result
+        );
+        assert!(result.contains("More text here."), "Other content preserved");
+    }
+
+    #[test]
+    fn apply_doc_reference_update_only_replaces_target_line() {
+        // If the same path appears on multiple lines, only replace on the target line
+        let content = "Line 1: `src/old/config.rs`\nLine 2: `src/old/config.rs`\nLine 3: other\n";
+        let insertions = vec![Insertion {
+            kind: InsertionKind::DocReferenceUpdate {
+                line: 2,
+                old_ref: "src/old/config.rs".to_string(),
+                new_ref: "src/new/config.rs".to_string(),
+            },
+            finding: AuditFinding::StaleDocReference,
+            safety_tier: FixSafetyTier::SafeAuto,
+            auto_apply: false,
+            blocked_reason: None,
+            preflight: None,
+            code: "src/old/config.rs → src/new/config.rs".to_string(),
+            description: "Update stale reference".to_string(),
+        }];
+
+        let result = apply_insertions_to_content(content, &insertions, &Language::Unknown);
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(
+            lines[0].contains("src/old/config.rs"),
+            "Line 1 should still have old path"
+        );
+        assert!(
+            lines[1].contains("src/new/config.rs"),
+            "Line 2 should have new path"
+        );
+    }
+
+    #[test]
+    fn doc_reference_update_safety_tier_is_safe_auto() {
+        let kind = InsertionKind::DocReferenceUpdate {
+            line: 1,
+            old_ref: "old".to_string(),
+            new_ref: "new".to_string(),
+        };
+        assert_eq!(kind.safety_tier(), FixSafetyTier::SafeAuto);
+    }
+
+    #[test]
+    fn generate_fixes_creates_doc_reference_update_for_stale_ref() {
+        use super::super::{AuditSummary, CodeAuditResult};
+
+        let dir = std::env::temp_dir().join("homeboy_fixer_doc_ref_update");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+
+        // Create the docs file with a stale reference
+        std::fs::write(
+            dir.join("docs/guide.md"),
+            "# Guide\n\nSee `src/old/config.rs` for configuration.\n",
+        )
+        .unwrap();
+
+        let audit_result = CodeAuditResult {
+            component_id: "test".to_string(),
+            source_path: dir.to_string_lossy().to_string(),
+            summary: AuditSummary {
+                files_scanned: 1,
+                conventions_detected: 0,
+                outliers_found: 0,
+                alignment_score: None,
+                files_skipped: 0,
+                warnings: vec![],
+            },
+            conventions: vec![],
+            findings: vec![super::super::findings::Finding {
+                convention: "docs".to_string(),
+                severity: super::super::findings::Severity::Warning,
+                file: "docs/guide.md".to_string(),
+                description:
+                    "Stale file reference `src/old/config.rs` (line 3) — target has moved"
+                        .to_string(),
+                suggestion:
+                    "Did you mean `src/new/config.rs`? File 'src/old/config.rs' no longer exists at the documented path."
+                        .to_string(),
+                kind: AuditFinding::StaleDocReference,
+            }],
+            directory_conventions: vec![],
+            duplicate_groups: vec![],
+        };
+
+        let fix_result = generate_fixes(&audit_result, &dir);
+        assert_eq!(fix_result.fixes.len(), 1);
+
+        let fix = &fix_result.fixes[0];
+        assert_eq!(fix.file, "docs/guide.md");
+        assert_eq!(fix.insertions.len(), 1);
+
+        let ins = &fix.insertions[0];
+        assert!(
+            matches!(
+                &ins.kind,
+                InsertionKind::DocReferenceUpdate {
+                    line: 3,
+                    old_ref,
+                    new_ref,
+                } if old_ref == "src/old/config.rs" && new_ref == "src/new/config.rs"
+            ),
+            "Expected DocReferenceUpdate, got: {:?}",
+            ins.kind
+        );
+        assert_eq!(ins.safety_tier, FixSafetyTier::SafeAuto);
+        assert_eq!(ins.finding, AuditFinding::StaleDocReference);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_doc_reference_update_to_disk() {
+        let dir = std::env::temp_dir().join("homeboy_fixer_doc_ref_apply");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+
+        std::fs::write(
+            dir.join("docs/guide.md"),
+            "# Guide\n\nSee `src/old/config.rs` for configuration.\n\nMore docs.\n",
+        )
+        .unwrap();
+
+        let mut fixes = vec![Fix {
+            file: "docs/guide.md".to_string(),
+            required_methods: vec![],
+            required_registrations: vec![],
+            insertions: vec![insertion(
+                InsertionKind::DocReferenceUpdate {
+                    line: 3,
+                    old_ref: "src/old/config.rs".to_string(),
+                    new_ref: "src/new/config.rs".to_string(),
+                },
+                AuditFinding::StaleDocReference,
+                "src/old/config.rs → src/new/config.rs".to_string(),
+                "Update stale reference".to_string(),
+            )],
+            applied: false,
+        }];
+
+        let applied = apply_fixes(&mut fixes, &dir);
+        assert_eq!(applied, 1);
+        assert!(fixes[0].applied);
+
+        let content = std::fs::read_to_string(dir.join("docs/guide.md")).unwrap();
+        assert!(
+            content.contains("src/new/config.rs"),
+            "File should contain the new path"
+        );
+        assert!(
+            !content.contains("src/old/config.rs"),
+            "File should not contain the old path"
+        );
+        assert!(content.contains("More docs."), "Other content preserved");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
