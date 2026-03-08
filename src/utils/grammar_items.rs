@@ -266,11 +266,20 @@ pub(crate) fn find_matching_brace(lines: &[&str], start_line: usize, grammar: &G
     let mut depth: i32 = 0;
     let mut found_open = false;
     let mut in_block_comment = false;
+    let mut raw_string_closing: Option<String> = None;
 
     for i in start_line..lines.len() {
         let line = lines[i];
         let chars: Vec<char> = line.chars().collect();
         let mut j = 0;
+
+        // If we're inside a multi-line raw string, scan for the closing delimiter
+        if let Some(ref closing_str) = raw_string_closing {
+            if line.contains(closing_str.as_str()) {
+                raw_string_closing = None;
+            }
+            continue;
+        }
 
         while j < chars.len() {
             // Inside block comment
@@ -321,46 +330,41 @@ pub(crate) fn find_matching_brace(lines: &[&str], start_line: usize, grammar: &G
                         }
                         k += 1;
                     }
-                    // If we didn't find closing on this line, skip rest of line
+                    // If we didn't find closing on this line, enter multi-line raw string state
                     if k >= chars.len() {
-                        let closing_str: String = closing.chars().collect();
-                        let mut found_close = false;
-                        for next_i in (i + 1)..lines.len() {
-                            if lines[next_i].contains(&closing_str) {
-                                found_close = true;
-                                break;
-                            }
-                            if next_i == lines.len() - 1 {
-                                return lines.len() - 1;
-                            }
-                        }
-                        if found_close {
-                            // Raw string closed on a later line — skip rest of this line
-                            break;
-                        }
+                        raw_string_closing = Some(closing);
+                        break;
                     }
                     j = k;
                     continue;
                 }
             }
 
+            // Char literal: 'x', '\\', '\''
+            if chars[j] == '\'' {
+                let start = j;
+                j += 1;
+                if j < chars.len() && chars[j] == escape_char {
+                    j += 2; // escaped char: '\x'
+                } else if j < chars.len() {
+                    j += 1; // normal char: 'x'
+                }
+                if j < chars.len() && chars[j] == '\'' {
+                    j += 1; // closing quote
+                } else {
+                    // Not a valid char literal (lifetime or other) — skip the quote
+                    j = start + 1;
+                }
+                continue;
+            }
+
             // Regular string literal
             if quote_chars.contains(&chars[j]) {
-                let quote = chars[j];
-                // In Rust, single quote is for char literals and lifetimes
-                if quote == '\'' {
-                    if j + 1 < chars.len()
-                        && (chars[j + 1].is_alphanumeric() || chars[j + 1] == '_')
-                    {
-                        j += 1;
-                        continue;
-                    }
-                }
                 j += 1;
                 while j < chars.len() {
                     if chars[j] == escape_char {
                         j += 2;
-                    } else if chars[j] == quote {
+                    } else if chars[j] == '"' {
                         j += 1;
                         break;
                     } else {
@@ -457,10 +461,21 @@ pub fn validate_brace_balance(source: &str, grammar: &Grammar) -> bool {
     let escape_char = grammar.strings.escape.chars().next().unwrap_or('\\');
     let mut depth: i32 = 0;
     let mut in_block_comment = false;
+    let mut raw_string_closing: Option<String> = None;
 
     for line in &lines {
         let chars: Vec<char> = line.chars().collect();
         let mut j = 0;
+
+        // If inside a multi-line raw string, scan for closing delimiter
+        if let Some(ref closing_str) = raw_string_closing {
+            let line_str: String = chars.iter().collect();
+            if line_str.contains(closing_str.as_str()) {
+                raw_string_closing = None;
+            }
+            continue;
+        }
+
         while j < chars.len() {
             if in_block_comment {
                 if j + 1 < chars.len() && chars[j] == '*' && chars[j + 1] == '/' {
@@ -479,6 +494,41 @@ pub fn validate_brace_balance(source: &str, grammar: &Grammar) -> bool {
             if j + 1 < chars.len() && chars[j] == '/' && chars[j + 1] == '/' {
                 break;
             }
+            // Raw string literal (r#"..."#, r##"..."##, etc.)
+            if chars[j] == 'r' && j + 1 < chars.len() {
+                let mut hashes = 0;
+                let mut k = j + 1;
+                while k < chars.len() && chars[k] == '#' {
+                    hashes += 1;
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == '"' && hashes > 0 {
+                    k += 1; // skip opening quote
+                    let closing: String = std::iter::once('"')
+                        .chain(std::iter::repeat('#').take(hashes))
+                        .collect();
+                    let closing_chars: Vec<char> = closing.chars().collect();
+                    let mut found_on_line = false;
+                    while k < chars.len() {
+                        if k + closing_chars.len() <= chars.len() {
+                            let slice: String = chars[k..k + closing_chars.len()].iter().collect();
+                            if slice == closing {
+                                k += closing_chars.len();
+                                found_on_line = true;
+                                break;
+                            }
+                        }
+                        k += 1;
+                    }
+                    if !found_on_line {
+                        // Multi-line raw string — skip lines until closing
+                        raw_string_closing = Some(closing);
+                        break;
+                    }
+                    j = k;
+                    continue;
+                }
+            }
             if chars[j] == '"' {
                 j += 1;
                 while j < chars.len() {
@@ -490,6 +540,22 @@ pub fn validate_brace_balance(source: &str, grammar: &Grammar) -> bool {
                     } else {
                         j += 1;
                     }
+                }
+                continue;
+            }
+            // Skip char literals: 'x', '\\', '\''
+            if chars[j] == '\'' {
+                j += 1;
+                if j < chars.len() && chars[j] == escape_char {
+                    // Escaped char: '\x' (2 chars after quote)
+                    j += 2;
+                } else if j < chars.len() {
+                    // Normal char: 'x' (1 char after quote)
+                    j += 1;
+                }
+                // Skip closing quote
+                if j < chars.len() && chars[j] == '\'' {
+                    j += 1;
                 }
                 continue;
             }
@@ -826,5 +892,81 @@ pub fn after() {}";
         ));
         assert!(!validate_brace_balance("fn foo() {", &grammar));
         assert!(!validate_brace_balance("fn foo() { { }", &grammar));
+    }
+
+    #[test]
+    fn validate_brace_balance_char_literals() {
+        let grammar = full_rust_grammar();
+        // Char literal containing close brace — should NOT count as a real brace
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '}'; }",
+            &grammar
+        ));
+        // Char literal containing open brace
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '{'; }",
+            &grammar
+        ));
+        // Escaped char literal (backslash)
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '\\\\'; }",
+            &grammar
+        ));
+        // Escaped single quote char literal
+        assert!(validate_brace_balance(
+            "fn foo() { let c = '\\''; }",
+            &grammar
+        ));
+        // rfind pattern that triggered the original bug
+        assert!(validate_brace_balance(
+            "fn insert_before_closing_brace(content: &str) {\n    content.rfind('}');\n}",
+            &grammar
+        ));
+    }
+
+    #[test]
+    fn validate_brace_balance_raw_strings() {
+        let grammar = full_rust_grammar();
+        // Multi-line raw string containing braces — should NOT count as real braces
+        assert!(validate_brace_balance(
+            "fn foo() {\n    let s = r#\"\npub struct Bar {}\n\"#;\n}",
+            &grammar
+        ));
+        // Single-line raw string with braces
+        assert!(validate_brace_balance(
+            "fn foo() { let s = r#\"{ not a brace }\"#; }",
+            &grammar
+        ));
+        // Raw string with unbalanced braces inside (should still be balanced overall)
+        assert!(validate_brace_balance(
+            "fn foo() {\n    let s = r#\"{\n{\n{\"#;\n}",
+            &grammar
+        ));
+    }
+
+    #[test]
+    fn find_matching_brace_skips_raw_strings() {
+        let grammar = full_rust_grammar();
+        // mod tests block with raw strings containing braces inside
+        let content = "\
+mod tests {
+    fn test_something() {
+        let s = r#\"
+pub struct Fake {}
+fn inner() { }
+\"#;
+        assert!(true);
+    }
+}
+
+fn after() {}";
+        let lines: Vec<&str> = content.lines().collect();
+        let end = find_matching_brace(&lines, 0, &grammar);
+        // The closing brace of `mod tests` is line 8 (0-indexed)
+        // Without raw string handling, the braces inside r#"..."# would corrupt depth
+        assert_eq!(
+            end, 8,
+            "Should find closing brace of mod tests, not be confused by raw string braces"
+        );
     }
 }
