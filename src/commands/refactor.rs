@@ -148,7 +148,7 @@ enum RefactorCommand {
         write_mode: WriteModeArgs,
     },
 
-    /// Build an audit-safe decomposition plan for a large source file
+    /// Decompose a large source file into a directory of smaller modules
     Decompose {
         /// Source file to decompose (relative to component/path root)
         #[arg(long, value_name = "FILE")]
@@ -157,10 +157,6 @@ enum RefactorCommand {
         /// Planning strategy (currently: grouped)
         #[arg(long, default_value = "grouped")]
         strategy: String,
-
-        /// Prefer audit-safe target suggestions (e.g., include fragments)
-        #[arg(long, default_value_t = true)]
-        audit_safe: bool,
 
         #[command(flatten)]
         component: ComponentArgs,
@@ -260,13 +256,11 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
         RefactorCommand::Decompose {
             file,
             strategy,
-            audit_safe,
             component,
             write_mode,
         } => run_decompose(
             &file,
             &strategy,
-            audit_safe,
             component.component.as_deref(),
             component.path.as_deref(),
             write_mode.write,
@@ -1315,13 +1309,12 @@ fn run_transform(
 fn run_decompose(
     file: &str,
     strategy: &str,
-    audit_safe: bool,
     component_id: Option<&str>,
     path: Option<&str>,
     write: bool,
 ) -> CmdResult<RefactorOutput> {
     let root = refactor::move_items::resolve_root(component_id, path)?;
-    let plan = refactor::build_plan(file, &root, strategy, audit_safe)?;
+    let plan = refactor::build_plan(file, &root, strategy)?;
 
     // Capture undo snapshot before writes
     if write {
