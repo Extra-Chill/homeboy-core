@@ -163,12 +163,23 @@ pub fn run_upgrade_with_method(
                 upgraded: false,
                 message: "Already at latest version".to_string(),
                 restart_required: false,
+                extensions_updated: vec![],
+                extensions_skipped: vec![],
             });
         }
     }
 
     // Execute the upgrade
     let (success, new_version) = execute_upgrade(install_method)?;
+
+    // Auto-update all installed extensions after a successful upgrade.
+    // This prevents CI/local extension version drift that causes baseline
+    // mismatches and inconsistent audit findings.
+    let (extensions_updated, extensions_skipped) = if success {
+        update_all_extensions()
+    } else {
+        (vec![], vec![])
+    };
 
     Ok(UpgradeResult {
         command: "upgrade".to_string(),
@@ -182,7 +193,69 @@ pub fn run_upgrade_with_method(
             "Upgrade command completed but version unchanged".to_string()
         },
         restart_required: success,
+        extensions_updated,
+        extensions_skipped,
     })
+}
+
+/// Update all installed extensions. Best-effort — failures are logged and
+/// the extension is added to the skipped list.
+fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
+    use crate::extension;
+
+    let extension_ids = extension::available_extension_ids();
+    if extension_ids.is_empty() {
+        return (vec![], vec![]);
+    }
+
+    log_status!("upgrade", "Updating {} installed extension(s)...", extension_ids.len());
+
+    let mut updated = Vec::new();
+    let mut skipped = Vec::new();
+
+    for id in &extension_ids {
+        // Skip linked extensions (they're managed externally)
+        if extension::is_extension_linked(id) {
+            skipped.push(id.clone());
+            continue;
+        }
+
+        let old_version = extension::load_extension(id)
+            .ok()
+            .map(|m| m.version.clone())
+            .unwrap_or_default();
+
+        match extension::update(id, false) {
+            Ok(_) => {
+                let new_version = extension::load_extension(id)
+                    .ok()
+                    .map(|m| m.version.clone())
+                    .unwrap_or_default();
+
+                if old_version != new_version {
+                    log_status!(
+                        "upgrade",
+                        "  {} {} → {}",
+                        id, old_version, new_version
+                    );
+                } else {
+                    log_status!("upgrade", "  {} {} (up to date)", id, new_version);
+                }
+
+                updated.push(ExtensionUpgradeEntry {
+                    extension_id: id.clone(),
+                    old_version,
+                    new_version,
+                });
+            }
+            Err(e) => {
+                log_status!("upgrade", "  {} skipped: {}", id, e.message);
+                skipped.push(id.clone());
+            }
+        }
+    }
+
+    (updated, skipped)
 }
 
 #[cfg(unix)]
