@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.74.0] - 2026-03-09
+
+### Added
+- make baseline ratchet opt-in via --ratchet flag
+
+### Fixed
+- deduplicate levenshtein and module_path_from_file
+
 ## [0.72.0] - 2026-03-08
 ### Added
 - enable autofix on all CI jobs + release autofix PRs
