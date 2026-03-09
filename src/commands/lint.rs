@@ -7,7 +7,7 @@ use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
 use homeboy::git;
 use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
-use homeboy::utils::autofix::{self, AutofixMode};
+use homeboy::utils::autofix::{self, AutofixMode, FixResultsSummary};
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -86,6 +86,10 @@ pub struct LintOutput {
 pub struct LintAutofixOutput {
     files_modified: usize,
     rerun_recommended: bool,
+    /// Structured summary of what the extension fixed (populated when the
+    /// extension writes to `HOMEBOY_FIX_RESULTS_FILE`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix_summary: Option<FixResultsSummary>,
 }
 
 pub(crate) fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> {
@@ -149,6 +153,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
+    let fix_results_file = autofix::fix_results_temp_path();
 
     let before_fix_files = if args.fix {
         Some(changed_file_set(&component.local_path)?)
@@ -245,6 +250,11 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
             "HOMEBOY_LINT_FINDINGS_FILE",
             &lint_findings_file.to_string_lossy(),
         )
+        .env_if(
+            args.fix,
+            "HOMEBOY_FIX_RESULTS_FILE",
+            &fix_results_file.to_string_lossy(),
+        )
         .run()?;
 
     let lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
@@ -262,6 +272,16 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
             .map(|before| count_newly_changed(before, &after_fix_files))
             .unwrap_or(0);
 
+        // Read structured fix results from extension sidecar (if written).
+        let fix_results = autofix::parse_fix_results_file(&fix_results_file);
+        let _ = std::fs::remove_file(&fix_results_file);
+
+        let fix_summary = if fix_results.is_empty() {
+            None
+        } else {
+            Some(autofix::summarize_fix_results(&fix_results))
+        };
+
         let outcome = autofix::standard_outcome(
             AutofixMode::Write,
             files_modified,
@@ -277,6 +297,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
         autofix = Some(LintAutofixOutput {
             files_modified,
             rerun_recommended: outcome.rerun_recommended,
+            fix_summary,
         });
     }
 
