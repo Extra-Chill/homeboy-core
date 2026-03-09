@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::code_audit::walker::is_test_path;
 use crate::error::{Error, Result};
 use crate::git;
 
@@ -142,7 +143,7 @@ pub fn detect_drift(component: &str, opts: &DriftOptions) -> Result<DriftReport>
     // Filter to production files only (exclude tests)
     let prod_files: Vec<&str> = changed_files
         .iter()
-        .filter(|f| !is_test_file(f))
+        .filter(|f| !is_test_path(f))
         .map(|s| s.as_str())
         .collect();
 
@@ -169,7 +170,7 @@ pub fn detect_drift(component: &str, opts: &DriftOptions) -> Result<DriftReport>
     // Also detect file renames
     let renames = get_renamed_files(opts.root, opts.since)?;
     for (old, new) in &renames {
-        if !is_test_file(old) {
+        if !is_test_path(old) {
             changes.push(ProductionChange {
                 change_type: ChangeType::FileMove,
                 file: new.clone(),
@@ -450,11 +451,6 @@ fn extract_changes_from_diff(file: &str, diff: &str) -> Vec<ProductionChange> {
 // ============================================================================
 // Test file scanning
 // ============================================================================
-
-/// Check if a file path looks like a test file.
-fn is_test_file(path: &str) -> bool {
-    path.contains("/tests/") || path.contains("Test.php") || path.contains("_test.rs")
-}
 
 /// Collect all test files in the repo.
 fn collect_test_files(root: &Path) -> Vec<PathBuf> {
@@ -776,11 +772,11 @@ mod tests {
     }
 
     #[test]
-    fn is_test_file_detection() {
-        assert!(is_test_file("tests/Unit/FooTest.php"));
-        assert!(is_test_file("tests/integration/bar_test.rs"));
-        assert!(!is_test_file("src/Foo.php"));
-        assert!(!is_test_file("src/config.rs"));
+    fn is_test_path_detection() {
+        assert!(is_test_path("tests/Unit/FooTest.php"));
+        assert!(is_test_path("tests/integration/bar_test.rs"));
+        assert!(!is_test_path("src/Foo.php"));
+        assert!(!is_test_path("src/config.rs"));
     }
 
     #[test]

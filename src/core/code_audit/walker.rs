@@ -71,7 +71,7 @@ pub(crate) fn walk_source_files(root: &Path) -> std::io::Result<Vec<std::path::P
 /// Matches common test file patterns across languages:
 /// - Paths under `tests/`, `Tests/`, `test/`, `__tests__/` directories
 /// - Files named `*_test.rs`, `*Test.php`, `*.test.js`, `*.spec.ts`, etc.
-pub(crate) fn is_test_path(relative_path: &str) -> bool {
+pub fn is_test_path(relative_path: &str) -> bool {
     // Directory-based detection
     let path_lower = relative_path.to_lowercase();
     if path_lower.starts_with("tests/")

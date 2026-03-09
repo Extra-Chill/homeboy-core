@@ -10,7 +10,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::args::{BaselineArgs, PositionalComponentArgs};
-use super::test_scope::{build_phpunit_filter_regex, compute_changed_test_scope};
+use super::test_scope::compute_changed_test_scope;
 use super::{CmdResult, GlobalArgs};
 
 #[derive(Args)]
@@ -938,7 +938,20 @@ fn build_test_smoke_verifier<'a>(
 ) -> Option<impl Fn(&fixer::ApplyChunkResult) -> Result<String, String> + 'a> {
     let component = load_or_discover(component_id, source_path)?;
     let script_path = super::test::resolve_test_script(&component).ok()?;
-    let changed_scope = compute_changed_test_scope(&component, "HEAD~1").ok();
+    // Pre-compute the changed test files string so the closure can use it.
+    // The extension's test runner decides how to scope (e.g., PHPUnit uses
+    // --filter, Cargo uses positional test names). Core does not generate
+    // runner-specific args — it passes HOMEBOY_CHANGED_TEST_FILES and lets
+    // the extension handle conversion.
+    let changed_test_files: Option<String> = compute_changed_test_scope(&component, "HEAD~1")
+        .ok()
+        .and_then(|scope| {
+            if scope.selected_files.is_empty() {
+                None
+            } else {
+                Some(scope.selected_files.join("\n"))
+            }
+        });
 
     Some(move |chunk: &fixer::ApplyChunkResult| {
         if chunk.files.is_empty() || changed_files.is_empty() {
@@ -961,23 +974,16 @@ fn build_test_smoke_verifier<'a>(
             chunk.chunk_id.replace(':', "-")
         ));
 
-        let runner = ExtensionRunner::new(component_id, &script_path)
+        let mut runner = ExtensionRunner::new(component_id, &script_path)
             .path_override(Some(source_path.to_string()))
             .env("HOMEBOY_SKIP_LINT", "1")
             .env("HOMEBOY_TEST_RESULTS_FILE", &results_file.to_string_lossy());
 
-        let mut args = Vec::new();
-        if let Some(scope) = &changed_scope {
-            if !scope.selected_files.is_empty() {
-                args.push(format!(
-                    "--filter={}",
-                    build_phpunit_filter_regex(&scope.selected_files)
-                ));
-            }
+        if let Some(ref files) = changed_test_files {
+            runner = runner.env("HOMEBOY_CHANGED_TEST_FILES", files);
         }
 
         let output = runner
-            .script_args(&args)
             .run()
             .map_err(|error| format!("test smoke run failed: {}", error))?;
 

@@ -46,6 +46,7 @@ pub use checks::{CheckResult, CheckStatus};
 pub use conventions::{AuditFinding, Convention, Deviation, Language, Outlier};
 pub use findings::{Finding, Severity};
 pub use fingerprint::FileFingerprint;
+pub use walker::is_test_path;
 
 use crate::{component, utils::is_zero, Result};
 
