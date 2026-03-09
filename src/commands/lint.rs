@@ -1,6 +1,5 @@
 use clap::Args;
 use serde::Serialize;
-use std::collections::HashSet;
 
 use homeboy::component::Component;
 use homeboy::error::Error;
@@ -156,7 +155,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
     let fix_results_file = autofix::fix_results_temp_path();
 
     let before_fix_files = if args.fix {
-        Some(changed_file_set(&component.local_path)?)
+        Some(autofix::changed_file_set(&component.local_path)?)
     } else {
         None
     };
@@ -266,10 +265,10 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
     let mut hints = Vec::new();
 
     if args.fix {
-        let after_fix_files = changed_file_set(&component.local_path)?;
+        let after_fix_files = autofix::changed_file_set(&component.local_path)?;
         let files_modified = before_fix_files
             .as_ref()
-            .map(|before| count_newly_changed(before, &after_fix_files))
+            .map(|before| autofix::count_newly_changed(before, &after_fix_files))
             .unwrap_or(0);
 
         // Read structured fix results from extension sidecar (if written).
@@ -388,71 +387,10 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
 }
 
 #[cfg(test)]
-fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
-    let path = std::path::Path::new(local_path);
-    if path.exists() {
-        Ok(HashSet::new())
-    } else {
-        git::get_uncommitted_changes(local_path).map(|changes| {
-            let mut files = HashSet::new();
-            files.extend(changes.staged);
-            files.extend(changes.unstaged);
-            files.extend(changes.untracked);
-            files
-        })
-    }
-}
-
-#[cfg(not(test))]
-fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
-    let uncommitted = git::get_uncommitted_changes(local_path)?;
-    let mut files = HashSet::new();
-    files.extend(uncommitted.staged);
-    files.extend(uncommitted.unstaged);
-    files.extend(uncommitted.untracked);
-    Ok(files)
-}
-
-fn count_newly_changed(before: &HashSet<String>, after: &HashSet<String>) -> usize {
-    after.difference(before).count()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use homeboy::lint_baseline::{self, LintFinding};
     use std::path::Path;
-
-    #[test]
-    fn count_newly_changed_only_counts_new_entries() {
-        let before = HashSet::from([
-            "src/a.rs".to_string(),
-            "src/b.rs".to_string(),
-            "README.md".to_string(),
-        ]);
-        let after = HashSet::from([
-            "src/a.rs".to_string(),
-            "src/b.rs".to_string(),
-            "README.md".to_string(),
-            "src/c.rs".to_string(),
-            "tests/a_test.rs".to_string(),
-        ]);
-
-        assert_eq!(count_newly_changed(&before, &after), 2);
-    }
-
-    #[test]
-    fn test_changed_file_set() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().to_string_lossy().to_string();
-        let result = changed_file_set(&path);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_count_newly_changed_only_counts_new_entries() {
-        count_newly_changed_only_counts_new_entries();
-    }
 
     #[test]
     fn lint_baseline_roundtrip_and_compare() {

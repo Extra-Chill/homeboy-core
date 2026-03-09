@@ -12,6 +12,7 @@
 //! its output.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,6 +213,46 @@ pub fn fix_results_temp_path() -> std::path::PathBuf {
     ))
 }
 
+// ============================================================================
+// Git change tracking for autofix file-count reporting
+// ============================================================================
+
+/// Snapshot uncommitted files in a working tree. Called before and after a fix
+/// pass to compute how many files the fixer modified.
+///
+/// In test builds the real git call is replaced with a stub that returns an
+/// empty set for existing directories (avoids needing a real git repo).
+#[cfg(not(test))]
+pub fn changed_file_set(local_path: &str) -> crate::Result<HashSet<String>> {
+    let uncommitted = crate::git::get_uncommitted_changes(local_path)?;
+    let mut files = HashSet::new();
+    files.extend(uncommitted.staged);
+    files.extend(uncommitted.unstaged);
+    files.extend(uncommitted.untracked);
+    Ok(files)
+}
+
+#[cfg(test)]
+pub fn changed_file_set(local_path: &str) -> crate::Result<HashSet<String>> {
+    let path = Path::new(local_path);
+    if path.exists() {
+        Ok(HashSet::new())
+    } else {
+        crate::git::get_uncommitted_changes(local_path).map(|changes| {
+            let mut files = HashSet::new();
+            files.extend(changes.staged);
+            files.extend(changes.unstaged);
+            files.extend(changes.untracked);
+            files
+        })
+    }
+}
+
+/// Count files that appeared after a fix pass (present in `after` but not `before`).
+pub fn count_newly_changed(before: &HashSet<String>, after: &HashSet<String>) -> usize {
+    after.difference(before).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +353,32 @@ mod tests {
         let outcome = standard_outcome(AutofixMode::Write, 0, None, vec![]);
         assert_eq!(outcome.status, "auto_fix_noop");
         assert!(!outcome.rerun_recommended);
+    }
+
+    #[test]
+    fn count_newly_changed_only_counts_new_entries() {
+        let before = HashSet::from([
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+            "README.md".to_string(),
+        ]);
+        let after = HashSet::from([
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+            "README.md".to_string(),
+            "src/c.rs".to_string(),
+            "tests/a_test.rs".to_string(),
+        ]);
+
+        assert_eq!(count_newly_changed(&before, &after), 2);
+    }
+
+    #[test]
+    fn changed_file_set_returns_empty_for_existing_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_string_lossy().to_string();
+        let result = changed_file_set(&path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
     }
 }
