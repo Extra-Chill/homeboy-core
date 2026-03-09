@@ -267,9 +267,7 @@ fn main() -> std::process::ExitCode {
 
     // Extract --output early so it's available for all code paths (including
     // extension CLI commands which exit before Cli::from_arg_matches).
-    let output_file: Option<String> = matches
-        .get_one::<String>("output")
-        .cloned();
+    let output_file: Option<String> = matches.get_one::<String>("output").cloned();
 
     if let Some(extension_cmd) = try_parse_extension_cli_command(&matches, &extension_info) {
         let cli_args = cli::CliArgs {
