@@ -1172,9 +1172,6 @@ mod tests {
         let fixed = &entries["fixed"];
 
         assert_eq!(added[0], "agent-first scoping — Phase 1 schema");
-        assert_eq!(
-            fixed[0],
-            "rename $class param — fixes bootstrap crash"
-        );
+        assert_eq!(fixed[0], "rename $class param — fixes bootstrap crash");
     }
 }
