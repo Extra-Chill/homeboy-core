@@ -130,7 +130,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
                 ))
             } else {
                 Some(format!(
-                    "This directory is a git repo ('{}') but is not managed by Homeboy. Run `homeboy init --all` to see all components.",
+                    "Component not configured. Register it with: `homeboy component create --local-path {}`",
                     git_root_str
                 ))
             }
@@ -150,7 +150,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             }
         } else {
             Some(format!(
-                "This directory is a git repo ('{}') but is not managed by Homeboy. Run `homeboy init --all` to see all components.",
+                "Component not configured. Register it with: `homeboy component create --local-path {}`",
                 git_root_str
             ))
         }
@@ -170,7 +170,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
         }
     } else {
         Some(
-            "This directory is not managed by Homeboy. Run `homeboy init --all` to see all components."
+            "Component not configured. Register it with: `homeboy component create --local-path <path>`"
                 .to_string(),
         )
     };
