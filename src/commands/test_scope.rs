@@ -1,9 +1,10 @@
 use clap::Args;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Serialize;
 
+use homeboy::code_audit::is_test_path;
 use homeboy::component::Component;
 use homeboy::git;
 use homeboy::test_drift::{self, DriftOptions};
@@ -88,39 +89,6 @@ pub fn compute_changed_test_scope(
     })
 }
 
-pub fn build_phpunit_filter_regex(selected_files: &[String]) -> String {
-    // Build a regex that matches test class names derived from selected file basenames.
-    // Example: tests/Unit/Foo/BarBazTest.php -> BarBazTest
-    let mut classes: Vec<String> = selected_files
-        .iter()
-        .filter_map(|f| {
-            if !f.ends_with(".php") {
-                return None;
-            }
-            Path::new(f)
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-        })
-        .filter(|stem| !stem.is_empty())
-        .map(|stem| regex::escape(&stem))
-        .collect();
-
-    classes.sort();
-    classes.dedup();
-
-    if classes.is_empty() {
-        // No PHP class-based test files selected. Use a non-matching regex
-        // to avoid accidentally running the full suite.
-        return "^$".to_string();
-    }
-
-    format!("({})", classes.join("|"))
-}
-
-fn is_test_path(path: &str) -> bool {
-    path.contains("/tests/") || path.ends_with("Test.php") || path.ends_with("_test.rs")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,21 +113,11 @@ mod tests {
     }
 
     #[test]
-    fn test_build_phpunit_filter_regex() {
-        let selected = vec![
-            "tests/Unit/Foo/BarBazTest.php".to_string(),
-            "tests/Unit/Foo/BatTest.php".to_string(),
-            "tests/core/thing_test.rs".to_string(),
-        ];
-
-        let regex = build_phpunit_filter_regex(&selected);
-        assert_eq!(regex, "(BarBazTest|BatTest)");
-    }
-
-    #[test]
-    fn test_is_test_path() {
+    fn test_is_test_path_uses_canonical() {
+        // Verify canonical is_test_path (from code_audit::walker) is used
         assert!(is_test_path("tests/unit/foo_test.rs"));
         assert!(is_test_path("plugin/tests/FooTest.php"));
+        assert!(is_test_path("src/components/Button.test.tsx"));
         assert!(!is_test_path("src/core/component.rs"));
     }
 
