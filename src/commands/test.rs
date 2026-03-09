@@ -1,11 +1,9 @@
 use clap::Args;
 use serde::Serialize;
-use std::collections::HashSet;
 
 use homeboy::component::Component;
 use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
-use homeboy::git;
 use homeboy::refactor::{self, TransformSet};
 use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
 use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};
@@ -367,7 +365,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
 
     let fix_results_file = autofix::fix_results_temp_path();
     let before_fix_files = if args.fix {
-        Some(changed_file_set(&component.local_path)?)
+        Some(autofix::changed_file_set(&component.local_path)?)
     } else {
         None
     };
@@ -463,10 +461,10 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
 
     // Read structured fix results from extension sidecar (if written).
     let test_autofix = if args.fix {
-        let after_fix_files = changed_file_set(&component.local_path)?;
+        let after_fix_files = autofix::changed_file_set(&component.local_path)?;
         let files_modified = before_fix_files
             .as_ref()
-            .map(|before| count_newly_changed(before, &after_fix_files))
+            .map(|before| autofix::count_newly_changed(before, &after_fix_files))
             .unwrap_or(0);
 
         let fix_results = autofix::parse_fix_results_file(&fix_results_file);
@@ -1206,36 +1204,6 @@ fn run_scaffold(
             0,
         ))
     }
-}
-
-#[cfg(test)]
-fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
-    let path = std::path::Path::new(local_path);
-    if path.exists() {
-        Ok(HashSet::new())
-    } else {
-        git::get_uncommitted_changes(local_path).map(|changes| {
-            let mut files = HashSet::new();
-            files.extend(changes.staged);
-            files.extend(changes.unstaged);
-            files.extend(changes.untracked);
-            files
-        })
-    }
-}
-
-#[cfg(not(test))]
-fn changed_file_set(local_path: &str) -> homeboy::Result<HashSet<String>> {
-    let uncommitted = git::get_uncommitted_changes(local_path)?;
-    let mut files = HashSet::new();
-    files.extend(uncommitted.staged);
-    files.extend(uncommitted.unstaged);
-    files.extend(uncommitted.untracked);
-    Ok(files)
-}
-
-fn count_newly_changed(before: &HashSet<String>, after: &HashSet<String>) -> usize {
-    after.difference(before).count()
 }
 
 #[cfg(test)]
