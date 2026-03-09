@@ -765,8 +765,13 @@ fn group_items(file: &str, items: &[ParsedItem], content: &str) -> Vec<Decompose
         buckets.entry(key).or_default().extend(names);
     }
 
-    // Deduplicate within buckets
-    for names in buckets.values_mut() {
+    // Deduplicate within buckets — but skip type buckets because impl names
+    // match their target struct/enum names (e.g., struct Foo + impl Foo both
+    // have name "Foo" and should both be kept)
+    for (bucket_key, names) in buckets.iter_mut() {
+        if type_bucket_keys.contains(bucket_key) {
+            continue; // Type buckets may have struct name == impl name, keep both
+        }
         let mut seen = HashSet::new();
         names.retain(|name| seen.insert(name.clone()));
     }
