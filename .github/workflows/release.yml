@@ -42,8 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should-release: ${{ steps.check.outputs.should-release }}
-      bump-type: ${{ steps.check.outputs.bump-type }}
-      commit-count: ${{ steps.check.outputs.commit-count }}
+      bump-type: ${{ steps.release-check.outputs.release-bump-type }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,7 +58,17 @@ jobs:
           restore-keys: |
             release-last-failed-${{ github.ref_name }}-
 
-      - name: Check commits since last tag
+      - name: Dry-run release check
+        id: release-check
+        uses: Extra-Chill/homeboy-action@v1
+        with:
+          source: '.'
+          extension: rust
+          component: homeboy
+          commands: release
+          release-dry-run: 'true'
+
+      - name: Decide whether to release
         id: check
         run: |
           # Skip if HEAD matches the last failed attempt (no new commits to retry)
@@ -73,54 +82,15 @@ jobs:
             fi
           fi
 
-          LAST_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "")"
-          if [ -z "${LAST_TAG}" ]; then
-            COMMIT_RANGE="HEAD"
-          else
-            COMMIT_RANGE="${LAST_TAG}..HEAD"
-          fi
+          RELEASE_VERSION="${{ steps.release-check.outputs.release-version }}"
+          BUMP_TYPE="${{ steps.release-check.outputs.release-bump-type }}"
 
-          BUMP="none"
-          HAS_BREAKING=false
-          COUNT=0
-          COMMIT_RE='^[a-f0-9]+ ([a-z]+)(\([^)]*\))?(!)?: (.+)$'
-
-          while IFS= read -r line; do
-            [ -z "${line}" ] && continue
-            [[ "${line}" =~ ^[a-f0-9]+\ release: ]] && continue
-            [[ "${line}" =~ ^[a-f0-9]+\ Merge\ pull\ request ]] && continue
-
-            if [[ "${line}" =~ ${COMMIT_RE} ]]; then
-              TYPE="${BASH_REMATCH[1]}"
-              BREAKING="${BASH_REMATCH[3]:-}"
-
-              [ "${BREAKING}" = "!" ] && HAS_BREAKING=true
-              [[ "${TYPE}" =~ ^(chore|ci|test|style|build|docs)$ ]] && continue
-
-              case "${TYPE}" in
-                feat) [ "${BUMP}" != "major" ] && BUMP="minor" ;;
-                fix|refactor|perf) [ "${BUMP}" = "none" ] && BUMP="patch" ;;
-                *) continue ;;
-              esac
-              COUNT=$((COUNT + 1))
-            fi
-          done < <(git log "${COMMIT_RANGE}" --oneline --no-merges 2>/dev/null || true)
-
-          if [ "${HAS_BREAKING}" = false ]; then
-            if git log "${COMMIT_RANGE}" --format="%B" 2>/dev/null | grep -q "^BREAKING CHANGE:"; then
-              HAS_BREAKING=true
-            fi
-          fi
-          [ "${HAS_BREAKING}" = true ] && BUMP="major"
-
-          if [ "${COUNT}" -eq 0 ] || [ "${BUMP}" = "none" ]; then
+          if [ -z "${RELEASE_VERSION}" ]; then
             echo "should-release=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No releasable commits since ${LAST_TAG:-initial}"
+            echo "::notice::No releasable commits at HEAD ${HEAD_SHA:0:8}"
           else
             echo "should-release=true" >> "$GITHUB_OUTPUT"
-            echo "bump-type=${BUMP}" >> "$GITHUB_OUTPUT"
-            echo "commit-count=${COUNT}" >> "$GITHUB_OUTPUT"
-            echo "::notice::${COUNT} releasable commits → ${BUMP} bump"
+            echo "::notice::Release dry-run predicts v${RELEASE_VERSION} (${BUMP_TYPE})"
           fi
 
   # ── Step 2: Build once ──
