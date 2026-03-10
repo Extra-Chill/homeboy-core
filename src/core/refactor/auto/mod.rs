@@ -15,14 +15,12 @@ pub use apply::{
     apply_decompose_plans, apply_fixes, apply_fixes_chunked, apply_new_files,
     apply_new_files_chunked, auto_apply_subset,
 };
-pub use policy::apply_fix_policy;
-pub use preflight::{
-    run_fix_preflight, run_insertion_preflight, run_new_file_preflight,
-};
 pub use outcome::{
     standard_outcome, AppliedAutofixCapture, AutofixMode, AutofixOutcome, AutofixSidecarFiles,
     FixApplied, FixResultsSummary, RuleFixCount,
 };
+pub use policy::apply_fix_policy;
+pub use preflight::{run_fix_preflight, run_insertion_preflight, run_new_file_preflight};
 pub use sidecar::{
     fix_plan_temp_path, fix_results_temp_path, parse_fix_plan_file, parse_fix_results_file,
     read_fix_results,

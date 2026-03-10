@@ -1,13 +1,13 @@
-use crate::refactor::auto as fixer;
 use crate::code_audit::is_test_path;
 use crate::component::Component;
 use crate::extension;
 use crate::git;
 use crate::lint_baseline;
+use crate::refactor::auto as fixer;
+use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
 use crate::refactor::runner;
 use crate::test_drift::{self, DriftOptions};
 use crate::undo::UndoSnapshot;
-use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
 use crate::Error;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
@@ -83,7 +83,9 @@ pub fn run_lint_refactor(
     options: LintSourceOptions,
     write: bool,
 ) -> crate::Result<RefactorPlan> {
-    build_refactor_plan(lint_refactor_request(component, root, settings, options, write))
+    build_refactor_plan(lint_refactor_request(
+        component, root, settings, options, write,
+    ))
 }
 
 pub fn run_test_refactor(
@@ -93,7 +95,9 @@ pub fn run_test_refactor(
     options: TestSourceOptions,
     write: bool,
 ) -> crate::Result<RefactorPlan> {
-    build_refactor_plan(test_refactor_request(component, root, settings, options, write))
+    build_refactor_plan(test_refactor_request(
+        component, root, settings, options, write,
+    ))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -514,7 +518,12 @@ fn plan_audit_stage(
             .iterations
             .iter()
             .filter(|iteration| iteration.status != "continued")
-            .map(|iteration| format!("audit iteration {}: {}", iteration.iteration, iteration.status))
+            .map(|iteration| {
+                format!(
+                    "audit iteration {}: {}",
+                    iteration.iteration, iteration.status
+                )
+            })
             .collect::<Vec<_>>();
 
         (

@@ -1,5 +1,5 @@
-use crate::code_audit::{fixer, AuditFinding, CodeAuditResult};
 use crate::code_audit::conventions::Language;
+use crate::code_audit::{fixer, AuditFinding, CodeAuditResult};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::Path;
@@ -500,7 +500,8 @@ pub(crate) fn generate_duplicate_function_fixes(
             "all_file_paths": all_paths,
         });
 
-        let Some(result_val) = crate::extension::run_refactor_script(&manifest, &extract_cmd) else {
+        let Some(result_val) = crate::extension::run_refactor_script(&manifest, &extract_cmd)
+        else {
             generate_simple_duplicate_fixes(group, root, fixes, skipped);
             continue;
         };
@@ -534,7 +535,9 @@ pub(crate) fn generate_duplicate_function_fixes(
         }
 
         if let (Some(trait_file), Some(trait_content)) = (
-            result_val.get("trait_file").and_then(|value| value.as_str()),
+            result_val
+                .get("trait_file")
+                .and_then(|value| value.as_str()),
             result_val
                 .get("trait_content")
                 .and_then(|value| value.as_str()),
@@ -557,7 +560,10 @@ pub(crate) fn generate_duplicate_function_fixes(
             }
         }
 
-        if let Some(file_edits) = result_val.get("file_edits").and_then(|value| value.as_array()) {
+        if let Some(file_edits) = result_val
+            .get("file_edits")
+            .and_then(|value| value.as_array())
+        {
             for edit in file_edits {
                 let Some(file) = edit
                     .get("file")
@@ -571,8 +577,12 @@ pub(crate) fn generate_duplicate_function_fixes(
 
                 if let Some(remove_lines) = edit.get("remove_lines") {
                     if let (Some(start), Some(end)) = (
-                        remove_lines.get("start_line").and_then(|value| value.as_u64()),
-                        remove_lines.get("end_line").and_then(|value| value.as_u64()),
+                        remove_lines
+                            .get("start_line")
+                            .and_then(|value| value.as_u64()),
+                        remove_lines
+                            .get("end_line")
+                            .and_then(|value| value.as_u64()),
                     ) {
                         insertions.push(insertion(
                             fixer::InsertionKind::FunctionRemoval {
@@ -598,7 +608,8 @@ pub(crate) fn generate_duplicate_function_fixes(
                     ));
                 }
 
-                if let Some(use_trait) = edit.get("add_use_trait").and_then(|value| value.as_str()) {
+                if let Some(use_trait) = edit.get("add_use_trait").and_then(|value| value.as_str())
+                {
                     insertions.push(insertion(
                         fixer::InsertionKind::TraitUse,
                         AuditFinding::DuplicateFunction,
@@ -629,7 +640,10 @@ fn generate_simple_duplicate_fixes(
 ) {
     for remove_file in &group.remove_from {
         let abs_path = root.join(remove_file.as_str());
-        let ext = abs_path.extension().and_then(|value| value.to_str()).unwrap_or("");
+        let ext = abs_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
 
         let content = match std::fs::read_to_string(&abs_path) {
             Ok(content) => content,

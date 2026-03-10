@@ -44,14 +44,8 @@ pub(crate) fn rewrite_callers_after_dedup(fix: &fixer::Fix, root: &Path) {
             .and_then(|value| value.to_str())
             .unwrap_or("rs");
 
-        let result = symbol_graph::rewrite_imports(
-            fn_name,
-            &old_module,
-            &new_module,
-            root,
-            &[ext],
-            true,
-        );
+        let result =
+            symbol_graph::rewrite_imports(fn_name, &old_module, &new_module, root, &[ext], true);
 
         if !result.rewrites.is_empty() {
             log_status!(
