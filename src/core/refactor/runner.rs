@@ -3,35 +3,7 @@ use crate::error::Error;
 use crate::extension;
 
 pub fn resolve_lint_script(component: &Component) -> crate::Result<String> {
-    let extensions = component.extensions.as_ref().ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "component",
-            format!("Component '{}' has no extensions configured", component.id),
-            None,
-            None,
-        )
-        .with_hint(format!(
-            "Add a extension: homeboy component set {} --extension <extension_id>",
-            component.id
-        ))
-    })?;
-
-    let extension_id = if extensions.contains_key("wordpress") {
-        "wordpress"
-    } else {
-        extensions.keys().next().ok_or_else(|| {
-            Error::validation_invalid_argument(
-                "component",
-                format!("Component '{}' has no extensions configured", component.id),
-                None,
-                None,
-            )
-            .with_hint(format!(
-                "Add a extension: homeboy component set {} --extension <extension_id>",
-                component.id
-            ))
-        })?
-    };
+    let extension_id = resolve_extension_id(component)?;
 
     let manifest = extension::load_extension(extension_id)?;
 
@@ -49,24 +21,7 @@ pub fn resolve_lint_script(component: &Component) -> crate::Result<String> {
 }
 
 pub fn resolve_test_script(component: &Component) -> crate::Result<String> {
-    let extension_id_owned: String;
-    let extension_id: &str = if let Some(ref extensions) = component.extensions {
-        if extensions.contains_key("wordpress") {
-            "wordpress"
-        } else if let Some(key) = extensions.keys().next() {
-            key.as_str()
-        } else if let Some(detected) = auto_detect_extension(component) {
-            extension_id_owned = detected;
-            &extension_id_owned
-        } else {
-            return Err(no_extensions_error(component));
-        }
-    } else if let Some(detected) = auto_detect_extension(component) {
-        extension_id_owned = detected;
-        &extension_id_owned
-    } else {
-        return Err(no_extensions_error(component));
-    };
+    let extension_id = resolve_extension_id(component)?;
 
     let manifest = extension::load_extension(extension_id)?;
 
@@ -103,6 +58,29 @@ fn auto_detect_extension(component: &Component) -> Option<String> {
     }
 
     None
+}
+
+fn resolve_extension_id(component: &Component) -> crate::Result<&str> {
+    if let Some(ref extensions) = component.extensions {
+        if extensions.contains_key("wordpress") {
+            return Ok("wordpress");
+        }
+
+        if let Some(key) = extensions.keys().next() {
+            return Ok(key.as_str());
+        }
+    }
+
+    if let Some(detected) = auto_detect_extension(component) {
+        return Ok(match detected.as_str() {
+            "wordpress" => "wordpress",
+            "rust" => "rust",
+            "node" => "node",
+            _ => return Err(no_extensions_error(component)),
+        });
+    }
+
+    Err(no_extensions_error(component))
 }
 
 fn no_extensions_error(component: &Component) -> crate::Error {
