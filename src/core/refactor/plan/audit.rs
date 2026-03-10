@@ -9,6 +9,57 @@ use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
+pub(crate) fn rewrite_callers_after_dedup(fix: &fixer::Fix, root: &Path) {
+    use crate::core::symbol_graph;
+
+    for insertion in &fix.insertions {
+        if !matches!(insertion.kind, fixer::InsertionKind::FunctionRemoval { .. }) {
+            continue;
+        }
+        if insertion.finding != crate::code_audit::AuditFinding::DuplicateFunction {
+            continue;
+        }
+
+        let Some(fn_name) = insertion.description.split('`').nth(1) else {
+            continue;
+        };
+        let Some(canonical_file) = insertion
+            .description
+            .split("canonical copy in ")
+            .nth(1)
+            .map(|value| value.trim_end_matches(')'))
+        else {
+            continue;
+        };
+
+        let old_module = symbol_graph::module_path_from_file(&fix.file);
+        let new_module = symbol_graph::module_path_from_file(canonical_file);
+
+        if old_module == new_module {
+            continue;
+        }
+
+        let ext = Path::new(&fix.file)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("rs");
+
+        let result =
+            symbol_graph::rewrite_imports(fn_name, &old_module, &new_module, root, &[ext], true);
+
+        if !result.rewrites.is_empty() {
+            log_status!(
+                "fix",
+                "Rewrote {} caller import(s) for `{}`: {} → {}",
+                result.rewrites.len(),
+                fn_name,
+                old_module,
+                new_module
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct AuditConvergenceScoring {
     pub warning_weight: usize,

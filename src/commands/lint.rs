@@ -5,7 +5,10 @@ use homeboy::component::Component;
 use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use homeboy::git;
 use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
-use homeboy::refactor::{auto::{self, AutofixMode}, run_lint_refactor, AppliedRefactor, LintSourceOptions};
+use homeboy::refactor::{
+    auto::{self, AutofixMode},
+    run_lint_refactor, AppliedRefactor, LintSourceOptions,
+};
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};

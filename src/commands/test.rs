@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use homeboy::component::Component;
 use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use homeboy::refactor::{
-    self, auto::{self, AutofixMode}, run_test_refactor, AppliedRefactor, TestSourceOptions,
-    TransformSet,
+    self,
+    auto::{self, AutofixMode},
+    run_test_refactor, AppliedRefactor, TestSourceOptions, TransformSet,
 };
 use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
 use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};

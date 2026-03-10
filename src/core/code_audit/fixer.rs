@@ -15,7 +15,7 @@ use regex::Regex;
 use super::conventions::{AuditFinding, Language};
 use super::naming::{detect_naming_suffix, suffix_matches};
 use super::test_mapping::source_to_test_path;
-use super::{duplication, CodeAuditResult};
+use super::CodeAuditResult;
 use crate::core::refactor::decompose;
 
 /// Callback that verifies an applied chunk, returning Ok(message) or Err(reason).
@@ -1030,7 +1030,11 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                         // Structural concern across directories; no safe automatic
                         // in-file patching yet. Leave for dedicated refactor planning.
                     }
-                    kind if crate::core::refactor::plan::generate::is_actionable_comment_finding(kind) => {
+                    kind
+                        if crate::core::refactor::plan::generate::is_actionable_comment_finding(
+                            kind,
+                        ) =>
+                    {
                         // Comment hygiene requires human judgement; do not auto-edit.
                     }
                     _ => {}
@@ -1198,7 +1202,9 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(test_file) = crate::core::refactor::plan::generate::extract_expected_test_path(&finding.description) else {
+        let Some(test_file) =
+            crate::core::refactor::plan::generate::extract_expected_test_path(&finding.description)
+        else {
             continue;
         };
 
@@ -1207,7 +1213,11 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(root, &test_file, &finding.file) else {
+        let Some(candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(
+            root,
+            &test_file,
+            &finding.file,
+        ) else {
             continue;
         };
         new_files.push(new_file(
@@ -1226,15 +1236,24 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(expected_test_method) = crate::core::refactor::plan::generate::extract_expected_test_method(&finding.description) else {
+        let Some(expected_test_method) =
+            crate::core::refactor::plan::generate::extract_expected_test_method(
+                &finding.description,
+            )
+        else {
             continue;
         };
-        let Some(source_method) = crate::core::refactor::plan::generate::extract_source_method_name(&finding.description) else {
+        let Some(source_method) =
+            crate::core::refactor::plan::generate::extract_source_method_name(&finding.description)
+        else {
             continue;
         };
 
         // Try to find the test file: explicit path in description > derived from extension mapping
-        let test_file_opt = crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(&finding.description)
+        let test_file_opt =
+            crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(
+                &finding.description,
+            )
             .or_else(|| derive_expected_test_file_path(root, &finding.file));
 
         // For inline-test languages (Rust), when no separate test file is derived,
@@ -1252,12 +1271,13 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
 
                 // Insert if the source file already has a test module
                 if source_content.contains("#[cfg(test)]") {
-                    let test_stub = crate::core::refactor::plan::generate::generate_test_method_stub(
-                        &source_language,
-                        &expected_test_method,
-                        &finding.file,
-                        &source_method,
-                    );
+                    let test_stub =
+                        crate::core::refactor::plan::generate::generate_test_method_stub(
+                            &source_language,
+                            &expected_test_method,
+                            &finding.file,
+                            &source_method,
+                        );
 
                     fixes.push(Fix {
                         file: finding.file.clone(),
@@ -1335,7 +1355,12 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                 existing.content.push_str(&test_stub);
             }
         } else {
-            let Some(mut candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(root, &test_file, &finding.file)
+            let Some(mut candidate) =
+                crate::core::refactor::plan::generate::generate_test_file_candidate(
+                    root,
+                    &test_file,
+                    &finding.file,
+                )
             else {
                 continue;
             };
@@ -1351,349 +1376,20 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
         }
     }
 
-    // Phase 1b: Visibility narrowing for unreferenced exports.
-    // Change `pub fn` → `pub(crate) fn` for functions not referenced by other files.
-    // Safety: skip functions that are re-exported via `pub use` in parent mod.rs files.
-    for finding in &result.findings {
-        if finding.kind != AuditFinding::UnreferencedExport {
-            continue;
-        }
+    crate::core::refactor::plan::generate::generate_unreferenced_export_fixes(
+        result,
+        root,
+        &mut fixes,
+        &mut skipped,
+    );
 
-        let Some(fn_name) = extract_function_name_from_unreferenced(&finding.description) else {
-            continue;
-        };
-
-        let abs_path = root.join(&finding.file);
-        let language = detect_language(&abs_path);
-
-        // Only Rust for now — PHP and JS have different visibility models
-        if !matches!(language, Language::Rust) {
-            continue;
-        }
-
-        let content = match std::fs::read_to_string(&abs_path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        // Skip if already narrowed (pub(crate) or pub(super)) — no fix needed
-        if content.contains(&format!("pub(crate) fn {}", fn_name))
-            || content.contains(&format!("pub(super) fn {}", fn_name))
-        {
-            continue;
-        }
-
-        // Safety check: skip if function is re-exported via `pub use` in parent mod.rs
-        // or referenced by binary crate sources
-        if is_reexported(&finding.file, &fn_name, root) {
-            skipped.push(SkippedFile {
-                file: finding.file.clone(),
-                reason: format!(
-                    "Function '{}' is re-exported or used by binary crate — cannot narrow visibility",
-                    fn_name
-                ),
-            });
-            continue;
-        }
-
-        // Find the line containing `pub fn <name>` or `pub async fn <name>`
-        let target_patterns = [
-            format!("pub fn {}(", fn_name),
-            format!("pub fn {}<", fn_name),
-            format!("pub async fn {}(", fn_name),
-            format!("pub async fn {}<", fn_name),
-        ];
-
-        let mut found_line = None;
-        for (i, line) in content.lines().enumerate() {
-            let trimmed = line.trim();
-            if target_patterns
-                .iter()
-                .any(|pat| trimmed.contains(pat.as_str()))
-            {
-                found_line = Some(i + 1); // 1-indexed
-                break;
-            }
-        }
-
-        let Some(line_num) = found_line else {
-            skipped.push(SkippedFile {
-                file: finding.file.clone(),
-                reason: format!("Could not locate `pub fn {}` declaration in file", fn_name),
-            });
-            continue;
-        };
-
-        // Determine the exact replacement: `pub fn` → `pub(crate) fn` or `pub async fn` → `pub(crate) async fn`
-        let line_content = content.lines().nth(line_num - 1).unwrap_or("");
-        let (from, to) = if line_content.contains(&format!("pub async fn {}", fn_name)) {
-            (
-                "pub async fn".to_string(),
-                "pub(crate) async fn".to_string(),
-            )
-        } else {
-            ("pub fn".to_string(), "pub(crate) fn".to_string())
-        };
-
-        fixes.push(Fix {
-            file: finding.file.clone(),
-            required_methods: vec![],
-            required_registrations: vec![],
-            insertions: vec![insertion(
-                InsertionKind::VisibilityChange {
-                    line: line_num,
-                    from: from.clone(),
-                    to: to.clone(),
-                },
-                AuditFinding::UnreferencedExport,
-                format!("{} → {}", from, to),
-                format!(
-                    "Narrow visibility of '{}': {} → {} (unreferenced export)",
-                    fn_name, from, to
-                ),
-            )],
-            applied: false,
-        });
-    }
-
-    // Phase 2: Duplication fixes — extract shared code via extension protocol
-
-    /// Minimum number of files (including canonical) before extracting to shared code.
-    /// Groups with fewer files are reported as findings but not auto-fixed —
-    /// the overhead of a trait/module for 2-3 files isn't worth it.
-    const MIN_EXTRACT_GROUP_SIZE: usize = 4;
-
-    /// Function names that shouldn't be extracted to traits/shared modules.
-    /// These are typically boilerplate that's better handled by inheritance
-    /// or factory patterns, not trait extraction.
-    const SKIP_EXTRACT_NAMES: &[&str] = &[
-        "__construct",
-        "constructor",
-        "new",
-        "set_up",
-        "setUp",
-        "tear_down",
-        "tearDown",
-    ];
-
-    for group in &result.duplicate_groups {
-        let group_size = 1 + group.remove_from.len(); // canonical + duplicates
-
-        // Skip constructors and test lifecycle methods
-        if SKIP_EXTRACT_NAMES.contains(&group.function_name.as_str()) {
-            continue;
-        }
-
-        // Small groups (2-3 files): use simple remove+import (no trait extraction)
-        if group_size < MIN_EXTRACT_GROUP_SIZE {
-            generate_simple_duplicate_fixes(group, root, &mut fixes, &mut skipped);
-            continue;
-        }
-
-        let canonical_abs = root.join(&group.canonical_file);
-        let ext = canonical_abs
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        let language = detect_language(&canonical_abs);
-
-        // Only use extract_shared for PHP class methods (not tests, not JS/JSX).
-        let is_test_file = super::walker::is_test_path(&group.canonical_file);
-        let use_extract_shared = matches!(language, Language::Php) && !is_test_file;
-
-        let ext_manifest = crate::extension::find_extension_for_file_ext(ext, "refactor");
-
-        let canonical_content = match std::fs::read_to_string(&canonical_abs) {
-            Ok(c) => c,
-            Err(_) => {
-                skipped.push(SkippedFile {
-                    file: group.canonical_file.clone(),
-                    reason: format!(
-                        "Cannot read canonical file for duplicate `{}`",
-                        group.function_name
-                    ),
-                });
-                continue;
-            }
-        };
-
-        let manifest = if use_extract_shared {
-            ext_manifest
-        } else {
-            None
-        };
-
-        let Some(manifest) = manifest else {
-            // Fall back to simple remove+import for languages without extract_shared
-            generate_simple_duplicate_fixes(group, root, &mut fixes, &mut skipped);
-            continue;
-        };
-
-        // Read all duplicate file contents
-        let mut file_entries = Vec::new();
-        let mut any_read_failure = false;
-        for remove_file in &group.remove_from {
-            let abs_path = root.join(remove_file);
-            match std::fs::read_to_string(&abs_path) {
-                Ok(c) => {
-                    file_entries.push(serde_json::json!({
-                        "path": remove_file,
-                        "content": c,
-                    }));
-                }
-                Err(_) => {
-                    skipped.push(SkippedFile {
-                        file: remove_file.clone(),
-                        reason: format!(
-                            "Cannot read file to remove duplicate `{}`",
-                            group.function_name
-                        ),
-                    });
-                    any_read_failure = true;
-                }
-            }
-        }
-        if any_read_failure && file_entries.is_empty() {
-            continue;
-        }
-
-        // Collect all file paths for common ancestor namespace computation
-        let mut all_paths: Vec<&str> = vec![group.canonical_file.as_str()];
-        all_paths.extend(group.remove_from.iter().map(|s| s.as_str()));
-
-        // Call the extension's extract_shared command
-        let extract_cmd = serde_json::json!({
-            "command": "extract_shared",
-            "function_name": group.function_name,
-            "canonical_file": group.canonical_file,
-            "canonical_content": canonical_content,
-            "files": file_entries,
-            "all_file_paths": all_paths,
-        });
-
-        let extract_result = crate::extension::run_refactor_script(&manifest, &extract_cmd);
-
-        let Some(result_val) = extract_result else {
-            // Extension doesn't support extract_shared, fall back
-            generate_simple_duplicate_fixes(group, root, &mut fixes, &mut skipped);
-            continue;
-        };
-
-        // Check for error or skip
-        if result_val.get("error").is_some() {
-            let err = result_val["error"].as_str().unwrap_or("unknown error");
-            skipped.push(SkippedFile {
-                file: group.canonical_file.clone(),
-                reason: format!(
-                    "extract_shared failed for `{}`: {}",
-                    group.function_name, err
-                ),
-            });
-            continue;
-        }
-        if result_val
-            .get("skip")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            let reason = result_val
-                .get("reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("extension decided to skip");
-            skipped.push(SkippedFile {
-                file: group.canonical_file.clone(),
-                reason: format!("Skipped `{}`: {}", group.function_name, reason),
-            });
-            continue;
-        }
-
-        // Parse the trait/shared file info
-        if let (Some(trait_file), Some(trait_content)) = (
-            result_val.get("trait_file").and_then(|v| v.as_str()),
-            result_val.get("trait_content").and_then(|v| v.as_str()),
-        ) {
-            // Only add the new file once (avoid duplicates from multiple groups)
-            if !new_files.iter().any(|nf| nf.file == trait_file) {
-                let trait_name = result_val
-                    .get("trait_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("SharedTrait");
-                new_files.push(new_file(
-                    AuditFinding::DuplicateFunction,
-                    FixSafetyTier::PlanOnly,
-                    trait_file.to_string(),
-                    trait_content.to_string(),
-                    format!(
-                        "Create trait `{}` for shared `{}` method",
-                        trait_name, group.function_name
-                    ),
-                ));
-            }
-        }
-
-        // Parse the per-file edits
-        if let Some(file_edits) = result_val.get("file_edits").and_then(|v| v.as_array()) {
-            for edit in file_edits {
-                let file = match edit.get("file").and_then(|v| v.as_str()) {
-                    Some(f) => f.to_string(),
-                    None => continue,
-                };
-
-                let mut insertions = Vec::new();
-
-                // Function removal
-                if let Some(rl) = edit.get("remove_lines") {
-                    if let (Some(start), Some(end)) = (
-                        rl.get("start_line").and_then(|v| v.as_u64()),
-                        rl.get("end_line").and_then(|v| v.as_u64()),
-                    ) {
-                        insertions.push(insertion(
-                            InsertionKind::FunctionRemoval {
-                                start_line: start as usize,
-                                end_line: end as usize,
-                            },
-                            AuditFinding::DuplicateFunction,
-                            String::new(),
-                            format!(
-                                "Remove duplicate `{}` (extracted to shared trait)",
-                                group.function_name
-                            ),
-                        ));
-                    }
-                }
-
-                // Import statement (namespace-level use)
-                if let Some(import) = edit.get("add_import").and_then(|v| v.as_str()) {
-                    insertions.push(insertion(
-                        InsertionKind::ImportAdd,
-                        AuditFinding::DuplicateFunction,
-                        import.to_string(),
-                        format!("Import shared trait for `{}`", group.function_name),
-                    ));
-                }
-
-                // Trait use statement (inside class body)
-                if let Some(use_trait) = edit.get("add_use_trait").and_then(|v| v.as_str()) {
-                    insertions.push(insertion(
-                        InsertionKind::TraitUse,
-                        AuditFinding::DuplicateFunction,
-                        use_trait.to_string(),
-                        format!("Use shared trait for `{}`", group.function_name),
-                    ));
-                }
-
-                if !insertions.is_empty() {
-                    fixes.push(Fix {
-                        file,
-                        required_methods: vec![],
-                        required_registrations: vec![],
-                        insertions,
-                        applied: false,
-                    });
-                }
-            }
-        }
-    }
+    crate::core::refactor::plan::generate::generate_duplicate_function_fixes(
+        result,
+        root,
+        &mut fixes,
+        &mut new_files,
+        &mut skipped,
+    );
 
     // Phase 3: GodFile decomposition — use refactor decompose primitive
     let mut decompose_plans = Vec::new();
@@ -1730,7 +1426,9 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(new_path) = crate::core::refactor::plan::generate::extract_suggested_path(&finding.suggestion) else {
+        let Some(new_path) =
+            crate::core::refactor::plan::generate::extract_suggested_path(&finding.suggestion)
+        else {
             continue;
         };
 
@@ -1833,7 +1531,6 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     }
 }
 
-
 pub(crate) fn test_method_exists_in_file(
     root: &Path,
     test_file: &str,
@@ -1872,218 +1569,6 @@ pub(crate) fn derive_expected_test_file_path(root: &Path, source_file: &str) -> 
     Some(path)
 }
 
-
-/// Fallback duplicate fix for languages without `extract_shared` support.
-///
-/// Uses grammar-based `parse_items` (with extension script fallback) to find
-/// function boundaries, removes the duplicate, and adds a simple import
-/// statement. This works for Rust (standalone fns) but is less ideal for
-/// OOP languages where the function is a class method.
-fn generate_simple_duplicate_fixes(
-    group: &duplication::DuplicateGroup,
-    root: &Path,
-    fixes: &mut Vec<Fix>,
-    skipped: &mut Vec<SkippedFile>,
-) {
-    for remove_file in &group.remove_from {
-        let abs_path = root.join(remove_file.as_str());
-        let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-        let content = match std::fs::read_to_string(&abs_path) {
-            Ok(c) => c,
-            Err(_) => {
-                skipped.push(SkippedFile {
-                    file: remove_file.clone(),
-                    reason: format!(
-                        "Cannot read file to remove duplicate `{}`",
-                        group.function_name
-                    ),
-                });
-                continue;
-            }
-        };
-
-        // Try grammar-based parse first, then extension script
-        let items = parse_items_for_dedup(ext, &content, remove_file);
-
-        let Some(items) = items else {
-            skipped.push(SkippedFile {
-                file: remove_file.clone(),
-                reason: format!(
-                    "Cannot locate `{}` boundaries in {} — no grammar or extension available",
-                    group.function_name, remove_file
-                ),
-            });
-            continue;
-        };
-
-        let Some(item) = find_parsed_item_by_name(&items, &group.function_name) else {
-            skipped.push(SkippedFile {
-                file: remove_file.clone(),
-                reason: format!(
-                    "Function `{}` not found by parser in {}",
-                    group.function_name, remove_file
-                ),
-            });
-            continue;
-        };
-
-        // Build the import path from the canonical file
-        let import_path = module_path_from_file(&group.canonical_file);
-        let import_stmt = match ext {
-            "rs" => format!("use crate::{}::{};", import_path, group.function_name),
-            _ => format!(
-                "import {{ {} }} from '{}';",
-                group.function_name, import_path
-            ),
-        };
-
-        let mut insertions = vec![insertion(
-            InsertionKind::FunctionRemoval {
-                start_line: item.start_line,
-                end_line: item.end_line,
-            },
-            AuditFinding::DuplicateFunction,
-            String::new(),
-            format!(
-                "Remove duplicate `{}` (canonical copy in {})",
-                group.function_name, group.canonical_file
-            ),
-        )];
-
-        // Only add the import if the file doesn't already have it
-        if !content.contains(&import_stmt) {
-            insertions.push(insertion(
-                InsertionKind::ImportAdd,
-                AuditFinding::DuplicateFunction,
-                import_stmt,
-                format!("Import `{}` from canonical location", group.function_name),
-            ));
-        }
-
-        fixes.push(Fix {
-            file: remove_file.clone(),
-            required_methods: vec![],
-            required_registrations: vec![],
-            insertions,
-            applied: false,
-        });
-    }
-}
-
-/// Parse items using grammar engine first, extension script as fallback.
-///
-/// This ensures `generate_simple_duplicate_fixes` works even when no
-/// extension is installed, as long as a grammar.toml exists for the language.
-fn parse_items_for_dedup(
-    file_ext: &str,
-    content: &str,
-    file_path: &str,
-) -> Option<Vec<crate::extension::ParsedItem>> {
-    // Try grammar engine first (no subprocess, faster)
-    if let Some(grammar) = super::core_fingerprint::load_grammar_for_ext(file_ext) {
-        let items = crate::utils::grammar_items::parse_items(content, &grammar);
-        if !items.is_empty() {
-            return Some(
-                items
-                    .into_iter()
-                    .map(crate::extension::ParsedItem::from)
-                    .collect(),
-            );
-        }
-    }
-
-    // Fall back to extension script
-    let manifest = crate::extension::find_extension_for_file_ext(file_ext, "refactor")?;
-    let parse_cmd = serde_json::json!({
-        "command": "parse_items",
-        "file_path": file_path,
-        "content": content,
-        "items": [],
-    });
-
-    crate::extension::run_refactor_script(&manifest, &parse_cmd)
-        .and_then(|v| v.get("items").cloned())
-        .and_then(|v| serde_json::from_value(v).ok())
-}
-
-/// After a FunctionRemoval fix for DuplicateFunction is applied, rewrite
-/// callers across the codebase to import from the canonical location.
-///
-/// This uses the symbol_graph core primitive to trace all files that import
-/// the removed function from the old module and rewrite them to import from
-/// the canonical module instead.
-pub(crate) fn rewrite_callers_after_dedup(fix: &Fix, root: &Path) {
-    use crate::core::symbol_graph;
-
-    for insertion in &fix.insertions {
-        // Only process FunctionRemoval insertions for DuplicateFunction
-        if !matches!(insertion.kind, InsertionKind::FunctionRemoval { .. }) {
-            continue;
-        }
-        if insertion.finding != AuditFinding::DuplicateFunction {
-            continue;
-        }
-
-        // Extract function name and canonical file from the description.
-        // Description format: "Remove duplicate `foo` (canonical copy in src/bar.rs)"
-        let Some(fn_name) = insertion.description.split('`').nth(1) else {
-            continue;
-        };
-        let Some(canonical_file) = insertion
-            .description
-            .split("canonical copy in ")
-            .nth(1)
-            .map(|s| s.trim_end_matches(')'))
-        else {
-            continue;
-        };
-
-        let old_module = symbol_graph::module_path_from_file(&fix.file);
-        let new_module = symbol_graph::module_path_from_file(canonical_file);
-
-        if old_module == new_module {
-            continue;
-        }
-
-        // Determine file extensions to scan
-        let ext = Path::new(&fix.file)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("rs");
-
-        let result = symbol_graph::rewrite_imports(
-            fn_name,
-            &old_module,
-            &new_module,
-            root,
-            &[ext],
-            true, // write to disk
-        );
-
-        if !result.rewrites.is_empty() {
-            log_status!(
-                "fix",
-                "Rewrote {} caller import(s) for `{}`: {} → {}",
-                result.rewrites.len(),
-                fn_name,
-                old_module,
-                new_module
-            );
-        }
-    }
-}
-
-
-/// Convert a relative file path to a Rust module path.
-///
-/// Delegates to `symbol_graph::module_path_from_file` — the canonical
-/// implementation. This wrapper exists for backward compatibility with
-/// callers that import it from `fixer`.
-pub(crate) fn module_path_from_file(file_path: &str) -> String {
-    crate::core::symbol_graph::module_path_from_file(file_path)
-}
-
 fn generate_fallback_signature(method_name: &str, language: &Language) -> MethodSignature {
     let signature = match language {
         Language::Php => format!("public function {}()", method_name),
@@ -2099,45 +1584,9 @@ fn generate_fallback_signature(method_name: &str, language: &Language) -> Method
     }
 }
 
-fn normalize_item_name(name: &str) -> String {
-    name.trim().to_string()
-}
-
-fn find_parsed_item_by_name<'a>(
-    items: &'a [crate::extension::ParsedItem],
-    requested_name: &str,
-) -> Option<&'a crate::extension::ParsedItem> {
-    if let Some(exact) = items.iter().find(|item| item.name == requested_name) {
-        return Some(exact);
-    }
-
-    let requested = normalize_item_name(requested_name);
-    let mut normalized_matches = items
-        .iter()
-        .filter(|item| normalize_item_name(&item.name) == requested);
-
-    let first = normalized_matches.next()?;
-    if normalized_matches.next().is_some() {
-        return None;
-    }
-
-    Some(first)
-}
-
 // ============================================================================
-// Unreferenced Export Helpers
+// Description parsing helpers still temporarily live here.
 // ============================================================================
-
-/// Extract function name from an unreferenced export finding description.
-///
-/// Example: "Public function 'compute' is not referenced by any other file" → "compute"
-fn extract_function_name_from_unreferenced(description: &str) -> Option<String> {
-    let needle = "Public function '";
-    let start = description.find(needle)? + needle.len();
-    let rest = &description[start..];
-    let end = rest.find('\'')?;
-    Some(rest[..end].to_string())
-}
 
 /// Extract the old reference path from a StaleDocReference description.
 ///
@@ -2156,170 +1605,6 @@ fn extract_line_number(description: &str) -> Option<usize> {
     let rest = &description[start..];
     let end = rest.find(')')?;
     rest[..end].parse().ok()
-}
-
-/// Check if a function is referenced outside the lib crate — either re-exported
-/// via `pub use` in parent mod.rs files, or imported by binary crate sources
-/// (main.rs, commands/, docs/, etc.).
-///
-/// This prevents narrowing visibility for functions that the binary crate
-/// depends on, which would cause E0603 compile errors.
-fn is_reexported(file_path: &str, fn_name: &str, root: &Path) -> bool {
-    let source_path = Path::new(file_path);
-
-    // Check 1: `pub use` re-exports in parent mod.rs / lib.rs files.
-    // Uses block-aware parsing to handle multi-line `pub use module::{...};` blocks.
-    let mut current = source_path.parent();
-    while let Some(dir) = current {
-        for filename in &["mod.rs", "lib.rs"] {
-            let check_path = root.join(dir).join(filename);
-            if check_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&check_path) {
-                    if has_pub_use_of(&content, fn_name) {
-                        return true;
-                    }
-                }
-            }
-        }
-        current = dir.parent();
-    }
-
-    // Check 2: Binary crate sources that import this function directly.
-    // In a Rust workspace, `main.rs` and its `mod` tree (commands/, docs/, etc.)
-    // are separate from lib.rs. They import from the lib as an external crate,
-    // so `pub(crate)` items are invisible to them.
-    if is_used_by_binary_crate(fn_name, root) {
-        return true;
-    }
-
-    false
-}
-
-/// Check if file content contains a `pub use` statement that references a function.
-///
-/// Handles both single-line and multi-line `pub use` blocks:
-/// - `pub use module::{foo, bar};`
-/// - `pub use module::{`
-///   `foo, bar,`
-///   `};`
-fn has_pub_use_of(content: &str, fn_name: &str) -> bool {
-    let mut in_pub_use_block = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        if in_pub_use_block {
-            // Inside a multi-line `pub use { ... };` block
-            if trimmed.contains(fn_name) {
-                return true;
-            }
-            if trimmed.contains("};") || trimmed == "}" {
-                in_pub_use_block = false;
-            }
-        } else if trimmed.starts_with("pub use") {
-            if trimmed.contains(fn_name) {
-                return true;
-            }
-            // Multi-line: `pub use module::{` without closing `};` on the same line
-            if trimmed.contains('{') && !trimmed.contains('}') {
-                in_pub_use_block = true;
-            }
-        }
-    }
-    false
-}
-
-/// Scan binary crate sources (main.rs and its module tree) for references
-/// to a function name. Returns true if any binary source file imports or
-/// references the function.
-fn is_used_by_binary_crate(fn_name: &str, root: &Path) -> bool {
-    let src = root.join("src");
-
-    // main.rs is the binary entry point
-    let main_rs = src.join("main.rs");
-    if main_rs.exists() {
-        if let Ok(content) = std::fs::read_to_string(&main_rs) {
-            if content.contains(fn_name) {
-                return true;
-            }
-        }
-    }
-
-    // Binary crate modules: typically `src/commands/` and `src/docs/` in homeboy.
-    // Detect binary modules: any `mod X;` declared in main.rs that is NOT also
-    // declared in lib.rs.
-    let lib_rs = src.join("lib.rs");
-    let lib_mods = if lib_rs.exists() {
-        std::fs::read_to_string(&lib_rs)
-            .ok()
-            .map(|c| extract_mod_names(&c))
-            .unwrap_or_default()
-    } else {
-        std::collections::HashSet::new()
-    };
-
-    let main_mods = if main_rs.exists() {
-        std::fs::read_to_string(&main_rs)
-            .ok()
-            .map(|c| extract_mod_names(&c))
-            .unwrap_or_default()
-    } else {
-        std::collections::HashSet::new()
-    };
-
-    // Binary-only modules: declared in main.rs but NOT in lib.rs
-    let bin_only_mods: Vec<&String> = main_mods.difference(&lib_mods).collect();
-
-    for mod_name in bin_only_mods {
-        let mod_dir = src.join(mod_name);
-        if mod_dir.is_dir() && scan_dir_for_reference(&mod_dir, fn_name) {
-            return true;
-        }
-        // Also check single-file module: src/<mod_name>.rs
-        let mod_file = src.join(format!("{}.rs", mod_name));
-        if mod_file.exists() {
-            if let Ok(content) = std::fs::read_to_string(&mod_file) {
-                if content.contains(fn_name) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-/// Extract `mod X;` declarations from a Rust source file.
-fn extract_mod_names(content: &str) -> std::collections::HashSet<String> {
-    let mut mods = std::collections::HashSet::new();
-    let re = Regex::new(r"(?m)^\s*(?:pub\s+)?mod\s+(\w+)\s*;").unwrap();
-    for cap in re.captures_iter(content) {
-        mods.insert(cap[1].to_string());
-    }
-    mods
-}
-
-/// Recursively scan a directory for any .rs file containing the given function name.
-fn scan_dir_for_reference(dir: &Path, fn_name: &str) -> bool {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if scan_dir_for_reference(&path, fn_name) {
-                return true;
-            }
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains(fn_name) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
 
 // ============================================================================
@@ -3603,7 +2888,8 @@ pub struct TestOutput {}
     #[test]
     fn extract_test_file_from_missing_test_method_parses_description() {
         let desc = "Method 'run' has no corresponding test in 'tests/commands/audit_test.rs'";
-        let parsed = crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(desc);
+        let parsed =
+            crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(desc);
         assert_eq!(parsed, Some("tests/commands/audit_test.rs".to_string()));
     }
 
@@ -4160,10 +3446,12 @@ mod tests {
     #[test]
     fn should_not_remove_broken_doc_reference_in_prose_line() {
         let line = "CLI commands now return typed structs and are serialized in `crates/homeboy/src/main.rs`, standardizing success/error output and exit codes.";
-        assert!(!crate::core::refactor::plan::generate::should_remove_broken_doc_line(
-            line,
-            "crates/homeboy/src/main.rs"
-        ));
+        assert!(
+            !crate::core::refactor::plan::generate::should_remove_broken_doc_line(
+                line,
+                "crates/homeboy/src/main.rs"
+            )
+        );
     }
 
     #[test]
@@ -4273,7 +3561,8 @@ mod tests {
         }];
 
         assert_eq!(
-            find_parsed_item_by_name(&items, "id").map(|item| item.name.as_str()),
+            crate::core::refactor::plan::generate::find_parsed_item_by_name(&items, "id")
+                .map(|item| item.name.as_str()),
             Some("id")
         );
     }
@@ -4963,7 +4252,7 @@ class FlowAbilities {
     fn extract_function_name_from_unreferenced_description() {
         let desc = "Public function 'compute' is not referenced by any other file";
         assert_eq!(
-            extract_function_name_from_unreferenced(desc),
+            crate::core::refactor::plan::generate::extract_function_name_from_unreferenced(desc),
             Some("compute".to_string())
         );
     }
@@ -4971,7 +4260,10 @@ class FlowAbilities {
     #[test]
     fn extract_function_name_returns_none_for_unrelated() {
         let desc = "Missing method: validate";
-        assert_eq!(extract_function_name_from_unreferenced(desc), None);
+        assert_eq!(
+            crate::core::refactor::plan::generate::extract_function_name_from_unreferenced(desc),
+            None
+        );
     }
 
     #[test]
@@ -5065,14 +4357,18 @@ class FlowAbilities {
         .unwrap();
 
         // parse_release_artifacts is re-exported
-        assert!(is_reexported(
+        assert!(crate::core::refactor::plan::generate::is_reexported(
             "src/core/release/utils.rs",
             "parse_release_artifacts",
             &root
         ));
 
         // helper is NOT re-exported
-        assert!(!is_reexported("src/core/release/utils.rs", "helper", &root));
+        assert!(!crate::core::refactor::plan::generate::is_reexported(
+            "src/core/release/utils.rs",
+            "helper",
+            &root
+        ));
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -5098,21 +4394,21 @@ class FlowAbilities {
         .unwrap();
 
         // derive_id_from_url is re-exported (multi-line block)
-        assert!(is_reexported(
+        assert!(crate::core::refactor::plan::generate::is_reexported(
             "src/core/extension/lifecycle.rs",
             "derive_id_from_url",
             &root
         ));
 
         // is_git_url is also re-exported
-        assert!(is_reexported(
+        assert!(crate::core::refactor::plan::generate::is_reexported(
             "src/core/extension/lifecycle.rs",
             "is_git_url",
             &root
         ));
 
         // internal_helper is NOT re-exported
-        assert!(!is_reexported(
+        assert!(!crate::core::refactor::plan::generate::is_reexported(
             "src/core/extension/lifecycle.rs",
             "internal_helper",
             &root
@@ -5124,17 +4420,31 @@ class FlowAbilities {
     #[test]
     fn has_pub_use_of_single_line() {
         let content = "pub use utils::{compute, transform};\n";
-        assert!(has_pub_use_of(content, "compute"));
-        assert!(has_pub_use_of(content, "transform"));
-        assert!(!has_pub_use_of(content, "missing"));
+        assert!(crate::core::refactor::plan::generate::has_pub_use_of(
+            content, "compute"
+        ));
+        assert!(crate::core::refactor::plan::generate::has_pub_use_of(
+            content,
+            "transform"
+        ));
+        assert!(!crate::core::refactor::plan::generate::has_pub_use_of(
+            content, "missing"
+        ));
     }
 
     #[test]
     fn has_pub_use_of_multi_line() {
         let content =
             "pub use lifecycle::{\n    check_update, derive_id,\n    install, uninstall,\n};\n";
-        assert!(has_pub_use_of(content, "derive_id"));
-        assert!(has_pub_use_of(content, "install"));
-        assert!(!has_pub_use_of(content, "missing"));
+        assert!(crate::core::refactor::plan::generate::has_pub_use_of(
+            content,
+            "derive_id"
+        ));
+        assert!(crate::core::refactor::plan::generate::has_pub_use_of(
+            content, "install"
+        ));
+        assert!(!crate::core::refactor::plan::generate::has_pub_use_of(
+            content, "missing"
+        ));
     }
 }
