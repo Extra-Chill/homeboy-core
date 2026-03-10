@@ -5,13 +5,13 @@ use std::path::PathBuf;
 use homeboy::component::Component;
 use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use homeboy::refactor::{
-    self, run_test_refactor, AppliedRefactor, TestSourceOptions, TransformSet,
+    self, auto::{self, AutofixMode}, run_test_refactor, AppliedRefactor, TestSourceOptions,
+    TransformSet,
 };
 use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
 use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};
 use homeboy::test_drift::{self, DriftOptions, DriftReport};
 use homeboy::test_scaffold::{self, ScaffoldConfig};
-use homeboy::utils::autofix::{self, AutofixMode};
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::test_scope::{compute_changed_test_scope, TestScopeOutput};
@@ -299,7 +299,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
             true,
         )?;
 
-        let outcome = autofix::standard_outcome(
+        let outcome = auto::standard_outcome(
             AutofixMode::Write,
             plan.files_modified,
             Some(format!("homeboy test {} --analyze", args.comp.id())),
@@ -750,7 +750,7 @@ fn run_auto_fix_drift(
         }
     };
 
-    let outcome = autofix::standard_outcome(
+    let outcome = auto::standard_outcome(
         if write {
             AutofixMode::Write
         } else {

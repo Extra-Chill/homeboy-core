@@ -1,11 +1,11 @@
 use clap::Args;
-use homeboy::code_audit::{self, baseline, fixer, CodeAuditResult};
+use homeboy::code_audit::{self, baseline, CodeAuditResult};
 use homeboy::git;
 use homeboy::refactor::{
+    auto::{self, AutofixMode, FixResult, FixResultsSummary, PolicySummary},
     run_audit_refactor, AuditConvergenceScoring, AuditRefactorIterationSummary,
     AuditVerificationToggles,
 };
-use homeboy::utils::autofix::{self, AutofixMode, FixResultsSummary};
 use serde::Serialize;
 use std::path::Path;
 
@@ -124,7 +124,7 @@ pub enum AuditOutput {
         source_path: String,
         status: String,
         #[serde(flatten)]
-        fix_result: fixer::FixResult,
+        fix_result: FixResult,
         /// Universal fix summary bridged from the Rust-native FixResult.
         /// Same structure as lint --fix and test --fix output.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -412,7 +412,7 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
             }
         }
 
-        let outcome = autofix::standard_outcome(
+        let outcome = auto::standard_outcome(
             if written {
                 AutofixMode::Write
             } else {
@@ -434,7 +434,7 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
 
         // Bridge to universal fix summary (before strip_code mutates the data).
         let fix_summary = if written && final_fix_result.files_modified > 0 {
-            Some(autofix::summarize_audit_fix_result(&final_fix_result))
+            Some(auto::summarize_audit_fix_result(&final_fix_result))
         } else {
             None
         };
@@ -636,7 +636,7 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
     }
 }
 
-fn build_fix_hints(written: bool, summary: &fixer::PolicySummary) -> Vec<String> {
+fn build_fix_hints(written: bool, summary: &PolicySummary) -> Vec<String> {
     let mut hints = Vec::new();
 
     if !written && summary.has_blocked_items() {
@@ -663,7 +663,7 @@ fn build_fix_hints(written: bool, summary: &fixer::PolicySummary) -> Vec<String>
     hints
 }
 
-fn log_fix_summary(result: &fixer::FixResult, policy: &fixer::PolicySummary, written: bool) {
+fn log_fix_summary(result: &FixResult, policy: &PolicySummary, written: bool) {
     let kind_counts = result.finding_counts();
     let total_insertions = result.total_insertions;
     let total_new_files = result.new_files.len();
@@ -709,10 +709,10 @@ mod tests {
     use super::default_audit_exit_code;
     use super::{run, AuditArgs, AuditOutput};
     use crate::commands::args::{BaselineArgs, PositionalComponentArgs};
-    use homeboy::code_audit::fixer::{FixSafetyTier, InsertionKind};
     use homeboy::code_audit::AuditFinding;
     use homeboy::code_audit::{AuditSummary, CodeAuditResult, Finding, Severity};
     use homeboy::refactor::{
+        auto::{ApplyChunkResult, ChunkStatus, FixSafetyTier, InsertionKind},
         build_chunk_verifier, finding_fingerprint, score_delta, weighted_finding_score_with,
         AuditConvergenceScoring,
     };
@@ -773,8 +773,8 @@ mod tests {
 
     #[test]
     fn test_run_fix_write_applies_preflight_checked_method_stub() {
-        use homeboy::code_audit::fixer::{
-            self, Fix, FixPolicy, Insertion, PreflightContext, PreflightStatus,
+        use homeboy::refactor::auto::{
+            self, Fix, FixPolicy, FixResult, Insertion, PreflightContext,
         };
 
         let root = tmp_dir("fix-write-applies-preflight-checked-method-stub");
@@ -783,7 +783,7 @@ mod tests {
 
         // Construct a FixResult directly — tests the fixer logic without
         // requiring an extension to fingerprint .rs files.
-        let mut fix_result = fixer::FixResult {
+        let mut fix_result = FixResult {
             fixes: vec![Fix {
                 file: "commands/bad.rs".to_string(),
                 required_methods: vec!["run".to_string(), "helper".to_string()],
@@ -809,42 +809,37 @@ mod tests {
         };
 
         // Step 1: apply_fix_policy annotates insertions
-        let summary = fixer::apply_fix_policy(
+        let summary = auto::apply_fix_policy(
             &mut fix_result,
             true, // write mode
             &FixPolicy::default(),
             &PreflightContext { root: &root },
         );
 
-        assert_eq!(summary.auto_apply_insertions, 1);
+        assert_eq!(summary.auto_apply_insertions, 0);
         assert_eq!(summary.preflight_failures, 0);
 
         let insertion = &fix_result.fixes[0].insertions[0];
         assert_eq!(insertion.finding, AuditFinding::MissingMethod);
         assert!(matches!(insertion.kind, InsertionKind::MethodStub));
-        assert_eq!(insertion.safety_tier, FixSafetyTier::SafeWithChecks);
-        assert!(insertion.auto_apply);
-        assert!(matches!(
-            insertion.preflight.as_ref().map(|report| report.status),
-            Some(PreflightStatus::Passed)
-        ));
+        assert_eq!(insertion.safety_tier, FixSafetyTier::PlanOnly);
+        assert!(!insertion.auto_apply);
+        assert!(insertion.preflight.is_some());
 
-        // Step 2: apply_fixes writes to disk
-        let mut auto_subset = fixer::auto_apply_subset(&fix_result);
-        let modified = fixer::apply_fixes(&mut auto_subset.fixes, &root);
-        assert_eq!(modified, 1);
-        assert!(auto_subset.fixes[0].applied);
+        // Plan-only method stubs should not be auto-applied in unattended mode.
+        let mut auto_subset = auto::auto_apply_subset(&fix_result);
+        let modified = auto::apply_fixes(&mut auto_subset.fixes, &root);
+        assert_eq!(modified, 0);
 
         let content = fs::read_to_string(root.join("commands/bad.rs")).unwrap();
-        assert!(content.contains("pub fn helper()"));
-        assert!(content.contains("todo!(\"helper\")"));
+        assert_eq!(content, "pub fn run() {}\n");
 
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn test_run_fix_only_import_add_filters_method_stub() {
-        use homeboy::code_audit::fixer::{self, Fix, FixPolicy, Insertion, PreflightContext};
+        use homeboy::refactor::auto::{self, Fix, FixPolicy, FixResult, Insertion, PreflightContext};
 
         let root = tmp_dir("fix-only-import-add");
         fs::create_dir_all(root.join("commands")).unwrap();
@@ -856,7 +851,7 @@ mod tests {
 
         // Construct a FixResult with both a MethodStub and an ImportAdd.
         // The --only import_add policy should filter out the MethodStub entirely.
-        let mut fix_result = fixer::FixResult {
+        let mut fix_result = FixResult {
             fixes: vec![Fix {
                 file: "commands/bad.rs".to_string(),
                 required_methods: vec!["run".to_string()],
@@ -898,7 +893,7 @@ mod tests {
             exclude: vec![],
         };
 
-        fixer::apply_fix_policy(
+        auto::apply_fix_policy(
             &mut fix_result,
             false, // dry-run
             &policy,
@@ -942,10 +937,10 @@ mod tests {
             )
             .unwrap();
             let verifier = build_chunk_verifier(&root, &baseline.findings, vec![]);
-            verifier(&homeboy::code_audit::fixer::ApplyChunkResult {
+            verifier(&ApplyChunkResult {
                 chunk_id: "fix:1".to_string(),
                 files: vec!["commands/good_one.rs".to_string()],
-                status: homeboy::code_audit::fixer::ChunkStatus::Applied,
+                status: ChunkStatus::Applied,
                 applied_files: 1,
                 reverted_files: 0,
                 verification: None,
@@ -1001,10 +996,10 @@ mod tests {
 
         let result = {
             let verifier = build_chunk_verifier(&root, &baseline.findings, vec![]);
-            verifier(&homeboy::code_audit::fixer::ApplyChunkResult {
+            verifier(&ApplyChunkResult {
                 chunk_id: "fix:1".to_string(),
                 files: vec!["src/target.rs".to_string()],
-                status: homeboy::code_audit::fixer::ChunkStatus::Applied,
+                status: ChunkStatus::Applied,
                 applied_files: 1,
                 reverted_files: 0,
                 verification: None,
@@ -1112,16 +1107,16 @@ mod tests {
         )
         .unwrap();
 
-        let smoke = |_chunk: &homeboy::code_audit::fixer::ApplyChunkResult| {
+        let smoke = |_chunk: &ApplyChunkResult| {
             Ok("lint_smoke_passed".to_string())
         };
 
         let result = {
             let verifier = build_chunk_verifier(&root, &baseline.findings, vec![&smoke]);
-            verifier(&homeboy::code_audit::fixer::ApplyChunkResult {
+            verifier(&ApplyChunkResult {
                 chunk_id: "fix:1".to_string(),
                 files: vec!["commands/good_one.rs".to_string()],
-                status: homeboy::code_audit::fixer::ChunkStatus::Applied,
+                status: ChunkStatus::Applied,
                 applied_files: 1,
                 reverted_files: 0,
                 verification: None,
@@ -1161,16 +1156,16 @@ mod tests {
         )
         .unwrap();
 
-        let smoke = |_chunk: &homeboy::code_audit::fixer::ApplyChunkResult| {
+        let smoke = |_chunk: &ApplyChunkResult| {
             Err("lint smoke failed".to_string())
         };
 
         let result = {
             let verifier = build_chunk_verifier(&root, &baseline.findings, vec![&smoke]);
-            verifier(&homeboy::code_audit::fixer::ApplyChunkResult {
+            verifier(&ApplyChunkResult {
                 chunk_id: "fix:1".to_string(),
                 files: vec!["commands/good_one.rs".to_string()],
-                status: homeboy::code_audit::fixer::ChunkStatus::Applied,
+                status: ChunkStatus::Applied,
                 applied_files: 1,
                 reverted_files: 0,
                 verification: None,

@@ -14,7 +14,6 @@ use regex::Regex;
 
 use super::conventions::{AuditFinding, Language};
 use super::naming::{detect_naming_suffix, suffix_matches};
-use super::preflight;
 use super::test_mapping::source_to_test_path;
 use super::{duplication, CodeAuditResult};
 use crate::core::refactor::decompose;
@@ -102,14 +101,11 @@ pub enum InsertionKind {
     ConstructorWithRegistration,
     /// Add a missing import/use statement at the top of the file.
     ImportAdd,
-<<<<<<< HEAD
-    /// Add or replace a namespace declaration at the top of the file.
-    NamespaceDeclaration,
-=======
     /// Add a missing type conformance declaration to the primary type.
     /// Examples: `implements Foo`, `impl Foo for Bar`, `class X implements Foo`.
     TypeConformance,
->>>>>>> origin/main
+    /// Add or replace a namespace declaration at the top of the file.
+    NamespaceDeclaration,
     /// Remove a function definition (lines start_line..=end_line) and replace with an import.
     FunctionRemoval {
         /// 1-indexed start line (includes doc comments and attributes).
@@ -155,11 +151,8 @@ impl InsertionKind {
             }
             Self::RegistrationStub
             | Self::ConstructorWithRegistration
-<<<<<<< HEAD
-            | Self::NamespaceDeclaration
-=======
             | Self::TypeConformance
->>>>>>> origin/main
+            | Self::NamespaceDeclaration
             | Self::VisibilityChange { .. } => FixSafetyTier::SafeWithChecks,
             // Stub generation is useful for planning, but not trustworthy enough
             // for unattended auto-apply. Keep it plan-only until it graduates.
@@ -293,8 +286,6 @@ pub struct ApplyOptions<'a> {
     pub verifier: Option<ChunkVerifier<'a>>,
 }
 
-use crate::core::undo::InMemoryRollback;
-
 #[derive(Debug, Clone, Default)]
 pub struct FixPolicy {
     pub only: Option<Vec<AuditFinding>>,
@@ -365,278 +356,9 @@ fn new_file(
     }
 }
 
-fn finding_allowed(finding: &AuditFinding, policy: &FixPolicy) -> bool {
-    let included = policy
-        .only
-        .as_ref()
-        .is_none_or(|only| only.contains(finding));
+pub use crate::core::refactor::auto::policy::apply_fix_policy;
 
-    included && !policy.exclude.contains(finding)
-}
-
-fn annotate_insertion_for_policy(
-    file: &str,
-    insertion: &mut Insertion,
-    write: bool,
-    policy: &FixPolicy,
-    context: &PreflightContext<'_>,
-) -> bool {
-    if !finding_allowed(&insertion.finding, policy) {
-        return false;
-    }
-
-    insertion.preflight = preflight::run_insertion_preflight(file, insertion, context);
-
-    insertion.auto_apply = if !write {
-        true
-    } else {
-        match insertion.safety_tier {
-            FixSafetyTier::SafeAuto => true,
-            FixSafetyTier::SafeWithChecks => insertion.preflight.as_ref().is_some_and(|report| {
-                matches!(
-                    report.status,
-                    PreflightStatus::Passed | PreflightStatus::NotApplicable
-                )
-            }),
-            FixSafetyTier::PlanOnly => false,
-        }
-    };
-
-    insertion.blocked_reason = if insertion.auto_apply {
-        None
-    } else {
-        Some(match insertion.safety_tier {
-            FixSafetyTier::SafeAuto => "Blocked by current write policy".to_string(),
-            FixSafetyTier::SafeWithChecks => insertion
-                .preflight
-                .as_ref()
-                .and_then(first_failed_detail)
-                .unwrap_or_else(|| {
-                    "Blocked: requires preflight validation before auto-write".to_string()
-                }),
-            FixSafetyTier::PlanOnly => {
-                "Blocked: plan-only fix, not eligible for auto-write".to_string()
-            }
-        })
-    };
-
-    true
-}
-
-fn annotate_new_file_for_policy(
-    new_file: &mut NewFile,
-    write: bool,
-    policy: &FixPolicy,
-    context: &PreflightContext<'_>,
-) -> bool {
-    if !finding_allowed(&new_file.finding, policy) {
-        return false;
-    }
-
-    new_file.preflight = preflight::run_new_file_preflight(new_file, context);
-
-    new_file.auto_apply = if !write {
-        true
-    } else {
-        match new_file.safety_tier {
-            FixSafetyTier::SafeAuto => true,
-            FixSafetyTier::SafeWithChecks => new_file.preflight.as_ref().is_some_and(|report| {
-                matches!(
-                    report.status,
-                    PreflightStatus::Passed | PreflightStatus::NotApplicable
-                )
-            }),
-            FixSafetyTier::PlanOnly => false,
-        }
-    };
-
-    new_file.blocked_reason = if new_file.auto_apply {
-        None
-    } else {
-        Some(match new_file.safety_tier {
-            FixSafetyTier::SafeAuto => "Blocked by current write policy".to_string(),
-            FixSafetyTier::SafeWithChecks => new_file
-                .preflight
-                .as_ref()
-                .and_then(first_failed_detail)
-                .unwrap_or_else(|| {
-                    "Blocked: requires preflight validation before auto-write".to_string()
-                }),
-            FixSafetyTier::PlanOnly => {
-                "Blocked: plan-only fix, not eligible for auto-write".to_string()
-            }
-        })
-    };
-
-    true
-}
-
-pub fn apply_fix_policy(
-    result: &mut FixResult,
-    write: bool,
-    policy: &FixPolicy,
-    context: &PreflightContext<'_>,
-) -> PolicySummary {
-    let mut summary = PolicySummary::default();
-
-    result.fixes = result
-        .fixes
-        .drain(..)
-        .filter_map(|mut fix| {
-            fix.insertions.retain_mut(|insertion| {
-                annotate_insertion_for_policy(&fix.file, insertion, write, policy, context)
-            });
-
-            preflight::run_fix_preflight(&mut fix, context, write);
-
-            for insertion in &mut fix.insertions {
-                insertion.auto_apply = if !write {
-                    true
-                } else {
-                    match insertion.safety_tier {
-                        FixSafetyTier::SafeAuto => true,
-                        FixSafetyTier::SafeWithChecks => {
-                            insertion.preflight.as_ref().is_some_and(|report| {
-                                matches!(
-                                    report.status,
-                                    PreflightStatus::Passed | PreflightStatus::NotApplicable
-                                )
-                            })
-                        }
-                        FixSafetyTier::PlanOnly => false,
-                    }
-                };
-
-                insertion.blocked_reason = if insertion.auto_apply {
-                    None
-                } else {
-                    Some(match insertion.safety_tier {
-                        FixSafetyTier::SafeAuto => "Blocked by current write policy".to_string(),
-                        FixSafetyTier::SafeWithChecks => insertion
-                            .preflight
-                            .as_ref()
-                            .and_then(first_failed_detail)
-                            .unwrap_or_else(|| {
-                                "Blocked: requires preflight validation before auto-write"
-                                    .to_string()
-                            }),
-                        FixSafetyTier::PlanOnly => {
-                            "Blocked: plan-only fix, not eligible for auto-write".to_string()
-                        }
-                    })
-                };
-
-                summary.visible_insertions += 1;
-                if insertion.auto_apply {
-                    summary.auto_apply_insertions += 1;
-                } else {
-                    summary.blocked_insertions += 1;
-                    if insertion
-                        .preflight
-                        .as_ref()
-                        .is_some_and(|report| report.status == PreflightStatus::Failed)
-                    {
-                        summary.preflight_failures += 1;
-                    }
-                }
-            }
-
-            if fix.insertions.is_empty() {
-                None
-            } else {
-                Some(fix)
-            }
-        })
-        .collect();
-
-    result.new_files = result
-        .new_files
-        .drain(..)
-        .filter_map(|mut pending| {
-            if !annotate_new_file_for_policy(&mut pending, write, policy, context) {
-                return None;
-            }
-
-            summary.visible_new_files += 1;
-            if pending.auto_apply {
-                summary.auto_apply_new_files += 1;
-            } else {
-                summary.blocked_new_files += 1;
-                if pending
-                    .preflight
-                    .as_ref()
-                    .is_some_and(|report| report.status == PreflightStatus::Failed)
-                {
-                    summary.preflight_failures += 1;
-                }
-            }
-
-            Some(pending)
-        })
-        .collect();
-
-    // Filter decompose plans by policy (--only / --exclude)
-    if let Some(ref only) = policy.only {
-        if !only.contains(&AuditFinding::GodFile) {
-            result.decompose_plans.clear();
-        }
-    }
-    if policy.exclude.contains(&AuditFinding::GodFile) {
-        result.decompose_plans.clear();
-    }
-
-    result.total_insertions = summary.visible_insertions + summary.visible_new_files;
-    summary
-}
-
-pub fn auto_apply_subset(result: &FixResult) -> FixResult {
-    let fixes: Vec<Fix> = result
-        .fixes
-        .iter()
-        .filter_map(|fix| {
-            let insertions: Vec<Insertion> = fix
-                .insertions
-                .iter()
-                .filter(|insertion| insertion.auto_apply)
-                .cloned()
-                .collect();
-
-            if insertions.is_empty() {
-                None
-            } else {
-                Some(Fix {
-                    file: fix.file.clone(),
-                    required_methods: fix.required_methods.clone(),
-                    required_registrations: fix.required_registrations.clone(),
-                    insertions,
-                    applied: false,
-                })
-            }
-        })
-        .collect();
-
-    let new_files: Vec<NewFile> = result
-        .new_files
-        .iter()
-        .filter(|new_file| new_file.auto_apply)
-        .cloned()
-        .collect();
-
-    let decompose_plans = result.decompose_plans.clone();
-
-    let total_insertions =
-        fixes.iter().map(|fix| fix.insertions.len()).sum::<usize>() + new_files.len();
-
-    FixResult {
-        fixes,
-        new_files,
-        decompose_plans,
-        skipped: vec![],
-        chunk_results: vec![],
-        total_insertions,
-        files_modified: 0,
-    }
-}
+pub use crate::core::refactor::auto::apply::auto_apply_subset;
 
 pub(crate) fn first_failed_detail(report: &PreflightReport) -> Option<String> {
     report
@@ -853,7 +575,6 @@ fn generate_import_statement(import_path: &str, language: &Language) -> String {
     }
 }
 
-<<<<<<< HEAD
 fn generate_namespace_declaration(namespace: &str, language: &Language) -> Option<String> {
     match language {
         Language::Php => Some(format!("namespace {};", namespace)),
@@ -892,7 +613,6 @@ fn insert_namespace_declaration(content: &str, declaration: &str, language: &Lan
     }
 }
 
-=======
 fn generate_type_conformance_declaration(
     type_name: &str,
     conformance: &str,
@@ -988,8 +708,6 @@ fn insert_inline_type_conformance(content: &str, declaration: &str, language: &L
     }
     result
 }
-
->>>>>>> origin/main
 /// Insert an import statement into file content at the correct location.
 ///
 /// Finds the last existing import/use line and inserts after it.
@@ -1182,7 +900,7 @@ fn file_has_constructor(content: &str, language: &Language) -> bool {
 ///    (e.g., `FlowHelpers.php` among `*Ability.php` files)
 /// 3. Only add registration stubs when the file already has the callback
 ///    method, or when adding to an existing constructor
-pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
+pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixResult {
     let mut fixes = Vec::new();
     let mut skipped = Vec::new();
 
@@ -1250,15 +968,12 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             let mut missing_methods: Vec<&str> = Vec::new();
             let mut missing_registrations: Vec<&str> = Vec::new();
             let mut missing_imports: Vec<&str> = Vec::new();
-<<<<<<< HEAD
-            let mut namespace_declarations: Vec<String> = Vec::new();
-=======
             let mut missing_interfaces: Vec<&str> = Vec::new();
->>>>>>> origin/main
+            let mut namespace_declarations: Vec<String> = Vec::new();
             let mut needs_constructor = false;
 
             for deviation in &outlier.deviations {
-                match deviation.kind {
+                match &deviation.kind {
                     AuditFinding::MissingMethod => {
                         let method_name = deviation
                             .description
@@ -1293,7 +1008,13 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                             .unwrap_or(&deviation.description);
                         missing_imports.push(import_path);
                     }
-<<<<<<< HEAD
+                    AuditFinding::MissingInterface => {
+                        let conformance = deviation
+                            .description
+                            .strip_prefix("Missing interface: ")
+                            .unwrap_or(&deviation.description);
+                        missing_interfaces.push(conformance);
+                    }
                     AuditFinding::NamespaceMismatch => {
                         if let Some(expected_namespace) =
                             extract_expected_namespace(&deviation.description)
@@ -1304,20 +1025,12 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                                 namespace_declarations.push(declaration);
                             }
                         }
-=======
-                    AuditFinding::MissingInterface => {
-                        let conformance = deviation
-                            .description
-                            .strip_prefix("Missing interface: ")
-                            .unwrap_or(&deviation.description);
-                        missing_interfaces.push(conformance);
->>>>>>> origin/main
                     }
                     AuditFinding::DirectorySprawl => {
                         // Structural concern across directories; no safe automatic
                         // in-file patching yet. Leave for dedicated refactor planning.
                     }
-                    AuditFinding::TodoMarker | AuditFinding::LegacyComment => {
+                    kind if crate::core::refactor::plan::generate::is_actionable_comment_finding(kind) => {
                         // Comment hygiene requires human judgement; do not auto-edit.
                     }
                     _ => {}
@@ -1337,14 +1050,6 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                 ));
             }
 
-<<<<<<< HEAD
-            for declaration in &namespace_declarations {
-                insertions.push(insertion(
-                    InsertionKind::NamespaceDeclaration,
-                    AuditFinding::NamespaceMismatch,
-                    declaration.clone(),
-                    format!("Align namespace declaration to `{}`", declaration),
-=======
             for conformance in &missing_interfaces {
                 let Some(type_name) = content
                     .lines()
@@ -1366,7 +1071,15 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                         "Add declared conformance `{}` to {}",
                         conformance, type_name
                     ),
->>>>>>> origin/main
+                ));
+            }
+
+            for declaration in &namespace_declarations {
+                insertions.push(insertion(
+                    InsertionKind::NamespaceDeclaration,
+                    AuditFinding::NamespaceMismatch,
+                    declaration.clone(),
+                    format!("Align namespace declaration to `{}`", declaration),
                 ));
             }
 
@@ -1485,7 +1198,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         }
 
-        let Some(test_file) = extract_expected_test_path(&finding.description) else {
+        let Some(test_file) = crate::core::refactor::plan::generate::extract_expected_test_path(&finding.description) else {
             continue;
         };
 
@@ -1494,7 +1207,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         }
 
-        let Some(candidate) = generate_test_file_candidate(root, &test_file, &finding.file) else {
+        let Some(candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(root, &test_file, &finding.file) else {
             continue;
         };
         new_files.push(new_file(
@@ -1513,15 +1226,15 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         }
 
-        let Some(expected_test_method) = extract_expected_test_method(&finding.description) else {
+        let Some(expected_test_method) = crate::core::refactor::plan::generate::extract_expected_test_method(&finding.description) else {
             continue;
         };
-        let Some(source_method) = extract_source_method_name(&finding.description) else {
+        let Some(source_method) = crate::core::refactor::plan::generate::extract_source_method_name(&finding.description) else {
             continue;
         };
 
         // Try to find the test file: explicit path in description > derived from extension mapping
-        let test_file_opt = extract_test_file_from_missing_test_method(&finding.description)
+        let test_file_opt = crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(&finding.description)
             .or_else(|| derive_expected_test_file_path(root, &finding.file));
 
         // For inline-test languages (Rust), when no separate test file is derived,
@@ -1539,7 +1252,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
 
                 // Insert if the source file already has a test module
                 if source_content.contains("#[cfg(test)]") {
-                    let test_stub = generate_test_method_stub(
+                    let test_stub = crate::core::refactor::plan::generate::generate_test_method_stub(
                         &source_language,
                         &expected_test_method,
                         &finding.file,
@@ -1590,8 +1303,12 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         }
 
-        let test_stub =
-            generate_test_method_stub(&ext, &expected_test_method, &finding.file, &source_method);
+        let test_stub = crate::core::refactor::plan::generate::generate_test_method_stub(
+            &ext,
+            &expected_test_method,
+            &finding.file,
+            &source_method,
+        );
 
         let file_exists = root.join(&test_file).exists();
         if file_exists {
@@ -1618,7 +1335,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                 existing.content.push_str(&test_stub);
             }
         } else {
-            let Some(mut candidate) = generate_test_file_candidate(root, &test_file, &finding.file)
+            let Some(mut candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(root, &test_file, &finding.file)
             else {
                 continue;
             };
@@ -2013,7 +1730,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         }
 
-        let Some(new_path) = extract_suggested_path(&finding.suggestion) else {
+        let Some(new_path) = crate::core::refactor::plan::generate::extract_suggested_path(&finding.suggestion) else {
             continue;
         };
 
@@ -2070,7 +1787,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             continue;
         };
 
-        if !should_remove_broken_doc_line(line, &dead_path) {
+        if !crate::core::refactor::plan::generate::should_remove_broken_doc_line(line, &dead_path) {
             continue;
         }
 
@@ -2100,7 +1817,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
     // the file was already modified by the first.  Merging into a single `Fix`
     // per file ensures `apply_insertions_to_content()` sees *all* removals at
     // once and can sort them in reverse order so line numbers stay valid.
-    let fixes = merge_fixes_per_file(fixes);
+    let fixes = crate::core::refactor::plan::generate::merge_fixes_per_file(fixes);
 
     let total_insertions: usize = fixes.iter().map(|f| f.insertions.len()).sum();
     let files_modified = fixes.len();
@@ -2116,51 +1833,6 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
     }
 }
 
-/// Extract the expected test file path from a MissingTestFile description.
-///
-/// Example description:
-/// "No test file found (expected 'tests/utils/token_test.rs') and no inline tests"
-fn extract_expected_test_path(description: &str) -> Option<String> {
-    let needle = "expected '";
-    let start = description.find(needle)? + needle.len();
-    let rest = &description[start..];
-    let end = rest.find('\'')?;
-    Some(rest[..end].to_string())
-}
-
-/// Extract expected test method from MissingTestMethod description.
-///
-/// Examples:
-/// "Method 'run' has no corresponding test (expected 'test_run')"
-/// "Method 'run' has no corresponding test in 'tests/foo_test.rs'"
-fn extract_expected_test_method(description: &str) -> Option<String> {
-    let needle = "expected '";
-    let start = description.find(needle)? + needle.len();
-    let rest = &description[start..];
-    let end = rest.find('\'')?;
-    Some(rest[..end].to_string())
-}
-
-/// Extract target test file from MissingTestMethod description when present.
-///
-/// Example:
-/// "Method 'run' has no corresponding test in 'tests/commands/foo_test.rs'"
-fn extract_test_file_from_missing_test_method(description: &str) -> Option<String> {
-    let needle = " in '";
-    let start = description.find(needle)? + needle.len();
-    let rest = &description[start..];
-    let end = rest.find('\'')?;
-    Some(rest[..end].to_string())
-}
-
-/// Extract source method name from MissingTestMethod description.
-fn extract_source_method_name(description: &str) -> Option<String> {
-    let needle = "Method '";
-    let start = description.find(needle)? + needle.len();
-    let rest = &description[start..];
-    let end = rest.find('\'')?;
-    Some(rest[..end].to_string())
-}
 
 pub(crate) fn test_method_exists_in_file(
     root: &Path,
@@ -2200,131 +1872,6 @@ pub(crate) fn derive_expected_test_file_path(root: &Path, source_file: &str) -> 
     Some(path)
 }
 
-fn generate_test_method_stub(
-    language: &Language,
-    expected_test_method: &str,
-    source_file: &str,
-    source_method: &str,
-) -> String {
-    match language {
-        Language::Rust => format!(
-            "#[test]\n#[ignore = \"autogenerated scaffold\"]\nfn {}() {{\n    todo!(\"Autogenerated scaffold for {}::{}\");\n}}\n",
-            expected_test_method, source_file, source_method
-        ),
-        Language::Php => format!(
-            "public function {}(): void {{\n    $this->markTestIncomplete('Autogenerated scaffold for {}::{}');\n}}\n",
-            expected_test_method, source_file, source_method
-        ),
-        _ => format!(
-            "// Add {} for {}::{}\n",
-            expected_test_method, source_file, source_method
-        ),
-    }
-}
-
-/// Generate test file content for audit autofix.
-///
-/// Strategy:
-/// 1) Try scaffold generation from source file for richer, deterministic stubs.
-/// 2) Fall back to minimal placeholder if scaffold yields nothing useful.
-///    Placeholders are still valid compilable test files that satisfy the
-///    `MissingTestFile` audit finding and provide an explicit place for real tests.
-struct TestFileCandidate {
-    content: String,
-}
-
-fn generate_test_file_candidate(
-    root: &Path,
-    test_file: &str,
-    source_file: &str,
-) -> Option<TestFileCandidate> {
-    if let Some(scaffolded) = generate_test_file_from_scaffold(root, test_file, source_file) {
-        return Some(TestFileCandidate {
-            content: scaffolded,
-        });
-    }
-
-    Some(TestFileCandidate {
-        content: generate_test_file_stub(test_file, source_file),
-    })
-}
-
-/// Attempt to scaffold test content from source file.
-///
-/// Returns None when language is unsupported, mapping mismatches, or no stubs
-/// were extracted. Caller should fall back to placeholder generation.
-fn generate_test_file_from_scaffold(
-    root: &Path,
-    test_file: &str,
-    source_file: &str,
-) -> Option<String> {
-    let source_path = root.join(source_file);
-    if !source_path.exists() {
-        return None;
-    }
-
-    let lang = Path::new(source_file)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(Language::from_extension)
-        .unwrap_or(Language::Unknown);
-
-    let config = match lang {
-        Language::Rust => crate::test_scaffold::ScaffoldConfig::rust(),
-        Language::Php => crate::test_scaffold::ScaffoldConfig::php(),
-        _ => return None,
-    };
-
-    let scaffolded =
-        crate::test_scaffold::scaffold_file(&source_path, root, &config, false).ok()?;
-
-    // Safety: only consume scaffold output if it maps to the same expected test file.
-    if scaffolded.test_file != test_file {
-        return None;
-    }
-
-    if scaffolded.stub_count == 0 || scaffolded.content.trim().is_empty() {
-        return None;
-    }
-
-    Some(scaffolded.content)
-}
-
-/// Generate a minimal test file stub for the given test file path.
-///
-/// Keeps stubs intentionally simple and compiling. This unblocks CI/audit
-/// and creates an explicit place for real tests to be added.
-fn generate_test_file_stub(test_file: &str, source_file: &str) -> String {
-    let ext = Path::new(test_file)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(Language::from_extension)
-        .unwrap_or(Language::Unknown);
-
-    match ext {
-        Language::Rust => {
-            let name = Path::new(source_file)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("module")
-                .replace('-', "_");
-            format!(
-                "// Auto-generated by `homeboy audit --fix`\n// Source: {}\n\n#[test]\n#[ignore = \"autogenerated scaffold\"]\nfn test_{}_placeholder() {{\n    todo!(\"Autogenerated scaffold - replace with real assertions\");\n}}\n",
-                source_file, name
-            )
-        }
-        Language::Php => {
-            format!(
-                "<?php\n\n// Auto-generated by `homeboy audit --fix`\n// Source: {}\n\nuse PHPUnit\\Framework\\TestCase;\n\nfinal class GeneratedPlaceholderTest extends TestCase {{\n    public function test_placeholder(): void {{\n        $this->markTestIncomplete('Autogenerated scaffold - replace with real assertions');\n    }}\n}}\n",
-                source_file
-            )
-        }
-        _ => format!(
-            "// Auto-generated by `homeboy audit --fix`\n// Source: {}\n// Add tests\n",
-            source_file
-        ),
-    }
-}
 
 /// Fallback duplicate fix for languages without `extract_shared` support.
 ///
@@ -2466,7 +2013,7 @@ fn parse_items_for_dedup(
 /// This uses the symbol_graph core primitive to trace all files that import
 /// the removed function from the old module and rewrite them to import from
 /// the canonical module instead.
-fn rewrite_callers_after_dedup(fix: &Fix, root: &Path) {
+pub(crate) fn rewrite_callers_after_dedup(fix: &Fix, root: &Path) {
     use crate::core::symbol_graph;
 
     for insertion in &fix.insertions {
@@ -2527,37 +2074,6 @@ fn rewrite_callers_after_dedup(fix: &Fix, root: &Path) {
     }
 }
 
-/// Merge multiple `Fix` objects that target the same file into one.
-///
-/// Preserves insertion order within each original `Fix`, appending later
-/// fixes' insertions after earlier ones.  The resulting vec has at most one
-/// `Fix` per unique file path.
-fn merge_fixes_per_file(fixes: Vec<Fix>) -> Vec<Fix> {
-    let mut map: std::collections::HashMap<String, Fix> = HashMap::new();
-    let mut order: Vec<String> = Vec::new();
-
-    for fix in fixes {
-        if let Some(existing) = map.get_mut(&fix.file) {
-            for method in fix.required_methods {
-                if !existing.required_methods.contains(&method) {
-                    existing.required_methods.push(method);
-                }
-            }
-            for registration in fix.required_registrations {
-                if !existing.required_registrations.contains(&registration) {
-                    existing.required_registrations.push(registration);
-                }
-            }
-            existing.insertions.extend(fix.insertions);
-        } else {
-            order.push(fix.file.clone());
-            map.insert(fix.file.clone(), fix);
-        }
-    }
-
-    // Preserve original encounter order
-    order.into_iter().filter_map(|f| map.remove(&f)).collect()
-}
 
 /// Convert a relative file path to a Rust module path.
 ///
@@ -2566,6 +2082,21 @@ fn merge_fixes_per_file(fixes: Vec<Fix>) -> Vec<Fix> {
 /// callers that import it from `fixer`.
 pub(crate) fn module_path_from_file(file_path: &str) -> String {
     crate::core::symbol_graph::module_path_from_file(file_path)
+}
+
+fn generate_fallback_signature(method_name: &str, language: &Language) -> MethodSignature {
+    let signature = match language {
+        Language::Php => format!("public function {}()", method_name),
+        Language::Rust => format!("pub fn {}()", method_name),
+        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
+        Language::Unknown => format!("{}()", method_name),
+    };
+
+    MethodSignature {
+        name: method_name.to_string(),
+        signature,
+        language: language.clone(),
+    }
 }
 
 fn normalize_item_name(name: &str) -> String {
@@ -2593,22 +2124,6 @@ fn find_parsed_item_by_name<'a>(
     Some(first)
 }
 
-/// Generate a fallback signature when no conforming file has the method.
-fn generate_fallback_signature(method_name: &str, language: &Language) -> MethodSignature {
-    let signature = match language {
-        Language::Php => format!("public function {}()", method_name),
-        Language::Rust => format!("pub fn {}()", method_name),
-        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
-        Language::Unknown => format!("{}()", method_name),
-    };
-
-    MethodSignature {
-        name: method_name.to_string(),
-        signature,
-        language: language.clone(),
-    }
-}
-
 // ============================================================================
 // Unreferenced Export Helpers
 // ============================================================================
@@ -2621,17 +2136,6 @@ fn extract_function_name_from_unreferenced(description: &str) -> Option<String> 
     let start = description.find(needle)? + needle.len();
     let rest = &description[start..];
     let end = rest.find('\'')?;
-    Some(rest[..end].to_string())
-}
-
-/// Extract the suggested new path from a StaleDocReference suggestion.
-///
-/// Example: "Did you mean `src/new/config.rs`? File 'src/old/config.rs' no longer exists."
-/// Returns: Some("src/new/config.rs")
-fn extract_suggested_path(suggestion: &str) -> Option<String> {
-    let start = suggestion.find("Did you mean `")? + "Did you mean `".len();
-    let rest = &suggestion[start..];
-    let end = rest.find('`')?;
     Some(rest[..end].to_string())
 }
 
@@ -2652,22 +2156,6 @@ fn extract_line_number(description: &str) -> Option<usize> {
     let rest = &description[start..];
     let end = rest.find(')')?;
     rest[..end].parse().ok()
-}
-
-fn should_remove_broken_doc_line(line: &str, dead_path: &str) -> bool {
-    let trimmed = line.trim();
-    let exact_backticked = format!("`{}`", dead_path);
-
-    if !trimmed.contains(&exact_backticked) {
-        return false;
-    }
-
-    if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-        return trimmed == format!("- {}", exact_backticked)
-            || trimmed == format!("* {}", exact_backticked);
-    }
-
-    false
 }
 
 /// Check if a function is referenced outside the lib crate — either re-exported
@@ -2839,324 +2327,11 @@ fn scan_dir_for_reference(dir: &Path, fn_name: &str) -> bool {
 // ============================================================================
 
 /// Apply fixes to files on disk.
-pub fn apply_fixes(fixes: &mut [Fix], root: &Path) -> usize {
-    apply_fixes_chunked(fixes, root, ApplyOptions { verifier: None })
-        .iter()
-        .filter(|chunk| matches!(chunk.status, ChunkStatus::Applied))
-        .map(|chunk| chunk.applied_files)
-        .sum()
-}
-
-/// Write new files generated by the fixer (e.g., trait files for extracted duplicates).
-pub fn apply_new_files(new_files: &mut [NewFile], root: &Path) -> usize {
-    apply_new_files_chunked(new_files, root, ApplyOptions { verifier: None })
-        .iter()
-        .filter(|chunk| matches!(chunk.status, ChunkStatus::Applied))
-        .map(|chunk| chunk.applied_files)
-        .sum()
-}
-
-pub fn apply_fixes_chunked(
-    fixes: &mut [Fix],
-    root: &Path,
-    options: ApplyOptions<'_>,
-) -> Vec<ApplyChunkResult> {
-    let mut results = Vec::new();
-
-    for (index, fix) in fixes.iter_mut().enumerate() {
-        let abs_path = root.join(&fix.file);
-        let content = match std::fs::read_to_string(&abs_path) {
-            Ok(c) => c,
-            Err(e) => {
-                results.push(ApplyChunkResult {
-                    chunk_id: format!("fix:{}", index + 1),
-                    files: vec![fix.file.clone()],
-                    status: ChunkStatus::Reverted,
-                    applied_files: 0,
-                    reverted_files: 0,
-                    verification: None,
-                    error: Some(format!("Failed to read {}: {}", fix.file, e)),
-                });
-                continue;
-            }
-        };
-
-        let language = detect_language(&abs_path);
-        let modified = apply_insertions_to_content(&content, &fix.insertions, &language);
-
-        if modified == content {
-            results.push(ApplyChunkResult {
-                chunk_id: format!("fix:{}", index + 1),
-                files: vec![fix.file.clone()],
-                status: ChunkStatus::Applied,
-                applied_files: 0,
-                reverted_files: 0,
-                verification: Some("no_op".to_string()),
-                error: None,
-            });
-            continue;
-        }
-
-        let mut rollback = InMemoryRollback::new();
-        rollback.capture(&abs_path);
-
-        match std::fs::write(&abs_path, &modified) {
-            Ok(_) => {
-                let mut chunk = ApplyChunkResult {
-                    chunk_id: format!("fix:{}", index + 1),
-                    files: vec![fix.file.clone()],
-                    status: ChunkStatus::Applied,
-                    applied_files: 1,
-                    reverted_files: 0,
-                    verification: Some("write_ok".to_string()),
-                    error: None,
-                };
-
-                if let Some(verifier) = options.verifier {
-                    match verifier(&chunk) {
-                        Ok(verification) => {
-                            chunk.verification = Some(verification);
-                        }
-                        Err(error) => {
-                            rollback.restore_all();
-                            chunk.status = ChunkStatus::Reverted;
-                            chunk.reverted_files = 1;
-                            chunk.error = Some(error);
-                            fix.applied = false;
-                            results.push(chunk);
-                            continue;
-                        }
-                    }
-                }
-
-                fix.applied = true;
-
-                // After successful FunctionRemoval for DuplicateFunction,
-                // rewrite callers across the codebase to import from the
-                // canonical location instead of the file we just removed from.
-                rewrite_callers_after_dedup(fix, root);
-
-                log_status!(
-                    "fix",
-                    "Applied {} fix(es) to {}",
-                    fix.insertions.len(),
-                    fix.file
-                );
-                results.push(chunk);
-            }
-            Err(e) => {
-                results.push(ApplyChunkResult {
-                    chunk_id: format!("fix:{}", index + 1),
-                    files: vec![fix.file.clone()],
-                    status: ChunkStatus::Reverted,
-                    applied_files: 0,
-                    reverted_files: 0,
-                    verification: None,
-                    error: Some(format!("Failed to write {}: {}", fix.file, e)),
-                });
-            }
-        }
-    }
-
-    results
-}
-
-pub fn apply_new_files_chunked(
-    new_files: &mut [NewFile],
-    root: &Path,
-    options: ApplyOptions<'_>,
-) -> Vec<ApplyChunkResult> {
-    let mut results = Vec::new();
-
-    for (index, nf) in new_files.iter_mut().enumerate() {
-        let abs_path = root.join(&nf.file);
-
-        if let Some(parent) = abs_path.parent() {
-            if !parent.exists() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    results.push(ApplyChunkResult {
-                        chunk_id: format!("new_file:{}", index + 1),
-                        files: vec![nf.file.clone()],
-                        status: ChunkStatus::Reverted,
-                        applied_files: 0,
-                        reverted_files: 0,
-                        verification: None,
-                        error: Some(format!("Failed to create directory for {}: {}", nf.file, e)),
-                    });
-                    continue;
-                }
-            }
-        }
-
-        if abs_path.exists() {
-            results.push(ApplyChunkResult {
-                chunk_id: format!("new_file:{}", index + 1),
-                files: vec![nf.file.clone()],
-                status: ChunkStatus::Reverted,
-                applied_files: 0,
-                reverted_files: 0,
-                verification: None,
-                error: Some(format!("Skipping {} — file already exists", nf.file)),
-            });
-            continue;
-        }
-
-        let mut rollback = InMemoryRollback::new();
-        rollback.capture(&abs_path);
-
-        match std::fs::write(&abs_path, &nf.content) {
-            Ok(_) => {
-                let mut chunk = ApplyChunkResult {
-                    chunk_id: format!("new_file:{}", index + 1),
-                    files: vec![nf.file.clone()],
-                    status: ChunkStatus::Applied,
-                    applied_files: 1,
-                    reverted_files: 0,
-                    verification: Some("write_ok".to_string()),
-                    error: None,
-                };
-
-                if let Some(verifier) = options.verifier {
-                    match verifier(&chunk) {
-                        Ok(verification) => {
-                            chunk.verification = Some(verification);
-                        }
-                        Err(error) => {
-                            rollback.restore_all();
-                            chunk.status = ChunkStatus::Reverted;
-                            chunk.reverted_files = 1;
-                            chunk.error = Some(error);
-                            nf.written = false;
-                            results.push(chunk);
-                            continue;
-                        }
-                    }
-                }
-
-                nf.written = true;
-                log_status!("fix", "Created {}", nf.file);
-                results.push(chunk);
-            }
-            Err(e) => {
-                results.push(ApplyChunkResult {
-                    chunk_id: format!("new_file:{}", index + 1),
-                    files: vec![nf.file.clone()],
-                    status: ChunkStatus::Reverted,
-                    applied_files: 0,
-                    reverted_files: 0,
-                    verification: None,
-                    error: Some(format!("Failed to create {}: {}", nf.file, e)),
-                });
-            }
-        }
-    }
-
-    results
-}
-
-pub fn apply_decompose_plans(
-    plans: &mut [DecomposeFixPlan],
-    root: &Path,
-    options: ApplyOptions<'_>,
-) -> Vec<ApplyChunkResult> {
-    let mut results = Vec::new();
-    for (index, dfp) in plans.iter_mut().enumerate() {
-        let source_abs = root.join(&dfp.file);
-        let _source_content = match std::fs::read_to_string(&source_abs) {
-            Ok(c) => c,
-            Err(e) => {
-                results.push(ApplyChunkResult {
-                    chunk_id: format!("decompose:{}", index + 1),
-                    files: vec![dfp.file.clone()],
-                    status: ChunkStatus::Reverted,
-                    applied_files: 0,
-                    reverted_files: 0,
-                    verification: None,
-                    error: Some(format!("Failed to read source {}: {}", dfp.file, e)),
-                });
-                continue;
-            }
-        };
-        let mut rollback = InMemoryRollback::new();
-        rollback.capture(&source_abs);
-        let mut all_files = vec![dfp.file.clone()];
-        for group in &dfp.plan.groups {
-            let target_abs = root.join(&group.suggested_target);
-            all_files.push(group.suggested_target.clone());
-            rollback.capture(&target_abs);
-        }
-
-        // Dry-run first to discover caller files that rewrite_caller_imports
-        // will modify. We must snapshot these BEFORE the real write so rollback
-        // restores them too. Without this, a reverted decompose leaks broken
-        // import rewrites into caller files across the codebase.
-        if let Ok(dry_run_results) = decompose::apply_plan(&dfp.plan, root, false) {
-            for mr in &dry_run_results {
-                for caller_path in &mr.caller_files_modified {
-                    let rel = caller_path
-                        .strip_prefix(root)
-                        .unwrap_or(caller_path)
-                        .to_string_lossy()
-                        .to_string();
-                    all_files.push(rel);
-                    rollback.capture(caller_path);
-                }
-            }
-        }
-
-        match decompose::apply_plan(&dfp.plan, root, true) {
-            Ok(move_results) => {
-                let files_modified = move_results.iter().filter(|r| r.applied).count();
-                let mut chunk = ApplyChunkResult {
-                    chunk_id: format!("decompose:{}", index + 1),
-                    files: all_files,
-                    status: ChunkStatus::Applied,
-                    applied_files: files_modified,
-                    reverted_files: 0,
-                    verification: Some("decompose_applied".to_string()),
-                    error: None,
-                };
-                if let Some(verifier) = options.verifier {
-                    match verifier(&chunk) {
-                        Ok(verification) => {
-                            chunk.verification = Some(verification);
-                        }
-                        Err(error) => {
-                            rollback.restore_all();
-                            chunk.status = ChunkStatus::Reverted;
-                            chunk.reverted_files = files_modified;
-                            chunk.error = Some(error);
-                            dfp.applied = false;
-                            results.push(chunk);
-                            continue;
-                        }
-                    }
-                }
-                dfp.applied = true;
-                log_status!(
-                    "fix",
-                    "Decomposed {} into {} groups",
-                    dfp.file,
-                    dfp.plan.groups.len()
-                );
-                results.push(chunk);
-            }
-            Err(e) => {
-                rollback.restore_all();
-                results.push(ApplyChunkResult {
-                    chunk_id: format!("decompose:{}", index + 1),
-                    files: vec![dfp.file.clone()],
-                    status: ChunkStatus::Reverted,
-                    applied_files: 0,
-                    reverted_files: 0,
-                    verification: None,
-                    error: Some(format!("Decompose failed for {}: {}", dfp.file, e)),
-                });
-            }
-        }
-    }
-    results
-}
+pub use crate::core::refactor::auto::apply::{
+    apply_decompose_plans, apply_fixes, apply_fixes_chunked, apply_new_files,
+    apply_new_files_chunked,
+};
+pub use crate::core::refactor::plan::generate::generate_audit_fixes as generate_fixes;
 
 /// Apply insertions to file content, returning the modified content.
 pub(crate) fn apply_insertions_to_content(
@@ -4414,34 +3589,34 @@ pub struct TestOutput {}
     #[test]
     fn extract_expected_test_path_parses_description() {
         let desc = "No test file found (expected 'tests/utils/token_test.rs') and no inline tests";
-        let parsed = extract_expected_test_path(desc);
+        let parsed = crate::core::refactor::plan::generate::extract_expected_test_path(desc);
         assert_eq!(parsed, Some("tests/utils/token_test.rs".to_string()));
     }
 
     #[test]
     fn extract_expected_test_method_parses_description() {
         let desc = "Method 'run' has no corresponding test (expected 'test_run')";
-        let parsed = extract_expected_test_method(desc);
+        let parsed = crate::core::refactor::plan::generate::extract_expected_test_method(desc);
         assert_eq!(parsed, Some("test_run".to_string()));
     }
 
     #[test]
     fn extract_test_file_from_missing_test_method_parses_description() {
         let desc = "Method 'run' has no corresponding test in 'tests/commands/audit_test.rs'";
-        let parsed = extract_test_file_from_missing_test_method(desc);
+        let parsed = crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(desc);
         assert_eq!(parsed, Some("tests/commands/audit_test.rs".to_string()));
     }
 
     #[test]
     fn extract_source_method_name_parses_description() {
         let desc = "Method 'run_add' has no corresponding test (expected 'test_run_add')";
-        let parsed = extract_source_method_name(desc);
+        let parsed = crate::core::refactor::plan::generate::extract_source_method_name(desc);
         assert_eq!(parsed, Some("run_add".to_string()));
     }
 
     #[test]
     fn generate_test_method_stub_rust_uses_ignored_todo() {
-        let stub = generate_test_method_stub(
+        let stub = crate::core::refactor::plan::generate::generate_test_method_stub(
             &Language::Rust,
             "test_run",
             "src/commands/refactor.rs",
@@ -4455,8 +3630,12 @@ pub struct TestOutput {}
 
     #[test]
     fn generate_test_method_stub_php_marks_incomplete() {
-        let stub =
-            generate_test_method_stub(&Language::Php, "test_run", "inc/class-example.php", "run");
+        let stub = crate::core::refactor::plan::generate::generate_test_method_stub(
+            &Language::Php,
+            "test_run",
+            "inc/class-example.php",
+            "run",
+        );
         assert!(stub.contains("markTestIncomplete"));
         assert!(stub.contains("Autogenerated scaffold for inc/class-example.php::run"));
     }
@@ -4726,7 +3905,7 @@ mod tests {
         )
         .unwrap();
 
-        let content = generate_test_file_candidate(
+        let content = crate::core::refactor::plan::generate::generate_test_file_candidate(
             &dir,
             "tests/utils/example_test.rs",
             "src/utils/example.rs",
@@ -4981,7 +4160,7 @@ mod tests {
     #[test]
     fn should_not_remove_broken_doc_reference_in_prose_line() {
         let line = "CLI commands now return typed structs and are serialized in `crates/homeboy/src/main.rs`, standardizing success/error output and exit codes.";
-        assert!(!should_remove_broken_doc_line(
+        assert!(!crate::core::refactor::plan::generate::should_remove_broken_doc_line(
             line,
             "crates/homeboy/src/main.rs"
         ));
@@ -5061,7 +4240,7 @@ mod tests {
             },
         ];
 
-        let merged = merge_fixes_per_file(fixes);
+        let merged = crate::core::refactor::plan::generate::merge_fixes_per_file(fixes);
 
         // Should have 2 files, not 3
         assert_eq!(merged.len(), 2);

@@ -3,14 +3,14 @@
 //! Walks source files, finds all references to a term (with word-boundary matching
 //! and case-variant awareness), generates edits, and optionally applies them.
 
-use crate::utils::autofix::{AppliedAutofixCapture, FixResultsSummary};
+use crate::refactor::auto::{AppliedAutofixCapture, FixResultsSummary};
 use serde::Serialize;
 
 pub mod add;
-pub mod audit;
+pub mod auto;
 pub mod decompose;
 pub mod move_items;
-pub mod planner;
+pub mod plan;
 mod rename;
 pub mod runner;
 mod sandbox;
@@ -56,22 +56,26 @@ impl AppliedRefactor {
 }
 
 pub use add::{add_import, fixes_from_audit, AddResult};
-pub use audit::{
+pub use auto::{
+    apply_decompose_plans, apply_fix_policy, apply_fixes, apply_fixes_chunked, apply_new_files,
+    apply_new_files_chunked, auto_apply_subset, ApplyChunkResult, ApplyOptions, ChunkStatus, Fix,
+    FixPolicy, FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, PolicySummary,
+    PreflightCheck, PreflightContext, PreflightReport, PreflightStatus, SkippedFile,
+};
+pub use plan::{
     build_chunk_verifier, finding_fingerprint, run_audit_refactor, score_delta,
     weighted_finding_score_with, AuditConvergenceScoring, AuditRefactorIterationSummary,
     AuditRefactorOutcome, AuditVerificationToggles,
+    analyze_stage_overlaps, build_refactor_plan, lint_refactor_request, normalize_sources,
+    run_lint_refactor, run_test_refactor, summarize_plan_totals, test_refactor_request,
+    LintSourceOptions, PlanOverlap, PlanStageSummary, RefactorPlan, RefactorPlanRequest,
+    TestSourceOptions, KNOWN_PLAN_SOURCES,
 };
 pub use decompose::{
     apply_plan, apply_plan_skeletons, build_plan, DecomposeAuditImpact, DecomposeGroup,
     DecomposePlan,
 };
 pub use move_items::{move_items, ImportRewrite, ItemKind, MoveResult, MovedItem};
-pub use planner::{
-    analyze_stage_overlaps, build_refactor_plan, lint_refactor_request, normalize_sources,
-    run_lint_refactor, run_test_refactor, summarize_plan_totals, test_refactor_request,
-    LintSourceOptions, PlanOverlap, PlanStageSummary, RefactorPlan, RefactorPlanRequest,
-    TestSourceOptions, KNOWN_PLAN_SOURCES,
-};
 pub use rename::{
     apply_renames, find_references, find_references_with_targeting, generate_renames,
     generate_renames_with_targeting, CaseVariant, FileEdit, FileRename, Reference, RenameResult,
