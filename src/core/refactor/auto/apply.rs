@@ -1,9 +1,10 @@
 use crate::code_audit::conventions::Language;
 use crate::code_audit::fixer::{
-    apply_insertions_to_content, detect_language, rewrite_callers_after_dedup, ApplyChunkResult,
-    ApplyOptions, ChunkStatus, DecomposeFixPlan, Fix, FixResult, Insertion, NewFile,
+    apply_insertions_to_content, detect_language, ApplyChunkResult, ApplyOptions, ChunkStatus,
+    DecomposeFixPlan, Fix, FixResult, Insertion, NewFile,
 };
 use crate::core::refactor::decompose;
+use crate::core::refactor::plan::audit::rewrite_callers_after_dedup;
 use crate::core::undo::InMemoryRollback;
 use std::path::Path;
 
