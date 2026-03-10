@@ -102,8 +102,14 @@ pub enum InsertionKind {
     ConstructorWithRegistration,
     /// Add a missing import/use statement at the top of the file.
     ImportAdd,
+<<<<<<< HEAD
     /// Add or replace a namespace declaration at the top of the file.
     NamespaceDeclaration,
+=======
+    /// Add a missing type conformance declaration to the primary type.
+    /// Examples: `implements Foo`, `impl Foo for Bar`, `class X implements Foo`.
+    TypeConformance,
+>>>>>>> origin/main
     /// Remove a function definition (lines start_line..=end_line) and replace with an import.
     FunctionRemoval {
         /// 1-indexed start line (includes doc comments and attributes).
@@ -149,7 +155,11 @@ impl InsertionKind {
             }
             Self::RegistrationStub
             | Self::ConstructorWithRegistration
+<<<<<<< HEAD
             | Self::NamespaceDeclaration
+=======
+            | Self::TypeConformance
+>>>>>>> origin/main
             | Self::VisibilityChange { .. } => FixSafetyTier::SafeWithChecks,
             // Stub generation is useful for planning, but not trustworthy enough
             // for unattended auto-apply. Keep it plan-only until it graduates.
@@ -843,6 +853,7 @@ fn generate_import_statement(import_path: &str, language: &Language) -> String {
     }
 }
 
+<<<<<<< HEAD
 fn generate_namespace_declaration(namespace: &str, language: &Language) -> Option<String> {
     match language {
         Language::Php => Some(format!("namespace {};", namespace)),
@@ -881,6 +892,104 @@ fn insert_namespace_declaration(content: &str, declaration: &str, language: &Lan
     }
 }
 
+=======
+fn generate_type_conformance_declaration(
+    type_name: &str,
+    conformance: &str,
+    language: &Language,
+) -> String {
+    match language {
+        Language::Rust => format!("\nimpl {} for {} {{\n}}\n", conformance, type_name),
+        Language::Php | Language::TypeScript => conformance.to_string(),
+        Language::JavaScript | Language::Unknown => conformance.to_string(),
+    }
+}
+
+fn primary_type_name_from_declaration(line: &str, language: &Language) -> Option<String> {
+    let trimmed = line.trim();
+    match language {
+        Language::Php | Language::TypeScript => Regex::new(r"\b(?:class|interface|trait)\s+(\w+)")
+            .ok()?
+            .captures(trimmed)
+            .map(|cap| cap[1].to_string()),
+        Language::Rust => Regex::new(r"\b(?:pub\s+)?(?:struct|enum|trait)\s+(\w+)")
+            .ok()?
+            .captures(trimmed)
+            .map(|cap| cap[1].to_string()),
+        Language::JavaScript => Regex::new(r"\bclass\s+(\w+)")
+            .ok()?
+            .captures(trimmed)
+            .map(|cap| cap[1].to_string()),
+        Language::Unknown => None,
+    }
+}
+
+fn insert_type_conformance(content: &str, declarations: &[&String], language: &Language) -> String {
+    let Some(declaration) = declarations.first() else {
+        return content.to_string();
+    };
+
+    match language {
+        Language::Php | Language::TypeScript => {
+            insert_inline_type_conformance(content, declaration, language)
+        }
+        Language::Rust => {
+            if content.contains(declaration.as_str()) {
+                content.to_string()
+            } else if content.ends_with('\n') {
+                format!("{}{}", content, declaration)
+            } else {
+                format!("{}\n{}", content, declaration)
+            }
+        }
+        Language::JavaScript | Language::Unknown => content.to_string(),
+    }
+}
+
+fn insert_inline_type_conformance(content: &str, declaration: &str, language: &Language) -> String {
+    let conformance = declaration.trim();
+    let keyword = match language {
+        Language::Php | Language::TypeScript => "implements",
+        _ => return content.to_string(),
+    };
+
+    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+    for line in &mut lines {
+        if primary_type_name_from_declaration(line, language).is_none() {
+            continue;
+        }
+
+        if line.contains(conformance) {
+            break;
+        }
+
+        if line.contains(keyword) {
+            if let Some(pos) = line.find('{') {
+                let before = &line[..pos].trim_end();
+                let after = &line[pos..];
+                *line = format!("{}, {} {}", before, conformance, after);
+            } else {
+                *line = format!("{}, {}", line.trim_end(), conformance);
+            }
+        } else if let Some(pos) = line.find('{') {
+            let before = line[..pos].trim_end();
+            let after = &line[pos..];
+            *line = format!("{} {} {} {}", before, keyword, conformance, after);
+        } else {
+            *line = format!("{} {} {}", line.trim_end(), keyword, conformance);
+        }
+
+        break;
+    }
+
+    let mut result = lines.join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+>>>>>>> origin/main
 /// Insert an import statement into file content at the correct location.
 ///
 /// Finds the last existing import/use line and inserts after it.
@@ -1141,7 +1250,11 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
             let mut missing_methods: Vec<&str> = Vec::new();
             let mut missing_registrations: Vec<&str> = Vec::new();
             let mut missing_imports: Vec<&str> = Vec::new();
+<<<<<<< HEAD
             let mut namespace_declarations: Vec<String> = Vec::new();
+=======
+            let mut missing_interfaces: Vec<&str> = Vec::new();
+>>>>>>> origin/main
             let mut needs_constructor = false;
 
             for deviation in &outlier.deviations {
@@ -1180,6 +1293,7 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                             .unwrap_or(&deviation.description);
                         missing_imports.push(import_path);
                     }
+<<<<<<< HEAD
                     AuditFinding::NamespaceMismatch => {
                         if let Some(expected_namespace) =
                             extract_expected_namespace(&deviation.description)
@@ -1190,6 +1304,14 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                                 namespace_declarations.push(declaration);
                             }
                         }
+=======
+                    AuditFinding::MissingInterface => {
+                        let conformance = deviation
+                            .description
+                            .strip_prefix("Missing interface: ")
+                            .unwrap_or(&deviation.description);
+                        missing_interfaces.push(conformance);
+>>>>>>> origin/main
                     }
                     AuditFinding::DirectorySprawl => {
                         // Structural concern across directories; no safe automatic
@@ -1215,12 +1337,36 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                 ));
             }
 
+<<<<<<< HEAD
             for declaration in &namespace_declarations {
                 insertions.push(insertion(
                     InsertionKind::NamespaceDeclaration,
                     AuditFinding::NamespaceMismatch,
                     declaration.clone(),
                     format!("Align namespace declaration to `{}`", declaration),
+=======
+            for conformance in &missing_interfaces {
+                let Some(type_name) = content
+                    .lines()
+                    .find_map(|line| primary_type_name_from_declaration(line, &language))
+                    .or_else(|| {
+                        abs_path
+                            .file_stem()
+                            .map(|stem| stem.to_string_lossy().to_string())
+                    })
+                else {
+                    continue;
+                };
+
+                insertions.push(insertion(
+                    InsertionKind::TypeConformance,
+                    AuditFinding::MissingInterface,
+                    generate_type_conformance_declaration(&type_name, conformance, &language),
+                    format!(
+                        "Add declared conformance `{}` to {}",
+                        conformance, type_name
+                    ),
+>>>>>>> origin/main
                 ));
             }
 
@@ -3025,6 +3171,7 @@ pub(crate) fn apply_insertions_to_content(
     let mut registration_stubs = Vec::new();
     let mut constructor_stubs = Vec::new();
     let mut import_adds = Vec::new();
+    let mut type_conformances = Vec::new();
     let mut namespace_declarations = Vec::new();
     let mut trait_uses = Vec::new();
     let mut removals: Vec<(usize, usize)> = Vec::new();
@@ -3038,6 +3185,7 @@ pub(crate) fn apply_insertions_to_content(
             InsertionKind::RegistrationStub => registration_stubs.push(&insertion.code),
             InsertionKind::ConstructorWithRegistration => constructor_stubs.push(&insertion.code),
             InsertionKind::ImportAdd => import_adds.push(&insertion.code),
+            InsertionKind::TypeConformance => type_conformances.push(&insertion.code),
             InsertionKind::NamespaceDeclaration => namespace_declarations.push(&insertion.code),
             InsertionKind::TraitUse => trait_uses.push(&insertion.code),
             InsertionKind::FunctionRemoval {
@@ -3137,6 +3285,10 @@ pub(crate) fn apply_insertions_to_content(
     // Apply import additions (they go at the top)
     for import_line in &import_adds {
         result = insert_import(&result, import_line, language);
+    }
+
+    if !type_conformances.is_empty() {
+        result = insert_type_conformance(&result, &type_conformances, language);
     }
 
     // Insert trait use statements inside the class body (after opening brace)
@@ -3355,6 +3507,98 @@ class MyClass {
         let new_pos = result.find("newMethod").unwrap();
         let last_brace = result.rfind('}').unwrap();
         assert!(new_pos < last_brace);
+    }
+
+    #[test]
+    fn insert_type_conformance_updates_php_class_declaration() {
+        let content = "<?php\nclass FlowAbility extends BaseAbility {\n}\n";
+        let declaration = "AbilityInterface".to_string();
+
+        let result = insert_type_conformance(content, &[&declaration], &Language::Php);
+
+        assert!(
+            result.contains("class FlowAbility extends BaseAbility implements AbilityInterface {")
+        );
+    }
+
+    #[test]
+    fn insert_type_conformance_appends_rust_impl_block() {
+        let content = "pub struct FlowAbility;\n";
+        let declaration =
+            generate_type_conformance_declaration("FlowAbility", "Runnable", &Language::Rust);
+
+        let result = insert_type_conformance(content, &[&declaration], &Language::Rust);
+
+        assert!(result.contains("impl Runnable for FlowAbility"));
+    }
+
+    #[test]
+    fn generate_fixes_includes_missing_interface_conformance() {
+        use super::super::checks::CheckStatus;
+        use super::super::conventions::{AuditFinding, Deviation, Outlier};
+        use super::super::{AuditSummary, CodeAuditResult, ConventionReport};
+
+        let dir = std::env::temp_dir().join("homeboy_fixer_missing_interface_test");
+        let abilities = dir.join("abilities");
+        let _ = std::fs::create_dir_all(&abilities);
+
+        std::fs::write(
+            abilities.join("FlowAbility.php"),
+            "<?php\nclass FlowAbility extends BaseAbility {\n}\n",
+        )
+        .unwrap();
+
+        let result = CodeAuditResult {
+            component_id: "demo".to_string(),
+            source_path: dir.to_string_lossy().to_string(),
+            summary: AuditSummary {
+                files_scanned: 1,
+                conventions_detected: 1,
+                outliers_found: 1,
+                alignment_score: Some(0.5),
+                files_skipped: 0,
+                warnings: vec![],
+            },
+            conventions: vec![ConventionReport {
+                name: "Ability Convention".to_string(),
+                glob: "abilities/*.php".to_string(),
+                status: CheckStatus::Drift,
+                expected_methods: vec![],
+                expected_registrations: vec![],
+                expected_interfaces: vec!["AbilityInterface".to_string()],
+                expected_namespace: None,
+                expected_imports: vec![],
+                conforming: vec![],
+                outliers: vec![Outlier {
+                    file: "abilities/FlowAbility.php".to_string(),
+                    noisy: false,
+                    deviations: vec![Deviation {
+                        kind: AuditFinding::MissingInterface,
+                        description: "Missing interface: AbilityInterface".to_string(),
+                        suggestion: "Implement AbilityInterface".to_string(),
+                    }],
+                }],
+                total_files: 1,
+                confidence: 1.0,
+            }],
+            directory_conventions: vec![],
+            findings: vec![],
+            duplicate_groups: vec![],
+        };
+
+        let fix_result = generate_fixes(&result, &dir);
+        assert_eq!(fix_result.fixes.len(), 1);
+        assert_eq!(fix_result.fixes[0].insertions.len(), 1);
+        assert!(matches!(
+            fix_result.fixes[0].insertions[0].kind,
+            InsertionKind::TypeConformance
+        ));
+        assert_eq!(
+            fix_result.fixes[0].insertions[0].finding,
+            AuditFinding::MissingInterface
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
