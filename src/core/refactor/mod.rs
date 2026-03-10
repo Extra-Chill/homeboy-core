@@ -7,6 +7,7 @@ use crate::utils::autofix::{AppliedAutofixCapture, FixResultsSummary};
 use serde::Serialize;
 
 pub mod add;
+pub mod audit;
 pub mod decompose;
 pub mod move_items;
 pub mod planner;
@@ -55,6 +56,10 @@ impl AppliedRefactor {
 }
 
 pub use add::{add_import, fixes_from_audit, AddResult};
+pub use audit::{
+    run_audit_refactor, AuditConvergenceScoring, AuditRefactorIterationSummary,
+    AuditRefactorOutcome, AuditVerificationToggles,
+};
 pub use decompose::{
     apply_plan, apply_plan_skeletons, build_plan, DecomposeAuditImpact, DecomposeGroup,
     DecomposePlan,
