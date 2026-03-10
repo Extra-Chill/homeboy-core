@@ -839,7 +839,9 @@ mod tests {
 
     #[test]
     fn test_run_fix_only_import_add_filters_method_stub() {
-        use homeboy::refactor::auto::{self, Fix, FixPolicy, FixResult, Insertion, PreflightContext};
+        use homeboy::refactor::auto::{
+            self, Fix, FixPolicy, FixResult, Insertion, PreflightContext,
+        };
 
         let root = tmp_dir("fix-only-import-add");
         fs::create_dir_all(root.join("commands")).unwrap();
@@ -1107,9 +1109,7 @@ mod tests {
         )
         .unwrap();
 
-        let smoke = |_chunk: &ApplyChunkResult| {
-            Ok("lint_smoke_passed".to_string())
-        };
+        let smoke = |_chunk: &ApplyChunkResult| Ok("lint_smoke_passed".to_string());
 
         let result = {
             let verifier = build_chunk_verifier(&root, &baseline.findings, vec![&smoke]);
@@ -1156,9 +1156,7 @@ mod tests {
         )
         .unwrap();
 
-        let smoke = |_chunk: &ApplyChunkResult| {
-            Err("lint smoke failed".to_string())
-        };
+        let smoke = |_chunk: &ApplyChunkResult| Err("lint smoke failed".to_string());
 
         let result = {
             let verifier = build_chunk_verifier(&root, &baseline.findings, vec![&smoke]);

@@ -1030,7 +1030,11 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                         // Structural concern across directories; no safe automatic
                         // in-file patching yet. Leave for dedicated refactor planning.
                     }
-                    kind if crate::core::refactor::plan::generate::is_actionable_comment_finding(kind) => {
+                    kind
+                        if crate::core::refactor::plan::generate::is_actionable_comment_finding(
+                            kind,
+                        ) =>
+                    {
                         // Comment hygiene requires human judgement; do not auto-edit.
                     }
                     _ => {}
@@ -1198,7 +1202,9 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(test_file) = crate::core::refactor::plan::generate::extract_expected_test_path(&finding.description) else {
+        let Some(test_file) =
+            crate::core::refactor::plan::generate::extract_expected_test_path(&finding.description)
+        else {
             continue;
         };
 
@@ -1207,7 +1213,11 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(root, &test_file, &finding.file) else {
+        let Some(candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(
+            root,
+            &test_file,
+            &finding.file,
+        ) else {
             continue;
         };
         new_files.push(new_file(
@@ -1226,15 +1236,24 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(expected_test_method) = crate::core::refactor::plan::generate::extract_expected_test_method(&finding.description) else {
+        let Some(expected_test_method) =
+            crate::core::refactor::plan::generate::extract_expected_test_method(
+                &finding.description,
+            )
+        else {
             continue;
         };
-        let Some(source_method) = crate::core::refactor::plan::generate::extract_source_method_name(&finding.description) else {
+        let Some(source_method) =
+            crate::core::refactor::plan::generate::extract_source_method_name(&finding.description)
+        else {
             continue;
         };
 
         // Try to find the test file: explicit path in description > derived from extension mapping
-        let test_file_opt = crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(&finding.description)
+        let test_file_opt =
+            crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(
+                &finding.description,
+            )
             .or_else(|| derive_expected_test_file_path(root, &finding.file));
 
         // For inline-test languages (Rust), when no separate test file is derived,
@@ -1252,12 +1271,13 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
 
                 // Insert if the source file already has a test module
                 if source_content.contains("#[cfg(test)]") {
-                    let test_stub = crate::core::refactor::plan::generate::generate_test_method_stub(
-                        &source_language,
-                        &expected_test_method,
-                        &finding.file,
-                        &source_method,
-                    );
+                    let test_stub =
+                        crate::core::refactor::plan::generate::generate_test_method_stub(
+                            &source_language,
+                            &expected_test_method,
+                            &finding.file,
+                            &source_method,
+                        );
 
                     fixes.push(Fix {
                         file: finding.file.clone(),
@@ -1335,7 +1355,12 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                 existing.content.push_str(&test_stub);
             }
         } else {
-            let Some(mut candidate) = crate::core::refactor::plan::generate::generate_test_file_candidate(root, &test_file, &finding.file)
+            let Some(mut candidate) =
+                crate::core::refactor::plan::generate::generate_test_file_candidate(
+                    root,
+                    &test_file,
+                    &finding.file,
+                )
             else {
                 continue;
             };
@@ -1730,7 +1755,9 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let Some(new_path) = crate::core::refactor::plan::generate::extract_suggested_path(&finding.suggestion) else {
+        let Some(new_path) =
+            crate::core::refactor::plan::generate::extract_suggested_path(&finding.suggestion)
+        else {
             continue;
         };
 
@@ -1833,7 +1860,6 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     }
 }
 
-
 pub(crate) fn test_method_exists_in_file(
     root: &Path,
     test_file: &str,
@@ -1871,7 +1897,6 @@ pub(crate) fn derive_expected_test_file_path(root: &Path, source_file: &str) -> 
 
     Some(path)
 }
-
 
 /// Fallback duplicate fix for languages without `extract_shared` support.
 ///
@@ -2073,7 +2098,6 @@ pub(crate) fn rewrite_callers_after_dedup(fix: &Fix, root: &Path) {
         }
     }
 }
-
 
 /// Convert a relative file path to a Rust module path.
 ///
@@ -3603,7 +3627,8 @@ pub struct TestOutput {}
     #[test]
     fn extract_test_file_from_missing_test_method_parses_description() {
         let desc = "Method 'run' has no corresponding test in 'tests/commands/audit_test.rs'";
-        let parsed = crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(desc);
+        let parsed =
+            crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(desc);
         assert_eq!(parsed, Some("tests/commands/audit_test.rs".to_string()));
     }
 
@@ -4160,10 +4185,12 @@ mod tests {
     #[test]
     fn should_not_remove_broken_doc_reference_in_prose_line() {
         let line = "CLI commands now return typed structs and are serialized in `crates/homeboy/src/main.rs`, standardizing success/error output and exit codes.";
-        assert!(!crate::core::refactor::plan::generate::should_remove_broken_doc_line(
-            line,
-            "crates/homeboy/src/main.rs"
-        ));
+        assert!(
+            !crate::core::refactor::plan::generate::should_remove_broken_doc_line(
+                line,
+                "crates/homeboy/src/main.rs"
+            )
+        );
     }
 
     #[test]

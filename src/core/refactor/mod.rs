@@ -62,20 +62,19 @@ pub use auto::{
     FixPolicy, FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, PolicySummary,
     PreflightCheck, PreflightContext, PreflightReport, PreflightStatus, SkippedFile,
 };
-pub use plan::{
-    build_chunk_verifier, finding_fingerprint, run_audit_refactor, score_delta,
-    weighted_finding_score_with, AuditConvergenceScoring, AuditRefactorIterationSummary,
-    AuditRefactorOutcome, AuditVerificationToggles,
-    analyze_stage_overlaps, build_refactor_plan, lint_refactor_request, normalize_sources,
-    run_lint_refactor, run_test_refactor, summarize_plan_totals, test_refactor_request,
-    LintSourceOptions, PlanOverlap, PlanStageSummary, RefactorPlan, RefactorPlanRequest,
-    TestSourceOptions, KNOWN_PLAN_SOURCES,
-};
 pub use decompose::{
     apply_plan, apply_plan_skeletons, build_plan, DecomposeAuditImpact, DecomposeGroup,
     DecomposePlan,
 };
 pub use move_items::{move_items, ImportRewrite, ItemKind, MoveResult, MovedItem};
+pub use plan::{
+    analyze_stage_overlaps, build_chunk_verifier, build_refactor_plan, finding_fingerprint,
+    lint_refactor_request, normalize_sources, run_audit_refactor, run_lint_refactor,
+    run_test_refactor, score_delta, summarize_plan_totals, test_refactor_request,
+    weighted_finding_score_with, AuditConvergenceScoring, AuditRefactorIterationSummary,
+    AuditRefactorOutcome, AuditVerificationToggles, LintSourceOptions, PlanOverlap,
+    PlanStageSummary, RefactorPlan, RefactorPlanRequest, TestSourceOptions, KNOWN_PLAN_SOURCES,
+};
 pub use rename::{
     apply_renames, find_references, find_references_with_targeting, generate_renames,
     generate_renames_with_targeting, CaseVariant, FileEdit, FileRename, Reference, RenameResult,

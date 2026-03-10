@@ -97,7 +97,10 @@ pub fn run_insertion_preflight(
 
             let mut checks = Vec::new();
 
-            if matches!(insertion.kind, crate::code_audit::fixer::InsertionKind::TraitUse) {
+            if matches!(
+                insertion.kind,
+                crate::code_audit::fixer::InsertionKind::TraitUse
+            ) {
                 let has_class = content.contains("class ");
                 checks.push(PreflightCheck {
                     name: "class_exists".to_string(),
