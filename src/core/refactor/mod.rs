@@ -3,7 +3,7 @@
 //! Walks source files, finds all references to a term (with word-boundary matching
 //! and case-variant awareness), generates edits, and optionally applies them.
 
-use crate::utils::autofix::{AppliedAutofixCapture, FixResultsSummary};
+use crate::refactor::auto::{AppliedAutofixCapture, FixResultsSummary};
 use serde::Serialize;
 
 pub mod add;

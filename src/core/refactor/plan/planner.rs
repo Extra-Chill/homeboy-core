@@ -7,7 +7,7 @@ use crate::lint_baseline;
 use crate::refactor::runner;
 use crate::test_drift::{self, DriftOptions};
 use crate::undo::UndoSnapshot;
-use crate::utils::autofix::{self, FixApplied, FixResultsSummary};
+use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
 use crate::Error;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
@@ -189,7 +189,7 @@ impl FixAccumulator {
         if self.fixes.is_empty() {
             None
         } else {
-            Some(autofix::summarize_fix_results(&self.fixes))
+            Some(auto::summarize_fix_results(&self.fixes))
         }
     }
 }
@@ -545,12 +545,12 @@ fn plan_audit_stage(
             changed_files,
             fix_summary: if write {
                 if fix_result.files_modified > 0 {
-                    Some(autofix::summarize_audit_fix_result(&fix_result))
+                    Some(auto::summarize_audit_fix_result(&fix_result))
                 } else {
                     None
                 }
             } else if policy_summary.visible_insertions + policy_summary.visible_new_files > 0 {
-                Some(autofix::summarize_audit_fix_result(&fix_result))
+                Some(auto::summarize_audit_fix_result(&fix_result))
             } else {
                 None
             },
@@ -580,7 +580,7 @@ fn run_lint_stage(
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    let fix_sidecars = autofix::AutofixSidecarFiles::for_plan();
+    let fix_sidecars = auto::AutofixSidecarFiles::for_plan();
     let before_fix = if plan_mode {
         Some(snapshot_tree(&sandbox_component.local_path)?)
     } else {
@@ -661,7 +661,7 @@ fn run_lint_stage(
             files_modified: changed_files.len(),
             detected_findings: Some(lint_findings.len()),
             changed_files,
-            fix_summary: autofix::summarize_optional_fix_results(&fix_results),
+            fix_summary: auto::summarize_optional_fix_results(&fix_results),
             warnings: Vec::new(),
         },
         fix_results,
@@ -684,7 +684,7 @@ fn run_test_stage(
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
-    let fix_sidecars = autofix::AutofixSidecarFiles::for_plan();
+    let fix_sidecars = auto::AutofixSidecarFiles::for_plan();
     let before_fix = if plan_mode {
         Some(snapshot_tree(&sandbox_component.local_path)?)
     } else {
@@ -749,7 +749,7 @@ fn run_test_stage(
             files_modified: changed_files.len(),
             detected_findings: None,
             changed_files,
-            fix_summary: autofix::summarize_optional_fix_results(&fix_results),
+            fix_summary: auto::summarize_optional_fix_results(&fix_results),
             warnings: Vec::new(),
         },
         fix_results,

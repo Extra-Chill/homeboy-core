@@ -5,8 +5,7 @@ use homeboy::component::Component;
 use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use homeboy::git;
 use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
-use homeboy::refactor::{run_lint_refactor, AppliedRefactor, LintSourceOptions};
-use homeboy::utils::autofix::{self, AutofixMode};
+use homeboy::refactor::{auto::{self, AutofixMode}, run_lint_refactor, AppliedRefactor, LintSourceOptions};
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -204,7 +203,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
             true,
         )?;
 
-        let outcome = autofix::standard_outcome(
+        let outcome = auto::standard_outcome(
             AutofixMode::Write,
             plan.files_modified,
             Some(format!("homeboy test {} --analyze", args.comp.component)),

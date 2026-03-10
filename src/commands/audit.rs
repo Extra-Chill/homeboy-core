@@ -2,10 +2,9 @@ use clap::Args;
 use homeboy::code_audit::{self, baseline, fixer, CodeAuditResult};
 use homeboy::git;
 use homeboy::refactor::{
-    run_audit_refactor, AuditConvergenceScoring, AuditRefactorIterationSummary,
-    AuditVerificationToggles,
+    auto::{self, AutofixMode, FixResultsSummary}, run_audit_refactor, AuditConvergenceScoring,
+    AuditRefactorIterationSummary, AuditVerificationToggles,
 };
-use homeboy::utils::autofix::{self, AutofixMode, FixResultsSummary};
 use serde::Serialize;
 use std::path::Path;
 
@@ -412,7 +411,7 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
             }
         }
 
-        let outcome = autofix::standard_outcome(
+        let outcome = auto::standard_outcome(
             if written {
                 AutofixMode::Write
             } else {
@@ -434,7 +433,7 @@ fn run_inner(args: AuditArgs) -> CmdResult<AuditOutput> {
 
         // Bridge to universal fix summary (before strip_code mutates the data).
         let fix_summary = if written && final_fix_result.files_modified > 0 {
-            Some(autofix::summarize_audit_fix_result(&final_fix_result))
+            Some(auto::summarize_audit_fix_result(&final_fix_result))
         } else {
             None
         };
