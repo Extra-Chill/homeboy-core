@@ -14,10 +14,10 @@ use regex::Regex;
 
 use super::conventions::{AuditFinding, Language};
 use super::naming::{detect_naming_suffix, suffix_matches};
-use super::preflight;
 use super::test_mapping::source_to_test_path;
 use super::{duplication, CodeAuditResult};
 use crate::core::refactor::decompose;
+use crate::core::refactor::auto::preflight;
 
 /// Callback that verifies an applied chunk, returning Ok(message) or Err(reason).
 pub type ChunkVerifier<'a> = &'a dyn Fn(&ApplyChunkResult) -> Result<String, String>;

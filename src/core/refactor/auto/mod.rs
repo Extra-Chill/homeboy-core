@@ -1,4 +1,5 @@
 pub mod outcome;
+pub mod preflight;
 pub mod sidecar;
 pub mod summary;
 pub mod tracking;
@@ -10,7 +11,7 @@ pub use crate::code_audit::fixer::{
     InsertionKind, NewFile, PolicySummary, PreflightCheck, PreflightContext, PreflightReport,
     PreflightStatus, SkippedFile,
 };
-pub use crate::code_audit::preflight::{
+pub use preflight::{
     run_fix_preflight, run_insertion_preflight, run_new_file_preflight,
 };
 pub use outcome::{
