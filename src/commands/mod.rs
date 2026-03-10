@@ -286,6 +286,8 @@ pub mod logs;
 pub mod project;
 pub mod refactor;
 pub mod release;
+#[cfg(test)]
+pub mod refactor_tests;
 pub mod server;
 pub mod ssh;
 pub mod status;
