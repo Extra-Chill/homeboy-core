@@ -9,7 +9,7 @@ use crate::undo::UndoSnapshot;
 use crate::utils::autofix::{self, FixApplied, FixResultsSummary};
 use crate::Error;
 use serde::Serialize;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 pub const KNOWN_PLAN_SOURCES: &[&str] = &["audit", "lint", "test"];
@@ -167,7 +167,10 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
     }
 
     let proposals = collect_fix_proposals(&planned_stages);
-    let mut stage_summaries: Vec<PlanStageSummary> = planned_stages.into_iter().map(|stage| stage.summary).collect();
+    let mut stage_summaries: Vec<PlanStageSummary> = planned_stages
+        .into_iter()
+        .map(|stage| stage.summary)
+        .collect();
     let changed_files = collect_stage_changed_files(&stage_summaries);
     let overlaps = analyze_stage_overlaps(&stage_summaries);
     if !overlaps.is_empty() {
@@ -256,7 +259,10 @@ pub fn normalize_sources(sources: &[String]) -> crate::Result<Vec<String>> {
             "from",
             format!("Unknown refactor source(s): {}", unknown.join(", ")),
             None,
-            Some(vec![format!("Known sources: {}", KNOWN_PLAN_SOURCES.join(", "))]),
+            Some(vec![format!(
+                "Known sources: {}",
+                KNOWN_PLAN_SOURCES.join(", ")
+            )]),
         ));
     }
 
@@ -362,7 +368,12 @@ fn plan_audit_stage(
                 duplicate_groups: vec![],
             }
         } else {
-            crate::code_audit::audit_path_scoped(component_id, &root.to_string_lossy(), changed, None)?
+            crate::code_audit::audit_path_scoped(
+                component_id,
+                &root.to_string_lossy(),
+                changed,
+                None,
+            )?
         }
     } else {
         crate::code_audit::audit_path_with_id(component_id, &root.to_string_lossy())?
@@ -374,7 +385,8 @@ fn plan_audit_stage(
         exclude: exclude.to_vec(),
     };
     let preflight_context = fixer::PreflightContext { root };
-    let policy_summary = fixer::apply_fix_policy(&mut fix_result, write, &policy, &preflight_context);
+    let policy_summary =
+        fixer::apply_fix_policy(&mut fix_result, write, &policy, &preflight_context);
 
     let changed_files = collect_audit_changed_files(&fix_result);
     let fix_results = summarize_audit_fix_result_entries(&fix_result);
@@ -401,7 +413,8 @@ fn plan_audit_stage(
             files_modified: changed_files.len(),
             detected_findings: Some(result.findings.len()),
             changed_files,
-            fix_summary: if policy_summary.visible_insertions + policy_summary.visible_new_files > 0 {
+            fix_summary: if policy_summary.visible_insertions + policy_summary.visible_new_files > 0
+            {
                 Some(autofix::summarize_audit_fix_result(&fix_result))
             } else {
                 None
@@ -434,7 +447,7 @@ fn run_lint_stage(
     let fix_results_file = autofix::fix_results_temp_path();
     let fix_plan_file = autofix::fix_plan_temp_path();
     let before_fix = if plan_mode {
-        Some(autofix::changed_file_set(&sandbox_component.local_path)?)
+        Some(snapshot_tree(&sandbox_component.local_path)?)
     } else {
         None
     };
@@ -462,23 +475,27 @@ fn run_lint_stage(
         .settings(settings)
         .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1")
         .env_opt("HOMEBOY_LINT_GLOB", &effective_glob)
-        .env("HOMEBOY_LINT_FINDINGS_FILE", &findings_file.to_string_lossy())
-        .env_if(plan_mode, "HOMEBOY_FIX_PLAN_FILE", &fix_plan_file.to_string_lossy())
-        .env_if(plan_mode, "HOMEBOY_FIX_RESULTS_FILE", &fix_results_file.to_string_lossy())
+        .env(
+            "HOMEBOY_LINT_FINDINGS_FILE",
+            &findings_file.to_string_lossy(),
+        )
+        .env_if(
+            plan_mode,
+            "HOMEBOY_FIX_PLAN_FILE",
+            &fix_plan_file.to_string_lossy(),
+        )
+        .env_if(
+            plan_mode,
+            "HOMEBOY_FIX_RESULTS_FILE",
+            &fix_results_file.to_string_lossy(),
+        )
         .run()?;
 
     let changed_files = if plan_mode {
-        let after_fix = autofix::changed_file_set(&sandbox_component.local_path)?;
+        let after_fix = snapshot_tree(&sandbox_component.local_path)?;
         before_fix
             .as_ref()
-            .map(|before| {
-                after_fix
-                    .difference(before)
-                    .cloned()
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect()
-            })
+            .map(|before| diff_tree_snapshots(before, &after_fix))
             .unwrap_or_default()
     } else {
         Vec::new()
@@ -535,7 +552,7 @@ fn run_test_stage(
     let fix_results_file = autofix::fix_results_temp_path();
     let fix_plan_file = autofix::fix_plan_temp_path();
     let before_fix = if plan_mode {
-        Some(autofix::changed_file_set(&sandbox_component.local_path)?)
+        Some(snapshot_tree(&sandbox_component.local_path)?)
     } else {
         None
     };
@@ -544,8 +561,16 @@ fn run_test_stage(
         .component(sandbox_component.clone())
         .settings(settings)
         .env("HOMEBOY_TEST_RESULTS_FILE", &results_file.to_string_lossy())
-        .env_if(plan_mode, "HOMEBOY_FIX_PLAN_FILE", &fix_plan_file.to_string_lossy())
-        .env_if(plan_mode, "HOMEBOY_FIX_RESULTS_FILE", &fix_results_file.to_string_lossy())
+        .env_if(
+            plan_mode,
+            "HOMEBOY_FIX_PLAN_FILE",
+            &fix_plan_file.to_string_lossy(),
+        )
+        .env_if(
+            plan_mode,
+            "HOMEBOY_FIX_RESULTS_FILE",
+            &fix_results_file.to_string_lossy(),
+        )
         .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1");
 
     if let Some(changed_test_files) = changed_test_files {
@@ -557,17 +582,10 @@ fn run_test_stage(
     runner.run()?;
 
     let changed_files = if plan_mode {
-        let after_fix = autofix::changed_file_set(&sandbox_component.local_path)?;
+        let after_fix = snapshot_tree(&sandbox_component.local_path)?;
         before_fix
             .as_ref()
-            .map(|before| {
-                after_fix
-                    .difference(before)
-                    .cloned()
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect()
-            })
+            .map(|before| diff_tree_snapshots(before, &after_fix))
             .unwrap_or_default()
     } else {
         Vec::new()
@@ -623,8 +641,12 @@ impl Drop for SandboxDir {
 
 fn clone_tree(src: &Path) -> crate::Result<SandboxDir> {
     let temp = std::env::temp_dir().join(format!("homeboy-refactor-ci-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("create temp refactor sandbox".to_string())))?;
+    std::fs::create_dir_all(&temp).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some("create temp refactor sandbox".to_string()),
+        )
+    })?;
     copy_dir_recursive(src, &temp)?;
     Ok(SandboxDir { path: temp })
 }
@@ -647,29 +669,98 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> crate::Result<()> {
             }
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            std::fs::copy(&src_path, &dst_path)
-                .map_err(|e| Error::internal_io(e.to_string(), Some("copy sandbox file".to_string())))?;
+            std::fs::copy(&src_path, &dst_path).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("copy sandbox file".to_string()))
+            })?;
         }
     }
 
     Ok(())
 }
 
-fn copy_changed_files(src_root: &Path, dst_root: &Path, changed_files: &[String]) -> crate::Result<()> {
+fn copy_changed_files(
+    src_root: &Path,
+    dst_root: &Path,
+    changed_files: &[String],
+) -> crate::Result<()> {
     for file in changed_files {
         let src = src_root.join(file);
         let dst = dst_root.join(file);
 
         if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| Error::internal_io(e.to_string(), Some(format!("create parent for {}", file))))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                Error::internal_io(e.to_string(), Some(format!("create parent for {}", file)))
+            })?;
         }
 
-        std::fs::copy(&src, &dst)
-            .map_err(|e| Error::internal_io(e.to_string(), Some(format!("copy changed file {}", file))))?;
+        std::fs::copy(&src, &dst).map_err(|e| {
+            Error::internal_io(e.to_string(), Some(format!("copy changed file {}", file)))
+        })?;
     }
 
     Ok(())
+}
+
+fn snapshot_tree(root: &str) -> crate::Result<BTreeMap<String, u64>> {
+    let root_path = Path::new(root);
+    let mut files = BTreeMap::new();
+    snapshot_tree_recursive(root_path, root_path, &mut files)?;
+    Ok(files)
+}
+
+fn snapshot_tree_recursive(
+    root: &Path,
+    dir: &Path,
+    files: &mut BTreeMap<String, u64>,
+) -> crate::Result<()> {
+    for entry in std::fs::read_dir(dir)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read sandbox dir".to_string())))?
+    {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(e.to_string(), Some("read sandbox entry".to_string()))
+        })?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            snapshot_tree_recursive(root, &path, files)?;
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|e| {
+                Error::internal_io(e.to_string(), Some("strip sandbox prefix".to_string()))
+            })?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let metadata = std::fs::metadata(&path).map_err(|e| {
+            Error::internal_io(e.to_string(), Some("stat sandbox file".to_string()))
+        })?;
+        files.insert(relative, metadata.len());
+    }
+
+    Ok(())
+}
+
+fn diff_tree_snapshots(
+    before: &BTreeMap<String, u64>,
+    after: &BTreeMap<String, u64>,
+) -> Vec<String> {
+    let mut changed = BTreeSet::new();
+
+    for (file, size) in after {
+        if before.get(file) != Some(size) {
+            changed.insert(file.clone());
+        }
+    }
+
+    for file in before.keys() {
+        if !after.contains_key(file) {
+            changed.insert(file.clone());
+        }
+    }
+
+    changed.into_iter().collect()
 }
 
 fn collect_audit_changed_files(fix_result: &fixer::FixResult) -> Vec<String> {
@@ -719,7 +810,11 @@ pub fn analyze_stage_overlaps(stages: &[PlanStageSummary]) -> Vec<PlanOverlap> {
             continue;
         }
 
-        let later_files: BTreeSet<&str> = later_stage.changed_files.iter().map(String::as_str).collect();
+        let later_files: BTreeSet<&str> = later_stage
+            .changed_files
+            .iter()
+            .map(String::as_str)
+            .collect();
 
         for earlier_stage in stages.iter().take(later_index) {
             if earlier_stage.changed_files.is_empty() {
@@ -752,9 +847,15 @@ pub fn analyze_stage_overlaps(stages: &[PlanStageSummary]) -> Vec<PlanOverlap> {
     overlaps
 }
 
-pub fn summarize_plan_totals(stages: &[PlanStageSummary], total_files_selected: usize) -> PlanTotals {
+pub fn summarize_plan_totals(
+    stages: &[PlanStageSummary],
+    total_files_selected: usize,
+) -> PlanTotals {
     PlanTotals {
-        stages_with_proposals: stages.iter().filter(|stage| stage.fixes_proposed > 0).count(),
+        stages_with_proposals: stages
+            .iter()
+            .filter(|stage| stage.fixes_proposed > 0)
+            .count(),
         total_fixes_proposed: stages.iter().map(|stage| stage.fixes_proposed).sum(),
         total_files_selected,
     }
