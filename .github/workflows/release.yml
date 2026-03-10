@@ -195,7 +195,6 @@ jobs:
           commands: audit
           auto-issue: 'true'
           autofix: 'false'
-          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   gate-lint:
     name: Lint
@@ -231,7 +230,6 @@ jobs:
           component: homeboy
           commands: lint
           autofix: 'false'
-          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   gate-test:
     name: Test
@@ -267,7 +265,6 @@ jobs:
           component: homeboy
           commands: test
           autofix: 'false'
-          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   gate-refactor:
     name: Refactor
@@ -327,19 +324,10 @@ jobs:
       release-tag: ${{ steps.release.outputs.release-tag }}
       released: ${{ steps.release.outputs.released }}
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        continue-on-error: true
-        with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
-          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Rust toolchain needed so run-release.sh can regenerate Cargo.lock
       # after bumping Cargo.toml version
@@ -354,7 +342,6 @@ jobs:
           component: homeboy
           commands: release
           release-dry-run: ${{ inputs.dry-run || 'false' }}
-          app-token: ${{ steps.app-token.outputs.token || '' }}
 
   # ── Step 4: Build cross-platform binaries ──
   plan:
