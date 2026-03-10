@@ -191,3 +191,88 @@ pub(crate) fn should_remove_broken_doc_line(line: &str, dead_path: &str) -> bool
 pub(crate) fn is_actionable_comment_finding(kind: &AuditFinding) -> bool {
     matches!(kind, AuditFinding::TodoMarker | AuditFinding::LegacyComment)
 }
+
+pub(crate) fn generate_fallback_signature(
+    method_name: &str,
+    language: &Language,
+) -> fixer::MethodSignature {
+    let signature = match language {
+        Language::Php => format!("public function {}()", method_name),
+        Language::Rust => format!("pub fn {}()", method_name),
+        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
+        Language::Unknown => format!("{}()", method_name),
+    };
+
+    fixer::MethodSignature {
+        name: method_name.to_string(),
+        signature,
+        language: language.clone(),
+    }
+}
+
+pub(crate) fn extract_function_name_from_unreferenced(description: &str) -> Option<String> {
+    let needle = "Public function '";
+    let start = description.find(needle)? + needle.len();
+    let rest = &description[start..];
+    let end = rest.find('\'')?;
+    Some(rest[..end].to_string())
+}
+
+pub(crate) fn module_path_from_file(file_path: &str) -> String {
+    crate::core::symbol_graph::module_path_from_file(file_path)
+}
+
+fn normalize_item_name(name: &str) -> String {
+    name.trim().to_string()
+}
+
+pub(crate) fn find_parsed_item_by_name<'a>(
+    items: &'a [crate::extension::ParsedItem],
+    requested_name: &str,
+) -> Option<&'a crate::extension::ParsedItem> {
+    if let Some(exact) = items.iter().find(|item| item.name == requested_name) {
+        return Some(exact);
+    }
+
+    let requested = normalize_item_name(requested_name);
+    let mut normalized_matches = items
+        .iter()
+        .filter(|item| normalize_item_name(&item.name) == requested);
+
+    let first = normalized_matches.next()?;
+    if normalized_matches.next().is_some() {
+        return None;
+    }
+
+    Some(first)
+}
+
+pub(crate) fn parse_items_for_dedup(
+    file_ext: &str,
+    content: &str,
+    file_path: &str,
+) -> Option<Vec<crate::extension::ParsedItem>> {
+    if let Some(grammar) = crate::code_audit::core_fingerprint::load_grammar_for_ext(file_ext) {
+        let items = crate::utils::grammar_items::parse_items(content, &grammar);
+        if !items.is_empty() {
+            return Some(
+                items
+                    .into_iter()
+                    .map(crate::extension::ParsedItem::from)
+                    .collect(),
+            );
+        }
+    }
+
+    let manifest = crate::extension::find_extension_for_file_ext(file_ext, "refactor")?;
+    let parse_cmd = serde_json::json!({
+        "command": "parse_items",
+        "file_path": file_path,
+        "content": content,
+        "items": [],
+    });
+
+    crate::extension::run_refactor_script(&manifest, &parse_cmd)
+        .and_then(|v| v.get("items").cloned())
+        .and_then(|v| serde_json::from_value(v).ok())
+}
