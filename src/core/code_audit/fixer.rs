@@ -844,7 +844,11 @@ fn generate_import_statement(import_path: &str, language: &Language) -> String {
     }
 }
 
-fn generate_type_conformance_declaration(type_name: &str, conformance: &str, language: &Language) -> String {
+fn generate_type_conformance_declaration(
+    type_name: &str,
+    conformance: &str,
+    language: &Language,
+) -> String {
     match language {
         Language::Rust => format!("\nimpl {} for {} {{\n}}\n", conformance, type_name),
         Language::Php | Language::TypeScript => conformance.to_string(),
@@ -877,7 +881,9 @@ fn insert_type_conformance(content: &str, declarations: &[&String], language: &L
     };
 
     match language {
-        Language::Php | Language::TypeScript => insert_inline_type_conformance(content, declaration, language),
+        Language::Php | Language::TypeScript => {
+            insert_inline_type_conformance(content, declaration, language)
+        }
         Language::Rust => {
             if content.contains(declaration.as_str()) {
                 content.to_string()
@@ -1281,7 +1287,10 @@ pub fn generate_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
                     InsertionKind::TypeConformance,
                     AuditFinding::MissingInterface,
                     generate_type_conformance_declaration(&type_name, conformance, &language),
-                    format!("Add declared conformance `{}` to {}", conformance, type_name),
+                    format!(
+                        "Add declared conformance `{}` to {}",
+                        conformance, type_name
+                    ),
                 ));
             }
 
@@ -3425,7 +3434,9 @@ class MyClass {
 
         let result = insert_type_conformance(content, &[&declaration], &Language::Php);
 
-        assert!(result.contains("class FlowAbility extends BaseAbility implements AbilityInterface {"));
+        assert!(
+            result.contains("class FlowAbility extends BaseAbility implements AbilityInterface {")
+        );
     }
 
     #[test]
@@ -3496,8 +3507,14 @@ class MyClass {
         let fix_result = generate_fixes(&result, &dir);
         assert_eq!(fix_result.fixes.len(), 1);
         assert_eq!(fix_result.fixes[0].insertions.len(), 1);
-        assert!(matches!(fix_result.fixes[0].insertions[0].kind, InsertionKind::TypeConformance));
-        assert_eq!(fix_result.fixes[0].insertions[0].finding, AuditFinding::MissingInterface);
+        assert!(matches!(
+            fix_result.fixes[0].insertions[0].kind,
+            InsertionKind::TypeConformance
+        ));
+        assert_eq!(
+            fix_result.fixes[0].insertions[0].finding,
+            AuditFinding::MissingInterface
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
