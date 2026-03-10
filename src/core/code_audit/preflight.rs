@@ -13,7 +13,9 @@ pub fn run_insertion_preflight(
     context: &PreflightContext<'_>,
 ) -> Option<PreflightReport> {
     match insertion.finding {
-        AuditFinding::MissingMethod | AuditFinding::MissingRegistration => {
+        AuditFinding::MissingMethod
+        | AuditFinding::MissingRegistration
+        | AuditFinding::NamespaceMismatch => {
             let abs_path = context.root.join(file);
             let content = std::fs::read_to_string(&abs_path).ok()?;
             let language = detect_language(&abs_path);
@@ -368,6 +370,7 @@ fn syntax_shape_check(content: &str, insertion: &Insertion, language: &Language)
     let detail_prefix = match insertion.finding {
         AuditFinding::MissingMethod => "generated method stub",
         AuditFinding::MissingRegistration => "generated registration/constructor",
+        AuditFinding::NamespaceMismatch => "generated namespace declaration",
         _ => "generated content",
     };
 
