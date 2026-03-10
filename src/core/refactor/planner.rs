@@ -448,8 +448,7 @@ fn run_lint_stage(
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    let fix_results_file = autofix::fix_results_temp_path();
-    let fix_plan_file = autofix::fix_plan_temp_path();
+    let fix_sidecars = autofix::AutofixSidecarFiles::for_plan();
     let before_fix = if plan_mode {
         Some(snapshot_tree(&sandbox_component.local_path)?)
     } else {
@@ -486,12 +485,16 @@ fn run_lint_stage(
         .env_if(
             plan_mode,
             "HOMEBOY_FIX_PLAN_FILE",
-            &fix_plan_file.to_string_lossy(),
+            &fix_sidecars
+                .plan_file
+                .as_ref()
+                .expect("plan sidecar initialized")
+                .to_string_lossy(),
         )
         .env_if(
             plan_mode,
             "HOMEBOY_FIX_RESULTS_FILE",
-            &fix_results_file.to_string_lossy(),
+            &fix_sidecars.results_file.to_string_lossy(),
         )
         .run()?;
 
@@ -505,16 +508,9 @@ fn run_lint_stage(
         Vec::new()
     };
 
-    let planned_fix_results = autofix::parse_fix_plan_file(&fix_plan_file);
-    let fix_results = if planned_fix_results.is_empty() {
-        autofix::parse_fix_results_file(&fix_results_file)
-    } else {
-        planned_fix_results
-    };
+    let fix_results = fix_sidecars.consume_fix_results();
     let fixes_proposed = fix_results.len();
     let lint_findings = lint_baseline::parse_findings_file(&findings_file).unwrap_or_default();
-    let _ = std::fs::remove_file(&fix_results_file);
-    let _ = std::fs::remove_file(&fix_plan_file);
     let _ = std::fs::remove_file(&findings_file);
 
     Ok(PlannedStage {
@@ -527,11 +523,7 @@ fn run_lint_stage(
             files_modified: changed_files.len(),
             detected_findings: Some(lint_findings.len()),
             changed_files,
-            fix_summary: if fix_results.is_empty() {
-                None
-            } else {
-                Some(autofix::summarize_fix_results(&fix_results))
-            },
+            fix_summary: autofix::summarize_optional_fix_results(&fix_results),
             warnings: Vec::new(),
         },
         fix_results,
@@ -553,8 +545,7 @@ fn run_test_stage(
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
-    let fix_results_file = autofix::fix_results_temp_path();
-    let fix_plan_file = autofix::fix_plan_temp_path();
+    let fix_sidecars = autofix::AutofixSidecarFiles::for_plan();
     let before_fix = if plan_mode {
         Some(snapshot_tree(&sandbox_component.local_path)?)
     } else {
@@ -568,12 +559,16 @@ fn run_test_stage(
         .env_if(
             plan_mode,
             "HOMEBOY_FIX_PLAN_FILE",
-            &fix_plan_file.to_string_lossy(),
+            &fix_sidecars
+                .plan_file
+                .as_ref()
+                .expect("plan sidecar initialized")
+                .to_string_lossy(),
         )
         .env_if(
             plan_mode,
             "HOMEBOY_FIX_RESULTS_FILE",
-            &fix_results_file.to_string_lossy(),
+            &fix_sidecars.results_file.to_string_lossy(),
         )
         .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1");
 
@@ -595,15 +590,8 @@ fn run_test_stage(
         Vec::new()
     };
 
-    let planned_fix_results = autofix::parse_fix_plan_file(&fix_plan_file);
-    let fix_results = if planned_fix_results.is_empty() {
-        autofix::parse_fix_results_file(&fix_results_file)
-    } else {
-        planned_fix_results
-    };
+    let fix_results = fix_sidecars.consume_fix_results();
     let fixes_proposed = fix_results.len();
-    let _ = std::fs::remove_file(&fix_results_file);
-    let _ = std::fs::remove_file(&fix_plan_file);
     let _ = std::fs::remove_file(&results_file);
 
     Ok(PlannedStage {
@@ -616,11 +604,7 @@ fn run_test_stage(
             files_modified: changed_files.len(),
             detected_findings: None,
             changed_files,
-            fix_summary: if fix_results.is_empty() {
-                None
-            } else {
-                Some(autofix::summarize_fix_results(&fix_results))
-            },
+            fix_summary: autofix::summarize_optional_fix_results(&fix_results),
             warnings: Vec::new(),
         },
         fix_results,

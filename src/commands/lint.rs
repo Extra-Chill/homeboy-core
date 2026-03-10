@@ -5,7 +5,8 @@ use homeboy::component::Component;
 use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use homeboy::git;
 use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
-use homeboy::utils::autofix::{self, AutofixMode, FixResultsSummary};
+use homeboy::refactor::AppliedRefactor;
+use homeboy::utils::autofix::{self, AutofixMode};
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -71,23 +72,13 @@ pub struct LintOutput {
     component: String,
     exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    autofix: Option<LintAutofixOutput>,
+    autofix: Option<AppliedRefactor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hints: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     baseline_comparison: Option<LintBaselineComparison>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lint_findings: Option<Vec<LintFinding>>,
-}
-
-#[derive(Serialize)]
-pub struct LintAutofixOutput {
-    files_modified: usize,
-    rerun_recommended: bool,
-    /// Structured summary of what the extension fixed (populated when the
-    /// extension writes to `HOMEBOY_FIX_RESULTS_FILE`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fix_summary: Option<FixResultsSummary>,
 }
 
 pub(crate) fn resolve_lint_command(
@@ -108,10 +99,10 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    let fix_results_file = autofix::fix_results_temp_path();
+    let fix_sidecars = autofix::AutofixSidecarFiles::for_apply();
 
     let before_fix_files = if args.fix {
-        Some(autofix::changed_file_set(&component.local_path)?)
+        Some(autofix::begin_applied_fix_capture(&component.local_path)?)
     } else {
         None
     };
@@ -208,7 +199,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
         .env_if(
             args.fix,
             "HOMEBOY_FIX_RESULTS_FILE",
-            &fix_results_file.to_string_lossy(),
+            &fix_sidecars.results_file.to_string_lossy(),
         )
         .run()?;
 
@@ -221,25 +212,15 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
     let mut hints = Vec::new();
 
     if args.fix {
-        let after_fix_files = autofix::changed_file_set(&component.local_path)?;
-        let files_modified = before_fix_files
-            .as_ref()
-            .map(|before| autofix::count_newly_changed(before, &after_fix_files))
-            .unwrap_or(0);
-
-        // Read structured fix results from extension sidecar (if written).
-        let fix_results = autofix::parse_fix_results_file(&fix_results_file);
-        let _ = std::fs::remove_file(&fix_results_file);
-
-        let fix_summary = if fix_results.is_empty() {
-            None
-        } else {
-            Some(autofix::summarize_fix_results(&fix_results))
-        };
+        let capture = autofix::finish_applied_fix_capture(
+            &component.local_path,
+            before_fix_files.as_ref().expect("fix capture initialized"),
+            &fix_sidecars,
+        )?;
 
         let outcome = autofix::standard_outcome(
             AutofixMode::Write,
-            files_modified,
+            capture.files_modified,
             Some(format!("homeboy test {} --analyze", args.comp.component)),
             vec![],
         );
@@ -249,11 +230,10 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
         }
 
         hints.extend(outcome.hints.clone());
-        autofix = Some(LintAutofixOutput {
-            files_modified,
-            rerun_recommended: outcome.rerun_recommended,
-            fix_summary,
-        });
+        autofix = Some(AppliedRefactor::from_capture(
+            capture,
+            outcome.rerun_recommended,
+        ));
     }
 
     // Baseline lifecycle

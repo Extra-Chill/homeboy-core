@@ -3,6 +3,9 @@
 //! Walks source files, finds all references to a term (with word-boundary matching
 //! and case-variant awareness), generates edits, and optionally applies them.
 
+use crate::utils::autofix::{AppliedAutofixCapture, FixResultsSummary};
+use serde::Serialize;
+
 pub mod add;
 pub mod decompose;
 pub mod move_items;
@@ -11,6 +14,29 @@ mod rename;
 pub mod runner;
 mod sandbox;
 pub mod transform;
+
+/// Shared output for detector-triggered refactors/fixes.
+///
+/// Commands like `lint --fix` and `test --fix` are detector-driven entrypoints,
+/// but the write path is still a refactor. Keep the applied-change reporting in
+/// refactor so commands don't invent parallel output models.
+#[derive(Debug, Clone, Serialize)]
+pub struct AppliedRefactor {
+    pub files_modified: usize,
+    pub rerun_recommended: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_summary: Option<FixResultsSummary>,
+}
+
+impl AppliedRefactor {
+    pub fn from_capture(capture: AppliedAutofixCapture, rerun_recommended: bool) -> Self {
+        Self {
+            files_modified: capture.files_modified,
+            rerun_recommended,
+            fix_summary: capture.fix_summary,
+        }
+    }
+}
 
 pub use add::{add_import, fixes_from_audit, AddResult};
 pub use decompose::{
