@@ -25,11 +25,7 @@ struct ResolvedRunnerContext {
 /// Encapsulates the shared logic for finding components, resolving extensions,
 /// loading manifests, merging settings, and executing runner scripts.
 pub struct ExtensionRunner {
-    component_id: String,
-    script_path: String, // Relative to extension root (e.g., "scripts/lint/lint-runner.sh")
-    extension_id: Option<String>,
-    capability: Option<ExtensionCapability>,
-    execution_context: Option<ExtensionExecutionContext>,
+    execution_context: ExtensionExecutionContext,
     settings_overrides: Vec<(String, String)>,
     env_vars: Vec<(String, String)>,
     script_args: Vec<String>,
@@ -38,25 +34,6 @@ pub struct ExtensionRunner {
 }
 
 impl ExtensionRunner {
-    /// Create a new ExtensionRunner for a component and script.
-    ///
-    /// - `component_id`: The component to run the script for
-    /// - `script_path`: Path to the script relative to extension root (e.g., "scripts/lint/lint-runner.sh")
-    pub fn new(component_id: &str, script_path: &str) -> Self {
-        Self {
-            component_id: component_id.to_string(),
-            script_path: script_path.to_string(),
-            extension_id: None,
-            capability: None,
-            execution_context: None,
-            settings_overrides: Vec::new(),
-            env_vars: Vec::new(),
-            script_args: Vec::new(),
-            path_override: None,
-            pre_loaded_component: None,
-        }
-    }
-
     /// Use a pre-loaded component instead of loading by ID.
     ///
     /// This avoids re-loading from config when the caller already has a
@@ -69,29 +46,13 @@ impl ExtensionRunner {
     /// Create a runner from a pre-resolved execution context.
     pub fn for_context(execution_context: ExtensionExecutionContext) -> Self {
         Self {
-            component_id: execution_context.component.id.clone(),
-            script_path: execution_context.script_path.clone(),
-            extension_id: Some(execution_context.extension_id.clone()),
-            capability: Some(execution_context.capability),
-            execution_context: Some(execution_context),
+            execution_context,
             settings_overrides: Vec::new(),
             env_vars: Vec::new(),
             script_args: Vec::new(),
             path_override: None,
             pre_loaded_component: None,
         }
-    }
-
-    /// Set the resolved extension explicitly to avoid secondary selection.
-    pub fn extension_id(mut self, extension_id: impl Into<String>) -> Self {
-        self.extension_id = Some(extension_id.into());
-        self
-    }
-
-    /// Set the capability explicitly to avoid inferring from script naming.
-    pub fn capability(mut self, capability: ExtensionCapability) -> Self {
-        self.capability = Some(capability);
-        self
     }
 
     /// Override the component's `local_path` for this execution.
@@ -170,7 +131,7 @@ impl ExtensionRunner {
 
     fn resolve_context(&self) -> Result<ResolvedRunnerContext> {
         let component = self.find_component()?;
-        let execution = self.resolve_execution(&component)?;
+        let execution = self.resolve_execution(component);
 
         self.validate_script_exists(&execution.extension_path, &execution.script_path)?;
 
@@ -183,47 +144,20 @@ impl ExtensionRunner {
         })
     }
 
-    fn resolve_execution(&self, component: &Component) -> Result<ExtensionExecutionContext> {
-        if let Some(execution_context) = &self.execution_context {
-            let mut execution = execution_context.clone();
-            execution.component = component.clone();
-            if let Some(ref path) = self.path_override {
-                execution.component.local_path = path.clone();
-            }
-            execution.script_path = self.script_path.clone();
-            return Ok(execution);
+    fn resolve_execution(&self, component: Component) -> ExtensionExecutionContext {
+        let mut execution = self.execution_context.clone();
+        execution.component = component;
+        if let Some(ref path) = self.path_override {
+            execution.component.local_path = path.clone();
         }
-
-        if let (Some(extension_id), Some(capability)) = (&self.extension_id, self.capability) {
-            let mut execution = super::resolve_execution_context(component, capability)?;
-            if execution.extension_id != *extension_id {
-                execution.extension_id = extension_id.clone();
-                execution.extension_path = super::extension_path(extension_id);
-                execution.settings =
-                    super::extract_component_extension_settings(component, extension_id);
-            }
-            execution.script_path = self.script_path.clone();
-            return Ok(execution);
-        }
-
-        let capability = self.capability.unwrap_or_else(|| {
-            if self.script_path.contains("test") {
-                ExtensionCapability::Test
-            } else {
-                ExtensionCapability::Lint
-            }
-        });
-
-        let mut execution = super::resolve_execution_context(component, capability)?;
-        execution.script_path = self.script_path.clone();
-        Ok(execution)
+        execution
     }
 
     fn find_component(&self) -> Result<Component> {
         let mut comp = if let Some(ref pre_loaded) = self.pre_loaded_component {
             pre_loaded.clone()
         } else {
-            match component::load(&self.component_id) {
+            match component::load(&self.execution_context.component.id) {
                 Ok(c) => c,
                 Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
                     // Fall back to portable config discovery when --path is provided
@@ -231,12 +165,12 @@ impl ExtensionRunner {
                         if let Some(mut discovered) =
                             component::discover_from_portable(Path::new(path))
                         {
-                            discovered.id = self.component_id.clone();
+                            discovered.id = self.execution_context.component.id.clone();
                             discovered.local_path = path.clone();
                             discovered
                         } else {
                             Component::new(
-                                self.component_id.clone(),
+                                self.execution_context.component.id.clone(),
                                 path.clone(),
                                 String::new(),
                                 None,
@@ -346,7 +280,7 @@ impl ExtensionRunner {
         let mut env = super::execution::build_exec_env(
             extension_name,
             None, // no project context in runner
-            Some(&self.component_id),
+            Some(&self.execution_context.component.id),
             settings_json,
             Some(&extension_path.to_string_lossy()),
             None,                  // no project base_path in runner
@@ -365,7 +299,7 @@ impl ExtensionRunner {
         extension_path: &Path,
         env_vars: &[(String, String)],
     ) -> Result<CommandOutput> {
-        let script_path = extension_path.join(&self.script_path);
+        let script_path = extension_path.join(&self.execution_context.script_path);
         let mut command = shell::quote_path(&script_path.to_string_lossy());
 
         // Append script arguments if any
@@ -387,12 +321,10 @@ impl ExtensionRunner {
     }
 
     fn script_description(&self) -> &str {
-        if self.script_path.contains("test") {
-            "test"
-        } else if self.script_path.contains("lint") {
-            "lint"
-        } else {
-            "script"
+        match self.execution_context.capability {
+            ExtensionCapability::Lint => "lint",
+            ExtensionCapability::Test => "test",
+            ExtensionCapability::Build => "build",
         }
     }
 }
