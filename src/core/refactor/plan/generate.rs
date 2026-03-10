@@ -192,24 +192,6 @@ pub(crate) fn is_actionable_comment_finding(kind: &AuditFinding) -> bool {
     matches!(kind, AuditFinding::TodoMarker | AuditFinding::LegacyComment)
 }
 
-pub(crate) fn generate_fallback_signature(
-    method_name: &str,
-    language: &Language,
-) -> fixer::MethodSignature {
-    let signature = match language {
-        Language::Php => format!("public function {}()", method_name),
-        Language::Rust => format!("pub fn {}()", method_name),
-        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
-        Language::Unknown => format!("{}()", method_name),
-    };
-
-    fixer::MethodSignature {
-        name: method_name.to_string(),
-        signature,
-        language: language.clone(),
-    }
-}
-
 pub(crate) fn extract_function_name_from_unreferenced(description: &str) -> Option<String> {
     let needle = "Public function '";
     let start = description.find(needle)? + needle.len();

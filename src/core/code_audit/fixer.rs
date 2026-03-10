@@ -101,14 +101,11 @@ pub enum InsertionKind {
     ConstructorWithRegistration,
     /// Add a missing import/use statement at the top of the file.
     ImportAdd,
-<<<<<<< HEAD
-    /// Add or replace a namespace declaration at the top of the file.
-    NamespaceDeclaration,
-=======
     /// Add a missing type conformance declaration to the primary type.
     /// Examples: `implements Foo`, `impl Foo for Bar`, `class X implements Foo`.
     TypeConformance,
->>>>>>> origin/main
+    /// Add or replace a namespace declaration at the top of the file.
+    NamespaceDeclaration,
     /// Remove a function definition (lines start_line..=end_line) and replace with an import.
     FunctionRemoval {
         /// 1-indexed start line (includes doc comments and attributes).
@@ -154,11 +151,8 @@ impl InsertionKind {
             }
             Self::RegistrationStub
             | Self::ConstructorWithRegistration
-<<<<<<< HEAD
-            | Self::NamespaceDeclaration
-=======
             | Self::TypeConformance
->>>>>>> origin/main
+            | Self::NamespaceDeclaration
             | Self::VisibilityChange { .. } => FixSafetyTier::SafeWithChecks,
             // Stub generation is useful for planning, but not trustworthy enough
             // for unattended auto-apply. Keep it plan-only until it graduates.
@@ -581,7 +575,6 @@ fn generate_import_statement(import_path: &str, language: &Language) -> String {
     }
 }
 
-<<<<<<< HEAD
 fn generate_namespace_declaration(namespace: &str, language: &Language) -> Option<String> {
     match language {
         Language::Php => Some(format!("namespace {};", namespace)),
@@ -620,7 +613,6 @@ fn insert_namespace_declaration(content: &str, declaration: &str, language: &Lan
     }
 }
 
-=======
 fn generate_type_conformance_declaration(
     type_name: &str,
     conformance: &str,
@@ -716,8 +708,6 @@ fn insert_inline_type_conformance(content: &str, declaration: &str, language: &L
     }
     result
 }
-
->>>>>>> origin/main
 /// Insert an import statement into file content at the correct location.
 ///
 /// Finds the last existing import/use line and inserts after it.
@@ -978,11 +968,8 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             let mut missing_methods: Vec<&str> = Vec::new();
             let mut missing_registrations: Vec<&str> = Vec::new();
             let mut missing_imports: Vec<&str> = Vec::new();
-<<<<<<< HEAD
-            let mut namespace_declarations: Vec<String> = Vec::new();
-=======
             let mut missing_interfaces: Vec<&str> = Vec::new();
->>>>>>> origin/main
+            let mut namespace_declarations: Vec<String> = Vec::new();
             let mut needs_constructor = false;
 
             for deviation in &outlier.deviations {
@@ -1021,7 +1008,13 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                             .unwrap_or(&deviation.description);
                         missing_imports.push(import_path);
                     }
-<<<<<<< HEAD
+                    AuditFinding::MissingInterface => {
+                        let conformance = deviation
+                            .description
+                            .strip_prefix("Missing interface: ")
+                            .unwrap_or(&deviation.description);
+                        missing_interfaces.push(conformance);
+                    }
                     AuditFinding::NamespaceMismatch => {
                         if let Some(expected_namespace) =
                             extract_expected_namespace(&deviation.description)
@@ -1032,14 +1025,6 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                                 namespace_declarations.push(declaration);
                             }
                         }
-=======
-                    AuditFinding::MissingInterface => {
-                        let conformance = deviation
-                            .description
-                            .strip_prefix("Missing interface: ")
-                            .unwrap_or(&deviation.description);
-                        missing_interfaces.push(conformance);
->>>>>>> origin/main
                     }
                     AuditFinding::DirectorySprawl => {
                         // Structural concern across directories; no safe automatic
@@ -1065,14 +1050,6 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                 ));
             }
 
-<<<<<<< HEAD
-            for declaration in &namespace_declarations {
-                insertions.push(insertion(
-                    InsertionKind::NamespaceDeclaration,
-                    AuditFinding::NamespaceMismatch,
-                    declaration.clone(),
-                    format!("Align namespace declaration to `{}`", declaration),
-=======
             for conformance in &missing_interfaces {
                 let Some(type_name) = content
                     .lines()
@@ -1094,7 +1071,15 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                         "Add declared conformance `{}` to {}",
                         conformance, type_name
                     ),
->>>>>>> origin/main
+                ));
+            }
+
+            for declaration in &namespace_declarations {
+                insertions.push(insertion(
+                    InsertionKind::NamespaceDeclaration,
+                    AuditFinding::NamespaceMismatch,
+                    declaration.clone(),
+                    format!("Align namespace declaration to `{}`", declaration),
                 ));
             }
 
@@ -2099,6 +2084,21 @@ pub(crate) fn module_path_from_file(file_path: &str) -> String {
     crate::core::symbol_graph::module_path_from_file(file_path)
 }
 
+fn generate_fallback_signature(method_name: &str, language: &Language) -> MethodSignature {
+    let signature = match language {
+        Language::Php => format!("public function {}()", method_name),
+        Language::Rust => format!("pub fn {}()", method_name),
+        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
+        Language::Unknown => format!("{}()", method_name),
+    };
+
+    MethodSignature {
+        name: method_name.to_string(),
+        signature,
+        language: language.clone(),
+    }
+}
+
 fn normalize_item_name(name: &str) -> String {
     name.trim().to_string()
 }
@@ -2122,22 +2122,6 @@ fn find_parsed_item_by_name<'a>(
     }
 
     Some(first)
-}
-
-/// Generate a fallback signature when no conforming file has the method.
-fn generate_fallback_signature(method_name: &str, language: &Language) -> MethodSignature {
-    let signature = match language {
-        Language::Php => format!("public function {}()", method_name),
-        Language::Rust => format!("pub fn {}()", method_name),
-        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
-        Language::Unknown => format!("{}()", method_name),
-    };
-
-    MethodSignature {
-        name: method_name.to_string(),
-        signature,
-        language: language.clone(),
-    }
 }
 
 // ============================================================================
@@ -3632,7 +3616,7 @@ pub struct TestOutput {}
 
     #[test]
     fn generate_test_method_stub_rust_uses_ignored_todo() {
-        let stub = generate_test_method_stub(
+        let stub = crate::core::refactor::plan::generate::generate_test_method_stub(
             &Language::Rust,
             "test_run",
             "src/commands/refactor.rs",
@@ -3646,8 +3630,12 @@ pub struct TestOutput {}
 
     #[test]
     fn generate_test_method_stub_php_marks_incomplete() {
-        let stub =
-            generate_test_method_stub(&Language::Php, "test_run", "inc/class-example.php", "run");
+        let stub = crate::core::refactor::plan::generate::generate_test_method_stub(
+            &Language::Php,
+            "test_run",
+            "inc/class-example.php",
+            "run",
+        );
         assert!(stub.contains("markTestIncomplete"));
         assert!(stub.contains("Autogenerated scaffold for inc/class-example.php::run"));
     }
