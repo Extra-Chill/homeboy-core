@@ -6,7 +6,10 @@
 pub mod add;
 pub mod decompose;
 pub mod move_items;
+pub mod planner;
 mod rename;
+pub mod runner;
+mod sandbox;
 pub mod transform;
 
 pub use add::{add_import, fixes_from_audit, AddResult};
@@ -15,6 +18,7 @@ pub use decompose::{
     DecomposePlan,
 };
 pub use move_items::{move_items, ImportRewrite, ItemKind, MoveResult, MovedItem};
+pub use planner::{build_refactor_plan, RefactorPlan, RefactorPlanRequest, KNOWN_PLAN_SOURCES};
 pub use rename::{
     apply_renames, find_references, find_references_with_targeting, generate_renames,
     generate_renames_with_targeting, CaseVariant, FileEdit, FileRename, Reference, RenameResult,

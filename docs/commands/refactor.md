@@ -3,14 +3,41 @@
 ## Synopsis
 
 ```sh
+homeboy refactor <COMPONENT> --from <SOURCE>... [OPTIONS]
+homeboy refactor <COMPONENT> --all [OPTIONS]
 homeboy refactor <COMMAND>
 ```
 
 ## Description
 
-Structural refactoring tools for renaming concepts across a codebase. Walks source files, finds all references to a term (with word-boundary matching and case-variant awareness), generates edits, and optionally applies them.
+Structural refactoring tools for planning and applying code changes across a codebase.
+
+The top-level `refactor` command can now build a merged refactor plan from one or more fix sources:
+
+```sh
+# Preview a merged plan from selected sources
+homeboy refactor homeboy --from audit --from lint --from test
+
+# Preview a merged plan from all known sources
+homeboy refactor homeboy --all
+
+# Apply the merged plan
+homeboy refactor homeboy --all --write
+```
+
+Supported sources today:
+
+- `audit`
+- `lint`
+- `test`
+
+`--all` expands to all known sources in canonical order.
+
+The refactor planner is source-driven and generic; CI is just one consumer of this interface.
 
 ## Subcommands
+
+The following subcommands remain available for targeted refactors:
 
 ### `rename`
 
