@@ -1,7 +1,7 @@
 use crate::code_audit::conventions::Language;
 use crate::code_audit::fixer::{
-    detect_language, ApplyChunkResult, ApplyOptions, ChunkStatus, DecomposeFixPlan, Fix,
-    FixResult, Insertion, InsertionKind, NewFile,
+    detect_language, ApplyChunkResult, ApplyOptions, ChunkStatus, DecomposeFixPlan, Fix, FixResult,
+    Insertion, InsertionKind, NewFile,
 };
 use crate::core::refactor::decompose;
 use crate::core::refactor::plan::audit::rewrite_callers_after_dedup;
@@ -210,7 +210,11 @@ pub(crate) fn insert_trait_uses(content: &str, stubs: &[&String], language: &Lan
             }
         }
         _ => {
-            let combined: String = stubs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n");
+            let combined: String = stubs
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             insert_before_closing_brace(content, &combined, language)
         }
     }
@@ -254,7 +258,9 @@ pub(crate) fn insert_type_conformance(
     };
 
     match language {
-        Language::Php | Language::TypeScript => insert_inline_type_conformance(content, declaration, language),
+        Language::Php | Language::TypeScript => {
+            insert_inline_type_conformance(content, declaration, language)
+        }
         Language::Rust => {
             if content.contains(declaration.as_str()) {
                 content.to_string()
@@ -322,11 +328,34 @@ pub(crate) fn insert_import(content: &str, import_line: &str, language: &Languag
     };
 
     let rust_definition_starts = [
-        "fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn ", "struct ", "pub struct ",
-        "pub(crate) struct ", "enum ", "pub enum ", "pub(crate) enum ", "impl ", "impl<",
-        "mod ", "pub mod ", "pub(crate) mod ", "trait ", "pub trait ", "pub(crate) trait ",
-        "const ", "pub const ", "pub(crate) const ", "static ", "pub static ",
-        "pub(crate) static ", "type ", "pub type ", "pub(crate) type ", "#[cfg(test)]",
+        "fn ",
+        "pub fn ",
+        "pub(crate) fn ",
+        "pub(super) fn ",
+        "struct ",
+        "pub struct ",
+        "pub(crate) struct ",
+        "enum ",
+        "pub enum ",
+        "pub(crate) enum ",
+        "impl ",
+        "impl<",
+        "mod ",
+        "pub mod ",
+        "pub(crate) mod ",
+        "trait ",
+        "pub trait ",
+        "pub(crate) trait ",
+        "const ",
+        "pub const ",
+        "pub(crate) const ",
+        "static ",
+        "pub static ",
+        "pub(crate) static ",
+        "type ",
+        "pub type ",
+        "pub(crate) type ",
+        "#[cfg(test)]",
     ];
 
     let mut last_import_idx = None;
@@ -366,7 +395,11 @@ pub(crate) fn insert_import(content: &str, import_line: &str, language: &Languag
                 break;
             }
         }
-        if first_code > 0 { first_code - 1 } else { 0 }
+        if first_code > 0 {
+            first_code - 1
+        } else {
+            0
+        }
     };
 
     let mut result = String::with_capacity(content.len() + import_line.len() + 2);

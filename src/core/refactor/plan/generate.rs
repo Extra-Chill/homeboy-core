@@ -84,7 +84,10 @@ fn stub_body(method_name: &str, language: &Language) -> String {
         }
         Language::Rust => format!("        todo!(\"{}\")", method_name),
         Language::JavaScript | Language::TypeScript => {
-            format!("        throw new Error('Not implemented: {}');", method_name)
+            format!(
+                "        throw new Error('Not implemented: {}');",
+                method_name
+            )
         }
         Language::Unknown => String::new(),
     }
@@ -278,7 +281,7 @@ pub(crate) fn test_method_exists_in_file(
     new_files: &[fixer::NewFile],
 ) -> bool {
     if let Some(new_file) = new_files.iter().find(|new_file| new_file.file == test_file) {
-        return new_file.content.contains(&expected_test_method);
+        return new_file.content.contains(expected_test_method);
     }
 
     let abs_path = root.join(test_file);
@@ -448,7 +451,12 @@ pub(crate) fn extract_signatures_from_items(
 
     symbols
         .into_iter()
-        .filter(|symbol| matches!(symbol.concept.as_str(), "function" | "free_function" | "method"))
+        .filter(|symbol| {
+            matches!(
+                symbol.concept.as_str(),
+                "function" | "free_function" | "method"
+            )
+        })
         .filter_map(|symbol| {
             let name = symbol.name()?.to_string();
             let line_idx = symbol.line.checked_sub(1)?;

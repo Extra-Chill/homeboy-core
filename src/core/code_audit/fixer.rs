@@ -432,7 +432,10 @@ fn generate_type_conformance_declaration(
     )
 }
 
-pub(crate) fn primary_type_name_from_declaration(line: &str, language: &Language) -> Option<String> {
+pub(crate) fn primary_type_name_from_declaration(
+    line: &str,
+    language: &Language,
+) -> Option<String> {
     let trimmed = line.trim();
     match language {
         Language::Php | Language::TypeScript => Regex::new(r"\b(?:class|interface|trait)\s+(\w+)")
@@ -877,7 +880,12 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             crate::core::refactor::plan::generate::extract_test_file_from_missing_test_method(
                 &finding.description,
             )
-            .or_else(|| crate::core::refactor::plan::generate::derive_expected_test_file_path(root, &finding.file));
+            .or_else(|| {
+                crate::core::refactor::plan::generate::derive_expected_test_file_path(
+                    root,
+                    &finding.file,
+                )
+            });
 
         // For inline-test languages (Rust), when no separate test file is derived,
         // insert the test method directly into the source file's #[cfg(test)] module.
@@ -3603,10 +3611,11 @@ class FlowAbilities {
             files_modified: 0,
         };
 
-        let (_, expected_path) = crate::core::refactor::plan::generate::mapping_from_source_comment(
-            &result.new_files[0].content,
-        )
-        .unwrap();
+        let (_, expected_path) =
+            crate::core::refactor::plan::generate::mapping_from_source_comment(
+                &result.new_files[0].content,
+            )
+            .unwrap();
         assert_eq!(expected_path, "tests/utils/token_test.rs");
 
         let summary = apply_fix_policy(
