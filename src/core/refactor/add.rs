@@ -1,15 +1,15 @@
 //! Refactor add — apply fixes from audit results or explicit additions.
 //!
 //! Two modes:
-//! - **From audit**: Parse saved audit JSON, generate fixes via `fixer::generate_fixes()`,
+//! - **From audit**: Parse saved audit JSON, generate fixes via `refactor::auto::generate_fixes()`,
 //!   optionally apply. Composable pipeline step: `audit > audit.json && refactor add --from-audit @audit.json`
 //! - **Explicit**: Add imports/stubs to files matching a glob pattern.
 //!   Example: `refactor add --import "use serde::Serialize" --to "src/commands/*.rs"`
 
 use std::path::{Path, PathBuf};
 
-use crate::code_audit::fixer::{self, Fix, FixResult, Insertion, InsertionKind};
 use crate::code_audit::CodeAuditResult;
+use crate::refactor::auto::{self, Fix, FixResult, Insertion, InsertionKind};
 use crate::{component, Result};
 
 /// Result of an explicit import addition (not from audit).
@@ -47,10 +47,10 @@ pub fn fixes_from_audit(audit: &CodeAuditResult, write: bool) -> Result<FixResul
         ));
     }
 
-    let mut fix_result = fixer::generate_fixes(audit, root);
+    let mut fix_result = auto::generate_fixes(audit, root);
 
     if write && !fix_result.fixes.is_empty() {
-        let applied = fixer::apply_fixes(&mut fix_result.fixes, root);
+        let applied = auto::apply_fixes(&mut fix_result.fixes, root);
         fix_result.files_modified = applied;
     }
 
@@ -122,7 +122,7 @@ pub fn add_import(
     let mut files_modified = 0;
 
     if write && !fixes.is_empty() {
-        files_modified = fixer::apply_fixes(&mut fixes, &root);
+        files_modified = auto::apply_fixes(&mut fixes, &root);
     }
 
     Ok(AddResult {
