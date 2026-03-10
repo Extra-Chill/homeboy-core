@@ -46,7 +46,9 @@ pub use lifecycle::{
 
 // Extension loader functions
 
+use crate::component::Component;
 use crate::config;
+use crate::error::Error;
 use crate::error::Result;
 use crate::output::MergeOutput;
 use crate::paths;
@@ -97,6 +99,104 @@ pub fn find_extension_for_file_ext(ext: &str, capability: &str) -> Option<Extens
                 _ => false,
             }
         })
+    })
+}
+
+fn no_extensions_error(component: &Component) -> Error {
+    Error::validation_invalid_argument(
+        "component",
+        format!(
+            "Component '{}' has no extensions configured and none could be auto-detected",
+            component.id
+        ),
+        None,
+        None,
+    )
+    .with_hint(format!(
+        "Add a extension: homeboy component set {} --extension wordpress",
+        component.id
+    ))
+}
+
+pub fn auto_detect_extension_id(component: &Component) -> Option<String> {
+    if let Some(ref cmd) = component.build_command {
+        if cmd.contains("extensions/wordpress") {
+            return Some("wordpress".to_string());
+        }
+    }
+
+    let expanded = shellexpand::tilde(&component.local_path);
+    let path = std::path::Path::new(expanded.as_ref());
+
+    if path.join("composer.json").exists()
+        || path.join("wp-content").exists()
+        || path.join("plugin.php").exists()
+        || path.join("wordpress").exists()
+        || path.join("phpcs.xml.dist").exists()
+    {
+        return Some("wordpress".to_string());
+    }
+
+    if path.join("Cargo.toml").exists() {
+        return Some("rust".to_string());
+    }
+
+    if path.join("package.json").exists() {
+        return Some("node".to_string());
+    }
+
+    None
+}
+
+pub fn resolve_extension_id(component: &Component) -> Result<String> {
+    if let Some(ref extensions) = component.extensions {
+        if extensions.contains_key("wordpress") {
+            return Ok("wordpress".to_string());
+        }
+
+        if let Some(key) = extensions.keys().next() {
+            return Ok(key.clone());
+        }
+    }
+
+    if let Some(detected) = auto_detect_extension_id(component) {
+        return Ok(detected);
+    }
+
+    Err(no_extensions_error(component))
+}
+
+pub fn resolve_lint_script(component: &Component) -> Result<String> {
+    let extension_id = resolve_extension_id(component)?;
+    let manifest = load_extension(&extension_id)?;
+
+    manifest.lint_script().map(|s| s.to_string()).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "extension",
+            format!(
+                "Extension '{}' does not have lint infrastructure configured (missing lint.extension_script)",
+                extension_id
+            ),
+            None,
+            None,
+        )
+    })
+}
+
+pub fn resolve_test_script(component: &Component) -> Result<String> {
+    let extension_id = resolve_extension_id(component)?;
+    let manifest = load_extension(&extension_id)?;
+
+    manifest.test_script().map(|s| s.to_string()).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "extension",
+            format!(
+                "Extension '{}' does not have test infrastructure configured (missing test.extension_script)",
+                extension_id
+            ),
+            None,
+            None,
+        )
     })
 }
 

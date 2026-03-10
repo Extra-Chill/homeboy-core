@@ -414,9 +414,9 @@ fn validate_remote_sync(component: &Component) -> Result<()> {
 /// This is the pre-release quality gate — ensures code passes lint and tests
 /// before any version bump or tag is created.
 fn validate_code_quality(component: &Component) -> Result<()> {
-    let extensions = match &component.extensions {
-        Some(ext) if !ext.is_empty() => ext,
-        _ => {
+    let extension_id = match extension::resolve_extension_id(component) {
+        Ok(id) => id,
+        Err(_) => {
             log_status!(
                 "release",
                 "No extensions configured — skipping code quality checks"
@@ -425,17 +425,7 @@ fn validate_code_quality(component: &Component) -> Result<()> {
         }
     };
 
-    // Determine which extension to use (prefer wordpress, then first available)
-    let extension_id = if extensions.contains_key("wordpress") {
-        "wordpress"
-    } else {
-        match extensions.keys().next() {
-            Some(id) => id.as_str(),
-            None => return Ok(()),
-        }
-    };
-
-    let manifest = match extension::load_extension(extension_id) {
+    let manifest = match extension::load_extension(&extension_id) {
         Ok(m) => m,
         Err(_) => {
             log_status!(

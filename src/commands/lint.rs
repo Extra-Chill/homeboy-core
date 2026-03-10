@@ -2,7 +2,6 @@ use clap::Args;
 use serde::Serialize;
 
 use homeboy::component::Component;
-use homeboy::error::Error;
 use homeboy::extension::{self, ExtensionRunner};
 use homeboy::git;
 use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
@@ -92,52 +91,7 @@ pub struct LintAutofixOutput {
 }
 
 pub(crate) fn resolve_lint_script(component: &Component) -> homeboy::error::Result<String> {
-    let extensions = component.extensions.as_ref().ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "component",
-            format!("Component '{}' has no extensions configured", component.id),
-            None,
-            None,
-        )
-        .with_hint(format!(
-            "Add a extension: homeboy component set {} --extension <extension_id>",
-            component.id
-        ))
-    })?;
-
-    let extension_id = if extensions.contains_key("wordpress") {
-        "wordpress"
-    } else {
-        extensions.keys().next().ok_or_else(|| {
-            Error::validation_invalid_argument(
-                "component",
-                format!("Component '{}' has no extensions configured", component.id),
-                None,
-                None,
-            )
-            .with_hint(format!(
-                "Add a extension: homeboy component set {} --extension <extension_id>",
-                component.id
-            ))
-        })?
-    };
-
-    let manifest = extension::load_extension(extension_id)?;
-
-    manifest
-        .lint_script()
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            Error::validation_invalid_argument(
-                "extension",
-                format!(
-                    "Extension '{}' does not have lint infrastructure configured (missing lint.extension_script)",
-                    extension_id
-                ),
-                None,
-                None,
-            )
-        })
+    extension::resolve_lint_script(component)
 }
 
 pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {

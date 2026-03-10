@@ -13,6 +13,13 @@ pub struct RunnerOutput {
     pub stderr: String,
 }
 
+struct ResolvedRunnerContext {
+    component: Component,
+    extension_name: String,
+    extension_path: PathBuf,
+    settings_json: String,
+}
+
 /// Orchestrates extension script execution for test/lint runners.
 ///
 /// Encapsulates the shared logic for finding components, resolving extensions,
@@ -108,6 +115,26 @@ impl ExtensionRunner {
     /// 7. Prepare environment variables
     /// 8. Execute via shell
     pub fn run(&self) -> Result<RunnerOutput> {
+        let resolved = self.resolve_context()?;
+        let project_path = PathBuf::from(&resolved.component.local_path);
+        let env_vars = self.prepare_env_vars(
+            &resolved.extension_path,
+            &project_path,
+            &resolved.settings_json,
+            &resolved.extension_name,
+        );
+
+        let output = self.execute_script(&resolved.extension_path, &env_vars)?;
+
+        Ok(RunnerOutput {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
+    }
+
+    fn resolve_context(&self) -> Result<ResolvedRunnerContext> {
         let component = self.find_component()?;
         let (extension_name, extension_settings) = self.determine_extension(&component)?;
         let extension_path = self.find_extension_path(&extension_name)?;
@@ -116,16 +143,12 @@ impl ExtensionRunner {
 
         let manifest = self.load_extension_manifest(&extension_path)?;
         let settings_json = self.merge_settings(&manifest, &extension_settings)?;
-        let project_path = PathBuf::from(&component.local_path);
-        let env_vars = self.prepare_env_vars(&extension_path, &project_path, &settings_json);
 
-        let output = self.execute_script(&extension_path, &env_vars)?;
-
-        Ok(RunnerOutput {
-            exit_code: output.exit_code,
-            success: output.success,
-            stdout: output.stdout,
-            stderr: output.stderr,
+        Ok(ResolvedRunnerContext {
+            component,
+            extension_name,
+            extension_path,
+            settings_json,
         })
     }
 
@@ -169,53 +192,15 @@ impl ExtensionRunner {
         &self,
         component: &Component,
     ) -> Result<(String, Vec<(String, String)>)> {
-        let extensions = component.extensions.as_ref().ok_or_else(|| {
-            Error::validation_invalid_argument(
-                "component",
-                format!(
-                    "Component '{}' has no extensions configured for {}",
-                    component.id,
-                    self.script_description()
-                ),
-                None,
-                None,
-            )
-            .with_hint(format!(
-                "Add a extension: homeboy component set {} --extension <extension_id>",
-                component.id
-            ))
-        })?;
+        let extension_name = super::resolve_extension_id(component)?;
+        let extension_settings = component
+            .extensions
+            .as_ref()
+            .and_then(|extensions| extensions.get(&extension_name))
+            .map(extract_extension_settings)
+            .unwrap_or_default();
 
-        // Prefer wordpress extension if available
-        if extensions.contains_key("wordpress") {
-            let settings = extract_extension_settings(
-                extensions
-                    .get("wordpress")
-                    .expect("wordpress extension checked above"),
-            );
-            return Ok(("wordpress".to_string(), settings));
-        }
-
-        // Otherwise use the first available extension
-        if let Some((extension_name, extension_config)) = extensions.iter().next() {
-            let settings = extract_extension_settings(extension_config);
-            return Ok((extension_name.clone(), settings));
-        }
-
-        Err(Error::validation_invalid_argument(
-            "component",
-            format!(
-                "Component '{}' has no extensions configured for {}",
-                component.id,
-                self.script_description()
-            ),
-            None,
-            None,
-        )
-        .with_hint(format!(
-            "Add a extension: homeboy component set {} --extension <extension_id>",
-            component.id
-        )))
+        Ok((extension_name, extension_settings))
     }
 
     fn find_extension_path(&self, extension_name: &str) -> Result<PathBuf> {
@@ -321,15 +306,11 @@ impl ExtensionRunner {
         extension_path: &Path,
         project_path: &Path,
         settings_json: &str,
+        extension_name: &str,
     ) -> Vec<(String, String)> {
-        let extension_name = extension_path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unknown".to_string());
-
         let component_path = project_path.to_string_lossy();
         let mut env = super::execution::build_exec_env(
-            &extension_name,
+            extension_name,
             None, // no project context in runner
             Some(&self.component_id),
             settings_json,
