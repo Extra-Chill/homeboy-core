@@ -12,6 +12,7 @@ use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::audit::{AuditConvergenceScoring, AuditVerificationToggles};
 use super::sandbox::{
     clone_tree, copy_changed_files, diff_tree_snapshots, snapshot_tree, SandboxDir,
 };
@@ -162,11 +163,10 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
         let stage = match source.as_str() {
             "audit" => plan_audit_stage(
                 &request.component.id,
-                &request.root,
+                working_root.path(),
                 scoped_changed_files.as_deref(),
                 &request.only,
                 &request.exclude,
-                Some(working_root.path()),
                 true,
             )?,
             "lint" => run_lint_stage(
@@ -380,7 +380,6 @@ fn plan_audit_stage(
     changed_files: Option<&[String]>,
     only: &[crate::code_audit::AuditFinding],
     exclude: &[crate::code_audit::AuditFinding],
-    apply_root: Option<&Path>,
     write: bool,
 ) -> crate::Result<PlannedStage> {
     let result = if let Some(changed) = changed_files {
@@ -419,23 +418,52 @@ fn plan_audit_stage(
         exclude: exclude.to_vec(),
     };
     let preflight_context = fixer::PreflightContext { root };
-    let policy_summary =
-        fixer::apply_fix_policy(&mut fix_result, write, &policy, &preflight_context);
+    let (fix_result, policy_summary, changed_files, stage_warnings) = if write {
+        let outcome = super::audit::run_audit_refactor(
+            result.clone(),
+            only,
+            exclude,
+            AuditConvergenceScoring::default(),
+            AuditVerificationToggles {
+                lint_smoke: true,
+                test_smoke: true,
+            },
+            3,
+            true,
+        )?;
 
-    let changed_files = collect_audit_changed_files(&fix_result);
+        let changed_files = outcome
+            .fix_result
+            .chunk_results
+            .iter()
+            .filter(|chunk| matches!(chunk.status, fixer::ChunkStatus::Applied))
+            .flat_map(|chunk| chunk.files.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let warnings = outcome
+            .iterations
+            .iter()
+            .filter(|iteration| iteration.status != "continued")
+            .map(|iteration| format!("audit iteration {}: {}", iteration.iteration, iteration.status))
+            .collect::<Vec<_>>();
+
+        (
+            outcome.fix_result,
+            outcome.policy_summary,
+            changed_files,
+            warnings,
+        )
+    } else {
+        let policy_summary =
+            fixer::apply_fix_policy(&mut fix_result, false, &policy, &preflight_context);
+        let changed_files = collect_audit_changed_files(&fix_result);
+        (fix_result, policy_summary, changed_files, Vec::new())
+    };
+
     let fix_results = summarize_audit_fix_result_entries(&fix_result);
     let fixes_proposed = fix_results.len();
-
-    if write {
-        if let Some(apply_root) = apply_root {
-            if !fix_result.fixes.is_empty() {
-                fixer::apply_fixes(&mut fix_result.fixes, apply_root);
-            }
-            if !fix_result.new_files.is_empty() {
-                fixer::apply_new_files(&mut fix_result.new_files, apply_root);
-            }
-        }
-    }
 
     Ok(PlannedStage {
         source: "audit".to_string(),
@@ -447,13 +475,18 @@ fn plan_audit_stage(
             files_modified: changed_files.len(),
             detected_findings: Some(result.findings.len()),
             changed_files,
-            fix_summary: if policy_summary.visible_insertions + policy_summary.visible_new_files > 0
-            {
+            fix_summary: if write {
+                if fix_result.files_modified > 0 {
+                    Some(autofix::summarize_audit_fix_result(&fix_result))
+                } else {
+                    None
+                }
+            } else if policy_summary.visible_insertions + policy_summary.visible_new_files > 0 {
                 Some(autofix::summarize_audit_fix_result(&fix_result))
             } else {
                 None
             },
-            warnings: Vec::new(),
+            warnings: stage_warnings,
         },
         fix_results,
     })
@@ -756,6 +789,26 @@ pub fn summarize_plan_totals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::Component;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn tmp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("homeboy-refactor-planner-{name}-{nanos}"))
+    }
+
+    fn test_component(root: &Path) -> Component {
+        Component {
+            id: "component".to_string(),
+            local_path: root.to_string_lossy().to_string(),
+            remote_path: String::new(),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn analyze_stage_overlaps_reports_later_stage_precedence() {
@@ -889,5 +942,57 @@ mod tests {
         assert_eq!(totals.stages_with_proposals, 2);
         assert_eq!(totals.total_fixes_proposed, 5);
         assert_eq!(totals.total_files_selected, 3);
+    }
+
+    #[test]
+    fn build_refactor_plan_audit_write_uses_audit_refactor_engine() {
+        let root = tmp_dir("audit-write");
+        fs::create_dir_all(root.join("commands")).unwrap();
+        fs::write(
+            root.join("commands/good_one.rs"),
+            "pub fn run() {}\npub fn helper() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("commands/good_two.rs"),
+            "pub fn run() {}\npub fn helper() {}\n",
+        )
+        .unwrap();
+        fs::write(root.join("commands/bad.rs"), "pub fn run() {}\n").unwrap();
+
+        let component = test_component(&root);
+        let plan = build_refactor_plan(RefactorPlanRequest {
+            component,
+            root: root.clone(),
+            sources: vec!["audit".to_string()],
+            changed_since: None,
+            only: vec![crate::code_audit::AuditFinding::DuplicateFunction],
+            exclude: vec![],
+            settings: vec![],
+            lint: LintSourceOptions::default(),
+            test: TestSourceOptions::default(),
+            write: true,
+        })
+        .unwrap();
+
+        let audit_stage = plan
+            .stages
+            .iter()
+            .find(|stage| stage.stage == "audit")
+            .expect("audit stage present");
+
+        assert!(audit_stage.applied);
+        assert!(audit_stage.files_modified > 0);
+        assert!(!audit_stage.changed_files.is_empty());
+        assert!(plan
+            .proposals
+            .iter()
+            .any(|proposal| proposal.source == "audit"));
+        assert!(audit_stage
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("audit iteration ")));
+
+        let _ = fs::remove_dir_all(root);
     }
 }
