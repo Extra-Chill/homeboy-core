@@ -429,12 +429,12 @@ pub(crate) fn extract_expected_test_method_from_fix_description(
 #[derive(Debug, Clone)]
 pub(crate) struct MethodSignature {
     /// Method name.
-    pub(super) name: String,
+    pub(crate) name: String,
     /// Full signature line (e.g., "public function execute(array $config): array").
-    pub(super) signature: String,
+    pub(crate) signature: String,
     /// The language this was extracted from.
     #[allow(dead_code)]
-    pub(super) language: Language,
+    pub(crate) language: Language,
 }
 
 /// Extract full method signatures from a source file.
@@ -513,42 +513,9 @@ pub(crate) fn extract_js_signatures(content: &str) -> Vec<MethodSignature> {
 // ============================================================================
 
 /// Generate a stub body for a method based on language.
-fn stub_body(method_name: &str, language: &Language) -> String {
-    match language {
-        Language::Php => {
-            format!(
-                "        throw new \\RuntimeException('Not implemented: {}');",
-                method_name
-            )
-        }
-        Language::Rust => {
-            format!("        todo!(\"{}\")", method_name)
-        }
-        Language::JavaScript | Language::TypeScript => {
-            format!(
-                "        throw new Error('Not implemented: {}');",
-                method_name
-            )
-        }
-        Language::Unknown => String::new(),
-    }
-}
-
 /// Generate a method stub from a signature.
 fn generate_method_stub(sig: &MethodSignature) -> String {
-    let body = stub_body(&sig.name, &sig.language);
-    match sig.language {
-        Language::Php => {
-            format!("\n    {} {{\n{}\n    }}\n", sig.signature, body)
-        }
-        Language::Rust => {
-            format!("\n    {} {{\n{}\n    }}\n", sig.signature, body)
-        }
-        Language::JavaScript | Language::TypeScript => {
-            format!("\n    {} {{\n{}\n    }}\n", sig.signature, body)
-        }
-        Language::Unknown => String::new(),
-    }
+    crate::core::refactor::plan::generate::generate_method_stub(sig)
 }
 
 // ============================================================================
@@ -559,27 +526,11 @@ fn generate_method_stub(sig: &MethodSignature) -> String {
 ///
 /// Language-aware: `use X;` for Rust/PHP, `import X from 'X';` for JS/TS.
 fn generate_import_statement(import_path: &str, language: &Language) -> String {
-    match language {
-        Language::Rust => format!("use {};", import_path),
-        Language::Php => format!("use {};", import_path),
-        Language::JavaScript | Language::TypeScript => {
-            // Extract the last segment as the name
-            let name = import_path
-                .rsplit("::")
-                .next()
-                .or_else(|| import_path.rsplit('/').next())
-                .unwrap_or(import_path);
-            format!("import {{ {} }} from '{}';", name, import_path)
-        }
-        Language::Unknown => format!("use {};", import_path),
-    }
+    crate::core::refactor::plan::generate::generate_import_statement(import_path, language)
 }
 
 fn generate_namespace_declaration(namespace: &str, language: &Language) -> Option<String> {
-    match language {
-        Language::Php => Some(format!("namespace {};", namespace)),
-        _ => None,
-    }
+    crate::core::refactor::plan::generate::generate_namespace_declaration(namespace, language)
 }
 
 fn extract_expected_namespace(description: &str) -> Option<String> {
@@ -594,11 +545,11 @@ fn generate_type_conformance_declaration(
     conformance: &str,
     language: &Language,
 ) -> String {
-    match language {
-        Language::Rust => format!("\nimpl {} for {} {{\n}}\n", conformance, type_name),
-        Language::Php | Language::TypeScript => conformance.to_string(),
-        Language::JavaScript | Language::Unknown => conformance.to_string(),
-    }
+    crate::core::refactor::plan::generate::generate_type_conformance_declaration(
+        type_name,
+        conformance,
+        language,
+    )
 }
 
 pub(crate) fn primary_type_name_from_declaration(line: &str, language: &Language) -> Option<String> {
@@ -628,18 +579,7 @@ pub(crate) fn primary_type_name_from_declaration(line: &str, language: &Language
 
 /// Generate a registration stub for PHP (add_action/add_filter in __construct).
 fn generate_registration_stub(hook_name: &str) -> String {
-    // The hook name from the audit is the first arg of add_action
-    // We need to generate: add_action('hook_name', [$this, 'methodName']);
-    // Use a generic callback name based on the hook
-    let callback = hook_name
-        .strip_prefix("wp_")
-        .or_else(|| hook_name.strip_prefix("datamachine_"))
-        .unwrap_or(hook_name);
-
-    format!(
-        "        add_action('{}', [$this, '{}']);",
-        hook_name, callback
-    )
+    crate::core::refactor::plan::generate::generate_registration_stub(hook_name)
 }
 
 // ============================================================================
