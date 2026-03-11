@@ -471,7 +471,7 @@ fn calculate_deploy_readiness(project: &Project) -> (bool, Vec<String>) {
     } else {
         // Check if at least one component is actually deployable (has artifact or git strategy)
         let has_deployable = project.component_ids.iter().any(|id| {
-            if let Ok(comp) = component::load(id) {
+            if let Ok(comp) = project::resolve_project_component(project, id) {
                 let is_git = comp.deploy_strategy.as_deref() == Some("git");
                 let has_artifact = component::resolve_artifact(&comp).is_some();
                 is_git || has_artifact
