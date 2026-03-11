@@ -20,8 +20,8 @@ use crate::project::{self, Project};
 use crate::ssh::SshClient;
 use crate::utils::base_path;
 use crate::utils::parser;
-use crate::utils::shell;
-use crate::utils::template::{render_map, TemplateVars};
+use crate::engine::shell;
+use crate::engine::template::{render_map, TemplateVars};
 use crate::utils::{self, artifact};
 use crate::version;
 

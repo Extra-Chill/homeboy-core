@@ -197,7 +197,7 @@ pub enum ExtensionOutput {
         #[serde(skip_serializing_if = "Option::is_none")]
         project_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", flatten)]
-        output: Option<homeboy::utils::command::CapturedOutput>,
+        output: Option<homeboy::engine::command::CapturedOutput>,
     },
     #[serde(rename = "extension.setup")]
     Setup { extension_id: String },
@@ -248,7 +248,7 @@ pub enum ExtensionOutput {
     Exec {
         extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none", flatten)]
-        output: Option<homeboy::utils::command::CapturedOutput>,
+        output: Option<homeboy::engine::command::CapturedOutput>,
     },
     #[serde(rename = "extension.set")]
     SetBatch { batch: homeboy::BatchResult },

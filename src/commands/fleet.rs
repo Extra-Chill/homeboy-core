@@ -687,7 +687,7 @@ fn check(id: &str, only_outdated: bool) -> CmdResult<FleetOutput> {
 }
 
 fn exec(id: &str, command: Vec<String>, check: bool) -> CmdResult<FleetOutput> {
-    use homeboy::shell;
+    use homeboy::engine::shell;
     use homeboy::ssh::{resolve_context, SshClient, SshResolveArgs};
 
     if command.is_empty() {

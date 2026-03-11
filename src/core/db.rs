@@ -6,7 +6,7 @@ use crate::context::{require_project_base_path, resolve_project_ssh};
 use crate::engine::executor::execute_for_project;
 use crate::extension::{load_all_extensions, DatabaseCliConfig};
 use crate::project::{self, Project};
-use crate::utils::template::{render_map, TemplateVars};
+use crate::engine::template::{render_map, TemplateVars};
 use crate::utils::token;
 use crate::{Error, Result};
 

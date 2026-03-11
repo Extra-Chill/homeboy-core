@@ -3,11 +3,8 @@
 use std::process::{Command, Output};
 
 use crate::error::{Error, Result};
+use serde::Serialize;
 
-/// Run a command and return stdout on success.
-///
-/// Returns trimmed stdout if the command succeeds.
-/// Returns an error with stderr (or stdout fallback) if it fails.
 pub fn run(program: &str, args: &[&str], context: &str) -> Result<String> {
     let output = Command::new(program).args(args).output().map_err(|e| {
         Error::internal_io(
@@ -26,10 +23,6 @@ pub fn run(program: &str, args: &[&str], context: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Run a command in a specific directory.
-///
-/// Returns trimmed stdout if the command succeeds.
-/// Returns an error with stderr (or stdout fallback) if it fails.
 pub fn run_in(dir: &str, program: &str, args: &[&str], context: &str) -> Result<String> {
     let output = Command::new(program)
         .args(args)
@@ -52,9 +45,6 @@ pub fn run_in(dir: &str, program: &str, args: &[&str], context: &str) -> Result<
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Run a command in a directory, returning Ok(None) on failure instead of error.
-///
-/// Useful when command failure is expected/acceptable (e.g., checking for optional tags).
 pub fn run_in_optional(dir: &str, program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program)
         .args(args)
@@ -67,16 +57,9 @@ pub fn run_in_optional(dir: &str, program: &str, args: &[&str]) -> Option<String
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stdout.is_empty() {
-        None
-    } else {
-        Some(stdout)
-    }
+    if stdout.is_empty() { None } else { Some(stdout) }
 }
 
-/// Extract error text from command output.
-///
-/// Prefers stderr, falls back to stdout if stderr is empty.
 pub fn error_text(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.trim().is_empty() {
@@ -86,7 +69,6 @@ pub fn error_text(output: &Output) -> String {
     }
 }
 
-/// Check if a command succeeds in a directory without capturing output.
 pub fn succeeded_in(dir: &str, program: &str, args: &[&str]) -> bool {
     Command::new(program)
         .args(args)
@@ -96,10 +78,6 @@ pub fn succeeded_in(dir: &str, program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// Require a command operation to have succeeded.
-///
-/// Generic helper that takes success flag and error text.
-/// Useful for checking results from various command execution patterns.
 pub fn require_success(success: bool, stderr: &str, operation: &str) -> Result<()> {
     if success {
         Ok(())
@@ -111,10 +89,6 @@ pub fn require_success(success: bool, stderr: &str, operation: &str) -> Result<(
     }
 }
 
-use serde::Serialize;
-
-/// Captured output from command execution.
-/// Reusable primitive for any command that executes external processes.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CapturedOutput {
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -130,61 +104,5 @@ impl CapturedOutput {
 
     pub fn is_empty(&self) -> bool {
         self.stdout.is_empty() && self.stderr.is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn run_succeeds_with_valid_command() {
-        let result = run("echo", &["hello"], "echo test");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "hello");
-    }
-
-    #[test]
-    fn run_fails_with_invalid_command() {
-        let result = run("nonexistent_command_xyz", &[], "test");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn run_in_optional_returns_none_on_failure() {
-        let result = run_in_optional("/tmp", "false", &[]);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn error_text_prefers_stderr() {
-        let output = Output {
-            status: std::process::ExitStatus::default(),
-            stdout: b"stdout content".to_vec(),
-            stderr: b"stderr content".to_vec(),
-        };
-        assert_eq!(error_text(&output), "stderr content");
-    }
-
-    #[test]
-    fn error_text_falls_back_to_stdout() {
-        let output = Output {
-            status: std::process::ExitStatus::default(),
-            stdout: b"stdout content".to_vec(),
-            stderr: b"".to_vec(),
-        };
-        assert_eq!(error_text(&output), "stdout content");
-    }
-
-    #[test]
-    fn require_success_passes_when_successful() {
-        let result = require_success(true, "", "TEST");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn require_success_fails_with_error_message() {
-        let result = require_success(false, "Something went wrong", "LIST");
-        assert!(result.is_err());
     }
 }

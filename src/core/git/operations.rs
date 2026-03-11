@@ -130,7 +130,7 @@ pub fn detect_baseline_with_version(
     // machine) are available before we resolve the baseline.  Best-effort:
     // if there is no remote or the network is unavailable we silently
     // proceed with whatever tags are already local.
-    let _ = crate::utils::command::run_in_optional(path, "git", &["fetch", "--tags", "--quiet"]);
+    let _ = crate::engine::command::run_in_optional(path, "git", &["fetch", "--tags", "--quiet"]);
 
     // Priority 1: Check for latest tag
     if let Some(tag) = get_latest_tag(path)? {
@@ -281,7 +281,7 @@ pub fn get_repo_snapshot(path: &str) -> Result<RepoSnapshot> {
         return Err(Error::git_command_failed("Not a git repository"));
     }
 
-    let branch = crate::utils::command::run_in(
+    let branch = crate::engine::command::run_in(
         path,
         "git",
         &["rev-parse", "--abbrev-ref", "HEAD"],
@@ -298,13 +298,13 @@ pub fn get_repo_snapshot(path: &str) -> Result<RepoSnapshot> {
         .map(|o| o.status.success() && o.stdout.is_empty())
         .unwrap_or(false);
 
-    let (ahead, behind) = crate::utils::command::run_in_optional(
+    let (ahead, behind) = crate::engine::command::run_in_optional(
         path,
         "git",
         &["rev-parse", "--abbrev-ref", "@{upstream}"],
     )
     .and_then(|_| {
-        crate::utils::command::run_in_optional(
+        crate::engine::command::run_in_optional(
             path,
             "git",
             &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
@@ -804,7 +804,7 @@ pub fn tag_at(
 
 /// Check if a tag exists on the remote.
 pub fn tag_exists_on_remote(path: &str, tag_name: &str) -> Result<bool> {
-    Ok(crate::utils::command::run_in_optional(
+    Ok(crate::engine::command::run_in_optional(
         path,
         "git",
         &[
@@ -821,7 +821,7 @@ pub fn tag_exists_on_remote(path: &str, tag_name: &str) -> Result<bool> {
 /// Check if a tag exists locally.
 pub fn tag_exists_locally(path: &str, tag_name: &str) -> Result<bool> {
     Ok(
-        crate::utils::command::run_in_optional(path, "git", &["tag", "-l", tag_name])
+        crate::engine::command::run_in_optional(path, "git", &["tag", "-l", tag_name])
             .map(|s| !s.is_empty())
             .unwrap_or(false),
     )
@@ -829,7 +829,7 @@ pub fn tag_exists_locally(path: &str, tag_name: &str) -> Result<bool> {
 
 /// Get the commit SHA a tag points to.
 pub fn get_tag_commit(path: &str, tag_name: &str) -> Result<String> {
-    crate::utils::command::run_in(
+    crate::engine::command::run_in(
         path,
         "git",
         &["rev-list", "-n", "1", tag_name],
@@ -839,17 +839,17 @@ pub fn get_tag_commit(path: &str, tag_name: &str) -> Result<String> {
 
 /// Get the current HEAD commit SHA.
 pub fn get_head_commit(path: &str) -> Result<String> {
-    crate::utils::command::run_in(path, "git", &["rev-parse", "HEAD"], "get HEAD commit")
+    crate::engine::command::run_in(path, "git", &["rev-parse", "HEAD"], "get HEAD commit")
 }
 
 /// Fetch from remote and return count of commits behind upstream.
 /// Returns Ok(Some(n)) if behind by n commits, Ok(None) if not behind or no upstream.
 pub fn fetch_and_get_behind_count(path: &str) -> Result<Option<u32>> {
     // Run git fetch (update tracking refs)
-    crate::utils::command::run_in(path, "git", &["fetch"], "git fetch")?;
+    crate::engine::command::run_in(path, "git", &["fetch"], "git fetch")?;
 
     // Check if upstream exists
-    let upstream = crate::utils::command::run_in_optional(
+    let upstream = crate::engine::command::run_in_optional(
         path,
         "git",
         &["rev-parse", "--abbrev-ref", "@{upstream}"],
@@ -859,7 +859,7 @@ pub fn fetch_and_get_behind_count(path: &str) -> Result<Option<u32>> {
     }
 
     // Get ahead/behind counts
-    let counts = crate::utils::command::run_in_optional(
+    let counts = crate::engine::command::run_in_optional(
         path,
         "git",
         &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],

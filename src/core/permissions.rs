@@ -3,7 +3,7 @@ use std::process::Command;
 use crate::defaults;
 use crate::error::{Error, Result};
 use crate::ssh::{CommandOutput, SshClient};
-use crate::utils::shell;
+use crate::engine::shell;
 
 /// Fix local file permissions before build.
 ///

@@ -166,7 +166,7 @@ fn deploy_components(
             result = result.with_deployed_ref(checkout.tag.clone());
         } else if config.head {
             // Deploying from HEAD — record the current branch
-            if let Some(branch) = crate::utils::command::run_in_optional(
+            if let Some(branch) = crate::engine::command::run_in_optional(
                 &component.local_path,
                 "git",
                 &["rev-parse", "--abbrev-ref", "HEAD"],
@@ -389,7 +389,7 @@ fn checkout_latest_tags(components: &[Component]) -> Result<Vec<TagCheckout>> {
         };
 
         // Save the current ref (branch name or commit hash for detached HEAD)
-        let original_ref = crate::utils::command::run_in_optional(
+        let original_ref = crate::engine::command::run_in_optional(
             path,
             "git",
             &["rev-parse", "--abbrev-ref", "HEAD"],
@@ -397,8 +397,8 @@ fn checkout_latest_tags(components: &[Component]) -> Result<Vec<TagCheckout>> {
         .unwrap_or_else(|| "main".to_string());
 
         // If already on this tag's commit, skip checkout
-        let tag_commit = crate::utils::command::run_in_optional(path, "git", &["rev-parse", &tag]);
-        let head_commit = crate::utils::command::run_in_optional(path, "git", &["rev-parse", "HEAD"]);
+        let tag_commit = crate::engine::command::run_in_optional(path, "git", &["rev-parse", &tag]);
+        let head_commit = crate::engine::command::run_in_optional(path, "git", &["rev-parse", "HEAD"]);
         if tag_commit.is_some() && tag_commit == head_commit {
             log_status!("deploy", "'{}' is already at tag {} — no checkout needed", component.id, tag);
             checkouts.push(TagCheckout {
@@ -412,7 +412,7 @@ fn checkout_latest_tags(components: &[Component]) -> Result<Vec<TagCheckout>> {
 
         // Checkout the tag
         log_status!("deploy", "'{}' checking out tag {} for deploy...", component.id, tag);
-        match crate::utils::command::run_in(path, "git", &["checkout", &tag], "git checkout tag") {
+        match crate::engine::command::run_in(path, "git", &["checkout", &tag], "git checkout tag") {
             Ok(_) => {
                 checkouts.push(TagCheckout {
                     component_id: component.id.clone(),
@@ -444,7 +444,7 @@ fn restore_branches(checkouts: &[TagCheckout]) {
         if checkout.original_ref == "HEAD" {
             continue;
         }
-        let restore = crate::utils::command::run_in(
+        let restore = crate::engine::command::run_in(
             &checkout.local_path,
             "git",
             &["checkout", &checkout.original_ref],
