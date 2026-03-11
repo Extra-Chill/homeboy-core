@@ -10,6 +10,8 @@ include!("upgrade/planning.rs");
 include!("upgrade/execution.rs");
 include!("upgrade/validation.rs");
 
+pub mod update_check;
+
 impl InstallMethod {
     pub fn as_str(&self) -> &'static str {
         match self {

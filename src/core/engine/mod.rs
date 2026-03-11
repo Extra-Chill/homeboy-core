@@ -7,5 +7,6 @@
 //! Domain-specific implementations (release, deploy, etc.) use these primitives
 //! to build their orchestration logic.
 
+pub mod baseline;
 pub mod executor;
 pub mod pipeline;

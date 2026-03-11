@@ -1,10 +1,13 @@
 mod execution;
+pub mod lint;
 mod lifecycle;
 mod manifest;
 mod runner;
 mod runner_contract;
 mod runtime_helper;
 mod scope;
+pub mod test;
+pub mod update_check;
 pub mod version;
 
 pub mod exec_context;

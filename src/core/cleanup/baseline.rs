@@ -1,10 +1,10 @@
-//! Cleanup baseline — delegates to the generic `utils::baseline` primitive.
+//! Cleanup baseline — delegates to the generic `engine::baseline` primitive.
 //!
 //! Baselines config health issues so CI only fails on NEW issues.
 
 use std::path::Path;
 
-use crate::baseline::{self as generic, BaselineConfig, Fingerprintable};
+use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
 use super::config::ConfigIssue;
 use super::CleanupResult;

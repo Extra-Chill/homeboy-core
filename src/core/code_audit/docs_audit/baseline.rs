@@ -1,10 +1,10 @@
-//! Docs audit baseline — delegates to the generic `utils::baseline` primitive.
+//! Docs audit baseline — delegates to the generic `engine::baseline` primitive.
 //!
 //! Baselines broken references so CI only fails on NEW broken refs.
 
 use std::path::Path;
 
-use crate::baseline::{self as generic, BaselineConfig, Fingerprintable};
+use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
 use super::{AuditResult, BrokenReference};
 

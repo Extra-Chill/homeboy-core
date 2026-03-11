@@ -1,8 +1,8 @@
-pub mod audit;
 pub mod generate;
 pub mod planner;
+pub mod verify;
 
-pub use audit::{
+pub use verify::{
     build_chunk_verifier, finding_fingerprint, run_audit_refactor, score_delta,
     weighted_finding_score_with, AuditConvergenceScoring, AuditRefactorIterationSummary,
     AuditRefactorOutcome, AuditVerificationToggles,

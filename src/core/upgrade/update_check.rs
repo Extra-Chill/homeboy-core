@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CACHE_FILENAME: &str = "update_check.json";
-const CHECK_INTERVAL_SECS: u64 = 86400; // 24 hours
+const CHECK_INTERVAL_SECS: u64 = 86400;
 const ENV_VAR_DISABLE: &str = "HOMEBOY_NO_UPDATE_CHECK";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ pub struct UpdateCheckCache {
 }
 
 pub(crate) fn cache_path() -> Option<std::path::PathBuf> {
-    paths::homeboy().ok().map(|p| p.join(CACHE_FILENAME))
+    paths::homeboy().ok().map(|path| path.join(CACHE_FILENAME))
 }
 
 fn read_cache() -> Option<UpdateCheckCache> {
@@ -47,7 +47,7 @@ fn write_cache(cache: &UpdateCheckCache) {
 pub(crate) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
 
@@ -58,7 +58,7 @@ fn is_cache_fresh(cache: &UpdateCheckCache) -> bool {
 
 fn is_disabled_by_env() -> bool {
     std::env::var(ENV_VAR_DISABLE)
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
@@ -75,18 +75,12 @@ fn print_hint(latest: &str, current: &str) {
     );
 }
 
-/// Run the startup update check. Prints a hint to stderr if an update is available.
-///
-/// Silently returns on any error (network failure, parse error, config missing, etc.).
-/// Call this from main.rs after arg parsing, skipping for `upgrade`/`update` commands.
 pub fn run_startup_check() {
     if is_disabled_by_env() || is_disabled_by_config() {
         return;
     }
 
     let mut already_printed = false;
-
-    // Read cache — if it has an update for our current version, print hint immediately
     let cached = read_cache();
 
     if let Some(ref cache) = cached {
@@ -95,19 +89,16 @@ pub fn run_startup_check() {
             already_printed = true;
         }
 
-        // If cache is fresh, no need to re-fetch
         if is_cache_fresh(cache) {
             return;
         }
     }
 
-    // Cache is stale or missing — fetch latest version (may take a moment)
     let check = match upgrade::check_for_updates() {
-        Ok(c) => c,
-        Err(_) => return, // Network error — silently skip
+        Ok(check) => check,
+        Err(_) => return,
     };
 
-    // Write refreshed cache
     write_cache(&UpdateCheckCache {
         latest_version: check.latest_version.clone().unwrap_or_default(),
         current_version: check.current_version.clone(),
@@ -115,7 +106,6 @@ pub fn run_startup_check() {
         checked_at: now_unix(),
     });
 
-    // Print hint if update available and we haven't already printed from cache
     if !already_printed && check.update_available {
         if let Some(latest) = &check.latest_version {
             print_hint(latest, &check.current_version);
@@ -133,7 +123,7 @@ mod tests {
             latest_version: "0.50.0".to_string(),
             current_version: upgrade::current_version().to_string(),
             update_available: true,
-            checked_at: now_unix() - 100, // 100 seconds ago
+            checked_at: now_unix() - 100,
         };
         assert!(is_cache_fresh(&cache));
     }
@@ -153,7 +143,7 @@ mod tests {
     fn test_cache_stale_after_version_change() {
         let cache = UpdateCheckCache {
             latest_version: "0.50.0".to_string(),
-            current_version: "0.40.0".to_string(), // Different from current binary
+            current_version: "0.40.0".to_string(),
             update_available: true,
             checked_at: now_unix() - 100,
         };
@@ -178,23 +168,18 @@ mod tests {
 
     #[test]
     fn test_env_var_disable() {
-        // When not set, should not be disabled
         std::env::remove_var(ENV_VAR_DISABLE);
         assert!(!is_disabled_by_env());
 
-        // When set to "1", should be disabled
         std::env::set_var(ENV_VAR_DISABLE, "1");
         assert!(is_disabled_by_env());
 
-        // When set to "true" (case-insensitive), should be disabled
         std::env::set_var(ENV_VAR_DISABLE, "True");
         assert!(is_disabled_by_env());
 
-        // When set to other values, should not be disabled
         std::env::set_var(ENV_VAR_DISABLE, "0");
         assert!(!is_disabled_by_env());
 
-        // Clean up
         std::env::remove_var(ENV_VAR_DISABLE);
     }
 }

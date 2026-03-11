@@ -3,25 +3,19 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 use homeboy::component::Component;
-use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
-use homeboy::refactor::{
-    self,
-    auto::{self, AutofixMode},
-    run_test_refactor, AppliedRefactor, TestSourceOptions, TransformSet,
+use homeboy::extension::test as extension_test;
+use homeboy::extension::test::{
+    CoverageOutput, TestRunWorkflowArgs, TestScopeOutput, TestSummaryOutput,
 };
-use homeboy::test_analyze::{self, TestAnalysis, TestAnalysisInput};
-use homeboy::test_baseline::{self, TestBaselineComparison, TestCounts};
-use homeboy::test_drift::{self, DriftOptions, DriftReport};
-use homeboy::test_scaffold::{self, ScaffoldConfig};
+use homeboy::refactor::AppliedRefactor;
+use homeboy::scaffold::ScaffoldConfig;
+use homeboy::test_analyze::TestAnalysis;
+use homeboy::extension::test::{TestBaselineComparison, TestCounts};
+use homeboy::test_drift::DriftReport;
+use homeboy::test_workflow;
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
-use super::test_scope::{compute_changed_test_scope, TestScopeOutput};
 use super::{CmdResult, GlobalArgs};
-
-mod parsing;
-
-pub use parsing::CoverageOutput;
-use parsing::{build_test_summary, TestSummaryOutput};
 
 #[derive(Args)]
 pub struct TestArgs {
@@ -224,12 +218,6 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
     filtered
 }
 
-pub(crate) fn resolve_test_command(
-    component: &Component,
-) -> homeboy::error::Result<ExtensionExecutionContext> {
-    extension::resolve_execution_context(component, ExtensionCapability::Test)
-}
-
 pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
     let source_path = args.comp.source_path()?;
     let component = args.comp.load()?;
@@ -252,406 +240,47 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestOutput> {
         return run_drift(args.comp.id(), &component, &args.since);
     }
 
-    // Compute optional PR/impact-scoped test selection
-    let changed_scope = if let Some(ref git_ref) = args.changed_since {
-        Some(compute_changed_test_scope(&component, git_ref)?)
-    } else {
-        None
-    };
-
-    // Coverage is enabled by --coverage or --coverage-min
-    let coverage_enabled = args.coverage || args.coverage_min.is_some();
-
-    // Create temp file for coverage output
-    let coverage_file = if coverage_enabled {
-        Some(std::env::temp_dir().join(format!("homeboy-coverage-{}.json", std::process::id())))
-    } else {
-        None
-    };
-
-    // Create temp file for test results output
-    let results_file =
-        std::env::temp_dir().join(format!("homeboy-test-results-{}.json", std::process::id()));
-
-    // Create temp file for test failures output (for --analyze)
-    let failures_file = if args.analyze {
-        Some(
-            std::env::temp_dir().join(format!("homeboy-test-failures-{}.json", std::process::id())),
-        )
-    } else {
-        None
-    };
-
     let passthrough_args = filter_homeboy_flags(&args.args);
-
-    let planned_autofix = if args.fix {
-        let selected_files = changed_scope
-            .as_ref()
-            .map(|scope| scope.selected_files.clone());
-        let plan = run_test_refactor(
-            component.clone(),
-            PathBuf::from(&source_path),
-            args.setting_args.setting.clone(),
-            TestSourceOptions {
-                selected_files,
-                skip_lint: args.skip_lint,
-                script_args: passthrough_args.clone(),
-            },
-            true,
-        )?;
-
-        let outcome = auto::standard_outcome(
-            AutofixMode::Write,
-            plan.files_modified,
-            Some(format!("homeboy test {} --analyze", args.comp.id())),
-            plan.hints.clone(),
-        );
-
-        Some((plan, outcome))
-    } else {
-        None
-    };
-
-    let resolved = resolve_test_command(&component)?;
-
-    let mut runner = ExtensionRunner::for_context(resolved)
-        .component(component.clone())
-        .path_override(args.comp.path.clone())
-        .settings(&args.setting_args.setting)
-        .env_if(args.skip_lint, "HOMEBOY_SKIP_LINT", "1")
-        .env_if(coverage_enabled, "HOMEBOY_COVERAGE", "1")
-        .env("HOMEBOY_TEST_RESULTS_FILE", &results_file.to_string_lossy());
-
-    if let Some(ref file) = coverage_file {
-        runner = runner.env("HOMEBOY_COVERAGE_FILE", &file.to_string_lossy());
-    }
-
-    if let Some(ref file) = failures_file {
-        runner = runner.env("HOMEBOY_TEST_FAILURES_FILE", &file.to_string_lossy());
-    }
-
-    if let Some(min) = args.coverage_min {
-        runner = runner.env("HOMEBOY_COVERAGE_MIN", &format!("{}", min));
-    }
-
-    if let Some(ref scope) = changed_scope {
-        if scope.selected_files.is_empty() {
-            homeboy::log_status!(
-                "test",
-                "No changed-scope tests found since {}. Skipping test runner.",
-                scope.changed_since.as_deref().unwrap_or("unknown")
-            );
-
-            let hints = Some(vec![
-                format!(
-                    "No impacted tests found for --changed-since {}",
-                    scope.changed_since.as_deref().unwrap_or("unknown")
-                ),
-                format!("Run full suite if needed: homeboy test {}", args.comp.id()),
-            ]);
-
-            return Ok((
-                TestOutput {
-                    status: "passed".to_string(),
-                    component: args.comp.component.clone(),
-                    exit_code: 0,
-                    test_counts: None,
-                    coverage: None,
-                    baseline_comparison: None,
-                    analysis: None,
-                    autofix: None,
-                    hints,
-                    drift: None,
-                    scaffold: None,
-                    auto_fix_drift: None,
-                    test_scope: Some(scope.clone()),
-                    summary: if args.json_summary {
-                        Some(build_test_summary(None, None, 0))
-                    } else {
-                        None
-                    },
-                },
-                0,
-            ));
-        }
-
-        // Pass changed test files to the extension via env var.
-        // The extension's test runner decides how to scope (e.g., PHPUnit
-        // uses --filter, Cargo uses positional test names, Jest uses
-        // --testPathPattern). Core does not generate runner-specific args.
-        runner = runner.env(
-            "HOMEBOY_CHANGED_TEST_FILES",
-            &scope.selected_files.join("\n"),
-        );
-
-        homeboy::log_status!(
-            "test",
-            "Scoped test run: {} selected file(s) since {}",
-            scope.selected_count,
-            scope.changed_since.as_deref().unwrap_or("unknown")
-        );
-    }
-
-    let output = runner.script_args(&passthrough_args).run()?;
-
-    // Read test results if available
-    let test_counts = parsing::parse_test_results_file(&results_file)
-        .or_else(|| parsing::parse_test_results_text(&output.stdout));
-
-    // Clean up test results temp file
-    let _ = std::fs::remove_file(&results_file);
-
-    let test_autofix = planned_autofix
-        .as_ref()
-        .map(|(plan, outcome)| AppliedRefactor::from_plan(plan, outcome.rerun_recommended));
-
-    // Determine actual test status: when parsed results show 0 failures,
-    // treat as passed even if the runner script exited non-zero (e.g., lint
-    // failures, deprecation notices, or PHPUnit warnings that don't indicate
-    // actual test failures).
-    let status = if let Some(ref counts) = test_counts {
-        if counts.failed == 0 {
-            "passed"
-        } else {
-            "failed"
-        }
-    } else if output.success {
-        "passed"
-    } else {
-        "failed"
-    };
-
-    // Read coverage results if available
-    let coverage = coverage_file
-        .as_ref()
-        .and_then(|f| parsing::parse_coverage_file(f).ok());
-
-    // Clean up coverage temp file
-    if let Some(ref f) = coverage_file {
-        let _ = std::fs::remove_file(f);
-    }
-
-    // Read and analyze test failures if --analyze
-    let analysis = if args.analyze {
-        let analysis_input = failures_file
-            .as_ref()
-            .and_then(|f| parsing::parse_failures_file(f))
-            .unwrap_or_else(|| TestAnalysisInput {
-                failures: Vec::new(),
-                total: test_counts.as_ref().map(|c| c.total).unwrap_or(0),
-                passed: test_counts.as_ref().map(|c| c.passed).unwrap_or(0),
-            });
-
-        // Clean up failures temp file
-        if let Some(ref f) = failures_file {
-            let _ = std::fs::remove_file(f);
-        }
-
-        let result = test_analyze::analyze(args.comp.id(), &analysis_input);
-
-        if !result.clusters.is_empty() {
-            eprintln!(
-                "[test] Analysis: {} failure(s) in {} cluster(s)",
-                result.total_failures,
-                result.clusters.len(),
-            );
-            for (i, cluster) in result.clusters.iter().enumerate().take(5) {
-                eprintln!(
-                    "[test]   {}. {} ({} failures) — {:?}",
-                    i + 1,
-                    cluster.pattern,
-                    cluster.count,
-                    cluster.category,
-                );
-            }
-        }
-
-        Some(result)
-    } else {
-        // Clean up failures temp file (if somehow set)
-        if let Some(ref f) = failures_file {
-            let _ = std::fs::remove_file(f);
-        }
-        None
-    };
-
-    // --baseline: save current state
-    if args.baseline_args.baseline {
-        if let Some(ref counts) = test_counts {
-            let saved = test_baseline::save_baseline(&source_path, args.comp.id(), counts)?;
-            eprintln!(
-                "[test] Baseline saved to {} ({} passed, {} failed, {} total)",
-                saved.display(),
-                counts.passed,
-                counts.failed,
-                counts.total,
-            );
-        } else {
-            eprintln!(
-                "[test] Cannot save baseline: no test results available. \
-                 Ensure the extension writes HOMEBOY_TEST_RESULTS_FILE."
-            );
-        }
-    }
-
-    // Baseline comparison
-    let mut baseline_comparison = None;
-    let mut baseline_exit_override = None;
-
-    if !args.baseline_args.baseline && !args.baseline_args.ignore_baseline {
-        if let Some(ref counts) = test_counts {
-            // Try explicit baseline first, then differential from git ref
-            let resolved_baseline = test_baseline::load_baseline(&source_path).or_else(|| {
-                args.changed_since.as_ref().and_then(|git_ref| {
-                    let bl = test_baseline::load_baseline_from_ref(
-                        &source_path.to_string_lossy(),
-                        git_ref,
-                    );
-                    if bl.is_some() {
-                        eprintln!(
-                            "[test] Using baseline from {} for differential comparison",
-                            git_ref
-                        );
-                    }
-                    bl
-                })
-            });
-
-            if let Some(existing_baseline) = resolved_baseline {
-                let comparison = test_baseline::compare(counts, &existing_baseline);
-
-                if comparison.regression {
-                    eprintln!("[test] REGRESSION: {}", comparison.reasons.join("; "));
-                    baseline_exit_override = Some(1);
-                } else if comparison.passed_delta > 0 || comparison.failed_delta < 0 {
-                    eprintln!(
-                        "[test] Improvement: passed {} ({:+}), failed {} ({:+})",
-                        counts.passed,
-                        comparison.passed_delta,
-                        counts.failed,
-                        comparison.failed_delta,
-                    );
-
-                    // Auto-ratchet: update baseline when results improve
-                    if args.ratchet {
-                        let _ = test_baseline::save_baseline(&source_path, args.comp.id(), counts);
-                        eprintln!("[test] Baseline ratcheted forward");
-                    }
-                } else {
-                    eprintln!(
-                        "[test] No regression: passed {} (same), failed {} (same)",
-                        counts.passed, counts.failed,
-                    );
-                }
-
-                baseline_comparison = Some(comparison);
-            }
-        }
-    }
-
-    let mut hints = Vec::new();
-
-    if let Some((_, outcome)) = &planned_autofix {
-        hints.extend(outcome.hints.clone());
-    }
-
-    let comp_id = args.comp.id();
-
-    // Filter hint when tests fail and no passthrough args were used
-    if status == "failed" && passthrough_args.is_empty() {
-        hints.push(format!(
-            "To run specific tests: homeboy test {} -- --filter=TestName",
-            comp_id
-        ));
-    }
-
-    // Fix hint when lint is enabled (default) and --fix not used
-    if !args.skip_lint && !args.fix {
-        hints.push(format!(
-            "Auto-fix lint issues: homeboy test {} --fix",
-            comp_id
-        ));
-    }
-
-    // Coverage hint when not using coverage
-    if !coverage_enabled {
-        hints.push(format!(
-            "Collect coverage: homeboy test {} --coverage",
-            comp_id
-        ));
-    }
-
-    // Baseline hints
-    if test_counts.is_some() && !args.baseline_args.baseline && baseline_comparison.is_none() {
-        hints.push(format!(
-            "Save test baseline: homeboy test {} --baseline",
-            comp_id
-        ));
-    }
-
-    // Ratchet hint when baseline exists but --ratchet not used
-    if baseline_comparison.is_some() && !args.ratchet {
-        hints.push(format!(
-            "Auto-update baseline on improvement: homeboy test {} --ratchet",
-            comp_id
-        ));
-    }
-
-    // Analyze hint when tests fail and --analyze not used
-    if status == "failed" && !args.analyze {
-        hints.push(format!(
-            "Analyze failures: homeboy test {} --analyze",
-            comp_id
-        ));
-    }
-
-    // Capability hint when not using passthrough args
-    if args.args.is_empty() {
-        hints.push("Pass args to test runner: homeboy test <component> -- [args]".to_string());
-    }
-
-    // Always include docs reference
-    hints.push("Full options: homeboy docs commands/test".to_string());
-
-    let hints = if hints.is_empty() { None } else { Some(hints) };
-
-    // Exit code: when parsed test results show 0 failures, force exit code 0
-    // even if the runner script exited non-zero (lint failures, deprecation notices).
-    // Baseline regression still overrides.
-    let test_exit_code = if status == "passed" {
-        0
-    } else {
-        output.exit_code
-    };
-    let exit_code = baseline_exit_override.unwrap_or(test_exit_code);
-    let summary = if args.json_summary {
-        Some(build_test_summary(
-            test_counts.as_ref(),
-            analysis.as_ref(),
-            exit_code,
-        ))
-    } else {
-        None
-    };
+    let workflow = extension_test::run_main_test_workflow(
+        &component,
+        &PathBuf::from(&source_path),
+        TestRunWorkflowArgs {
+            component_label: args.comp.component.clone(),
+            component_id: args.comp.id().to_string(),
+            path_override: args.comp.path.clone(),
+            settings: args.setting_args.setting.clone(),
+            skip_lint: args.skip_lint,
+            fix: args.fix,
+            coverage: args.coverage,
+            coverage_min: args.coverage_min,
+            analyze: args.analyze,
+            baseline: args.baseline_args.baseline,
+            ignore_baseline: args.baseline_args.ignore_baseline,
+            ratchet: args.ratchet,
+            changed_since: args.changed_since.clone(),
+            json_summary: args.json_summary,
+            passthrough_args: passthrough_args.clone(),
+        },
+    )?;
 
     Ok((
         TestOutput {
-            status: status.to_string(),
-            component: args.comp.component.clone(),
-            exit_code,
-            test_counts,
-            coverage,
-            baseline_comparison,
-            analysis,
-            autofix: test_autofix,
-            hints,
+            status: workflow.status,
+            component: workflow.component,
+            exit_code: workflow.exit_code,
+            test_counts: workflow.test_counts,
+            coverage: workflow.coverage,
+            baseline_comparison: workflow.baseline_comparison,
+            analysis: workflow.analysis,
+            autofix: workflow.autofix,
+            hints: workflow.hints,
             drift: None,
             scaffold: None,
             auto_fix_drift: None,
-            test_scope: changed_scope,
-            summary,
+            test_scope: workflow.test_scope,
+            summary: workflow.summary,
         },
-        exit_code,
+        workflow.exit_code,
     ))
 }
 
@@ -668,123 +297,34 @@ fn run_auto_fix_drift(
     write: bool,
     include_report: bool,
 ) -> CmdResult<TestOutput> {
-    let source_path = {
-        let expanded = shellexpand::tilde(&component.local_path);
-        std::path::PathBuf::from(expanded.as_ref())
-    };
-
-    let opts = if source_path.join("Cargo.toml").exists() {
-        DriftOptions::rust(&source_path, since)
-    } else {
-        DriftOptions::php(&source_path, since)
-    };
-
-    homeboy::log_status!(
-        "test",
-        "Auto-fixing drift since {} in {} ({})",
-        since,
-        component_id,
-        if write { "write" } else { "dry-run" }
-    );
-
-    let drift_report = test_drift::detect_drift(component_id, &opts)?;
-    let rules = test_drift::generate_transform_rules(&drift_report);
-
-    let output = if rules.is_empty() {
-        homeboy::log_status!("test", "No auto-fixable drift detected. Nothing to apply.");
-
-        AutoFixDriftOutput {
-            since: since.to_string(),
-            auto_fixable_changes: drift_report.auto_fixable,
-            generated_rules: 0,
-            replacements: 0,
-            files_modified: 0,
-            written: write,
-            rerun_recommended: false,
-        }
-    } else {
-        let set = TransformSet {
-            description: format!(
-                "Auto-generated drift fixes for {} since {}",
-                component_id, since
-            ),
-            rules,
-        };
-
-        let result =
-            refactor::apply_transforms(&source_path, "test_auto_fix_drift", &set, write, None)?;
-
-        homeboy::log_status!(
-            "test",
-            "Applied {} replacement{} across {} file{}",
-            result.total_replacements,
-            if result.total_replacements == 1 {
-                ""
-            } else {
-                "s"
-            },
-            result.total_files,
-            if result.total_files == 1 { "" } else { "s" },
-        );
-
-        if !write {
-            homeboy::log_status!(
-                "hint",
-                "Dry-run only. Re-run with --write to apply generated fixes."
-            );
-        } else if result.total_replacements > 0 {
-            homeboy::log_status!(
-                "hint",
-                "Re-run tests: homeboy test {} --analyze",
-                component_id
-            );
-        }
-
-        AutoFixDriftOutput {
-            since: since.to_string(),
-            auto_fixable_changes: drift_report.auto_fixable,
-            generated_rules: set.rules.len(),
-            replacements: result.total_replacements,
-            files_modified: result.total_files,
-            written: write,
-            rerun_recommended: write && result.total_replacements > 0,
-        }
-    };
-
-    let outcome = auto::standard_outcome(
-        if write {
-            AutofixMode::Write
-        } else {
-            AutofixMode::DryRun
-        },
-        output.replacements,
-        Some(format!("homeboy test {} --analyze", component_id)),
-        vec![format!(
-            "Use --since <ref> to target a drift window (current: {})",
-            since
-        )],
-    );
+    let result =
+        test_workflow::auto_fix_test_drift(component_id, component, since, write, include_report)?;
 
     Ok((
         TestOutput {
-            status: outcome.status,
-            component: component_id.to_string(),
+            status: if result.output.replacements > 0 || !result.hints.is_empty() {
+                if write { "fixed" } else { "planned" }.to_string()
+            } else {
+                "passed".to_string()
+            },
+            component: result.component,
             exit_code: 0,
             test_counts: None,
             coverage: None,
             baseline_comparison: None,
             analysis: None,
             autofix: None,
-            hints: Some(outcome.hints),
-            drift: if include_report {
-                Some(drift_report)
-            } else {
-                None
-            },
+            hints: Some(result.hints),
+            drift: result.report,
             scaffold: None,
             auto_fix_drift: Some(AutoFixDriftOutput {
-                rerun_recommended: outcome.rerun_recommended,
-                ..output
+                since: result.output.since,
+                auto_fixable_changes: result.output.auto_fixable_changes,
+                generated_rules: result.output.generated_rules,
+                replacements: result.output.replacements,
+                files_modified: result.output.files_modified,
+                written: result.output.written,
+                rerun_recommended: result.output.rerun_recommended,
             }),
             test_scope: None,
             summary: None,
@@ -795,148 +335,26 @@ fn run_auto_fix_drift(
 
 /// Run drift detection without running tests.
 fn run_drift(component_id: &str, component: &Component, since: &str) -> CmdResult<TestOutput> {
-    let source_path = {
-        let expanded = shellexpand::tilde(&component.local_path);
-        std::path::PathBuf::from(expanded.as_ref())
-    };
-
-    homeboy::log_status!(
-        "drift",
-        "Detecting test drift since {} in {}",
-        since,
-        component_id
-    );
-
-    // Auto-detect language from extension
-    let opts = if source_path.join("Cargo.toml").exists() {
-        DriftOptions::rust(&source_path, since)
-    } else {
-        DriftOptions::php(&source_path, since)
-    };
-
-    let report = test_drift::detect_drift(component_id, &opts)?;
-
-    // Report to stderr
-    if report.production_changes.is_empty() {
-        homeboy::log_status!("drift", "No production changes detected since {}", since);
-    } else {
-        homeboy::log_status!(
-            "drift",
-            "{} production change{} detected",
-            report.production_changes.len(),
-            if report.production_changes.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
-        );
-
-        for change in &report.production_changes {
-            let label = match change.change_type {
-                test_drift::ChangeType::MethodRename => "method rename",
-                test_drift::ChangeType::MethodRemoved => "method removed",
-                test_drift::ChangeType::ClassRename => "class rename",
-                test_drift::ChangeType::ClassRemoved => "class removed",
-                test_drift::ChangeType::ErrorCodeChange => "error code change",
-                test_drift::ChangeType::ReturnTypeChange => "return type change",
-                test_drift::ChangeType::SignatureChange => "signature change",
-                test_drift::ChangeType::FileMove => "file moved",
-                test_drift::ChangeType::StringChange => "string changed",
-            };
-
-            if let Some(ref new) = change.new_symbol {
-                homeboy::log_status!(
-                    "  change",
-                    "{}: {} → {} ({})",
-                    label,
-                    change.old_symbol,
-                    new,
-                    change.file
-                );
-            } else {
-                homeboy::log_status!(
-                    "  change",
-                    "{}: {} ({})",
-                    label,
-                    change.old_symbol,
-                    change.file
-                );
-            }
-        }
-
-        if !report.drifted_tests.is_empty() {
-            homeboy::log_status!(
-                "drift",
-                "{} drifted reference{} in {} test file{}",
-                report.drifted_tests.len(),
-                if report.drifted_tests.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                report.total_drifted_files,
-                if report.total_drifted_files == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-            );
-
-            for dt in report.drifted_tests.iter().take(20) {
-                let change = &report.production_changes[dt.change_index];
-                homeboy::log_status!(
-                    "  ref",
-                    "{}:{} references '{}' ({})",
-                    dt.test_file,
-                    dt.line,
-                    change.old_symbol,
-                    format!("{:?}", change.change_type).to_lowercase()
-                );
-            }
-
-            if report.drifted_tests.len() > 20 {
-                homeboy::log_status!(
-                    "info",
-                    "... and {} more (use --json for full list)",
-                    report.drifted_tests.len() - 20
-                );
-            }
-        }
-
-        if report.auto_fixable > 0 {
-            homeboy::log_status!(
-                "hint",
-                "{} change{} auto-fixable with refactor transform",
-                report.auto_fixable,
-                if report.auto_fixable == 1 { "" } else { "s" }
-            );
-        }
-    }
-
-    let exit_code = if report.drifted_tests.is_empty() {
-        0
-    } else {
-        1
-    };
+    let result = test_workflow::detect_test_drift(component_id, component, since)?;
 
     Ok((
         TestOutput {
             status: "drift".to_string(),
-            component: component_id.to_string(),
-            exit_code,
+            component: result.component,
+            exit_code: result.exit_code,
             test_counts: None,
             coverage: None,
             baseline_comparison: None,
             analysis: None,
             autofix: None,
             hints: None,
-            drift: Some(report),
+            drift: Some(result.report),
             scaffold: None,
             auto_fix_drift: None,
             test_scope: None,
             summary: None,
         },
-        exit_code,
+        result.exit_code,
     ))
 }
 
@@ -971,7 +389,7 @@ fn run_scaffold(
             mode_label
         );
 
-        let result = test_scaffold::scaffold_file(&file_path, &source_path, &config, write)?;
+        let result = homeboy::scaffold::scaffold_file(&file_path, &source_path, &config, write)?;
 
         if result.skipped {
             homeboy::log_status!(
@@ -1046,7 +464,7 @@ fn run_scaffold(
             mode_label
         );
 
-        let batch = test_scaffold::scaffold_untested(&source_path, &config, write)?;
+        let batch = homeboy::scaffold::scaffold_untested(&source_path, &config, write)?;
 
         let files_needing_tests = batch
             .results
@@ -1134,6 +552,7 @@ fn run_scaffold(
 mod tests {
     use super::*;
     use homeboy::refactor::test_refactor_request;
+    use homeboy::refactor::TestSourceOptions;
 
     #[test]
     fn filter_strips_boolean_flags() {

@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::core::symbol_graph::module_path_from_file;
-use crate::core::test_scaffold::load_extension_grammar;
+use crate::core::scaffold::load_extension_grammar;
 use crate::extension::{
     self, AdjustedItem, ExtensionManifest, ParsedItem, RelatedTests, ResolvedImports,
 };

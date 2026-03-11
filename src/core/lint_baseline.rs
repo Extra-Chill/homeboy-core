@@ -1,4 +1,4 @@
-//! Lint baseline — delegates to the generic `utils::baseline` primitive.
+//! Lint baseline — delegates to the generic `engine::baseline` primitive.
 //!
 //! Tracks lint findings emitted by extension sidecar JSON so CI only fails on
 //! NEW findings (`id` fingerprints).
@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::baseline::{self as generic, BaselineConfig, Fingerprintable};
+use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
 const BASELINE_KEY: &str = "lint";
 

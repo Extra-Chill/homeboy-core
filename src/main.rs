@@ -292,8 +292,8 @@ fn main() -> std::process::ExitCode {
 
     // Startup update checks — skip for upgrade/update commands (they handle this themselves)
     if !matches!(&cli.command, Commands::Upgrade(_) | Commands::Update(_)) {
-        homeboy::update_check::run_startup_check();
-        homeboy::extension_update_check::run_startup_check();
+        homeboy::upgrade::update_check::run_startup_check();
+        homeboy::extension::update_check::run_startup_check();
     }
 
     let mode = response_mode(&cli.command);

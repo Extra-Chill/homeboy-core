@@ -1,13 +1,5 @@
 use clap::Args;
-use std::collections::BTreeSet;
-use std::path::PathBuf;
-
 use serde::Serialize;
-
-use homeboy::code_audit::is_test_path;
-use homeboy::component::Component;
-use homeboy::git;
-use homeboy::test_drift::{self, DriftOptions};
 
 use super::{CmdResult, GlobalArgs};
 
@@ -36,63 +28,12 @@ pub fn run(args: TestScopeArgs, _global: &GlobalArgs) -> CmdResult<TestScopeComm
     ))
 }
 
-#[derive(Clone, Serialize)]
-pub struct TestScopeOutput {
-    pub mode: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub changed_since: Option<String>,
-    pub selected_count: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub selected_files: Vec<String>,
-}
-
-pub fn compute_changed_test_scope(
-    component: &Component,
-    git_ref: &str,
-) -> homeboy::error::Result<TestScopeOutput> {
-    let source_path = {
-        let expanded = shellexpand::tilde(&component.local_path);
-        PathBuf::from(expanded.as_ref())
-    };
-
-    let changed_files = git::get_files_changed_since(&source_path.to_string_lossy(), git_ref)?;
-
-    let opts = if source_path.join("Cargo.toml").exists() {
-        DriftOptions::rust(&source_path, git_ref)
-    } else {
-        DriftOptions::php(&source_path, git_ref)
-    };
-
-    let report = test_drift::detect_drift(&component.id, &opts)?;
-
-    let mut selected: BTreeSet<String> = BTreeSet::new();
-
-    // Include directly changed test files
-    for file in &changed_files {
-        if is_test_path(file) {
-            selected.insert(file.clone());
-        }
-    }
-
-    // Include drift-detected impacted test files
-    for drifted in &report.drifted_tests {
-        selected.insert(drifted.test_file.clone());
-    }
-
-    let selected_files: Vec<String> = selected.into_iter().collect();
-
-    Ok(TestScopeOutput {
-        mode: "changed".to_string(),
-        changed_since: Some(git_ref.to_string()),
-        selected_count: selected_files.len(),
-        selected_files,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use homeboy::code_audit::is_test_path;
     use homeboy::component::Component;
+    use homeboy::extension::test::compute_changed_test_scope;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;

@@ -1,4 +1,4 @@
-//! Audit-specific baseline — delegates to the generic `utils::baseline` primitive.
+//! Audit-specific baseline — delegates to the generic `engine::baseline` primitive.
 //!
 //! Provides the audit domain's [`Fingerprintable`] implementation for findings,
 //! plus backward-compatible wrappers (`save_baseline`, `load_baseline`, `compare`)
@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::baseline::{self as generic, BaselineConfig, Fingerprintable};
+use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
 use super::findings::Finding;
 use super::CodeAuditResult;
