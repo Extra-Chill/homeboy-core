@@ -3,15 +3,13 @@ use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
 use crate::output::{CreateOutput, MergeOutput, RemoveResult};
 use crate::server;
-use crate::utils::parser;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectComponentAttachment {
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_path: Option<String>,
+    pub local_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -77,8 +75,6 @@ pub struct Project {
     pub shared_tables: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<ProjectComponentAttachment>,
-    #[serde(default)]
-    pub component_ids: Vec<String>,
     /// Per-component field overrides applied when a component runs in this project.
     ///
     /// Example: `{"data-machine": {"extract_command": "...", "remote_owner": "opencode:opencode"}}`
@@ -339,21 +335,6 @@ fn component_ids_from_attachments(components: &[ProjectComponentAttachment]) -> 
         .collect()
 }
 
-fn sync_components_and_ids(project: &mut Project) {
-    if project.components.is_empty() && !project.component_ids.is_empty() {
-        project.components = project
-            .component_ids
-            .iter()
-            .map(|id| ProjectComponentAttachment {
-                id: id.clone(),
-                local_path: None,
-            })
-            .collect();
-    }
-
-    project.component_ids = component_ids_from_attachments(&project.components);
-}
-
 pub fn project_component_ids(project: &Project) -> Vec<String> {
     component_ids_from_attachments(&project.components)
 }
@@ -365,59 +346,37 @@ pub fn has_component(project: &Project, component_id: &str) -> bool {
         .any(|component| component.id == component_id)
 }
 
-pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
-    if component_ids.is_empty() {
+pub fn set_component_attachments(
+    project_id: &str,
+    components: Vec<ProjectComponentAttachment>,
+) -> Result<Vec<String>> {
+    if components.is_empty() {
         return Err(Error::validation_invalid_argument(
-            "componentIds",
-            "At least one component ID is required",
+            "components",
+            "At least one component attachment is required",
             Some(project_id.to_string()),
             None,
         ));
     }
 
-    let deduped = parser::dedupe(component_ids);
-
-    let mut project = load(project_id)?;
-    sync_components_and_ids(&mut project);
-    project.components = deduped
-        .iter()
-        .map(|id| ProjectComponentAttachment {
-            id: id.clone(),
-            local_path: project
-                .components
-                .iter()
-                .find(|component| &component.id == id)
-                .and_then(|component| component.local_path.clone()),
-        })
-        .collect();
-    sync_components_and_ids(&mut project);
-    save(&project)?;
-    Ok(project_component_ids(&project))
-}
-
-pub fn add_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
-    if component_ids.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "componentIds",
-            "At least one component ID is required",
-            Some(project_id.to_string()),
-            None,
-        ));
-    }
-
-    let deduped = parser::dedupe(component_ids);
-
-    let mut project = load(project_id)?;
-    sync_components_and_ids(&mut project);
-    for id in deduped {
-        if !has_component(&project, &id) {
-            project.components.push(ProjectComponentAttachment {
-                id,
-                local_path: None,
-            });
+    let mut deduped = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for component in components {
+        if component.local_path.trim().is_empty() {
+            return Err(Error::validation_invalid_argument(
+                "components.local_path",
+                "Project component attachments require a non-empty local_path",
+                Some(project_id.to_string()),
+                None,
+            ));
+        }
+        if seen.insert(component.id.clone()) {
+            deduped.push(component);
         }
     }
-    sync_components_and_ids(&mut project);
+
+    let mut project = load(project_id)?;
+    project.components = deduped;
     save(&project)?;
     Ok(project_component_ids(&project))
 }
@@ -433,7 +392,6 @@ pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result
     }
 
     let mut project = load(project_id)?;
-    sync_components_and_ids(&mut project);
 
     let mut missing = Vec::new();
     for id in &component_ids {
@@ -454,25 +412,22 @@ pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result
     project
         .components
         .retain(|component| !component_ids.contains(&component.id));
-    sync_components_and_ids(&mut project);
     save(&project)?;
     Ok(project_component_ids(&project))
 }
 
 pub fn attach_component_path(project_id: &str, component_id: &str, local_path: &str) -> Result<()> {
     let mut project = load(project_id)?;
-    sync_components_and_ids(&mut project);
 
     if let Some(component) = project.components.iter_mut().find(|c| c.id == component_id) {
-        component.local_path = Some(local_path.to_string());
+        component.local_path = local_path.to_string();
     } else {
         project.components.push(ProjectComponentAttachment {
             id: component_id.to_string(),
-            local_path: Some(local_path.to_string()),
+            local_path: local_path.to_string(),
         });
     }
 
-    sync_components_and_ids(&mut project);
     save(&project)
 }
 
@@ -515,45 +470,42 @@ pub fn resolve_project_component(
     project: &Project,
     component_id: &str,
 ) -> Result<crate::component::Component> {
-    let mut project = project.clone();
-    sync_components_and_ids(&mut project);
-
     let component = if let Some(attachment) = project
         .components
         .iter()
         .find(|component| component.id == component_id)
     {
-        if let Some(local_path) = &attachment.local_path {
-            crate::component::discover_from_portable(std::path::Path::new(local_path)).ok_or_else(
-                || {
-                    Error::validation_invalid_argument(
-                        "components.local_path",
-                        format!(
-                            "Project component '{}' points to '{}' but no homeboy.json was found",
-                            component_id, local_path
-                        ),
-                        Some(project.id.clone()),
-                        None,
-                    )
-                },
-            )?
-        } else {
-            crate::component::load(component_id)?
-        }
+        crate::component::discover_from_portable(std::path::Path::new(&attachment.local_path))
+            .ok_or_else(|| {
+                Error::validation_invalid_argument(
+                    "components.local_path",
+                    format!(
+                        "Project component '{}' points to '{}' but no homeboy.json was found",
+                        component_id, attachment.local_path
+                    ),
+                    Some(project.id.clone()),
+                    None,
+                )
+            })?
     } else {
-        crate::component::load(component_id)?
+        return Err(Error::validation_invalid_argument(
+            "components",
+            format!(
+                "Project '{}' has no attached component '{}'",
+                project.id, component_id
+            ),
+            Some(project.id.clone()),
+            None,
+        ));
     };
-    Ok(apply_component_overrides(&component, &project))
+    Ok(apply_component_overrides(&component, project))
 }
 
 pub fn resolve_project_components(project: &Project) -> Result<Vec<crate::component::Component>> {
-    let mut project = project.clone();
-    sync_components_and_ids(&mut project);
-
     project
         .components
         .iter()
-        .map(|component| resolve_project_component(&project, &component.id))
+        .map(|component| resolve_project_component(project, &component.id))
         .collect()
 }
 

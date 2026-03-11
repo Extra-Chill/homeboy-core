@@ -112,15 +112,9 @@ enum ProjectComponentsCommand {
     Set {
         /// Project ID
         project_id: String,
-        /// Component IDs
-        component_ids: Vec<String>,
-    },
-    /// Add one or more components
-    Add {
-        /// Project ID
-        project_id: String,
-        /// Component IDs
-        component_ids: Vec<String>,
+        /// JSON array of attachments: [{"id":"foo","local_path":"/repo"}]
+        #[arg(long)]
+        json: String,
     },
     /// Attach a repo path for a project component discovered via homeboy.json
     AttachPath {
@@ -577,14 +571,7 @@ fn delete(project_id: &str) -> CmdResult<ProjectOutput> {
 fn components(command: ProjectComponentsCommand) -> CmdResult<ProjectOutput> {
     match command {
         ProjectComponentsCommand::List { project_id } => components_list(&project_id),
-        ProjectComponentsCommand::Set {
-            project_id,
-            component_ids,
-        } => components_set(&project_id, component_ids),
-        ProjectComponentsCommand::Add {
-            project_id,
-            component_ids,
-        } => components_add(&project_id, component_ids),
+        ProjectComponentsCommand::Set { project_id, json } => components_set(&project_id, &json),
         ProjectComponentsCommand::AttachPath {
             project_id,
             local_path,
@@ -620,16 +607,19 @@ fn components_list(project_id: &str) -> CmdResult<ProjectOutput> {
     ))
 }
 
-fn components_set(project_id: &str, component_ids: Vec<String>) -> CmdResult<ProjectOutput> {
-    project::set_components(project_id, component_ids)?;
+fn components_set(project_id: &str, json: &str) -> CmdResult<ProjectOutput> {
+    let raw = homeboy::config::read_json_spec_to_string(json)?;
+    let attachments: Vec<project::ProjectComponentAttachment> = serde_json::from_str(&raw)
+        .map_err(|e| {
+            homeboy::Error::validation_invalid_json(
+                e,
+                Some("parse project component attachments".to_string()),
+                None,
+            )
+        })?;
+    project::set_component_attachments(project_id, attachments)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "set", &project)
-}
-
-fn components_add(project_id: &str, component_ids: Vec<String>) -> CmdResult<ProjectOutput> {
-    project::add_components(project_id, component_ids)?;
-    let project = project::load(project_id)?;
-    write_project_components(project_id, "add", &project)
 }
 
 fn components_attach_path(project_id: &str, local_path: &str) -> CmdResult<ProjectOutput> {
@@ -877,14 +867,14 @@ fn status(project_id: &str, health_only: bool) -> CmdResult<ProjectOutput> {
                     e
                 );
                 Some(
-                    proj.component_ids
+                    proj.components
                         .iter()
                         .map(|cid| {
-                            let comp_version = component::load(cid)
+                            let comp_version = component::load(&cid.id)
                                 .ok()
                                 .and_then(|comp| version::get_component_version(&comp));
                             ProjectComponentVersion {
-                                component_id: cid.clone(),
+                                component_id: cid.id.clone(),
                                 version: comp_version,
                                 version_source: Some("cached".to_string()),
                             }

@@ -823,7 +823,6 @@ pub(crate) fn check_id_collision(id: &str, saving_type: &str) -> Result<()> {
 
     check::<crate::project::Project>(id, saving_type)?;
     check::<crate::server::Server>(id, saving_type)?;
-    check::<crate::component::Component>(id, saving_type)?;
     check::<crate::extension::ExtensionManifest>(id, saving_type)?;
     check::<crate::fleet::Fleet>(id, saving_type)?;
 
@@ -861,7 +860,6 @@ fn check_alias_collision_all(id: &str, saving_type: &str) -> Result<()> {
 
     check_aliases_in::<crate::project::Project>(&id_lower, saving_type)?;
     check_aliases_in::<crate::server::Server>(&id_lower, saving_type)?;
-    check_aliases_in::<crate::component::Component>(&id_lower, saving_type)?;
     check_aliases_in::<crate::extension::ExtensionManifest>(&id_lower, saving_type)?;
     check_aliases_in::<crate::fleet::Fleet>(&id_lower, saving_type)?;
 
