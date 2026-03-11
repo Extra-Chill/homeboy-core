@@ -9,8 +9,8 @@ use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::paths;
 use crate::permissions;
 use crate::ssh::execute_local_command_in_dir;
-use crate::utils::command::CapturedOutput;
-use crate::utils::shell;
+use crate::engine::command::CapturedOutput;
+use crate::engine::shell;
 
 // === Build Command Resolution ===
 

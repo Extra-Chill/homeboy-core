@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use crate::component::{self, Component};
+use crate::engine::validation;
 use crate::error::Result;
-use crate::utils::{io, parser, validation};
+use crate::utils::{io, parser};
 
 use super::sections::*;
 use super::settings::*;

@@ -4,11 +4,11 @@ use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::engine::temp;
+use crate::engine::validation::ValidationCollector;
 use crate::error::{Error, ErrorCode, Result};
 use crate::extension::{self, ExtensionManifest};
 use crate::git::{self, UncommittedChanges};
 use crate::release::changelog;
-use crate::utils::validation::ValidationCollector;
 use crate::version;
 
 use super::executor::ReleaseStepExecutor;

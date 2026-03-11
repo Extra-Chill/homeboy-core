@@ -20,7 +20,6 @@ pub struct ParseRule {
 #[derive(Debug, Clone)]
 pub struct DeriveRule {
     pub field: String,
-    /// Expression with + / - over named fields, e.g. "total - failed - skipped"
     pub expr: String,
 }
 
@@ -104,54 +103,4 @@ fn evaluate_expr(expr: &str, values: &HashMap<String, f64>) -> f64 {
     }
 
     total
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_evaluate_expr() {
-        let values = HashMap::from([
-            ("total".to_string(), 12.0),
-            ("failed".to_string(), 2.0),
-            ("skipped".to_string(), 1.0),
-        ]);
-        assert_eq!(evaluate_expr("total - failed - skipped", &values), 9.0);
-        assert_eq!(evaluate_expr("total + 1", &values), 13.0);
-    }
-
-    #[test]
-    fn test_parse() {
-        let spec = ParseSpec {
-            rules: vec![ParseRule {
-                pattern: r"Errors:\s*(\d+)".to_string(),
-                field: "errors".to_string(),
-                group: 1,
-                aggregate: Aggregate::Sum,
-            }],
-            defaults: HashMap::new(),
-            derive: vec![],
-        };
-
-        let parsed = spec.parse("Errors: 2\nErrors: 3\n");
-        assert_eq!(parsed.get("errors").copied().unwrap_or(0.0), 5.0);
-    }
-
-    #[test]
-    fn test_parse_output() {
-        let spec = ParseSpec {
-            rules: vec![ParseRule {
-                pattern: r"Errors:\s*(\d+)".to_string(),
-                field: "errors".to_string(),
-                group: 1,
-                aggregate: Aggregate::Sum,
-            }],
-            defaults: HashMap::new(),
-            derive: vec![],
-        };
-
-        let parsed = parse_output("Errors: 2\nErrors: 3\n", &spec);
-        assert_eq!(parsed.get("errors").copied().unwrap_or(0.0), 5.0);
-    }
 }

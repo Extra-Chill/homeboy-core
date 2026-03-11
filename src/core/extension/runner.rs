@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::component::{self, Component};
+use crate::engine::shell;
 use crate::error::{Error, ErrorCode, Result};
 use crate::ssh::{execute_local_command_passthrough, CommandOutput};
-use crate::utils::{io, shell};
+use crate::utils::io;
 
 /// Output from a extension runner script execution.
 pub struct RunnerOutput {

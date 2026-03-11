@@ -9,8 +9,8 @@ use crate::extension::{find_extension_by_tool, CliConfig};
 use crate::project::{self, Project};
 use crate::server;
 use crate::ssh::{execute_local_command, CommandOutput};
-use crate::utils::shell;
-use crate::utils::template::{render_map, TemplateVars};
+use crate::engine::shell;
+use crate::engine::template::{render_map, TemplateVars};
 use crate::utils::token;
 use crate::{Error, Result};
 

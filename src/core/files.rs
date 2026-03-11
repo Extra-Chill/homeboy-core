@@ -8,11 +8,12 @@ use std::io::{self, Read};
 
 use crate::context::{require_project_base_path, resolve_project_ssh_with_base_path};
 use crate::defaults;
+use crate::engine::{command, shell};
 use crate::engine::executor::execute_for_project;
 use crate::error::{Error, Result};
 use crate::project;
 use crate::utils::base_path;
-use crate::utils::{command, parser, shell, token};
+use crate::utils::{parser, token};
 
 use std::path::Path;
 use std::process::Command;

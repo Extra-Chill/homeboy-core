@@ -10,7 +10,7 @@ use crate::engine::executor::{execute_for_project, execute_for_project_interacti
 use crate::error::{Error, Result};
 use crate::project::{self, Project};
 use crate::utils::base_path;
-use crate::utils::shell;
+use crate::engine::shell;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]

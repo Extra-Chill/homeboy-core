@@ -5,7 +5,7 @@ use crate::engine::pipeline::{
 };
 use crate::error::{Error, Result};
 use crate::extension::{self, ExtensionManifest};
-use crate::utils::validation;
+use crate::engine::validation;
 use crate::{changelog, version};
 
 use super::types::{ReleaseContext, ReleaseStepType};

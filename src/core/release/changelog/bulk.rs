@@ -6,8 +6,9 @@ use crate::component;
 use crate::config::read_json_spec_to_string;
 use crate::core::local_files::{self, FileSystem};
 use crate::core::release::version;
+use crate::engine::validation;
 use crate::error::{Error, Result};
-use crate::utils::{io, validation};
+use crate::utils::io;
 
 use super::io::*;
 use super::sections::*;

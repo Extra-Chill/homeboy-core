@@ -15,7 +15,7 @@ fn artifact_is_fresh(component: &Component) -> bool {
     };
 
     // Get HEAD commit timestamp as Unix epoch seconds
-    let commit_ts = crate::utils::command::run_in_optional(
+    let commit_ts = crate::engine::command::run_in_optional(
         &component.local_path,
         "git",
         &["log", "-1", "--format=%ct", "HEAD"],
