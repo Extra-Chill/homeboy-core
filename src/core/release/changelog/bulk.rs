@@ -113,7 +113,7 @@ pub fn add_items(
     // Validate entry type if provided
     let validated_type = entry_type.map(validate_entry_type).transpose()?;
 
-    let component = component::load(id)?;
+    let component = component::resolve_effective(Some(id), None, None)?;
     let settings = resolve_effective_settings(Some(&component));
 
     let (path, changed, items_added) = if let Some(ref entry_type_val) = validated_type {
@@ -143,7 +143,7 @@ pub struct ShowOutput {
 }
 
 pub fn show(component_id: &str) -> Result<ShowOutput> {
-    let component = component::load(component_id)?;
+    let component = component::resolve_effective(Some(component_id), None, None)?;
     let changelog_path = resolve_changelog_path(&component)?;
 
     let content = io::read_file(
@@ -183,7 +183,7 @@ fn generate_template(initial_version: &str, next_label: &str) -> String {
 /// If the changelog file doesn't exist, creates a new one with Keep a Changelog template.
 /// If the changelog file exists, ensures it has an Unreleased section.
 pub fn init(component_id: &str, path: Option<&str>, configure: bool) -> Result<InitOutput> {
-    let component = component::load(component_id)?;
+    let component = component::resolve_effective(Some(component_id), None, None)?;
 
     // Validate local_path is absolute and exists before any file operations
     component::validate_local_path(&component)?;

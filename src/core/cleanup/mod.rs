@@ -30,7 +30,7 @@ pub struct CleanupResult {
 
 /// Run all cleanup checks on a component.
 pub fn cleanup_component(component_id: &str) -> Result<CleanupResult> {
-    let comp = crate::component::load(component_id)?;
+    let comp = crate::component::resolve_effective(Some(component_id), None, None)?;
     let config_issues = config::check_config(&comp);
 
     let mut hints = Vec::new();

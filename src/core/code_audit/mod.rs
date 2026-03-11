@@ -149,7 +149,7 @@ pub struct ConventionReport {
 
 /// Audit a registered component by ID.
 pub fn audit_component(component_id: &str) -> Result<CodeAuditResult> {
-    let comp = component::load(component_id)?;
+    let comp = component::resolve_effective(Some(component_id), None, None)?;
     component::validate_local_path(&comp)?;
     audit_path_with_id(component_id, &comp.local_path)
 }

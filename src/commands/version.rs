@@ -45,18 +45,16 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
     match args.command {
         VersionCommand::Show { component_id, path } => {
             let info = if let Some(ref p) = path {
-                // With --path: resolve component, override local_path
-                let mut comp = component::resolve(component_id.as_deref())?;
-                comp.local_path = p.clone();
+                let comp = component::resolve_effective(component_id.as_deref(), Some(p), None)?;
                 read_component_version(&comp)?
             } else if component_id.is_some() {
                 // Explicit component ID or CWD discovery
-                let comp = component::resolve(component_id.as_deref())?;
+                let comp = component::resolve_effective(component_id.as_deref(), None, None)?;
                 read_component_version(&comp)?
             } else {
                 // No component ID and no --path: try CWD discovery first,
                 // fall back to showing homeboy binary version
-                match component::resolve(None) {
+                match component::resolve_effective(None, None, None) {
                     Ok(comp) => read_component_version(&comp)?,
                     Err(_) => read_version(None)?,
                 }
@@ -67,7 +65,7 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                 if info.targets.is_empty() {
                     None
                 } else {
-                    component::resolve(None).ok().map(|c| c.id)
+                    component::resolve_effective(None, None, None).ok().map(|c| c.id)
                 }
             });
 
