@@ -102,9 +102,9 @@ pub fn component_usage(fleet_id: &str) -> Result<std::collections::HashMap<Strin
 
     for project_id in &fleet.project_ids {
         if let Ok(project) = project::load(project_id) {
-            for component_id in &project.component_ids {
+            for component_id in project::project_component_ids(&project) {
                 usage
-                    .entry(component_id.clone())
+                    .entry(component_id)
                     .or_default()
                     .push(project_id.clone());
             }

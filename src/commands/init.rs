@@ -39,11 +39,7 @@ fn collect_focused_components(
                 continue;
             }
 
-            let Some(local_path) = attachment.local_path.as_deref() else {
-                continue;
-            };
-
-            if let Some(mut component) = component::discover_from_portable(Path::new(local_path)) {
+            if let Some(mut component) = component::discover_from_portable(Path::new(&attachment.local_path)) {
                 component.id = attachment.id.clone();
                 by_id.insert(component.id.clone(), component);
             }
@@ -342,7 +338,7 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
     } else {
         all_projects
             .into_iter()
-            .filter(|p| p.component_ids.iter().any(|id| relevant_ids.contains(id)))
+            .filter(|p| p.components.iter().any(|c| relevant_ids.contains(&c.id)))
             .collect()
     };
 

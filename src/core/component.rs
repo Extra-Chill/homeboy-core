@@ -546,17 +546,17 @@ fn update_project_references(old_id: &str, new_id: &str) -> Result<()> {
     let projects = project::list().unwrap_or_default();
     for proj in projects {
         if project::has_component(&proj, old_id) {
-            let updated_ids: Vec<String> = project::project_component_ids(&proj)
+            let updated_components: Vec<project::ProjectComponentAttachment> = proj
+                .components
                 .into_iter()
-                .map(|comp_id| {
-                    if comp_id == old_id {
-                        new_id.to_string()
-                    } else {
-                        comp_id
+                .map(|mut component| {
+                    if component.id == old_id {
+                        component.id = new_id.to_string();
                     }
+                    component
                 })
                 .collect();
-            project::set_components(&proj.id, updated_ids)?;
+            project::set_component_attachments(&proj.id, updated_components)?;
         }
     }
     Ok(())

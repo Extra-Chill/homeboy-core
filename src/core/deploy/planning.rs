@@ -220,8 +220,8 @@ fn load_project_components(project: &Project) -> Result<LoadedComponents> {
     let mut deployable = Vec::new();
     let mut skipped = Vec::new();
 
-    for id in &project.component_ids {
-        let mut loaded = project::resolve_project_component(project, id)?;
+    for attachment in &project.components {
+        let mut loaded = project::resolve_project_component(project, &attachment.id)?;
 
         // Validate required extensions are installed before attempting artifact resolution.
         // Without this check, missing extensions cause resolve_artifact() to silently
