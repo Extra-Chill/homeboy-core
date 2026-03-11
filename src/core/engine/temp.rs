@@ -69,7 +69,11 @@ mod tests {
 
         let path = runtime_temp_file("homeboy-test", ".json").expect("temp file path");
         assert!(path.starts_with(dir.path()));
-        assert!(path.file_name().unwrap().to_string_lossy().ends_with(".json"));
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(".json"));
 
         unsafe {
             env::remove_var(HOMEBOY_RUNTIME_TMPDIR_ENV);
