@@ -2,6 +2,7 @@ use crate::code_audit::conventions::Language;
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{Fix, FixSafetyTier, InsertionKind, NewFile, SkippedFile};
 use crate::core::refactor::shared::detect_language;
+use crate::scaffold::ScaffoldConfig;
 use std::path::Path;
 
 use super::{insertion, new_file};
@@ -221,13 +222,12 @@ fn generate_test_file_from_scaffold(
         .unwrap_or(Language::Unknown);
 
     let config = match lang {
-        Language::Rust => crate::test_scaffold::ScaffoldConfig::rust(),
-        Language::Php => crate::test_scaffold::ScaffoldConfig::php(),
+        Language::Rust => ScaffoldConfig::rust(),
+        Language::Php => ScaffoldConfig::php(),
         _ => return None,
     };
 
-    let scaffolded =
-        crate::test_scaffold::scaffold_file(&source_path, root, &config, false).ok()?;
+    let scaffolded = crate::scaffold::scaffold_file(&source_path, root, &config, false).ok()?;
 
     if scaffolded.test_file != test_file {
         return None;
