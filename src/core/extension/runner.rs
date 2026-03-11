@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::component::{self, Component};
 use crate::engine::shell;
-use crate::error::{Error, ErrorCode, Result};
+use crate::error::{Error, Result};
 use crate::ssh::{execute_local_command_passthrough, CommandOutput};
 use crate::utils::io;
 
@@ -158,31 +158,11 @@ impl ExtensionRunner {
         let mut comp = if let Some(ref pre_loaded) = self.pre_loaded_component {
             pre_loaded.clone()
         } else {
-            match component::load(&self.execution_context.component.id) {
-                Ok(c) => c,
-                Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
-                    // Fall back to portable config discovery when --path is provided
-                    if let Some(ref path) = self.path_override {
-                        if let Some(mut discovered) =
-                            component::discover_from_portable(Path::new(path))
-                        {
-                            discovered.id = self.execution_context.component.id.clone();
-                            discovered.local_path = path.clone();
-                            discovered
-                        } else {
-                            Component::new(
-                                self.execution_context.component.id.clone(),
-                                path.clone(),
-                                String::new(),
-                                None,
-                            )
-                        }
-                    } else {
-                        return Err(err);
-                    }
-                }
-                Err(err) => return Err(err),
-            }
+            component::resolve_effective(
+                Some(&self.execution_context.component.id),
+                self.path_override.as_deref(),
+                None,
+            )?
         };
         if let Some(ref path) = self.path_override {
             comp.local_path = path.clone();

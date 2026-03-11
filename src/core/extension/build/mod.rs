@@ -393,10 +393,7 @@ pub fn run_components(components: &[Component]) -> Result<(BuildResult, i32)> {
 }
 
 fn execute_build(component_id: &str, path_override: Option<&str>) -> Result<(BuildOutput, i32)> {
-    let mut comp = component::load(component_id)?;
-    if let Some(path) = path_override {
-        comp.local_path = path.to_string();
-    }
+    let comp = component::resolve_effective(Some(component_id), path_override, None)?;
     execute_build_component(&comp)
 }
 

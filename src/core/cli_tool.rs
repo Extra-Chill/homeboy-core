@@ -58,7 +58,7 @@ fn try_run_for_component(
     identifier: &str,
     args: &[String],
 ) -> Option<Result<CliToolResult>> {
-    match component::load(identifier) {
+    match component::resolve_effective(Some(identifier), None, None) {
         Ok(component) => {
             let extension = find_extension_by_tool(tool)?;
             let cli_config = extension.cli.as_ref()?;

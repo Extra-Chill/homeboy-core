@@ -268,7 +268,7 @@ pub struct CommitOptions {
 }
 
 fn get_component_path(component_id: &str) -> Result<String> {
-    let comp = component::load(component_id)?;
+    let comp = component::resolve_effective(Some(component_id), None, None)?;
     Ok(comp.local_path)
 }
 
@@ -929,7 +929,7 @@ pub fn changes(
     let path = get_component_path(id)?;
 
     // Load component for version checking and changelog info
-    let component = crate::component::load(id).ok();
+    let component = crate::component::resolve_effective(Some(id), None, None).ok();
 
     // Determine baseline with version alignment awareness
     let baseline = match since_tag {
