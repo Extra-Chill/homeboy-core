@@ -1,14 +1,16 @@
 use crate::component::Component;
+use crate::extension::test::drift::{
+    detect_drift, generate_transform_rules, DriftOptions, DriftReport,
+};
 use crate::extension::test::TestScopeOutput;
+use crate::extension::test::{ChangeType, TestAnalysis};
+use crate::extension::test::{TestBaselineComparison, TestCounts};
 use crate::refactor::AppliedRefactor;
 use crate::refactor::{
     self,
     auto::{self, AutofixMode},
     TransformSet,
 };
-use crate::extension::test::{ChangeType, TestAnalysis};
-use crate::extension::test::{TestBaselineComparison, TestCounts};
-use crate::extension::test::drift::{detect_drift, generate_transform_rules, DriftOptions, DriftReport};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
