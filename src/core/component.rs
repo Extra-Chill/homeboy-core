@@ -582,17 +582,10 @@ pub fn set_changelog_target(component_id: &str, file_path: &str) -> Result<()> {
 fn update_project_references(old_id: &str, new_id: &str) -> Result<()> {
     let projects = project::list().unwrap_or_default();
     for proj in projects {
-        if proj.component_ids.contains(&old_id.to_string()) {
-            let updated_ids: Vec<String> = proj
-                .component_ids
-                .iter()
-                .map(|comp_id: &String| {
-                    if comp_id == old_id {
-                        new_id.to_string()
-                    } else {
-                        comp_id.clone()
-                    }
-                })
+        if project::has_component(&proj, old_id) {
+            let updated_ids: Vec<String> = project::project_component_ids(&proj)
+                .into_iter()
+                .map(|comp_id| if comp_id == old_id { new_id.to_string() } else { comp_id })
                 .collect();
             project::set_components(&proj.id, updated_ids)?;
         }
@@ -604,7 +597,7 @@ pub fn projects_using(component_id: &str) -> Result<Vec<String>> {
     let projects = project::list().unwrap_or_default();
     Ok(projects
         .iter()
-        .filter(|p| p.component_ids.contains(&component_id.to_string()))
+        .filter(|p| project::has_component(p, component_id))
         .map(|p| p.id.clone())
         .collect())
 }
@@ -617,9 +610,9 @@ pub fn shared_components() -> Result<std::collections::HashMap<String, Vec<Strin
         std::collections::HashMap::new();
 
     for project in projects {
-        for component_id in &project.component_ids {
+        for component_id in project::project_component_ids(&project) {
             sharing
-                .entry(component_id.clone())
+                .entry(component_id)
                 .or_default()
                 .push(project.id.clone());
         }
