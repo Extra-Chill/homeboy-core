@@ -12,6 +12,7 @@
 //! 6. Analyzing structural complexity (god files, high item counts)
 
 pub mod baseline;
+pub mod compare;
 mod checks;
 mod comment_hygiene;
 pub(crate) mod conventions;
@@ -42,6 +43,9 @@ use std::path::Path;
 use self::layer_ownership::run as run_layer_ownership;
 
 pub use checks::{CheckResult, CheckStatus};
+pub use compare::{
+    finding_fingerprint, score_delta, weighted_finding_score_with, AuditConvergenceScoring,
+};
 pub use conventions::{AuditFinding, Convention, Deviation, Language, Outlier};
 pub use duplication::DuplicateGroup;
 pub use findings::{Finding, Severity};

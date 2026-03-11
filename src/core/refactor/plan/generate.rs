@@ -407,13 +407,13 @@ fn generate_test_file_from_scaffold(
         .unwrap_or(Language::Unknown);
 
     let config = match lang {
-        Language::Rust => crate::test_scaffold::ScaffoldConfig::rust(),
-        Language::Php => crate::test_scaffold::ScaffoldConfig::php(),
+        Language::Rust => crate::scaffold::ScaffoldConfig::rust(),
+        Language::Php => crate::scaffold::ScaffoldConfig::php(),
         _ => return None,
     };
 
     let scaffolded =
-        crate::test_scaffold::scaffold_file(&source_path, root, &config, false).ok()?;
+        crate::scaffold::scaffold_file(&source_path, root, &config, false).ok()?;
 
     if scaffolded.test_file != test_file {
         return None;

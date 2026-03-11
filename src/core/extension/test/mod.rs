@@ -1,0 +1,114 @@
+pub mod parsing;
+pub mod run;
+
+use crate::component::Component;
+use crate::extension::{ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
+use crate::git;
+use crate::test_drift::{self, DriftOptions};
+use serde::Serialize;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TestScopeOutput {
+    pub mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_since: Option<String>,
+    pub selected_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selected_files: Vec<String>,
+}
+
+pub use parsing::{
+    build_test_summary, parse_coverage_file, parse_failures_file, parse_test_results_file,
+    parse_test_results_text, CoverageOutput, TestSummaryOutput,
+};
+pub use run::{run_main_test_workflow, TestRunWorkflowArgs, TestRunWorkflowResult};
+
+pub fn resolve_test_command(
+    component: &Component,
+) -> crate::error::Result<ExtensionExecutionContext> {
+    crate::extension::resolve_execution_context(component, ExtensionCapability::Test)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_test_runner(
+    component: &Component,
+    path_override: Option<String>,
+    settings: &[(String, String)],
+    skip_lint: bool,
+    coverage_enabled: bool,
+    results_file: &str,
+    coverage_file: Option<&str>,
+    failures_file: Option<&str>,
+    coverage_min: Option<f64>,
+    changed_test_files: Option<&[String]>,
+) -> crate::Result<ExtensionRunner> {
+    let resolved = resolve_test_command(component)?;
+
+    let mut runner = ExtensionRunner::for_context(resolved)
+        .component(component.clone())
+        .path_override(path_override)
+        .settings(settings)
+        .env_if(skip_lint, "HOMEBOY_SKIP_LINT", "1")
+        .env_if(coverage_enabled, "HOMEBOY_COVERAGE", "1")
+        .env("HOMEBOY_TEST_RESULTS_FILE", results_file);
+
+    if let Some(file) = coverage_file {
+        runner = runner.env("HOMEBOY_COVERAGE_FILE", file);
+    }
+
+    if let Some(file) = failures_file {
+        runner = runner.env("HOMEBOY_TEST_FAILURES_FILE", file);
+    }
+
+    if let Some(min) = coverage_min {
+        runner = runner.env("HOMEBOY_COVERAGE_MIN", &format!("{}", min));
+    }
+
+    if let Some(files) = changed_test_files {
+        runner = runner.env("HOMEBOY_CHANGED_TEST_FILES", &files.join("\n"));
+    }
+
+    Ok(runner)
+}
+
+pub fn compute_changed_test_scope(
+    component: &Component,
+    git_ref: &str,
+) -> crate::error::Result<TestScopeOutput> {
+    let source_path = {
+        let expanded = shellexpand::tilde(&component.local_path);
+        PathBuf::from(expanded.as_ref())
+    };
+
+    let changed_files = git::get_files_changed_since(&source_path.to_string_lossy(), git_ref)?;
+
+    let opts = if source_path.join("Cargo.toml").exists() {
+        DriftOptions::rust(&source_path, git_ref)
+    } else {
+        DriftOptions::php(&source_path, git_ref)
+    };
+
+    let report = test_drift::detect_drift(&component.id, &opts)?;
+    let mut selected: BTreeSet<String> = BTreeSet::new();
+
+    for file in &changed_files {
+        if crate::code_audit::is_test_path(file) {
+            selected.insert(file.clone());
+        }
+    }
+
+    for drifted in &report.drifted_tests {
+        selected.insert(drifted.test_file.clone());
+    }
+
+    let selected_files: Vec<String> = selected.into_iter().collect();
+
+    Ok(TestScopeOutput {
+        mode: "changed".to_string(),
+        changed_since: Some(git_ref.to_string()),
+        selected_count: selected_files.len(),
+        selected_files,
+    })
+}

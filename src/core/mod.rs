@@ -31,11 +31,12 @@ pub mod scope;
 
 pub mod server;
 pub mod ssh;
+pub mod scaffold;
 pub mod symbol_graph;
 pub mod test_analyze;
 pub mod test_baseline;
 pub mod test_drift;
-pub mod test_scaffold;
+pub mod test_workflow;
 pub mod undo;
 pub mod update_check;
 pub mod upgrade;

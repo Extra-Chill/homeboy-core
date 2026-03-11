@@ -5,7 +5,6 @@ use crate::git;
 use crate::lint_baseline;
 use crate::refactor::auto as fixer;
 use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
-use crate::refactor::runner;
 use crate::test_drift::{self, DriftOptions};
 use crate::undo::UndoSnapshot;
 use crate::Error;
@@ -13,7 +12,7 @@ use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::audit::{AuditConvergenceScoring, AuditVerificationToggles};
+use super::verify::{AuditConvergenceScoring, AuditVerificationToggles};
 use crate::refactor::sandbox::{
     clone_tree, copy_changed_files, diff_tree_snapshots, snapshot_tree, SandboxDir,
 };
@@ -491,7 +490,7 @@ fn plan_audit_stage(
         Vec<String>,
         Vec<String>,
     ) = if write {
-        let outcome = super::audit::run_audit_refactor(
+        let outcome = super::verify::run_audit_refactor(
             result.clone(),
             only,
             exclude,
@@ -579,7 +578,6 @@ fn run_lint_stage(
 ) -> crate::Result<PlannedStage> {
     let mut sandbox_component = component.clone();
     sandbox_component.local_path = sandbox.path().to_string_lossy().to_string();
-    let resolved = runner::resolve_lint_command(&sandbox_component)?;
     let findings_file = std::env::temp_dir().join(format!(
         "homeboy-lint-findings-{}-{}-{}.json",
         std::process::id(),
@@ -615,20 +613,20 @@ fn run_lint_stage(
         options.glob.clone()
     };
 
-    extension::ExtensionRunner::for_context(resolved)
-        .component(sandbox_component.clone())
-        .settings(settings)
-        .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1")
-        .env_opt("HOMEBOY_LINT_FILE", &options.file)
-        .env_opt("HOMEBOY_LINT_GLOB", &effective_glob)
-        .env_if(options.errors_only, "HOMEBOY_ERRORS_ONLY", "1")
-        .env_opt("HOMEBOY_SNIFFS", &options.sniffs)
-        .env_opt("HOMEBOY_EXCLUDE_SNIFFS", &options.exclude_sniffs)
-        .env_opt("HOMEBOY_CATEGORY", &options.category)
-        .env(
-            "HOMEBOY_LINT_FINDINGS_FILE",
-            &findings_file.to_string_lossy(),
-        )
+    let findings_file_str = findings_file.to_string_lossy().to_string();
+    let runner = extension::lint::build_lint_runner(
+        &sandbox_component,
+        None,
+        settings,
+        false,
+        options.file.as_deref(),
+        effective_glob.as_deref(),
+        options.errors_only,
+        options.sniffs.as_deref(),
+        options.exclude_sniffs.as_deref(),
+        options.category.as_deref(),
+        &findings_file_str,
+    )?
         .env_if(
             plan_mode,
             "HOMEBOY_FIX_PLAN_FILE",
@@ -643,7 +641,9 @@ fn run_lint_stage(
             "HOMEBOY_FIX_RESULTS_FILE",
             &fix_sidecars.results_file.to_string_lossy(),
         )
-        .run()?;
+        .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1");
+
+    runner.run()?;
 
     let changed_files = if plan_mode {
         let after_fix = snapshot_tree(&sandbox_component.local_path)?;
@@ -687,7 +687,6 @@ fn run_test_stage(
 ) -> crate::Result<PlannedStage> {
     let mut sandbox_component = component.clone();
     sandbox_component.local_path = sandbox.path().to_string_lossy().to_string();
-    let resolved = runner::resolve_test_command(&sandbox_component)?;
     let results_file = std::env::temp_dir().join(format!(
         "homeboy-test-results-{}-{}.json",
         std::process::id(),
@@ -700,11 +699,21 @@ fn run_test_stage(
         None
     };
 
-    let mut runner = extension::ExtensionRunner::for_context(resolved)
-        .component(sandbox_component.clone())
-        .settings(settings)
-        .env_if(options.skip_lint, "HOMEBOY_SKIP_LINT", "1")
-        .env("HOMEBOY_TEST_RESULTS_FILE", &results_file.to_string_lossy())
+    let results_file_str = results_file.to_string_lossy().to_string();
+    let selected_test_files = options.selected_files.as_deref().or(changed_test_files);
+
+    let mut runner = extension::test::build_test_runner(
+        &sandbox_component,
+        None,
+        settings,
+        options.skip_lint,
+        false,
+        &results_file_str,
+        None,
+        None,
+        None,
+        selected_test_files,
+    )?
         .env_if(
             plan_mode,
             "HOMEBOY_FIX_PLAN_FILE",
@@ -720,13 +729,6 @@ fn run_test_stage(
             &fix_sidecars.results_file.to_string_lossy(),
         )
         .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1");
-
-    let selected_test_files = options.selected_files.as_deref().or(changed_test_files);
-    if let Some(changed_test_files) = selected_test_files {
-        if !changed_test_files.is_empty() {
-            runner = runner.env("HOMEBOY_CHANGED_TEST_FILES", &changed_test_files.join("\n"));
-        }
-    }
 
     if !options.script_args.is_empty() {
         runner = runner.script_args(&options.script_args);

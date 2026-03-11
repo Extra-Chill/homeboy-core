@@ -6,7 +6,7 @@ use crate::core::lint_baseline;
 use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::error::{Error, ErrorCode, Result};
-use crate::extension::{self, ExtensionManifest, ExtensionRunner};
+use crate::extension::{self, ExtensionManifest};
 use crate::git::{self, UncommittedChanges};
 use crate::utils::validation::ValidationCollector;
 use crate::version;
@@ -414,10 +414,8 @@ fn validate_remote_sync(component: &Component) -> Result<()> {
 /// This is the pre-release quality gate — ensures code passes lint and tests
 /// before any version bump or tag is created.
 fn validate_code_quality(component: &Component) -> Result<()> {
-    let lint_context =
-        extension::resolve_execution_context(component, extension::ExtensionCapability::Lint);
-    let test_context =
-        extension::resolve_execution_context(component, extension::ExtensionCapability::Test);
+    let lint_context = extension::lint::resolve_lint_command(component);
+    let test_context = extension::test::resolve_test_command(component);
 
     let mut checks_run = 0;
     let mut failures = Vec::new();
@@ -434,14 +432,21 @@ fn validate_code_quality(component: &Component) -> Result<()> {
                 .as_nanos()
         ));
 
-        match ExtensionRunner::for_context(lint_context)
-            .component(component.clone())
-            .env(
-                "HOMEBOY_LINT_FINDINGS_FILE",
-                &lint_findings_file.to_string_lossy(),
-            )
-            .run()
-        {
+        let lint_findings_file_str = lint_findings_file.to_string_lossy().to_string();
+        match extension::lint::build_lint_runner(
+            component,
+            None,
+            &[],
+            false,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+            &lint_findings_file_str,
+        )
+        .and_then(|runner| runner.run()) {
             Ok(output) => {
                 checks_run += 1;
 
@@ -499,10 +504,27 @@ fn validate_code_quality(component: &Component) -> Result<()> {
             "Running tests ({})...",
             test_context.extension_id
         );
-        match ExtensionRunner::for_context(test_context)
-            .component(component.clone())
-            .run()
-        {
+        let results_file = std::env::temp_dir().join(format!(
+            "homeboy-release-test-{}.json",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let results_file_str = results_file.to_string_lossy().to_string();
+        match extension::test::build_test_runner(
+            component,
+            None,
+            &[],
+            false,
+            false,
+            &results_file_str,
+            None,
+            None,
+            None,
+            None,
+        )
+        .and_then(|runner| runner.run()) {
             Ok(output) if output.success => {
                 log_status!("release", "Tests passed");
                 checks_run += 1;

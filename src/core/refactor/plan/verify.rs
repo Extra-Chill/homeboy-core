@@ -1,13 +1,16 @@
 use crate::code_audit::{self, is_test_path, CodeAuditResult};
 use crate::component::{self, Component};
-use crate::extension::ExtensionRunner;
+use crate::extension::{lint as extension_lint, test as extension_test};
 use crate::refactor::auto as fixer;
-use crate::refactor::runner;
 use crate::test_drift::{self, DriftOptions};
 use crate::undo::UndoSnapshot;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
+
+pub use crate::code_audit::{
+    finding_fingerprint, score_delta, weighted_finding_score_with, AuditConvergenceScoring,
+};
 
 pub(crate) fn rewrite_callers_after_dedup(fix: &fixer::Fix, root: &Path) {
     use crate::core::symbol_graph;
@@ -57,38 +60,6 @@ pub(crate) fn rewrite_callers_after_dedup(fix: &fixer::Fix, root: &Path) {
                 new_module
             );
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct AuditConvergenceScoring {
-    pub warning_weight: usize,
-    pub info_weight: usize,
-}
-
-impl Default for AuditConvergenceScoring {
-    fn default() -> Self {
-        Self {
-            warning_weight: 3,
-            info_weight: 1,
-        }
-    }
-}
-
-impl AuditConvergenceScoring {
-    fn severity_weight(&self, severity: &crate::code_audit::Severity) -> usize {
-        match severity {
-            crate::code_audit::Severity::Warning => self.warning_weight,
-            crate::code_audit::Severity::Info => self.info_weight,
-        }
-    }
-
-    fn weighted_finding_score(&self, result: &CodeAuditResult) -> usize {
-        result
-            .findings
-            .iter()
-            .map(|finding| self.severity_weight(&finding.severity))
-            .sum()
     }
 }
 
@@ -179,8 +150,7 @@ pub fn run_audit_refactor(
                 iteration_summary.findings_after = current_result.findings.len();
                 iteration_summary.weighted_score_after =
                     weighted_finding_score_with(&current_result, scoring);
-                iteration_summary.score_delta =
-                    score_delta(&current_result, &current_result, scoring);
+                iteration_summary.score_delta = score_delta(&current_result, &current_result, scoring);
                 iteration_summary.status = "stopped_no_safe_changes".to_string();
                 iterations.push(iteration_summary);
                 break;
@@ -234,29 +204,6 @@ pub fn run_audit_refactor(
     })
 }
 
-pub fn weighted_finding_score_with(
-    result: &CodeAuditResult,
-    scoring: AuditConvergenceScoring,
-) -> usize {
-    scoring.weighted_finding_score(result)
-}
-
-pub fn score_delta(
-    before: &CodeAuditResult,
-    after: &CodeAuditResult,
-    scoring: AuditConvergenceScoring,
-) -> isize {
-    weighted_finding_score_with(before, scoring) as isize
-        - weighted_finding_score_with(after, scoring) as isize
-}
-
-pub fn finding_fingerprint(finding: &crate::code_audit::Finding) -> String {
-    format!(
-        "{}::{:?}::{}::{}",
-        finding.file, finding.kind, finding.convention, finding.description
-    )
-}
-
 fn findings_fingerprint(result: &CodeAuditResult) -> Vec<String> {
     let mut fingerprints: Vec<String> = result.findings.iter().map(finding_fingerprint).collect();
     fingerprints.sort();
@@ -278,7 +225,7 @@ fn build_smoke_verifier<'a>(
     changed_files: &'a [String],
 ) -> Option<impl Fn(&fixer::ApplyChunkResult) -> Result<String, String> + 'a> {
     let component = load_or_discover(component_id, source_path)?;
-    let resolved = runner::resolve_lint_command(&component).ok()?;
+    extension_lint::resolve_lint_command(&component).ok()?;
     let root = PathBuf::from(source_path);
     Some(move |chunk: &fixer::ApplyChunkResult| {
         if changed_files.is_empty() {
@@ -310,11 +257,21 @@ fn build_smoke_verifier<'a>(
             format!("{{{}}}", joined)
         };
 
-        let output = ExtensionRunner::for_context(resolved.clone())
-            .path_override(Some(source_path.to_string()))
-            .env("HOMEBOY_LINT_GLOB", &glob)
-            .run()
-            .map_err(|error| format!("lint smoke run failed: {}", error))?;
+        let output = extension_lint::build_lint_runner(
+            &component,
+            Some(source_path.to_string()),
+            &[],
+            false,
+            None,
+            Some(&glob),
+            false,
+            None,
+            None,
+            None,
+            "/dev/null",
+        )
+        .and_then(|runner| runner.run())
+        .map_err(|error| format!("lint smoke run failed: {}", error))?;
 
         if output.success {
             Ok("lint_smoke_passed".to_string())
@@ -330,7 +287,7 @@ fn build_test_smoke_verifier<'a>(
     changed_files: &'a [String],
 ) -> Option<impl Fn(&fixer::ApplyChunkResult) -> Result<String, String> + 'a> {
     let component = load_or_discover(component_id, source_path)?;
-    let resolved = runner::resolve_test_command(&component).ok()?;
+    extension_test::resolve_test_command(&component).ok()?;
     let changed_test_files = compute_changed_test_files(&component, "HEAD~1")
         .ok()
         .and_then(|files| (!files.is_empty()).then_some(files.join("\n")));
@@ -355,19 +312,29 @@ fn build_test_smoke_verifier<'a>(
             std::process::id(),
             chunk.chunk_id.replace(':', "-")
         ));
+        let results_file_str = results_file.to_string_lossy().to_string();
+        let selected_test_files = changed_test_files.as_ref().map(|files| {
+            files
+                .split('\n')
+                .filter(|file| !file.is_empty())
+                .map(|file| file.to_string())
+                .collect::<Vec<_>>()
+        });
 
-        let mut runner = ExtensionRunner::for_context(resolved.clone())
-            .path_override(Some(source_path.to_string()))
-            .env("HOMEBOY_SKIP_LINT", "1")
-            .env("HOMEBOY_TEST_RESULTS_FILE", &results_file.to_string_lossy());
-
-        if let Some(ref files) = changed_test_files {
-            runner = runner.env("HOMEBOY_CHANGED_TEST_FILES", files);
-        }
-
-        let output = runner
-            .run()
-            .map_err(|error| format!("test smoke run failed: {}", error))?;
+        let output = extension_test::build_test_runner(
+            &component,
+            Some(source_path.to_string()),
+            &[],
+            true,
+            false,
+            &results_file_str,
+            None,
+            None,
+            None,
+            selected_test_files.as_deref(),
+        )
+        .and_then(|runner| runner.run())
+        .map_err(|error| format!("test smoke run failed: {}", error))?;
 
         let _ = std::fs::remove_file(&results_file);
 
@@ -448,8 +415,8 @@ fn run_fix_iteration(
         for file in &changed_files {
             snap.capture_file(file);
         }
-        if let Err(e) = snap.save() {
-            crate::log_status!("undo", "Warning: failed to save undo snapshot: {}", e);
+        if let Err(error) = snap.save() {
+            crate::log_status!("undo", "Warning: failed to save undo snapshot: {}", error);
         }
     }
 
@@ -557,7 +524,7 @@ fn run_fix_iteration(
         if let Some(original) = fix_result
             .decompose_plans
             .iter_mut()
-            .find(|c| c.file == plan.file)
+            .find(|candidate| candidate.file == plan.file)
         {
             original.applied = plan.applied;
         }
@@ -592,6 +559,7 @@ fn run_fix_iteration(
 
 fn is_cascading_finding_kind(kind: &crate::code_audit::AuditFinding) -> bool {
     use crate::code_audit::AuditFinding;
+
     matches!(
         kind,
         AuditFinding::GodFile
@@ -636,8 +604,8 @@ pub fn build_chunk_verifier<'a>(
 
         let hard_failures: Vec<String> = new_findings
             .iter()
-            .filter(|f| !is_cascading_finding_kind(&f.kind))
-            .map(|f| format!("{}: {:?}", f.file, f.kind))
+            .filter(|finding| !is_cascading_finding_kind(&finding.kind))
+            .map(|finding| format!("{}: {:?}", finding.file, finding.kind))
             .collect();
         let cascading_count = new_findings.len() - hard_failures.len();
 

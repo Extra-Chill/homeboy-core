@@ -1,8 +1,7 @@
 use clap::Args;
 use serde::Serialize;
 
-use homeboy::component::Component;
-use homeboy::extension::{self, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
+use homeboy::extension::lint as extension_lint;
 use homeboy::git;
 use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
 use homeboy::refactor::{
@@ -81,12 +80,6 @@ pub struct LintOutput {
     baseline_comparison: Option<LintBaselineComparison>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lint_findings: Option<Vec<LintFinding>>,
-}
-
-pub(crate) fn resolve_lint_command(
-    component: &Component,
-) -> homeboy::error::Result<ExtensionExecutionContext> {
-    extension::resolve_execution_context(component, ExtensionCapability::Lint)
 }
 
 pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
@@ -218,24 +211,21 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
         None
     };
 
-    let resolved = resolve_lint_command(&component)?;
-
-    let output = ExtensionRunner::for_context(resolved)
-        .component(component.clone())
-        .path_override(args.comp.path.clone())
-        .settings(&args.setting_args.setting)
-        .env_if(args.summary, "HOMEBOY_SUMMARY_MODE", "1")
-        .env_opt("HOMEBOY_LINT_FILE", &args.file)
-        .env_opt("HOMEBOY_LINT_GLOB", &effective_glob)
-        .env_if(args.errors_only, "HOMEBOY_ERRORS_ONLY", "1")
-        .env_opt("HOMEBOY_SNIFFS", &args.sniffs)
-        .env_opt("HOMEBOY_EXCLUDE_SNIFFS", &args.exclude_sniffs)
-        .env_opt("HOMEBOY_CATEGORY", &args.category)
-        .env(
-            "HOMEBOY_LINT_FINDINGS_FILE",
-            &lint_findings_file.to_string_lossy(),
-        )
-        .run()?;
+    let findings_file_str = lint_findings_file.to_string_lossy().to_string();
+    let output = extension_lint::build_lint_runner(
+        &component,
+        args.comp.path.clone(),
+        &args.setting_args.setting,
+        args.summary,
+        args.file.as_deref(),
+        effective_glob.as_deref(),
+        args.errors_only,
+        args.sniffs.as_deref(),
+        args.exclude_sniffs.as_deref(),
+        args.category.as_deref(),
+        &findings_file_str,
+    )?
+    .run()?;
 
     let lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
     let _ = std::fs::remove_file(&lint_findings_file);
@@ -348,6 +338,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use homeboy::component::Component;
     use homeboy::lint_baseline::{self, LintFinding};
     use homeboy::refactor::lint_refactor_request;
     use std::path::Path;
@@ -404,7 +395,7 @@ mod tests {
     fn test_resolve_lint_command() {
         let component =
             Component::new("test".to_string(), "/tmp".to_string(), "".to_string(), None);
-        let result = resolve_lint_command(&component);
+        let result = extension_lint::resolve_lint_command(&component);
         assert!(result.is_err());
     }
 
