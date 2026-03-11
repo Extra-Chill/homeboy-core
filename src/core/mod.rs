@@ -19,7 +19,6 @@ pub mod fleet;
 pub mod git;
 pub mod health;
 pub mod hooks;
-pub mod lint_baseline;
 pub mod logs;
 pub mod output;
 pub mod project;
