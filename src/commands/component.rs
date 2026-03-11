@@ -179,7 +179,8 @@ pub fn run(
                     "Missing required argument: --local-path",
                     None,
                     Some(vec![
-                        "Initialize a repo: homeboy component create --local-path <path>".to_string(),
+                        "Initialize a repo: homeboy component create --local-path <path>"
+                            .to_string(),
                         "This writes portable config to <path>/homeboy.json".to_string(),
                     ]),
                 )
@@ -200,7 +201,8 @@ pub fn run(
                 })?;
 
             let id = component::slugify_id(dir_name)?;
-            let mut new_component = Component::new(id.clone(), local_path.clone(), remote_path, build_artifact);
+            let mut new_component =
+                Component::new(id.clone(), local_path.clone(), remote_path, build_artifact);
 
             new_component.version_targets = if let Some(json_spec) = version_targets_json {
                 let raw = homeboy::config::read_json_spec_to_string(&json_spec)?;

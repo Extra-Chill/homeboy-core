@@ -349,8 +349,7 @@ fn portable_component_id_from_value(portable: &Value, dir: &Path) -> Option<Stri
         .get("id")
         .and_then(|v| v.as_str())
         .filter(|id| !id.trim().is_empty())
-        .map(|id| crate::utils::slugify::slugify_id(id, "component_id").ok())
-        .flatten()
+        .and_then(|id| crate::utils::slugify::slugify_id(id, "component_id").ok())
         .or_else(|| {
             let dir_name = dir.file_name()?.to_string_lossy();
             crate::utils::slugify::slugify_id(&dir_name, "component_id").ok()
@@ -651,7 +650,13 @@ fn update_project_references(old_id: &str, new_id: &str) -> Result<()> {
         if project::has_component(&proj, old_id) {
             let updated_ids: Vec<String> = project::project_component_ids(&proj)
                 .into_iter()
-                .map(|comp_id| if comp_id == old_id { new_id.to_string() } else { comp_id })
+                .map(|comp_id| {
+                    if comp_id == old_id {
+                        new_id.to_string()
+                    } else {
+                        comp_id
+                    }
+                })
                 .collect();
             project::set_components(&proj.id, updated_ids)?;
         }
