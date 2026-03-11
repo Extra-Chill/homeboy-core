@@ -345,6 +345,53 @@ pub fn run_component(component: &Component) -> Result<(BuildResult, i32)> {
     Ok((BuildResult::Single(output), exit_code))
 }
 
+/// Build multiple pre-resolved components.
+pub fn run_components(components: &[Component]) -> Result<(BuildResult, i32)> {
+    let mut results = Vec::with_capacity(components.len());
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+
+    for component in components {
+        match execute_build_component(component) {
+            Ok((output, _)) => {
+                if output.success {
+                    succeeded += 1;
+                } else {
+                    failed += 1;
+                }
+                results.push(ItemOutcome {
+                    id: component.id.clone(),
+                    result: Some(output),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                failed += 1;
+                results.push(ItemOutcome {
+                    id: component.id.clone(),
+                    result: None,
+                    error: Some(error.to_string()),
+                });
+            }
+        }
+    }
+
+    let exit_code = if failed > 0 { 1 } else { 0 };
+
+    Ok((
+        BuildResult::Bulk(BulkResult {
+            action: "build".to_string(),
+            results,
+            summary: BulkSummary {
+                total: succeeded + failed,
+                succeeded,
+                failed,
+            },
+        }),
+        exit_code,
+    ))
+}
+
 fn execute_build(component_id: &str, path_override: Option<&str>) -> Result<(BuildOutput, i32)> {
     let mut comp = component::load(component_id)?;
     if let Some(path) = path_override {

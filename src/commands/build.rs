@@ -86,12 +86,8 @@ pub fn run(
             ));
         }
 
-        let json_spec = serde_json::json!({
-            "componentIds": proj.component_ids
-        })
-        .to_string();
-
-        return build::run(&json_spec);
+        let components = project::resolve_project_components(&proj)?;
+        return build::run_components(&components);
     }
 
     // Multiple positional args: use shared resolver
@@ -126,12 +122,12 @@ pub fn run(
             ));
         }
 
-        let json_spec = serde_json::json!({
-            "componentIds": component_ids
-        })
-        .to_string();
+        let components: Result<Vec<_>, _> = component_ids
+            .iter()
+            .map(|id| project::resolve_project_component(&proj, id))
+            .collect();
 
-        return build::run(&json_spec);
+        return build::run_components(&components?);
     }
 
     // Single target_id: treat as component ID
