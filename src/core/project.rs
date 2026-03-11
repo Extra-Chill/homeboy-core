@@ -8,6 +8,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectComponentOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_artifact: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extract_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deploy_strategy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_deploy: Option<crate::component::GitDeployConfig>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub hooks: HashMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<crate::component::ScopeConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 
 pub struct Project {
     #[serde(skip)]
@@ -52,13 +70,11 @@ pub struct Project {
     pub shared_tables: Vec<String>,
     #[serde(default)]
     pub component_ids: Vec<String>,
-    /// Per-component field overrides. Keys are component IDs, values are
-    /// partial JSON objects whose fields override the component's defaults
-    /// when deploying through this project.
+    /// Per-component field overrides applied when a component runs in this project.
     ///
     /// Example: `{"data-machine": {"extract_command": "...", "remote_owner": "opencode:opencode"}}`
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub component_overrides: HashMap<String, serde_json::Value>,
+    pub component_overrides: HashMap<String, ProjectComponentOverrides>,
 
     /// Service names to check in fleet health status (e.g. ["kimaki", "php8.4-fpm", "nginx"]).
     /// These are checked via `systemctl is-active <name>` on the remote server.
@@ -416,6 +432,54 @@ pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result
         .retain(|id| !component_ids.contains(id));
     save(&project)?;
     Ok(project.component_ids)
+}
+
+pub fn apply_component_overrides(
+    component: &crate::component::Component,
+    project: &Project,
+) -> crate::component::Component {
+    let Some(overrides) = project.component_overrides.get(&component.id) else {
+        return component.clone();
+    };
+
+    let mut merged = component.clone();
+
+    if let Some(build_artifact) = &overrides.build_artifact {
+        merged.build_artifact = Some(build_artifact.clone());
+    }
+    if let Some(extract_command) = &overrides.extract_command {
+        merged.extract_command = Some(extract_command.clone());
+    }
+    if let Some(remote_owner) = &overrides.remote_owner {
+        merged.remote_owner = Some(remote_owner.clone());
+    }
+    if let Some(deploy_strategy) = &overrides.deploy_strategy {
+        merged.deploy_strategy = Some(deploy_strategy.clone());
+    }
+    if let Some(git_deploy) = &overrides.git_deploy {
+        merged.git_deploy = Some(git_deploy.clone());
+    }
+    if !overrides.hooks.is_empty() {
+        merged.hooks = overrides.hooks.clone();
+    }
+    if let Some(scopes) = &overrides.scopes {
+        merged.scopes = Some(scopes.clone());
+    }
+
+    merged
+}
+
+pub fn resolve_project_component(project: &Project, component_id: &str) -> Result<crate::component::Component> {
+    let component = crate::component::load(component_id)?;
+    Ok(apply_component_overrides(&component, project))
+}
+
+pub fn resolve_project_components(project: &Project) -> Result<Vec<crate::component::Component>> {
+    project
+        .component_ids
+        .iter()
+        .map(|component_id| resolve_project_component(project, component_id))
+        .collect()
 }
 
 pub fn pin(project_id: &str, pin_type: PinType, path: &str, options: PinOptions) -> Result<()> {

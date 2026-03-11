@@ -1,46 +1,3 @@
-/// Apply per-project component overrides to a cloned component.
-///
-/// If the project has `component_overrides` entries for this component,
-/// merge them onto a clone. Only deploy-relevant fields are applied:
-/// `extract_command`, `remote_owner`, `build_command`, `build_artifact`,
-/// `deploy_strategy`, and `hooks`.
-fn apply_component_overrides(component: &Component, project: &Project) -> Component {
-    let overrides = match project.component_overrides.get(&component.id) {
-        Some(v) if v.is_object() => v,
-        _ => return component.clone(),
-    };
-
-    // Serialize the component to JSON, merge overrides, deserialize back.
-    // This reuses serde for all field types without manual field-by-field code.
-    let mut base = match serde_json::to_value(component) {
-        Ok(v) => v,
-        Err(_) => return component.clone(),
-    };
-
-    if let (Some(base_obj), Some(override_obj)) = (base.as_object_mut(), overrides.as_object()) {
-        for (key, value) in override_obj {
-            // Skip identity fields — overriding id/local_path/remote_path per-project
-            // would break deploy targeting. Use project base_path for path changes.
-            if matches!(
-                key.as_str(),
-                "id" | "local_path" | "remote_path" | "aliases"
-            ) {
-                continue;
-            }
-            base_obj.insert(key.clone(), value.clone());
-        }
-    }
-
-    match serde_json::from_value::<Component>(base) {
-        Ok(mut merged) => {
-            // Preserve identity fields from original
-            merged.id = component.id.clone();
-            merged
-        }
-        Err(_) => component.clone(),
-    }
-}
-
 /// Main deploy orchestration entry point.
 /// Handles component selection, building, and deployment.
 fn deploy_components(
@@ -150,7 +107,7 @@ fn deploy_components(
 
     for component in &components {
         // Apply per-project overrides (e.g. different extract_command or remote_owner)
-        let component = apply_component_overrides(component, project);
+        let component = crate::project::apply_component_overrides(component, project);
         let mut result = execute_component_deploy(
             &component,
             config,
