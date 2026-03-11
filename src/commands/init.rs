@@ -17,6 +17,42 @@ use homeboy::{changelog, git, version};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn collect_focused_components(
+    show_all: bool,
+    relevant_ids: &HashSet<String>,
+    all_components: Vec<Component>,
+    all_projects: &[Project],
+) -> Vec<Component> {
+    if show_all {
+        return all_components;
+    }
+
+    let mut by_id: HashMap<String, Component> = all_components
+        .into_iter()
+        .filter(|c| relevant_ids.contains(&c.id))
+        .map(|component| (component.id.clone(), component))
+        .collect();
+
+    for project in all_projects {
+        for attachment in &project.components {
+            if !relevant_ids.contains(&attachment.id) || by_id.contains_key(&attachment.id) {
+                continue;
+            }
+
+            let Some(local_path) = attachment.local_path.as_deref() else {
+                continue;
+            };
+
+            if let Some(mut component) = component::discover_from_portable(Path::new(local_path)) {
+                component.id = attachment.id.clone();
+                by_id.insert(component.id.clone(), component);
+            }
+        }
+    }
+
+    by_id.into_values().collect()
+}
+
 use super::args::HiddenJsonArgs;
 use super::CmdResult;
 
@@ -229,14 +265,12 @@ pub fn run(args: InitArgs, _global: &super::GlobalArgs) -> CmdResult<InitOutput>
     let show_all = args.all || relevant_ids.is_empty();
 
     // Filter components and calculate release state
-    let filtered_components: Vec<Component> = if show_all {
-        all_components
-    } else {
-        all_components
-            .into_iter()
-            .filter(|c| relevant_ids.contains(&c.id))
-            .collect()
-    };
+    let filtered_components = collect_focused_components(
+        show_all,
+        &relevant_ids,
+        all_components,
+        &all_projects,
+    );
 
     // Wrap components with release state and gaps
     let cwd = std::env::current_dir().ok();
