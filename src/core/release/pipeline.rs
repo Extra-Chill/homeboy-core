@@ -2,7 +2,6 @@ use std::path::Path;
 
 use crate::release::changelog;
 use crate::component::{self, Component};
-use crate::core::lint_baseline;
 use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::error::{Error, ErrorCode, Result};
@@ -458,11 +457,12 @@ fn validate_code_quality(component: &Component) -> Result<()> {
                     // Lint failed — but check if baseline says drift didn't increase
                     let source_path = std::path::Path::new(&component.local_path);
                     let findings =
-                        lint_baseline::parse_findings_file(&lint_findings_file).unwrap_or_default();
+                        crate::extension::lint::baseline::parse_findings_file(&lint_findings_file)
+                            .unwrap_or_default();
                     let _ = std::fs::remove_file(&lint_findings_file);
 
-                    if let Some(baseline) = lint_baseline::load_baseline(source_path) {
-                        let comparison = lint_baseline::compare(&findings, &baseline);
+                    if let Some(baseline) = crate::extension::lint::baseline::load_baseline(source_path) {
+                        let comparison = crate::extension::lint::baseline::compare(&findings, &baseline);
                         if comparison.drift_increased {
                             log_status!(
                                 "release",

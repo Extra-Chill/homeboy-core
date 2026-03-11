@@ -1,5 +1,9 @@
+pub mod baseline;
+
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
+
+pub use baseline::{BaselineComparison, LintBaseline, LintBaselineMetadata, LintFinding};
 
 pub fn resolve_lint_command(
     component: &Component,

@@ -3,7 +3,9 @@ use serde::Serialize;
 
 use homeboy::extension::lint as extension_lint;
 use homeboy::git;
-use homeboy::lint_baseline::{self, BaselineComparison as LintBaselineComparison, LintFinding};
+use homeboy::extension::lint::baseline::{
+    self as lint_baseline, BaselineComparison as LintBaselineComparison, LintFinding,
+};
 use homeboy::refactor::{
     auto::{self, AutofixMode},
     run_lint_refactor, AppliedRefactor, LintSourceOptions,
@@ -339,7 +341,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
 mod tests {
     use super::*;
     use homeboy::component::Component;
-    use homeboy::lint_baseline::{self, LintFinding};
+    use homeboy::extension::lint::baseline::{self as lint_baseline, LintFinding};
     use homeboy::refactor::lint_refactor_request;
     use std::path::Path;
 
