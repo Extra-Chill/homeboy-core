@@ -3,7 +3,6 @@
 pub mod config;
 pub mod api;
 pub mod auth;
-pub mod build;
 pub mod cleanup;
 pub mod cli_tool;
 pub mod code_audit;
@@ -41,6 +40,8 @@ pub(crate) mod permissions;
 
 // Public extensions for CLI access
 pub mod defaults;
+
+pub use extension::build;
 
 // Re-export common types for convenience
 pub use error::{Error, ErrorCode, Result};
