@@ -534,7 +534,7 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
                 Err(_) => continue,
             };
 
-            let sigs = super::fixer::extract_signatures(&content, &lang);
+            let sigs = crate::core::refactor::plan::generate::extract_signatures(&content, &lang);
             for sig in &sigs {
                 if conv.expected_methods.contains(&sig.name) {
                     method_sigs

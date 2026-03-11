@@ -1,12 +1,16 @@
 use crate::code_audit::conventions::{AuditFinding, Language};
-use crate::code_audit::fixer::{
-    apply_insertions_to_content, detect_language, first_failed_detail, Fix, FixSafetyTier,
-    Insertion, NewFile, PreflightCheck, PreflightContext, PreflightReport, PreflightStatus,
+use crate::refactor::auto::{
+    Fix, FixSafetyTier, Insertion, InsertionKind, NewFile, PreflightCheck, PreflightContext,
+    PreflightReport, PreflightStatus,
 };
+use crate::refactor::auto::apply::apply_insertions_to_content;
+use crate::refactor::auto::policy::blocked_reason_from_preflight;
 use crate::core::refactor::plan::generate::{
     derive_expected_test_file_path, extract_expected_test_method_from_fix_description,
+    extract_signatures_from_items,
     extract_source_file_from_test_stub, mapping_from_source_comment, test_method_exists_in_file,
 };
+use crate::core::refactor::shared::detect_language;
 
 pub fn run_insertion_preflight(
     file: &str,
@@ -100,7 +104,7 @@ pub fn run_insertion_preflight(
 
             if matches!(
                 insertion.kind,
-                crate::code_audit::fixer::InsertionKind::TraitUse
+                InsertionKind::TraitUse
             ) {
                 let has_class = content.contains("class ");
                 checks.push(PreflightCheck {
@@ -135,7 +139,7 @@ pub fn run_insertion_preflight(
                 return Some(finalize_report(checks));
             }
 
-            if let crate::code_audit::fixer::InsertionKind::FunctionRemoval {
+            if let InsertionKind::FunctionRemoval {
                 start_line,
                 end_line,
             } = &insertion.kind
@@ -243,7 +247,7 @@ pub fn run_fix_preflight(fix: &mut Fix, context: &PreflightContext<'_>, write: b
                 insertion
                     .preflight
                     .as_ref()
-                    .and_then(first_failed_detail)
+                    .and_then(blocked_reason_from_preflight)
                     .unwrap_or_else(|| {
                         "Blocked: requires preflight validation before auto-write".to_string()
                     }),
@@ -374,13 +378,12 @@ fn syntax_shape_check(content: &str, insertion: &Insertion, language: &Language)
     };
 
     let parsed_ok = match language {
-        Language::Php => !crate::code_audit::fixer::extract_signatures(content, language).is_empty()
+        Language::Php => !extract_signatures_from_items(content, language).is_empty()
             || content.contains("class "),
-        Language::Rust => !crate::code_audit::fixer::extract_signatures(content, language).is_empty()
+        Language::Rust => !extract_signatures_from_items(content, language).is_empty()
             || content.contains("fn "),
         Language::JavaScript | Language::TypeScript => {
-            !crate::code_audit::fixer::extract_signatures(content, language).is_empty()
-                || content.contains("function ")
+            !extract_signatures_from_items(content, language).is_empty() || content.contains("function ")
         }
         Language::Unknown => true,
     };

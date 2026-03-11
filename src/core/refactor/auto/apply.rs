@@ -1,10 +1,12 @@
 use crate::code_audit::conventions::Language;
-use crate::code_audit::fixer::{
-    detect_language, ApplyChunkResult, ApplyOptions, ChunkStatus, DecomposeFixPlan, Fix,
-    FixResult, Insertion, InsertionKind, NewFile,
+use crate::refactor::auto::{
+    ApplyChunkResult, ApplyOptions, ChunkStatus, DecomposeFixPlan, Fix, FixResult, Insertion,
+    InsertionKind, NewFile,
 };
 use crate::core::refactor::decompose;
 use crate::core::refactor::plan::audit::rewrite_callers_after_dedup;
+use crate::core::refactor::plan::generate::primary_type_name_from_declaration;
+use crate::core::refactor::shared::detect_language;
 use crate::core::undo::InMemoryRollback;
 use regex::Regex;
 use std::path::Path;
@@ -277,7 +279,7 @@ fn insert_inline_type_conformance(content: &str, declaration: &str, language: &L
 
     let mut lines: Vec<String> = content.lines().map(String::from).collect();
     for line in &mut lines {
-        if crate::code_audit::fixer::primary_type_name_from_declaration(line, language).is_none() {
+        if primary_type_name_from_declaration(line, language).is_none() {
             continue;
         }
 
