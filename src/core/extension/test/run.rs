@@ -9,7 +9,7 @@ use crate::refactor::{
     run_test_refactor, AppliedRefactor, TestSourceOptions,
 };
 use crate::test_analyze::{self, TestAnalysis, TestAnalysisInput};
-use crate::test_baseline::{self, TestBaselineComparison, TestCounts};
+use crate::extension::test::baseline::{self, TestBaselineComparison, TestCounts};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -216,7 +216,7 @@ pub fn run_main_test_workflow(
 
     if args.baseline {
         if let Some(ref counts) = test_counts {
-            let _ = test_baseline::save_baseline(source_path, &args.component_id, counts)?;
+            let _ = baseline::save_baseline(source_path, &args.component_id, counts)?;
         }
     }
 
@@ -225,21 +225,21 @@ pub fn run_main_test_workflow(
 
     if !args.baseline && !args.ignore_baseline {
         if let Some(ref counts) = test_counts {
-            let resolved_baseline = test_baseline::load_baseline(source_path).or_else(|| {
+            let resolved_baseline = baseline::load_baseline(source_path).or_else(|| {
                 args.changed_since.as_ref().and_then(|git_ref| {
-                    test_baseline::load_baseline_from_ref(&source_path.to_string_lossy(), git_ref)
+                    baseline::load_baseline_from_ref(&source_path.to_string_lossy(), git_ref)
                 })
             });
 
             if let Some(existing_baseline) = resolved_baseline {
-                let comparison = test_baseline::compare(counts, &existing_baseline);
+                let comparison = baseline::compare(counts, &existing_baseline);
 
                 if comparison.regression {
                     baseline_exit_override = Some(1);
                 } else if (comparison.passed_delta > 0 || comparison.failed_delta < 0)
                     && args.ratchet
                 {
-                    let _ = test_baseline::save_baseline(source_path, &args.component_id, counts);
+                    let _ = baseline::save_baseline(source_path, &args.component_id, counts);
                 }
 
                 baseline_comparison = Some(comparison);

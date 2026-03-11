@@ -10,7 +10,7 @@ use homeboy::extension::test::{
 use homeboy::refactor::AppliedRefactor;
 use homeboy::scaffold::ScaffoldConfig;
 use homeboy::test_analyze::TestAnalysis;
-use homeboy::test_baseline::{TestBaselineComparison, TestCounts};
+use homeboy::extension::test::{TestBaselineComparison, TestCounts};
 use homeboy::test_drift::DriftReport;
 use homeboy::test_workflow;
 

@@ -1,4 +1,5 @@
 pub mod parsing;
+pub mod baseline;
 pub mod run;
 
 use crate::component::Component;
@@ -19,6 +20,10 @@ pub struct TestScopeOutput {
     pub selected_files: Vec<String>,
 }
 
+pub use baseline::{
+    compare as compare_baseline, load_baseline, load_baseline_from_ref, save_baseline,
+    TestBaseline, TestBaselineComparison, TestCounts,
+};
 pub use parsing::{
     build_test_summary, parse_coverage_file, parse_failures_file, parse_test_results_file,
     parse_test_results_text, CoverageOutput, TestSummaryOutput,

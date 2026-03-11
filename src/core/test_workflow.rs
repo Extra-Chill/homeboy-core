@@ -7,7 +7,7 @@ use crate::refactor::{
     TransformSet,
 };
 use crate::test_analyze::TestAnalysis;
-use crate::test_baseline::{TestBaselineComparison, TestCounts};
+use crate::extension::test::{TestBaselineComparison, TestCounts};
 use crate::test_drift::{self, DriftOptions, DriftReport};
 use serde::Serialize;
 
