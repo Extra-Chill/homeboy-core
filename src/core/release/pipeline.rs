@@ -1,13 +1,14 @@
 use std::path::Path;
 
-use crate::release::changelog;
 use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
+use crate::engine::temp;
+use crate::engine::validation::ValidationCollector;
 use crate::error::{Error, ErrorCode, Result};
 use crate::extension::{self, ExtensionManifest};
 use crate::git::{self, UncommittedChanges};
-use crate::engine::validation::ValidationCollector;
+use crate::release::changelog;
 use crate::version;
 
 use super::executor::ReleaseStepExecutor;
@@ -19,7 +20,7 @@ use super::types::{
 
 /// Load a component with portable config fallback when path_override is set.
 /// In CI environments, the component may not be registered — only homeboy.json exists.
-fn load_component(component_id: &str, options: &ReleaseOptions) -> Result<Component> {
+pub(crate) fn load_component(component_id: &str, options: &ReleaseOptions) -> Result<Component> {
     match component::load(component_id) {
         Ok(mut comp) => {
             if let Some(ref path) = options.path_override {
@@ -423,13 +424,7 @@ fn validate_code_quality(component: &Component) -> Result<()> {
         log_status!("release", "Running lint ({})...", lint_context.extension_id);
 
         // Create a temporary findings file so we can compare against baseline
-        let lint_findings_file = std::env::temp_dir().join(format!(
-            "homeboy-release-lint-{}.json",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
+        let lint_findings_file = temp::runtime_temp_file("homeboy-release-lint", ".json")?;
 
         let lint_findings_file_str = lint_findings_file.to_string_lossy().to_string();
         match extension::lint::build_lint_runner(
@@ -461,8 +456,11 @@ fn validate_code_quality(component: &Component) -> Result<()> {
                             .unwrap_or_default();
                     let _ = std::fs::remove_file(&lint_findings_file);
 
-                    if let Some(baseline) = crate::extension::lint::baseline::load_baseline(source_path) {
-                        let comparison = crate::extension::lint::baseline::compare(&findings, &baseline);
+                    if let Some(baseline) =
+                        crate::extension::lint::baseline::load_baseline(source_path)
+                    {
+                        let comparison =
+                            crate::extension::lint::baseline::compare(&findings, &baseline);
                         if comparison.drift_increased {
                             log_status!(
                                 "release",
@@ -505,13 +503,7 @@ fn validate_code_quality(component: &Component) -> Result<()> {
             "Running tests ({})...",
             test_context.extension_id
         );
-        let results_file = std::env::temp_dir().join(format!(
-            "homeboy-release-test-{}.json",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
+        let results_file = temp::runtime_temp_file("homeboy-release-test", ".json")?;
         let results_file_str = results_file.to_string_lossy().to_string();
         match extension::test::build_test_runner(
             component,

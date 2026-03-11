@@ -15,4 +15,5 @@ pub mod pipeline;
 pub mod shell;
 pub mod symbol_graph;
 pub mod template;
+pub mod temp;
 pub mod validation;
