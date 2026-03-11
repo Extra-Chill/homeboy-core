@@ -661,7 +661,10 @@ pub fn delete_safe(id: &str) -> Result<()> {
     if !associated_projects(id)?.is_empty() {
         return Err(Error::validation_invalid_argument(
             "component",
-            format!("Cannot delete component '{}' while projects still reference it", id),
+            format!(
+                "Cannot delete component '{}' while projects still reference it",
+                id
+            ),
             Some(id.to_string()),
             None,
         ));
@@ -926,7 +929,10 @@ pub fn resolve(id: Option<&str>) -> Result<Component> {
     ];
     if detect_from_cwd().is_none() {
         hints.push("Initialize the repo: homeboy component create --local-path .".to_string());
-        hints.push("Or attach the repo to a project: homeboy project components attach-path <project> .".to_string());
+        hints.push(
+            "Or attach the repo to a project: homeboy project components attach-path <project> ."
+                .to_string(),
+        );
     }
 
     Err(Error::validation_invalid_argument(
@@ -942,11 +948,17 @@ pub fn list() -> Result<Vec<Component>> {
 }
 
 pub fn list_ids() -> Result<Vec<String>> {
-    Ok(inventory()?.into_iter().map(|component| component.id).collect())
+    Ok(inventory()?
+        .into_iter()
+        .map(|component| component.id)
+        .collect())
 }
 
 pub fn load(id: &str) -> Result<Component> {
-    if let Some(component) = inventory()?.into_iter().find(|component| component.id == id) {
+    if let Some(component) = inventory()?
+        .into_iter()
+        .find(|component| component.id == id)
+    {
         return Ok(component);
     }
 
