@@ -39,7 +39,9 @@ fn collect_focused_components(
                 continue;
             }
 
-            if let Some(mut component) = component::discover_from_portable(Path::new(&attachment.local_path)) {
+            if let Some(mut component) =
+                component::discover_from_portable(Path::new(&attachment.local_path))
+            {
                 component.id = attachment.id.clone();
                 by_id.insert(component.id.clone(), component);
             }

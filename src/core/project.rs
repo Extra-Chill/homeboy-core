@@ -475,8 +475,8 @@ pub fn resolve_project_component(
         .iter()
         .find(|component| component.id == component_id)
     {
-        crate::component::discover_from_portable(std::path::Path::new(&attachment.local_path)).ok_or_else(
-            || {
+        crate::component::discover_from_portable(std::path::Path::new(&attachment.local_path))
+            .ok_or_else(|| {
                 Error::validation_invalid_argument(
                     "components.local_path",
                     format!(
@@ -486,8 +486,7 @@ pub fn resolve_project_component(
                     Some(project.id.clone()),
                     None,
                 )
-            },
-        )?
+            })?
     } else {
         return Err(Error::validation_invalid_argument(
             "components",
@@ -499,7 +498,7 @@ pub fn resolve_project_component(
             None,
         ));
     };
-    Ok(apply_component_overrides(&component, &project))
+    Ok(apply_component_overrides(&component, project))
 }
 
 pub fn resolve_project_components(project: &Project) -> Result<Vec<crate::component::Component>> {

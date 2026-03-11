@@ -571,9 +571,7 @@ fn delete(project_id: &str) -> CmdResult<ProjectOutput> {
 fn components(command: ProjectComponentsCommand) -> CmdResult<ProjectOutput> {
     match command {
         ProjectComponentsCommand::List { project_id } => components_list(&project_id),
-        ProjectComponentsCommand::Set { project_id, json } => {
-            components_set(&project_id, &json)
-        }
+        ProjectComponentsCommand::Set { project_id, json } => components_set(&project_id, &json),
         ProjectComponentsCommand::AttachPath {
             project_id,
             local_path,
@@ -612,7 +610,13 @@ fn components_list(project_id: &str) -> CmdResult<ProjectOutput> {
 fn components_set(project_id: &str, json: &str) -> CmdResult<ProjectOutput> {
     let raw = homeboy::config::read_json_spec_to_string(json)?;
     let attachments: Vec<project::ProjectComponentAttachment> = serde_json::from_str(&raw)
-        .map_err(|e| homeboy::Error::validation_invalid_json(e, Some("parse project component attachments".to_string()), None))?;
+        .map_err(|e| {
+            homeboy::Error::validation_invalid_json(
+                e,
+                Some("parse project component attachments".to_string()),
+                None,
+            )
+        })?;
     project::set_component_attachments(project_id, attachments)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "set", &project)
