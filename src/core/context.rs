@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::component;
@@ -65,17 +66,37 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
     let git_root = detect_git_root(&cwd);
 
     let components = component::list().unwrap_or_default();
+    let projects = project::list().unwrap_or_default();
+    let attached_components = collect_attached_components(&projects);
 
-    let matched: Vec<String> = components
+    let matched_registered: Vec<String> = components
         .iter()
         .filter(|c| path_matches(&cwd, &c.local_path))
         .map(|c| c.id.clone())
         .collect();
 
+    let matched_attached: Vec<String> = attached_components
+        .iter()
+        .filter(|c| path_matches(&cwd, &c.local_path))
+        .map(|c| c.id.clone())
+        .collect();
+
+    let matched: Vec<String> = matched_registered
+        .into_iter()
+        .chain(matched_attached)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
     let managed = !matched.is_empty();
 
     // Check for contained components (monorepo pattern)
-    let contained: Vec<&component::Component> = components
+    let all_local_components: Vec<component::Component> = components
+        .into_iter()
+        .chain(attached_components)
+        .collect();
+
+    let contained: Vec<&component::Component> = all_local_components
         .iter()
         .filter(|c| path_is_parent_of(&cwd, &c.local_path))
         .collect();
@@ -103,7 +124,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             .map(|s| s.to_string_lossy().to_string());
 
         let relink_match = repo_name.as_ref().and_then(|name| {
-            components
+            all_local_components
                 .iter()
                 .find(|c| c.id == *name || c.aliases.iter().any(|a| a == name))
         });
@@ -119,7 +140,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
                 // JSON-escape just enough for typical paths (quotes + backslashes).
                 let json_path = git_root_str.replace('\\', "\\\\").replace('"', "\\\"");
                 Some(format!(
-                    "This looks like component '{}' but local_path is set to '{}'. To relink: homeboy component set {} --json '{{\"local_path\":\"{}\"}}' (edit JSON if your path contains unusual characters)",
+                    "This looks like component '{}' but its repo path is set to '{}'. To reattach it to a project, use: homeboy project components attach-path <project-id> {} {}",
                     component_match.id,
                     component_match.local_path,
                     component_match.id,
@@ -127,7 +148,8 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
                 ))
             } else {
                 Some(format!(
-                    "Component not configured. Register it with: `homeboy component create --local-path {}`",
+                    "Repo detected. Prefer attaching it to a project: `homeboy project components attach-path <project-id> {} {}`",
+                    repo_name.unwrap_or_else(|| "<component-id>".to_string()),
                     git_root_str
                 ))
             }
@@ -147,7 +169,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             }
         } else {
             Some(format!(
-                "Component not configured. Register it with: `homeboy component create --local-path {}`",
+                "Repo detected. Prefer attaching it to a project: `homeboy project components attach-path <project-id> <component-id> {}`",
                 git_root_str
             ))
         }
@@ -167,7 +189,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
         }
     } else {
         Some(
-            "Component not configured. Register it with: `homeboy component create --local-path <path>`"
+            "Repo not attached. Prefer: `homeboy project components attach-path <project-id> <component-id> <path>`"
                 .to_string(),
         )
     };
@@ -185,6 +207,30 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
         },
         0,
     ))
+}
+
+fn collect_attached_components(projects: &[project::Project]) -> Vec<component::Component> {
+    let mut components = Vec::new();
+    let mut seen = HashSet::new();
+
+    for project in projects {
+        for attachment in &project.components {
+            let Some(local_path) = attachment.local_path.as_deref() else {
+                continue;
+            };
+
+            if !seen.insert((attachment.id.clone(), local_path.to_string())) {
+                continue;
+            }
+
+            if let Some(mut component) = component::discover_from_portable(Path::new(local_path)) {
+                component.id = attachment.id.clone();
+                components.push(component);
+            }
+        }
+    }
+
+    components
 }
 
 fn detect_git_root(cwd: &PathBuf) -> Option<String> {
