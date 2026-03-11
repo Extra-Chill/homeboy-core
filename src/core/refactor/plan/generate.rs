@@ -1,11 +1,29 @@
 use crate::code_audit::conventions::Language;
-use crate::code_audit::{fixer, AuditFinding, CodeAuditResult};
+use crate::code_audit::naming::{detect_naming_suffix, suffix_matches};
+use crate::code_audit::{AuditFinding, CodeAuditResult};
+use crate::core::refactor::auto::{
+    DecomposeFixPlan, Fix, FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, SkippedFile,
+};
+use crate::core::refactor::decompose;
+use crate::core::refactor::shared::detect_language;
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-pub fn generate_audit_fixes(result: &CodeAuditResult, root: &Path) -> fixer::FixResult {
-    fixer::generate_fixes_impl(result, root)
+pub fn generate_audit_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
+    generate_fixes_impl(result, root)
+}
+
+/// Full method signature extracted from a conforming file.
+#[derive(Debug, Clone)]
+pub(crate) struct MethodSignature {
+    /// Method name.
+    pub(crate) name: String,
+    /// Full signature line (e.g., "public function execute(array $config): array").
+    pub(crate) signature: String,
+    /// The language this was extracted from.
+    #[allow(dead_code)]
+    pub(crate) language: Language,
 }
 
 pub(crate) fn extract_expected_test_path(description: &str) -> Option<String> {
@@ -62,7 +80,7 @@ pub(crate) fn generate_test_method_stub(
     }
 }
 
-pub(crate) fn generate_method_stub(sig: &fixer::MethodSignature) -> String {
+pub(crate) fn generate_method_stub(sig: &MethodSignature) -> String {
     let body = stub_body(&sig.name, &sig.language);
     match sig.language {
         Language::Php => format!("\n    {} {{\n{}\n    }}\n", sig.signature, body),
@@ -84,7 +102,10 @@ fn stub_body(method_name: &str, language: &Language) -> String {
         }
         Language::Rust => format!("        todo!(\"{}\")", method_name),
         Language::JavaScript | Language::TypeScript => {
-            format!("        throw new Error('Not implemented: {}');", method_name)
+            format!(
+                "        throw new Error('Not implemented: {}');",
+                method_name
+            )
         }
         Language::Unknown => String::new(),
     }
@@ -140,8 +161,71 @@ pub(crate) fn generate_registration_stub(hook_name: &str) -> String {
     )
 }
 
-pub(crate) fn merge_fixes_per_file(fixes: Vec<fixer::Fix>) -> Vec<fixer::Fix> {
-    let mut map: std::collections::HashMap<String, fixer::Fix> = std::collections::HashMap::new();
+fn extract_expected_namespace(description: &str) -> Option<String> {
+    let expected_re = Regex::new(r"expected `([^`]+)`").ok()?;
+    expected_re
+        .captures(description)
+        .map(|cap| cap[1].to_string())
+}
+
+/// Build a signature map from conforming files for a convention.
+fn build_signature_map(
+    conforming_files: &[String],
+    root: &Path,
+) -> HashMap<String, MethodSignature> {
+    let mut sig_map: HashMap<String, MethodSignature> = HashMap::new();
+
+    for rel_path in conforming_files {
+        let abs_path = root.join(rel_path);
+        if let Ok(content) = std::fs::read_to_string(&abs_path) {
+            let language = detect_language(&abs_path);
+
+            for sig in extract_signatures_from_items(&content, &language) {
+                sig_map.entry(sig.name.clone()).or_insert(sig);
+            }
+        }
+    }
+
+    sig_map
+}
+
+fn is_inline_test_language(language: &Language) -> bool {
+    matches!(language, Language::Rust)
+}
+
+fn file_has_constructor(content: &str, language: &Language) -> bool {
+    match language {
+        Language::Php => content.contains("function __construct"),
+        Language::Rust => content.contains("fn new("),
+        Language::JavaScript | Language::TypeScript => content.contains("constructor("),
+        Language::Unknown => false,
+    }
+}
+
+pub(crate) fn primary_type_name_from_declaration(
+    line: &str,
+    language: &Language,
+) -> Option<String> {
+    let trimmed = line.trim();
+    match language {
+        Language::Php | Language::TypeScript => Regex::new(r"\b(?:class|interface|trait)\s+(\w+)")
+            .ok()?
+            .captures(trimmed)
+            .map(|cap| cap[1].to_string()),
+        Language::Rust => Regex::new(r"\b(?:pub\s+)?(?:struct|enum|trait)\s+(\w+)")
+            .ok()?
+            .captures(trimmed)
+            .map(|cap| cap[1].to_string()),
+        Language::JavaScript => Regex::new(r"\bclass\s+(\w+)")
+            .ok()?
+            .captures(trimmed)
+            .map(|cap| cap[1].to_string()),
+        Language::Unknown => None,
+    }
+}
+
+pub(crate) fn merge_fixes_per_file(fixes: Vec<Fix>) -> Vec<Fix> {
+    let mut map: std::collections::HashMap<String, Fix> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
 
     for fix in fixes {
@@ -275,10 +359,10 @@ pub(crate) fn test_method_exists_in_file(
     root: &Path,
     test_file: &str,
     expected_test_method: &str,
-    new_files: &[fixer::NewFile],
+    new_files: &[NewFile],
 ) -> bool {
     if let Some(new_file) = new_files.iter().find(|new_file| new_file.file == test_file) {
-        return new_file.content.contains(&expected_test_method);
+        return new_file.content.contains(expected_test_method);
     }
 
     let abs_path = root.join(test_file);
@@ -397,6 +481,578 @@ pub(crate) fn find_parsed_item_by_name<'a>(
     Some(first)
 }
 
+pub(crate) fn generate_fallback_signature(
+    method_name: &str,
+    language: &Language,
+) -> MethodSignature {
+    let signature = match language {
+        Language::Php => format!("public function {}()", method_name),
+        Language::Rust => format!("pub fn {}()", method_name),
+        Language::JavaScript | Language::TypeScript => format!("{}()", method_name),
+        Language::Unknown => format!("{}()", method_name),
+    };
+
+    MethodSignature {
+        name: method_name.to_string(),
+        signature,
+        language: language.clone(),
+    }
+}
+
+pub(crate) fn extract_stale_ref_path(description: &str) -> Option<String> {
+    let start = description.find('`')? + 1;
+    let rest = &description[start..];
+    let end = rest.find('`')?;
+    Some(rest[..end].to_string())
+}
+
+pub(crate) fn extract_line_number(description: &str) -> Option<usize> {
+    let start = description.find("(line ")? + "(line ".len();
+    let rest = &description[start..];
+    let end = rest.find(')')?;
+    rest[..end].parse().ok()
+}
+
+pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixResult {
+    let mut fixes = Vec::new();
+    let mut skipped = Vec::new();
+
+    for conv_report in &result.conventions {
+        if conv_report.outliers.is_empty() {
+            continue;
+        }
+
+        if conv_report.confidence < 0.5 {
+            for outlier in &conv_report.outliers {
+                skipped.push(SkippedFile {
+                    file: outlier.file.clone(),
+                    reason: format!(
+                        "Convention '{}' confidence too low ({:.0}%) — needs manual review",
+                        conv_report.name,
+                        conv_report.confidence * 100.0
+                    ),
+                });
+            }
+            continue;
+        }
+
+        let conforming_names: Vec<String> = conv_report
+            .conforming
+            .iter()
+            .filter_map(|f| {
+                Path::new(f)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+            })
+            .collect();
+        let naming_suffix = detect_naming_suffix(&conforming_names);
+        let sig_map = build_signature_map(&conv_report.conforming, root);
+
+        for outlier in &conv_report.outliers {
+            if let Some(ref suffix) = naming_suffix {
+                let file_stem = Path::new(&outlier.file)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !suffix_matches(&file_stem, suffix) {
+                    skipped.push(SkippedFile {
+                        file: outlier.file.clone(),
+                        reason: format!(
+                            "Name doesn't match convention pattern '*{}' — likely a utility/helper, needs manual refactoring",
+                            suffix
+                        ),
+                    });
+                    continue;
+                }
+            }
+
+            let mut insertions = Vec::new();
+            let abs_path = root.join(&outlier.file);
+            let language = detect_language(&abs_path);
+            let content = std::fs::read_to_string(&abs_path).unwrap_or_default();
+            let has_constructor = file_has_constructor(&content, &language);
+
+            let mut missing_methods: Vec<&str> = Vec::new();
+            let mut missing_registrations: Vec<&str> = Vec::new();
+            let mut missing_imports: Vec<&str> = Vec::new();
+            let mut missing_interfaces: Vec<&str> = Vec::new();
+            let mut namespace_declarations: Vec<String> = Vec::new();
+            let mut needs_constructor = false;
+
+            for deviation in &outlier.deviations {
+                match &deviation.kind {
+                    AuditFinding::MissingMethod => {
+                        let method_name = deviation
+                            .description
+                            .strip_prefix("Missing method: ")
+                            .unwrap_or(&deviation.description);
+
+                        if method_name.len() < 3 {
+                            continue;
+                        }
+
+                        if method_name == "__construct"
+                            || method_name == "new"
+                            || method_name == "constructor"
+                        {
+                            needs_constructor = true;
+                        } else {
+                            missing_methods.push(method_name);
+                        }
+                    }
+                    AuditFinding::MissingRegistration => {
+                        let hook_name = deviation
+                            .description
+                            .strip_prefix("Missing registration: ")
+                            .unwrap_or(&deviation.description);
+                        missing_registrations.push(hook_name);
+                    }
+                    AuditFinding::MissingImport => {
+                        let import_path = deviation
+                            .description
+                            .strip_prefix("Missing import: ")
+                            .unwrap_or(&deviation.description);
+                        missing_imports.push(import_path);
+                    }
+                    AuditFinding::MissingInterface => {
+                        let conformance = deviation
+                            .description
+                            .strip_prefix("Missing interface: ")
+                            .unwrap_or(&deviation.description);
+                        missing_interfaces.push(conformance);
+                    }
+                    AuditFinding::NamespaceMismatch => {
+                        if let Some(expected_namespace) =
+                            extract_expected_namespace(&deviation.description)
+                        {
+                            if let Some(declaration) =
+                                generate_namespace_declaration(&expected_namespace, &language)
+                            {
+                                namespace_declarations.push(declaration);
+                            }
+                        }
+                    }
+                    AuditFinding::DirectorySprawl => {}
+                    kind if is_actionable_comment_finding(kind) => {}
+                    _ => {}
+                }
+            }
+
+            for import_path in &missing_imports {
+                let use_stmt = generate_import_statement(import_path, &language);
+                insertions.push(insertion(
+                    InsertionKind::ImportAdd,
+                    AuditFinding::MissingImport,
+                    use_stmt,
+                    format!("Add missing import: {}", import_path),
+                ));
+            }
+
+            for conformance in &missing_interfaces {
+                let Some(type_name) = content
+                    .lines()
+                    .find_map(|line| primary_type_name_from_declaration(line, &language))
+                    .or_else(|| {
+                        abs_path
+                            .file_stem()
+                            .map(|stem| stem.to_string_lossy().to_string())
+                    })
+                else {
+                    continue;
+                };
+
+                insertions.push(insertion(
+                    InsertionKind::TypeConformance,
+                    AuditFinding::MissingInterface,
+                    generate_type_conformance_declaration(&type_name, conformance, &language),
+                    format!(
+                        "Add declared conformance `{}` to {}",
+                        conformance, type_name
+                    ),
+                ));
+            }
+
+            for declaration in &namespace_declarations {
+                insertions.push(insertion(
+                    InsertionKind::NamespaceDeclaration,
+                    AuditFinding::NamespaceMismatch,
+                    declaration.clone(),
+                    format!("Align namespace declaration to `{}`", declaration),
+                ));
+            }
+
+            if !missing_registrations.is_empty() && language == Language::Php {
+                if has_constructor && !needs_constructor {
+                    for hook_name in &missing_registrations {
+                        insertions.push(insertion(
+                            InsertionKind::RegistrationStub,
+                            AuditFinding::MissingRegistration,
+                            generate_registration_stub(hook_name),
+                            format!("Add {} registration in __construct()", hook_name),
+                        ));
+                    }
+                } else {
+                    let reg_lines: String = missing_registrations
+                        .iter()
+                        .map(|h| generate_registration_stub(h))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let construct_code = format!(
+                        "\n    public function __construct() {{\n{}\n    }}\n",
+                        reg_lines
+                    );
+                    insertions.push(insertion(
+                        InsertionKind::ConstructorWithRegistration,
+                        AuditFinding::MissingRegistration,
+                        construct_code,
+                        format!(
+                            "Add __construct() with {} registration(s)",
+                            missing_registrations.len()
+                        ),
+                    ));
+                    needs_constructor = false;
+                }
+            }
+
+            if needs_constructor {
+                let constructor_name = match language {
+                    Language::Php => "__construct",
+                    Language::Rust => "new",
+                    Language::JavaScript | Language::TypeScript => "constructor",
+                    Language::Unknown => "__construct",
+                };
+                if let Some(sig) = sig_map.get(constructor_name) {
+                    insertions.push(insertion(
+                        InsertionKind::MethodStub,
+                        AuditFinding::MissingMethod,
+                        generate_method_stub(sig),
+                        format!(
+                            "Add {}() stub to match {} convention",
+                            constructor_name, conv_report.name
+                        ),
+                    ));
+                } else {
+                    let fallback_sig = generate_fallback_signature(constructor_name, &language);
+                    insertions.push(insertion(
+                        InsertionKind::MethodStub,
+                        AuditFinding::MissingMethod,
+                        generate_method_stub(&fallback_sig),
+                        format!(
+                            "Add {}() stub to match {} convention (signature inferred)",
+                            constructor_name, conv_report.name
+                        ),
+                    ));
+                }
+            }
+
+            for method_name in &missing_methods {
+                if let Some(sig) = sig_map.get(*method_name) {
+                    insertions.push(insertion(
+                        InsertionKind::MethodStub,
+                        AuditFinding::MissingMethod,
+                        generate_method_stub(sig),
+                        format!(
+                            "Add {}() stub to match {} convention",
+                            method_name, conv_report.name
+                        ),
+                    ));
+                } else {
+                    let fallback_sig = generate_fallback_signature(method_name, &language);
+                    insertions.push(insertion(
+                        InsertionKind::MethodStub,
+                        AuditFinding::MissingMethod,
+                        generate_method_stub(&fallback_sig),
+                        format!(
+                            "Add {}() stub to match {} convention (signature inferred)",
+                            method_name, conv_report.name
+                        ),
+                    ));
+                }
+            }
+
+            if !insertions.is_empty() {
+                fixes.push(Fix {
+                    file: outlier.file.clone(),
+                    required_methods: conv_report.expected_methods.clone(),
+                    required_registrations: conv_report.expected_registrations.clone(),
+                    insertions,
+                    applied: false,
+                });
+            }
+        }
+    }
+
+    let mut new_files: Vec<NewFile> = Vec::new();
+    for finding in &result.findings {
+        if finding.kind != AuditFinding::MissingTestFile {
+            continue;
+        }
+
+        let Some(test_file) = extract_expected_test_path(&finding.description) else {
+            continue;
+        };
+
+        let abs_test_path = root.join(&test_file);
+        if abs_test_path.exists() || new_files.iter().any(|nf| nf.file == test_file) {
+            continue;
+        }
+
+        let Some(candidate) = generate_test_file_candidate(root, &test_file, &finding.file) else {
+            continue;
+        };
+        new_files.push(new_file(
+            AuditFinding::MissingTestFile,
+            FixSafetyTier::SafeWithChecks,
+            test_file,
+            candidate.content,
+            format!("Create missing test file for '{}'", finding.file),
+        ));
+    }
+
+    for finding in &result.findings {
+        if finding.kind != AuditFinding::MissingTestMethod {
+            continue;
+        }
+
+        let Some(expected_test_method) = extract_expected_test_method(&finding.description) else {
+            continue;
+        };
+        let Some(source_method) = extract_source_method_name(&finding.description) else {
+            continue;
+        };
+
+        let test_file_opt = extract_test_file_from_missing_test_method(&finding.description)
+            .or_else(|| derive_expected_test_file_path(root, &finding.file));
+
+        if test_file_opt.is_none() {
+            let source_language = detect_language(Path::new(&finding.file));
+            if is_inline_test_language(&source_language) {
+                let source_abs = root.join(&finding.file);
+                let source_content = std::fs::read_to_string(&source_abs).unwrap_or_default();
+
+                if source_content.contains(&expected_test_method) {
+                    continue;
+                }
+
+                if source_content.contains("#[cfg(test)]") {
+                    let test_stub = generate_test_method_stub(
+                        &source_language,
+                        &expected_test_method,
+                        &finding.file,
+                        &source_method,
+                    );
+
+                    fixes.push(Fix {
+                        file: finding.file.clone(),
+                        required_methods: vec![],
+                        required_registrations: vec![],
+                        insertions: vec![insertion(
+                            InsertionKind::MethodStub,
+                            AuditFinding::MissingTestMethod,
+                            test_stub,
+                            format!(
+                                "Scaffold missing test method '{}' for '{}::{}' (inline)",
+                                expected_test_method, finding.file, source_method
+                            ),
+                        )],
+                        applied: false,
+                    });
+                    continue;
+                }
+            }
+
+            skipped.push(SkippedFile {
+                file: finding.file.clone(),
+                reason: format!(
+                    "Could not derive test file path for missing test method '{}'",
+                    expected_test_method
+                ),
+            });
+            continue;
+        }
+
+        let test_file = test_file_opt.unwrap();
+
+        let ext = Path::new(&test_file)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(Language::from_extension)
+            .unwrap_or(Language::Unknown);
+
+        if test_method_exists_in_file(root, &test_file, &expected_test_method, &new_files) {
+            continue;
+        }
+
+        let test_stub =
+            generate_test_method_stub(&ext, &expected_test_method, &finding.file, &source_method);
+
+        let file_exists = root.join(&test_file).exists();
+        if file_exists {
+            fixes.push(Fix {
+                file: test_file,
+                required_methods: vec![],
+                required_registrations: vec![],
+                insertions: vec![insertion(
+                    InsertionKind::MethodStub,
+                    AuditFinding::MissingTestMethod,
+                    test_stub,
+                    format!(
+                        "Scaffold missing test method '{}' for '{}::{}'",
+                        expected_test_method, finding.file, source_method
+                    ),
+                )],
+                applied: false,
+            });
+        } else if let Some(existing) = new_files.iter_mut().find(|nf| nf.file == test_file) {
+            if !existing.content.contains(&expected_test_method) {
+                existing.content.push('\n');
+                existing.content.push_str(&test_stub);
+            }
+        } else {
+            let Some(mut candidate) = generate_test_file_candidate(root, &test_file, &finding.file)
+            else {
+                continue;
+            };
+            candidate.content.push('\n');
+            candidate.content.push_str(&test_stub);
+            new_files.push(new_file(
+                AuditFinding::MissingTestFile,
+                FixSafetyTier::SafeWithChecks,
+                test_file,
+                candidate.content,
+                format!("Create missing test file for '{}'", finding.file),
+            ));
+        }
+    }
+
+    generate_unreferenced_export_fixes(result, root, &mut fixes, &mut skipped);
+    generate_duplicate_function_fixes(result, root, &mut fixes, &mut new_files, &mut skipped);
+
+    let mut decompose_plans = Vec::new();
+    for finding in &result.findings {
+        if finding.kind != AuditFinding::GodFile {
+            continue;
+        }
+        let is_test = crate::code_audit::walker::is_test_path(&finding.file);
+        if is_test {
+            continue;
+        }
+        match decompose::build_plan(&finding.file, root, "grouped") {
+            Ok(plan) => {
+                if plan.groups.len() > 1 {
+                    decompose_plans.push(DecomposeFixPlan {
+                        file: finding.file.clone(),
+                        plan,
+                        applied: false,
+                    });
+                }
+            }
+            Err(e) => {
+                skipped.push(SkippedFile {
+                    file: finding.file.clone(),
+                    reason: format!("Decompose plan failed: {}", e),
+                });
+            }
+        }
+    }
+
+    for finding in &result.findings {
+        if finding.kind != AuditFinding::StaleDocReference {
+            continue;
+        }
+
+        let Some(new_path) = extract_suggested_path(&finding.suggestion) else {
+            continue;
+        };
+
+        let Some(old_path) = extract_stale_ref_path(&finding.description) else {
+            continue;
+        };
+
+        let line_num = extract_line_number(&finding.description).unwrap_or(0);
+        if line_num == 0 {
+            continue;
+        }
+
+        fixes.push(Fix {
+            file: finding.file.clone(),
+            required_methods: vec![],
+            required_registrations: vec![],
+            insertions: vec![insertion(
+                InsertionKind::DocReferenceUpdate {
+                    line: line_num,
+                    old_ref: old_path.clone(),
+                    new_ref: new_path.clone(),
+                },
+                AuditFinding::StaleDocReference,
+                format!("{} → {}", old_path, new_path),
+                format!(
+                    "Update stale reference: `{}` → `{}` (line {})",
+                    old_path, new_path, line_num
+                ),
+            )],
+            applied: false,
+        });
+    }
+
+    for finding in &result.findings {
+        if finding.kind != AuditFinding::BrokenDocReference {
+            continue;
+        }
+
+        let Some(dead_path) = extract_stale_ref_path(&finding.description) else {
+            continue;
+        };
+
+        let Some(line_num) = extract_line_number(&finding.description) else {
+            continue;
+        };
+
+        let abs_path = root.join(&finding.file);
+        let Ok(content) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+
+        let Some(line) = content.lines().nth(line_num.saturating_sub(1)) else {
+            continue;
+        };
+
+        if !should_remove_broken_doc_line(line, &dead_path) {
+            continue;
+        }
+
+        fixes.push(Fix {
+            file: finding.file.clone(),
+            required_methods: vec![],
+            required_registrations: vec![],
+            insertions: vec![insertion(
+                InsertionKind::DocLineRemoval { line: line_num },
+                AuditFinding::BrokenDocReference,
+                dead_path.clone(),
+                format!(
+                    "Remove dead documentation reference line for `{}` (line {})",
+                    dead_path, line_num
+                ),
+            )],
+            applied: false,
+        });
+    }
+
+    let fixes = merge_fixes_per_file(fixes);
+    let total_insertions: usize = fixes.iter().map(|f| f.insertions.len()).sum();
+    let files_modified = fixes.len();
+
+    FixResult {
+        fixes,
+        new_files,
+        decompose_plans,
+        skipped,
+        chunk_results: vec![],
+        total_insertions,
+        files_modified,
+    }
+}
+
 pub(crate) fn parse_items_for_dedup(
     file_ext: &str,
     content: &str,
@@ -430,7 +1086,7 @@ pub(crate) fn parse_items_for_dedup(
 pub(crate) fn extract_signatures_from_items(
     content: &str,
     language: &Language,
-) -> Vec<fixer::MethodSignature> {
+) -> Vec<MethodSignature> {
     let file_ext = match language {
         Language::Php => "php",
         Language::Rust => "rs",
@@ -448,7 +1104,12 @@ pub(crate) fn extract_signatures_from_items(
 
     symbols
         .into_iter()
-        .filter(|symbol| matches!(symbol.concept.as_str(), "function" | "free_function" | "method"))
+        .filter(|symbol| {
+            matches!(
+                symbol.concept.as_str(),
+                "function" | "free_function" | "method"
+            )
+        })
         .filter_map(|symbol| {
             let name = symbol.name()?.to_string();
             let line_idx = symbol.line.checked_sub(1)?;
@@ -458,7 +1119,7 @@ pub(crate) fn extract_signatures_from_items(
                 .filter(|line| !line.is_empty())
                 .unwrap_or_else(|| name.clone());
 
-            Some(fixer::MethodSignature {
+            Some(MethodSignature {
                 name,
                 signature,
                 language: language.clone(),
@@ -467,13 +1128,17 @@ pub(crate) fn extract_signatures_from_items(
         .collect()
 }
 
+pub(crate) fn extract_signatures(content: &str, language: &Language) -> Vec<MethodSignature> {
+    extract_signatures_from_items(content, language)
+}
+
 fn insertion(
-    kind: fixer::InsertionKind,
+    kind: InsertionKind,
     finding: AuditFinding,
     code: String,
     description: String,
-) -> fixer::Insertion {
-    fixer::Insertion {
+) -> Insertion {
+    Insertion {
         safety_tier: kind.safety_tier(),
         kind,
         finding,
@@ -487,12 +1152,12 @@ fn insertion(
 
 fn new_file(
     finding: AuditFinding,
-    safety_tier: fixer::FixSafetyTier,
+    safety_tier: FixSafetyTier,
     file: String,
     content: String,
     description: String,
-) -> fixer::NewFile {
-    fixer::NewFile {
+) -> NewFile {
+    NewFile {
         file,
         finding,
         safety_tier,
@@ -508,8 +1173,8 @@ fn new_file(
 pub(crate) fn generate_unreferenced_export_fixes(
     result: &CodeAuditResult,
     root: &Path,
-    fixes: &mut Vec<fixer::Fix>,
-    skipped: &mut Vec<fixer::SkippedFile>,
+    fixes: &mut Vec<Fix>,
+    skipped: &mut Vec<SkippedFile>,
 ) {
     for finding in &result.findings {
         if finding.kind != AuditFinding::UnreferencedExport {
@@ -521,7 +1186,7 @@ pub(crate) fn generate_unreferenced_export_fixes(
         };
 
         let abs_path = root.join(&finding.file);
-        let language = fixer::detect_language(&abs_path);
+        let language = detect_language(&abs_path);
         if !matches!(language, Language::Rust) {
             continue;
         }
@@ -538,7 +1203,7 @@ pub(crate) fn generate_unreferenced_export_fixes(
         }
 
         if is_reexported(&finding.file, &fn_name, root) {
-            skipped.push(fixer::SkippedFile {
+            skipped.push(SkippedFile {
                 file: finding.file.clone(),
                 reason: format!(
                     "Function '{}' is re-exported or used by binary crate — cannot narrow visibility",
@@ -564,7 +1229,7 @@ pub(crate) fn generate_unreferenced_export_fixes(
         });
 
         let Some(line_num) = found_line else {
-            skipped.push(fixer::SkippedFile {
+            skipped.push(SkippedFile {
                 file: finding.file.clone(),
                 reason: format!("Could not locate `pub fn {}` declaration in file", fn_name),
             });
@@ -581,12 +1246,12 @@ pub(crate) fn generate_unreferenced_export_fixes(
             ("pub fn".to_string(), "pub(crate) fn".to_string())
         };
 
-        fixes.push(fixer::Fix {
+        fixes.push(Fix {
             file: finding.file.clone(),
             required_methods: vec![],
             required_registrations: vec![],
             insertions: vec![insertion(
-                fixer::InsertionKind::VisibilityChange {
+                InsertionKind::VisibilityChange {
                     line: line_num,
                     from: from.clone(),
                     to: to.clone(),
@@ -606,9 +1271,9 @@ pub(crate) fn generate_unreferenced_export_fixes(
 pub(crate) fn generate_duplicate_function_fixes(
     result: &CodeAuditResult,
     root: &Path,
-    fixes: &mut Vec<fixer::Fix>,
-    new_files: &mut Vec<fixer::NewFile>,
-    skipped: &mut Vec<fixer::SkippedFile>,
+    fixes: &mut Vec<Fix>,
+    new_files: &mut Vec<NewFile>,
+    skipped: &mut Vec<SkippedFile>,
 ) {
     const MIN_EXTRACT_GROUP_SIZE: usize = 4;
     const SKIP_EXTRACT_NAMES: &[&str] = &[
@@ -638,14 +1303,14 @@ pub(crate) fn generate_duplicate_function_fixes(
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
-        let language = fixer::detect_language(&canonical_abs);
+        let language = detect_language(&canonical_abs);
         let use_extract_shared = matches!(language, Language::Php)
             && !crate::code_audit::is_test_path(&group.canonical_file);
 
         let canonical_content = match std::fs::read_to_string(&canonical_abs) {
             Ok(content) => content,
             Err(_) => {
-                skipped.push(fixer::SkippedFile {
+                skipped.push(SkippedFile {
                     file: group.canonical_file.clone(),
                     reason: format!(
                         "Cannot read canonical file for duplicate `{}`",
@@ -679,7 +1344,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                     }));
                 }
                 Err(_) => {
-                    skipped.push(fixer::SkippedFile {
+                    skipped.push(SkippedFile {
                         file: remove_file.clone(),
                         reason: format!(
                             "Cannot read file to remove duplicate `{}`",
@@ -714,7 +1379,7 @@ pub(crate) fn generate_duplicate_function_fixes(
 
         if result_val.get("error").is_some() {
             let err = result_val["error"].as_str().unwrap_or("unknown error");
-            skipped.push(fixer::SkippedFile {
+            skipped.push(SkippedFile {
                 file: group.canonical_file.clone(),
                 reason: format!(
                     "extract_shared failed for `{}`: {}",
@@ -733,7 +1398,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                 .get("reason")
                 .and_then(|value| value.as_str())
                 .unwrap_or("extension decided to skip");
-            skipped.push(fixer::SkippedFile {
+            skipped.push(SkippedFile {
                 file: group.canonical_file.clone(),
                 reason: format!("Skipped `{}`: {}", group.function_name, reason),
             });
@@ -755,7 +1420,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                     .unwrap_or("SharedTrait");
                 new_files.push(new_file(
                     AuditFinding::DuplicateFunction,
-                    fixer::FixSafetyTier::PlanOnly,
+                    FixSafetyTier::PlanOnly,
                     trait_file.to_string(),
                     trait_content.to_string(),
                     format!(
@@ -791,7 +1456,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                             .and_then(|value| value.as_u64()),
                     ) {
                         insertions.push(insertion(
-                            fixer::InsertionKind::FunctionRemoval {
+                            InsertionKind::FunctionRemoval {
                                 start_line: start as usize,
                                 end_line: end as usize,
                             },
@@ -807,7 +1472,7 @@ pub(crate) fn generate_duplicate_function_fixes(
 
                 if let Some(import) = edit.get("add_import").and_then(|value| value.as_str()) {
                     insertions.push(insertion(
-                        fixer::InsertionKind::ImportAdd,
+                        InsertionKind::ImportAdd,
                         AuditFinding::DuplicateFunction,
                         import.to_string(),
                         format!("Import shared trait for `{}`", group.function_name),
@@ -817,7 +1482,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                 if let Some(use_trait) = edit.get("add_use_trait").and_then(|value| value.as_str())
                 {
                     insertions.push(insertion(
-                        fixer::InsertionKind::TraitUse,
+                        InsertionKind::TraitUse,
                         AuditFinding::DuplicateFunction,
                         use_trait.to_string(),
                         format!("Use shared trait for `{}`", group.function_name),
@@ -825,7 +1490,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                 }
 
                 if !insertions.is_empty() {
-                    fixes.push(fixer::Fix {
+                    fixes.push(Fix {
                         file,
                         required_methods: vec![],
                         required_registrations: vec![],
@@ -841,8 +1506,8 @@ pub(crate) fn generate_duplicate_function_fixes(
 fn generate_simple_duplicate_fixes(
     group: &crate::code_audit::DuplicateGroup,
     root: &Path,
-    fixes: &mut Vec<fixer::Fix>,
-    skipped: &mut Vec<fixer::SkippedFile>,
+    fixes: &mut Vec<Fix>,
+    skipped: &mut Vec<SkippedFile>,
 ) {
     for remove_file in &group.remove_from {
         let abs_path = root.join(remove_file.as_str());
@@ -854,7 +1519,7 @@ fn generate_simple_duplicate_fixes(
         let content = match std::fs::read_to_string(&abs_path) {
             Ok(content) => content,
             Err(_) => {
-                skipped.push(fixer::SkippedFile {
+                skipped.push(SkippedFile {
                     file: remove_file.clone(),
                     reason: format!(
                         "Cannot read file to remove duplicate `{}`",
@@ -867,7 +1532,7 @@ fn generate_simple_duplicate_fixes(
 
         let items = parse_items_for_dedup(ext, &content, remove_file);
         let Some(items) = items else {
-            skipped.push(fixer::SkippedFile {
+            skipped.push(SkippedFile {
                 file: remove_file.clone(),
                 reason: format!(
                     "Cannot locate `{}` boundaries in {} — no grammar or extension available",
@@ -878,7 +1543,7 @@ fn generate_simple_duplicate_fixes(
         };
 
         let Some(item) = find_parsed_item_by_name(&items, &group.function_name) else {
-            skipped.push(fixer::SkippedFile {
+            skipped.push(SkippedFile {
                 file: remove_file.clone(),
                 reason: format!(
                     "Function `{}` not found by parser in {}",
@@ -898,7 +1563,7 @@ fn generate_simple_duplicate_fixes(
         };
 
         let mut insertions = vec![insertion(
-            fixer::InsertionKind::FunctionRemoval {
+            InsertionKind::FunctionRemoval {
                 start_line: item.start_line,
                 end_line: item.end_line,
             },
@@ -912,14 +1577,14 @@ fn generate_simple_duplicate_fixes(
 
         if !content.contains(&import_stmt) {
             insertions.push(insertion(
-                fixer::InsertionKind::ImportAdd,
+                InsertionKind::ImportAdd,
                 AuditFinding::DuplicateFunction,
                 import_stmt,
                 format!("Import `{}` from canonical location", group.function_name),
             ));
         }
 
-        fixes.push(fixer::Fix {
+        fixes.push(Fix {
             file: remove_file.clone(),
             required_methods: vec![],
             required_registrations: vec![],

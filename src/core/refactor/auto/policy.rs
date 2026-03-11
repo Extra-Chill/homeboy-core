@@ -1,10 +1,17 @@
-use crate::code_audit::fixer::first_failed_detail;
 use crate::code_audit::AuditFinding;
 use crate::refactor::auto::preflight;
 use crate::refactor::auto::{
     FixPolicy, FixResult, FixSafetyTier, Insertion, NewFile, PolicySummary, PreflightContext,
-    PreflightStatus,
+    PreflightReport, PreflightStatus,
 };
+
+pub(crate) fn blocked_reason_from_preflight(report: &PreflightReport) -> Option<String> {
+    report
+        .checks
+        .iter()
+        .find(|check| !check.passed)
+        .map(|check| format!("Blocked by preflight {}: {}", check.name, check.detail))
+}
 
 fn finding_allowed(finding: &AuditFinding, policy: &FixPolicy) -> bool {
     let included = policy
@@ -51,7 +58,7 @@ fn annotate_insertion_for_policy(
             FixSafetyTier::SafeWithChecks => insertion
                 .preflight
                 .as_ref()
-                .and_then(first_failed_detail)
+                .and_then(blocked_reason_from_preflight)
                 .unwrap_or_else(|| {
                     "Blocked: requires preflight validation before auto-write".to_string()
                 }),
@@ -99,7 +106,7 @@ fn annotate_new_file_for_policy(
             FixSafetyTier::SafeWithChecks => new_file
                 .preflight
                 .as_ref()
-                .and_then(first_failed_detail)
+                .and_then(blocked_reason_from_preflight)
                 .unwrap_or_else(|| {
                     "Blocked: requires preflight validation before auto-write".to_string()
                 }),
@@ -156,7 +163,7 @@ pub fn apply_fix_policy(
                         FixSafetyTier::SafeWithChecks => insertion
                             .preflight
                             .as_ref()
-                            .and_then(first_failed_detail)
+                            .and_then(blocked_reason_from_preflight)
                             .unwrap_or_else(|| {
                                 "Blocked: requires preflight validation before auto-write"
                                     .to_string()
