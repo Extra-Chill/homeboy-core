@@ -1,5 +1,5 @@
 use crate::config::{self, ConfigEntity};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorCode, Result};
 use crate::extension;
 use crate::output::{CreateOutput, MergeOutput, MergeResult, RemoveResult};
 use crate::project;
@@ -825,6 +825,61 @@ pub fn resolve(id: Option<&str>) -> Result<Component> {
         None,
         Some(hints),
     ))
+}
+
+/// Resolve the effective component for runtime operations.
+///
+/// Resolution order:
+/// 1. If `project` + explicit `id` are provided, use project-owned component resolution.
+/// 2. If explicit `id` + `path_override` are provided, try stored config first, then portable discovery at path.
+/// 3. If only explicit `id` is provided, use `load(id)`.
+/// 4. If no explicit `id`, fall back to `resolve(None)` (CWD / git-root portable discovery).
+pub fn resolve_effective(
+    id: Option<&str>,
+    path_override: Option<&str>,
+    project: Option<&crate::project::Project>,
+) -> Result<Component> {
+    if let (Some(project), Some(id)) = (project, id) {
+        let mut component = crate::project::resolve_project_component(project, id)?;
+        if let Some(path) = path_override {
+            component.local_path = path.to_string();
+        }
+        return Ok(component);
+    }
+
+    if let Some(id) = id {
+        if let Some(path) = path_override {
+            match load(id) {
+                Ok(mut component) => {
+                    component.local_path = path.to_string();
+                    Ok(component)
+                }
+                Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
+                    if let Some(mut discovered) = discover_from_portable(Path::new(path)) {
+                        discovered.id = id.to_string();
+                        discovered.local_path = path.to_string();
+                        Ok(discovered)
+                    } else {
+                        Ok(Component::new(
+                            id.to_string(),
+                            path.to_string(),
+                            String::new(),
+                            None,
+                        ))
+                    }
+                }
+                Err(err) => Err(err),
+            }
+        } else {
+            load(id)
+        }
+    } else {
+        let mut component = resolve(None)?;
+        if let Some(path) = path_override {
+            component.local_path = path.to_string();
+        }
+        Ok(component)
+    }
 }
 
 #[cfg(test)]

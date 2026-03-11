@@ -1,11 +1,9 @@
-use std::path::Path;
-
 use crate::component::{self, Component};
 use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::engine::temp;
 use crate::engine::validation::ValidationCollector;
-use crate::error::{Error, ErrorCode, Result};
+use crate::error::{Error, Result};
 use crate::extension::{self, ExtensionManifest};
 use crate::git::{self, UncommittedChanges};
 use crate::release::changelog;
@@ -21,33 +19,7 @@ use super::types::{
 /// Load a component with portable config fallback when path_override is set.
 /// In CI environments, the component may not be registered — only homeboy.json exists.
 pub(crate) fn load_component(component_id: &str, options: &ReleaseOptions) -> Result<Component> {
-    match component::load(component_id) {
-        Ok(mut comp) => {
-            if let Some(ref path) = options.path_override {
-                comp.local_path = path.clone();
-            }
-            Ok(comp)
-        }
-        Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
-            if let Some(ref path) = options.path_override {
-                if let Some(mut discovered) = component::discover_from_portable(Path::new(path)) {
-                    discovered.id = component_id.to_string();
-                    discovered.local_path = path.clone();
-                    Ok(discovered)
-                } else {
-                    Ok(Component::new(
-                        component_id.to_string(),
-                        path.clone(),
-                        String::new(),
-                        None,
-                    ))
-                }
-            } else {
-                Err(err)
-            }
-        }
-        Err(err) => Err(err),
-    }
+    component::resolve_effective(Some(component_id), options.path_override.as_deref(), None)
 }
 
 /// Execute a release by computing the plan and executing it.
