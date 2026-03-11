@@ -1,14 +1,16 @@
 use crate::component::Component;
+use crate::extension::test::drift::{
+    detect_drift, generate_transform_rules, DriftOptions, DriftReport,
+};
 use crate::extension::test::TestScopeOutput;
+use crate::extension::test::{ChangeType, TestAnalysis};
+use crate::extension::test::{TestBaselineComparison, TestCounts};
 use crate::refactor::AppliedRefactor;
 use crate::refactor::{
     self,
     auto::{self, AutofixMode},
     TransformSet,
 };
-use crate::test_analyze::TestAnalysis;
-use crate::extension::test::{TestBaselineComparison, TestCounts};
-use crate::test_drift::{self, DriftOptions, DriftReport};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,7 +77,7 @@ pub fn detect_test_drift(
         DriftOptions::php(&source_path, since)
     };
 
-    let report = test_drift::detect_drift(component_id, &opts)?;
+    let report = detect_drift(component_id, &opts)?;
 
     if report.production_changes.is_empty() {
         crate::log_status!("drift", "No production changes detected since {}", since);
@@ -93,15 +95,15 @@ pub fn detect_test_drift(
 
         for change in &report.production_changes {
             let label = match change.change_type {
-                test_drift::ChangeType::MethodRename => "method rename",
-                test_drift::ChangeType::MethodRemoved => "method removed",
-                test_drift::ChangeType::ClassRename => "class rename",
-                test_drift::ChangeType::ClassRemoved => "class removed",
-                test_drift::ChangeType::ErrorCodeChange => "error code change",
-                test_drift::ChangeType::ReturnTypeChange => "return type change",
-                test_drift::ChangeType::SignatureChange => "signature change",
-                test_drift::ChangeType::FileMove => "file moved",
-                test_drift::ChangeType::StringChange => "string changed",
+                ChangeType::MethodRename => "method rename",
+                ChangeType::MethodRemoved => "method removed",
+                ChangeType::ClassRename => "class rename",
+                ChangeType::ClassRemoved => "class removed",
+                ChangeType::ErrorCodeChange => "error code change",
+                ChangeType::ReturnTypeChange => "return type change",
+                ChangeType::SignatureChange => "signature change",
+                ChangeType::FileMove => "file moved",
+                ChangeType::StringChange => "string changed",
             };
 
             if let Some(ref new) = change.new_symbol {
@@ -212,8 +214,8 @@ pub fn auto_fix_test_drift(
         if write { "write" } else { "dry-run" }
     );
 
-    let drift_report = test_drift::detect_drift(component_id, &opts)?;
-    let rules = test_drift::generate_transform_rules(&drift_report);
+    let drift_report = detect_drift(component_id, &opts)?;
+    let rules = generate_transform_rules(&drift_report);
 
     let output = if rules.is_empty() {
         crate::log_status!("test", "No auto-fixable drift detected. Nothing to apply.");

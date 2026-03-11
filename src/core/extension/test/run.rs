@@ -8,7 +8,7 @@ use crate::refactor::{
     auto::{self, AutofixMode},
     run_test_refactor, AppliedRefactor, TestSourceOptions,
 };
-use crate::test_analyze::{self, TestAnalysis, TestAnalysisInput};
+use crate::extension::test::analyze::{analyze, TestAnalysis, TestAnalysisInput};
 use crate::extension::test::baseline::{self, TestBaselineComparison, TestCounts};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -206,7 +206,7 @@ pub fn run_main_test_workflow(
             let _ = std::fs::remove_file(file);
         }
 
-        Some(test_analyze::analyze(&args.component_id, &analysis_input))
+        Some(analyze(&args.component_id, &analysis_input))
     } else {
         if let Some(ref file) = failures_file {
             let _ = std::fs::remove_file(file);

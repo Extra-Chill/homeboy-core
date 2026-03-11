@@ -5,14 +5,12 @@ use std::path::PathBuf;
 use homeboy::component::Component;
 use homeboy::extension::test as extension_test;
 use homeboy::extension::test::{
-    CoverageOutput, TestRunWorkflowArgs, TestScopeOutput, TestSummaryOutput,
+    auto_fix_test_drift, detect_test_drift, CoverageOutput, DriftReport, TestAnalysis,
+    TestRunWorkflowArgs, TestScopeOutput, TestSummaryOutput,
 };
 use homeboy::refactor::AppliedRefactor;
 use homeboy::scaffold::ScaffoldConfig;
-use homeboy::test_analyze::TestAnalysis;
 use homeboy::extension::test::{TestBaselineComparison, TestCounts};
-use homeboy::test_drift::DriftReport;
-use homeboy::test_workflow;
 
 use super::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -297,8 +295,7 @@ fn run_auto_fix_drift(
     write: bool,
     include_report: bool,
 ) -> CmdResult<TestOutput> {
-    let result =
-        test_workflow::auto_fix_test_drift(component_id, component, since, write, include_report)?;
+    let result = auto_fix_test_drift(component_id, component, since, write, include_report)?;
 
     Ok((
         TestOutput {
@@ -335,7 +332,7 @@ fn run_auto_fix_drift(
 
 /// Run drift detection without running tests.
 fn run_drift(component_id: &str, component: &Component, since: &str) -> CmdResult<TestOutput> {
-    let result = test_workflow::detect_test_drift(component_id, component, since)?;
+    let result = detect_test_drift(component_id, component, since)?;
 
     Ok((
         TestOutput {
