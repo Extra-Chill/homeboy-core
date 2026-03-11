@@ -609,7 +609,7 @@ fn components_list(project_id: &str) -> CmdResult<ProjectOutput> {
                 components: Some(ProjectComponentsOutput {
                     action: "list".to_string(),
                     project_id: project_id.to_string(),
-                    component_ids: project.component_ids.clone(),
+                    component_ids: project::project_component_ids(&project),
                     components,
                 }),
                 ..Default::default()
@@ -650,7 +650,7 @@ fn components_remove(project_id: &str, component_ids: Vec<String>) -> CmdResult<
 
 fn components_clear(project_id: &str) -> CmdResult<ProjectOutput> {
     let mut project = project::load(project_id)?;
-    project.component_ids.clear();
+    project.components.clear();
 
     write_project_components(project_id, "clear", &project)
 }
@@ -672,7 +672,7 @@ fn write_project_components(
                 components: Some(ProjectComponentsOutput {
                     action: action.to_string(),
                     project_id: project_id.to_string(),
-                    component_ids: project.component_ids.clone(),
+                    component_ids: project::project_component_ids(project),
                     components,
                 }),
                 ..Default::default()

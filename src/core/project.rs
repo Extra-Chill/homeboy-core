@@ -332,6 +332,33 @@ entity_crud!(Project; list_ids, merge, slugify_id);
 // Operations
 // ============================================================================
 
+fn component_ids_from_attachments(components: &[ProjectComponentAttachment]) -> Vec<String> {
+    components.iter().map(|component| component.id.clone()).collect()
+}
+
+fn sync_components_and_ids(project: &mut Project) {
+    if project.components.is_empty() && !project.component_ids.is_empty() {
+        project.components = project
+            .component_ids
+            .iter()
+            .map(|id| ProjectComponentAttachment {
+                id: id.clone(),
+                local_path: None,
+            })
+            .collect();
+    }
+
+    project.component_ids = component_ids_from_attachments(&project.components);
+}
+
+pub fn project_component_ids(project: &Project) -> Vec<String> {
+    component_ids_from_attachments(&project.components)
+}
+
+pub fn has_component(project: &Project, component_id: &str) -> bool {
+    project.components.iter().any(|component| component.id == component_id)
+}
+
 pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
     use crate::component;
 
@@ -363,6 +390,7 @@ pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Ve
     let deduped = parser::dedupe(component_ids);
 
     let mut project = load(project_id)?;
+    sync_components_and_ids(&mut project);
     project.components = deduped
         .iter()
         .map(|id| ProjectComponentAttachment {
@@ -374,9 +402,9 @@ pub fn set_components(project_id: &str, component_ids: Vec<String>) -> Result<Ve
                 .and_then(|component| component.local_path.clone()),
         })
         .collect();
-    project.component_ids = deduped.clone();
+    sync_components_and_ids(&mut project);
     save(&project)?;
-    Ok(deduped)
+    Ok(project_component_ids(&project))
 }
 
 pub fn add_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
@@ -410,17 +438,18 @@ pub fn add_components(project_id: &str, component_ids: Vec<String>) -> Result<Ve
     let deduped = parser::dedupe(component_ids);
 
     let mut project = load(project_id)?;
+    sync_components_and_ids(&mut project);
     for id in deduped {
-        if !project.component_ids.contains(&id) {
-            project.component_ids.push(id.clone());
+        if !has_component(&project, &id) {
             project.components.push(ProjectComponentAttachment {
                 id,
                 local_path: None,
             });
         }
     }
+    sync_components_and_ids(&mut project);
     save(&project)?;
-    Ok(project.component_ids)
+    Ok(project_component_ids(&project))
 }
 
 pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result<Vec<String>> {
@@ -434,10 +463,11 @@ pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result
     }
 
     let mut project = load(project_id)?;
+    sync_components_and_ids(&mut project);
 
     let mut missing = Vec::new();
     for id in &component_ids {
-        if !project.component_ids.contains(id) {
+        if !has_component(&project, id) {
             missing.push(id.clone());
         }
     }
@@ -452,17 +482,16 @@ pub fn remove_components(project_id: &str, component_ids: Vec<String>) -> Result
     }
 
     project
-        .component_ids
-        .retain(|id| !component_ids.contains(id));
-    project
         .components
         .retain(|component| !component_ids.contains(&component.id));
+    sync_components_and_ids(&mut project);
     save(&project)?;
-    Ok(project.component_ids)
+    Ok(project_component_ids(&project))
 }
 
 pub fn attach_component_path(project_id: &str, component_id: &str, local_path: &str) -> Result<()> {
     let mut project = load(project_id)?;
+    sync_components_and_ids(&mut project);
 
     if let Some(component) = project.components.iter_mut().find(|c| c.id == component_id) {
         component.local_path = Some(local_path.to_string());
@@ -471,11 +500,9 @@ pub fn attach_component_path(project_id: &str, component_id: &str, local_path: &
             id: component_id.to_string(),
             local_path: Some(local_path.to_string()),
         });
-        if !project.component_ids.contains(&component_id.to_string()) {
-            project.component_ids.push(component_id.to_string());
-        }
     }
 
+    sync_components_and_ids(&mut project);
     save(&project)
 }
 
@@ -518,6 +545,9 @@ pub fn resolve_project_component(
     project: &Project,
     component_id: &str,
 ) -> Result<crate::component::Component> {
+    let mut project = project.clone();
+    sync_components_and_ids(&mut project);
+
     let component = if let Some(attachment) = project
         .components
         .iter()
@@ -543,14 +573,17 @@ pub fn resolve_project_component(
     } else {
         crate::component::load(component_id)?
     };
-    Ok(apply_component_overrides(&component, project))
+    Ok(apply_component_overrides(&component, &project))
 }
 
 pub fn resolve_project_components(project: &Project) -> Result<Vec<crate::component::Component>> {
+    let mut project = project.clone();
+    sync_components_and_ids(&mut project);
+
     project
-        .component_ids
+        .components
         .iter()
-        .map(|component_id| resolve_project_component(project, component_id))
+        .map(|component| resolve_project_component(&project, &component.id))
         .collect()
 }
 

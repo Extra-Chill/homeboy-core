@@ -1076,7 +1076,7 @@ pub fn changes_project_filtered(
     // Filter to only components that are in the project
     let filtered: Vec<String> = component_ids
         .iter()
-        .filter(|id| proj.component_ids.contains(id))
+        .filter(|id| project::has_component(&proj, id))
         .cloned()
         .collect();
 
@@ -1086,7 +1086,7 @@ pub fn changes_project_filtered(
             format!(
                 "None of the specified components are in project '{}'. Available: {}",
                 project_id,
-                proj.component_ids.join(", ")
+                project::project_component_ids(&proj).join(", ")
             ),
             None,
             None,
