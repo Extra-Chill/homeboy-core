@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::test_analyze::{TestAnalysis, TestAnalysisInput};
+use crate::extension::test::analyze::{TestAnalysis, TestAnalysisInput};
 use crate::extension::test::TestCounts;
 use crate::utils::io;
 use crate::utils::output_parse::{Aggregate, DeriveRule, ParseRule, ParseSpec};

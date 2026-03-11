@@ -10,3 +10,4 @@
 pub mod baseline;
 pub mod executor;
 pub mod pipeline;
+pub mod symbol_graph;

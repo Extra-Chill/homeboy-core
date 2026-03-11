@@ -5,7 +5,7 @@ use crate::git;
 use crate::lint_baseline;
 use crate::refactor::auto as fixer;
 use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
-use crate::test_drift::{self, DriftOptions};
+use crate::extension::test::drift::{detect_drift, DriftOptions};
 use crate::undo::UndoSnapshot;
 use crate::Error;
 use serde::Serialize;
@@ -414,7 +414,7 @@ fn compute_changed_test_files(component: &Component, git_ref: &str) -> crate::Re
         DriftOptions::php(&source_path, git_ref)
     };
 
-    let report = test_drift::detect_drift(&component.id, &opts)?;
+    let report = detect_drift(&component.id, &opts)?;
     let mut selected: BTreeSet<String> = BTreeSet::new();
 
     for file in &changed_files {

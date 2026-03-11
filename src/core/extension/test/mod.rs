@@ -1,11 +1,14 @@
+pub mod analyze;
 pub mod parsing;
 pub mod baseline;
+pub mod drift;
 pub mod run;
+pub mod workflow;
 
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use crate::git;
-use crate::test_drift::{self, DriftOptions};
+use crate::extension::test::drift::DriftOptions;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -20,15 +23,21 @@ pub struct TestScopeOutput {
     pub selected_files: Vec<String>,
 }
 
+pub use analyze::{FailureCategory, FailureCluster, TestAnalysis, TestAnalysisInput, TestFailure};
 pub use baseline::{
     compare as compare_baseline, load_baseline, load_baseline_from_ref, save_baseline,
     TestBaseline, TestBaselineComparison, TestCounts,
 };
+pub use drift::{ChangeType, DriftReport, DriftedTest, ProductionChange};
 pub use parsing::{
     build_test_summary, parse_coverage_file, parse_failures_file, parse_test_results_file,
     parse_test_results_text, CoverageOutput, TestSummaryOutput,
 };
 pub use run::{run_main_test_workflow, TestRunWorkflowArgs, TestRunWorkflowResult};
+pub use workflow::{
+    auto_fix_test_drift, detect_test_drift, AutoFixDriftOutput, AutoFixDriftWorkflowResult,
+    DriftWorkflowResult, MainTestWorkflowResult,
+};
 
 pub fn resolve_test_command(
     component: &Component,
@@ -95,7 +104,7 @@ pub fn compute_changed_test_scope(
         DriftOptions::php(&source_path, git_ref)
     };
 
-    let report = test_drift::detect_drift(&component.id, &opts)?;
+    let report = drift::detect_drift(&component.id, &opts)?;
     let mut selected: BTreeSet<String> = BTreeSet::new();
 
     for file in &changed_files {

@@ -2,7 +2,7 @@ use crate::code_audit::{self, is_test_path, CodeAuditResult};
 use crate::component::{self, Component};
 use crate::extension::{lint as extension_lint, test as extension_test};
 use crate::refactor::auto as fixer;
-use crate::test_drift::{self, DriftOptions};
+use crate::extension::test::drift::{detect_drift, DriftOptions};
 use crate::undo::UndoSnapshot;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
@@ -13,7 +13,7 @@ pub use crate::code_audit::{
 };
 
 pub(crate) fn rewrite_callers_after_dedup(fix: &fixer::Fix, root: &Path) {
-    use crate::core::symbol_graph;
+    use crate::core::engine::symbol_graph;
 
     for insertion in &fix.insertions {
         if !matches!(insertion.kind, fixer::InsertionKind::FunctionRemoval { .. }) {
@@ -358,7 +358,7 @@ fn compute_changed_test_files(component: &Component, git_ref: &str) -> crate::Re
         DriftOptions::php(&source_path, git_ref)
     };
 
-    let report = test_drift::detect_drift(&component.id, &opts)?;
+    let report = detect_drift(&component.id, &opts)?;
     let mut selected: BTreeSet<String> = BTreeSet::new();
 
     for file in &changed_files {

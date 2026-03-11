@@ -17,7 +17,7 @@ pub(crate) fn extract_function_name_from_unreferenced(description: &str) -> Opti
 }
 
 pub(crate) fn module_path_from_file(file_path: &str) -> String {
-    crate::core::symbol_graph::module_path_from_file(file_path)
+    crate::core::engine::symbol_graph::module_path_from_file(file_path)
 }
 
 pub(crate) fn generate_unreferenced_export_fixes(
