@@ -538,10 +538,26 @@ pub fn resolve_project_component(
                 },
             )?
         } else {
-            crate::component::load(component_id)?
+            return Err(Error::validation_invalid_argument(
+                "components.local_path",
+                format!(
+                    "Project component '{}' is attached without a repo path. Reattach it with: homeboy project components attach-path {} <path>",
+                    component_id, project.id
+                ),
+                Some(project.id.clone()),
+                None,
+            ));
         }
     } else {
-        crate::component::load(component_id)?
+        return Err(Error::validation_invalid_argument(
+            "components",
+            format!(
+                "Project '{}' has no attached component '{}'",
+                project.id, component_id
+            ),
+            Some(project.id.clone()),
+            None,
+        ));
     };
     Ok(apply_component_overrides(&component, &project))
 }
