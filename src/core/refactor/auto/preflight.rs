@@ -1,16 +1,16 @@
 use crate::code_audit::conventions::{AuditFinding, Language};
+use crate::core::refactor::plan::generate::{
+    derive_expected_test_file_path, extract_expected_test_method_from_fix_description,
+    extract_signatures_from_items, extract_source_file_from_test_stub, mapping_from_source_comment,
+    test_method_exists_in_file,
+};
+use crate::core::refactor::shared::detect_language;
+use crate::refactor::auto::apply::apply_insertions_to_content;
+use crate::refactor::auto::policy::blocked_reason_from_preflight;
 use crate::refactor::auto::{
     Fix, FixSafetyTier, Insertion, InsertionKind, NewFile, PreflightCheck, PreflightContext,
     PreflightReport, PreflightStatus,
 };
-use crate::refactor::auto::apply::apply_insertions_to_content;
-use crate::refactor::auto::policy::blocked_reason_from_preflight;
-use crate::core::refactor::plan::generate::{
-    derive_expected_test_file_path, extract_expected_test_method_from_fix_description,
-    extract_signatures_from_items,
-    extract_source_file_from_test_stub, mapping_from_source_comment, test_method_exists_in_file,
-};
-use crate::core::refactor::shared::detect_language;
 
 pub fn run_insertion_preflight(
     file: &str,
@@ -102,10 +102,7 @@ pub fn run_insertion_preflight(
 
             let mut checks = Vec::new();
 
-            if matches!(
-                insertion.kind,
-                InsertionKind::TraitUse
-            ) {
+            if matches!(insertion.kind, InsertionKind::TraitUse) {
                 let has_class = content.contains("class ");
                 checks.push(PreflightCheck {
                     name: "class_exists".to_string(),
@@ -378,12 +375,16 @@ fn syntax_shape_check(content: &str, insertion: &Insertion, language: &Language)
     };
 
     let parsed_ok = match language {
-        Language::Php => !extract_signatures_from_items(content, language).is_empty()
-            || content.contains("class "),
-        Language::Rust => !extract_signatures_from_items(content, language).is_empty()
-            || content.contains("fn "),
+        Language::Php => {
+            !extract_signatures_from_items(content, language).is_empty()
+                || content.contains("class ")
+        }
+        Language::Rust => {
+            !extract_signatures_from_items(content, language).is_empty() || content.contains("fn ")
+        }
         Language::JavaScript | Language::TypeScript => {
-            !extract_signatures_from_items(content, language).is_empty() || content.contains("function ")
+            !extract_signatures_from_items(content, language).is_empty()
+                || content.contains("function ")
         }
         Language::Unknown => true,
     };

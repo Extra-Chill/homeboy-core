@@ -2,8 +2,7 @@ use crate::code_audit::conventions::Language;
 use crate::code_audit::naming::{detect_naming_suffix, suffix_matches};
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{
-    DecomposeFixPlan, Fix, FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile,
-    SkippedFile,
+    DecomposeFixPlan, Fix, FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, SkippedFile,
 };
 use crate::core::refactor::decompose;
 use crate::core::refactor::shared::detect_language;
@@ -103,7 +102,10 @@ fn stub_body(method_name: &str, language: &Language) -> String {
         }
         Language::Rust => format!("        todo!(\"{}\")", method_name),
         Language::JavaScript | Language::TypeScript => {
-            format!("        throw new Error('Not implemented: {}');", method_name)
+            format!(
+                "        throw new Error('Not implemented: {}');",
+                method_name
+            )
         }
         Language::Unknown => String::new(),
     }
@@ -360,7 +362,7 @@ pub(crate) fn test_method_exists_in_file(
     new_files: &[NewFile],
 ) -> bool {
     if let Some(new_file) = new_files.iter().find(|new_file| new_file.file == test_file) {
-        return new_file.content.contains(&expected_test_method);
+        return new_file.content.contains(expected_test_method);
     }
 
     let abs_path = root.join(test_file);
@@ -663,7 +665,10 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                     InsertionKind::TypeConformance,
                     AuditFinding::MissingInterface,
                     generate_type_conformance_declaration(&type_name, conformance, &language),
-                    format!("Add declared conformance `{}` to {}", conformance, type_name),
+                    format!(
+                        "Add declared conformance `{}` to {}",
+                        conformance, type_name
+                    ),
                 ));
             }
 
@@ -746,7 +751,10 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
                         InsertionKind::MethodStub,
                         AuditFinding::MissingMethod,
                         generate_method_stub(sig),
-                        format!("Add {}() stub to match {} convention", method_name, conv_report.name),
+                        format!(
+                            "Add {}() stub to match {} convention",
+                            method_name, conv_report.name
+                        ),
                     ));
                 } else {
                     let fallback_sig = generate_fallback_signature(method_name, &language);
@@ -875,12 +883,8 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
             continue;
         }
 
-        let test_stub = generate_test_method_stub(
-            &ext,
-            &expected_test_method,
-            &finding.file,
-            &source_method,
-        );
+        let test_stub =
+            generate_test_method_stub(&ext, &expected_test_method, &finding.file, &source_method);
 
         let file_exists = root.join(&test_file).exists();
         if file_exists {
@@ -1100,7 +1104,12 @@ pub(crate) fn extract_signatures_from_items(
 
     symbols
         .into_iter()
-        .filter(|symbol| matches!(symbol.concept.as_str(), "function" | "free_function" | "method"))
+        .filter(|symbol| {
+            matches!(
+                symbol.concept.as_str(),
+                "function" | "free_function" | "method"
+            )
+        })
         .filter_map(|symbol| {
             let name = symbol.name()?.to_string();
             let line_idx = symbol.line.checked_sub(1)?;
