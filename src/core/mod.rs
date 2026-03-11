@@ -37,7 +37,6 @@ pub mod test_drift;
 pub mod test_workflow;
 pub mod undo;
 pub mod upgrade;
-pub mod version;
 
 // Internal extensions - not part of public API
 pub(crate) mod http;
