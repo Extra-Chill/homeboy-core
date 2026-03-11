@@ -1,6 +1,7 @@
 use clap::{Args, Subcommand, ValueEnum};
 use homeboy::log_status;
 use serde::Serialize;
+use std::path::Path;
 
 use homeboy::component::{self, Component};
 use homeboy::deploy::{self, DeployConfig};
@@ -125,8 +126,6 @@ enum ProjectComponentsCommand {
     AttachPath {
         /// Project ID
         project_id: String,
-        /// Component ID to attach
-        component_id: String,
         /// Local repo path containing homeboy.json
         local_path: String,
     },
@@ -396,9 +395,10 @@ fn show(project_id: &str) -> CmdResult<ProjectOutput> {
             "Local project: Commands execute on this machine. Only deploy requires a server."
                 .to_string(),
         )
-    } else if project.component_ids.is_empty() {
+    } else if project.components.is_empty() {
         Some(format!(
-            "No components linked. Use: homeboy project components add {} <component-id>",
+            "No components linked. Use: homeboy project components add {} <component-id> or homeboy project components attach-path {} <component-id> <path>",
+            project.id,
             project.id
         ))
     } else {
@@ -463,15 +463,16 @@ fn calculate_deploy_readiness(project: &Project) -> (bool, Vec<String>) {
     }
 
     // Check components
-    if project.component_ids.is_empty() {
+    if project.components.is_empty() {
         blockers.push(format!(
-            "No components linked - add with: homeboy project components add {} <component-id>",
+            "No components linked - add with: homeboy project components add {} <component-id> or attach a repo: homeboy project components attach-path {} <component-id> <path>",
+            project.id,
             project.id
         ));
     } else {
         // Check if at least one component is actually deployable (has artifact or git strategy)
-        let has_deployable = project.component_ids.iter().any(|id| {
-            if let Ok(comp) = project::resolve_project_component(project, id) {
+        let has_deployable = project.components.iter().any(|attachment| {
+            if let Ok(comp) = project::resolve_project_component(project, &attachment.id) {
                 let is_git = comp.deploy_strategy.as_deref() == Some("git");
                 let has_artifact = component::resolve_artifact(&comp).is_some();
                 is_git || has_artifact
@@ -482,7 +483,7 @@ fn calculate_deploy_readiness(project: &Project) -> (bool, Vec<String>) {
         if !has_deployable {
             blockers.push(format!(
                 "No deployable components - {} component(s) exist but none have a build artifact or deploy strategy configured",
-                project.component_ids.len()
+                project.components.len()
             ));
         }
     }
@@ -586,9 +587,8 @@ fn components(command: ProjectComponentsCommand) -> CmdResult<ProjectOutput> {
         } => components_add(&project_id, component_ids),
         ProjectComponentsCommand::AttachPath {
             project_id,
-            component_id,
             local_path,
-        } => components_attach_path(&project_id, &component_id, &local_path),
+        } => components_attach_path(&project_id, &local_path),
         ProjectComponentsCommand::Remove {
             project_id,
             component_ids,
@@ -632,12 +632,9 @@ fn components_add(project_id: &str, component_ids: Vec<String>) -> CmdResult<Pro
     write_project_components(project_id, "add", &project)
 }
 
-fn components_attach_path(
-    project_id: &str,
-    component_id: &str,
-    local_path: &str,
-) -> CmdResult<ProjectOutput> {
-    project::attach_component_path(project_id, component_id, local_path)?;
+fn components_attach_path(project_id: &str, local_path: &str) -> CmdResult<ProjectOutput> {
+    let component_id = component::infer_portable_component_id(Path::new(local_path))?;
+    project::attach_component_path(project_id, &component_id, local_path)?;
     let project = project::load(project_id)?;
     write_project_components(project_id, "attach_path", &project)
 }

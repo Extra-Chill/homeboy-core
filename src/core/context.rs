@@ -91,10 +91,8 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
     let managed = !matched.is_empty();
 
     // Check for contained components (monorepo pattern)
-    let all_local_components: Vec<component::Component> = components
-        .into_iter()
-        .chain(attached_components)
-        .collect();
+    let all_local_components: Vec<component::Component> =
+        components.into_iter().chain(attached_components).collect();
 
     let contained: Vec<&component::Component> = all_local_components
         .iter()
@@ -140,16 +138,14 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
                 // JSON-escape just enough for typical paths (quotes + backslashes).
                 let json_path = git_root_str.replace('\\', "\\\\").replace('"', "\\\"");
                 Some(format!(
-                    "This looks like component '{}' but its repo path is set to '{}'. To reattach it to a project, use: homeboy project components attach-path <project-id> {} {}",
+                    "This looks like component '{}' but its repo path is set to '{}'. To reattach it to a project, use: homeboy project components attach-path <project-id> {}",
                     component_match.id,
                     component_match.local_path,
-                    component_match.id,
                     json_path
                 ))
             } else {
                 Some(format!(
-                    "Repo detected. Prefer attaching it to a project: `homeboy project components attach-path <project-id> {} {}`",
-                    repo_name.unwrap_or_else(|| "<component-id>".to_string()),
+                    "Repo detected. Prefer attaching it to a project: `homeboy project components attach-path <project-id> {}`",
                     git_root_str
                 ))
             }
@@ -169,7 +165,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
             }
         } else {
             Some(format!(
-                "Repo detected. Prefer attaching it to a project: `homeboy project components attach-path <project-id> <component-id> {}`",
+                "Repo detected. Prefer attaching it to a project: `homeboy project components attach-path <project-id> {}`",
                 git_root_str
             ))
         }
@@ -189,7 +185,7 @@ pub fn run(path: Option<&str>) -> Result<(ContextOutput, i32)> {
         }
     } else {
         Some(
-            "Repo not attached. Prefer: `homeboy project components attach-path <project-id> <component-id> <path>`"
+            "Repo not attached. Prefer: `homeboy project components attach-path <project-id> <path>`"
                 .to_string(),
         )
     };
@@ -280,7 +276,7 @@ fn find_project_for_components(component_ids: &[String]) -> Option<project::Proj
     let projects = project::list().ok()?;
     projects
         .into_iter()
-        .find(|p| component_ids.iter().all(|id| p.component_ids.contains(id)))
+        .find(|p| component_ids.iter().all(|id| project::has_component(p, id)))
 }
 
 pub fn build_component_info(component: &component::Component) -> ContainedComponentInfo {
