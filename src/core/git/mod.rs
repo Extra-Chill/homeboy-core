@@ -34,7 +34,7 @@ fn resolve_target(
     let path = if let Some(p) = path_override {
         p.to_string()
     } else {
-        let comp = crate::component::load(id)?;
+        let comp = crate::component::resolve_effective(Some(id), None, None)?;
         comp.local_path
     };
     Ok((id.to_string(), path))

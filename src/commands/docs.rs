@@ -299,7 +299,7 @@ fn run_map(
 ) -> CmdResult<DocsOutput> {
     use homeboy::code_audit::fingerprint::FileFingerprint;
 
-    let comp = component::load(component_id)?;
+    let comp = component::resolve_effective(Some(component_id), None, None)?;
     let root = Path::new(&comp.local_path);
 
     // Determine which directories to scan

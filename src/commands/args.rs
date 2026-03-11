@@ -7,11 +7,9 @@
 //! See: https://github.com/Extra-Chill/homeboy/issues/436
 
 use clap::Args;
-use std::path::Path;
 use std::path::PathBuf;
 
 use homeboy::component::{self, Component};
-use homeboy::error::ErrorCode;
 
 // ============================================================================
 // ComponentArgs: --component + --path + resolve()
@@ -45,11 +43,7 @@ impl ComponentArgs {
     /// Resolve a component, applying path override if provided.
     /// Falls back to CWD auto-discovery when both fields are None.
     pub fn resolve(&self) -> homeboy::Result<Component> {
-        let mut comp = component::resolve(self.component.as_deref())?;
-        if let Some(ref path) = self.path {
-            comp.local_path = path.clone();
-        }
-        Ok(comp)
+        component::resolve_effective(self.component.as_deref(), self.path.as_deref(), None)
     }
 
     /// Resolve just the root directory path — prefers --path, falls back
@@ -70,11 +64,7 @@ impl ComponentArgs {
         let id = self.component.as_deref().ok_or_else(|| {
             homeboy::Error::validation_missing_argument(vec!["component".to_string()])
         })?;
-        let mut comp = component::load(id)?;
-        if let Some(ref path) = self.path {
-            comp.local_path = path.clone();
-        }
-        Ok(comp)
+        component::resolve_effective(Some(id), self.path.as_deref(), None)
     }
 }
 
@@ -97,32 +87,7 @@ pub struct PositionalComponentArgs {
 impl PositionalComponentArgs {
     /// Load the component, applying path override if provided.
     pub fn load(&self) -> homeboy::Result<Component> {
-        if let Some(ref path) = self.path {
-            match component::load(&self.component) {
-                Ok(mut comp) => {
-                    comp.local_path = path.clone();
-                    Ok(comp)
-                }
-                Err(err) if matches!(err.code, ErrorCode::ComponentNotFound) => {
-                    if let Some(mut discovered) = component::discover_from_portable(Path::new(path))
-                    {
-                        discovered.id = self.component.clone();
-                        discovered.local_path = path.clone();
-                        Ok(discovered)
-                    } else {
-                        Ok(Component::new(
-                            self.component.clone(),
-                            path.clone(),
-                            String::new(),
-                            None,
-                        ))
-                    }
-                }
-                Err(err) => Err(err),
-            }
-        } else {
-            component::load(&self.component)
-        }
+        component::resolve_effective(Some(&self.component), self.path.as_deref(), None)
     }
 
     /// Get the component ID.
@@ -135,7 +100,7 @@ impl PositionalComponentArgs {
         if let Some(ref path) = self.path {
             Ok(PathBuf::from(path))
         } else {
-            let comp = component::load(&self.component)?;
+            let comp = component::resolve_effective(Some(&self.component), None, None)?;
             let expanded = shellexpand::tilde(&comp.local_path);
             Ok(PathBuf::from(expanded.as_ref()))
         }

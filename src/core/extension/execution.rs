@@ -323,7 +323,7 @@ fn resolve_extension_context(
 
     // Handle component-only execution (no project required)
     if let Some(cid) = component_id {
-        if let Ok(loaded_component) = component::load(cid) {
+        if let Ok(loaded_component) = component::resolve_effective(Some(cid), None, None) {
             component = Some(loaded_component);
             resolved_component_id = Some(cid.to_string());
         }
@@ -345,12 +345,14 @@ fn resolve_extension_context(
 
         if let Some(ref comp_id) = resolved_component_id {
             component = Some(
-                project::resolve_project_component(&loaded_project, comp_id).map_err(|_| {
-                    Error::config(format!(
-                        "Component {} required by extension {} is not configured",
-                        comp_id, &extension.id
-                    ))
-                })?,
+                component::resolve_effective(Some(comp_id), None, Some(&loaded_project)).map_err(
+                    |_| {
+                        Error::config(format!(
+                            "Component {} required by extension {} is not configured",
+                            comp_id, &extension.id
+                        ))
+                    },
+                )?,
             );
         }
 
@@ -613,7 +615,7 @@ pub fn build_exec_env(
         let component_path = if let Some(override_path) = component_path_override {
             override_path.to_string()
         } else {
-            match component::load(cid) {
+            match component::resolve_effective(Some(cid), None, None) {
                 Ok(component) => component.local_path,
                 Err(e) => {
                     env.push(("HOMEBOY_COMPONENT_LOAD_ERROR".to_string(), e.to_string()));
