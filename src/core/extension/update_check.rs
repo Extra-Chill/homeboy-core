@@ -16,17 +16,16 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CACHE_FILENAME: &str = "extension_update_check.json";
-const CHECK_INTERVAL_SECS: u64 = 86400; // 24 hours
+const CHECK_INTERVAL_SECS: u64 = 86400;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionUpdateCache {
-    /// Extension ID -> number of commits behind
     pub extensions_behind: HashMap<String, usize>,
     pub checked_at: u64,
 }
 
 fn cache_path() -> Option<std::path::PathBuf> {
-    paths::homeboy().ok().map(|p| p.join(CACHE_FILENAME))
+    paths::homeboy().ok().map(|path| path.join(CACHE_FILENAME))
 }
 
 fn read_cache() -> Option<ExtensionUpdateCache> {
@@ -46,18 +45,17 @@ fn write_cache(cache: &ExtensionUpdateCache) {
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
 
 fn is_cache_fresh(cache: &ExtensionUpdateCache) -> bool {
-    let elapsed = now_unix().saturating_sub(cache.checked_at);
-    elapsed < CHECK_INTERVAL_SECS
+    now_unix().saturating_sub(cache.checked_at) < CHECK_INTERVAL_SECS
 }
 
 fn is_disabled_by_env() -> bool {
     std::env::var("HOMEBOY_NO_UPDATE_CHECK")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
@@ -88,24 +86,19 @@ fn print_extension_hints(extensions_behind: &HashMap<String, usize>) {
             extensions_behind.len(),
             names
                 .iter()
-                .map(|n| n.as_str())
+                .map(|name| name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );
     }
 }
 
-/// Run the startup extension update check. Prints hints to stderr if updates are available.
-///
-/// Silently returns on any error. Call from main.rs alongside the CLI update check.
 pub fn run_startup_check() {
     if is_disabled_by_env() || is_disabled_by_config() {
         return;
     }
 
     let mut already_printed = false;
-
-    // Read cache — if it has updates, print hint immediately
     let cached = read_cache();
 
     if let Some(ref cache) = cached {
@@ -119,7 +112,6 @@ pub fn run_startup_check() {
         }
     }
 
-    // Cache stale or missing — check all extensions
     let extension_ids = extension::available_extension_ids();
     let mut extensions_behind: HashMap<String, usize> = HashMap::new();
 
@@ -129,13 +121,11 @@ pub fn run_startup_check() {
         }
     }
 
-    // Write refreshed cache
     write_cache(&ExtensionUpdateCache {
         extensions_behind: extensions_behind.clone(),
         checked_at: now_unix(),
     });
 
-    // Print hint if updates found and we haven't already
     if !already_printed && !extensions_behind.is_empty() {
         print_extension_hints(&extensions_behind);
     }

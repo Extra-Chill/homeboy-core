@@ -7,6 +7,7 @@ mod runner_contract;
 mod runtime_helper;
 mod scope;
 pub mod test;
+pub mod update_check;
 pub mod version;
 
 pub mod exec_context;

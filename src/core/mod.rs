@@ -15,7 +15,6 @@ pub mod deploy;
 pub mod engine;
 pub mod error;
 pub mod extension;
-pub mod extension_update_check;
 pub mod files;
 pub mod fleet;
 pub mod git;
@@ -38,7 +37,6 @@ pub mod test_baseline;
 pub mod test_drift;
 pub mod test_workflow;
 pub mod undo;
-pub mod update_check;
 pub mod upgrade;
 pub mod version;
 
