@@ -6,7 +6,6 @@
 - [build](build.md)
 - [changelog](changelog.md)
 - [changes](changes.md)
-- [cleanup](cleanup.md) — config health checks and hygiene
 - [component](component.md)
 - [config](config.md)
 - [db](db.md)

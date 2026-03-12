@@ -632,7 +632,6 @@
 - `Server` — Manage SSH server configurations
 - `Test` — Run tests for a component
 - `Lint` — Lint a component
-- `Cleanup` — Identify config drift, stale state, and hygiene issues
 - `Db` — Database operations
 - `File` — Remote file operations
 - `Fleet` — Manage fleets (groups of projects)

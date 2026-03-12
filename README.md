@@ -82,7 +82,6 @@ Topics cover commands, schemas, architecture, and developer guides — all embed
 | `status` | Actionable overview: which components have uncommitted changes, need a version bump, or are ready to deploy. Filters: `--uncommitted`, `--needs-bump`, `--ready`. |
 | `refactor` | Structural renaming across a codebase. Standard mode generates case variants (lowercase, PascalCase, UPPER_CASE, plural, snake_case compounds). Literal mode for exact string matching. Collision detection. Dry-run by default. |
 | `audit` | Discover code conventions from a codebase and flag drift. `--conventions` to see discovered patterns. `--fix --write` to apply corrections. `--baseline` to save state for future comparisons. |
-| `cleanup` | Detect config drift, stale state, and hygiene issues. Filter by `--severity` (error/warning/info) or `--category` (local_path/remote_path/version_targets/extensions). |
 | `build` | Build a component using its configured build command. |
 | `test` | Run tests for a component. |
 | `lint` | Lint a component. |
