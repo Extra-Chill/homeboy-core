@@ -359,7 +359,10 @@ fn list() -> CmdResult<ProjectOutput> {
         .collect();
 
     let hint = if items.is_empty() {
-        Some("No projects configured. Run 'homeboy init' to see project context".to_string())
+        Some(
+            "No projects configured. Run 'homeboy status --full' to see project context"
+                .to_string(),
+        )
     } else {
         None
     };

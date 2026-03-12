@@ -279,7 +279,7 @@ pub fn run(
                 "Run 'homeboy project components add {} <component-id>' to add components",
                 project_id
             ))
-            .with_hint("Run 'homeboy init' to see project context and available components")
+            .with_hint("Run 'homeboy status --full' to see project context and available components")
         } else {
             e
         }

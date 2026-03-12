@@ -533,7 +533,9 @@ impl Error {
             ErrorCode::ComponentNotFound
             | ErrorCode::ProjectNotFound
             | ErrorCode::ProjectNoActive => {
-                self.with_hint("Run 'homeboy init' to see project context and available components")
+                self.with_hint(
+                    "Run 'homeboy status --full' to see project context and available components",
+                )
             }
             _ => self,
         }

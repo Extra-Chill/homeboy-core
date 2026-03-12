@@ -79,7 +79,8 @@ enum Commands {
     /// Execute CLI-compatible extensions
     #[command(visible_alias = "extensions")]
     Extension(extension::ExtensionArgs),
-    /// Get repo context (read-only, creates no state)
+    /// Deprecated alias for `status --full`
+    #[command(hide = true)]
     Init(init::InitArgs),
     /// Actionable component status overview
     Status(status::StatusArgs),
