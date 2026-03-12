@@ -1,10 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::component::{self, Component};
-use crate::engine::shell;
-use crate::error::{Error, Result};
-use crate::local_files;
-use crate::ssh::{execute_local_command_passthrough, CommandOutput};
+use crate::component::Component;
+use crate::error::Result;
+use crate::ssh::CommandOutput;
 
 /// Output from a extension runner script execution.
 pub struct RunnerOutput {
@@ -14,12 +12,7 @@ pub struct RunnerOutput {
     pub stderr: String,
 }
 
-use super::{ExtensionCapability, ExtensionExecutionContext};
-
-struct ResolvedRunnerContext {
-    execution: ExtensionExecutionContext,
-    settings_json: String,
-}
+use super::ExtensionExecutionContext;
 
 /// Orchestrates extension script execution for test/lint runners.
 ///
@@ -111,16 +104,22 @@ impl ExtensionRunner {
     /// 7. Prepare environment variables
     /// 8. Execute via shell
     pub fn run(&self) -> Result<RunnerOutput> {
-        let resolved = self.resolve_context()?;
-        let project_path = PathBuf::from(&resolved.execution.component.local_path);
+        let prepared = super::execution::prepare_capability_run(
+            &self.execution_context,
+            self.pre_loaded_component.as_ref(),
+            self.path_override.as_deref(),
+            &self.settings_overrides,
+        )?;
+
+        let project_path = PathBuf::from(&prepared.execution.component.local_path);
         let env_vars = self.prepare_env_vars(
-            &resolved.execution.extension_path,
+            &prepared.execution.extension_path,
             &project_path,
-            &resolved.settings_json,
-            &resolved.execution.extension_id,
+            &prepared.settings_json,
+            &prepared.execution.extension_id,
         );
 
-        let output = self.execute_script(&resolved.execution.extension_path, &env_vars)?;
+        let output = self.execute_script(&prepared.execution.extension_path, &env_vars)?;
 
         Ok(RunnerOutput {
             exit_code: output.exit_code,
@@ -130,127 +129,6 @@ impl ExtensionRunner {
         })
     }
 
-    fn resolve_context(&self) -> Result<ResolvedRunnerContext> {
-        let component = self.find_component()?;
-        let execution = self.resolve_execution(component);
-
-        self.validate_script_exists(&execution.extension_path, &execution.script_path)?;
-
-        let manifest = self.load_extension_manifest(&execution.extension_path)?;
-        let settings_json = self.merge_settings(&manifest, &execution.settings)?;
-
-        Ok(ResolvedRunnerContext {
-            execution,
-            settings_json,
-        })
-    }
-
-    fn resolve_execution(&self, component: Component) -> ExtensionExecutionContext {
-        let mut execution = self.execution_context.clone();
-        execution.component = component;
-        if let Some(ref path) = self.path_override {
-            execution.component.local_path = path.clone();
-        }
-        execution
-    }
-
-    fn find_component(&self) -> Result<Component> {
-        let mut comp = if let Some(ref pre_loaded) = self.pre_loaded_component {
-            pre_loaded.clone()
-        } else {
-            component::resolve_effective(
-                Some(&self.execution_context.component.id),
-                self.path_override.as_deref(),
-                None,
-            )?
-        };
-        if let Some(ref path) = self.path_override {
-            comp.local_path = path.clone();
-        }
-        Ok(comp)
-    }
-
-    fn validate_script_exists(&self, extension_path: &Path, script_path: &str) -> Result<()> {
-        let script_path = extension_path.join(script_path);
-        if !script_path.exists() {
-            return Err(Error::validation_invalid_argument(
-                "extension",
-                format!(
-                    "Extension at {} does not have {} infrastructure (missing {})",
-                    extension_path.display(),
-                    self.script_description(),
-                    script_path.display()
-                ),
-                None,
-                None,
-            ));
-        }
-        Ok(())
-    }
-
-    fn load_extension_manifest(&self, extension_path: &Path) -> Result<serde_json::Value> {
-        let extension_name = extension_path
-            .file_name()
-            .ok_or_else(|| Error::internal_io("Extension path has no file name".to_string(), None))?
-            .to_string_lossy();
-        let manifest_path = extension_path.join(format!("{}.json", extension_name));
-
-        if !manifest_path.exists() {
-            return Err(Error::internal_io(
-                format!("Extension manifest not found: {}", manifest_path.display()),
-                None,
-            ));
-        }
-
-        let content =
-            local_files::read_file(&manifest_path, &format!("read {}", manifest_path.display()))?;
-
-        serde_json::from_str(&content).map_err(|e| {
-            Error::validation_invalid_json(e, Some("parse manifest".to_string()), None)
-        })
-    }
-
-    fn merge_settings(
-        &self,
-        manifest: &serde_json::Value,
-        extension_settings: &[(String, String)],
-    ) -> Result<String> {
-        let mut settings = serde_json::json!({});
-
-        // Start with manifest defaults
-        if let Some(manifest_settings) = manifest.get("settings") {
-            if let Some(settings_array) = manifest_settings.as_array() {
-                if let serde_json::Value::Object(ref mut obj) = settings {
-                    for setting in settings_array {
-                        if let (Some(id), Some(default)) = (
-                            setting.get("id").and_then(|v| v.as_str()),
-                            setting.get("default").and_then(|v| v.as_str()),
-                        ) {
-                            obj.insert(
-                                id.to_string(),
-                                serde_json::Value::String(default.to_string()),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        if let serde_json::Value::Object(ref mut obj) = settings {
-            // Add extension settings from component config
-            for (key, value) in extension_settings {
-                obj.insert(key.clone(), serde_json::Value::String(value.clone()));
-            }
-
-            // Add user overrides (these take precedence)
-            for (key, value) in &self.settings_overrides {
-                obj.insert(key.clone(), serde_json::Value::String(value.clone()));
-            }
-        }
-
-        crate::config::to_json_string(&settings)
-    }
-
     fn prepare_env_vars(
         &self,
         extension_path: &Path,
@@ -258,22 +136,14 @@ impl ExtensionRunner {
         settings_json: &str,
         extension_name: &str,
     ) -> Vec<(String, String)> {
-        let component_path = project_path.to_string_lossy();
-        let mut env = super::execution::build_exec_env(
+        super::execution::build_capability_env(
             extension_name,
-            None, // no project context in runner
-            Some(&self.execution_context.component.id),
+            &self.execution_context.component.id,
+            extension_path,
+            project_path,
             settings_json,
-            Some(&extension_path.to_string_lossy()),
-            None,                  // no project base_path in runner
-            None,                  // no individual settings
-            Some(&component_path), // path_override (respects --path flag)
-        );
-
-        // Add command-specific environment variables (e.g. HOMEBOY_SKIP)
-        env.extend(self.env_vars.iter().cloned());
-
-        env
+            &self.env_vars,
+        )
     }
 
     fn execute_script(
@@ -281,32 +151,11 @@ impl ExtensionRunner {
         extension_path: &Path,
         env_vars: &[(String, String)],
     ) -> Result<CommandOutput> {
-        let script_path = extension_path.join(&self.execution_context.script_path);
-        let mut command = shell::quote_path(&script_path.to_string_lossy());
-
-        // Append script arguments if any
-        if !self.script_args.is_empty() {
-            command.push(' ');
-            command.push_str(&shell::quote_args(&self.script_args));
-        }
-
-        let env_refs: Vec<(&str, &str)> = env_vars
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-
-        Ok(execute_local_command_passthrough(
-            &command,
-            None,
-            Some(&env_refs),
-        ))
-    }
-
-    fn script_description(&self) -> &str {
-        match self.execution_context.capability {
-            ExtensionCapability::Lint => "lint",
-            ExtensionCapability::Test => "test",
-            ExtensionCapability::Build => "build",
-        }
+        super::execution::execute_capability_script(
+            extension_path,
+            &self.execution_context.script_path,
+            &self.script_args,
+            env_vars,
+        )
     }
 }

@@ -1,12 +1,18 @@
-use crate::component;
+use crate::component::{self, Component};
 use crate::engine::command::CapturedOutput;
+use crate::engine::shell;
 use crate::engine::{template, validation};
 use crate::error::{Error, Result};
 use crate::http::ApiClient;
+use crate::local_files;
 use crate::project::{self, Project};
-use crate::ssh::{execute_local_command_in_dir, execute_local_command_interactive};
+use crate::ssh::{
+    execute_local_command_in_dir, execute_local_command_interactive,
+    execute_local_command_passthrough, CommandOutput,
+};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::Path;
 
 use super::exec_context;
 use super::load_extension;
@@ -377,6 +383,206 @@ fn serialize_settings(settings: &HashMap<String, serde_json::Value>) -> Result<S
             e.to_string(),
             Some("serialize extension settings".to_string()),
         )
+    })
+}
+
+pub(crate) fn load_extension_manifest_from_dir(extension_path: &Path) -> Result<serde_json::Value> {
+    let extension_name = extension_path
+        .file_name()
+        .ok_or_else(|| Error::internal_io("Extension path has no file name".to_string(), None))?
+        .to_string_lossy();
+    let manifest_path = extension_path.join(format!("{}.json", extension_name));
+
+    if !manifest_path.exists() {
+        return Err(Error::internal_io(
+            format!("Extension manifest not found: {}", manifest_path.display()),
+            None,
+        ));
+    }
+
+    let content =
+        local_files::read_file(&manifest_path, &format!("read {}", manifest_path.display()))?;
+
+    serde_json::from_str(&content)
+        .map_err(|e| Error::validation_invalid_json(e, Some("parse manifest".to_string()), None))
+}
+
+pub(crate) fn build_settings_json_from_manifest(
+    manifest: &serde_json::Value,
+    extension_settings: &[(String, String)],
+    settings_overrides: &[(String, String)],
+) -> Result<String> {
+    let mut settings = serde_json::json!({});
+
+    if let Some(manifest_settings) = manifest.get("settings") {
+        if let Some(settings_array) = manifest_settings.as_array() {
+            if let serde_json::Value::Object(ref mut obj) = settings {
+                for setting in settings_array {
+                    if let (Some(id), Some(default)) = (
+                        setting.get("id").and_then(|v| v.as_str()),
+                        setting.get("default").and_then(|v| v.as_str()),
+                    ) {
+                        obj.insert(
+                            id.to_string(),
+                            serde_json::Value::String(default.to_string()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if let serde_json::Value::Object(ref mut obj) = settings {
+        for (key, value) in extension_settings {
+            obj.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+
+        for (key, value) in settings_overrides {
+            obj.insert(key.clone(), serde_json::Value::String(value.clone()));
+        }
+    }
+
+    crate::config::to_json_string(&settings)
+}
+
+pub(crate) fn validate_capability_script_exists(
+    extension_path: &Path,
+    script_path: &str,
+    capability: super::ExtensionCapability,
+) -> Result<()> {
+    let script_path = extension_path.join(script_path);
+    if !script_path.exists() {
+        let label = match capability {
+            super::ExtensionCapability::Lint => "lint",
+            super::ExtensionCapability::Test => "test",
+            super::ExtensionCapability::Build => "build",
+        };
+
+        return Err(Error::validation_invalid_argument(
+            "extension",
+            format!(
+                "Extension at {} does not have {} infrastructure (missing {})",
+                extension_path.display(),
+                label,
+                script_path.display()
+            ),
+            None,
+            None,
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn build_capability_env(
+    extension_name: &str,
+    component_id: &str,
+    extension_path: &Path,
+    component_path: &Path,
+    settings_json: &str,
+    extra_env: &[(String, String)],
+) -> Vec<(String, String)> {
+    let component_path = component_path.to_string_lossy();
+    let mut env = build_exec_env(
+        extension_name,
+        None,
+        Some(component_id),
+        settings_json,
+        Some(&extension_path.to_string_lossy()),
+        None,
+        None,
+        Some(&component_path),
+    );
+    env.extend(extra_env.iter().cloned());
+    env
+}
+
+pub(crate) fn execute_capability_script(
+    extension_path: &Path,
+    script_path: &str,
+    script_args: &[String],
+    env_vars: &[(String, String)],
+) -> Result<CommandOutput> {
+    let script_path = extension_path.join(script_path);
+    let mut command = shell::quote_path(&script_path.to_string_lossy());
+
+    if !script_args.is_empty() {
+        command.push(' ');
+        command.push_str(&shell::quote_args(script_args));
+    }
+
+    let env_refs: Vec<(&str, &str)> = env_vars
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    Ok(execute_local_command_passthrough(
+        &command,
+        None,
+        Some(&env_refs),
+    ))
+}
+
+pub(crate) struct PreparedCapabilityRun {
+    pub execution: super::ExtensionExecutionContext,
+    pub settings_json: String,
+}
+
+pub(crate) fn resolve_capability_component(
+    execution_context: &super::ExtensionExecutionContext,
+    pre_loaded_component: Option<&Component>,
+    path_override: Option<&str>,
+) -> Result<Component> {
+    let mut comp = if let Some(pre_loaded) = pre_loaded_component {
+        pre_loaded.clone()
+    } else {
+        component::resolve_effective(Some(&execution_context.component.id), path_override, None)?
+    };
+
+    if let Some(path) = path_override {
+        comp.local_path = path.to_string();
+    }
+
+    Ok(comp)
+}
+
+pub(crate) fn build_capability_execution_context(
+    execution_context: &super::ExtensionExecutionContext,
+    component: Component,
+    path_override: Option<&str>,
+) -> super::ExtensionExecutionContext {
+    let mut execution = execution_context.clone();
+    execution.component = component;
+
+    if let Some(path) = path_override {
+        execution.component.local_path = path.to_string();
+    }
+
+    execution
+}
+
+pub(crate) fn prepare_capability_run(
+    execution_context: &super::ExtensionExecutionContext,
+    pre_loaded_component: Option<&Component>,
+    path_override: Option<&str>,
+    settings_overrides: &[(String, String)],
+) -> Result<PreparedCapabilityRun> {
+    let component =
+        resolve_capability_component(execution_context, pre_loaded_component, path_override)?;
+    let execution = build_capability_execution_context(execution_context, component, path_override);
+
+    validate_capability_script_exists(
+        &execution.extension_path,
+        &execution.script_path,
+        execution.capability,
+    )?;
+
+    let manifest = load_extension_manifest_from_dir(&execution.extension_path)?;
+    let settings_json =
+        build_settings_json_from_manifest(&manifest, &execution.settings, settings_overrides)?;
+
+    Ok(PreparedCapabilityRun {
+        execution,
+        settings_json,
     })
 }
 
