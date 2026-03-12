@@ -1,4 +1,4 @@
-use crate::component;
+use crate::component::{self, Component};
 use crate::engine::command::CapturedOutput;
 use crate::engine::shell;
 use crate::engine::{template, validation};
@@ -517,6 +517,43 @@ pub(crate) fn execute_capability_script(
         None,
         Some(&env_refs),
     ))
+}
+
+pub(crate) fn resolve_capability_component(
+    execution_context: &super::ExtensionExecutionContext,
+    pre_loaded_component: Option<&Component>,
+    path_override: Option<&str>,
+) -> Result<Component> {
+    let mut comp = if let Some(pre_loaded) = pre_loaded_component {
+        pre_loaded.clone()
+    } else {
+        component::resolve_effective(
+            Some(&execution_context.component.id),
+            path_override,
+            None,
+        )?
+    };
+
+    if let Some(path) = path_override {
+        comp.local_path = path.to_string();
+    }
+
+    Ok(comp)
+}
+
+pub(crate) fn build_capability_execution_context(
+    execution_context: &super::ExtensionExecutionContext,
+    component: Component,
+    path_override: Option<&str>,
+) -> super::ExtensionExecutionContext {
+    let mut execution = execution_context.clone();
+    execution.component = component;
+
+    if let Some(path) = path_override {
+        execution.component.local_path = path.to_string();
+    }
+
+    execution
 }
 
 fn build_template_vars<'a>(

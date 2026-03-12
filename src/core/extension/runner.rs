@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::component::{self, Component};
+use crate::component::Component;
 use crate::error::Result;
 use crate::ssh::CommandOutput;
 
@@ -129,8 +129,16 @@ impl ExtensionRunner {
     }
 
     fn resolve_context(&self) -> Result<ResolvedRunnerContext> {
-        let component = self.find_component()?;
-        let execution = self.resolve_execution(component);
+        let component = super::execution::resolve_capability_component(
+            &self.execution_context,
+            self.pre_loaded_component.as_ref(),
+            self.path_override.as_deref(),
+        )?;
+        let execution = super::execution::build_capability_execution_context(
+            &self.execution_context,
+            component,
+            self.path_override.as_deref(),
+        );
 
         super::execution::validate_capability_script_exists(
             &execution.extension_path,
@@ -149,31 +157,6 @@ impl ExtensionRunner {
             execution,
             settings_json,
         })
-    }
-
-    fn resolve_execution(&self, component: Component) -> ExtensionExecutionContext {
-        let mut execution = self.execution_context.clone();
-        execution.component = component;
-        if let Some(ref path) = self.path_override {
-            execution.component.local_path = path.clone();
-        }
-        execution
-    }
-
-    fn find_component(&self) -> Result<Component> {
-        let mut comp = if let Some(ref pre_loaded) = self.pre_loaded_component {
-            pre_loaded.clone()
-        } else {
-            component::resolve_effective(
-                Some(&self.execution_context.component.id),
-                self.path_override.as_deref(),
-                None,
-            )?
-        };
-        if let Some(ref path) = self.path_override {
-            comp.local_path = path.clone();
-        }
-        Ok(comp)
     }
 
     fn prepare_env_vars(
