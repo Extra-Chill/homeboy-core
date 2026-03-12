@@ -1,4 +1,6 @@
-use crate::component::{associated_projects, mutate_portable, rename_component, resolve_effective, Component};
+use crate::component::{
+    associated_projects, mutate_portable, rename_component, resolve_effective, Component,
+};
 use crate::config;
 use crate::error::{Error, Result};
 use crate::output::{MergeOutput, MergeResult};
