@@ -7,13 +7,17 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub mod portable;
+pub mod resolution;
 
 pub use portable::{
     discover_from_portable, has_portable_config, infer_portable_component_id, mutate_portable,
     portable_json, read_portable_config, write_portable_config,
+};
+pub use resolution::{
+    detect_from_cwd, resolve, resolve_artifact, resolve_effective, validate_local_path,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -596,7 +600,7 @@ pub fn inventory() -> Result<Vec<Component>> {
             if seen.insert(component.id.clone()) {
                 components.push(component);
             }
-        } else if let Some(git_root) = detect_git_root(&cwd) {
+        } else if let Some(git_root) = resolution::detect_git_root(&cwd) {
             if let Some(component) = discover_from_portable(&git_root) {
                 if seen.insert(component.id.clone()) {
                     components.push(component);
@@ -619,35 +623,6 @@ pub fn associated_projects(component_id: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Resolve effective artifact path for a component.
-/// Returns the component's explicit artifact OR the extension's pattern (with substitution).
-pub fn resolve_artifact(component: &Component) -> Option<String> {
-    // 1. Component has explicit artifact
-    if let Some(ref artifact) = component.build_artifact {
-        return Some(artifact.clone());
-    }
-
-    // 2. Check if any linked extension provides an artifact pattern
-    if let Some(ref extensions) = component.extensions {
-        for extension_id in extensions.keys() {
-            if let Ok(manifest) = extension::load_extension(extension_id) {
-                if let Some(ref build) = manifest.build {
-                    if let Some(ref pattern) = build.artifact_pattern {
-                        // Substitute template variables
-                        let resolved = pattern
-                            .replace("{component_id}", &component.id)
-                            .replace("{local_path}", &component.local_path);
-                        return Some(resolved);
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. No artifact configured and no extension pattern
-    None
-}
-
 /// Check if any linked extension provides an artifact pattern.
 pub fn extension_provides_artifact_pattern(component: &Component) -> bool {
     component
@@ -663,144 +638,6 @@ pub fn extension_provides_artifact_pattern(component: &Component) -> bool {
             })
         })
         .unwrap_or(false)
-}
-
-/// Validates component local_path is usable (absolute and exists).
-/// Expands tilde to home directory before validation.
-/// Returns the validated PathBuf on success, or an actionable error with self-healing hints.
-pub fn validate_local_path(component: &Component) -> Result<PathBuf> {
-    // Expand tilde to home directory (e.g., ~/Developer -> /Users/chubes/Developer)
-    let expanded = shellexpand::tilde(&component.local_path);
-    let path = PathBuf::from(expanded.as_ref());
-
-    // Check if relative path (no leading /)
-    if !path.is_absolute() {
-        return Err(Error::validation_invalid_argument(
-            "local_path",
-            format!(
-                "Component '{}' has relative local_path '{}' which cannot be resolved. \
-                Use absolute path like /Users/chubes/path/to/component",
-                component.id, component.local_path
-            ),
-            Some(component.id.clone()),
-            None,
-        )
-        .with_hint(format!(
-            "Set absolute path: homeboy component set {} --local-path \"/full/path/to/{}\"",
-            component.id, component.local_path
-        ))
-        .with_hint("Use 'pwd' in the component directory to get the absolute path".to_string()));
-    }
-
-    // Check if path exists
-    if !path.exists() {
-        return Err(Error::validation_invalid_argument(
-            "local_path",
-            format!(
-                "Component '{}' local_path does not exist: {}",
-                component.id,
-                path.display()
-            ),
-            Some(component.id.clone()),
-            None,
-        )
-        .with_hint(format!("Verify the path exists: ls -la {}", path.display()))
-        .with_hint(format!(
-            "Update path: homeboy component set {} --local-path \"/correct/path\"",
-            component.id
-        )));
-    }
-
-    Ok(path)
-}
-
-/// Detect component ID from current working directory.
-/// Returns Some(component_id) if cwd matches or is within a component's local_path.
-pub fn detect_from_cwd() -> Option<String> {
-    let cwd = std::env::current_dir().ok()?;
-    let components = inventory().ok()?;
-
-    for component in components {
-        let expanded = shellexpand::tilde(&component.local_path);
-        let local_path = Path::new(expanded.as_ref());
-
-        if cwd.starts_with(local_path) {
-            return Some(component.id);
-        }
-    }
-    None
-}
-
-/// Find the git root directory for a given path.
-fn detect_git_root(dir: &Path) -> Option<PathBuf> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(dir)
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
-        }
-    }
-    None
-}
-
-/// Resolve a Component from an optional ID, with CWD auto-discovery fallback.
-///
-/// Resolution order:
-/// 1. Explicit `id` → load from canonical inventory
-/// 2. No `id` → try inventory detection from CWD
-/// 3. Still no match → try `homeboy.json` in CWD
-/// 4. Still no match → try `homeboy.json` at git root (covers subdirectories)
-pub fn resolve(id: Option<&str>) -> Result<Component> {
-    // Explicit ID: load from config (post_load applies portable layering)
-    if let Some(id) = id {
-        return load(id);
-    }
-
-    // Try registered component detection from CWD
-    if let Some(detected_id) = detect_from_cwd() {
-        return load(&detected_id);
-    }
-
-    // Try portable config discovery from CWD
-    let cwd = std::env::current_dir().map_err(|e| Error::internal_io(e.to_string(), None))?;
-
-    if let Some(component) = discover_from_portable(&cwd) {
-        return Ok(component);
-    }
-
-    // Try git root as fallback (e.g., running from a subdirectory)
-    if let Some(git_root) = detect_git_root(&cwd) {
-        if git_root != cwd {
-            if let Some(component) = discover_from_portable(&git_root) {
-                return Ok(component);
-            }
-        }
-    }
-
-    // Nothing found — produce a helpful error
-    let mut hints = vec![
-        "Provide a component ID: homeboy <command> <component-id>".to_string(),
-        "Or run from a directory containing homeboy.json".to_string(),
-    ];
-    if detect_from_cwd().is_none() {
-        hints.push("Initialize the repo: homeboy component create --local-path .".to_string());
-        hints.push(
-            "Or attach the repo to a project: homeboy project components attach-path <project> ."
-                .to_string(),
-        );
-    }
-
-    Err(Error::validation_invalid_argument(
-        "component_id",
-        "No component ID provided and no homeboy.json found in current directory",
-        None,
-        Some(hints),
-    ))
 }
 
 pub fn list() -> Result<Vec<Component>> {
@@ -828,52 +665,6 @@ pub fn load(id: &str) -> Result<Component> {
 
 pub fn exists(id: &str) -> bool {
     load(id).is_ok()
-}
-
-/// Resolve the effective component for runtime operations.
-///
-/// Resolution order:
-/// 1. If `project` + explicit `id` are provided, use project-owned component resolution.
-/// 2. If explicit `id` + `path_override` are provided, require portable discovery at path.
-/// 3. If only explicit `id` is provided, use canonical inventory lookup.
-/// 4. If no explicit `id`, fall back to `resolve(None)` (CWD / git-root portable discovery).
-pub fn resolve_effective(
-    id: Option<&str>,
-    path_override: Option<&str>,
-    project: Option<&crate::project::Project>,
-) -> Result<Component> {
-    if let (Some(project), Some(id)) = (project, id) {
-        let mut component = crate::project::resolve_project_component(project, id)?;
-        if let Some(path) = path_override {
-            component.local_path = path.to_string();
-        }
-        return Ok(component);
-    }
-
-    if let Some(id) = id {
-        if let Some(path) = path_override {
-            if let Some(mut discovered) = discover_from_portable(Path::new(path)) {
-                discovered.id = id.to_string();
-                discovered.local_path = path.to_string();
-                Ok(discovered)
-            } else {
-                Err(Error::validation_invalid_argument(
-                    "local_path",
-                    format!("No homeboy.json found at {}", path),
-                    Some(id.to_string()),
-                    None,
-                ))
-            }
-        } else {
-            load(id)
-        }
-    } else {
-        let mut component = resolve(None)?;
-        if let Some(path) = path_override {
-            component.local_path = path.to_string();
-        }
-        Ok(component)
-    }
 }
 
 #[cfg(test)]
