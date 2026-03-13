@@ -8,15 +8,15 @@
 //! to build their orchestration logic.
 
 pub mod baseline;
-pub mod command;
 pub mod codebase_scan;
+pub mod command;
 pub mod executor;
 pub mod identifier;
 pub mod output_parse;
 pub mod pipeline;
 pub mod shell;
 pub mod symbol_graph;
+pub mod temp;
 pub mod template;
 pub mod text;
-pub mod temp;
 pub mod validation;

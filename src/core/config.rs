@@ -1,6 +1,6 @@
-use crate::error::Error;
 use crate::engine::identifier;
 use crate::engine::text::levenshtein;
+use crate::error::Error;
 use crate::local_files::{self, FileSystem};
 use crate::output::{
     BatchResult, CreateOutput, CreateResult, MergeOutput, MergeResult, RemoveResult,

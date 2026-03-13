@@ -1,8 +1,8 @@
 use regex::Regex;
 use serde::Serialize;
 
-use crate::error::Result;
 use crate::engine::command;
+use crate::error::Result;
 
 // Docs file patterns for categorizing commits
 const DOCS_FILE_EXTENSIONS: [&str; 1] = [".md"];

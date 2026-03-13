@@ -22,9 +22,9 @@ mod tty;
 
 use commands::utils::{args, entity_suggest};
 use commands::{
-    api, audit, auth, build, changelog, changes, cli, component, config, db, deploy,
-    extension, file, fleet, git, init, lint, logs, project, refactor, release, server, ssh, status,
-    test, transfer, undo, upgrade, version,
+    api, audit, auth, build, changelog, changes, cli, component, config, db, deploy, extension,
+    file, fleet, git, init, lint, logs, project, refactor, release, server, ssh, status, test,
+    transfer, undo, upgrade, version,
 };
 use homeboy::extension::load_all_extensions;
 

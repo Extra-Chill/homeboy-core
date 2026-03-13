@@ -36,11 +36,11 @@
 // execute_for_project_direct() -> tries direct first, falls back to shell
 
 use crate::context::resolve_project_ssh;
+use crate::engine::shell;
 use crate::error::{Error, Result};
 use crate::extension::CliConfig;
 use crate::project::Project;
 use crate::ssh::{execute_local_command, execute_local_command_interactive, CommandOutput};
-use crate::engine::shell;
 use std::process::Command;
 
 /// Execute a command for a project - routes to local or SSH based on server_id config.

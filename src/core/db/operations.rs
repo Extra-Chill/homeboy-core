@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use crate::context::require_project_base_path;
 use crate::engine::executor::execute_for_project;
-use crate::engine::text;
 use crate::engine::template::{render_map, TemplateVars};
+use crate::engine::text;
 use crate::extension::{load_all_extensions, DatabaseCliConfig};
 use crate::project::{self, Project};
 use crate::{Error, Result};

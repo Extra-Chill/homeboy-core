@@ -192,8 +192,8 @@ pub fn write_file_atomic(path: &Path, content: &str, operation: &str) -> Result<
 mod tests {
     use super::*;
     use std::io::Write;
-    use tempfile::NamedTempFile;
     use tempfile::tempdir;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_local_fs_write_read() {

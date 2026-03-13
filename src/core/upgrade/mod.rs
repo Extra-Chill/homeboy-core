@@ -1,17 +1,17 @@
-mod types;
 mod constants;
+mod execution;
 mod helpers;
 mod planning;
-mod execution;
-mod validation;
+mod types;
 pub mod update_check;
+mod validation;
 
-pub use types::*;
 pub use helpers::{
-    current_version, detect_install_method, fetch_latest_version,
-    restart_with_new_binary, run_upgrade_with_method,
+    current_version, detect_install_method, fetch_latest_version, restart_with_new_binary,
+    run_upgrade_with_method,
 };
 pub use planning::resolve_binary_on_path;
+pub use types::*;
 pub use validation::check_for_updates;
 
 impl InstallMethod {

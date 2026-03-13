@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::engine::validation;
+use crate::error::Result;
 
 use super::types::ReleaseArtifact;
 

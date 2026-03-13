@@ -3,9 +3,9 @@ use crate::core::local_files::FileSystem;
 use crate::engine::pipeline::{
     PipelineRunStatus, PipelineStep, PipelineStepExecutor, PipelineStepResult,
 };
+use crate::engine::validation;
 use crate::error::{Error, Result};
 use crate::extension::{self, ExtensionManifest};
-use crate::engine::validation;
 use crate::{changelog, version};
 
 use super::types::{ReleaseContext, ReleaseStepType};

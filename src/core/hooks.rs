@@ -8,10 +8,10 @@
 //! Examples: `pre:version:bump`, `post:version:bump`, `post:release`, `post:deploy`
 
 use crate::component::Component;
+use crate::engine::template;
 use crate::error::{Error, Result};
 use crate::extension;
 use crate::ssh::{execute_local_command_in_dir, SshClient};
-use crate::engine::template;
 use serde::Serialize;
 use std::collections::HashMap;
 

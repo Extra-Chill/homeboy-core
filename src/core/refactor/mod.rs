@@ -77,12 +77,12 @@ pub use plan::{
     AuditRefactorOutcome, AuditVerificationToggles, LintSourceOptions, PlanOverlap,
     PlanStageSummary, RefactorPlan, RefactorPlanRequest, TestSourceOptions, KNOWN_PLAN_SOURCES,
 };
+pub use propagate::{propagate, PropagateConfig, PropagateEdit, PropagateField, PropagateResult};
 pub use rename::{
     apply_renames, find_references, find_references_with_targeting, generate_renames,
     generate_renames_with_targeting, CaseVariant, FileEdit, FileRename, Reference, RenameResult,
     RenameScope, RenameSpec, RenameTargeting, RenameWarning,
 };
-pub use propagate::{propagate, PropagateConfig, PropagateEdit, PropagateField, PropagateResult};
 pub use transform::{
     ad_hoc_transform, apply_transforms, load_transform_set, TransformResult, TransformRule,
     TransformSet,

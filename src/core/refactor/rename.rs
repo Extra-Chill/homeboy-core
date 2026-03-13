@@ -6,11 +6,11 @@
 //! 3. Generates file content edits and file/directory renames
 //! 4. Applies changes to disk (or returns a dry-run preview)
 
-use crate::error::{Error, Result};
 use crate::engine::codebase_scan::{
     self, find_boundary_matches, find_case_insensitive_matches, find_literal_matches,
     ExtensionFilter, ScanConfig,
 };
+use crate::error::{Error, Result};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

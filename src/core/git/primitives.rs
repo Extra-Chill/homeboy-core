@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::error::{Error, Result};
 use crate::engine::command;
+use crate::error::{Error, Result};
 
 /// Clone a git repository to a target directory.
 pub fn clone_repo(url: &str, target_dir: &Path) -> Result<()> {

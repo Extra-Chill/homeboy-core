@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::error::{Error, Result};
 use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
+use crate::error::{Error, Result};
 use crate::local_files;
 
 // ============================================================================

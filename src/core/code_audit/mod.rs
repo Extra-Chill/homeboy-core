@@ -12,11 +12,9 @@
 //! 6. Analyzing structural complexity (god files, high item counts)
 
 pub mod baseline;
-pub mod compare;
-pub mod report;
-pub mod run;
 mod checks;
 mod comment_hygiene;
+pub mod compare;
 pub(crate) mod conventions;
 pub(crate) mod core_fingerprint;
 mod dead_code;
@@ -30,6 +28,8 @@ pub(crate) mod import_matching;
 mod layer_ownership;
 pub(crate) mod naming;
 pub(crate) mod preflight;
+pub mod report;
+pub mod run;
 mod signatures;
 mod structural;
 mod test_coverage;

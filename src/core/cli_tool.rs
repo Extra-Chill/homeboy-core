@@ -4,14 +4,14 @@ use std::collections::HashMap;
 use crate::component::{self, Component};
 use crate::context::resolve_project_ssh;
 use crate::engine::executor;
+use crate::engine::shell;
+use crate::engine::template::{render_map, TemplateVars};
 use crate::engine::text;
 use crate::error::ErrorCode;
 use crate::extension::{find_extension_by_tool, CliConfig};
 use crate::project::{self, Project};
 use crate::server;
 use crate::ssh::{execute_local_command, CommandOutput};
-use crate::engine::shell;
-use crate::engine::template::{render_map, TemplateVars};
 use crate::{Error, Result};
 
 #[derive(Serialize, Clone)]

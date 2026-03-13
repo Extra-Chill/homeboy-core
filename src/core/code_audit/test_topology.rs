@@ -8,8 +8,8 @@ use std::path::Path;
 
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
-use crate::extension::{self, ExtensionManifest};
 use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
+use crate::extension::{self, ExtensionManifest};
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct AuditRulesConfig {

@@ -1,11 +1,11 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
-pub mod portable;
+pub mod inventory;
 pub mod mutations;
+pub mod portable;
 pub mod relationships;
 pub mod resolution;
-pub mod inventory;
 pub mod versioning;
 
 pub use inventory::{exists, extension_provides_artifact_pattern, inventory, list, list_ids, load};

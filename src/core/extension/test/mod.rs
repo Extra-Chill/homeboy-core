@@ -1,16 +1,16 @@
 pub mod analyze;
-pub mod parsing;
 pub mod baseline;
 pub mod drift;
+pub mod parsing;
 pub mod report;
 pub mod run;
 pub mod scaffold;
 pub mod workflow;
 
 use crate::component::Component;
+use crate::extension::test::drift::DriftOptions;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 use crate::git;
-use crate::extension::test::drift::DriftOptions;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::PathBuf;

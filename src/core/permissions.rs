@@ -1,9 +1,9 @@
 use std::process::Command;
 
 use crate::defaults;
+use crate::engine::shell;
 use crate::error::{Error, Result};
 use crate::ssh::{CommandOutput, SshClient};
-use crate::engine::shell;
 
 /// Fix local file permissions before build.
 ///

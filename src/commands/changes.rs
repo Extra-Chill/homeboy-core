@@ -6,8 +6,8 @@ use homeboy::git::{self, ChangesOutput};
 use homeboy::project;
 use homeboy::BulkResult;
 
-use super::CmdResult;
 use super::utils::resolve::resolve_project_components;
+use super::CmdResult;
 
 #[derive(Args)]
 pub struct ChangesArgs {

@@ -3,8 +3,8 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::docs;
-use homeboy::codebase_map;
 use homeboy::code_audit::docs_audit::AuditResult;
+use homeboy::codebase_map;
 use homeboy::component;
 
 use super::CmdResult;

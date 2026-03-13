@@ -1,7 +1,7 @@
 use crate::code_audit::conventions::Language;
 use crate::core::refactor::decompose;
-use crate::core::refactor::plan::verify::rewrite_callers_after_dedup;
 use crate::core::refactor::plan::generate::primary_type_name_from_declaration;
+use crate::core::refactor::plan::verify::rewrite_callers_after_dedup;
 use crate::core::refactor::shared::detect_language;
 use crate::core::undo::InMemoryRollback;
 use crate::refactor::auto::{
