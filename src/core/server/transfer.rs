@@ -1,5 +1,4 @@
-use crate::server;
-use crate::ssh::SshClient;
+use super::SshClient;
 use serde::Serialize;
 use std::process::{Command, Stdio};
 
@@ -157,7 +156,7 @@ fn run_push(
     server_id: &str,
     remote_path: &str,
 ) -> crate::Result<(TransferOutput, i32)> {
-    let srv = server::load(server_id)?;
+    let srv = super::load(server_id)?;
     let client = SshClient::from_server(&srv, server_id)?;
 
     let remote_target = format!("{}@{}:{}", client.user, client.host, remote_path);
@@ -227,7 +226,7 @@ fn run_pull(
     remote_path: &str,
     local_path: &str,
 ) -> crate::Result<(TransferOutput, i32)> {
-    let srv = server::load(server_id)?;
+    let srv = super::load(server_id)?;
     let client = SshClient::from_server(&srv, server_id)?;
 
     let remote_target = format!("{}@{}:{}", client.user, client.host, remote_path);
@@ -300,8 +299,8 @@ fn run_server_to_server(
     dst_id: &str,
     dst_path: &str,
 ) -> crate::Result<(TransferOutput, i32)> {
-    let src_server = server::load(src_id)?;
-    let dst_server = server::load(dst_id)?;
+    let src_server = super::load(src_id)?;
+    let dst_server = super::load(dst_id)?;
 
     let src_client = SshClient::from_server(&src_server, src_id)?;
     let dst_client = SshClient::from_server(&dst_server, dst_id)?;

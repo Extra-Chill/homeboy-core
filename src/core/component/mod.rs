@@ -6,6 +6,7 @@ pub mod mutations;
 pub mod portable;
 pub mod relationships;
 pub mod resolution;
+pub mod scope;
 pub mod versioning;
 
 pub use inventory::{exists, extension_provides_artifact_pattern, inventory, list, list_ids, load};
@@ -18,6 +19,7 @@ pub use relationships::{associated_projects, projects_using, rename_component, s
 pub use resolution::{
     detect_from_cwd, resolve, resolve_artifact, resolve_effective, validate_local_path,
 };
+pub use scope::{resolve_component_scope, EffectiveScope, ScopeCommand};
 pub use versioning::{
     normalize_version_pattern, parse_version_targets, validate_version_pattern,
     validate_version_target_conflict,

@@ -41,7 +41,7 @@ pub struct ProjectListReport {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectStatusReport {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub health: Option<crate::health::ServerHealth>,
+    pub health: Option<crate::server::health::ServerHealth>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_versions: Option<Vec<ProjectComponentVersion>>,
 }
@@ -61,7 +61,7 @@ pub struct ProjectReportExtra {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deploy_blockers: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub health: Option<crate::health::ServerHealth>,
+    pub health: Option<crate::server::health::ServerHealth>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_versions: Option<Vec<ProjectComponentVersion>>,
 }

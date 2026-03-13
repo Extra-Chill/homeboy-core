@@ -23,10 +23,6 @@ pub struct RefactorArgs {
     #[arg(long = "from", value_name = "SOURCE", action = clap::ArgAction::Append)]
     from: Vec<String>,
 
-    /// Include all known proposal sources (deprecated; prefer `--from all`)
-    #[arg(long, default_value_t = false)]
-    all: bool,
-
     /// Only include files changed since a git ref (branch, tag, or SHA)
     #[arg(long)]
     changed_since: Option<String>,
@@ -207,7 +203,6 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
         None => run_refactor_sources(
             args.comp.as_ref(),
             &args.from,
-            args.all,
             args.changed_since.as_deref(),
             &args.only,
             &args.exclude,
@@ -412,7 +407,6 @@ pub struct WarningSummary {
 fn run_refactor_sources(
     comp: Option<&PositionalComponentArgs>,
     from: &[String],
-    all: bool,
     changed_since: Option<&str>,
     only: &[String],
     exclude: &[String],
@@ -424,14 +418,7 @@ fn run_refactor_sources(
     })?;
     let component = comp.load()?;
     let root = comp.source_path()?;
-    let requested_sources = if all {
-        homeboy::refactor::KNOWN_PLAN_SOURCES
-            .iter()
-            .map(|source| (*source).to_string())
-            .collect::<Vec<_>>()
-    } else {
-        from.to_vec()
-    };
+    let requested_sources = from.to_vec();
     let only_findings = parse_audit_findings(only)?;
     let exclude_findings = parse_audit_findings(exclude)?;
     let plan = homeboy::refactor::build_refactor_plan(homeboy::refactor::RefactorPlanRequest {
