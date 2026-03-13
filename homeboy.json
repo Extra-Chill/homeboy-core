@@ -14,7 +14,7 @@
         "Commands::src/commands/deploy.rs::MissingMethod",
         "Commands::src/commands/docs.rs::NamespaceMismatch",
         "Commands::src/commands/extension.rs::MissingMethod",
-        "Undo::src/core/undo/rollback.rs::SignatureMismatch",
+        "Undo::src/core/undo/snapshot.rs::SignatureMismatch",
         "dead_code::src/commands/changelog.rs::UnreferencedExport",
         "dead_code::src/commands/docs.rs::UnreferencedExport",
         "dead_code::src/commands/file.rs::OrphanedInternal",
