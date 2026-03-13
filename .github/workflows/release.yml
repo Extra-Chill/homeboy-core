@@ -2,10 +2,11 @@
 #
 # Runs every 15 minutes (and on manual dispatch). Checks for releasable
 # conventional commits since the last tag. If found:
-#   1. Quality gate (fmt, clippy, test, audit)
+#   1. Quality gate (audit, lint, test)
 #   2. Version bump + changelog generation from conventional commits
 #   3. Cross-platform binary builds via cargo-dist
 #   4. Publish to GitHub Releases, crates.io, and Homebrew
+#   5. Auto-refactor (post-release, never blocks the release)
 #
 # No human input needed — version is computed from commit types:
 #   fix: → patch, feat: → minor, BREAKING CHANGE → major
@@ -130,7 +131,8 @@ jobs:
   # ── Step 3: Quality gate (read-only checks + auto-refactor) ──
   # Unlike PR CI (scoped to changed files), release quality gate runs
   # unscoped — fixes the entire codebase before releasing.
-  # Serial pipeline: audit → lint → test → auto-refactor → release.
+  # Serial pipeline: audit → lint → test → release. Auto-refactor runs
+  # post-release and never blocks the release.
   # audit/lint/test stay read-only here; the dedicated auto-refactor step owns writes.
   gate-audit:
     name: Audit + Fix
@@ -248,10 +250,9 @@ jobs:
     needs:
       - check
       - gate-build
-      - gate-audit
-      - gate-lint
       - gate-test
-    if: needs.check.outputs.should-release == 'true'
+      - prepare
+    if: ${{ always() && needs.gate-test.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -294,7 +295,6 @@ jobs:
       - gate-build
       - gate-lint
       - gate-test
-      - gate-refactor
       - gate-audit
     runs-on: ubuntu-latest
     outputs:
