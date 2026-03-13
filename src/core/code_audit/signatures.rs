@@ -33,18 +33,17 @@ pub(crate) fn normalize_signature(sig: &str) -> String {
         .replace_all(&normalized, "")
         .to_string();
 
+    // Strip trailing body markers FIRST — the `{ }` or `{ ... }` are not part of
+    // the function's structural contract and contain parens (e.g., `Ok(())`) that
+    // confuse `strip_return_type`'s `rfind(')')`.
+    let normalized = strip_body_markers(&normalized);
+
     // Strip return type declarations — they don't change the calling convention
     // and shouldn't cause structural mismatches.
     // PHP:  "function foo(): void" → "function foo()"
     // PHP:  "function foo(): ?array" → "function foo()"
     // Rust: "fn foo() -> Result<T>" → "fn foo()"
     let normalized = strip_return_type(&normalized);
-
-    // Strip trailing body markers — the `{ }` or `{ ... }` are not part of the
-    // function's structural contract. Without this, stripping a return type from
-    // "register(): void {}" yields "register()" but "register() {}" keeps the
-    // braces, causing a false structural mismatch.
-    let normalized = strip_body_markers(&normalized);
 
     // Strip parameter type annotations — only arity and parameter names matter
     // for structural comparison.  This is language-agnostic: for each comma-
@@ -211,13 +210,28 @@ fn strip_body_markers(sig: &str) -> String {
 }
 
 fn strip_return_type(sig: &str) -> String {
-    // Find the last ')' — that's the end of the parameter list
-    if let Some(paren_pos) = sig.rfind(')') {
-        let after_paren = &sig[paren_pos + 1..].trim_start();
-        // PHP return type: ": void", ": ?array", ": \Namespace\Type"
-        // Rust return type: "-> Result<T>", "-> bool"
-        if after_paren.starts_with(':') || after_paren.starts_with("->") {
-            return sig[..=paren_pos].to_string();
+    // Find the closing ')' of the parameter list by matching parens from the
+    // first '(' — this avoids confusing parens inside return types like Result<()>.
+    if let Some(open_pos) = sig.find('(') {
+        let mut depth = 0;
+        for (i, ch) in sig[open_pos..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let paren_pos = open_pos + i;
+                        let after_paren = sig[paren_pos + 1..].trim_start();
+                        // PHP return type: ": void", ": ?array", ": \Namespace\Type"
+                        // Rust return type: "-> Result<T>", "-> bool"
+                        if after_paren.starts_with(':') || after_paren.starts_with("->") {
+                            return sig[..=paren_pos].to_string();
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
         }
     }
     sig.to_string()

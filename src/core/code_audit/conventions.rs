@@ -884,57 +884,43 @@ mod tests {
 
     #[test]
     fn signature_check_detects_mismatch() {
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed)
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(dir.join("steps")).unwrap();
+        std::fs::create_dir_all(dir.join("handlers")).unwrap();
 
         // Two conforming files with matching signatures
         std::fs::write(
-            dir.join("steps/AiChat.php"),
-            r#"<?php
-class AiChat {
-    public function execute($config, $context) { return []; }
-    public function register(): void {}
-}
-"#,
+            dir.join("handlers/chat.rs"),
+            "pub fn execute(config: &Config, context: &Context) -> Result<()> { Ok(()) }\npub fn register() {}\n",
         )
         .unwrap();
 
         std::fs::write(
-            dir.join("steps/Webhook.php"),
-            r#"<?php
-class Webhook {
-    public function execute($config, $context) { return []; }
-    public function register(): void {}
-}
-"#,
+            dir.join("handlers/webhook.rs"),
+            "pub fn execute(config: &Config, context: &Context) -> Result<()> { Ok(()) }\npub fn register() {}\n",
         )
         .unwrap();
 
         // One file with structurally different signature (different param count)
         std::fs::write(
-            dir.join("steps/AgentPing.php"),
-            r#"<?php
-class AgentPing {
-    public function execute($config) { return []; }
-    public function register(): void {}
-}
-"#,
+            dir.join("handlers/ping.rs"),
+            "pub fn execute(config: &Config) -> Result<()> { Ok(()) }\npub fn register() {}\n",
         )
         .unwrap();
 
         let mut conventions = vec![Convention {
-            name: "Steps".to_string(),
-            glob: "steps/*".to_string(),
+            name: "Handlers".to_string(),
+            glob: "handlers/*".to_string(),
             expected_methods: vec!["execute".to_string(), "register".to_string()],
             expected_registrations: vec![],
             expected_interfaces: vec![],
             expected_namespace: None,
             expected_imports: vec![],
             conforming: vec![
-                "steps/AiChat.php".to_string(),
-                "steps/Webhook.php".to_string(),
-                "steps/AgentPing.php".to_string(),
+                "handlers/chat.rs".to_string(),
+                "handlers/webhook.rs".to_string(),
+                "handlers/ping.rs".to_string(),
             ],
             outliers: vec![],
             total_files: 3,
@@ -944,10 +930,10 @@ class AgentPing {
         check_signature_consistency(&mut conventions, &dir);
 
         let conv = &conventions[0];
-        // AgentPing should be moved to outliers
+        // ping.rs should be moved to outliers
         assert_eq!(conv.conforming.len(), 2);
         assert_eq!(conv.outliers.len(), 1);
-        assert_eq!(conv.outliers[0].file, "steps/AgentPing.php");
+        assert_eq!(conv.outliers[0].file, "handlers/ping.rs");
         assert!(conv.outliers[0].deviations.iter().any(|d| {
             d.kind == AuditFinding::SignatureMismatch && d.description.contains("execute")
         }));
@@ -955,41 +941,42 @@ class AgentPing {
 
     #[test]
     fn signature_check_adds_to_existing_outliers() {
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed)
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(dir.join("steps")).unwrap();
+        std::fs::create_dir_all(dir.join("handlers")).unwrap();
 
         std::fs::write(
-            dir.join("steps/AiChat.php"),
-            "<?php\nclass AiChat {\n    public function execute($config, $context) { return []; }\n    public function register(): void {}\n}\n",
+            dir.join("handlers/chat.rs"),
+            "pub fn execute(config: &Config, context: &Context) -> Result<()> { Ok(()) }\npub fn register() {}\n",
         ).unwrap();
 
         std::fs::write(
-            dir.join("steps/Webhook.php"),
-            "<?php\nclass Webhook {\n    public function execute($config, $context) { return []; }\n    public function register(): void {}\n}\n",
+            dir.join("handlers/webhook.rs"),
+            "pub fn execute(config: &Config, context: &Context) -> Result<()> { Ok(()) }\npub fn register() {}\n",
         ).unwrap();
 
         // File already an outlier (missing register) AND has structurally different execute (1 param vs 2)
         std::fs::write(
-            dir.join("steps/Bad.php"),
-            "<?php\nclass Bad {\n    public function execute($config) { return []; }\n}\n",
+            dir.join("handlers/bad.rs"),
+            "pub fn execute(config: &Config) -> Result<()> { Ok(()) }\n",
         )
         .unwrap();
 
         let mut conventions = vec![Convention {
-            name: "Steps".to_string(),
-            glob: "steps/*".to_string(),
+            name: "Handlers".to_string(),
+            glob: "handlers/*".to_string(),
             expected_methods: vec!["execute".to_string(), "register".to_string()],
             expected_registrations: vec![],
             expected_interfaces: vec![],
             expected_namespace: None,
             expected_imports: vec![],
             conforming: vec![
-                "steps/AiChat.php".to_string(),
-                "steps/Webhook.php".to_string(),
+                "handlers/chat.rs".to_string(),
+                "handlers/webhook.rs".to_string(),
             ],
             outliers: vec![Outlier {
-                file: "steps/Bad.php".to_string(),
+                file: "handlers/bad.rs".to_string(),
                 noisy: false,
                 deviations: vec![Deviation {
                     kind: AuditFinding::MissingMethod,
@@ -1020,29 +1007,32 @@ class AgentPing {
 
     #[test]
     fn signature_check_no_change_when_all_match() {
+        // Uses Rust files so the test works in CI
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(dir.join("steps")).unwrap();
+        std::fs::create_dir_all(dir.join("handlers")).unwrap();
 
         std::fs::write(
-            dir.join("steps/A.php"),
-            "<?php\nclass A {\n    public function execute(array $config): array { return []; }\n}\n",
-        ).unwrap();
+            dir.join("handlers/a.rs"),
+            "pub fn execute(config: &Config) -> Vec<Item> { vec![] }\n",
+        )
+        .unwrap();
 
         std::fs::write(
-            dir.join("steps/B.php"),
-            "<?php\nclass B {\n    public function execute(array $config): array { return []; }\n}\n",
-        ).unwrap();
+            dir.join("handlers/b.rs"),
+            "pub fn execute(config: &Config) -> Vec<Item> { vec![] }\n",
+        )
+        .unwrap();
 
         let mut conventions = vec![Convention {
-            name: "Steps".to_string(),
-            glob: "steps/*".to_string(),
+            name: "Handlers".to_string(),
+            glob: "handlers/*".to_string(),
             expected_methods: vec!["execute".to_string()],
             expected_registrations: vec![],
             expected_interfaces: vec![],
             expected_namespace: None,
             expected_imports: vec![],
-            conforming: vec!["steps/A.php".to_string(), "steps/B.php".to_string()],
+            conforming: vec!["handlers/a.rs".to_string(), "handlers/b.rs".to_string()],
             outliers: vec![],
             total_files: 2,
             confidence: 1.0,
@@ -1088,41 +1078,42 @@ class AgentPing {
 
     #[test]
     fn signature_check_majority_wins() {
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed)
         // 2 files have one signature (2 params), 1 file has another (1 param) — the 2-file version is canonical
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
-        std::fs::create_dir_all(dir.join("steps")).unwrap();
+        std::fs::create_dir_all(dir.join("handlers")).unwrap();
 
         std::fs::write(
-            dir.join("steps/A.php"),
-            "<?php\nclass A {\n    public function run($input, $context) { return true; }\n}\n",
+            dir.join("handlers/a.rs"),
+            "pub fn run(input: &Input, context: &Context) -> bool { true }\n",
         )
         .unwrap();
 
         std::fs::write(
-            dir.join("steps/B.php"),
-            "<?php\nclass B {\n    public function run($input, $context) { return true; }\n}\n",
+            dir.join("handlers/b.rs"),
+            "pub fn run(input: &Input, context: &Context) -> bool { true }\n",
         )
         .unwrap();
 
         std::fs::write(
-            dir.join("steps/C.php"),
-            "<?php\nclass C {\n    public function run($input) { return true; }\n}\n",
+            dir.join("handlers/c.rs"),
+            "pub fn run(input: &Input) -> bool { true }\n",
         )
         .unwrap();
 
         let mut conventions = vec![Convention {
-            name: "Steps".to_string(),
-            glob: "steps/*".to_string(),
+            name: "Handlers".to_string(),
+            glob: "handlers/*".to_string(),
             expected_methods: vec!["run".to_string()],
             expected_registrations: vec![],
             expected_interfaces: vec![],
             expected_namespace: None,
             expected_imports: vec![],
             conforming: vec![
-                "steps/A.php".to_string(),
-                "steps/B.php".to_string(),
-                "steps/C.php".to_string(),
+                "handlers/a.rs".to_string(),
+                "handlers/b.rs".to_string(),
+                "handlers/c.rs".to_string(),
             ],
             outliers: vec![],
             total_files: 3,
@@ -1134,26 +1125,28 @@ class AgentPing {
         let conv = &conventions[0];
         assert_eq!(conv.conforming.len(), 2);
         assert_eq!(conv.outliers.len(), 1);
-        assert_eq!(conv.outliers[0].file, "steps/C.php");
+        assert_eq!(conv.outliers[0].file, "handlers/c.rs");
     }
 
     #[test]
     fn return_type_difference_not_a_mismatch() {
         // Files with and without return types should NOT produce a SignatureMismatch.
-        // This was the bug reported in #571.
+        // Uses Rust files so the test works in CI.
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(dir.join("api")).unwrap();
 
         std::fs::write(
-            dir.join("api/Users.php"),
-            "<?php\nclass Users {\n    public function register(): void {}\n    public function check($request) {}\n}\n",
-        ).unwrap();
+            dir.join("api/users.rs"),
+            "pub fn register() -> Result<()> { Ok(()) }\npub fn check(request: &Request) {}\n",
+        )
+        .unwrap();
 
         std::fs::write(
-            dir.join("api/Posts.php"),
-            "<?php\nclass Posts {\n    public function register() {}\n    public function check($request) {}\n}\n",
-        ).unwrap();
+            dir.join("api/posts.rs"),
+            "pub fn register() {}\npub fn check(request: &Request) {}\n",
+        )
+        .unwrap();
 
         let mut conventions = vec![Convention {
             name: "Api".to_string(),
@@ -1163,7 +1156,7 @@ class AgentPing {
             expected_interfaces: vec![],
             expected_namespace: None,
             expected_imports: vec![],
-            conforming: vec!["api/Users.php".to_string(), "api/Posts.php".to_string()],
+            conforming: vec!["api/users.rs".to_string(), "api/posts.rs".to_string()],
             outliers: vec![],
             total_files: 2,
             confidence: 1.0,
