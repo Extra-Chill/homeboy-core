@@ -4,6 +4,123 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.75.0] - 2026-03-13
+
+### Added
+- detect orphaned test methods referencing deleted source symbols
+- add generic command scope exclusions
+- autofix simple broken doc references
+- autofix stale doc references from audit
+- add explicit fix planning sidecars
+
+### Changed
+- move auto-refactor to post-release so it never blocks releases
+- run cargo fmt to fix import ordering across 44 files
+- extract propagate business logic from commands/ to core/refactor/propagate.rs
+- extract docs business logic from commands/ to core/
+- remove standalone docs audit subcommand and dead code
+- promote undo.rs to undo/ directory with snapshot + rollback split
+- promote db.rs to db/ directory (operations + tunnel)
+- extract transfer business logic from commands/ to core/
+- convert upgrade from include! fragments to proper modules
+- move ssh module into server/
+- remove keychain module and keyring dependency
+- promote server.rs to server/ module directory
+- extract audit workflow and report into core
+- consolidate compute_changed_test_files into single source of truth
+- extract lint workflow and report into core
+- extract test scaffold and report into core
+- move project report shaping into core
+- thin project command wrappers
+- hide deprecated init surface
+- move init report under context
+- remove cleanup command surface
+- establish core fleet modules
+- extract fleet status module
+- convert component into module directory
+- extract component inventory and mutations
+- extract component versioning helpers
+- extract component relationship helpers
+- extract component resolution module
+- extract portable component module
+- collapse runner preparation into execution
+- move runner context setup into execution
+- share extension execution plumbing
+- merge main into project files branch
+- move files under project
+- move logs under project
+- establish core project modules
+- remove final utils module
+- move command and core helpers into owned modules
+- make project attachments explicit
+- remove component local config support
+- derive component inventory
+- Merge origin/main into refactor/centralize-effective-component-resolution
+- reuse effective component resolver
+- adopt central component resolver
+- centralize effective component resolution
+- make component init repo-first
+- remove project component registry dependency
+- clean up project attachment resolution
+- make project attachments canonical
+- use project attachments in build
+- use project attachments in context and init
+- let projects attach repo-backed components
+- remove legacy build command support
+- type project component overrides
+- move build into extension domain
+- move shared primitives into engine
+- move codebase scan into engine
+- move grammar into extension core
+- thin release command
+- move runtime temp paths into engine
+- move lint baseline into extension domain
+- move changelog into release domain
+- move version into release domain
+- move test domain and symbol graph
+- align test lint audit and scaffold domains
+- refactor(code-factory): split plan generation modules
+- refactor(code-factory): remove code_audit fixer module
+- refactor(code-factory): derive signatures from grammar symbols
+- refactor(code-factory): move test helper parsing into plan
+- refactor(code-factory): move apply content engine into refactor auto
+- refactor(code-factory): move fix helpers into refactor plan
+- refactor(code-factory): extract refactor plan and auto modules
+- refactor(code-factory): auto-fix namespace declarations
+- refactor(code-factory): auto-fix missing interface conformance
+- refactor(code-factory): centralize lint and test fix requests
+- refactor(code-factory): route audit source writes through refactor core
+- refactor(code-factory): centralize detector-triggered refactor plumbing
+- unify build around resolved extension context
+- make extension runner context-only
+- remove transitional extension command helpers
+- let runner consume execution context
+- introduce extension execution context
+- make extension resolution capability-based
+- centralize extension script resolution
+- Revert "fix(ci): route PR and release workflows through homeboy-ci"
+- make refactor source-driven
+- move CI autofix into refactor phase
+
+### Fixed
+- allow synthetic component when --path provided without homeboy.json
+- rewrite signature tests from PHP to Rust and fix strip_return_type paren matching
+- resolve 6 pre-existing test failures blocking release
+- add autofix-commands to release audit gate — was enabled but had no commands to run
+- add .release-last-failed to .gitignore — unblocks continuous release
+- restore --lib test compilation and add audit report/run tests
+- use homeboy release dry-run for gating
+- scope failed-attempt cache to current ref
+- re-export planner helpers for tests
+- remove final refactor ci workflow references
+- use source-driven refactor autofix flow
+- run refactor autofix after failing PR checks
+- route PR and release workflows through homeboy-ci
+- reduce planner audit surface
+- track sandbox changes without git metadata
+- update refactor docs and split command tests
+- preserve impl blocks in type buckets
+
 ## [0.74.1] - 2026-03-09
 
 ### Changed
