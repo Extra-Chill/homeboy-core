@@ -43,7 +43,9 @@ pub struct AuditRunWorkflowResult {
 }
 
 /// Run the main audit workflow.
-pub fn run_main_audit_workflow(args: AuditRunWorkflowArgs) -> crate::Result<AuditRunWorkflowResult> {
+pub fn run_main_audit_workflow(
+    args: AuditRunWorkflowArgs,
+) -> crate::Result<AuditRunWorkflowResult> {
     // Run audit — scoped or full
     let result = run_audit(&args)?;
 
@@ -131,8 +133,8 @@ fn run_fix_workflow(
         result,
         &args.only_kinds,
         &args.exclude_kinds,
-        args.scoring.clone(),
-        args.verification.clone(),
+        args.scoring,
+        args.verification,
         args.max_iterations,
         written,
     )?;
@@ -227,8 +229,8 @@ fn process_ratchet(
 
     // Findings were eliminated — save updated baseline
     let save_result = if let Some(ref git_ref) = args.changed_since {
-        let changed = git::get_files_changed_since(&current_result.source_path, git_ref)
-            .unwrap_or_default();
+        let changed =
+            git::get_files_changed_since(&current_result.source_path, git_ref).unwrap_or_default();
         baseline::save_baseline_scoped(current_result, &changed)
     } else {
         baseline::save_baseline(current_result)
@@ -251,11 +253,7 @@ fn process_ratchet(
             }))
         }
         Err(e) => {
-            crate::log_status!(
-                "ratchet",
-                "Warning: failed to auto-update baseline: {}",
-                e
-            );
+            crate::log_status!("ratchet", "Warning: failed to auto-update baseline: {}", e);
             Ok(None)
         }
     }
@@ -287,10 +285,8 @@ fn run_baseline_save(
         baseline::save_baseline(&result).map_err(crate::Error::internal_unexpected)?
     };
 
-    let baseline_data =
-        baseline::load_baseline(Path::new(&result.source_path)).ok_or_else(|| {
-            crate::Error::internal_unexpected("Failed to read back saved baseline")
-        })?;
+    let baseline_data = baseline::load_baseline(Path::new(&result.source_path))
+        .ok_or_else(|| crate::Error::internal_unexpected("Failed to read back saved baseline"))?;
 
     if let Some(score) = baseline_data.metadata.alignment_score {
         eprintln!(
