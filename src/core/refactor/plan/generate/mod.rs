@@ -3,7 +3,6 @@ mod convention_fixes;
 mod doc_fixes;
 mod duplicate_fixes;
 mod signatures;
-mod test_fixes;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{DecomposeFixPlan, Fix, FixResult, SkippedFile};
@@ -11,7 +10,6 @@ use crate::core::refactor::decompose;
 use std::path::Path;
 
 use convention_fixes::apply_convention_fixes;
-use test_fixes::{apply_missing_test_file_fixes, apply_missing_test_method_fixes};
 
 pub(crate) use builders::{insertion, new_file};
 pub(crate) use doc_fixes::is_actionable_comment_finding;
@@ -22,10 +20,6 @@ pub(crate) use signatures::{
     extract_signatures, extract_signatures_from_items, find_parsed_item_by_name,
     generate_fallback_signature, generate_method_stub, parse_items_for_dedup,
     primary_type_name_from_declaration,
-};
-pub(crate) use test_fixes::{
-    derive_expected_test_file_path, extract_expected_test_method_from_fix_description,
-    extract_source_file_from_test_stub, mapping_from_source_comment, test_method_exists_in_file,
 };
 
 pub fn generate_audit_fixes(result: &CodeAuditResult, root: &Path) -> FixResult {
@@ -67,8 +61,6 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     apply_convention_fixes(result, root, &mut fixes, &mut skipped);
 
     let mut new_files = Vec::new();
-    apply_missing_test_file_fixes(result, root, &mut new_files);
-    apply_missing_test_method_fixes(result, root, &mut fixes, &mut new_files, &mut skipped);
     generate_unreferenced_export_fixes(result, root, &mut fixes, &mut skipped);
     generate_duplicate_function_fixes(result, root, &mut fixes, &mut new_files, &mut skipped);
 

@@ -1,9 +1,5 @@
 use crate::code_audit::conventions::{AuditFinding, Language};
-use crate::core::refactor::plan::generate::{
-    derive_expected_test_file_path, extract_expected_test_method_from_fix_description,
-    extract_signatures_from_items, extract_source_file_from_test_stub, mapping_from_source_comment,
-    test_method_exists_in_file,
-};
+use crate::core::refactor::plan::generate::extract_signatures_from_items;
 use crate::core::refactor::shared::detect_language;
 use crate::refactor::auto::apply::apply_insertions_to_content;
 use crate::refactor::auto::policy::blocked_reason_from_preflight;
@@ -32,48 +28,6 @@ pub fn run_insertion_preflight(
                 collision_check(&content, insertion),
                 syntax_shape_check(&simulated, insertion, &language),
             ];
-            Some(finalize_report(checks))
-        }
-        AuditFinding::MissingTestMethod => {
-            let source_file = extract_source_file_from_test_stub(&insertion.description)?;
-            let expected_test_method =
-                extract_expected_test_method_from_fix_description(&insertion.description)?;
-            let expected_test_path = derive_expected_test_file_path(context.root, &source_file)?;
-
-            let checks = vec![
-                PreflightCheck {
-                    name: "test_mapping".to_string(),
-                    passed: file == expected_test_path,
-                    detail: if file == expected_test_path {
-                        format!("source maps to {}", expected_test_path)
-                    } else {
-                        format!("source should map to {}, not {}", expected_test_path, file)
-                    },
-                },
-                PreflightCheck {
-                    name: "method_collision".to_string(),
-                    passed: !test_method_exists_in_file(
-                        context.root,
-                        file,
-                        &expected_test_method,
-                        &[],
-                    ),
-                    detail: if !test_method_exists_in_file(
-                        context.root,
-                        file,
-                        &expected_test_method,
-                        &[],
-                    ) {
-                        format!(
-                            "test method {} is not already present",
-                            expected_test_method
-                        )
-                    } else {
-                        format!("test method {} already exists", expected_test_method)
-                    },
-                },
-            ];
-
             Some(finalize_report(checks))
         }
         AuditFinding::UnreferencedExport => {
@@ -296,44 +250,6 @@ pub fn run_new_file_preflight(
                                 .map(|p| p.display().to_string())
                                 .unwrap_or_default()
                         )
-                    },
-                },
-            ]))
-        }
-        AuditFinding::MissingTestFile => {
-            let (_source_file, expected_test_path) =
-                mapping_from_source_comment(&new_file.content)?;
-            let abs = context.root.join(&new_file.file);
-
-            Some(finalize_report(vec![
-                PreflightCheck {
-                    name: "test_mapping".to_string(),
-                    passed: expected_test_path == new_file.file,
-                    detail: if expected_test_path == new_file.file {
-                        format!("source maps to {}", new_file.file)
-                    } else {
-                        format!(
-                            "source should map to {}, not {}",
-                            expected_test_path, new_file.file
-                        )
-                    },
-                },
-                PreflightCheck {
-                    name: "file_absent".to_string(),
-                    passed: !abs.exists(),
-                    detail: if abs.exists() {
-                        format!("{} already exists", new_file.file)
-                    } else {
-                        format!("{} does not already exist", new_file.file)
-                    },
-                },
-                PreflightCheck {
-                    name: "content_nonempty".to_string(),
-                    passed: !new_file.content.trim().is_empty(),
-                    detail: if new_file.content.trim().is_empty() {
-                        "generated test content is empty".to_string()
-                    } else {
-                        "generated test content is non-empty".to_string()
                     },
                 },
             ]))
