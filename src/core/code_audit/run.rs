@@ -420,3 +420,7 @@ pub fn default_audit_exit_code(result: &CodeAuditResult, is_scoped: bool) -> i32
         0
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/core/code_audit/run_test.rs"]
+mod run_test;

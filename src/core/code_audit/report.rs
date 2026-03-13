@@ -257,3 +257,7 @@ pub fn from_main_workflow(result: AuditRunWorkflowResult) -> (AuditCommandOutput
     let exit_code = result.exit_code;
     (result.output, exit_code)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/core/code_audit/report_test.rs"]
+mod report_test;
