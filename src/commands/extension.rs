@@ -763,8 +763,11 @@ fn exec_extension_tool(
     ];
 
     let command = args.join(" ");
-    let exit_code =
-        homeboy::server::execute_local_command_interactive(&command, Some(&working_dir), Some(&env));
+    let exit_code = homeboy::server::execute_local_command_interactive(
+        &command,
+        Some(&working_dir),
+        Some(&env),
+    );
 
     Ok((
         ExtensionOutput::Exec {
