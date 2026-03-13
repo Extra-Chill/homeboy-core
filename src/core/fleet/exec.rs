@@ -1,7 +1,7 @@
 use crate::engine::shell;
 use crate::fleet;
 use crate::project::Project;
-use crate::ssh::{resolve_context, SshClient, SshResolveArgs};
+use crate::server::{resolve_context, SshClient, SshResolveArgs};
 use serde::Serialize;
 
 #[derive(Debug, Default, Clone, Serialize)]

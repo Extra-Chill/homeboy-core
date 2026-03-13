@@ -21,7 +21,7 @@ use crate::hooks::{self, HookFailureMode};
 use crate::paths as base_path;
 use crate::permissions;
 use crate::project::{self, Project};
-use crate::ssh::SshClient;
+use crate::server::SshClient;
 use crate::version;
 
 include!("deploy/safety_and_artifact.rs");

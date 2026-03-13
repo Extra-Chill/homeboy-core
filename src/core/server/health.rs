@@ -4,8 +4,7 @@
 //! to collect uptime, load, disk, memory, and service health from remote servers.
 
 use crate::project::Project;
-use crate::server;
-use crate::ssh::SshClient;
+use super::SshClient;
 use serde::Serialize;
 
 // ============================================================================
@@ -79,7 +78,7 @@ pub struct ServiceStatus {
 /// Returns None if the server can't be reached or isn't configured.
 pub fn collect_project_health(proj: &Project) -> Option<ServerHealth> {
     let server_id = proj.server_id.as_deref()?;
-    let srv = server::load(server_id).ok()?;
+    let srv = super::load(server_id).ok()?;
     let client = SshClient::from_server(&srv, server_id).ok()?;
     Some(collect_server_health(&client, &proj.services))
 }

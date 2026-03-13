@@ -764,7 +764,7 @@ fn exec_extension_tool(
 
     let command = args.join(" ");
     let exit_code =
-        homeboy::ssh::execute_local_command_interactive(&command, Some(&working_dir), Some(&env));
+        homeboy::server::execute_local_command_interactive(&command, Some(&working_dir), Some(&env));
 
     Ok((
         ExtensionOutput::Exec {

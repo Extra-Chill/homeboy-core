@@ -16,18 +16,14 @@ pub mod error;
 pub mod extension;
 pub mod fleet;
 pub mod git;
-pub mod health;
 pub mod hooks;
 pub mod output;
 pub mod project;
 pub mod refactor;
 pub mod release;
-pub mod scope;
 
 pub mod scaffold;
 pub mod server;
-pub mod ssh;
-pub mod transfer;
 pub mod undo;
 pub mod upgrade;
 

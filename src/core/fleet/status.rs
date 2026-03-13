@@ -1,5 +1,5 @@
 use crate::deploy::{self, DeployConfig};
-use crate::health::{self, ServerHealth};
+use crate::server::health::{self, ServerHealth};
 use crate::project;
 use crate::version;
 use serde::Serialize;

@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::http::ApiClient;
 use crate::local_files;
 use crate::project::{self, Project};
-use crate::ssh::{
+use crate::server::{
     execute_local_command_in_dir, execute_local_command_interactive,
     execute_local_command_passthrough, CommandOutput,
 };

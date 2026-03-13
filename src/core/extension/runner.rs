@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::component::Component;
 use crate::error::Result;
-use crate::ssh::CommandOutput;
+use crate::server::CommandOutput;
 
 /// Output from a extension runner script execution.
 pub struct RunnerOutput {
