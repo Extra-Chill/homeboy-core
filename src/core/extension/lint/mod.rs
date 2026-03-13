@@ -1,9 +1,13 @@
 pub mod baseline;
+pub mod report;
+pub mod run;
 
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext, ExtensionRunner};
 
 pub use baseline::{BaselineComparison, LintBaseline, LintBaselineMetadata, LintFinding};
+pub use report::LintCommandOutput;
+pub use run::{run_main_lint_workflow, LintRunWorkflowArgs, LintRunWorkflowResult};
 
 pub fn resolve_lint_command(
     component: &Component,

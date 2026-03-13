@@ -1,16 +1,7 @@
 use clap::Args;
-use serde::Serialize;
+use std::path::PathBuf;
 
-use homeboy::engine::temp;
-use homeboy::extension::lint as extension_lint;
-use homeboy::extension::lint::baseline::{
-    self as lint_baseline, BaselineComparison as LintBaselineComparison, LintFinding,
-};
-use homeboy::git;
-use homeboy::refactor::{
-    auto::{self, AutofixMode},
-    run_lint_refactor, AppliedRefactor, LintSourceOptions,
-};
+use homeboy::extension::lint::{report, run_main_lint_workflow, LintCommandOutput, LintRunWorkflowArgs};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -70,273 +61,43 @@ pub struct LintArgs {
     _json: HiddenJsonArgs,
 }
 
-#[derive(Serialize)]
-pub struct LintOutput {
-    status: String,
-    component: String,
-    exit_code: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    autofix: Option<AppliedRefactor>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hints: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    baseline_comparison: Option<LintBaselineComparison>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lint_findings: Option<Vec<LintFinding>>,
-}
-
-pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintOutput> {
+pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput> {
     let component = args.comp.load()?;
     let source_path = args.comp.source_path()?;
-    let lint_findings_file = temp::runtime_temp_file("homeboy-lint-findings", ".json")?;
-    // Resolve glob from --changed-only or --changed-since flags
-    let effective_glob = if args.changed_only {
-        let uncommitted = git::get_uncommitted_changes(&component.local_path)?;
 
-        // Collect all changed files
-        let mut changed_files: Vec<String> = Vec::new();
-        changed_files.extend(uncommitted.staged);
-        changed_files.extend(uncommitted.unstaged);
-        changed_files.extend(uncommitted.untracked);
-
-        if changed_files.is_empty() {
-            println!("No files in working tree changes");
-            return Ok((
-                LintOutput {
-                    status: "passed".to_string(),
-                    component: args.comp.component,
-                    exit_code: 0,
-                    autofix: None,
-                    hints: None,
-                    baseline_comparison: None,
-                    lint_findings: None,
-                },
-                0,
-            ));
-        }
-
-        // Make paths absolute so lint runners can find files regardless of
-        // the shell's working directory (git status returns repo-relative paths)
-        let abs_files: Vec<String> = changed_files
-            .iter()
-            .map(|f| format!("{}/{}", component.local_path, f))
-            .collect();
-
-        // Pass ALL files to extension - let lint runner filter to relevant types
-        if abs_files.len() == 1 {
-            Some(abs_files[0].clone())
-        } else {
-            Some(format!("{{{}}}", abs_files.join(",")))
-        }
-    } else if let Some(ref git_ref) = args.changed_since {
-        let changed_files = git::get_files_changed_since(&component.local_path, git_ref)?;
-
-        if changed_files.is_empty() {
-            println!("No files changed since {}", git_ref);
-            return Ok((
-                LintOutput {
-                    status: "passed".to_string(),
-                    component: args.comp.component,
-                    exit_code: 0,
-                    autofix: None,
-                    hints: None,
-                    baseline_comparison: None,
-                    lint_findings: None,
-                },
-                0,
-            ));
-        }
-
-        // Make paths absolute (git diff returns repo-relative paths)
-        let abs_files: Vec<String> = changed_files
-            .iter()
-            .map(|f| format!("{}/{}", component.local_path, f))
-            .collect();
-
-        if abs_files.len() == 1 {
-            Some(abs_files[0].clone())
-        } else {
-            Some(format!("{{{}}}", abs_files.join(",")))
-        }
-    } else {
-        args.glob.clone()
-    };
-
-    let planned_autofix = if args.fix {
-        let changed_files = if args.changed_only {
-            let uncommitted = git::get_uncommitted_changes(&component.local_path)?;
-            let mut changed_files: Vec<String> = Vec::new();
-            changed_files.extend(uncommitted.staged);
-            changed_files.extend(uncommitted.unstaged);
-            changed_files.extend(uncommitted.untracked);
-            Some(changed_files)
-        } else if let Some(ref git_ref) = args.changed_since {
-            Some(git::get_files_changed_since(
-                &component.local_path,
-                git_ref,
-            )?)
-        } else {
-            None
-        };
-
-        let plan = run_lint_refactor(
-            component.clone(),
-            source_path.clone(),
-            args.setting_args.setting.clone(),
-            LintSourceOptions {
-                selected_files: changed_files,
-                file: args.file.clone(),
-                glob: effective_glob.clone(),
-                errors_only: args.errors_only,
-                sniffs: args.sniffs.clone(),
-                exclude_sniffs: args.exclude_sniffs.clone(),
-                category: args.category.clone(),
-            },
-            true,
-        )?;
-
-        let outcome = auto::standard_outcome(
-            AutofixMode::Write,
-            plan.files_modified,
-            Some(format!("homeboy test {} --analyze", args.comp.component)),
-            plan.hints.clone(),
-        );
-
-        Some((plan, outcome))
-    } else {
-        None
-    };
-
-    let findings_file_str = lint_findings_file.to_string_lossy().to_string();
-    let output = extension_lint::build_lint_runner(
+    let workflow = run_main_lint_workflow(
         &component,
-        args.comp.path.clone(),
-        &args.setting_args.setting,
-        args.summary,
-        args.file.as_deref(),
-        effective_glob.as_deref(),
-        args.errors_only,
-        args.sniffs.as_deref(),
-        args.exclude_sniffs.as_deref(),
-        args.category.as_deref(),
-        &findings_file_str,
-    )?
-    .run()?;
-
-    let lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
-    let _ = std::fs::remove_file(&lint_findings_file);
-
-    let mut status = if output.success { "passed" } else { "failed" }.to_string();
-    let autofix = planned_autofix
-        .as_ref()
-        .map(|(plan, outcome)| AppliedRefactor::from_plan(plan, outcome.rerun_recommended));
-
-    let mut hints = Vec::new();
-
-    if let Some((plan, outcome)) = &planned_autofix {
-        if output.success && outcome.status == "auto_fixed" {
-            status = outcome.status.clone();
-        }
-
-        hints.extend(outcome.hints.clone());
-
-        if plan.files_modified == 0 && output.success {
-            status = "passed".to_string();
-        }
-    }
-
-    // Baseline lifecycle
-    let mut baseline_comparison = None;
-    let mut baseline_exit_override = None;
-
-    if args.baseline_args.baseline {
-        let saved = lint_baseline::save_baseline(&source_path, args.comp.id(), &lint_findings)?;
-        eprintln!(
-            "[lint] Baseline saved to {} ({} findings)",
-            saved.display(),
-            lint_findings.len()
-        );
-    }
-
-    if !args.baseline_args.baseline && !args.baseline_args.ignore_baseline {
-        if let Some(existing) = lint_baseline::load_baseline(&source_path) {
-            let comparison = lint_baseline::compare(&lint_findings, &existing);
-
-            if comparison.drift_increased {
-                eprintln!(
-                    "[lint] DRIFT INCREASED: {} new finding(s) since baseline",
-                    comparison.new_items.len()
-                );
-                baseline_exit_override = Some(1);
-            } else if !comparison.resolved_fingerprints.is_empty() {
-                eprintln!(
-                    "[lint] Drift reduced: {} finding(s) resolved since baseline",
-                    comparison.resolved_fingerprints.len()
-                );
-            } else {
-                eprintln!("[lint] No change from baseline");
-            }
-
-            baseline_comparison = Some(comparison);
-        }
-    }
-
-    // Fix hint when linting fails
-    if !output.success && !args.fix {
-        hints.push(format!(
-            "Run 'homeboy lint {} --fix' to auto-fix formatting issues",
-            args.comp.component
-        ));
-        hints.push("Some issues may require manual fixes".to_string());
-    }
-
-    // Capability hints when running component-wide lint (no targeting options used)
-    if args.file.is_none()
-        && args.glob.is_none()
-        && !args.changed_only
-        && args.changed_since.is_none()
-    {
-        hints.push(
-            "For targeted linting: --file <path>, --glob <pattern>, --changed-only, or --changed-since <ref>".to_string(),
-        );
-    }
-
-    // Always include docs reference
-    hints.push("Full options: homeboy docs commands/lint".to_string());
-
-    if !args.baseline_args.baseline && baseline_comparison.is_none() {
-        hints.push(format!(
-            "Save lint baseline: homeboy lint {} --baseline",
-            args.comp.component
-        ));
-    }
-
-    let hints = if hints.is_empty() { None } else { Some(hints) };
-    let exit_code = baseline_exit_override.unwrap_or(output.exit_code);
-    if exit_code != output.exit_code {
-        status = "failed".to_string();
-    }
-
-    Ok((
-        LintOutput {
-            status,
-            component: args.comp.component,
-            exit_code,
-            autofix,
-            hints,
-            baseline_comparison,
-            lint_findings: Some(lint_findings),
+        &PathBuf::from(&source_path),
+        LintRunWorkflowArgs {
+            component_label: args.comp.component.clone(),
+            component_id: args.comp.id().to_string(),
+            path_override: args.comp.path.clone(),
+            settings: args.setting_args.setting.clone(),
+            summary: args.summary,
+            file: args.file.clone(),
+            glob: args.glob.clone(),
+            changed_only: args.changed_only,
+            changed_since: args.changed_since.clone(),
+            errors_only: args.errors_only,
+            sniffs: args.sniffs.clone(),
+            exclude_sniffs: args.exclude_sniffs.clone(),
+            category: args.category.clone(),
+            fix: args.fix,
+            baseline: args.baseline_args.baseline,
+            ignore_baseline: args.baseline_args.ignore_baseline,
         },
-        exit_code,
-    ))
+    )?;
+
+    Ok(report::from_main_workflow(workflow))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use homeboy::component::Component;
+    use homeboy::extension::lint as extension_lint;
     use homeboy::extension::lint::baseline::{self as lint_baseline, LintFinding};
     use homeboy::refactor::lint_refactor_request;
+    use homeboy::refactor::LintSourceOptions;
     use std::path::Path;
 
     #[test]
