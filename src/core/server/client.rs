@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
-use crate::server::Server;
 use crate::engine::shell;
+
+use super::Server;
 use std::process::{Command, Stdio};
 
 pub struct SshClient {

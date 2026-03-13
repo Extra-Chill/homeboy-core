@@ -1,10 +1,7 @@
-mod client;
-
-pub use client::*;
-
 use crate::error::{Error, Result};
 use crate::project::{self, Project};
-use crate::server::{self, Server};
+
+use super::Server;
 
 /// Arguments for SSH context resolution
 #[derive(Default)]
@@ -88,7 +85,7 @@ fn resolve_internal(
 
     // --server flag: force server resolution
     if let Some(server_id) = &args.server {
-        let server = server::load(server_id)?;
+        let server = super::load(server_id)?;
         return Ok(("server".to_string(), None, server_id.clone(), server, None));
     }
 
@@ -107,7 +104,7 @@ fn resolve_internal(
         ));
     }
 
-    if let Ok(server) = server::load(id) {
+    if let Ok(server) = super::load(id) {
         return Ok(("server".to_string(), None, id.clone(), server, None));
     }
 
@@ -128,6 +125,6 @@ fn resolve_from_project(project: &Project) -> Result<(String, Server)> {
             None,
         )
     })?;
-    let server = server::load(&server_id)?;
+    let server = super::load(&server_id)?;
     Ok((server_id, server))
 }

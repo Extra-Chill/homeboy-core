@@ -1,6 +1,10 @@
 mod keys;
+mod client;
+mod connection;
 
 pub use keys::*;
+pub use client::*;
+pub use connection::*;
 
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
