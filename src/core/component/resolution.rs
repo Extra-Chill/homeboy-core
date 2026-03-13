@@ -166,12 +166,14 @@ pub fn resolve_effective(
                 discovered.local_path = path.to_string();
                 Ok(discovered)
             } else {
-                Err(Error::validation_invalid_argument(
-                    "local_path",
-                    format!("No homeboy.json found at {}", path),
-                    Some(id.to_string()),
-                    None,
-                ))
+                // Fallback: create a synthetic component when --path is
+                // explicitly provided but the directory has no homeboy.json.
+                // This supports ad-hoc operations on unregistered projects.
+                Ok(Component {
+                    id: id.to_string(),
+                    local_path: path.to_string(),
+                    ..Component::default()
+                })
             }
         } else {
             load(id)
