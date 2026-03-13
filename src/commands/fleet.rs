@@ -2,8 +2,8 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::fleet::{self, Fleet};
-use homeboy::server::health::ServerHealth;
 use homeboy::project::Project;
+use homeboy::server::health::ServerHealth;
 use homeboy::EntityCrudOutput;
 
 use super::{CmdResult, DynamicSetArgs};
@@ -114,7 +114,6 @@ enum FleetCommand {
         #[arg(long, hide = true)]
         serial: bool,
     },
-
 }
 
 /// Entity-specific fields for fleet commands.
@@ -185,7 +184,6 @@ pub fn run(args: FleetArgs, _global: &super::GlobalArgs) -> CmdResult<FleetOutpu
             check,
             serial: _,
         } => exec(&id, command, check),
-
     }
 }
 
@@ -426,5 +424,3 @@ fn exec(id: &str, command: Vec<String>, check: bool) -> CmdResult<FleetOutput> {
         exit_code,
     ))
 }
-
-

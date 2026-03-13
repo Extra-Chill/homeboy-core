@@ -611,7 +611,11 @@ fn detect_doc_drift(root: &Path, component_id: &str) -> Vec<Finding> {
     };
 
     let doc_excludes = if let Ok(comp) = component::load(component_id) {
-        crate::component::scope::resolve_component_scope(&comp, crate::component::scope::ScopeCommand::Audit).exclude
+        crate::component::scope::resolve_component_scope(
+            &comp,
+            crate::component::scope::ScopeCommand::Audit,
+        )
+        .exclude
     } else {
         Vec::new()
     };
