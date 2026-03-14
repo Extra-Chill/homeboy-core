@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
 use homeboy::engine::shell;
 use homeboy::server::{self, Server};
-use homeboy::ssh::{resolve_context, SshClient, SshResolveArgs};
+use homeboy::server::{resolve_context, SshClient, SshResolveArgs};
 use serde::Serialize;
 
 use super::CmdResult;

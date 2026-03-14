@@ -10,7 +10,7 @@ use crate::extension::{self, exec_context, ExtensionCapability, ExtensionExecuti
 use crate::output::{BulkResult, BulkSummary, ItemOutcome};
 use crate::paths;
 use crate::permissions;
-use crate::ssh::execute_local_command_in_dir;
+use crate::server::execute_local_command_in_dir;
 
 mod artifact;
 

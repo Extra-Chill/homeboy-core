@@ -27,7 +27,6 @@ pub(crate) mod impact;
 pub(crate) mod import_matching;
 mod layer_ownership;
 pub(crate) mod naming;
-pub(crate) mod preflight;
 pub mod report;
 pub mod run;
 mod signatures;
@@ -612,7 +611,11 @@ fn detect_doc_drift(root: &Path, component_id: &str) -> Vec<Finding> {
     };
 
     let doc_excludes = if let Ok(comp) = component::load(component_id) {
-        crate::scope::resolve_component_scope(&comp, crate::scope::ScopeCommand::Audit).exclude
+        crate::component::scope::resolve_component_scope(
+            &comp,
+            crate::component::scope::ScopeCommand::Audit,
+        )
+        .exclude
     } else {
         Vec::new()
     };

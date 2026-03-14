@@ -11,7 +11,7 @@ use crate::error::ErrorCode;
 use crate::extension::{find_extension_by_tool, CliConfig};
 use crate::project::{self, Project};
 use crate::server;
-use crate::ssh::{execute_local_command, CommandOutput};
+use crate::server::{execute_local_command, CommandOutput};
 use crate::{Error, Result};
 
 #[derive(Serialize, Clone)]

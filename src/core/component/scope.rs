@@ -1,4 +1,4 @@
-use crate::component::{CommandScopeConfig, Component};
+use super::{CommandScopeConfig, Component};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScopeCommand {

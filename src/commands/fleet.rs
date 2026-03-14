@@ -2,8 +2,8 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::fleet::{self, Fleet};
-use homeboy::health::ServerHealth;
 use homeboy::project::Project;
+use homeboy::server::health::ServerHealth;
 use homeboy::EntityCrudOutput;
 
 use super::{CmdResult, DynamicSetArgs};
@@ -114,23 +114,6 @@ enum FleetCommand {
         #[arg(long, hide = true)]
         serial: bool,
     },
-    /// [DEPRECATED] Use 'homeboy deploy' instead. See issue #101.
-    Sync {
-        /// Fleet ID
-        id: String,
-
-        /// Sync only specific categories (repeatable)
-        #[arg(long, short = 'c', value_delimiter = ',')]
-        category: Option<Vec<String>>,
-
-        /// Show what would be synced without doing it
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Override leader server (defaults to fleet-sync.json config)
-        #[arg(long)]
-        leader: Option<String>,
-    },
 }
 
 /// Entity-specific fields for fleet commands.
@@ -201,12 +184,6 @@ pub fn run(args: FleetArgs, _global: &super::GlobalArgs) -> CmdResult<FleetOutpu
             check,
             serial: _,
         } => exec(&id, command, check),
-        FleetCommand::Sync {
-            id,
-            category,
-            dry_run,
-            leader,
-        } => sync(&id, category, dry_run, leader),
     }
 }
 
@@ -446,21 +423,4 @@ fn exec(id: &str, command: Vec<String>, check: bool) -> CmdResult<FleetOutput> {
         },
         exit_code,
     ))
-}
-
-fn sync(
-    _id: &str,
-    _categories: Option<Vec<String>>,
-    _dry_run: bool,
-    _leader_override: Option<String>,
-) -> CmdResult<FleetOutput> {
-    Err(homeboy::Error::validation_invalid_argument(
-        "fleet sync",
-        "fleet sync has been deprecated. Use 'homeboy deploy' to sync files across servers. \
-         Register your agent workspace as a component and deploy it like any other component.",
-        None,
-        None,
-    )
-    .with_hint("homeboy deploy <component> --fleet <fleet>".to_string())
-    .with_hint("See: https://github.com/Extra-Chill/homeboy/issues/101".to_string()))
 }

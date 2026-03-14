@@ -1,11 +1,10 @@
 use clap::Args;
 
-use homeboy::transfer::{self, TransferConfig};
+use homeboy::server::transfer::{self, TransferConfig};
 
 use super::CmdResult;
 
-// Re-export for dispatch compatibility
-pub use homeboy::transfer::TransferOutput;
+pub use homeboy::server::transfer::TransferOutput;
 
 #[derive(Args)]
 pub struct TransferArgs {

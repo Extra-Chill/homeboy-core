@@ -1,10 +1,14 @@
 mod client;
 mod connection;
+pub mod health;
 mod keys;
+pub mod transfer;
 
 pub use client::*;
 pub use connection::*;
+pub use health::*;
 pub use keys::*;
+pub use transfer::*;
 
 use crate::config::{self, ConfigEntity};
 use crate::error::{Error, Result};
