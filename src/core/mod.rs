@@ -21,7 +21,6 @@ pub mod undo;
 pub mod upgrade;
 
 // Internal extensions - not part of public API
-pub(crate) mod local_files;
 pub(crate) mod paths;
 
 // Public extensions for CLI access

@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
+use crate::engine::local_files;
 use crate::error::{Error, Result};
-use crate::local_files;
 
 // ============================================================================
 // Rule model

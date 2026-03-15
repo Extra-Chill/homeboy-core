@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::component::{self, Component};
+use crate::engine::local_files;
 use crate::engine::validation;
 use crate::error::Result;
-use crate::local_files;
 use crate::paths::resolve_path;
 
 use super::sections::*;

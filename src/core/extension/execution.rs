@@ -1,9 +1,9 @@
 use crate::component::{self, Component};
 use crate::engine::command::CapturedOutput;
+use crate::engine::local_files;
 use crate::engine::shell;
 use crate::engine::{template, validation};
 use crate::error::{Error, Result};
-use crate::local_files;
 use crate::project::{self, Project};
 use crate::server::http::ApiClient;
 use crate::server::{
