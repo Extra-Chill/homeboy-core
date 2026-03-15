@@ -604,8 +604,12 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
                     }
                 }
                 None => {
-                    // Different token counts — structural mismatch.
-                    // Find the majority token count and flag files that differ.
+                    // Different token counts — possible structural mismatch.
+                    // Group signatures by token count to identify signature families.
+                    // A token count shared by 2+ files is an intentional variant (e.g.,
+                    // different handler types with the same method name but different
+                    // parameter lists). Only flag truly isolated signatures — those
+                    // with a token count that appears exactly once (#691).
                     let mut len_counts: HashMap<usize, usize> = HashMap::new();
                     for t in &tokenized {
                         *len_counts.entry(t.len()).or_insert(0) += 1;
@@ -629,22 +633,31 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
                     };
 
                     for (i, (file, sig)) in file_sigs.iter().enumerate() {
-                        if tokenized[i].len() != majority_len {
-                            new_outlier_deviations
-                                .entry(file.clone())
-                                .or_default()
-                                .push(Deviation {
-                                    kind: AuditFinding::SignatureMismatch,
-                                    description: format!(
-                                        "Signature mismatch for {}: different structure — expected {} tokens, found {}. Example: `{}`",
-                                        method, majority_len, tokenized[i].len(), sig
-                                    ),
-                                    suggestion: format!(
-                                        "Update {}() to match the structural pattern: `{}`",
-                                        method, canonical_display
-                                    ),
-                                });
+                        let this_len = tokenized[i].len();
+                        if this_len == majority_len {
+                            continue;
                         }
+                        // Only flag if this token count is truly isolated (count == 1).
+                        // Multiple files sharing the same non-majority signature
+                        // indicates an intentional variant, not a mismatch.
+                        let family_size = len_counts.get(&this_len).copied().unwrap_or(0);
+                        if family_size >= 2 {
+                            continue;
+                        }
+                        new_outlier_deviations
+                            .entry(file.clone())
+                            .or_default()
+                            .push(Deviation {
+                                kind: AuditFinding::SignatureMismatch,
+                                description: format!(
+                                    "Signature mismatch for {}: different structure — expected {} tokens, found {}. Example: `{}`",
+                                    method, majority_len, tokenized[i].len(), sig
+                                ),
+                                suggestion: format!(
+                                    "Update {}() to match the structural pattern: `{}`",
+                                    method, canonical_display
+                                ),
+                            });
                     }
                 }
             }
