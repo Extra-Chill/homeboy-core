@@ -30,6 +30,7 @@ pub(crate) fn apply_insertions_to_content(
     let mut visibility_changes: Vec<(usize, &str, &str)> = Vec::new();
     let mut doc_ref_updates: Vec<(usize, &str, &str)> = Vec::new();
     let mut doc_line_removals: Vec<usize> = Vec::new();
+    let mut reexport_removals: Vec<&str> = Vec::new();
 
     for insertion in insertions {
         match &insertion.kind {
@@ -53,6 +54,9 @@ pub(crate) fn apply_insertions_to_content(
                 new_ref,
             } => doc_ref_updates.push((*line, old_ref.as_str(), new_ref.as_str())),
             InsertionKind::DocLineRemoval { line } => doc_line_removals.push(*line),
+            InsertionKind::ReexportRemoval { fn_name } => {
+                reexport_removals.push(fn_name.as_str());
+            }
         }
     }
 
@@ -92,6 +96,18 @@ pub(crate) fn apply_insertions_to_content(
             if idx < lines.len() {
                 lines.remove(idx);
             }
+        }
+        result = lines.join("\n");
+        if content.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+    }
+
+    // Remove function names from `pub use { ... }` re-export blocks.
+    if !reexport_removals.is_empty() {
+        let mut lines: Vec<String> = result.lines().map(String::from).collect();
+        for fn_name in &reexport_removals {
+            remove_from_pub_use_block(&mut lines, fn_name);
         }
         result = lines.join("\n");
         if content.ends_with('\n') && !result.ends_with('\n') {
@@ -159,6 +175,107 @@ pub(crate) fn apply_insertions_to_content(
     }
 
     result
+}
+
+/// Remove a function name from `pub use { ... }` blocks.
+///
+/// Handles both single-line (`pub use module::{a, b, c};`) and multi-line
+/// re-export blocks. Removes the name and trailing comma. If the block
+/// becomes empty after removal, removes the entire `pub use` statement.
+fn remove_from_pub_use_block(lines: &mut Vec<String>, fn_name: &str) {
+    let word_pattern = format!(r"\b{}\b", regex::escape(fn_name));
+    let word_re = match regex::Regex::new(&word_pattern) {
+        Ok(re) => re,
+        Err(_) => return,
+    };
+
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim().to_string();
+
+        // Single-line: pub use module::{a, b, c};
+        if trimmed.starts_with("pub use") && trimmed.contains('{') && trimmed.contains('}') {
+            if word_re.is_match(&trimmed) {
+                // Remove the name (and surrounding comma/whitespace)
+                let cleaned = word_re
+                    .replace(&lines[i], "")
+                    .to_string()
+                    .replace(", ,", ",")
+                    .replace("{, ", "{ ")
+                    .replace("{,", "{")
+                    .replace(", }", " }")
+                    .replace(",}", "}");
+
+                // Check if the block is now empty
+                if let Some(start) = cleaned.find('{') {
+                    if let Some(end) = cleaned.find('}') {
+                        let inside = cleaned[start + 1..end].trim();
+                        if inside.is_empty() {
+                            lines.remove(i);
+                            continue;
+                        }
+                    }
+                }
+                lines[i] = cleaned;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Multi-line block: pub use module::{
+        if trimmed.starts_with("pub use") && trimmed.contains('{') && !trimmed.contains('}') {
+            let block_start = i;
+            i += 1;
+            while i < lines.len() {
+                let inner = lines[i].trim().to_string();
+                if word_re.is_match(&inner) {
+                    // Remove this line entirely if it's just the name
+                    let cleaned = word_re
+                        .replace(&inner, "")
+                        .to_string()
+                        .replace(", ,", ",")
+                        .trim()
+                        .to_string();
+                    if cleaned.is_empty() || cleaned == "," {
+                        lines.remove(i);
+                        continue;
+                    }
+                    // Remove trailing comma if it's the last item before }
+                    let cleaned = cleaned.trim_end_matches(',').trim().to_string();
+                    if cleaned.is_empty() {
+                        lines.remove(i);
+                        continue;
+                    }
+                    lines[i] = format!(
+                        "{}{}",
+                        " ".repeat(lines[i].len() - lines[i].trim_start().len()),
+                        cleaned
+                    );
+                }
+                if inner.contains('}') {
+                    break;
+                }
+                i += 1;
+            }
+
+            // Check if the block is now empty (only opening and closing lines remain)
+            let block_end = i.min(lines.len() - 1);
+            let has_items = (block_start + 1..block_end)
+                .any(|j| !lines[j].trim().is_empty() && lines[j].trim() != ",");
+            if !has_items {
+                // Remove entire block
+                for _ in block_start..=block_end.min(lines.len() - 1) {
+                    if block_start < lines.len() {
+                        lines.remove(block_start);
+                    }
+                }
+                i = block_start;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
 }
 
 pub(crate) fn insert_into_constructor(
@@ -794,4 +911,52 @@ pub fn apply_decompose_plans(
         }
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_from_single_line_pub_use() {
+        let mut lines: Vec<String> = vec![
+            "pub use planner::{analyze_stage_overlaps, build_refactor_plan, normalize_sources};"
+                .into(),
+        ];
+        remove_from_pub_use_block(&mut lines, "analyze_stage_overlaps");
+        assert_eq!(lines.len(), 1);
+        assert!(!lines[0].contains("analyze_stage_overlaps"));
+        assert!(lines[0].contains("build_refactor_plan"));
+        assert!(lines[0].contains("normalize_sources"));
+    }
+
+    #[test]
+    fn remove_last_item_deletes_entire_line() {
+        let mut lines: Vec<String> = vec!["pub use planner::{only_function};".into()];
+        remove_from_pub_use_block(&mut lines, "only_function");
+        assert!(lines.is_empty(), "Empty pub use should be removed entirely");
+    }
+
+    #[test]
+    fn remove_from_multiline_pub_use() {
+        let mut lines: Vec<String> = vec![
+            "pub use module::{".into(),
+            "    alpha,".into(),
+            "    beta,".into(),
+            "    gamma,".into(),
+            "};".into(),
+        ];
+        remove_from_pub_use_block(&mut lines, "beta");
+        let joined = lines.join("\n");
+        assert!(!joined.contains("beta"), "beta should be removed");
+        assert!(joined.contains("alpha"), "alpha should remain");
+        assert!(joined.contains("gamma"), "gamma should remain");
+    }
+
+    #[test]
+    fn remove_does_not_touch_unrelated_pub_use() {
+        let mut lines: Vec<String> = vec!["pub use other::{foo, bar};".into()];
+        remove_from_pub_use_block(&mut lines, "baz");
+        assert_eq!(lines[0], "pub use other::{foo, bar};");
+    }
 }
