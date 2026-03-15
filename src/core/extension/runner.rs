@@ -114,7 +114,7 @@ impl ExtensionRunner {
     ///
     /// Use this when the command is pre-resolved (e.g., Build's `command_template`
     /// has already been interpolated with the script path).
-    pub fn command_override(mut self, command: String) -> Self {
+    pub(crate) fn command_override(mut self, command: String) -> Self {
         self.command_override = Some(command);
         self
     }
