@@ -529,6 +529,12 @@ fn run_fix_iteration(
     ))
 }
 
+/// Findings that are expected side effects of structural refactoring.
+///
+/// When decompose splits a god file into submodules, the new smaller files
+/// may trigger findings that weren't visible before (e.g., duplication
+/// patterns become detectable at the file level, or new files lack tests).
+/// These are the next step to fix, not a reason to rollback the refactor.
 fn is_cascading_finding_kind(kind: &crate::code_audit::AuditFinding) -> bool {
     use crate::code_audit::AuditFinding;
 
@@ -539,6 +545,10 @@ fn is_cascading_finding_kind(kind: &crate::code_audit::AuditFinding) -> bool {
             | AuditFinding::DirectorySprawl
             | AuditFinding::MissingTestFile
             | AuditFinding::MissingTestMethod
+            | AuditFinding::IntraMethodDuplicate
+            | AuditFinding::NearDuplicate
+            | AuditFinding::ParallelImplementation
+            | AuditFinding::UnreferencedExport
     )
 }
 
