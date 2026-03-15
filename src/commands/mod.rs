@@ -283,15 +283,12 @@ pub mod lint;
 pub mod logs;
 pub mod project;
 pub mod refactor;
-#[cfg(test)]
-pub mod refactor_tests;
 pub mod release;
 pub mod server;
 pub mod ssh;
 pub mod status;
 pub mod supports;
 pub mod test;
-pub mod test_scope;
 pub mod transfer;
 pub mod undo;
 pub mod upgrade;
