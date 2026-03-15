@@ -111,6 +111,13 @@ pub enum InsertionKind {
         /// Replacement text (e.g., "pub(crate) fn").
         to: String,
     },
+    /// Remove a function name from a `pub use { ... }` re-export block.
+    /// Used when narrowing visibility of unreferenced exports that are
+    /// also re-exported in parent mod.rs files.
+    ReexportRemoval {
+        /// The function name to remove from the re-export.
+        fn_name: String,
+    },
     /// Replace a stale path reference in a documentation file.
     DocReferenceUpdate {
         /// 1-indexed line number where the reference appears.
@@ -137,7 +144,8 @@ impl InsertionKind {
             | Self::ConstructorWithRegistration
             | Self::TypeConformance
             | Self::NamespaceDeclaration
-            | Self::VisibilityChange { .. } => FixSafetyTier::SafeWithChecks,
+            | Self::VisibilityChange { .. }
+            | Self::ReexportRemoval { .. } => FixSafetyTier::SafeWithChecks,
             Self::MethodStub => FixSafetyTier::PlanOnly,
             Self::FunctionRemoval { .. } | Self::TraitUse => FixSafetyTier::PlanOnly,
         }

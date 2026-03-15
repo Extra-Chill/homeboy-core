@@ -52,16 +52,22 @@ pub(crate) fn generate_unreferenced_export_fixes(
             continue;
         }
 
-        if is_reexported(&finding.file, &fn_name, root) {
+        // Hard block: binary crate directly references this function.
+        if is_used_by_binary_crate(&fn_name, root) {
             skipped.push(SkippedFile {
                 file: finding.file.clone(),
                 reason: format!(
-                    "Function '{}' is re-exported or used by binary crate — cannot narrow visibility",
+                    "Function '{}' is used by binary crate — cannot narrow visibility",
                     fn_name
                 ),
             });
             continue;
         }
+
+        // Collect mod.rs files that re-export this function via `pub use`.
+        // We'll generate ReexportRemoval fixes for these alongside the
+        // visibility change.
+        let reexport_files = find_reexport_files(&finding.file, &fn_name, root);
 
         let target_patterns = [
             format!("pub fn {}(", fn_name),
@@ -96,6 +102,7 @@ pub(crate) fn generate_unreferenced_export_fixes(
             ("pub fn".to_string(), "pub(crate) fn".to_string())
         };
 
+        // Generate visibility change for the source file.
         fixes.push(Fix {
             file: finding.file.clone(),
             required_methods: vec![],
@@ -115,6 +122,27 @@ pub(crate) fn generate_unreferenced_export_fixes(
             )],
             applied: false,
         });
+
+        // Generate re-export removal fixes for parent mod.rs files.
+        for reexport_file in &reexport_files {
+            fixes.push(Fix {
+                file: reexport_file.clone(),
+                required_methods: vec![],
+                required_registrations: vec![],
+                insertions: vec![insertion(
+                    InsertionKind::ReexportRemoval {
+                        fn_name: fn_name.clone(),
+                    },
+                    AuditFinding::UnreferencedExport,
+                    format!("Remove '{}' from pub use", fn_name),
+                    format!(
+                        "Remove re-export of '{}' from {} (no longer public)",
+                        fn_name, reexport_file
+                    ),
+                )],
+                applied: false,
+            });
+        }
     }
 }
 
@@ -444,8 +472,11 @@ fn generate_simple_duplicate_fixes(
     }
 }
 
-pub(crate) fn is_reexported(file_path: &str, fn_name: &str, root: &Path) -> bool {
+/// Find mod.rs/lib.rs files that re-export a function via `pub use`.
+/// Returns relative paths (e.g., "src/core/refactor/mod.rs").
+fn find_reexport_files(file_path: &str, fn_name: &str, root: &Path) -> Vec<String> {
     let source_path = Path::new(file_path);
+    let mut result = Vec::new();
 
     let mut current = source_path.parent();
     while let Some(dir) = current {
@@ -456,13 +487,13 @@ pub(crate) fn is_reexported(file_path: &str, fn_name: &str, root: &Path) -> bool
                     .ok()
                     .is_some_and(|content| has_pub_use_of(&content, fn_name))
             {
-                return true;
+                result.push(format!("{}/{}", dir.display(), filename));
             }
         }
         current = dir.parent();
     }
 
-    is_used_by_binary_crate(fn_name, root)
+    result
 }
 
 pub(crate) fn has_pub_use_of(content: &str, fn_name: &str) -> bool {
