@@ -1,10 +1,10 @@
 use crate::code_audit::{self, CodeAuditResult};
 use crate::component::{self, Component};
 use crate::engine::temp;
+use crate::engine::undo::UndoSnapshot;
 use crate::extension::test::compute_changed_test_files;
 use crate::extension::{lint as extension_lint, test as extension_test};
 use crate::refactor::auto as fixer;
-use crate::undo::UndoSnapshot;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

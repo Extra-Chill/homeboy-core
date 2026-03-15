@@ -22,4 +22,5 @@ pub mod symbol_graph;
 pub mod temp;
 pub mod template;
 pub mod text;
+pub mod undo;
 pub mod validation;
