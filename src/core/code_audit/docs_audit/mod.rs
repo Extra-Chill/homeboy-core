@@ -111,6 +111,12 @@ pub struct AuditResult {
 /// Find all markdown files in the docs directory.
 ///
 /// Excludes configured doc targets using file-name matching (case-insensitive).
+/// Filenames excluded from docs audit by default.
+/// CHANGELOG files are historically referential by design — they reference
+/// old functions, modules, and paths that no longer exist. Flagging them
+/// as stale/broken doc references is noise, not signal.
+const DEFAULT_DOC_EXCLUDES: &[&str] = &["changelog.md"];
+
 pub(crate) fn find_doc_files(docs_path: &Path, excluded_targets: &[String]) -> Vec<String> {
     let mut docs = Vec::new();
 
@@ -118,12 +124,13 @@ pub(crate) fn find_doc_files(docs_path: &Path, excluded_targets: &[String]) -> V
         return docs;
     }
 
-    let excluded_filenames: std::collections::HashSet<String> = excluded_targets
+    let mut excluded_filenames: std::collections::HashSet<String> = excluded_targets
         .iter()
         .filter_map(|p| Path::new(p).file_name())
         .filter_map(|n| n.to_str())
         .map(|s| s.to_lowercase())
         .collect();
+    excluded_filenames.extend(DEFAULT_DOC_EXCLUDES.iter().map(|s| s.to_string()));
 
     fn scan_docs(
         dir: &Path,
@@ -219,17 +226,17 @@ mod tests {
     }
 
     #[test]
-    fn test_find_doc_files_no_exclusion_when_none() {
+    fn test_find_doc_files_default_excludes_changelog() {
         let dir = tempfile::tempdir().unwrap();
         let docs_path = dir.path();
 
         fs::write(docs_path.join("guide.md"), "# Guide\n").unwrap();
         fs::write(docs_path.join("CHANGELOG.md"), "# Changelog\n").unwrap();
 
-        // Without exclusion, changelog should be included
+        // CHANGELOG is excluded by default (historically referential by design)
         let files = find_doc_files(docs_path, &[]);
-        assert_eq!(files.len(), 2);
-        assert!(files.iter().any(|f| f == "CHANGELOG.md"));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], "guide.md");
     }
 
     #[test]
@@ -241,10 +248,9 @@ mod tests {
         fs::write(docs_path.join("CHANGELOG.md"), "# Changelog\n").unwrap();
         fs::write(docs_path.join("CHANGES.md"), "# Changes\n").unwrap();
 
+        // CHANGES.md excluded by caller, CHANGELOG.md excluded by default
         let files = find_doc_files(docs_path, &["CHANGES.md".to_string()]);
-        assert_eq!(files.len(), 2);
-        assert!(files.contains(&"CHANGELOG.md".to_string()));
-        assert!(files.contains(&"guide.md".to_string()));
-        assert!(!files.iter().any(|f| f == "CHANGES.md"));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], "guide.md");
     }
 }
