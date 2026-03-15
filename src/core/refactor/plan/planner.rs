@@ -1,11 +1,11 @@
 use crate::component::Component;
 use crate::engine::temp;
+use crate::engine::undo::UndoSnapshot;
 use crate::extension;
 use crate::extension::test::compute_changed_test_files;
 use crate::git;
 use crate::refactor::auto as fixer;
 use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
-use crate::undo::UndoSnapshot;
 use crate::Error;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};

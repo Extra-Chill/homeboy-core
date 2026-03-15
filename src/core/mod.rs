@@ -17,7 +17,6 @@ pub mod refactor;
 pub mod release;
 pub mod scaffold;
 pub mod server;
-pub mod undo;
 pub mod upgrade;
 
 // Internal extensions - not part of public API

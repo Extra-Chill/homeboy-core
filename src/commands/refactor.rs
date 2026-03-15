@@ -506,7 +506,11 @@ fn run_rename(
             .chain(result.file_renames.iter().map(|r| r.from.clone()))
             .chain(result.file_renames.iter().map(|r| r.to.clone()))
             .collect();
-        homeboy::undo::UndoSnapshot::capture_and_save(&root, "refactor rename", &affected_files);
+        homeboy::engine::undo::UndoSnapshot::capture_and_save(
+            &root,
+            "refactor rename",
+            &affected_files,
+        );
 
         refactor::apply_renames(&mut result, &root)?;
     }
@@ -721,7 +725,7 @@ fn run_move(
     let root = refactor::move_items::resolve_root(component_id, path)?;
 
     if write {
-        homeboy::undo::UndoSnapshot::capture_and_save(&root, "refactor move", [from, to]);
+        homeboy::engine::undo::UndoSnapshot::capture_and_save(&root, "refactor move", [from, to]);
     }
 
     let item_refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
@@ -803,7 +807,11 @@ fn run_propagate(
         // Dry-run to discover affected files for the undo snapshot
         let preview = refactor::propagate(&config)?;
         let affected_files: Vec<&str> = preview.edits.iter().map(|e| e.file.as_str()).collect();
-        homeboy::undo::UndoSnapshot::capture_and_save(&root, "refactor propagate", affected_files);
+        homeboy::engine::undo::UndoSnapshot::capture_and_save(
+            &root,
+            "refactor propagate",
+            affected_files,
+        );
     }
 
     // Run the actual propagation (with write mode as requested)
@@ -913,7 +921,7 @@ fn run_transform(
                 .iter()
                 .flat_map(|r| r.matches.iter().map(|m| m.file.clone()))
                 .collect();
-            homeboy::undo::UndoSnapshot::capture_and_save(
+            homeboy::engine::undo::UndoSnapshot::capture_and_save(
                 &root,
                 "refactor transform",
                 &affected_files,
@@ -1001,7 +1009,11 @@ fn run_decompose(
         let affected: Vec<&str> = std::iter::once(file)
             .chain(plan.groups.iter().map(|g| g.suggested_target.as_str()))
             .collect();
-        homeboy::undo::UndoSnapshot::capture_and_save(&root, "refactor decompose", affected);
+        homeboy::engine::undo::UndoSnapshot::capture_and_save(
+            &root,
+            "refactor decompose",
+            affected,
+        );
     }
 
     let move_results = refactor::apply_plan(&plan, &root, write)?;
