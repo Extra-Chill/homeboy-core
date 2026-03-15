@@ -90,7 +90,11 @@ pub fn write_portable_config(dir: &Path, component: &Component) -> Result<()> {
     let path = dir.join("homeboy.json");
     let portable = portable_json(component)?;
     let content = crate::config::to_string_pretty(&portable)?;
-    crate::local_files::write_file_atomic(&path, &content, &format!("write {}", path.display()))
+    crate::engine::local_files::write_file_atomic(
+        &path,
+        &content,
+        &format!("write {}", path.display()),
+    )
 }
 
 pub fn has_portable_config(path: &Path) -> bool {

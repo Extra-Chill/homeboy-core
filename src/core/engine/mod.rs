@@ -14,6 +14,7 @@ pub mod command;
 pub mod executor;
 pub mod hooks;
 pub mod identifier;
+pub(crate) mod local_files;
 pub mod output_parse;
 pub mod pipeline;
 pub mod shell;

@@ -15,9 +15,9 @@ use regex::Regex;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+use crate::engine::local_files;
 use crate::error::{Error, Result};
 use crate::extension::grammar;
-use crate::local_files;
 
 /// A public method/function extracted from a source file.
 #[derive(Debug, Clone, Serialize)]

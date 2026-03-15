@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-use crate::local_files;
+use crate::engine::local_files;
 use crate::paths;
 
 /// Root configuration structure for homeboy.json

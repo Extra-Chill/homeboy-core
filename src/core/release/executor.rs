@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::core::local_files::FileSystem;
+use crate::engine::local_files::FileSystem;
 use crate::engine::pipeline::{
     PipelineRunStatus, PipelineStep, PipelineStepExecutor, PipelineStepResult,
 };
@@ -658,7 +658,7 @@ impl ReleaseStepExecutor {
 
     fn load_release_notes(&self) -> Result<String> {
         let changelog_path = changelog::resolve_changelog_path(&self.component)?;
-        let changelog_content = crate::core::local_files::local().read(&changelog_path)?;
+        let changelog_content = crate::engine::local_files::local().read(&changelog_path)?;
         let notes = validation::require(
             extract_latest_notes(&changelog_content),
             "changelog",

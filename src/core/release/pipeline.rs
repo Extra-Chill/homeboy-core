@@ -1,5 +1,5 @@
 use crate::component::{self, Component};
-use crate::core::local_files::FileSystem;
+use crate::engine::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
 use crate::engine::temp;
 use crate::engine::validation::ValidationCollector;
@@ -323,7 +323,7 @@ fn build_semver_recommendation(
 
 fn validate_changelog(component: &Component) -> Result<()> {
     let changelog_path = changelog::resolve_changelog_path(component)?;
-    let changelog_content = crate::core::local_files::local().read(&changelog_path)?;
+    let changelog_content = crate::engine::local_files::local().read(&changelog_path)?;
     let settings = changelog::resolve_effective_settings(Some(component));
 
     if let Some(status) =
@@ -549,7 +549,7 @@ fn validate_commits_vs_changelog(
 
     // Read unreleased changelog entries
     let changelog_path = changelog::resolve_changelog_path(component)?;
-    let changelog_content = crate::core::local_files::local().read(&changelog_path)?;
+    let changelog_content = crate::engine::local_files::local().read(&changelog_path)?;
     let settings = changelog::resolve_effective_settings(Some(component));
     let unreleased_entries =
         changelog::get_unreleased_entries(&changelog_content, &settings.next_section_aliases);

@@ -1,8 +1,8 @@
 use crate::config::{self, from_str};
 use crate::engine::identifier;
+use crate::engine::local_files::{self, FileSystem};
 use crate::error::{Error, Result};
 use crate::git;
-use crate::local_files::{self, FileSystem};
 use crate::paths;
 use std::path::{Path, PathBuf};
 use std::process::Command;
