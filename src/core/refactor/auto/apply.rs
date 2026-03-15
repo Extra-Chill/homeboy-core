@@ -229,30 +229,36 @@ fn remove_from_pub_use_block(lines: &mut Vec<String>, fn_name: &str) {
             while i < lines.len() {
                 let inner = lines[i].trim().to_string();
                 if word_re.is_match(&inner) {
-                    // Remove this line entirely if it's just the name
+                    // Remove the matched name (and surrounding comma/whitespace)
                     let cleaned = word_re
                         .replace(&inner, "")
                         .to_string()
                         .replace(", ,", ",")
                         .trim()
                         .to_string();
-                    if cleaned.is_empty() || cleaned == "," {
-                        lines.remove(i);
-                        continue;
-                    }
-                    // Remove trailing comma if it's the last item before }
-                    let cleaned = cleaned.trim_end_matches(',').trim().to_string();
+                    // Strip leading/trailing commas to normalize
+                    let cleaned = cleaned
+                        .trim_start_matches(',')
+                        .trim_end_matches(',')
+                        .trim()
+                        .to_string();
                     if cleaned.is_empty() {
                         lines.remove(i);
                         continue;
                     }
-                    lines[i] = format!(
-                        "{}{}",
-                        " ".repeat(lines[i].len() - lines[i].trim_start().len()),
+                    // Restore trailing comma for non-closing lines in a multi-line block.
+                    // Without this, removing an item from the end of a line leaves the
+                    // previous items without a trailing comma, breaking the next line.
+                    let needs_trailing_comma = !cleaned.contains('}');
+                    let final_cleaned = if needs_trailing_comma && !cleaned.ends_with(',') {
+                        format!("{},", cleaned)
+                    } else {
                         cleaned
-                    );
+                    };
+                    let indent = " ".repeat(lines[i].len() - lines[i].trim_start().len());
+                    lines[i] = format!("{}{}", indent, final_cleaned);
                 }
-                if inner.contains('}') {
+                if lines[i].trim().contains('}') {
                     break;
                 }
                 i += 1;
