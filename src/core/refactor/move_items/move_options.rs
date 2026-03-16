@@ -1,6 +1,5 @@
 //! move_options — extracted from move_items.rs.
 
-
 /// Behavioral options for move operations.
 #[derive(Debug, Clone, Copy)]
 pub struct MoveOptions {

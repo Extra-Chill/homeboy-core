@@ -41,21 +41,19 @@ pub(super) fn execute_component_deploy(
     };
 
     // Build (git-deploy, skip-build, and release-download skip this step)
-    let (build_exit_code, build_error) = if is_git_deploy
-        || config.skip_build
-        || release_artifact.is_some()
-    {
-        (Some(0), None)
-    } else if artifact_is_fresh(component) {
-        log_status!(
-            "deploy",
-            "Artifact for '{}' is up-to-date, skipping build",
-            component.id
-        );
-        (Some(0), None)
-    } else {
-        build::build_component(component)
-    };
+    let (build_exit_code, build_error) =
+        if is_git_deploy || config.skip_build || release_artifact.is_some() {
+            (Some(0), None)
+        } else if artifact_is_fresh(component) {
+            log_status!(
+                "deploy",
+                "Artifact for '{}' is up-to-date, skipping build",
+                component.id
+            );
+            (Some(0), None)
+        } else {
+            build::build_component(component)
+        };
 
     if let Some(ref error) = build_error {
         return ComponentDeployResult::failed(
@@ -349,9 +347,7 @@ fn try_download_release_artifact(component: &Component) -> Option<PathBuf> {
     let artifact_name = release_download::resolve_artifact_name(component)?;
 
     // Get the latest tag from the local clone (already synced by the pipeline)
-    let tag = git::get_latest_tag(&component.local_path)
-        .ok()
-        .flatten()?;
+    let tag = git::get_latest_tag(&component.local_path).ok().flatten()?;
 
     log_status!(
         "deploy",

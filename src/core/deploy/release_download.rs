@@ -96,17 +96,14 @@ pub fn download_release_artifact(
     let tmp_dir = crate::engine::temp::runtime_temp_dir("deploy-download")?;
     let dest_path = tmp_dir.join(artifact_name);
 
-    log_status!(
-        "deploy",
-        "Downloading release artifact: {}",
-        url
-    );
+    log_status!("deploy", "Downloading release artifact: {}", url);
 
     // Use curl for the download (follows redirects, handles GitHub's CDN)
     let output = std::process::Command::new("curl")
         .args([
-            "-fsSL",           // fail silently, show errors, follow redirects
-            "--retry", "3",    // retry on transient failures
+            "-fsSL", // fail silently, show errors, follow redirects
+            "--retry",
+            "3", // retry on transient failures
             "-o",
             dest_path.to_str().unwrap_or("artifact"),
             &url,
@@ -254,7 +251,10 @@ mod tests {
             "/remote".to_string(),
             Some("target/distrib/test-plugin.zip".to_string()),
         );
-        assert_eq!(resolve_artifact_name(&comp), Some("test-plugin.zip".to_string()));
+        assert_eq!(
+            resolve_artifact_name(&comp),
+            Some("test-plugin.zip".to_string())
+        );
 
         comp.build_artifact = Some("simple.zip".to_string());
         assert_eq!(resolve_artifact_name(&comp), Some("simple.zip".to_string()));

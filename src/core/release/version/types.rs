@@ -1,11 +1,7 @@
 //! types — extracted from version.rs.
 
-use crate::error::{Error, Result};
 use crate::is_zero;
-use crate::release::changelog;
 use serde::Serialize;
-use crate::core::release::*;
-
 
 /// Information about a version target after reading
 #[derive(Debug, Clone, Serialize)]
