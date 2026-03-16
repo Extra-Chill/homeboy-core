@@ -374,7 +374,16 @@ fn audit_internal(
     }
 
     // Phase 4d2: Parallel implementation detection (similar call patterns across files)
-    let parallel_findings = duplication::detect_parallel_implementations(&all_fingerprints);
+    // Build set of convention-expected methods to exclude from parallel detection.
+    // If a method is expected by a convention (present in 50%+ of files in the group),
+    // then similar call patterns across files implementing that convention are expected,
+    // not findings.
+    let convention_methods: std::collections::HashSet<String> = discovered_conventions
+        .iter()
+        .flat_map(|c| c.expected_methods.iter().cloned())
+        .collect();
+    let parallel_findings =
+        duplication::detect_parallel_implementations(&all_fingerprints, &convention_methods);
     if !parallel_findings.is_empty() {
         log_status!(
             "audit",

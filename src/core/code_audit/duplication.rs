@@ -913,7 +913,15 @@ fn lcs_ratio(a: &[String], b: &[String]) -> f64 {
 /// - Methods with fewer than MIN_CALL_COUNT calls
 /// - Pairs already caught by exact or near-duplicate detection
 /// - Pairs below both similarity thresholds
-pub(crate) fn detect_parallel_implementations(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+/// Detect parallel implementations — methods with similar call patterns across files.
+///
+/// `convention_methods` contains method names that are expected by discovered conventions.
+/// When both methods in a pair are convention-expected, the pair is skipped — similar call
+/// patterns are the expected behavior for convention-following code, not a finding.
+pub(crate) fn detect_parallel_implementations(
+    fingerprints: &[&FileFingerprint],
+    convention_methods: &std::collections::HashSet<String>,
+) -> Vec<Finding> {
     let sequences = extract_call_sequences(fingerprints);
 
     // Build sets of already-flagged pairs (exact + near duplicates) to avoid double-flagging
@@ -945,6 +953,14 @@ pub(crate) fn detect_parallel_implementations(fingerprints: &[&FileFingerprint])
 
             // Skip if either function is an exact duplicate
             if exact_dup_fns.contains(&a.method) || exact_dup_fns.contains(&b.method) {
+                continue;
+            }
+
+            // Skip if both methods are convention-expected — their similar call patterns
+            // are by design (they follow the same convention), not parallel implementation.
+            if convention_methods.contains(&a.method)
+                && convention_methods.contains(&b.method)
+            {
                 continue;
             }
 
@@ -1513,7 +1529,7 @@ mod tests {
             "fn upgrade_on_server() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    send_notification();\n}",
         );
 
-        let findings = detect_parallel_implementations(&[&fp1, &fp2]);
+        let findings = detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
 
         assert_eq!(findings.len(), 2, "Should emit one finding per file");
         assert!(findings
@@ -1536,7 +1552,7 @@ mod tests {
             "fn parse_config() {\n    read_file();\n    tokenize();\n    parse_ast();\n    validate_schema();\n}",
         );
 
-        let findings = detect_parallel_implementations(&[&fp1, &fp2]);
+        let findings = detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
         assert!(
             findings.is_empty(),
             "Completely different call sets should not flag"
@@ -1551,7 +1567,7 @@ mod tests {
             "fn deploy_op() {\n    validate();\n    build();\n    upload();\n    notify();\n}\nfn upgrade_op() {\n    validate();\n    build();\n    upload();\n    notify();\n}",
         );
 
-        let findings = detect_parallel_implementations(&[&fp]);
+        let findings = detect_parallel_implementations(&[&fp], &std::collections::HashSet::new());
         assert!(
             findings.is_empty(),
             "Same-file methods should not be flagged as parallel"
@@ -1571,7 +1587,7 @@ mod tests {
             "fn small_b() {\n    foo();\n    bar();\n}",
         );
 
-        let findings = detect_parallel_implementations(&[&fp1, &fp2]);
+        let findings = detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
         assert!(
             findings.is_empty(),
             "Methods with < MIN_CALL_COUNT calls should be skipped"
@@ -1593,7 +1609,7 @@ mod tests {
         );
 
         // "run" is skipped, so only one method in the pool — no pair to compare
-        let findings = detect_parallel_implementations(&[&fp1, &fp2]);
+        let findings = detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
         // Only fp2's "execute" has a valid call sequence; fp1's "run" is filtered
         // So there's only 1 candidate, no pair → no findings
         assert!(findings.is_empty(), "Generic names should be filtered out");
@@ -1637,5 +1653,40 @@ mod tests {
         let a = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let b = vec!["a".to_string(), "x".to_string(), "c".to_string()];
         assert_eq!(lcs_length(&a, &b), 2); // a, c
+    }
+
+    #[test]
+    fn convention_methods_skip_parallel_detection() {
+        // Two methods with identical call patterns — would normally flag
+        let fp1 = make_fingerprint_with_content(
+            "src/deploy.rs",
+            &["registerAbilities"],
+            "fn registerAbilities() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    notify_complete();\n}",
+        );
+        let fp2 = make_fingerprint_with_content(
+            "src/upgrade.rs",
+            &["registerAbility"],
+            "fn registerAbility() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    send_notification();\n}",
+        );
+
+        // Without convention methods: flagged
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+        );
+        assert_eq!(findings.len(), 2, "Should flag without convention context");
+
+        // With both methods as convention-expected: NOT flagged
+        let conv_methods: std::collections::HashSet<String> =
+            ["registerAbilities", "registerAbility"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+        let findings = detect_parallel_implementations(&[&fp1, &fp2], &conv_methods);
+        assert!(
+            findings.is_empty(),
+            "Convention methods should not be flagged as parallel, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
     }
 }
