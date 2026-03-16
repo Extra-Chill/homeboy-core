@@ -404,6 +404,17 @@ fn is_trivial_method(name: &str) -> bool {
         "__clone",
         "get_instance",
         "getInstance",
+        // Test lifecycle methods (PHPUnit / WP_UnitTestCase)
+        // These are optional overrides inherited from the base test class —
+        // not every test class needs to define them.
+        "set_up",
+        "tear_down",
+        "set_up_before_class",
+        "tear_down_after_class",
+        "setUp",
+        "tearDown",
+        "setUpBeforeClass",
+        "tearDownAfterClass",
     ];
     if trivial.contains(&name) {
         return true;

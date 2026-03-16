@@ -250,10 +250,18 @@ pub fn discover_conventions(
         }
     }
 
-    // Methods appearing in ≥ threshold files are "expected"
+    // Methods appearing in ≥ threshold files are "expected".
+    // Test lifecycle methods are excluded — they're optional overrides inherited
+    // from test base classes (PHPUnit, WP_UnitTestCase), not convention-specific.
+    let test_lifecycle: &[&str] = &[
+        "set_up", "tear_down", "set_up_before_class", "tear_down_after_class",
+        "setUp", "tearDown", "setUpBeforeClass", "tearDownAfterClass",
+    ];
+    let is_test_group = super::walker::is_test_path(glob_pattern);
     let expected_methods: Vec<String> = method_counts
         .iter()
         .filter(|(_, count)| **count >= threshold)
+        .filter(|(name, _)| !is_test_group || !test_lifecycle.contains(&name.as_str()))
         .map(|(name, _)| name.clone())
         .collect();
 
