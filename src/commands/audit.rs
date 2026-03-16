@@ -113,7 +113,10 @@ pub fn run(args: AuditArgs, _global: &GlobalArgs) -> CmdResult<AuditCommandOutpu
             &args.comp.component,
             args.comp.path.clone(),
         ))?;
-        (ctx.component_id, ctx.source_path.to_string_lossy().to_string())
+        (
+            ctx.component_id,
+            ctx.source_path.to_string_lossy().to_string(),
+        )
     };
 
     let workflow = run_main_audit_workflow(AuditRunWorkflowArgs {

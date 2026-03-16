@@ -11,7 +11,6 @@ use super::{
     ImportRewrite, MoveFileResult,
 };
 
-
 /// Move an entire module file to a new location, rewriting all imports.
 ///
 /// This is the `refactor move --file` operation:

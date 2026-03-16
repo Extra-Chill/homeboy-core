@@ -5,7 +5,6 @@ use crate::engine::text;
 
 use super::read_local_version;
 
-
 /// Parse version from content using regex pattern.
 /// Pattern must contain a capture group for the version string.
 /// Content is trimmed to handle trailing newlines in VERSION files.

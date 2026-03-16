@@ -403,7 +403,13 @@ fn section_name_to_slug(name: &str) -> String {
 fn sanitize_module_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     // Collapse consecutive underscores and trim leading/trailing
@@ -1578,7 +1584,10 @@ fn parse_hunk() {}
     fn section_name_to_slug_converts_hyphens_to_underscores() {
         // Hyphens are invalid in Rust module names
         assert_eq!(section_name_to_slug("Whole-file move"), "whole_file_move");
-        assert_eq!(section_name_to_slug("re-export handling"), "re_export_handling");
+        assert_eq!(
+            section_name_to_slug("re-export handling"),
+            "re_export_handling"
+        );
         assert_eq!(section_name_to_slug("pre-commit hooks"), "pre_commit_hooks");
     }
 

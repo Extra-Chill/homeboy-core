@@ -5,7 +5,6 @@ use std::path::Path;
 use crate::core::scaffold::load_extension_grammar;
 use crate::extension::{self, grammar_items, ExtensionManifest, ParsedItem};
 
-
 /// Find a refactor-capable extension for a file based on its extension.
 pub(crate) fn find_refactor_extension(file_path: &str) -> Option<ExtensionManifest> {
     let ext = Path::new(file_path).extension().and_then(|e| e.to_str())?;

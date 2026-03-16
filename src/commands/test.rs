@@ -180,8 +180,13 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
     // Drift detection mode — delegate to core drift workflows
     if args.drift {
         if args.fix {
-            let result =
-                auto_fix_test_drift(args.comp.id(), &ctx.component, &args.since, args.write, true)?;
+            let result = auto_fix_test_drift(
+                args.comp.id(),
+                &ctx.component,
+                &args.since,
+                args.write,
+                true,
+            )?;
             return Ok(report::from_auto_fix_drift_workflow(result));
         }
         let result = detect_test_drift(args.comp.id(), &ctx.component, &args.since)?;

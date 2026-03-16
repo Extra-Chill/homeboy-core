@@ -465,10 +465,8 @@ fn run_refactor_sources(
     let comp = comp.ok_or_else(|| {
         homeboy::Error::validation_missing_argument(vec!["component".to_string()])
     })?;
-    let ctx = execution_context::resolve(&ResolveOptions::source_only(
-        comp.id(),
-        comp.path.clone(),
-    ))?;
+    let ctx =
+        execution_context::resolve(&ResolveOptions::source_only(comp.id(), comp.path.clone()))?;
     let requested_sources = from.to_vec();
     let only_findings = parse_audit_findings(only)?;
     let exclude_findings = parse_audit_findings(exclude)?;

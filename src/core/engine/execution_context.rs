@@ -242,11 +242,7 @@ impl ExecutionContext {
     /// so operators can see exactly what the command will use.
     pub fn log_debug(&self) {
         crate::log_status!("context", "component_id: {}", self.component_id);
-        crate::log_status!(
-            "context",
-            "source_path: {}",
-            self.source_path.display()
-        );
+        crate::log_status!("context", "source_path: {}", self.source_path.display());
         crate::log_status!(
             "context",
             "git_root: {}",
@@ -350,7 +346,8 @@ mod tests {
         let root = dir.path();
         fs::create_dir_all(root).expect("create dir");
 
-        let options = ResolveOptions::source_only("test-comp", Some(root.to_string_lossy().to_string()));
+        let options =
+            ResolveOptions::source_only("test-comp", Some(root.to_string_lossy().to_string()));
         let ctx = resolve(&options).expect("resolve should succeed");
 
         assert_eq!(ctx.component_id, "test-comp");
@@ -372,14 +369,12 @@ mod tests {
         let sub = root.join("src");
         fs::create_dir_all(&sub).expect("create src dir");
 
-        let options = ResolveOptions::source_only("test-comp", Some(sub.to_string_lossy().to_string()));
+        let options =
+            ResolveOptions::source_only("test-comp", Some(sub.to_string_lossy().to_string()));
         let ctx = resolve(&options).expect("resolve should succeed");
 
         assert!(ctx.git_root.is_some());
-        assert_eq!(
-            ctx.git_root.unwrap(),
-            root.canonicalize().unwrap()
-        );
+        assert_eq!(ctx.git_root.unwrap(), root.canonicalize().unwrap());
     }
 
     #[test]
@@ -396,6 +391,9 @@ mod tests {
 
         let ctx = resolve(&options).expect("resolve should succeed");
         assert_eq!(ctx.settings.len(), 2);
-        assert!(ctx.settings.iter().any(|(k, v)| k == "mode" && v == "strict"));
+        assert!(ctx
+            .settings
+            .iter()
+            .any(|(k, v)| k == "mode" && v == "strict"));
     }
 }
