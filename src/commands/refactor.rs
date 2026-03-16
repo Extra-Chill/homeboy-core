@@ -789,10 +789,16 @@ fn run_move(
     // Post-write validation gate
     if write && !result.items_moved.is_empty() {
         let changed_files = vec![root.join(from), root.join(to)];
-        let validation =
-            homeboy::engine::validate_write::validate_write(&root, &changed_files, &validation_rollback)?;
+        let validation = homeboy::engine::validate_write::validate_write(
+            &root,
+            &changed_files,
+            &validation_rollback,
+        )?;
         if !validation.success {
-            homeboy::log_status!("validate", "Move output failed validation — changes rolled back");
+            homeboy::log_status!(
+                "validate",
+                "Move output failed validation — changes rolled back"
+            );
             if let Some(ref output) = validation.output {
                 homeboy::log_status!("validate", "{}", output);
             }
@@ -875,10 +881,16 @@ fn run_move_file(
     // Post-write validation gate
     if write && (result.imports_updated > 0 || result.mod_declarations_updated) {
         let changed_files = vec![root.join(file), root.join(to)];
-        let validation =
-            homeboy::engine::validate_write::validate_write(&root, &changed_files, &validation_rollback)?;
+        let validation = homeboy::engine::validate_write::validate_write(
+            &root,
+            &changed_files,
+            &validation_rollback,
+        )?;
         if !validation.success {
-            homeboy::log_status!("validate", "Move-file output failed validation — changes rolled back");
+            homeboy::log_status!(
+                "validate",
+                "Move-file output failed validation — changes rolled back"
+            );
             if let Some(ref output) = validation.output {
                 homeboy::log_status!("validate", "{}", output);
             }
@@ -1076,10 +1088,16 @@ fn run_transform(
             .iter()
             .flat_map(|r| r.matches.iter().map(|m| root.join(&m.file)))
             .collect();
-        let validation =
-            homeboy::engine::validate_write::validate_write(&root, &changed_files, &validation_rollback)?;
+        let validation = homeboy::engine::validate_write::validate_write(
+            &root,
+            &changed_files,
+            &validation_rollback,
+        )?;
         if !validation.success {
-            homeboy::log_status!("validate", "Transform output failed validation — changes rolled back");
+            homeboy::log_status!(
+                "validate",
+                "Transform output failed validation — changes rolled back"
+            );
             if let Some(ref output) = validation.output {
                 homeboy::log_status!("validate", "{}", output);
             }
@@ -1192,14 +1210,13 @@ fn run_decompose(
                     .map(|_| root.join(file))
                     .chain(std::iter::once(root.join(file)))
             })
-            .chain(
-                plan.groups
-                    .iter()
-                    .map(|g| root.join(&g.suggested_target)),
-            )
+            .chain(plan.groups.iter().map(|g| root.join(&g.suggested_target)))
             .collect();
-        let validation =
-            homeboy::engine::validate_write::validate_write(&root, &changed_files, &validation_rollback)?;
+        let validation = homeboy::engine::validate_write::validate_write(
+            &root,
+            &changed_files,
+            &validation_rollback,
+        )?;
         if !validation.success {
             homeboy::log_status!(
                 "validate",

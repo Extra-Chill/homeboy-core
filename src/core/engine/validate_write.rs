@@ -226,7 +226,11 @@ fn resolve_validate_command(root: &Path, changed_files: &[PathBuf]) -> Option<St
     // Collect unique file extensions from changed files
     let extensions: Vec<String> = changed_files
         .iter()
-        .filter_map(|f| f.extension().and_then(|e| e.to_str()).map(|s| s.to_string()))
+        .filter_map(|f| {
+            f.extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_string())
+        })
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
@@ -333,8 +337,7 @@ mod tests {
     fn validate_write_with_no_files_is_success() {
         let dir = TempDir::new().expect("temp dir");
         let rollback = InMemoryRollback::new();
-        let result =
-            validate_write(dir.path(), &[], &rollback).expect("should succeed");
+        let result = validate_write(dir.path(), &[], &rollback).expect("should succeed");
         assert!(result.success);
         assert_eq!(result.files_checked, 0);
     }
@@ -345,7 +348,11 @@ mod tests {
         let root = dir.path();
 
         // Create a Rust project with intentionally broken code
-        fs::write(root.join("Cargo.toml"), "[package]\nname = \"validate-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"validate-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/lib.rs"), "pub fn good() {}\n").unwrap();
 
