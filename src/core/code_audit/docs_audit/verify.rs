@@ -225,7 +225,9 @@ fn search_class_in_dir(dir: &Path, class_name: &str) -> bool {
         };
         content.lines().any(|line| {
             let trimmed = line.trim();
-            class_patterns.iter().any(|pat| trimmed.contains(pat.as_str()))
+            class_patterns
+                .iter()
+                .any(|pat| trimmed.contains(pat.as_str()))
                 && !trimmed.starts_with("//")
                 && !trimmed.starts_with('#')
                 && !trimmed.starts_with('*')
@@ -339,9 +341,8 @@ fn collect_dirs_named(root: &Path, target: &str) -> Vec<String> {
     };
 
     let target_owned = target.to_string();
-    let entries = codebase_scan::walk_entries(root, &config, |name, is_dir| {
-        is_dir && name == target_owned
-    });
+    let entries =
+        codebase_scan::walk_entries(root, &config, |name, is_dir| is_dir && name == target_owned);
 
     entries
         .into_iter()

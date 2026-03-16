@@ -11,7 +11,6 @@
 pub(crate) mod claims;
 pub(crate) mod verify;
 
-use std::fs;
 use std::path::Path;
 
 pub use claims::{Claim, ClaimConfidence, ClaimType};

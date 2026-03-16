@@ -323,7 +323,11 @@ fn should_skip_dir(name: &str, is_root: bool, config: &ScanConfig) -> bool {
         if ROOT_ONLY_SKIP_DIRS.contains(&name) {
             return true;
         }
-        if config.extra_root_skip_dirs.iter().any(|d| d.as_str() == name) {
+        if config
+            .extra_root_skip_dirs
+            .iter()
+            .any(|d| d.as_str() == name)
+        {
             return true;
         }
     }
