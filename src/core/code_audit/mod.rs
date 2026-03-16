@@ -390,12 +390,8 @@ fn audit_internal(
     // and included in the cross-reference set so that functions called via framework hooks,
     // callbacks, or inherited methods are recognized as referenced.
     let ref_fingerprints = fingerprint_reference_paths(reference_paths);
-    let all_with_refs: Vec<&fingerprint::FileFingerprint> = all_fingerprints
-        .iter()
-        .copied()
-        .chain(ref_fingerprints.iter())
-        .collect();
-    let dead_code_findings = dead_code::analyze_dead_code(&all_with_refs);
+    let ref_fp_refs: Vec<&fingerprint::FileFingerprint> = ref_fingerprints.iter().collect();
+    let dead_code_findings = dead_code::analyze_dead_code(&all_fingerprints, &ref_fp_refs);
     if !dead_code_findings.is_empty() {
         log_status!(
             "audit",

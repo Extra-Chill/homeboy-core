@@ -13,20 +13,27 @@ use super::fingerprint::FileFingerprint;
 
 /// Analyze fingerprints for dead code patterns.
 ///
-/// Performs four checks:
+/// Performs four checks on `owned` fingerprints:
 /// 1. Unused parameters (from extension fingerprint data)
 /// 2. Dead code markers (from extension fingerprint data)
 /// 3. Unreferenced exports (cross-file: public API never imported/called)
 /// 4. Orphaned internals (single-file: private function never called internally)
-pub(crate) fn analyze_dead_code(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+///
+/// `reference` fingerprints contribute calls and imports to the cross-reference
+/// set but are NOT checked for dead code themselves. This prevents false positives
+/// when framework source (e.g. WordPress core) is included as a reference dependency.
+pub(crate) fn analyze_dead_code(
+    owned: &[&FileFingerprint],
+    reference: &[&FileFingerprint],
+) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    // Build a global set of all internal calls and imports across all files
-    // for cross-file reference checking.
+    // Build a global set of all internal calls and imports across ALL files
+    // (owned + reference) for cross-file reference checking.
     let mut all_calls: HashSet<String> = HashSet::new();
     let mut all_imports: HashSet<String> = HashSet::new();
 
-    for fp in fingerprints {
+    for fp in owned.iter().chain(reference.iter()) {
         for call in &fp.internal_calls {
             all_calls.insert(call.clone());
         }
@@ -35,7 +42,9 @@ pub(crate) fn analyze_dead_code(fingerprints: &[&FileFingerprint]) -> Vec<Findin
         }
     }
 
-    for fp in fingerprints {
+    // Only check owned fingerprints for dead code — reference fingerprints
+    // just provide call/import data for the cross-reference set.
+    for fp in owned {
         // Check 1: Unused parameters
         for unused in &fp.unused_parameters {
             findings.push(Finding {
@@ -73,8 +82,8 @@ pub(crate) fn analyze_dead_code(fingerprints: &[&FileFingerprint]) -> Vec<Findin
         // Check 3: Unreferenced exports
         // A public function that no other file imports or calls.
         for export in &fp.public_api {
-            // Check if any OTHER file references this export.
-            let referenced_elsewhere = fingerprints.iter().any(|other| {
+            // Check if any OTHER file (owned or reference) references this export.
+            let referenced_elsewhere = owned.iter().chain(reference.iter()).any(|other| {
                 // Skip self
                 if other.relative_path == fp.relative_path {
                     return false;
@@ -288,7 +297,7 @@ mod tests {
             param: "ctx".to_string(),
         });
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].kind, AuditFinding::UnusedParameter);
         assert!(findings[0].description.contains("ctx"));
@@ -304,7 +313,7 @@ mod tests {
             marker_type: "allow_dead_code".to_string(),
         });
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].kind, AuditFinding::DeadCodeMarker);
         assert_eq!(findings[0].severity, Severity::Info);
@@ -328,7 +337,7 @@ mod tests {
         );
 
         // Neither file calls the other's exports
-        let findings = analyze_dead_code(&[&fp1, &fp2]);
+        let findings = analyze_dead_code(&[&fp1, &fp2], &[]);
         let unreferenced: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::UnreferencedExport)
@@ -353,7 +362,7 @@ mod tests {
             vec![],
         );
 
-        let findings = analyze_dead_code(&[&fp1, &fp2]);
+        let findings = analyze_dead_code(&[&fp1, &fp2], &[]);
         let unreferenced: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::UnreferencedExport)
@@ -373,7 +382,7 @@ mod tests {
             vec![("dead_helper", "private")],
         );
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         let orphaned: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::OrphanedInternal)
@@ -392,7 +401,7 @@ mod tests {
             vec![("helper", "private")],
         );
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         let orphaned: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::OrphanedInternal)
@@ -410,7 +419,7 @@ mod tests {
             vec![],
         );
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         let unreferenced: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::UnreferencedExport)
@@ -440,7 +449,7 @@ mod tests {
             "delete".to_string(),
         ];
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         let orphaned: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::OrphanedInternal)
@@ -464,7 +473,7 @@ mod tests {
         // The file content contains a direct call to write()
         fp.content = "fn run() { let result = write(&id, &path); }".to_string();
 
-        let findings = analyze_dead_code(&[&fp]);
+        let findings = analyze_dead_code(&[&fp], &[]);
         let orphaned: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::OrphanedInternal)
@@ -473,6 +482,67 @@ mod tests {
             orphaned.is_empty(),
             "Function called in content should not be flagged, got: {:?}",
             orphaned.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn reference_fingerprint_suppresses_unreferenced_export() {
+        // Plugin exports "on_save" — nobody in the plugin calls it.
+        let plugin_fp = make_fingerprint(
+            "inc/handler.php",
+            vec!["on_save"],
+            vec!["on_save"],
+            vec![],
+            vec![],
+        );
+
+        // Without references: flagged as unreferenced
+        let findings = analyze_dead_code(&[&plugin_fp], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert_eq!(unreferenced.len(), 1, "Should be flagged without references");
+
+        // Framework calls "on_save" via a hook
+        let framework_fp = make_fingerprint(
+            "wp-includes/plugin.php",
+            vec!["do_action"],
+            vec!["do_action"],
+            vec!["on_save"], // framework calls the plugin's function
+            vec![],
+        );
+
+        // With references: NOT flagged because framework calls it
+        let findings = analyze_dead_code(&[&plugin_fp], &[&framework_fp]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "Should not be flagged when referenced by framework, got: {:?}",
+            unreferenced.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn reference_fingerprints_not_checked_for_dead_code() {
+        // Framework has an export that nobody calls — should NOT be flagged
+        // because framework fingerprints are reference-only.
+        let framework_fp = make_fingerprint(
+            "wp-includes/internal.php",
+            vec!["internal_helper"],
+            vec!["internal_helper"],
+            vec![],
+            vec![],
+        );
+
+        let findings = analyze_dead_code(&[], &[&framework_fp]);
+        assert!(
+            findings.is_empty(),
+            "Reference fingerprints should not produce findings, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
         );
     }
 }
