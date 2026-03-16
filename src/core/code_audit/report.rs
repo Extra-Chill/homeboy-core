@@ -4,11 +4,14 @@
 //! produce domain-specific results. This module provides the output types and
 //! builder functions that assemble results into command-ready output.
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use crate::code_audit::{
     baseline, AuditFinding, CodeAuditResult, ConventionReport, DirectoryConvention, Severity,
 };
 use crate::refactor::{
-    auto::{FixResult, FixResultsSummary, PolicySummary},
+    auto::{FixResult, FixResultsSummary, FixSafetyTier, PolicySummary},
     AuditRefactorIterationSummary,
 };
 use serde::Serialize;
@@ -25,6 +28,8 @@ pub struct AuditSummaryOutput {
     pub info: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub top_findings: Vec<AuditSummaryFinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixability: Option<AuditFixability>,
     pub exit_code: i32,
 }
 
@@ -92,6 +97,8 @@ pub enum AuditCommandOutput {
         baseline_comparison: baseline::BaselineComparison,
         #[serde(skip_serializing_if = "Option::is_none")]
         summary: Option<AuditSummaryOutput>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fixability: Option<AuditFixability>,
     },
 
     #[serde(rename = "audit.summary")]
@@ -121,6 +128,34 @@ pub struct AuditFixPolicySummary {
     pub blocked_insertions: usize,
     pub blocked_new_files: usize,
     pub preflight_failures: usize,
+}
+
+/// Fixability metadata for audit findings — computed without running `--fix`.
+///
+/// This tells CI wrappers how many findings have automated fixes available
+/// and at what safety tier, without actually generating or applying the fixes.
+#[derive(Debug, Serialize)]
+pub struct AuditFixability {
+    /// Total findings that have any kind of automated fix.
+    pub fixable_count: usize,
+    /// Findings with `SafeAuto` tier — can be applied without checks.
+    pub auto_fixable_count: usize,
+    /// Findings with `SafeWithChecks` tier — require preflight validation.
+    pub guarded_fixable_count: usize,
+    /// Findings with `PlanOnly` tier — preview only, needs manual review.
+    pub plan_only_count: usize,
+    /// Breakdown by finding kind.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_kind: BTreeMap<String, FixabilityKindBreakdown>,
+}
+
+/// Per-finding-kind fixability breakdown.
+#[derive(Debug, Serialize)]
+pub struct FixabilityKindBreakdown {
+    pub total: usize,
+    pub auto: usize,
+    pub guarded: usize,
+    pub plan_only: usize,
 }
 
 /// Type alias for iteration summary.
@@ -159,6 +194,7 @@ pub fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSum
         warnings,
         info,
         top_findings,
+        fixability: None,
         exit_code,
     }
 }
@@ -208,6 +244,104 @@ pub fn build_fix_hints(written: bool, summary: &PolicySummary) -> Vec<String> {
     }
 
     hints
+}
+
+/// Compute fixability metadata from an audit result without applying fixes.
+///
+/// Runs the fix generator in dry-run mode and counts how many findings
+/// have automated fixes at each safety tier. This is cheap — no writes,
+/// no convergence loop, just planning + policy annotation.
+pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
+    let source_path = Path::new(&result.source_path);
+    if !source_path.is_dir() {
+        return None;
+    }
+
+    // Generate fix plan (dry-run — never writes)
+    let mut fix_result =
+        crate::refactor::plan::generate::generate_audit_fixes(result, source_path);
+
+    if fix_result.fixes.is_empty() && fix_result.new_files.is_empty() {
+        return None;
+    }
+
+    // Apply policy annotation (dry-run mode: write=false, no filtering)
+    let policy = crate::refactor::auto::FixPolicy {
+        only: None,
+        exclude: Vec::new(),
+    };
+    let context = crate::refactor::auto::PreflightContext { root: source_path };
+    crate::refactor::auto::apply_fix_policy(&mut fix_result, false, &policy, &context);
+
+    // Count by safety tier
+    let mut auto_fixable = 0usize;
+    let mut guarded = 0usize;
+    let mut plan_only = 0usize;
+    let mut by_kind: BTreeMap<String, FixabilityKindBreakdown> = BTreeMap::new();
+
+    for fix in &fix_result.fixes {
+        for insertion in &fix.insertions {
+            let kind_key = format!("{:?}", insertion.finding).to_lowercase();
+            let entry = by_kind.entry(kind_key).or_insert(FixabilityKindBreakdown {
+                total: 0,
+                auto: 0,
+                guarded: 0,
+                plan_only: 0,
+            });
+            entry.total += 1;
+
+            match insertion.safety_tier {
+                FixSafetyTier::SafeAuto => {
+                    auto_fixable += 1;
+                    entry.auto += 1;
+                }
+                FixSafetyTier::SafeWithChecks => {
+                    guarded += 1;
+                    entry.guarded += 1;
+                }
+                FixSafetyTier::PlanOnly => {
+                    plan_only += 1;
+                    entry.plan_only += 1;
+                }
+            }
+        }
+    }
+
+    for new_file in &fix_result.new_files {
+        let kind_key = format!("{:?}", new_file.finding).to_lowercase();
+        let entry = by_kind.entry(kind_key).or_insert(FixabilityKindBreakdown {
+            total: 0,
+            auto: 0,
+            guarded: 0,
+            plan_only: 0,
+        });
+        entry.total += 1;
+
+        match new_file.safety_tier {
+            FixSafetyTier::SafeAuto => {
+                auto_fixable += 1;
+                entry.auto += 1;
+            }
+            FixSafetyTier::SafeWithChecks => {
+                guarded += 1;
+                entry.guarded += 1;
+            }
+            FixSafetyTier::PlanOnly => {
+                plan_only += 1;
+                entry.plan_only += 1;
+            }
+        }
+    }
+
+    let fixable_count = auto_fixable + guarded + plan_only;
+
+    Some(AuditFixability {
+        fixable_count,
+        auto_fixable_count: auto_fixable,
+        guarded_fixable_count: guarded,
+        plan_only_count: plan_only,
+        by_kind,
+    })
 }
 
 /// Log fix summary to stderr for human-readable output.

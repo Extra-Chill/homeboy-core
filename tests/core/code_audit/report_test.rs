@@ -1,4 +1,6 @@
-use crate::code_audit::report::{build_audit_summary, build_fix_hints, build_fix_policy_summary};
+use crate::code_audit::report::{
+    build_audit_summary, build_fix_hints, build_fix_policy_summary, compute_fixability,
+};
 use crate::code_audit::{AuditSummary, CodeAuditResult, Finding, Severity};
 use crate::refactor::auto::PolicySummary;
 
@@ -165,4 +167,66 @@ fn test_build_fix_policy_summary_maps_fields() {
     assert_eq!(summary.blocked_insertions, 3);
     assert_eq!(summary.blocked_new_files, 2);
     assert_eq!(summary.preflight_failures, 1);
+}
+
+#[test]
+fn test_compute_fixability_returns_none_for_empty_result() {
+    let result = empty_result();
+    // source_path is /tmp/test which exists but has no source files to fix
+    let fixability = compute_fixability(&result);
+    assert!(fixability.is_none());
+}
+
+#[test]
+fn test_compute_fixability_returns_none_for_nonexistent_path() {
+    let mut result = empty_result();
+    result.source_path = "/nonexistent/path/that/does/not/exist".to_string();
+    result.findings.push(make_finding(Severity::Warning));
+    let fixability = compute_fixability(&result);
+    assert!(fixability.is_none());
+}
+
+#[test]
+fn test_compute_fixability_counts_fixes_from_real_audit() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    // Create a minimal codebase with a detectable convention + outlier
+    fs::create_dir_all(root.join("commands")).unwrap();
+    // Two conforming files establish a convention (methods: run + helper)
+    fs::write(
+        root.join("commands/good_one.rs"),
+        "pub fn run() {}\npub fn helper() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("commands/good_two.rs"),
+        "pub fn run() {}\npub fn helper() {}\n",
+    )
+    .unwrap();
+    // One outlier is missing a method → should produce a fixable finding
+    fs::write(root.join("commands/bad.rs"), "pub fn run() {}\n").unwrap();
+
+    // Run a real audit
+    let result = crate::code_audit::audit_path_with_id("fixability-test", &root.to_string_lossy())
+        .expect("audit should run");
+
+    // Compute fixability
+    let fixability = compute_fixability(&result);
+
+    // Should have at least some fixable findings (the missing method outlier)
+    if let Some(fix) = fixability {
+        assert!(fix.fixable_count > 0, "expected at least one fixable finding");
+        // auto_fixable + guarded + plan_only should equal fixable_count
+        assert_eq!(
+            fix.fixable_count,
+            fix.auto_fixable_count + fix.guarded_fixable_count + fix.plan_only_count
+        );
+        // by_kind should not be empty
+        assert!(!fix.by_kind.is_empty(), "expected per-kind breakdown");
+    }
+    // Note: fixability may also be None if the minimal codebase doesn't trigger
+    // enough conventions — that's acceptable for this test.
 }

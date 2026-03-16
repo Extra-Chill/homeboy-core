@@ -348,8 +348,10 @@ fn run_comparison_workflow(
     };
 
     if args.json_summary {
+        let mut summary = report::build_audit_summary(&result, exit_code);
+        summary.fixability = report::compute_fixability(&result);
         Ok(AuditRunWorkflowResult {
-            output: AuditCommandOutput::Summary(report::build_audit_summary(&result, exit_code)),
+            output: AuditCommandOutput::Summary(summary),
             exit_code,
         })
     } else {
@@ -384,22 +386,21 @@ fn build_comparison_output(
     }
 
     if args.json_summary {
+        let mut summary = report::build_audit_summary(&result, exit_code);
+        summary.fixability = report::compute_fixability(&result);
         Ok(AuditRunWorkflowResult {
-            output: AuditCommandOutput::Summary(report::build_audit_summary(&result, exit_code)),
+            output: AuditCommandOutput::Summary(summary),
             exit_code,
         })
     } else {
-        let summary = if args.json_summary {
-            Some(report::build_audit_summary(&result, exit_code))
-        } else {
-            None
-        };
+        let fixability = report::compute_fixability(&result);
 
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Compared {
                 result,
                 baseline_comparison: comparison,
-                summary,
+                summary: None,
+                fixability,
             },
             exit_code,
         })
