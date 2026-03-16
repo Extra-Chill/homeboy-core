@@ -375,13 +375,38 @@ fn audit_internal(
 
     // Phase 4d2: Parallel implementation detection (similar call patterns across files)
     // Build set of convention-expected methods to exclude from parallel detection.
-    // If a method is expected by a convention (present in 50%+ of files in the group),
-    // then similar call patterns across files implementing that convention are expected,
-    // not findings.
-    let convention_methods: std::collections::HashSet<String> = discovered_conventions
+    // Includes both per-directory convention methods AND cross-directory convention
+    // methods (methods that appear across sibling directory conventions).
+    let mut convention_methods: std::collections::HashSet<String> = discovered_conventions
         .iter()
         .flat_map(|c| c.expected_methods.iter().cloned())
         .collect();
+
+    // Cross-directory: find methods shared across 2+ sibling directory conventions.
+    // This catches patterns like registerXxxAbility that appear across inc/Abilities/*
+    // but aren't per-directory conventions individually.
+    {
+        use std::collections::HashMap;
+        let mut method_by_parent: HashMap<String, HashMap<String, usize>> = HashMap::new();
+        for conv in &discovered_conventions {
+            // Extract parent directory from glob (e.g. "inc/Abilities/Flow/*.php" → "inc/Abilities")
+            let parts: Vec<&str> = conv.glob.split('/').collect();
+            if parts.len() >= 3 {
+                let parent = parts[..parts.len() - 2].join("/");
+                let entry = method_by_parent.entry(parent).or_default();
+                for method in &conv.expected_methods {
+                    *entry.entry(method.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        for (_parent, methods) in &method_by_parent {
+            for (method, count) in methods {
+                if *count >= 2 {
+                    convention_methods.insert(method.clone());
+                }
+            }
+        }
+    }
     let parallel_findings =
         duplication::detect_parallel_implementations(&all_fingerprints, &convention_methods);
     if !parallel_findings.is_empty() {
