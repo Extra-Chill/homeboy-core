@@ -407,6 +407,29 @@ fn audit_internal(
             }
         }
     }
+
+    // Cross-file frequency: methods that appear in 3+ files are framework patterns.
+    // These include register*, handle_*, and other callback method names that exist
+    // across many files but aren't per-directory conventions (they may appear in only
+    // 1-2 files per directory, below the convention threshold).
+    {
+        use std::collections::HashMap;
+        let mut method_file_count: HashMap<&str, usize> = HashMap::new();
+        for fp in &all_fingerprints {
+            // Count unique methods per file (not per occurrence)
+            let mut seen_in_file = std::collections::HashSet::new();
+            for method in &fp.methods {
+                if seen_in_file.insert(method.as_str()) {
+                    *method_file_count.entry(method.as_str()).or_insert(0) += 1;
+                }
+            }
+        }
+        for (method, count) in &method_file_count {
+            if *count >= 3 {
+                convention_methods.insert(method.to_string());
+            }
+        }
+    }
     let parallel_findings =
         duplication::detect_parallel_implementations(&all_fingerprints, &convention_methods);
     if !parallel_findings.is_empty() {
