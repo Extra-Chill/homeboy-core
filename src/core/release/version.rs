@@ -8,19 +8,13 @@ pub use version::*;
 
 use crate::component::{self, Component, VersionTarget};
 use crate::config::{from_str, set_json_pointer, to_string_pretty};
-use crate::engine::codebase_scan;
 use crate::engine::hooks::{self, HookFailureMode};
 use crate::engine::local_files::{self, FileSystem};
 use crate::engine::text;
 use crate::error::{Error, Result};
-use crate::extension::{load_all_extensions, ExtensionManifest};
-use crate::is_zero;
-use crate::paths::resolve_path_string;
+use crate::extension::ExtensionManifest;
 use crate::release::changelog;
-use regex::Regex;
-use serde::Serialize;
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(crate) fn replace_versions(

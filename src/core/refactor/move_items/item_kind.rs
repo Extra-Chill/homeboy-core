@@ -1,6 +1,5 @@
 //! item_kind — extracted from move_items.rs.
 
-
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {

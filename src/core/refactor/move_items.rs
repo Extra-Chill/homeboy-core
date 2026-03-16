@@ -26,13 +26,11 @@ pub use whole_file_move::*;
 use std::path::{Path, PathBuf};
 
 use crate::core::engine::symbol_graph::module_path_from_file;
-use crate::core::scaffold::load_extension_grammar;
 use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
-use crate::extension::grammar_items;
 use crate::extension::{
     self, AdjustedItem, ExtensionManifest, ParsedItem, RelatedTests, ResolvedImports,
 };
-use crate::{component, Result};
+use crate::Result;
 
 impl ItemKind {
     fn from_str(s: &str) -> Self {
