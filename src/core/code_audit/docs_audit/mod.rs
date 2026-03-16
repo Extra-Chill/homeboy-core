@@ -169,6 +169,8 @@ pub(crate) fn collect_extension_ignore_patterns(comp: &component::Component) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
