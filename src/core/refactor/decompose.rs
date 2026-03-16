@@ -8,8 +8,7 @@ use crate::extension::grammar_items;
 use crate::extension::{self, ParsedItem};
 use crate::Result;
 
-use super::move_options::MoveOptions;
-use super::MoveResult;
+use super::move_items::{MoveOptions, MoveResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecomposePlan {

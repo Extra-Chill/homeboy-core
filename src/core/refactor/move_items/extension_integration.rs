@@ -1,9 +1,9 @@
 //! extension_integration — extracted from move_items.rs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
 use crate::core::scaffold::load_extension_grammar;
-use crate::extension::grammar_items;
-use crate::core::refactor::*;
+use crate::extension::{self, grammar_items, ExtensionManifest, ParsedItem};
 
 
 /// Find a refactor-capable extension for a file based on its extension.

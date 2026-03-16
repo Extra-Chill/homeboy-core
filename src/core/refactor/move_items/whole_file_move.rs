@@ -1,12 +1,15 @@
-//! whole-file_move — extracted from move_items.rs.
+//! whole_file_move — extracted from move_items.rs.
 
 use std::path::{Path, PathBuf};
+
 use crate::core::engine::symbol_graph::module_path_from_file;
 use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
 use crate::{component, Result};
-use crate::core::refactor::move_items::ext_rewrite_caller_imports;
-use crate::core::refactor::move_items::ext_parse_items;
-use crate::core::refactor::*;
+
+use super::{
+    core_parse_items, ext_parse_items, ext_rewrite_caller_imports, find_refactor_extension,
+    ImportRewrite, MoveFileResult,
+};
 
 
 /// Move an entire module file to a new location, rewriting all imports.

@@ -1,9 +1,9 @@
 //! version — extracted from version.rs.
 
-use crate::component::{self, Component, VersionTarget};
+use crate::component::Component;
 use crate::engine::text;
-use crate::core::release::version::read_local_version;
-use crate::core::release::*;
+
+use super::read_local_version;
 
 
 /// Parse version from content using regex pattern.

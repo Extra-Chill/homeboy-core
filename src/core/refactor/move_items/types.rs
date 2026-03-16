@@ -1,8 +1,8 @@
 //! types — extracted from move_items.rs.
 
-use std::path::{Path, PathBuf};
-use crate::{component, Result};
-use crate::core::refactor::*;
+use std::path::PathBuf;
+
+use super::ItemKind;
 
 
 /// Result of a move operation.

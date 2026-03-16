@@ -1,8 +1,5 @@
 //! move_options — extracted from move_items.rs.
 
-use crate::core::refactor::move_items::default;
-use crate::core::refactor::*;
-
 
 /// Behavioral options for move operations.
 #[derive(Debug, Clone, Copy)]

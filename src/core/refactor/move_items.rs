@@ -1,15 +1,3 @@
-mod extension_integration;
-mod item_kind;
-mod move_options;
-mod types;
-mod whole-file_move;
-
-pub use extension_integration::*;
-pub use item_kind::*;
-pub use move_options::*;
-pub use types::*;
-pub use whole-file_move::*;
-
 //! Refactor move — extract items from one file and move them to another.
 //!
 //! Language-agnostic orchestration layer. All language-specific parsing
@@ -22,6 +10,18 @@ pub use whole-file_move::*;
 //!
 //! Usage:
 //!   `homeboy refactor move --item "has_import" --from src/code_audit/conventions.rs --to src/code_audit/import_matching.rs`
+
+mod extension_integration;
+mod item_kind;
+mod move_options;
+mod types;
+mod whole_file_move;
+
+pub use extension_integration::*;
+pub use item_kind::*;
+pub use move_options::*;
+pub use types::*;
+pub use whole_file_move::*;
 
 use std::path::{Path, PathBuf};
 

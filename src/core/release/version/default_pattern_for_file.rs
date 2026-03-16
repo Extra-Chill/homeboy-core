@@ -2,21 +2,20 @@
 
 use crate::component::{self, Component, VersionTarget};
 use crate::engine::codebase_scan;
+use crate::engine::local_files::{self, FileSystem};
 use crate::engine::text;
 use crate::error::{Error, Result};
-use crate::extension::{load_all_extensions, ExtensionManifest};
+use crate::extension::{load_all_extensions, load_extension, ExtensionManifest};
 use crate::paths::resolve_path_string;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
-use crate::extension::load_extension;
-use crate::core::release::version::types::ComponentVersionInfo;
-use crate::core::release::version::find_version_pattern_in_extension;
-use crate::core::release::version::types::UnconfiguredPattern;
-use crate::core::release::version::types::ComponentVersionSnapshot;
-use crate::core::release::version::types::DEFAULT_SINCE_PLACEHOLDER;
-use crate::core::release::version::types::VersionTargetInfo;
-use crate::core::release::*;
+
+use super::find_version_pattern_in_extension;
+use super::types::{
+    ComponentVersionInfo, ComponentVersionSnapshot, UnconfiguredPattern, VersionTargetInfo,
+    DEFAULT_SINCE_PLACEHOLDER,
+};
 
 
 /// Parse all versions from content using regex pattern.
