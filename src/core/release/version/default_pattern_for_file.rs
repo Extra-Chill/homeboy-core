@@ -5,7 +5,7 @@ use crate::engine::codebase_scan;
 use crate::engine::local_files::{self, FileSystem};
 use crate::engine::text;
 use crate::error::{Error, Result};
-use crate::extension::{load_all_extensions, load_extension, ExtensionManifest};
+use crate::extension::load_all_extensions;
 use crate::paths::resolve_path_string;
 use regex::Regex;
 use std::fs;
@@ -16,7 +16,6 @@ use super::types::{
     ComponentVersionInfo, ComponentVersionSnapshot, UnconfiguredPattern, VersionTargetInfo,
     DEFAULT_SINCE_PLACEHOLDER,
 };
-
 
 /// Parse all versions from content using regex pattern.
 /// Content is trimmed to handle trailing newlines in VERSION files.
@@ -329,7 +328,10 @@ pub fn detect_unconfigured_patterns(component: &Component) -> Vec<UnconfiguredPa
 ///
 /// This is extension-driven: the component's extension must define `since_tag` config
 /// specifying which file extensions to scan and optionally a custom placeholder pattern.
-pub(crate) fn replace_since_tag_placeholders(component: &Component, new_version: &str) -> Result<usize> {
+pub(crate) fn replace_since_tag_placeholders(
+    component: &Component,
+    new_version: &str,
+) -> Result<usize> {
     use crate::extension::load_extension;
 
     // Find the extension's since_tag config

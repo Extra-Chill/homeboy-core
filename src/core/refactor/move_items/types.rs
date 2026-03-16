@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use super::ItemKind;
 
-
 /// Result of a move operation.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MoveResult {
