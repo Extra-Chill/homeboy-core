@@ -15,8 +15,8 @@ pub mod baseline;
 mod checks;
 pub mod codebase_map;
 mod comment_hygiene;
-mod compiler_warnings;
 pub mod compare;
+mod compiler_warnings;
 pub(crate) mod conventions;
 pub(crate) mod core_fingerprint;
 mod dead_code;
@@ -221,7 +221,13 @@ pub fn audit_path_scoped(
     git_ref: Option<&str>,
 ) -> Result<CodeAuditResult> {
     let ref_paths = read_reference_paths_from_env();
-    audit_internal(component_id, source_path, Some(file_filter), git_ref, &ref_paths)
+    audit_internal(
+        component_id,
+        source_path,
+        Some(file_filter),
+        git_ref,
+        &ref_paths,
+    )
 }
 
 /// Internal audit implementation supporting optional file scoping and impact tracing.
