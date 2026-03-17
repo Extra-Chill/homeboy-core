@@ -6,6 +6,30 @@
 //! 3. Generates file content edits and file/directory renames
 //! 4. Applies changes to disk (or returns a dry-run preview)
 
+mod collision_detection;
+mod types;
+
+pub use collision_detection::*;
+pub use types::*;
+
+
+mod case_utilities;
+mod cross_separator_join_functions;
+mod rename_generation;
+mod rename_scope;
+mod rename_spec;
+mod rename_targeting;
+mod types;
+
+pub use case_utilities::*;
+pub use cross_separator_join_functions::*;
+pub use rename_generation::*;
+pub use rename_scope::*;
+pub use rename_spec::*;
+pub use rename_targeting::*;
+pub use types::*;
+
+
 use crate::engine::codebase_scan::{
     self, find_boundary_matches, find_case_insensitive_matches, find_literal_matches,
     ExtensionFilter, ScanConfig,
@@ -19,397 +43,17 @@ use std::path::{Path, PathBuf};
 // Types
 // ============================================================================
 
-/// What scope to apply renames to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RenameScope {
-    /// Source files only.
-    Code,
-    /// Config files only (homeboy.json, component configs).
-    Config,
-    /// Everything.
-    All,
-}
-
-impl RenameScope {
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "code" => Ok(RenameScope::Code),
-            "config" => Ok(RenameScope::Config),
-            "all" => Ok(RenameScope::All),
-            _ => Err(Error::validation_invalid_argument(
-                "scope",
-                format!("Unknown scope '{}'. Use: code, config, all", s),
-                None,
-                None,
-            )),
-        }
-    }
-}
-
-/// A case variant of a rename term.
-#[derive(Debug, Clone, Serialize)]
-pub struct CaseVariant {
-    pub from: String,
-    pub to: String,
-    pub label: String,
-}
-
-/// A rename specification with all generated case variants.
-#[derive(Debug, Clone)]
-pub struct RenameSpec {
-    pub from: String,
-    pub to: String,
-    pub scope: RenameScope,
-    pub variants: Vec<CaseVariant>,
-    /// When true, use exact string matching (no boundary detection).
-    pub literal: bool,
-}
-
-/// Optional file-targeting controls for rename operations.
-#[derive(Debug, Clone)]
-pub struct RenameTargeting {
-    /// Include only files matching at least one glob. Empty = include all.
-    pub include_globs: Vec<String>,
-    /// Exclude files matching any glob.
-    pub exclude_globs: Vec<String>,
-    /// Whether file/directory renames should be generated/applied.
-    pub rename_files: bool,
-}
-
-impl Default for RenameTargeting {
-    fn default() -> Self {
-        Self {
-            include_globs: Vec::new(),
-            exclude_globs: Vec::new(),
-            rename_files: true,
-        }
-    }
-}
-
-impl RenameSpec {
-    /// Create a rename spec, auto-generating cross-separator case variants.
-    ///
-    /// Splits the `from` and `to` terms into constituent words, then generates
-    /// all standard naming convention variants:
-    ///
-    /// - `kebab-case` (e.g., `data-machine-agent`)
-    /// - `snake_case` (e.g., `data_machine_agent`)
-    /// - `UPPER_SNAKE` (e.g., `DATA_MACHINE_AGENT`)
-    /// - `PascalCase` (e.g., `DataMachineAgent`)
-    /// - `camelCase` (e.g., `dataMachineAgent`)
-    /// - `Display Name` (e.g., `Data Machine Agent`)
-    /// - Plus plural forms of each
-    ///
-    /// This means a single `--from wp-agent --to data-machine-agent` will also
-    /// match and replace `wp_agent`, `WP_AGENT`, `WPAgent`, `wpAgent`, `WP Agent`,
-    /// and all their plurals.
-    pub fn new(from: &str, to: &str, scope: RenameScope) -> Self {
-        let from_words = split_words(from);
-        let to_words = split_words(to);
-
-        let mut variants = Vec::new();
-
-        // If word splitting produced words, generate cross-separator variants.
-        // If it produced a single word (e.g., "widget"), the joins all collapse
-        // to the same thing, and dedup handles it naturally.
-        if !from_words.is_empty() && !to_words.is_empty() {
-            // Singular forms — all naming conventions
-            let join_fns: [fn(&[String]) -> String; 6] = [
-                join_kebab,
-                join_snake,
-                join_upper_snake,
-                join_pascal,
-                join_camel,
-                join_display,
-            ];
-            let labels = [
-                "kebab",
-                "snake_case",
-                "UPPER_SNAKE",
-                "PascalCase",
-                "camelCase",
-                "Display Name",
-            ];
-
-            for (label, join_fn) in labels.iter().zip(join_fns.iter()) {
-                variants.push(CaseVariant {
-                    from: join_fn(&from_words),
-                    to: join_fn(&to_words),
-                    label: label.to_string(),
-                });
-            }
-
-            // Plural forms — pluralize the last word, then generate all conventions
-            let mut from_words_plural = from_words.clone();
-            let mut to_words_plural = to_words.clone();
-            if let Some(last) = from_words_plural.last_mut() {
-                *last = pluralize(last);
-            }
-            if let Some(last) = to_words_plural.last_mut() {
-                *last = pluralize(last);
-            }
-
-            for (label, join_fn) in labels.iter().zip(join_fns.iter()) {
-                variants.push(CaseVariant {
-                    from: join_fn(&from_words_plural),
-                    to: join_fn(&to_words_plural),
-                    label: format!("plural {}", label),
-                });
-            }
-        } else {
-            // Fallback for empty/unparseable input — use the original simple logic
-            variants.push(CaseVariant {
-                from: from.to_lowercase(),
-                to: to.to_lowercase(),
-                label: "lowercase".to_string(),
-            });
-        }
-
-        // Deduplicate — remove variants where from matches a previous one.
-        // Sort by from length descending first so longer matches take priority.
-        variants.sort_by(|a, b| b.from.len().cmp(&a.from.len()));
-        let mut seen = std::collections::HashSet::new();
-        variants.retain(|v| seen.insert(v.from.clone()));
-
-        RenameSpec {
-            from: from.to_string(),
-            to: to.to_string(),
-            scope,
-            variants,
-            literal: false,
-        }
-    }
-
-    /// Create a literal rename spec — exact string match, no boundary detection,
-    /// no case variant generation. The `from` string is matched as-is.
-    pub fn literal(from: &str, to: &str, scope: RenameScope) -> Self {
-        let variants = vec![CaseVariant {
-            from: from.to_string(),
-            to: to.to_string(),
-            label: "literal".to_string(),
-        }];
-
-        RenameSpec {
-            from: from.to_string(),
-            to: to.to_string(),
-            scope,
-            variants,
-            literal: true,
-        }
-    }
-}
-
-/// A single reference found in the codebase.
-#[derive(Debug, Clone, Serialize)]
-pub struct Reference {
-    /// File path relative to root.
-    pub file: String,
-    /// Line number (1-indexed).
-    pub line: usize,
-    /// Column number (1-indexed).
-    pub column: usize,
-    /// The matched text.
-    pub matched: String,
-    /// What it would be replaced with.
-    pub replacement: String,
-    /// The case variant label.
-    pub variant: String,
-    /// The full line content for context.
-    pub context: String,
-}
-
-/// An edit to apply to a file's content.
-#[derive(Debug, Clone, Serialize)]
-pub struct FileEdit {
-    /// File path relative to root.
-    pub file: String,
-    /// Number of replacements in this file.
-    pub replacements: usize,
-    /// New content after all replacements.
-    #[serde(skip)]
-    pub new_content: String,
-}
-
-/// A file or directory rename.
-#[derive(Debug, Clone, Serialize)]
-pub struct FileRename {
-    /// Original path relative to root.
-    pub from: String,
-    /// New path relative to root.
-    pub to: String,
-}
-
-/// A warning about a potential collision or issue.
-#[derive(Debug, Clone, Serialize)]
-pub struct RenameWarning {
-    /// Warning category.
-    pub kind: String,
-    /// File path relative to root.
-    pub file: String,
-    /// Line number (if applicable).
-    pub line: Option<usize>,
-    /// Human-readable description.
-    pub message: String,
-}
-
-/// The full result of a rename operation.
-#[derive(Debug, Clone, Serialize)]
-pub struct RenameResult {
-    /// Case variants that were searched.
-    pub variants: Vec<CaseVariant>,
-    /// All references found.
-    pub references: Vec<Reference>,
-    /// File content edits to apply.
-    pub edits: Vec<FileEdit>,
-    /// File/directory renames to apply.
-    pub file_renames: Vec<FileRename>,
-    /// Warnings about potential collisions or issues.
-    pub warnings: Vec<RenameWarning>,
-    /// Total reference count.
-    pub total_references: usize,
-    /// Total files affected.
-    pub total_files: usize,
-    /// Whether changes were written to disk.
-    pub applied: bool,
-}
-
 // ============================================================================
 // Case utilities
 // ============================================================================
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-    }
-}
-
-fn pluralize(s: &str) -> String {
-    if s.ends_with('s') || s.ends_with('x') || s.ends_with("sh") || s.ends_with("ch") {
-        format!("{}es", s)
-    } else if s.ends_with('y') && !s.ends_with("ey") && !s.ends_with("oy") && !s.ends_with("ay") {
-        format!("{}ies", &s[..s.len() - 1])
-    } else {
-        format!("{}s", s)
-    }
-}
 
 // ============================================================================
 // Word splitting — decompose any naming convention into constituent words
 // ============================================================================
 
-/// Split a term into its constituent words, regardless of naming convention.
-///
-/// Handles:
-/// - `kebab-case` → `["kebab", "case"]`
-/// - `snake_case` → `["snake", "case"]`
-/// - `camelCase` → `["camel", "case"]`
-/// - `PascalCase` → `["pascal", "case"]`
-/// - `UPPER_SNAKE` → `["upper", "snake"]`
-/// - `WPAgent` → `["wp", "agent"]` (consecutive uppercase → separate word)
-/// - `XMLParser` → `["xml", "parser"]`
-/// - `data-machine-agent` → `["data", "machine", "agent"]`
-/// - Mixed: `my_WPAgent-thing` → `["my", "wp", "agent", "thing"]`
-///
-/// All returned words are lowercase.
-fn split_words(term: &str) -> Vec<String> {
-    let mut words = Vec::new();
-    let mut current = String::new();
-
-    let chars: Vec<char> = term.chars().collect();
-    let len = chars.len();
-
-    for i in 0..len {
-        let c = chars[i];
-
-        // Separators: hyphens, underscores, spaces, dots
-        if c == '-' || c == '_' || c == ' ' || c == '.' {
-            if !current.is_empty() {
-                words.push(current.to_lowercase());
-                current.clear();
-            }
-            continue;
-        }
-
-        if c.is_uppercase() && !current.is_empty() {
-            let prev = chars[i - 1];
-            // Split on camelCase boundary (lowercase/digit → uppercase)
-            // or consecutive-uppercase boundary (uppercase → uppercase+lowercase)
-            let is_camel_boundary = prev.is_lowercase() || prev.is_ascii_digit();
-            let is_acronym_boundary =
-                prev.is_uppercase() && i + 1 < len && chars[i + 1].is_lowercase();
-
-            if is_camel_boundary || is_acronym_boundary {
-                words.push(current.to_lowercase());
-                current.clear();
-            }
-        }
-
-        current.push(c);
-    }
-
-    if !current.is_empty() {
-        words.push(current.to_lowercase());
-    }
-
-    words
-}
-
 // ============================================================================
 // Cross-separator join functions
 // ============================================================================
-
-/// Join words as kebab-case: `["data", "machine", "agent"]` → `"data-machine-agent"`
-fn join_kebab(words: &[String]) -> String {
-    words.join("-")
-}
-
-/// Join words as snake_case: `["data", "machine", "agent"]` → `"data_machine_agent"`
-fn join_snake(words: &[String]) -> String {
-    words.join("_")
-}
-
-/// Join words as UPPER_SNAKE: `["data", "machine", "agent"]` → `"DATA_MACHINE_AGENT"`
-fn join_upper_snake(words: &[String]) -> String {
-    words
-        .iter()
-        .map(|w| w.to_uppercase())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
-/// Join words as PascalCase: `["data", "machine", "agent"]` → `"DataMachineAgent"`
-fn join_pascal(words: &[String]) -> String {
-    words
-        .iter()
-        .map(|w| capitalize(w))
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-/// Join words as camelCase: `["data", "machine", "agent"]` → `"dataMachineAgent"`
-fn join_camel(words: &[String]) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for (i, w) in words.iter().enumerate() {
-        if i == 0 {
-            parts.push(w.to_lowercase());
-        } else {
-            parts.push(capitalize(w));
-        }
-    }
-    parts.join("")
-}
-
-/// Join words as display name: `["data", "machine", "agent"]` → `"Data Machine Agent"`
-fn join_display(words: &[String]) -> String {
-    words
-        .iter()
-        .map(|w| capitalize(w))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 // Boundary matching and literal matching are provided by crate::engine::codebase_scan.
 // See: find_boundary_matches(), find_literal_matches()
@@ -418,41 +62,9 @@ fn join_display(words: &[String]) -> String {
 // File walking — delegates to crate::engine::codebase_scan
 // ============================================================================
 
-/// Build a ScanConfig appropriate for rename operations.
-fn scan_config_for_scope(scope: &RenameScope) -> ScanConfig {
-    let extensions = match scope {
-        RenameScope::Code => ExtensionFilter::Except(vec![
-            "json".to_string(),
-            "toml".to_string(),
-            "yaml".to_string(),
-            "yml".to_string(),
-        ]),
-        RenameScope::Config => ExtensionFilter::Only(vec![
-            "json".to_string(),
-            "toml".to_string(),
-            "yaml".to_string(),
-            "yml".to_string(),
-        ]),
-        RenameScope::All => ExtensionFilter::SourceDefaults,
-    };
-
-    ScanConfig {
-        extensions,
-        ..ScanConfig::default()
-    }
-}
-
 // ============================================================================
 // Reference finding
 // ============================================================================
-
-/// Find all references to the rename term across the codebase.
-///
-/// After the initial pass, discovers additional case variants that exist in the
-/// codebase but weren't generated (e.g., `WPAgent` when `WpAgent` was generated).
-pub fn find_references(spec: &RenameSpec, root: &Path) -> Vec<Reference> {
-    find_references_with_targeting(spec, root, &RenameTargeting::default())
-}
 
 /// Find references using optional include/exclude targeting controls.
 pub fn find_references_with_targeting(
@@ -597,11 +209,6 @@ fn discover_casing_in_files(
 // Rename generation
 // ============================================================================
 
-/// Generate file edits and file renames from found references.
-pub fn generate_renames(spec: &RenameSpec, root: &Path) -> RenameResult {
-    generate_renames_with_targeting(spec, root, &RenameTargeting::default())
-}
-
 /// Generate renames using optional include/exclude targeting controls.
 pub fn generate_renames_with_targeting(
     spec: &RenameSpec,
@@ -718,38 +325,6 @@ pub fn generate_renames_with_targeting(
     }
 }
 
-fn target_files(files: Vec<PathBuf>, root: &Path, targeting: &RenameTargeting) -> Vec<PathBuf> {
-    files
-        .into_iter()
-        .filter(|file| {
-            let relative = file
-                .strip_prefix(root)
-                .unwrap_or(file)
-                .to_string_lossy()
-                .replace('\\', "/");
-
-            if !targeting.include_globs.is_empty()
-                && !targeting
-                    .include_globs
-                    .iter()
-                    .any(|glob| glob_match::glob_match(glob, &relative))
-            {
-                return false;
-            }
-
-            if targeting
-                .exclude_globs
-                .iter()
-                .any(|glob| glob_match::glob_match(glob, &relative))
-            {
-                return false;
-            }
-
-            true
-        })
-        .collect()
-}
-
 // ============================================================================
 // Collision detection
 // ============================================================================
@@ -791,179 +366,9 @@ fn detect_collisions(
     warnings
 }
 
-/// Scan edited content for lines at the same indentation that introduce
-/// duplicate field/identifier names. This catches the case where renaming
-/// `modules` → `extensions` creates a collision with an existing `extensions` field.
-fn detect_duplicate_identifiers(file: &str, content: &str, warnings: &mut Vec<RenameWarning>) {
-    let lines: Vec<&str> = content.lines().collect();
-
-    // Group lines by indentation level, looking for struct-like blocks
-    // (lines with the same leading whitespace that contain identifier patterns)
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i];
-        let trimmed = line.trim();
-
-        // Look for struct/enum/block openers
-        if trimmed.ends_with('{') || trimmed.ends_with("{{") {
-            let block_indent = leading_spaces(lines.get(i + 1).unwrap_or(&""));
-            if block_indent == 0 {
-                i += 1;
-                continue;
-            }
-
-            // Collect identifiers at this indent level until block closes
-            let mut seen: HashMap<String, usize> = HashMap::new();
-            let mut j = i + 1;
-
-            while j < lines.len() {
-                let block_line = lines[j];
-                let block_trimmed = block_line.trim();
-
-                // Block ended
-                if block_trimmed == "}" || block_trimmed == "}," {
-                    break;
-                }
-
-                // Only check lines at this exact indent level
-                if leading_spaces(block_line) == block_indent {
-                    if let Some(ident) = extract_field_identifier(block_trimmed) {
-                        if let Some(&first_line) = seen.get(&ident) {
-                            warnings.push(RenameWarning {
-                                kind: "duplicate_identifier".to_string(),
-                                file: file.to_string(),
-                                line: Some(j + 1),
-                                message: format!(
-                                    "Duplicate identifier '{}' at line {} (first at line {})",
-                                    ident,
-                                    j + 1,
-                                    first_line
-                                ),
-                            });
-                        } else {
-                            seen.insert(ident, j + 1);
-                        }
-                    }
-                }
-
-                j += 1;
-            }
-
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-}
-
-/// Count leading spaces on a line.
-fn leading_spaces(line: &str) -> usize {
-    line.len() - line.trim_start().len()
-}
-
-/// Extract the field/identifier name from a struct field or variable declaration line.
-/// Returns the identifier if the line looks like a field declaration.
-///
-/// Matches patterns like:
-/// - `pub field_name: Type,`
-/// - `field_name: Type,`
-/// - `pub(crate) field_name: Type,`
-/// - `let field_name = ...`
-/// - `fn field_name(...`
-fn extract_field_identifier(trimmed: &str) -> Option<String> {
-    // Skip attributes, comments, empty lines
-    if trimmed.starts_with('#')
-        || trimmed.starts_with("//")
-        || trimmed.starts_with("/*")
-        || trimmed.is_empty()
-    {
-        return None;
-    }
-
-    // Strip visibility modifiers
-    let rest = trimmed
-        .strip_prefix("pub(crate) ")
-        .or_else(|| trimmed.strip_prefix("pub(super) "))
-        .or_else(|| trimmed.strip_prefix("pub "))
-        .unwrap_or(trimmed);
-
-    // Strip let/fn/const/static
-    let rest = rest
-        .strip_prefix("let mut ")
-        .or_else(|| rest.strip_prefix("let "))
-        .or_else(|| rest.strip_prefix("fn "))
-        .or_else(|| rest.strip_prefix("const "))
-        .or_else(|| rest.strip_prefix("static "))
-        .unwrap_or(rest);
-
-    // Extract identifier (alphanumeric + underscore until : or ( or = or space)
-    let ident: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-
-    if ident.is_empty() {
-        return None;
-    }
-
-    // Must be followed by : or ( or = or < (type params) to be an identifier
-    let after = &rest[ident.len()..].trim_start();
-    if after.starts_with(':')
-        || after.starts_with('(')
-        || after.starts_with('=')
-        || after.starts_with('<')
-    {
-        Some(ident)
-    } else {
-        None
-    }
-}
-
 // ============================================================================
 // Apply renames
 // ============================================================================
-
-/// Apply rename edits and file renames to disk.
-pub fn apply_renames(result: &mut RenameResult, root: &Path) -> Result<()> {
-    // Apply content edits first
-    for edit in &result.edits {
-        let path = root.join(&edit.file);
-        std::fs::write(&path, &edit.new_content).map_err(|e| {
-            Error::internal_io(e.to_string(), Some(format!("write {}", path.display())))
-        })?;
-    }
-
-    // Apply file renames (sort by path depth descending so children rename before parents)
-    let mut renames = result.file_renames.clone();
-    renames.sort_by(|a, b| {
-        b.from
-            .matches('/')
-            .count()
-            .cmp(&a.from.matches('/').count())
-    });
-
-    for rename in &renames {
-        let from = root.join(&rename.from);
-        let to = root.join(&rename.to);
-
-        // Create parent dirs if needed
-        if let Some(parent) = to.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        if from.exists() {
-            std::fs::rename(&from, &to).map_err(|e| {
-                Error::internal_io(
-                    e.to_string(),
-                    Some(format!("rename {} → {}", from.display(), to.display())),
-                )
-            })?;
-        }
-    }
-
-    result.applied = true;
-    Ok(())
-}
 
 // ============================================================================
 // Tests
