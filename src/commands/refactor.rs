@@ -182,6 +182,11 @@ enum RefactorCommand {
         #[arg(long, value_name = "GLOB", default_value = "**/*")]
         files: String,
 
+        /// Match context: "line" (default, per-line matching) or "file" (whole-file,
+        /// enables multi-line regex with (?s) dotall flag for patterns spanning newlines)
+        #[arg(long, value_name = "CONTEXT", default_value = "line")]
+        context: String,
+
         /// Only apply a specific rule ID within a named transform set
         #[arg(long, value_name = "RULE_ID")]
         rule: Option<String>,
@@ -331,6 +336,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             find,
             replace,
             files,
+            context,
             rule,
             component,
             write_mode,
@@ -339,6 +345,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             find.as_deref(),
             replace.as_deref(),
             &files,
+            &context,
             rule.as_deref(),
             component.component.as_deref(),
             component.path.as_deref(),
@@ -1017,6 +1024,7 @@ fn run_transform(
     find: Option<&str>,
     replace: Option<&str>,
     files: &str,
+    context: &str,
     rule_filter: Option<&str>,
     component_id: Option<&str>,
     path: Option<&str>,
@@ -1037,7 +1045,7 @@ fn run_transform(
         }
         (
             "ad-hoc".to_string(),
-            refactor::ad_hoc_transform(f, r, files),
+            refactor::ad_hoc_transform(f, r, files, context),
         )
     } else if let Some(n) = name {
         // Named mode — load from homeboy.json

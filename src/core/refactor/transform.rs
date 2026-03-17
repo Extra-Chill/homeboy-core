@@ -161,7 +161,7 @@ pub fn load_transform_set(root: &Path, name: &str) -> Result<TransformSet> {
 }
 
 /// Create a transform set from ad-hoc CLI arguments.
-pub fn ad_hoc_transform(find: &str, replace: &str, files: &str) -> TransformSet {
+pub fn ad_hoc_transform(find: &str, replace: &str, files: &str, context: &str) -> TransformSet {
     TransformSet {
         description: "Ad-hoc transform".to_string(),
         rules: vec![TransformRule {
@@ -170,7 +170,7 @@ pub fn ad_hoc_transform(find: &str, replace: &str, files: &str) -> TransformSet 
             find: find.to_string(),
             replace: replace.to_string(),
             files: files.to_string(),
-            context: "line".to_string(),
+            context: context.to_string(),
         }],
     }
 }
