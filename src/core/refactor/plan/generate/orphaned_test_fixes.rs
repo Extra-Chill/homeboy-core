@@ -78,7 +78,7 @@ fn find_rename_candidate(root: &Path, test_file: &str, expected_source: &str) ->
     // But rejects unrelated names like:
     //   parse → deploy (0.2)
     if let Some((name, sim)) = best_match {
-        if sim >= 0.5 && sim < 1.0 {
+        if (0.5..1.0).contains(&sim) {
             return Some(name.to_string());
         }
     }
@@ -259,7 +259,7 @@ pub(crate) fn generate_orphaned_test_fixes(
             // The test method prefix convention: test_<source_name>...
             // We replace the old source name with the new one in the test function name.
             let old_test_name = &test_method;
-            let new_test_name = if let Some(src) = expected_source.as_deref() {
+            let _new_test_name = if let Some(src) = expected_source.as_deref() {
                 old_test_name.replacen(src, &new_source_name, 1)
             } else {
                 continue;
