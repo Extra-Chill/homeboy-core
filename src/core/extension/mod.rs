@@ -385,6 +385,22 @@ pub struct UnusedParam {
     pub function: String,
     /// The parameter name (without type annotations or sigils).
     pub param: String,
+    /// Zero-based position of the parameter in the function signature.
+    /// Used for call-site-aware analysis: compare against caller arg_count.
+    #[serde(default)]
+    pub position: usize,
+}
+
+/// A call site — a function/method invocation with argument count.
+/// Used for cross-file parameter analysis (#824).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct CallSite {
+    /// The function/method name being called.
+    pub target: String,
+    /// The line number of the call (1-indexed).
+    pub line: usize,
+    /// The number of arguments passed at this call site.
+    pub arg_count: usize,
 }
 
 /// A marker indicating the developer has acknowledged dead code
@@ -454,6 +470,9 @@ pub struct FingerprintOutput {
     /// Function/method names called within this file (for cross-file reference analysis).
     #[serde(default)]
     pub internal_calls: Vec<String>,
+    /// Call sites with argument counts (for cross-file parameter analysis).
+    #[serde(default)]
+    pub call_sites: Vec<CallSite>,
     /// Public functions/methods exported from this file (the file's API surface).
     #[serde(default)]
     pub public_api: Vec<String>,

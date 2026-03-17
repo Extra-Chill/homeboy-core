@@ -49,6 +49,8 @@ pub struct FileFingerprint {
     pub dead_code_markers: Vec<crate::extension::DeadCodeMarker>,
     /// Function/method names called within this file.
     pub internal_calls: Vec<String>,
+    /// Call sites with argument counts (for cross-file parameter analysis).
+    pub call_sites: Vec<crate::extension::CallSite>,
     /// Public functions/methods exported from this file.
     pub public_api: Vec<String>,
     /// Method names that are trait implementations (called via trait dispatch).
@@ -115,6 +117,7 @@ fn fingerprint_via_extension(
         unused_parameters: output.unused_parameters,
         dead_code_markers: output.dead_code_markers,
         internal_calls: output.internal_calls,
+        call_sites: output.call_sites,
         public_api: output.public_api,
         trait_impl_methods: Vec::new(), // Extension scripts don't track this
     })

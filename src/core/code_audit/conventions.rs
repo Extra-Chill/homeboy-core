@@ -117,7 +117,13 @@ pub enum AuditFinding {
     /// Function has identical structure but different identifiers/literals.
     NearDuplicate,
     /// Function parameter is declared but never used in the function body.
+    /// When call-site data is available, this means no callers pass a value
+    /// for this position — truly dead, safe to remove.
     UnusedParameter,
+    /// Function parameter is received but ignored — callers ARE passing values
+    /// for this position, but the function doesn't use them. Higher severity
+    /// than UnusedParameter: likely a bug or stale param from a refactor.
+    IgnoredParameter,
     /// Developer has marked code with a dead code suppression attribute.
     DeadCodeMarker,
     /// Public function/method is never imported or called by any other file.
@@ -176,6 +182,7 @@ impl AuditFinding {
             "duplicate_function",
             "near_duplicate",
             "unused_parameter",
+            "ignored_parameter",
             "dead_code_marker",
             "unreferenced_export",
             "orphaned_internal",

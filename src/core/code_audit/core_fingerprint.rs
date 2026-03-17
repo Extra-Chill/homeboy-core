@@ -431,6 +431,7 @@ pub fn fingerprint_from_grammar(
         unused_parameters,
         dead_code_markers,
         internal_calls,
+        call_sites: Vec::new(), // Core grammar engine doesn't extract call sites yet
         public_api,
         trait_impl_methods,
     })
@@ -1166,7 +1167,7 @@ fn detect_unused_params(functions: &[FunctionInfo], _lang_id: &str) -> Vec<Unuse
             continue;
         };
 
-        for pname in &param_names {
+        for (idx, pname) in param_names.iter().enumerate() {
             // Skip self, mut, underscore-prefixed
             if pname == "self" || pname == "mut" || pname == "Self" || pname.starts_with('_') {
                 continue;
@@ -1179,6 +1180,7 @@ fn detect_unused_params(functions: &[FunctionInfo], _lang_id: &str) -> Vec<Unuse
                     unused.push(UnusedParam {
                         function: f.name.clone(),
                         param: pname.clone(),
+                        position: idx,
                     });
                 }
             }

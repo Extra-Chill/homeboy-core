@@ -5,17 +5,47 @@
 //! fingerprint scripts (unused_parameters, dead_code_markers, internal_calls,
 //! public_api) plus cross-file analysis of imports and method references.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
 use super::walker::is_test_path;
 
+/// A cross-file caller record: which files call a function and with how many args.
+struct CallerRecord {
+    /// Maximum arg_count seen across all call sites for this function.
+    max_arg_count: usize,
+    /// Number of distinct call sites across all files.
+    call_count: usize,
+}
+
+/// Build a caller map from call_sites across all fingerprints.
+/// Maps function_name → CallerRecord (max arg count + total call count).
+fn build_caller_map(
+    owned: &[&FileFingerprint],
+    reference: &[&FileFingerprint],
+) -> HashMap<String, CallerRecord> {
+    let mut map: HashMap<String, CallerRecord> = HashMap::new();
+
+    for fp in owned.iter().chain(reference.iter()) {
+        for cs in &fp.call_sites {
+            let entry = map.entry(cs.target.clone()).or_insert(CallerRecord {
+                max_arg_count: 0,
+                call_count: 0,
+            });
+            entry.max_arg_count = entry.max_arg_count.max(cs.arg_count);
+            entry.call_count += 1;
+        }
+    }
+
+    map
+}
+
 /// Analyze fingerprints for dead code patterns.
 ///
 /// Performs four checks on `owned` fingerprints:
-/// 1. Unused parameters (from extension fingerprint data)
+/// 1. Unused parameters (from extension fingerprint data, with call-site awareness)
 /// 2. Dead code markers (from extension fingerprint data)
 /// 3. Unreferenced exports (cross-file: public API never imported/called)
 /// 4. Orphaned internals (single-file: private function never called internally)
@@ -43,23 +73,24 @@ pub(crate) fn analyze_dead_code(
         }
     }
 
+    // Build cross-file caller map for parameter analysis (#824).
+    let caller_map = build_caller_map(owned, reference);
+
     // Only check owned fingerprints for dead code — reference fingerprints
     // just provide call/import data for the cross-reference set.
     for fp in owned {
-        // Check 1: Unused parameters
+        // Check 1: Unused parameters — with call-site-aware classification (#824)
         for unused in &fp.unused_parameters {
+            let (kind, description, suggestion) =
+                classify_unused_param(unused, &caller_map);
+
             findings.push(Finding {
                 convention: "dead_code".to_string(),
                 severity: Severity::Warning,
                 file: fp.relative_path.clone(),
-                description: format!(
-                    "Unused parameter '{}' in function '{}'",
-                    unused.param, unused.function
-                ),
-                suggestion:
-                    "Remove the parameter or prefix with underscore to indicate intentional disuse"
-                        .to_string(),
-                kind: AuditFinding::UnusedParameter,
+                description,
+                suggestion,
+                kind,
             });
         }
 
@@ -262,6 +293,75 @@ fn is_framework_entry_point(name: &str, fp: &FileFingerprint) -> bool {
 }
 
 // ============================================================================
+// Call-site-aware parameter classification (#824)
+// ============================================================================
+
+/// Classify an unused parameter using cross-file call site data.
+///
+/// Three cases:
+/// 1. **No callers found** (or no call_sites data) → `UnusedParameter` (legacy behavior)
+/// 2. **Callers exist but none pass enough args** → `UnusedParameter` (truly dead, safe to remove)
+/// 3. **Callers pass args for this position** → `IgnoredParameter` (received but ignored, likely a bug)
+fn classify_unused_param(
+    unused: &crate::extension::UnusedParam,
+    caller_map: &HashMap<String, CallerRecord>,
+) -> (AuditFinding, String, String) {
+    let fn_name = &unused.function;
+    let param = &unused.param;
+    let position = unused.position;
+
+    match caller_map.get(fn_name) {
+        None => {
+            // No call site data for this function — fall back to legacy behavior.
+            // This happens when: the function is never called, or call_sites
+            // aren't available yet (e.g., Rust grammar doesn't emit them).
+            (
+                AuditFinding::UnusedParameter,
+                format!(
+                    "Unused parameter '{}' in function '{}' (no callers found)",
+                    param, fn_name
+                ),
+                "Remove the parameter or prefix with underscore to indicate intentional disuse"
+                    .to_string(),
+            )
+        }
+        Some(record) => {
+            // position is 0-indexed. A caller with arg_count=3 passes positions 0,1,2.
+            // So a param at position N is "reached" when arg_count > N.
+            let callers_reach_position = record.max_arg_count > position;
+
+            if callers_reach_position {
+                // Callers ARE passing values for this position — the function
+                // receives the value but ignores it. This is worse than unused:
+                // it means callers think the function uses this parameter.
+                (
+                    AuditFinding::IgnoredParameter,
+                    format!(
+                        "Parameter '{}' in '{}' is received but ignored ({} caller(s) pass {} arg(s), param is at position {})",
+                        param, fn_name, record.call_count, record.max_arg_count, position
+                    ),
+                    "Either use the parameter (likely a bug) or remove it from both the signature and all call sites"
+                        .to_string(),
+                )
+            } else {
+                // Callers don't pass enough args to reach this position.
+                // Truly dead — safe to remove from the signature (callers
+                // won't need updating since they already don't pass it).
+                (
+                    AuditFinding::UnusedParameter,
+                    format!(
+                        "Unused parameter '{}' in '{}' (truly dead — {} caller(s) pass at most {} arg(s), param is at position {})",
+                        param, fn_name, record.call_count, record.max_arg_count, position
+                    ),
+                    "Safe to remove — no caller passes a value for this position"
+                        .to_string(),
+                )
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -295,11 +395,12 @@ mod tests {
     }
 
     #[test]
-    fn unused_parameter_produces_warning() {
+    fn unused_parameter_no_callers() {
         let mut fp = make_fingerprint("src/foo.rs", vec!["process"], vec![], vec![], vec![]);
         fp.unused_parameters.push(UnusedParam {
             function: "process".to_string(),
             param: "ctx".to_string(),
+            position: 0,
         });
 
         let findings = analyze_dead_code(&[&fp], &[]);
@@ -307,6 +408,67 @@ mod tests {
         assert_eq!(findings[0].kind, AuditFinding::UnusedParameter);
         assert!(findings[0].description.contains("ctx"));
         assert!(findings[0].description.contains("process"));
+    }
+
+    #[test]
+    fn unused_parameter_callers_dont_reach_position() {
+        // Function has 3 params, param at position 2 is unused.
+        // Callers only pass 2 args (positions 0 and 1) — position 2 is truly dead.
+        let mut fp = make_fingerprint("src/foo.rs", vec!["process"], vec![], vec![], vec![]);
+        fp.unused_parameters.push(UnusedParam {
+            function: "process".to_string(),
+            param: "opts".to_string(),
+            position: 2,
+        });
+
+        // Caller in another file passes only 2 args
+        let mut caller_fp = make_fingerprint("src/bar.rs", vec![], vec![], vec!["process"], vec![]);
+        caller_fp.call_sites.push(crate::extension::CallSite {
+            target: "process".to_string(),
+            line: 10,
+            arg_count: 2,
+        });
+
+        let findings = analyze_dead_code(&[&fp], &[&caller_fp]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].kind, AuditFinding::UnusedParameter);
+        assert!(
+            findings[0].description.contains("truly dead"),
+            "Should be classified as truly dead: {}",
+            findings[0].description
+        );
+    }
+
+    #[test]
+    fn ignored_parameter_callers_pass_value() {
+        // Function has 3 params, param at position 1 is unused.
+        // Callers pass 3 args — position 1 IS reached. This is IgnoredParameter.
+        let mut fp = make_fingerprint("src/foo.rs", vec!["process"], vec![], vec![], vec![]);
+        fp.unused_parameters.push(UnusedParam {
+            function: "process".to_string(),
+            param: "ctx".to_string(),
+            position: 1,
+        });
+
+        let mut caller_fp = make_fingerprint("src/bar.rs", vec![], vec![], vec!["process"], vec![]);
+        caller_fp.call_sites.push(crate::extension::CallSite {
+            target: "process".to_string(),
+            line: 10,
+            arg_count: 3,
+        });
+
+        let findings = analyze_dead_code(&[&fp], &[&caller_fp]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].kind,
+            AuditFinding::IgnoredParameter,
+            "Should be IgnoredParameter when callers pass values for the position"
+        );
+        assert!(
+            findings[0].description.contains("received but ignored"),
+            "Description should mention 'received but ignored': {}",
+            findings[0].description
+        );
     }
 
     #[test]
