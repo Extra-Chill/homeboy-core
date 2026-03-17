@@ -62,7 +62,7 @@ pub fn extract_contracts_from_grammar(
         let return_type = detect_return_shape(decl_text, contract_grammar);
 
         // Parse params
-        let params = parse_params(params_str);
+        let params = parse_params(params_str, &contract_grammar.param_format);
 
         // Detect receiver
         let receiver = detect_receiver(params_str);
@@ -148,10 +148,29 @@ fn find_function_body_range(
 
 /// Detect the return type shape from the function declaration line.
 fn detect_return_shape(decl_line: &str, contract: &ContractGrammar) -> ReturnShape {
-    // Extract the return type portion (after "->")
-    let return_part = match decl_line.split("->").nth(1) {
-        Some(part) => part.trim().trim_end_matches('{').trim(),
-        None => return ReturnShape::Unit,
+    // Extract the return type portion after the language-specific separator.
+    // For multi-char separators like "->" (Rust), split on the separator.
+    // For single-char separators like ":" (PHP), find the separator that
+    // follows the closing ")" of the parameter list to avoid matching
+    // namespace separators or ternary operators.
+    let separator = &contract.return_type_separator;
+    let return_part = if separator.len() == 1 {
+        // Single-char separator: find `)` then look for separator after it
+        let sep_char = separator.chars().next().unwrap();
+        let after_paren = match decl_line.rfind(')') {
+            Some(pos) => &decl_line[pos + 1..],
+            None => return ReturnShape::Unit,
+        };
+        match after_paren.find(sep_char) {
+            Some(pos) => after_paren[pos + 1..].trim().trim_end_matches('{').trim(),
+            None => return ReturnShape::Unit,
+        }
+    } else {
+        // Multi-char separator like "->": simple split
+        match decl_line.split(separator.as_str()).nth(1) {
+            Some(part) => part.trim().trim_end_matches('{').trim(),
+            None => return ReturnShape::Unit,
+        }
     };
 
     if return_part.is_empty() {
@@ -235,7 +254,7 @@ fn extract_generic_inner(s: &str) -> String {
 }
 
 /// Parse function parameters from the params string.
-fn parse_params(params_str: &str) -> Vec<Param> {
+fn parse_params(params_str: &str, param_format: &str) -> Vec<Param> {
     let params_str = params_str.trim();
     if params_str.is_empty() {
         return vec![];
@@ -245,30 +264,68 @@ fn parse_params(params_str: &str) -> Vec<Param> {
 
     for part in split_params(params_str) {
         let part = part.trim();
-        // Skip self/receiver params
-        if part == "self"
-            || part == "&self"
-            || part == "&mut self"
-            || part == "mut self"
-            || part.is_empty()
-        {
+        if part.is_empty() {
             continue;
         }
 
-        // Parse "name: Type" pattern
-        if let Some(colon_pos) = part.find(':') {
-            let name = part[..colon_pos]
-                .trim()
-                .trim_start_matches("mut ")
-                .to_string();
-            let param_type = part[colon_pos + 1..].trim().to_string();
-            let mutable = part.starts_with("mut ") || param_type.starts_with("&mut ");
-            params.push(Param {
-                name,
-                param_type,
-                mutable,
-                has_default: false,
-            });
+        match param_format {
+            "type_dollar_name" => {
+                // PHP format: `Type $name`, `?Type $name`, `$name`, `Type $name = default`
+                // Skip $this
+                if part.starts_with("$this") {
+                    continue;
+                }
+
+                // Check for default value
+                let (part_no_default, has_default) = if let Some(eq_pos) = part.find('=') {
+                    (part[..eq_pos].trim(), true)
+                } else {
+                    (part, false)
+                };
+
+                if let Some(dollar_pos) = part_no_default.rfind('$') {
+                    let name = part_no_default[dollar_pos + 1..].trim().to_string();
+                    let type_part = part_no_default[..dollar_pos].trim();
+                    let param_type = if type_part.is_empty() {
+                        "mixed".to_string()
+                    } else {
+                        type_part.to_string()
+                    };
+                    params.push(Param {
+                        name,
+                        param_type,
+                        mutable: false,
+                        has_default,
+                    });
+                }
+            }
+            _ => {
+                // Rust/default format: `name: Type`, `&self`, `mut name: Type`
+                // Skip self/receiver params
+                if part == "self"
+                    || part == "&self"
+                    || part == "&mut self"
+                    || part == "mut self"
+                {
+                    continue;
+                }
+
+                if let Some(colon_pos) = part.find(':') {
+                    let name = part[..colon_pos]
+                        .trim()
+                        .trim_start_matches("mut ")
+                        .to_string();
+                    let param_type = part[colon_pos + 1..].trim().to_string();
+                    let mutable =
+                        part.starts_with("mut ") || param_type.starts_with("&mut ");
+                    params.push(Param {
+                        name,
+                        param_type,
+                        mutable,
+                        has_default: false,
+                    });
+                }
+            }
         }
     }
 
@@ -622,6 +679,8 @@ mod tests {
                 r"unreachable!\s*\(".to_string(),
                 r"\.unwrap\(\)".to_string(),
             ],
+            return_type_separator: "->".to_string(),
+            param_format: "name_colon_type".to_string(),
             test_templates: HashMap::new(),
             type_defaults: vec![],
         }
@@ -661,7 +720,7 @@ mod tests {
 
     #[test]
     fn parse_params_basic() {
-        let params = parse_params("root: &Path, files: &[PathBuf]");
+        let params = parse_params("root: &Path, files: &[PathBuf]", "name_colon_type");
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].name, "root");
         assert_eq!(params[0].param_type, "&Path");
@@ -670,15 +729,36 @@ mod tests {
 
     #[test]
     fn parse_params_with_self() {
-        let params = parse_params("&self, key: &str");
+        let params = parse_params("&self, key: &str", "name_colon_type");
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "key");
     }
 
     #[test]
     fn parse_params_empty() {
-        let params = parse_params("");
+        let params = parse_params("", "name_colon_type");
         assert!(params.is_empty());
+    }
+
+    #[test]
+    fn parse_params_php_format() {
+        let params = parse_params("string $name, ?int $count = 0", "type_dollar_name");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "name");
+        assert_eq!(params[0].param_type, "string");
+        assert!(!params[0].has_default);
+        assert_eq!(params[1].name, "count");
+        assert_eq!(params[1].param_type, "?int");
+        assert!(params[1].has_default);
+    }
+
+    #[test]
+    fn parse_params_php_untyped() {
+        let params = parse_params("$request, $args", "type_dollar_name");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "request");
+        assert_eq!(params[0].param_type, "mixed");
+        assert_eq!(params[1].name, "args");
     }
 
     #[test]
