@@ -91,7 +91,8 @@ pub(crate) fn generate_test_file_fixes(
             None => {
                 skipped.push(SkippedFile {
                     file: source_file.clone(),
-                    reason: "No public functions found or no contract grammar available".to_string(),
+                    reason: "No public functions found or no contract grammar available"
+                        .to_string(),
                 });
                 continue;
             }
