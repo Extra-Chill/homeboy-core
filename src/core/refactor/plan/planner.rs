@@ -1,6 +1,7 @@
 use crate::component::Component;
 use crate::engine::temp;
-use crate::engine::undo::UndoSnapshot;
+use crate::engine::undo::{InMemoryRollback, UndoSnapshot};
+use crate::engine::validate_write;
 use crate::extension;
 use crate::extension::test::compute_changed_test_files;
 use crate::git;
@@ -294,12 +295,18 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
             }
         }
 
+        // Capture pre-write state for rollback if validation fails
+        let abs_changed: Vec<PathBuf> =
+            changed_files.iter().map(|f| request.root.join(f)).collect();
+        let mut validation_rollback = InMemoryRollback::new();
+        for file in &abs_changed {
+            validation_rollback.capture(file);
+        }
+
         copy_changed_files(working_root.path(), &request.root, &changed_files)?;
 
         // Run the project's formatter on written files so generated code matches style.
         // Non-fatal: formatting failure logs a warning but doesn't block the refactor.
-        let abs_changed: Vec<std::path::PathBuf> =
-            changed_files.iter().map(|f| request.root.join(f)).collect();
         match crate::engine::format_write::format_after_write(&request.root, &abs_changed) {
             Ok(fmt) => {
                 if let Some(cmd) = &fmt.command {
@@ -311,6 +318,46 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
             Err(e) => {
                 crate::log_status!("format", "Warning: post-write format failed: {}", e);
             }
+        }
+
+        // Validate that written code compiles. If validation fails, roll back
+        // all changes and report as dry-run (no files modified).
+        let validation = validate_write::validate_write(
+            &request.root,
+            &abs_changed,
+            &validation_rollback,
+        )?;
+        if !validation.success {
+            crate::log_status!(
+                "validate",
+                "Post-write validation failed — all changes rolled back"
+            );
+            if let Some(output) = &validation.output {
+                warnings.push(format!("Validation failed: {}", output));
+            }
+            // Reset: no files were modified (rolled back by validate_write)
+            for stage in &mut stage_summaries {
+                stage.applied = false;
+            }
+            return Ok(RefactorPlan {
+                component_id: request.component.id.clone(),
+                source_path: request.root.to_string_lossy().to_string(),
+                sources: sources.clone(),
+                dry_run: false,
+                applied: false,
+                merge_strategy: merge_order.clone(),
+                proposals,
+                stages: stage_summaries,
+                plan_totals,
+                overlaps,
+                files_modified: 0,
+                changed_files: vec![],
+                fix_summary: None,
+                warnings,
+                hints: vec![
+                    "Validation failed — changes were rolled back. Fix compilation errors and retry.".to_string(),
+                ],
+            });
         }
     }
 

@@ -578,7 +578,28 @@ fn run_rename(
             &affected_files,
         );
 
+        let abs_changed: Vec<std::path::PathBuf> =
+            affected_files.iter().map(|f| root.join(f)).collect();
+        let mut validation_rollback = homeboy::engine::undo::InMemoryRollback::new();
+        for file in &abs_changed {
+            validation_rollback.capture(file);
+        }
+
         refactor::apply_renames(&mut result, &root)?;
+
+        // Validate that renamed code compiles
+        let validation = homeboy::engine::validate_write::validate_write(
+            &root,
+            &abs_changed,
+            &validation_rollback,
+        )?;
+        if !validation.success {
+            homeboy::log_status!(
+                "validate",
+                "Post-write validation failed — changes rolled back"
+            );
+            result.applied = false;
+        }
     }
 
     let scope_str = match scope {
@@ -972,6 +993,15 @@ fn run_propagate(
         );
     }
 
+    // Capture pre-write state for validation rollback
+    let mut validation_rollback = homeboy::engine::undo::InMemoryRollback::new();
+    if write {
+        let preview = refactor::propagate(&config)?;
+        for edit in &preview.edits {
+            validation_rollback.capture(&root.join(&edit.file));
+        }
+    }
+
     // Run the actual propagation (with write mode as requested)
     let write_config = refactor::PropagateConfig {
         struct_name,
@@ -979,7 +1009,25 @@ fn run_propagate(
         root: &root,
         write,
     };
-    let result = refactor::propagate(&write_config)?;
+    let mut result = refactor::propagate(&write_config)?;
+
+    // Validate written code compiles
+    if write && result.applied {
+        let abs_changed: Vec<std::path::PathBuf> =
+            result.edits.iter().map(|e| root.join(&e.file)).collect();
+        let validation = homeboy::engine::validate_write::validate_write(
+            &root,
+            &abs_changed,
+            &validation_rollback,
+        )?;
+        if !validation.success {
+            homeboy::log_status!(
+                "validate",
+                "Post-write validation failed — changes rolled back"
+            );
+            result.applied = false;
+        }
+    }
 
     // Log results to stderr
     homeboy::log_status!(
