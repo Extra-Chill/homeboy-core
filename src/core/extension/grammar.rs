@@ -56,6 +56,50 @@ pub struct Grammar {
 
     /// Named patterns for structural concepts.
     pub patterns: HashMap<String, ConceptPattern>,
+
+    /// Contract extraction patterns — for analyzing function internals.
+    /// Optional: extensions that don't provide this get no contract extraction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<ContractGrammar>,
+}
+
+/// Grammar section for function contract extraction.
+///
+/// Defines patterns that identify control flow, side effects, and return
+/// paths within function bodies. All patterns are applied only inside
+/// function body ranges (between the function's opening and closing braces).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContractGrammar {
+    /// Patterns that identify side effects. Keys are effect kind names
+    /// (e.g., "file_read", "file_write", "process_spawn"), values are
+    /// regex patterns to match against lines inside function bodies.
+    #[serde(default)]
+    pub effects: HashMap<String, Vec<String>>,
+
+    /// Patterns that identify early return / guard clause lines.
+    /// Each pattern should match a line that contains a conditional return.
+    #[serde(default)]
+    pub guard_patterns: Vec<String>,
+
+    /// Patterns that identify return expressions with their variant.
+    /// Keys are variant names (e.g., "ok", "err", "some", "none", "true", "false").
+    /// Values are regex patterns that match return statements of that variant.
+    #[serde(default)]
+    pub return_patterns: HashMap<String, Vec<String>>,
+
+    /// Patterns that identify error propagation (e.g., `?` in Rust, `throw` in JS).
+    #[serde(default)]
+    pub error_propagation: Vec<String>,
+
+    /// Return type shape detection patterns. Keys are shape names
+    /// (e.g., "result", "option", "bool"), values are regex patterns
+    /// to match against the function signature's return type.
+    #[serde(default)]
+    pub return_shapes: HashMap<String, Vec<String>>,
+
+    /// Patterns for detecting panic/abort/unreachable paths.
+    #[serde(default)]
+    pub panic_patterns: Vec<String>,
 }
 
 /// Language identification metadata.
@@ -659,6 +703,7 @@ mod tests {
                 multiline: vec![],
             },
             blocks: BlockSyntax::default(),
+            contract: None,
             patterns: {
                 let mut p = HashMap::new();
                 p.insert(
@@ -731,6 +776,7 @@ mod tests {
                 multiline: vec![],
             },
             blocks: BlockSyntax::default(),
+            contract: None,
             patterns: {
                 let mut p = HashMap::new();
                 p.insert(
