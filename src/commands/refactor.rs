@@ -158,6 +158,10 @@ enum RefactorCommand {
     ///
     /// Named:  `refactor transform wp69_migration --component data-machine`
     /// Ad-hoc: `refactor transform --find "old" --replace "new" --files "**/*.php" --component C`
+    ///
+    /// Replacement templates support capture group refs ($1, $2, ${name}),
+    /// case transforms ($1:lower, $1:upper, $1:kebab, $1:snake, $1:pascal, $1:camel),
+    /// and literal $ via $$ (important for PHP code where every variable starts with $).
     Transform {
         /// Transform set name (from homeboy.json transforms key)
         #[arg(value_name = "NAME")]
@@ -167,13 +171,21 @@ enum RefactorCommand {
         #[arg(long, value_name = "REGEX")]
         find: Option<String>,
 
-        /// Replacement template with $1, $2 capture group refs (ad-hoc mode)
+        /// Replacement template (ad-hoc mode).
+        /// Supports $1, $2 capture group refs, ${name} named groups,
+        /// $1:lower/:upper/:kebab/:snake/:pascal/:camel case transforms,
+        /// and $$ for a literal dollar sign.
         #[arg(long, value_name = "TEMPLATE")]
         replace: Option<String>,
 
         /// Glob pattern for files to apply to (ad-hoc mode, default: **/*)
         #[arg(long, value_name = "GLOB", default_value = "**/*")]
         files: String,
+
+        /// Match context: "line" (default, per-line matching) or "file" (whole-file,
+        /// enables multi-line regex with (?s) dotall flag for patterns spanning newlines)
+        #[arg(long, value_name = "CONTEXT", default_value = "line")]
+        context: String,
 
         /// Only apply a specific rule ID within a named transform set
         #[arg(long, value_name = "RULE_ID")]
@@ -324,6 +336,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             find,
             replace,
             files,
+            context,
             rule,
             component,
             write_mode,
@@ -332,6 +345,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             find.as_deref(),
             replace.as_deref(),
             &files,
+            &context,
             rule.as_deref(),
             component.component.as_deref(),
             component.path.as_deref(),
@@ -1010,6 +1024,7 @@ fn run_transform(
     find: Option<&str>,
     replace: Option<&str>,
     files: &str,
+    context: &str,
     rule_filter: Option<&str>,
     component_id: Option<&str>,
     path: Option<&str>,
@@ -1030,7 +1045,7 @@ fn run_transform(
         }
         (
             "ad-hoc".to_string(),
-            refactor::ad_hoc_transform(f, r, files),
+            refactor::ad_hoc_transform(f, r, files, context),
         )
     } else if let Some(n) = name {
         // Named mode — load from homeboy.json
