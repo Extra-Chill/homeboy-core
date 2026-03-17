@@ -285,10 +285,7 @@ fn resolve_type_default<'a>(
 /// - `setup_lines` is newline-separated `let` bindings
 /// - `call_args` is comma-separated arguments for the function call
 /// - `extra_imports` is newline-separated `use` statements
-fn build_param_inputs(
-    params: &[Param],
-    type_defaults: &[TypeDefault],
-) -> (String, String, String) {
+fn build_param_inputs(params: &[Param], type_defaults: &[TypeDefault]) -> (String, String, String) {
     if params.is_empty() {
         return (String::new(), String::new(), String::new());
     }
@@ -639,7 +636,10 @@ mod tests {
         let vars = &plan.cases[0].variables;
 
         let param_setup = vars.get("param_setup").unwrap();
-        assert!(param_setup.contains("let root ="), "should have root binding");
+        assert!(
+            param_setup.contains("let root ="),
+            "should have root binding"
+        );
         assert!(
             param_setup.contains("let changed_files ="),
             "should have changed_files binding"
