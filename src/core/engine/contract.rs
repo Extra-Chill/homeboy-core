@@ -17,6 +17,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::code_audit::core_fingerprint::load_grammar_for_ext;
 use crate::error::{Error, Result};
 use crate::extension;
 
@@ -241,15 +242,51 @@ pub struct FileContracts {
 
 // ── Extraction API ──
 
-/// Extract function contracts from a source file using the appropriate extension.
+/// Extract function contracts from a source file.
 ///
-/// Returns `None` if no extension provides a contract script for this file type.
+/// Uses a two-tier strategy:
+/// 1. **Grammar-driven** (preferred): if the extension's grammar.toml has a `[contract]`
+///    section, uses the core grammar engine to extract contracts. No subprocess needed.
+/// 2. **Extension script** (fallback): if the extension has `scripts.contract`, runs
+///    the script and parses JSON output.
+///
+/// Returns `None` if neither path is available.
 pub fn extract_contracts(path: &Path, root: &Path) -> Result<Option<FileContracts>> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or_default();
 
+    let relative_path = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+
+    // Tier 1: Grammar-driven extraction (preferred — no subprocess)
+    if let Some(grammar) = load_grammar_for_ext(ext) {
+        if grammar.contract.is_some() {
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                Error::internal_io(
+                    format!("Failed to read source file: {}", e),
+                    Some("extract_contracts".to_string()),
+                )
+            })?;
+
+            if let Some(contracts) = super::contract_extract::extract_contracts_from_grammar(
+                &content,
+                &relative_path,
+                &grammar,
+            ) {
+                return Ok(Some(FileContracts {
+                    file: relative_path,
+                    contracts,
+                }));
+            }
+        }
+    }
+
+    // Tier 2: Extension script fallback
     let manifest = match find_extension_with_contract(ext) {
         Some(m) => m,
         None => return Ok(None),
@@ -268,12 +305,6 @@ pub fn extract_contracts(path: &Path, root: &Path) -> Result<Option<FileContract
     if !script_path.exists() {
         return Ok(None);
     }
-
-    let relative_path = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
 
     let content = std::fs::read_to_string(path).map_err(|e| {
         Error::internal_io(

@@ -604,6 +604,7 @@ mod tests {
                 multiline: vec![],
             },
             blocks: BlockSyntax::default(),
+            contract: None,
             patterns: {
                 let mut p = HashMap::new();
                 p.insert(
