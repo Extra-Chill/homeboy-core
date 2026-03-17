@@ -101,6 +101,18 @@ pub struct ContractGrammar {
     #[serde(default)]
     pub panic_patterns: Vec<String>,
 
+    /// The separator between the parameter list and return type in function declarations.
+    /// Rust: `"->"`, PHP: `":"`, TypeScript: `":"`.
+    /// Defaults to `"->"` for backward compatibility.
+    #[serde(default = "default_return_type_separator")]
+    pub return_type_separator: String,
+
+    /// Parameter format in function declarations.
+    /// `"name_colon_type"` — Rust/Go: `name: Type` (default)
+    /// `"type_dollar_name"` — PHP: `Type $name` or `$name`
+    #[serde(default = "default_param_format")]
+    pub param_format: String,
+
     /// Test code templates keyed by template name (e.g., "result_ok", "option_none").
     /// Templates contain variables like `{fn_name}`, `{param_names}`, `{test_name}`,
     /// `{condition}`, etc. that are replaced by the test plan renderer.
@@ -119,6 +131,14 @@ pub struct ContractGrammar {
     /// unmatched types is `Default::default()` (Rust) or language equivalent.
     #[serde(default)]
     pub type_defaults: Vec<TypeDefault>,
+}
+
+fn default_return_type_separator() -> String {
+    "->".to_string()
+}
+
+fn default_param_format() -> String {
+    "name_colon_type".to_string()
 }
 
 /// A single type-to-default-value mapping for test input construction.
