@@ -158,6 +158,7 @@ pub fn fingerprint_from_git_ref(
         unused_parameters: output.unused_parameters,
         dead_code_markers: output.dead_code_markers,
         internal_calls: output.internal_calls,
+        call_sites: output.call_sites,
         public_api: output.public_api,
         trait_impl_methods: Vec::new(),
     })
