@@ -3,6 +3,7 @@ mod convention_fixes;
 mod doc_fixes;
 mod duplicate_fixes;
 mod orphaned_test_fixes;
+mod parameter_fixes;
 mod signatures;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
@@ -96,6 +97,7 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
 
     doc_fixes::apply_stale_doc_reference_fixes(result, &mut fixes);
     doc_fixes::apply_broken_doc_reference_fixes(result, root, &mut fixes);
+    parameter_fixes::generate_parameter_fixes(result, root, &mut fixes, &mut skipped);
 
     let fixes = merge_fixes_per_file(fixes);
     let total_insertions: usize = fixes.iter().map(|fix| fix.insertions.len()).sum();
