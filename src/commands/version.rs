@@ -2,14 +2,17 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::component;
+use homeboy::release::{self, ReleaseCommandInput, ReleaseCommandResult};
 use homeboy::version::{read_component_version, read_version, VersionTargetInfo};
 
+use super::utils::args::{DryRunArgs, HiddenJsonArgs, PositionalComponentArgs};
 use super::CmdResult;
 
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum VersionOutput {
     Show(VersionShowOutput),
+    Bump(VersionBumpOutput),
 }
 
 #[derive(Args)]
@@ -29,16 +32,55 @@ enum VersionCommand {
         #[arg(long)]
         path: Option<String>,
     },
+
+    /// Bump version and release (alias for `homeboy release`)
+    Bump {
+        #[command(flatten)]
+        comp: PositionalComponentArgs,
+
+        #[command(flatten)]
+        dry_run_args: DryRunArgs,
+
+        #[command(flatten)]
+        _json: HiddenJsonArgs,
+
+        /// Deploy to all projects using this component after release
+        #[arg(long)]
+        deploy: bool,
+
+        /// Recover from an interrupted release (tag + push current version)
+        #[arg(long)]
+        recover: bool,
+
+        /// Skip pre-release lint and test checks
+        #[arg(long)]
+        skip_checks: bool,
+
+        /// Allow a major version bump. Required when commits contain breaking changes.
+        /// Without this flag, homeboy will warn and exit instead of releasing a major bump.
+        #[arg(long)]
+        major: bool,
+
+        /// Skip publish/package steps (version bump + tag + push only).
+        /// Use when CI handles publishing after the tag is pushed.
+        #[arg(long)]
+        skip_publish: bool,
+    },
 }
 
 #[derive(Serialize)]
-
 pub struct VersionShowOutput {
     command: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     component_id: Option<String>,
     pub version: String,
     targets: Vec<VersionTargetInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "command", rename = "release")]
+pub struct VersionBumpOutput {
+    pub result: ReleaseCommandResult,
 }
 
 pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<VersionOutput> {
@@ -80,6 +122,29 @@ pub fn run(args: VersionArgs, _global: &crate::commands::GlobalArgs) -> CmdResul
                 }),
                 0,
             ))
+        }
+        VersionCommand::Bump {
+            comp,
+            dry_run_args,
+            _json: _,
+            deploy,
+            recover,
+            skip_checks,
+            major,
+            skip_publish,
+        } => {
+            let (result, exit_code) = release::run_command(ReleaseCommandInput {
+                component_id: comp.id().to_string(),
+                path_override: comp.path.clone(),
+                dry_run: dry_run_args.dry_run,
+                deploy,
+                recover,
+                skip_checks,
+                major,
+                skip_publish,
+            })?;
+
+            Ok((VersionOutput::Bump(VersionBumpOutput { result }), exit_code))
         }
     }
 }

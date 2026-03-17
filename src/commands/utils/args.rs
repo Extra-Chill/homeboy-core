@@ -22,7 +22,7 @@ pub(crate) fn normalize_version_show(args: Vec<String>) -> Vec<String> {
         return args;
     }
 
-    let known_subcommands = ["show", "--help", "-h", "help"];
+    let known_subcommands = ["show", "bump", "--help", "-h", "help"];
     let second_arg = args.get(2).map(|s| s.as_str()).unwrap_or("");
 
     if known_subcommands.contains(&second_arg) || second_arg.starts_with('-') {
