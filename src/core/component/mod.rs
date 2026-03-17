@@ -511,7 +511,10 @@ mod tests {
         let component = Component {
             id: "my-plugin".to_string(),
             local_path: dir.to_string_lossy().to_string(),
-            extensions: Some(HashMap::from([("wordpress".to_string(), ScopedExtensionConfig::default())])),
+            extensions: Some(HashMap::from([(
+                "wordpress".to_string(),
+                ScopedExtensionConfig::default(),
+            )])),
             ..Component::default()
         };
 
@@ -527,16 +530,15 @@ mod tests {
         let dir = tmp.path();
 
         // Create a WordPress theme style.css
-        std::fs::write(
-            dir.join("style.css"),
-            "/*\nTheme Name: My Theme\n*/\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("style.css"), "/*\nTheme Name: My Theme\n*/\n").unwrap();
 
         let component = Component {
             id: "my-theme".to_string(),
             local_path: dir.to_string_lossy().to_string(),
-            extensions: Some(HashMap::from([("wordpress".to_string(), ScopedExtensionConfig::default())])),
+            extensions: Some(HashMap::from([(
+                "wordpress".to_string(),
+                ScopedExtensionConfig::default(),
+            )])),
             ..Component::default()
         };
 
@@ -551,7 +553,10 @@ mod tests {
         let component = Component {
             id: "my-crate".to_string(),
             local_path: "/tmp".to_string(),
-            extensions: Some(HashMap::from([("rust".to_string(), ScopedExtensionConfig::default())])),
+            extensions: Some(HashMap::from([(
+                "rust".to_string(),
+                ScopedExtensionConfig::default(),
+            )])),
             ..Component::default()
         };
 
@@ -573,7 +578,10 @@ mod tests {
             id: "my-plugin".to_string(),
             local_path: dir.to_string_lossy().to_string(),
             remote_path: String::new(),
-            extensions: Some(HashMap::from([("wordpress".to_string(), ScopedExtensionConfig::default())])),
+            extensions: Some(HashMap::from([(
+                "wordpress".to_string(),
+                ScopedExtensionConfig::default(),
+            )])),
             ..Component::default()
         };
 
@@ -587,7 +595,10 @@ mod tests {
             id: "my-plugin".to_string(),
             local_path: "/tmp".to_string(),
             remote_path: "custom/deploy/path".to_string(),
-            extensions: Some(HashMap::from([("wordpress".to_string(), ScopedExtensionConfig::default())])),
+            extensions: Some(HashMap::from([(
+                "wordpress".to_string(),
+                ScopedExtensionConfig::default(),
+            )])),
             ..Component::default()
         };
 

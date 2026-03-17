@@ -482,5 +482,3 @@ fn cleanup_build_dependencies(
         Ok(Some(summary))
     }
 }
-
-
