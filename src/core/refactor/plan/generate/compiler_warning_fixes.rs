@@ -149,10 +149,7 @@ fn build_line_replacement_fix(suggestion: &CompilerSuggestion) -> Fix {
         blocked_reason: None,
         preflight: None,
         code: String::new(),
-        description: format!(
-            "Fix {} (compiler: {})",
-            suggestion.code, suggestion.message
-        ),
+        description: format!("Fix {} (compiler: {})", suggestion.code, suggestion.message),
     };
 
     Fix {
@@ -242,17 +239,17 @@ fn parse_suggestions(stdout: &str, root: &Path) -> Vec<CompilerSuggestion> {
                     .unwrap_or(file_name);
 
                 // Skip external files.
-                if relative.is_empty()
-                    || relative.starts_with('/')
-                    || relative.contains("/.cargo/")
+                if relative.is_empty() || relative.starts_with('/') || relative.contains("/.cargo/")
                 {
                     continue;
                 }
 
                 let line_start =
                     span.get("line_start").and_then(|l| l.as_u64()).unwrap_or(1) as usize;
-                let line_end =
-                    span.get("line_end").and_then(|l| l.as_u64()).unwrap_or(line_start as u64) as usize;
+                let line_end = span
+                    .get("line_end")
+                    .and_then(|l| l.as_u64())
+                    .unwrap_or(line_start as u64) as usize;
 
                 // Extract the original text from the span for LineReplacement matching.
                 let original_text = span
@@ -265,8 +262,10 @@ fn parse_suggestions(stdout: &str, root: &Path) -> Vec<CompilerSuggestion> {
                     .to_string();
 
                 // For single-line replacements, extract just the portion being replaced.
-                let col_start =
-                    span.get("column_start").and_then(|c| c.as_u64()).unwrap_or(1) as usize;
+                let col_start = span
+                    .get("column_start")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(1) as usize;
                 let col_end = span
                     .get("column_end")
                     .and_then(|c| c.as_u64())
@@ -299,8 +298,10 @@ fn parse_suggestions(stdout: &str, root: &Path) -> Vec<CompilerSuggestion> {
     }
 
     // Deduplicate.
-    suggestions.sort_by(|a, b| (&a.file, a.line_start, &a.code).cmp(&(&b.file, b.line_start, &b.code)));
-    suggestions.dedup_by(|a, b| a.file == b.file && a.line_start == b.line_start && a.code == b.code);
+    suggestions
+        .sort_by(|a, b| (&a.file, a.line_start, &a.code).cmp(&(&b.file, b.line_start, &b.code)));
+    suggestions
+        .dedup_by(|a, b| a.file == b.file && a.line_start == b.line_start && a.code == b.code);
 
     suggestions
 }
