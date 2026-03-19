@@ -395,10 +395,7 @@ fn run_comparison_workflow(
     } else {
         let fixability = report::compute_fixability(&result);
         Ok(AuditRunWorkflowResult {
-            output: AuditCommandOutput::Full {
-                result,
-                fixability,
-            },
+            output: AuditCommandOutput::Full { result, fixability },
             exit_code,
         })
     }
