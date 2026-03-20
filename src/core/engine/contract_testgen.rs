@@ -113,10 +113,7 @@ pub(crate) fn generate_test_plan(
                 vars.insert("param_args".to_string(), so.call_args.clone());
                 // Merge any additional imports
                 if !so.extra_imports.is_empty() {
-                    let existing = vars
-                        .get("extra_imports")
-                        .cloned()
-                        .unwrap_or_default();
+                    let existing = vars.get("extra_imports").cloned().unwrap_or_default();
                     let merged = merge_imports(&existing, &so.extra_imports);
                     vars.insert("extra_imports".to_string(), merged);
                 }
@@ -470,8 +467,7 @@ fn infer_setup_from_condition(
                 ovr.imports.clone(),
             )
         } else {
-            let (val, call_override, imps) =
-                resolve_type_default(&param.param_type, type_defaults);
+            let (val, call_override, imps) = resolve_type_default(&param.param_type, type_defaults);
             let call = call_override.unwrap_or_else(|| {
                 if param.param_type.trim().starts_with('&') {
                     format!("&{}", param.name)
@@ -538,31 +534,27 @@ fn match_condition_to_param(
     }
 
     // ── Pattern: "param.is_none()" or "param is None" ──
-    if condition_contains_param_method(condition_lower, pname, "is_none")
-        || (condition_lower.contains(&pname.to_lowercase())
-            && condition_lower.contains("none"))
+    if (condition_contains_param_method(condition_lower, pname, "is_none")
+        || (condition_lower.contains(&pname.to_lowercase()) && condition_lower.contains("none")))
+        && ptype.starts_with("Option")
     {
-        if ptype.starts_with("Option") {
-            return Some(ConditionParamOverride {
-                value_expr: "None".to_string(),
-                call_arg: None,
-                imports: vec![],
-            });
-        }
+        return Some(ConditionParamOverride {
+            value_expr: "None".to_string(),
+            call_arg: None,
+            imports: vec![],
+        });
     }
 
     // ── Pattern: "param.is_some()" or "param is Some" ──
-    if condition_contains_param_method(condition_lower, pname, "is_some")
-        || (condition_lower.contains(&pname.to_lowercase())
-            && condition_lower.contains("some"))
+    if (condition_contains_param_method(condition_lower, pname, "is_some")
+        || (condition_lower.contains(&pname.to_lowercase()) && condition_lower.contains("some")))
+        && ptype.starts_with("Option")
     {
-        if ptype.starts_with("Option") {
-            return Some(ConditionParamOverride {
-                value_expr: "Some(Default::default())".to_string(),
-                call_arg: None,
-                imports: vec![],
-            });
-        }
+        return Some(ConditionParamOverride {
+            value_expr: "Some(Default::default())".to_string(),
+            call_arg: None,
+            imports: vec![],
+        });
     }
 
     // ── Pattern: path existence — "path doesn't exist", "not exists", "!path.exists()" ──
@@ -743,9 +735,20 @@ fn is_numeric_type(ptype: &str) -> bool {
     let t = ptype.trim();
     matches!(
         t,
-        "usize" | "u8" | "u16" | "u32" | "u64" | "u128"
-            | "isize" | "i8" | "i16" | "i32" | "i64" | "i128"
-            | "f32" | "f64"
+        "usize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "isize"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "f32"
+            | "f64"
     )
 }
 
@@ -782,11 +785,7 @@ fn extract_method_string_arg(condition: &str, param: &str, method: &str) -> Opti
 /// Produces assertion code that checks the actual return value, not just the
 /// type variant. Falls back to the standard `is_ok()`/`is_err()` checks when
 /// no more specific assertion can be derived.
-fn infer_assertion(
-    returns: &ReturnValue,
-    return_type: &ReturnShape,
-    condition: &str,
-) -> String {
+fn infer_assertion(returns: &ReturnValue, return_type: &ReturnShape, condition: &str) -> String {
     let indent = "        ";
 
     match return_type {
@@ -820,49 +819,33 @@ fn infer_assertion(
                         )
                     }
                 }
-                _ => format!(
-                    "{indent}let _ = result; // variant: {}",
-                    returns.variant
-                ),
+                _ => format!("{indent}let _ = result; // variant: {}", returns.variant),
             }
         }
-        ReturnShape::OptionType { .. } => {
-            match returns.variant.as_str() {
-                "some" => {
-                    if let Some(ref val) = returns.value {
-                        format!(
-                            "{indent}let inner = result.expect(\"expected Some for: {condition}\");\n\
+        ReturnShape::OptionType { .. } => match returns.variant.as_str() {
+            "some" => {
+                if let Some(ref val) = returns.value {
+                    format!(
+                        "{indent}let inner = result.expect(\"expected Some for: {condition}\");\n\
                              {indent}// Branch returns Some({val})\n\
                              {indent}let _ = inner; // TODO: assert value matches \"{val}\"",
-                        )
-                    } else {
-                        format!(
-                            "{indent}assert!(result.is_some(), \"expected Some for: {condition}\");",
-                        )
-                    }
-                }
-                "none" => {
+                    )
+                } else {
                     format!(
-                        "{indent}assert!(result.is_none(), \"expected None for: {condition}\");",
+                        "{indent}assert!(result.is_some(), \"expected Some for: {condition}\");",
                     )
                 }
-                _ => format!(
-                    "{indent}let _ = result; // variant: {}",
-                    returns.variant
-                ),
             }
-        }
-        ReturnShape::Bool => {
-            match returns.variant.as_str() {
-                "true" => format!(
-                    "{indent}assert!(result, \"expected true when: {condition}\");",
-                ),
-                "false" => format!(
-                    "{indent}assert!(!result, \"expected false when: {condition}\");",
-                ),
-                _ => format!("{indent}let _ = result;"),
+            "none" => {
+                format!("{indent}assert!(result.is_none(), \"expected None for: {condition}\");",)
             }
-        }
+            _ => format!("{indent}let _ = result; // variant: {}", returns.variant),
+        },
+        ReturnShape::Bool => match returns.variant.as_str() {
+            "true" => format!("{indent}assert!(result, \"expected true when: {condition}\");",),
+            "false" => format!("{indent}assert!(!result, \"expected false when: {condition}\");",),
+            _ => format!("{indent}let _ = result;"),
+        },
         ReturnShape::Collection { .. } => {
             // For collections, check emptiness based on condition
             if condition.contains("empty") || condition.contains("is_empty") {
@@ -1389,8 +1372,7 @@ mod tests {
             mutable: false,
             has_default: false,
         }];
-        let result =
-            infer_setup_from_condition("path doesn't exist", &params, &[]);
+        let result = infer_setup_from_condition("path doesn't exist", &params, &[]);
         assert!(result.is_some(), "should infer setup for nonexistent path");
         let so = result.unwrap();
         assert!(
@@ -1469,8 +1451,7 @@ mod tests {
             },
         ];
         // Condition only targets items, root should keep its type_default
-        let result =
-            infer_setup_from_condition("items.is_empty()", &params, &type_defaults);
+        let result = infer_setup_from_condition("items.is_empty()", &params, &type_defaults);
         assert!(result.is_some());
         let so = result.unwrap();
         assert!(
@@ -1685,8 +1666,7 @@ mod tests {
             mutable: false,
             has_default: false,
         }];
-        let result =
-            infer_setup_from_condition("name.contains(\"test\")", &params, &[]);
+        let result = infer_setup_from_condition("name.contains(\"test\")", &params, &[]);
         assert!(result.is_some());
         let so = result.unwrap();
         assert!(
