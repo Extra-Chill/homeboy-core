@@ -132,6 +132,7 @@ pub fn run_main_test_workflow(
         parse_test_results_file(&results_file).or_else(|| parse_test_results_text(&output.stdout));
     let _ = std::fs::remove_file(&results_file);
 
+    // Autofix is owned by `refactor --from test --write`; the test command is read-only.
     let test_autofix: Option<AppliedRefactor> = None;
 
     let status = if let Some(ref counts) = test_counts {

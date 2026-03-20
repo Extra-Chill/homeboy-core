@@ -63,7 +63,7 @@ The following environment variables are set for lint runners:
 - `HOMEBOY_MODULE_PATH`: Absolute path to extension directory
 - `HOMEBOY_COMPONENT_PATH`: Absolute path to component directory
 - `HOMEBOY_PLUGIN_PATH`: Same as component path
-- `HOMEBOY_AUTO_FIX`: Set to `1` when `--fix` flag is used
+- `HOMEBOY_AUTO_FIX`: Set to `1` when running via `refactor --from lint --write`
 - `HOMEBOY_SUMMARY_MODE`: Set to `1` when `--summary` flag is used
 - `HOMEBOY_LINT_FILE`: Single file path when `--file` is used
 - `HOMEBOY_LINT_GLOB`: Glob pattern when `--glob` or `--changed-only` is used
@@ -81,11 +81,11 @@ Returns JSON with lint results:
   "component": "component-name",
   "output": "lint output...",
   "exit_code": 0,
-  "hints": ["Run 'homeboy lint <component> --fix' to auto-fix..."]
+  "hints": ["Auto-fix: homeboy refactor <component> --from lint --write"]
 }
 ```
 
-The `hints` field appears when linting fails without `--fix`, suggesting the auto-fix option.
+The `hints` field appears when linting fails, suggesting the refactor command for auto-fixing.
 
 When extensions write `HOMEBOY_LINT_FINDINGS_FILE`, Homeboy exposes `lint_findings` in JSON output and
 supports baseline ratchet checks (`--baseline`, `--ignore-baseline`).
