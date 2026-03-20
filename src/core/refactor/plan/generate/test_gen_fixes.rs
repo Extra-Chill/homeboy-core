@@ -11,8 +11,7 @@ use std::path::Path;
 use crate::code_audit::core_fingerprint::load_grammar_for_ext;
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::engine::contract_testgen::{
-    generate_tests_for_file_with_types, generate_tests_for_methods_with_types,
-    GeneratedTestOutput,
+    generate_tests_for_file_with_types, generate_tests_for_methods_with_types, GeneratedTestOutput,
 };
 use crate::core::engine::symbol_graph::module_path_from_file;
 use crate::core::refactor::auto::{
@@ -253,18 +252,18 @@ pub(crate) fn generate_test_method_fixes(
             &method_refs,
             Some(&project_registry),
         ) {
-                Some(g) => g,
-                None => {
-                    skipped.push(SkippedFile {
-                        file: source_file.clone(),
-                        reason: format!(
-                            "Could not generate tests for methods: {}",
-                            missing_methods.join(", ")
-                        ),
-                    });
-                    continue;
-                }
-            };
+            Some(g) => g,
+            None => {
+                skipped.push(SkippedFile {
+                    file: source_file.clone(),
+                    reason: format!(
+                        "Could not generate tests for methods: {}",
+                        missing_methods.join(", ")
+                    ),
+                });
+                continue;
+            }
+        };
 
         // Determine target file and build insertion code
         let (target_file, append_code) = match &test_location {
