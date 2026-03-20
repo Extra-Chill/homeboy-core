@@ -103,9 +103,7 @@ pub(crate) fn generate_test_plan(
                 let cond_lower = b.condition.to_lowercase();
                 let mut hints_for_branch = HashMap::new();
                 for param in &contract.signature.params {
-                    if let Some(hint) =
-                        infer_hint_for_param(&b.condition, &cond_lower, param)
-                    {
+                    if let Some(hint) = infer_hint_for_param(&b.condition, &cond_lower, param) {
                         hints_for_branch.insert(param.name.clone(), hint);
                     }
                 }
@@ -139,8 +137,7 @@ pub(crate) fn generate_test_plan(
 
             // Behavioral inference: derive setup overrides from branch condition,
             // with cross-branch complement hints for unmatched params.
-            let complement_hints =
-                build_complement_hints(i, &all_branch_hints);
+            let complement_hints = build_complement_hints(i, &all_branch_hints);
             let setup_override = infer_setup_with_complements(
                 &branch.condition,
                 &contract.signature.params,
@@ -949,24 +946,23 @@ fn infer_setup_with_complements(
     let mut all_imports: Vec<String> = Vec::new();
 
     for param in params {
-        let (value_expr, call_arg, imports) =
-            if let Some(hint) = param_hints.get(&param.name) {
-                resolve_constructor(
-                    hint,
-                    &param.name,
-                    &param.param_type,
-                    type_constructors,
-                    type_defaults,
-                    fallback_default,
-                )
-            } else {
-                let (val, call_override, imps) =
-                    resolve_type_default(&param.param_type, type_defaults, fallback_default);
-                let call =
-                    call_override.unwrap_or_else(|| default_call_arg(&param.name, &param.param_type));
-                let imp_strs: Vec<String> = imps.into_iter().map(|s| s.to_string()).collect();
-                (val, call, imp_strs)
-            };
+        let (value_expr, call_arg, imports) = if let Some(hint) = param_hints.get(&param.name) {
+            resolve_constructor(
+                hint,
+                &param.name,
+                &param.param_type,
+                type_constructors,
+                type_defaults,
+                fallback_default,
+            )
+        } else {
+            let (val, call_override, imps) =
+                resolve_type_default(&param.param_type, type_defaults, fallback_default);
+            let call =
+                call_override.unwrap_or_else(|| default_call_arg(&param.name, &param.param_type));
+            let imp_strs: Vec<String> = imps.into_iter().map(|s| s.to_string()).collect();
+            (val, call, imp_strs)
+        };
 
         setup_lines.push(format!("        let {} = {};", param.name, value_expr));
         call_args.push(call_arg);
@@ -2089,7 +2085,7 @@ mod tests {
         assert!(
             so.setup_lines.contains("\"test\""),
             "should use the literal from contains(), got: {}",
-             so.setup_lines
+            so.setup_lines
         );
     }
 
