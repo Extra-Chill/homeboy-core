@@ -191,14 +191,16 @@ pub fn apply_fix_policy(
         })
         .collect();
 
+    // Filter decompose plans by policy — retain plans whose source finding
+    // matches the --only filter, or isn't in the --exclude list.
     if let Some(ref only) = policy.only {
-        if !only.contains(&AuditFinding::GodFile) {
-            result.decompose_plans.clear();
-        }
+        result
+            .decompose_plans
+            .retain(|p| only.contains(&p.source_finding));
     }
-    if policy.exclude.contains(&AuditFinding::GodFile) {
-        result.decompose_plans.clear();
-    }
+    result
+        .decompose_plans
+        .retain(|p| !policy.exclude.contains(&p.source_finding));
 
     result.total_insertions = summary.visible_insertions + summary.visible_new_files;
     summary
