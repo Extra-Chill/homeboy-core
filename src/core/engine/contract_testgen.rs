@@ -67,12 +67,27 @@ pub struct TestCase {
 /// - `type_constructors` — behavioral constructors for condition-specific inputs
 /// - `assertion_templates` — language-specific assertion code patterns
 /// - `fallback_default` — fallback expression when nothing else matches
+/// - `field_pattern` — regex for extracting struct fields from source
+///
+/// The `type_registry` maps type names to their definitions, enabling
+/// field-level assertions when the return type is a known struct.
 ///
 /// Core analyzes conditions and returns to produce **semantic hints**, then
 /// resolves those hints through the grammar to get language-specific code.
+/// Convenience wrapper — generates a test plan without a type registry.
+#[cfg(test)]
 pub(crate) fn generate_test_plan(
     contract: &FunctionContract,
     contract_grammar: &ContractGrammar,
+) -> TestPlan {
+    generate_test_plan_with_types(contract, contract_grammar, &HashMap::new())
+}
+
+/// Generate a test plan with access to a type registry for struct introspection.
+pub(crate) fn generate_test_plan_with_types(
+    contract: &FunctionContract,
+    contract_grammar: &ContractGrammar,
+    type_registry: &HashMap<String, TypeDefinition>,
 ) -> TestPlan {
     let mut cases = Vec::new();
     let type_defaults = &contract_grammar.type_defaults;
@@ -161,11 +176,24 @@ pub(crate) fn generate_test_plan(
 
             // Behavioral inference: derive assertion from branch return.
             // Core selects an assertion key; grammar provides the template.
+            // When a type registry is available, assertions can reference
+            // specific struct fields instead of using opaque TODO placeholders.
             let assertion = resolve_assertion(
                 &branch.returns,
                 &contract.signature.return_type,
                 &branch.condition,
                 &contract_grammar.assertion_templates,
+            );
+
+            // If we have type info and the assertion has a TODO placeholder,
+            // replace it with real field-level assertions using type defaults.
+            let assertion = enrich_assertion_with_fields(
+                &assertion,
+                &branch.returns,
+                &contract.signature.return_type,
+                type_registry,
+                type_defaults,
+                &contract_grammar.fallback_default,
             );
             vars.insert("assertion_code".to_string(), assertion);
 
@@ -859,6 +887,158 @@ fn resolve_assertion(
     }
 }
 
+/// Replace assertion TODO placeholders with real field-level assertions.
+///
+/// When the return type is a known struct, generates `assert_eq!` for each
+/// public field using the field's type-default value as the expected value.
+/// This produces tests that actually **assert behavior**, not just document
+/// what fields exist.
+///
+/// Turns:
+///   `let _ = inner; // TODO: assert specific value for "skipped"`
+/// Into:
+///   `assert_eq!(inner.success, false);`
+///   `assert_eq!(inner.command, None);`
+///   `assert_eq!(inner.rolled_back, false);`
+///   `assert_eq!(inner.files_checked, 0);`
+fn enrich_assertion_with_fields(
+    assertion: &str,
+    returns: &ReturnValue,
+    return_type: &ReturnShape,
+    type_registry: &HashMap<String, TypeDefinition>,
+    type_defaults: &[TypeDefault],
+    fallback_default: &str,
+) -> String {
+    // Only enrich if the assertion has a TODO placeholder
+    if !assertion.contains("TODO:") {
+        return assertion.to_string();
+    }
+
+    // Determine the inner type name to look up
+    let type_name = match return_type {
+        ReturnShape::ResultType { ok_type, .. } => {
+            if returns.variant == "ok" {
+                Some(ok_type.as_str())
+            } else {
+                None
+            }
+        }
+        ReturnShape::OptionType { some_type } => {
+            if returns.variant == "some" {
+                Some(some_type.as_str())
+            } else {
+                None
+            }
+        }
+        ReturnShape::Value { value_type } => Some(value_type.as_str()),
+        _ => None,
+    };
+
+    let type_name = match type_name {
+        Some(n) => n.trim(),
+        None => return assertion.to_string(),
+    };
+
+    let base_name = type_name
+        .trim_start_matches('&')
+        .trim_start_matches("mut ")
+        .trim();
+
+    let type_def = match type_registry.get(base_name) {
+        Some(td) => td,
+        None => return assertion.to_string(),
+    };
+
+    let public_fields: Vec<&FieldDef> = type_def.fields.iter().filter(|f| f.is_public).collect();
+    if public_fields.is_empty() {
+        return assertion.to_string();
+    }
+
+    let indent = "        ";
+
+    // Find the TODO line and everything after it (including the `let _ = inner;` line before it)
+    let todo_pos = match assertion.find("// TODO:") {
+        Some(pos) => pos,
+        None => return assertion.to_string(),
+    };
+
+    // Find the start of the line containing the `let _ =` before the TODO
+    // We want to replace both the `let _ = inner;` line AND the TODO line
+    let search_region = &assertion[..todo_pos];
+    let let_underscore_pos = search_region.rfind("let _ = ");
+    let replace_start = if let Some(lpos) = let_underscore_pos {
+        // Find the line start before `let _ =`
+        assertion[..lpos].rfind('\n').map(|p| p + 1).unwrap_or(0)
+    } else {
+        // No `let _ =` found, just replace from the TODO line start
+        assertion[..todo_pos].rfind('\n').map(|p| p + 1).unwrap_or(0)
+    };
+
+    let replace_end = assertion[todo_pos..]
+        .find('\n')
+        .map(|p| todo_pos + p + 1)
+        .unwrap_or(assertion.len());
+
+    // Build real field assertions
+    let mut field_assertions = Vec::new();
+    for field in &public_fields {
+        let expected = default_for_field_type(&field.field_type, type_defaults, fallback_default);
+        field_assertions.push(format!(
+            "{indent}assert_eq!(inner.{}, {});",
+            field.name, expected
+        ));
+    }
+
+    format!(
+        "{}{}{}",
+        &assertion[..replace_start],
+        field_assertions.join("\n"),
+        &assertion[replace_end..],
+    )
+}
+
+/// Resolve a default/zero value for a field type to use as expected assertion value.
+///
+/// Uses the grammar's type_defaults first, then falls back to common patterns.
+fn default_for_field_type(
+    field_type: &str,
+    type_defaults: &[TypeDefault],
+    fallback_default: &str,
+) -> String {
+    let trimmed = field_type.trim();
+
+    // Try grammar type_defaults first
+    for td in type_defaults {
+        if let Ok(re) = Regex::new(&td.pattern) {
+            if re.is_match(trimmed) {
+                return td.value.clone();
+            }
+        }
+    }
+
+    // Common fallbacks for types that might not be in type_defaults
+    if trimmed == "bool" {
+        return "false".to_string();
+    }
+    if trimmed == "usize" || trimmed == "u32" || trimmed == "u64" || trimmed == "i32" || trimmed == "i64" {
+        return "0".to_string();
+    }
+    if trimmed.starts_with("Option<") || trimmed.starts_with("Option ") {
+        return "None".to_string();
+    }
+    if trimmed.starts_with("Vec<") {
+        return "vec![]".to_string();
+    }
+    if trimmed == "String" {
+        return "String::new()".to_string();
+    }
+    if trimmed == "&str" {
+        return r#""""#.to_string();
+    }
+
+    fallback_default.to_string()
+}
+
 /// Build complement hints for a branch by examining what other branches require.
 ///
 /// If branch 1 says param X needs hint `"empty"`, then branches that don't
@@ -997,6 +1177,85 @@ fn merge_imports(existing: &str, new_imports: &str) -> String {
     all.join("\n")
 }
 
+// ── Type registry ──
+
+/// Build a type registry from struct/class definitions found in a source file.
+///
+/// Uses the grammar's symbol extraction to find struct/enum/class definitions,
+/// then parses their field declarations using the grammar's `field_pattern`.
+/// Returns a map from type name to `TypeDefinition`.
+fn build_type_registry(
+    content: &str,
+    file_path: &str,
+    grammar: &crate::extension::grammar::Grammar,
+    contract_grammar: &ContractGrammar,
+) -> HashMap<String, TypeDefinition> {
+    let mut registry = HashMap::new();
+
+    // Need a field pattern to parse fields
+    let field_pattern = match &contract_grammar.field_pattern {
+        Some(p) => p.as_str(),
+        None => return registry,
+    };
+
+    // Extract all symbols from the file via grammar
+    let symbols = crate::extension::grammar::extract(content, grammar);
+
+    // Also extract grammar items to get the full source of structs
+    let items = crate::extension::grammar_items::parse_items(content, grammar);
+
+    // Build a lookup from name → source body
+    let mut item_source: HashMap<String, String> = HashMap::new();
+    for item in &items {
+        if item.kind == "struct" || item.kind == "enum" || item.kind == "class" {
+            item_source.insert(item.name.clone(), item.source.clone());
+        }
+    }
+
+    // Process each struct/enum/class symbol
+    for sym in &symbols {
+        if sym.concept != "struct" && sym.concept != "class" {
+            continue;
+        }
+
+        let name: String = match sym.name() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+
+        let source = match item_source.get(&name) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let fields = parse_fields_from_source(
+            source,
+            field_pattern,
+            contract_grammar.field_visibility_pattern.as_deref(),
+        );
+
+        let is_public = sym
+            .captures
+            .get("visibility")
+            .map(|v: &String| v.contains("pub"))
+            .unwrap_or(false);
+
+        registry.insert(
+            name.clone(),
+            TypeDefinition {
+                name,
+                kind: sym.concept.clone(),
+                file: file_path.to_string(),
+                line: sym.line,
+                fields,
+                is_public,
+            },
+        );
+    }
+
+    registry
+}
+
 // ── End-to-end API ──
 
 /// Generated test output with source code and metadata.
@@ -1013,6 +1272,9 @@ pub struct GeneratedTestOutput {
 ///
 /// This is the full pipeline: grammar → contracts → test plans → rendered source.
 /// Returns `None` if the grammar has no contract or test_templates section.
+///
+/// When the grammar has `field_pattern`, struct definitions in the file are
+/// parsed into a type registry, enabling field-level assertions in generated tests.
 pub fn generate_tests_for_file(
     content: &str,
     file_path: &str,
@@ -1033,6 +1295,9 @@ pub fn generate_tests_for_file(
         return None;
     }
 
+    // Build type registry from struct definitions in this file
+    let type_registry = build_type_registry(content, file_path, grammar, contract_grammar);
+
     // Generate and render test plans
     let mut test_source = String::new();
     let mut all_extra_imports: Vec<String> = Vec::new();
@@ -1047,7 +1312,7 @@ pub fn generate_tests_for_file(
             continue;
         }
 
-        let plan = generate_test_plan(contract, contract_grammar);
+        let plan = generate_test_plan_with_types(contract, contract_grammar, &type_registry);
         if plan.cases.is_empty() {
             continue;
         }
@@ -1106,6 +1371,8 @@ pub fn generate_tests_for_methods(
         return None;
     }
 
+    let type_registry = build_type_registry(content, file_path, grammar, contract_grammar);
+
     let mut test_source = String::new();
     let mut all_extra_imports: Vec<String> = Vec::new();
     let mut tested_functions = Vec::new();
@@ -1116,7 +1383,7 @@ pub fn generate_tests_for_methods(
             continue;
         }
 
-        let plan = generate_test_plan(contract, contract_grammar);
+        let plan = generate_test_plan_with_types(contract, contract_grammar, &type_registry);
         if plan.cases.is_empty() {
             continue;
         }
@@ -2135,6 +2402,141 @@ mod tests {
             rendered.contains("skipped"),
             "should reference the expected return value 'skipped', got:\n{}",
             rendered
+        );
+    }
+
+    #[test]
+    fn test_parse_fields_from_rust_struct_source() {
+        let source = r#"
+pub struct ValidationResult {
+    pub success: bool,
+    pub command: Option<String>,
+    pub output: Option<String>,
+    pub rolled_back: bool,
+    files_checked: usize,
+}
+"#;
+        let fields = parse_fields_from_source(
+            source,
+            r"^\s*(?:pub\s+)?(\w+)\s*:\s*(.+?),?\s*$",
+            Some(r"^\s*pub\b"),
+        );
+
+        assert_eq!(fields.len(), 5, "should find 5 fields");
+        assert_eq!(fields[0].name, "success");
+        assert_eq!(fields[0].field_type, "bool");
+        assert!(fields[0].is_public, "success should be public");
+        assert_eq!(fields[1].name, "command");
+        assert_eq!(fields[1].field_type, "Option<String>");
+        assert_eq!(fields[4].name, "files_checked");
+        assert!(!fields[4].is_public, "files_checked should be private");
+    }
+
+    #[test]
+    fn test_enrich_assertion_replaces_todo_with_field_hints() {
+        let mut type_registry = HashMap::new();
+        type_registry.insert(
+            "ValidationResult".to_string(),
+            TypeDefinition {
+                name: "ValidationResult".to_string(),
+                kind: "struct".to_string(),
+                file: "src/test.rs".to_string(),
+                line: 1,
+                fields: vec![
+                    FieldDef {
+                        name: "success".to_string(),
+                        field_type: "bool".to_string(),
+                        is_public: true,
+                    },
+                    FieldDef {
+                        name: "command".to_string(),
+                        field_type: "Option<String>".to_string(),
+                        is_public: true,
+                    },
+                    FieldDef {
+                        name: "rolled_back".to_string(),
+                        field_type: "bool".to_string(),
+                        is_public: true,
+                    },
+                ],
+                is_public: true,
+            },
+        );
+
+        let assertion = "        let inner = result.unwrap();\n        // Branch returns Ok(skipped)\n        let _ = inner; // TODO: assert specific value for \"skipped\"";
+        let return_type = ReturnShape::ResultType {
+            ok_type: "ValidationResult".to_string(),
+            err_type: "Error".to_string(),
+        };
+        let returns = ReturnValue {
+            variant: "ok".to_string(),
+            value: Some("skipped".to_string()),
+        };
+
+        let type_defaults = sample_type_defaults();
+        let enriched = enrich_assertion_with_fields(
+            assertion,
+            &returns,
+            &return_type,
+            &type_registry,
+            &type_defaults,
+            "Default::default()",
+        );
+
+        // Should generate real assert_eq! statements, not comments
+        assert!(
+            enriched.contains("assert_eq!(inner.success, false)"),
+            "should assert success field equals false, got:\n{}",
+            enriched
+        );
+        assert!(
+            enriched.contains("assert_eq!(inner.command, None)"),
+            "should assert command field equals None, got:\n{}",
+            enriched
+        );
+        assert!(
+            enriched.contains("assert_eq!(inner.rolled_back, false)"),
+            "should assert rolled_back field equals false, got:\n{}",
+            enriched
+        );
+        assert!(
+            !enriched.contains("TODO:"),
+            "should replace the TODO placeholder, got:\n{}",
+            enriched
+        );
+        assert!(
+            !enriched.contains("let _ = inner"),
+            "should remove the let _ = inner placeholder, got:\n{}",
+            enriched
+        );
+    }
+
+    #[test]
+    fn test_enrich_assertion_skips_when_no_type_in_registry() {
+        let type_registry = HashMap::new();
+
+        let assertion = "        let _ = inner; // TODO: assert something";
+        let return_type = ReturnShape::ResultType {
+            ok_type: "UnknownType".to_string(),
+            err_type: "Error".to_string(),
+        };
+        let returns = ReturnValue {
+            variant: "ok".to_string(),
+            value: Some("val".to_string()),
+        };
+
+        let enriched = enrich_assertion_with_fields(
+            assertion,
+            &returns,
+            &return_type,
+            &type_registry,
+            &[],
+            "Default::default()",
+        );
+
+        assert_eq!(
+            enriched, assertion,
+            "should return assertion unchanged when type is not in registry"
         );
     }
 }
