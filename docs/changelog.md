@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.83.0] - 2026-03-20
+
+### Added
+- include fixability metadata in full audit output
+
+### Changed
+- pre-1.0 semver — breaking changes bump minor, not major
+- remove changelog add command — release owns all changelog entries
+- remove --fix from audit/lint/test — refactor owns all code changes
+
 ## [0.82.0] - 2026-03-19
 
 ### Added
