@@ -10,10 +10,7 @@ use std::path::Path;
 use crate::code_audit::{
     baseline, AuditFinding, CodeAuditResult, ConventionReport, DirectoryConvention, Severity,
 };
-use crate::refactor::{
-    auto::{FixResult, FixResultsSummary, FixSafetyTier, PolicySummary},
-    AuditRefactorIterationSummary,
-};
+use crate::refactor::auto::{FixResult, FixSafetyTier, PolicySummary};
 use serde::Serialize;
 
 use super::run::AuditRunWorkflowResult;
@@ -64,25 +61,6 @@ pub enum AuditCommandOutput {
         conventions: Vec<ConventionReport>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         directory_conventions: Vec<DirectoryConvention>,
-    },
-
-    #[serde(rename = "audit.fix")]
-    Fix {
-        component_id: String,
-        source_path: String,
-        status: String,
-        #[serde(flatten)]
-        fix_result: FixResult,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        fix_summary: Option<FixResultsSummary>,
-        policy_summary: AuditFixPolicySummary,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        iterations: Vec<AuditFixIterationSummary>,
-        written: bool,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        hints: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        ratchet_summary: Option<AutoRatchetSummary>,
     },
 
     #[serde(rename = "audit.baseline")]
@@ -159,9 +137,6 @@ pub struct FixabilityKindBreakdown {
     pub safe: usize,
     pub plan_only: usize,
 }
-
-/// Type alias for iteration summary.
-pub type AuditFixIterationSummary = AuditRefactorIterationSummary;
 
 /// Build an audit summary from a result and exit code.
 pub fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSummaryOutput {

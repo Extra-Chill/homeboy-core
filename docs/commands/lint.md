@@ -18,7 +18,6 @@ The `lint` command runs code style validation for a component using the linting 
 
 ## Options
 
-- `--fix`: Auto-fix formatting issues before validating (uses PHPCBF for WordPress)
 - `--baseline`: Save current lint findings as baseline for future comparisons
 - `--ignore-baseline`: Skip baseline comparison even if baseline exists
 - `--file <path>`: Lint only a single file (path relative to component root)
@@ -34,8 +33,8 @@ The `lint` command runs code style validation for a component using the linting 
 # Lint a WordPress component
 homeboy lint extrachill-api
 
-# Auto-fix formatting issues then validate
-homeboy lint extrachill-api --fix
+# Auto-fix formatting issues
+homeboy refactor extrachill-api --from lint --write
 
 # Lint only modified files in the working tree
 homeboy lint extrachill-api --changed-only
