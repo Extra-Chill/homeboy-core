@@ -244,11 +244,12 @@ pub struct FixResult {
     pub files_modified: usize,
 }
 
-/// A decompose operation generated from a GodFile finding.
+/// A decompose operation generated from a GodFile or HighItemCount finding.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DecomposeFixPlan {
     pub file: String,
     pub plan: decompose::DecomposePlan,
+    pub source_finding: AuditFinding,
     #[serde(default)]
     pub applied: bool,
 }
@@ -279,8 +280,8 @@ impl FixResult {
         for new_file in &self.new_files {
             *counts.entry(new_file.finding.clone()).or_insert(0) += 1;
         }
-        if !self.decompose_plans.is_empty() {
-            *counts.entry(AuditFinding::GodFile).or_insert(0) += self.decompose_plans.len();
+        for plan in &self.decompose_plans {
+            *counts.entry(plan.source_finding.clone()).or_insert(0) += 1;
         }
         counts
     }

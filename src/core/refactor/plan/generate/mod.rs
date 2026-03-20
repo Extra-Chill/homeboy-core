@@ -70,8 +70,16 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     orphaned_test_fixes::generate_orphaned_test_fixes(result, root, &mut fixes, &mut skipped);
 
     let mut decompose_plans = Vec::new();
+    let mut decompose_seen = std::collections::HashSet::new();
     for finding in &result.findings {
-        if finding.kind != AuditFinding::GodFile {
+        if !matches!(
+            finding.kind,
+            AuditFinding::GodFile | AuditFinding::HighItemCount
+        ) {
+            continue;
+        }
+        // A file can trigger both GodFile and HighItemCount — only plan once.
+        if decompose_seen.contains(&finding.file) {
             continue;
         }
         let is_test = crate::code_audit::walker::is_test_path(&finding.file);
@@ -81,14 +89,17 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
         match decompose::build_plan(&finding.file, root, "grouped") {
             Ok(plan) => {
                 if plan.groups.len() > 1 {
+                    decompose_seen.insert(finding.file.clone());
                     decompose_plans.push(DecomposeFixPlan {
                         file: finding.file.clone(),
                         plan,
+                        source_finding: finding.kind.clone(),
                         applied: false,
                     });
                 }
             }
             Err(error) => {
+                decompose_seen.insert(finding.file.clone());
                 skipped.push(SkippedFile {
                     file: finding.file.clone(),
                     reason: format!("Decompose plan failed: {}", error),
