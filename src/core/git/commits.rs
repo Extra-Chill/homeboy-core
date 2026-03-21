@@ -188,7 +188,13 @@ pub fn get_latest_tag_with_prefix(path: &str, tag_prefix: Option<&str>) -> Resul
             Ok(command::run_in_optional(
                 path,
                 "git",
-                &["describe", "--tags", "--abbrev=0", "--match", &match_pattern],
+                &[
+                    "describe",
+                    "--tags",
+                    "--abbrev=0",
+                    "--match",
+                    &match_pattern,
+                ],
             ))
         }
         None => Ok(command::run_in_optional(

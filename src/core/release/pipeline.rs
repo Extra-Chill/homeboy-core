@@ -93,7 +93,8 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     // Build semver recommendation from commits early so both JSON output and
     // validation paths share a single source of truth.
-    let semver_recommendation = build_semver_recommendation(&component, &options.bump_type, monorepo.as_ref())?;
+    let semver_recommendation =
+        build_semver_recommendation(&component, &options.bump_type, monorepo.as_ref())?;
 
     // === Stage 1: Determine changelog entries from conventional commits ===
     // Returns Some(entries) when commits need changelog entries generated.
@@ -335,8 +336,7 @@ pub(super) fn resolve_tag_and_commits(
 ) -> Result<(Option<String>, Vec<git::CommitInfo>)> {
     match monorepo {
         Some(ctx) => {
-            let latest_tag =
-                git::get_latest_tag_with_prefix(&ctx.git_root, Some(&ctx.tag_prefix))?;
+            let latest_tag = git::get_latest_tag_with_prefix(&ctx.git_root, Some(&ctx.tag_prefix))?;
             let commits = git::get_commits_since_tag_for_path(
                 &ctx.git_root,
                 latest_tag.as_deref(),
@@ -872,10 +872,7 @@ fn build_release_steps(
         needs: tag_needs,
         config: {
             let mut config = std::collections::HashMap::new();
-            config.insert(
-                "name".to_string(),
-                serde_json::Value::String(tag_name),
-            );
+            config.insert("name".to_string(), serde_json::Value::String(tag_name));
             config
         },
         status: ReleasePlanStatus::Ready,

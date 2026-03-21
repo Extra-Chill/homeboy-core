@@ -23,7 +23,8 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     )?;
 
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
-    let (mut bump_type, releasable_count) = match resolve_bump(&component.local_path, monorepo.as_ref())? {
+    let (mut bump_type, releasable_count) =
+        match resolve_bump(&component.local_path, monorepo.as_ref())? {
         Some(result) => result,
         None => {
             log_status!(
@@ -114,7 +115,9 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     if options.dry_run {
         let plan = super::plan(&input.component_id, &options)?;
         let new_version = extract_new_version_from_plan(&plan);
-        let tag = new_version.as_ref().map(|v| format_tag(v, monorepo.as_ref()));
+        let tag = new_version
+            .as_ref()
+            .map(|v| format_tag(v, monorepo.as_ref()));
         let deployment = input.deploy.then(|| plan_deployment(&input.component_id));
 
         return Ok((
@@ -138,7 +141,9 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     display_release_summary(&run_result);
 
     let new_version = extract_new_version_from_run(&run_result);
-    let tag = new_version.as_ref().map(|v| format_tag(v, monorepo.as_ref()));
+    let tag = new_version
+        .as_ref()
+        .map(|v| format_tag(v, monorepo.as_ref()));
     let post_release_exit = if has_post_release_warnings(&run_result) {
         3
     } else {
@@ -172,7 +177,10 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     ))
 }
 
-fn resolve_bump(local_path: &str, monorepo: Option<&git::MonorepoContext>) -> Result<Option<(String, usize)>> {
+fn resolve_bump(
+    local_path: &str,
+    monorepo: Option<&git::MonorepoContext>,
+) -> Result<Option<(String, usize)>> {
     let (_latest_tag, commits) = super::pipeline::resolve_tag_and_commits(local_path, monorepo)?;
 
     if commits.is_empty() {
