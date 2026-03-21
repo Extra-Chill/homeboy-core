@@ -25,29 +25,29 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
     let (mut bump_type, releasable_count) =
         match resolve_bump(&component.local_path, monorepo.as_ref())? {
-        Some(result) => result,
-        None => {
-            log_status!(
-                "release",
-                "No releasable commits since last tag — nothing to release"
-            );
-            return Ok((
-                ReleaseCommandResult {
-                    component_id: input.component_id,
-                    bump_type: "none".to_string(),
-                    dry_run: input.dry_run,
-                    releasable_commits: 0,
-                    new_version: None,
-                    tag: None,
-                    skipped_reason: Some("no-releasable-commits".to_string()),
-                    plan: None,
-                    run: None,
-                    deployment: None,
-                },
-                0,
-            ));
-        }
-    };
+            Some(result) => result,
+            None => {
+                log_status!(
+                    "release",
+                    "No releasable commits since last tag — nothing to release"
+                );
+                return Ok((
+                    ReleaseCommandResult {
+                        component_id: input.component_id,
+                        bump_type: "none".to_string(),
+                        dry_run: input.dry_run,
+                        releasable_commits: 0,
+                        new_version: None,
+                        tag: None,
+                        skipped_reason: Some("no-releasable-commits".to_string()),
+                        plan: None,
+                        run: None,
+                        deployment: None,
+                    },
+                    0,
+                ));
+            }
+        };
 
     // Pre-1.0 semver: breaking changes bump minor, not major.
     // In semver, 0.x.y signals "initial development" where the public API is
