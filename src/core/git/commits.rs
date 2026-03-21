@@ -8,6 +8,45 @@ use crate::error::Result;
 const DOCS_FILE_EXTENSIONS: [&str; 1] = [".md"];
 const DOCS_DIRECTORIES: [&str; 1] = ["docs/"];
 
+/// Context for a component that lives inside a monorepo.
+///
+/// When a component's `local_path` is a subdirectory of the git root,
+/// release operations need to scope commits and tags to that subdirectory.
+#[derive(Debug, Clone)]
+pub struct MonorepoContext {
+    /// The git repository root path.
+    pub git_root: String,
+    /// Relative path from git root to the component (e.g. "wordpress").
+    pub path_prefix: String,
+    /// Tag prefix for this component (e.g. "wordpress"), used to create
+    /// tags like `wordpress-v1.0.0`.
+    pub tag_prefix: String,
+}
+
+impl MonorepoContext {
+    /// Detect whether a component lives in a monorepo.
+    ///
+    /// Returns Some(context) if the component's path is a subdirectory of
+    /// the git root, None if it IS the root (single-repo component).
+    pub fn detect(local_path: &str, component_id: &str) -> Option<Self> {
+        let path_prefix = super::get_component_path_prefix(local_path)?;
+        let git_root = super::get_git_root(local_path).ok()?;
+
+        Some(MonorepoContext {
+            git_root,
+            path_prefix: path_prefix.clone(),
+            // Use component_id for tag prefix — it's the canonical name
+            tag_prefix: component_id.to_string(),
+        })
+    }
+
+    /// Format a version as a component-scoped tag name.
+    /// e.g. "1.2.3" -> "wordpress-v1.2.3"
+    pub fn format_tag(&self, version: &str) -> String {
+        format!("{}-v{}", self.tag_prefix, version)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 
 pub struct CommitInfo {
@@ -130,12 +169,34 @@ pub(crate) fn extract_version_from_tag(tag: &str) -> Option<String> {
 
 /// Get the latest git tag in the repository.
 /// Returns None if no tags exist.
+///
+/// When `tag_prefix` is provided (e.g. "wordpress"), only matches tags starting
+/// with that prefix (e.g. `wordpress-v*`). This enables independent component
+/// versioning in monorepos where each component has its own tag namespace.
 pub fn get_latest_tag(path: &str) -> Result<Option<String>> {
-    Ok(command::run_in_optional(
-        path,
-        "git",
-        &["describe", "--tags", "--abbrev=0"],
-    ))
+    get_latest_tag_with_prefix(path, None)
+}
+
+/// Get the latest git tag, optionally filtered by a component prefix.
+///
+/// With prefix "wordpress", matches tags like `wordpress-v1.0.0`.
+/// Without prefix, matches any tag (backward compatible).
+pub fn get_latest_tag_with_prefix(path: &str, tag_prefix: Option<&str>) -> Result<Option<String>> {
+    match tag_prefix {
+        Some(prefix) => {
+            let match_pattern = format!("{}-v*", prefix);
+            Ok(command::run_in_optional(
+                path,
+                "git",
+                &["describe", "--tags", "--abbrev=0", "--match", &match_pattern],
+            ))
+        }
+        None => Ok(command::run_in_optional(
+            path,
+            "git",
+            &["describe", "--tags", "--abbrev=0"],
+        )),
+    }
 }
 
 /// Find the most recent commit containing a version number in its message.
@@ -229,10 +290,34 @@ pub fn get_last_n_commits(path: &str, n: usize) -> Result<Vec<CommitInfo>> {
 /// Get commits since a given tag (or all commits if tag is None).
 /// Returns commits in reverse chronological order (newest first).
 pub fn get_commits_since_tag(path: &str, tag: Option<&str>) -> Result<Vec<CommitInfo>> {
+    get_commits_since_tag_for_path(path, tag, None)
+}
+
+/// Get commits since a given tag, optionally filtered to only those touching files
+/// under `path_prefix` (relative to the git root).
+///
+/// In a monorepo, `path_prefix` scopes commit collection to a specific component
+/// directory (e.g. "wordpress/") so that only commits touching that component's
+/// files are included.
+pub fn get_commits_since_tag_for_path(
+    path: &str,
+    tag: Option<&str>,
+    path_prefix: Option<&str>,
+) -> Result<Vec<CommitInfo>> {
     let range = tag
         .map(|t| format!("{}..HEAD", t))
         .unwrap_or_else(|| "HEAD".to_string());
-    let stdout = command::run_in(path, "git", &["log", &range, "--format=%h|%s"], "git log")?;
+
+    let mut args = vec!["log".to_string(), range, "--format=%h|%s".to_string()];
+
+    // Add path filter for monorepo scoping: `git log <range> -- <path_prefix>`
+    if let Some(prefix) = path_prefix {
+        args.push("--".to_string());
+        args.push(prefix.to_string());
+    }
+
+    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let stdout = command::run_in(path, "git", &args_refs, "git log")?;
 
     let commits = stdout
         .lines()
@@ -589,6 +674,34 @@ mod tests {
         assert_eq!(
             recommended_bump_from_commits(&commits),
             Some(SemverBump::Patch)
+        );
+    }
+
+    #[test]
+    fn monorepo_context_format_tag() {
+        let ctx = MonorepoContext {
+            git_root: "/repo".to_string(),
+            path_prefix: "wordpress".to_string(),
+            tag_prefix: "wordpress".to_string(),
+        };
+        assert_eq!(ctx.format_tag("1.2.3"), "wordpress-v1.2.3");
+        assert_eq!(ctx.format_tag("0.1.0"), "wordpress-v0.1.0");
+    }
+
+    #[test]
+    fn extract_version_from_component_prefixed_tag() {
+        assert_eq!(
+            extract_version_from_tag("wordpress-v1.2.3"),
+            Some("1.2.3".to_string())
+        );
+        assert_eq!(
+            extract_version_from_tag("github-v0.5.0"),
+            Some("0.5.0".to_string())
+        );
+        // Standard tags still work
+        assert_eq!(
+            extract_version_from_tag("v1.0.0"),
+            Some("1.0.0".to_string())
         );
     }
 }

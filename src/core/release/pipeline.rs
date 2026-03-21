@@ -88,9 +88,12 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         v.capture(validate_code_quality(&component), "code_quality");
     }
 
+    // Detect monorepo context for path-scoped commits and component-prefixed tags.
+    let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
+
     // Build semver recommendation from commits early so both JSON output and
     // validation paths share a single source of truth.
-    let semver_recommendation = build_semver_recommendation(&component, &options.bump_type)?;
+    let semver_recommendation = build_semver_recommendation(&component, &options.bump_type, monorepo.as_ref())?;
 
     // === Stage 1: Determine changelog entries from conventional commits ===
     // Returns Some(entries) when commits need changelog entries generated.
@@ -99,7 +102,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     // validations (they would false-fail since entries don't exist on disk yet).
     let pending_entries = v
         .capture(
-            validate_commits_vs_changelog(&component, options.dry_run),
+            validate_commits_vs_changelog(&component, options.dry_run, monorepo.as_ref()),
             "commits",
         )
         .flatten();
@@ -204,6 +207,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         &version_info.version,
         &new_version,
         options,
+        monorepo.as_ref(),
         &mut warnings,
         &mut hints,
     )?;
@@ -236,6 +240,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 fn build_semver_recommendation(
     component: &Component,
     requested_bump: &str,
+    monorepo: Option<&git::MonorepoContext>,
 ) -> Result<Option<ReleaseSemverRecommendation>> {
     let requested = git::SemverBump::parse(requested_bump).ok_or_else(|| {
         Error::validation_invalid_argument(
@@ -246,8 +251,7 @@ fn build_semver_recommendation(
         )
     })?;
 
-    let latest_tag = git::get_latest_tag(&component.local_path)?;
-    let commits = git::get_commits_since_tag(&component.local_path, latest_tag.as_deref())?;
+    let (latest_tag, commits) = resolve_tag_and_commits(&component.local_path, monorepo)?;
 
     if commits.is_empty() {
         return Ok(None);
@@ -319,6 +323,33 @@ fn build_semver_recommendation(
         is_underbump,
         reasons,
     }))
+}
+
+/// Resolve the latest tag and commits since that tag for a component.
+///
+/// In a monorepo, uses component-prefixed tags and path-scoped commits.
+/// In a single-repo, uses standard global tags and all commits.
+pub(super) fn resolve_tag_and_commits(
+    local_path: &str,
+    monorepo: Option<&git::MonorepoContext>,
+) -> Result<(Option<String>, Vec<git::CommitInfo>)> {
+    match monorepo {
+        Some(ctx) => {
+            let latest_tag =
+                git::get_latest_tag_with_prefix(&ctx.git_root, Some(&ctx.tag_prefix))?;
+            let commits = git::get_commits_since_tag_for_path(
+                &ctx.git_root,
+                latest_tag.as_deref(),
+                Some(&ctx.path_prefix),
+            )?;
+            Ok((latest_tag, commits))
+        }
+        None => {
+            let latest_tag = git::get_latest_tag(local_path)?;
+            let commits = git::get_commits_since_tag(local_path, latest_tag.as_deref())?;
+            Ok((latest_tag, commits))
+        }
+    }
 }
 
 fn validate_changelog(component: &Component) -> Result<()> {
@@ -535,12 +566,10 @@ fn validate_code_quality(component: &Component) -> Result<()> {
 fn validate_commits_vs_changelog(
     component: &Component,
     dry_run: bool,
+    monorepo: Option<&git::MonorepoContext>,
 ) -> Result<Option<std::collections::HashMap<String, Vec<String>>>> {
-    // Get latest tag
-    let latest_tag = git::get_latest_tag(&component.local_path)?;
-
-    // Get commits since tag
-    let commits = git::get_commits_since_tag(&component.local_path, latest_tag.as_deref())?;
+    // Get latest tag and commits (scoped to component in monorepo)
+    let (latest_tag, commits) = resolve_tag_and_commits(&component.local_path, monorepo)?;
 
     // If no commits, nothing to validate
     if commits.is_empty() {
@@ -747,6 +776,7 @@ fn build_release_steps(
     current_version: &str,
     new_version: &str,
     options: &ReleaseOptions,
+    monorepo: Option<&git::MonorepoContext>,
     warnings: &mut Vec<String>,
     _hints: &mut Vec<String>,
 ) -> Result<Vec<ReleasePlanStep>> {
@@ -831,16 +861,20 @@ fn build_release_steps(
     };
 
     // 4. Git tag (after package succeeds, or after commit if no package)
+    let tag_name = match monorepo {
+        Some(ctx) => ctx.format_tag(new_version),
+        None => format!("v{}", new_version),
+    };
     steps.push(ReleasePlanStep {
         id: "git.tag".to_string(),
         step_type: "git.tag".to_string(),
-        label: Some(format!("Tag v{}", new_version)),
+        label: Some(format!("Tag {}", tag_name)),
         needs: tag_needs,
         config: {
             let mut config = std::collections::HashMap::new();
             config.insert(
                 "name".to_string(),
-                serde_json::Value::String(format!("v{}", new_version)),
+                serde_json::Value::String(tag_name),
             );
             config
         },

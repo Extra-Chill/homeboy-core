@@ -22,7 +22,8 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         },
     )?;
 
-    let (mut bump_type, releasable_count) = match resolve_bump(&component.local_path)? {
+    let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
+    let (mut bump_type, releasable_count) = match resolve_bump(&component.local_path, monorepo.as_ref())? {
         Some(result) => result,
         None => {
             log_status!(
@@ -113,7 +114,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     if options.dry_run {
         let plan = super::plan(&input.component_id, &options)?;
         let new_version = extract_new_version_from_plan(&plan);
-        let tag = new_version.as_ref().map(|v| format!("v{}", v));
+        let tag = new_version.as_ref().map(|v| format_tag(v, monorepo.as_ref()));
         let deployment = input.deploy.then(|| plan_deployment(&input.component_id));
 
         return Ok((
@@ -137,7 +138,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     display_release_summary(&run_result);
 
     let new_version = extract_new_version_from_run(&run_result);
-    let tag = new_version.as_ref().map(|v| format!("v{}", v));
+    let tag = new_version.as_ref().map(|v| format_tag(v, monorepo.as_ref()));
     let post_release_exit = if has_post_release_warnings(&run_result) {
         3
     } else {
@@ -171,9 +172,8 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     ))
 }
 
-fn resolve_bump(local_path: &str) -> Result<Option<(String, usize)>> {
-    let latest_tag = git::get_latest_tag(local_path)?;
-    let commits = git::get_commits_since_tag(local_path, latest_tag.as_deref())?;
+fn resolve_bump(local_path: &str, monorepo: Option<&git::MonorepoContext>) -> Result<Option<(String, usize)>> {
+    let (_latest_tag, commits) = super::pipeline::resolve_tag_and_commits(local_path, monorepo)?;
 
     if commits.is_empty() {
         return Ok(None);
@@ -188,6 +188,14 @@ fn resolve_bump(local_path: &str) -> Result<Option<(String, usize)>> {
             Ok(Some((bump.as_str().to_string(), releasable)))
         }
         None => Ok(None),
+    }
+}
+
+/// Format a version string as a tag name, using component prefix in monorepos.
+fn format_tag(version: &str, monorepo: Option<&git::MonorepoContext>) -> String {
+    match monorepo {
+        Some(ctx) => ctx.format_tag(version),
+        None => format!("v{}", version),
     }
 }
 
@@ -403,9 +411,10 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
             ..Default::default()
         },
     )?;
+    let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
     let version_info = crate::version::read_component_version(&component)?;
     let current_version = &version_info.version;
-    let tag_name = format!("v{}", current_version);
+    let tag_name = format_tag(current_version, monorepo.as_ref());
 
     let tag_exists_local =
         git::tag_exists_locally(&component.local_path, &tag_name).unwrap_or(false);
