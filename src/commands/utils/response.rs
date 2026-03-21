@@ -149,19 +149,28 @@ fn exit_code_for_error(code: ErrorCode) -> i32 {
     }
 }
 
-pub fn print_json_result(result: Result<serde_json::Value>) -> Result<()> {
+pub fn print_json_result(result: Result<serde_json::Value>, exit_code: i32) -> Result<()> {
     match result {
-        Ok(data) => print_success(data),
+        Ok(data) if exit_code == 0 => print_success(data),
+        Ok(data) => {
+            // Command returned data but with a non-zero exit code (e.g., release
+            // succeeded but deploy failed). The envelope should reflect the failure.
+            print_response(&CliResponse {
+                success: false,
+                data: Some(data),
+                error: None,
+            })
+        }
         Err(err) => print_response(&CliResponse::<()>::from_error(&err)),
     }
 }
 
 /// Write the JSON output envelope to a file. Best-effort — failures are
 /// logged to stderr but don't affect the command's exit code.
-pub fn write_json_to_file(result: &Result<serde_json::Value>, path: &str) {
+pub fn write_json_to_file(result: &Result<serde_json::Value>, path: &str, exit_code: i32) {
     let response = match result {
         Ok(data) => CliResponse {
-            success: true,
+            success: exit_code == 0,
             data: Some(data.clone()),
             error: None,
         },

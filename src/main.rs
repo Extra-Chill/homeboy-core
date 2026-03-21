@@ -274,9 +274,9 @@ fn main() -> std::process::ExitCode {
 
         let (json_result, exit_code) = output::map_cmd_result_to_json(result);
         if let Some(ref path) = output_file {
-            output::write_json_to_file(&json_result, path);
+            output::write_json_to_file(&json_result, path, exit_code);
         }
-        output::print_json_result(json_result).ok();
+        output::print_json_result(json_result, exit_code).ok();
         return std::process::ExitCode::from(exit_code_to_u8(exit_code));
     }
 
@@ -373,12 +373,12 @@ fn main() -> std::process::ExitCode {
     // The file always gets written, even on failure, so consumers can read
     // structured error data instead of scraping log output.
     if let Some(ref path) = output_file {
-        output::write_json_to_file(&json_result, path);
+        output::write_json_to_file(&json_result, path, exit_code);
     }
 
     match mode {
         ResponseMode::Json => {
-            output::print_json_result(json_result).ok();
+            output::print_json_result(json_result, exit_code).ok();
         }
         ResponseMode::Raw(RawOutputMode::InteractivePassthrough) => {}
         ResponseMode::Raw(RawOutputMode::Markdown) => {}

@@ -804,12 +804,38 @@ fn build_release_steps(
         missing: vec![],
     });
 
-    // 3. Git tag
+    // === PUBLISH STEPS (extension-derived, skipped with --skip-publish) ===
+    //
+    // Package runs BEFORE git.tag + git.push so that build failures don't
+    // leave orphan tags on the remote. The order is:
+    //   version → git.commit → package → git.tag → git.push → publish → cleanup
+    //
+    // If the build fails: the version is committed locally but no tag exists
+    // and nothing is pushed. The user can `git reset HEAD~1` to undo.
+    // If the build succeeds: tag + push + publish proceed normally.
+
+    let tag_needs = if !publish_targets.is_empty() && !options.skip_publish {
+        // 3. Package (produces artifacts — runs before tagging)
+        steps.push(ReleasePlanStep {
+            id: "package".to_string(),
+            step_type: "package".to_string(),
+            label: Some("Package release artifacts".to_string()),
+            needs: vec!["git.commit".to_string()],
+            config: std::collections::HashMap::new(),
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
+        vec!["package".to_string()]
+    } else {
+        vec!["git.commit".to_string()]
+    };
+
+    // 4. Git tag (after package succeeds, or after commit if no package)
     steps.push(ReleasePlanStep {
         id: "git.tag".to_string(),
         step_type: "git.tag".to_string(),
         label: Some(format!("Tag v{}", new_version)),
-        needs: vec!["git.commit".to_string()],
+        needs: tag_needs,
         config: {
             let mut config = std::collections::HashMap::new();
             config.insert(
@@ -822,7 +848,7 @@ fn build_release_steps(
         missing: vec![],
     });
 
-    // 4. Git push (commits AND tags)
+    // 5. Git push (commits AND tags)
     steps.push(ReleasePlanStep {
         id: "git.push".to_string(),
         step_type: "git.push".to_string(),
@@ -837,21 +863,10 @@ fn build_release_steps(
         missing: vec![],
     });
 
-    // === PUBLISH STEPS (extension-derived, skipped with --skip-publish) ===
-
     if !publish_targets.is_empty() && !options.skip_publish {
-        // 5. Package (produces artifacts for publish steps)
-        steps.push(ReleasePlanStep {
-            id: "package".to_string(),
-            step_type: "package".to_string(),
-            label: Some("Package release artifacts".to_string()),
-            needs: vec!["git.push".to_string()],
-            config: std::collections::HashMap::new(),
-            status: ReleasePlanStatus::Ready,
-            missing: vec![],
-        });
-
-        // 6. Publish steps (all run independently after package)
+        // 6. Publish steps (all run independently after git.push)
+        // Package already ran before tagging; publish needs the push to have
+        // completed (e.g., crates.io/Homebrew need the tag on the remote).
         let mut publish_step_ids: Vec<String> = Vec::new();
         for target in &publish_targets {
             let step_id = format!("publish.{}", target);
@@ -862,7 +877,7 @@ fn build_release_steps(
                 id: step_id,
                 step_type,
                 label: Some(format!("Publish to {}", target)),
-                needs: vec!["package".to_string()],
+                needs: vec!["git.push".to_string()],
                 config: std::collections::HashMap::new(),
                 status: ReleasePlanStatus::Ready,
                 missing: vec![],
