@@ -67,3 +67,30 @@ pub(crate) fn list_tracked_markdown_files(path: &Path) -> Result<Vec<String>> {
 pub(crate) fn is_git_repo(path: &str) -> bool {
     command::succeeded_in(path, "git", &["rev-parse", "--git-dir"])
 }
+
+/// Get the git repository root directory from any path within the repo.
+pub fn get_git_root(path: &str) -> Result<String> {
+    command::run_in(path, "git", &["rev-parse", "--show-toplevel"], "git root")
+        .map(|s| s.trim().to_string())
+        .map_err(|e| Error::git_command_failed(e.to_string()))
+}
+
+/// Compute the relative path prefix of a component within a monorepo.
+///
+/// If `local_path` is a subdirectory of the git root, returns the relative path
+/// (e.g. "wordpress" for `/repo/wordpress`). Returns None if local_path IS the
+/// git root (not a monorepo component).
+pub fn get_component_path_prefix(local_path: &str) -> Option<String> {
+    let git_root = get_git_root(local_path).ok()?;
+    let root = std::path::Path::new(&git_root).canonicalize().ok()?;
+    let component = std::path::Path::new(local_path).canonicalize().ok()?;
+
+    if root == component {
+        return None; // Not a monorepo — component IS the repo root
+    }
+
+    component
+        .strip_prefix(&root)
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+}
