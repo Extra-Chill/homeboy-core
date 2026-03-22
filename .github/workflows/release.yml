@@ -241,6 +241,14 @@ jobs:
       - gate-test
       - prepare
     if: ${{ always() && needs.gate-test.result == 'success' }}
+    # Serialize auto-refactor across overlapping release runs. The first
+    # run finishes its work; the second queues and starts fresh (usually
+    # a no-op since the first already applied fixes). Without this,
+    # parallel runs waste compute and race on force-pushing to the same
+    # autofix branch.
+    concurrency:
+      group: release-autorefactor-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
