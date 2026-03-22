@@ -151,6 +151,19 @@ pub fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSum
     }
 }
 
+/// Serialize an [`AuditFinding`] variant to its serde snake_case key.
+///
+/// This must match the `#[serde(rename_all = "snake_case")]` on the enum so that
+/// `fixability.by_kind` keys align with the finding group keys in JSON output.
+/// Using `format!("{:?}", ...)` would produce Debug PascalCase (e.g. `compilerwarning`)
+/// which doesn't match the serde output (`compiler_warning`).
+pub(crate) fn finding_kind_key(finding: &AuditFinding) -> String {
+    serde_json::to_value(finding)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| format!("{:?}", finding).to_lowercase())
+}
+
 /// Compute fixability metadata from an audit result without applying fixes.
 ///
 /// Runs the fix generator in dry-run mode and counts how many findings
@@ -184,7 +197,7 @@ pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
 
     for fix in &fix_result.fixes {
         for insertion in &fix.insertions {
-            let kind_key = format!("{:?}", insertion.finding).to_lowercase();
+            let kind_key = finding_kind_key(&insertion.finding);
             let entry = by_kind.entry(kind_key).or_insert(FixabilityKindBreakdown {
                 total: 0,
                 safe: 0,
@@ -206,7 +219,7 @@ pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
     }
 
     for new_file in &fix_result.new_files {
-        let kind_key = format!("{:?}", new_file.finding).to_lowercase();
+        let kind_key = finding_kind_key(&new_file.finding);
         let entry = by_kind.entry(kind_key).or_insert(FixabilityKindBreakdown {
             total: 0,
             safe: 0,
