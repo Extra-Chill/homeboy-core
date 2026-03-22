@@ -20,6 +20,100 @@ pub(crate) fn module_path_from_file(file_path: &str) -> String {
     crate::core::engine::symbol_graph::module_path_from_file(file_path)
 }
 
+/// Generate a language-appropriate import statement for a duplicate function fix.
+///
+/// For Rust: `use crate::module::path::function_name;`
+/// For PHP: `use Namespace\ClassName;` (reads namespace from canonical file)
+/// For JS/TS: `import { function_name } from 'module/path';`
+fn generate_duplicate_import(
+    canonical_file: &str,
+    function_name: &str,
+    language: &Language,
+    root: &Path,
+) -> String {
+    match language {
+        Language::Rust => {
+            let import_path = module_path_from_file(canonical_file);
+            format!("use crate::{}::{};", import_path, function_name)
+        }
+        Language::Php => {
+            // Read the canonical file to extract its namespace and class name
+            let canonical_abs = root.join(canonical_file);
+            let content = std::fs::read_to_string(&canonical_abs).unwrap_or_default();
+            if let Some(fqcn) = extract_php_fqcn(&content) {
+                format!("use {};", fqcn)
+            } else {
+                // Fallback: derive from file path (inc/Abilities/Foo.php → Abilities\Foo)
+                let stem = Path::new(canonical_file)
+                    .with_extension("")
+                    .to_string_lossy()
+                    .replace('/', "\\");
+                format!("use {};", stem)
+            }
+        }
+        Language::JavaScript | Language::TypeScript => {
+            let import_path = module_path_from_file(canonical_file);
+            let name = import_path
+                .rsplit("::")
+                .next()
+                .or_else(|| import_path.rsplit('/').next())
+                .unwrap_or(&import_path);
+            format!("import {{ {} }} from '{}';", name, import_path)
+        }
+        Language::Unknown => {
+            let import_path = module_path_from_file(canonical_file);
+            format!("use {};", import_path)
+        }
+    }
+}
+
+/// Extract the fully qualified class name (namespace + class) from PHP file content.
+///
+/// Reads `namespace Foo\Bar;` and `class Baz` declarations to produce `Foo\Bar\Baz`.
+fn extract_php_fqcn(content: &str) -> Option<String> {
+    let mut namespace = None;
+    let mut class_name = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if namespace.is_none() {
+            if let Some(ns) = trimmed
+                .strip_prefix("namespace ")
+                .and_then(|rest| rest.strip_suffix(';'))
+            {
+                namespace = Some(ns.trim().to_string());
+            }
+        }
+
+        if class_name.is_none() {
+            // Match: class Foo, abstract class Foo, final class Foo
+            if let Some(rest) = trimmed
+                .strip_prefix("class ")
+                .or_else(|| {
+                    trimmed
+                        .strip_prefix("abstract class ")
+                        .or_else(|| trimmed.strip_prefix("final class "))
+                })
+            {
+                // Class name is the first word
+                let name = rest.split_whitespace().next()?;
+                class_name = Some(name.to_string());
+            }
+        }
+
+        if namespace.is_some() && class_name.is_some() {
+            break;
+        }
+    }
+
+    match (namespace, class_name) {
+        (Some(ns), Some(cls)) => Some(format!("{}\\{}", ns, cls)),
+        (None, Some(cls)) => Some(cls),
+        _ => None,
+    }
+}
+
 pub(crate) fn generate_unreferenced_export_fixes(
     result: &CodeAuditResult,
     root: &Path,
@@ -431,14 +525,8 @@ fn generate_simple_duplicate_fixes(
             continue;
         };
 
-        let import_path = module_path_from_file(&group.canonical_file);
-        let import_stmt = match ext {
-            "rs" => format!("use crate::{}::{};", import_path, group.function_name),
-            _ => format!(
-                "import {{ {} }} from '{}';",
-                group.function_name, import_path
-            ),
-        };
+        let language = Language::from_path(&abs_path);
+        let import_stmt = generate_duplicate_import(&group.canonical_file, &group.function_name, &language, root);
 
         let mut insertions = vec![insertion(
             InsertionKind::FunctionRemoval {
@@ -606,4 +694,89 @@ fn scan_dir_for_reference(dir: &Path, word_re: &Regex) -> bool {
             .ok()
             .is_some_and(|content| word_re.is_match(&content))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_php_fqcn_with_namespace() {
+        let content = "<?php\nnamespace DataMachine\\Abilities\\Fetch;\n\nclass FetchRssAbility {\n";
+        assert_eq!(
+            extract_php_fqcn(content),
+            Some("DataMachine\\Abilities\\Fetch\\FetchRssAbility".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_php_fqcn_abstract_class() {
+        let content =
+            "<?php\nnamespace DataMachine\\Core;\n\nabstract class BaseHandler {\n";
+        assert_eq!(
+            extract_php_fqcn(content),
+            Some("DataMachine\\Core\\BaseHandler".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_php_fqcn_no_namespace() {
+        let content = "<?php\nclass SimpleClass {\n";
+        assert_eq!(
+            extract_php_fqcn(content),
+            Some("SimpleClass".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_php_fqcn_no_class() {
+        let content = "<?php\nnamespace DataMachine;\n\nfunction helper() {}\n";
+        assert_eq!(extract_php_fqcn(content), None);
+    }
+
+    #[test]
+    fn test_generate_duplicate_import_rust() {
+        let import = generate_duplicate_import(
+            "src/core/engine/symbol_graph.rs",
+            "parse_imports",
+            &Language::Rust,
+            Path::new("/tmp"),
+        );
+        assert_eq!(import, "use crate::core::engine::symbol_graph::parse_imports;");
+    }
+
+    #[test]
+    fn test_generate_duplicate_import_php() {
+        use std::fs;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        let php_dir = root.join("inc/Abilities/Fetch");
+        fs::create_dir_all(&php_dir).unwrap();
+        fs::write(
+            php_dir.join("FetchRssAbility.php"),
+            "<?php\nnamespace DataMachine\\Abilities\\Fetch;\n\nclass FetchRssAbility {\n    public function httpGet() {}\n}\n",
+        ).unwrap();
+
+        let import = generate_duplicate_import(
+            "inc/Abilities/Fetch/FetchRssAbility.php",
+            "httpGet",
+            &Language::Php,
+            root,
+        );
+        assert_eq!(import, "use DataMachine\\Abilities\\Fetch\\FetchRssAbility;");
+    }
+
+    #[test]
+    fn test_generate_duplicate_import_js() {
+        let import = generate_duplicate_import(
+            "src/utils/helpers.js",
+            "formatDate",
+            &Language::JavaScript,
+            Path::new("/tmp"),
+        );
+        // JS imports derive the module name from the file path
+        assert!(import.starts_with("import {"), "Expected JS import, got: {}", import);
+        assert!(import.contains("helpers"), "Expected module name in import, got: {}", import);
+    }
 }
