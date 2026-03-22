@@ -119,15 +119,45 @@ fn test_compute_fixability_counts_fixes_from_real_audit() {
 fn test_finding_kind_key_produces_snake_case() {
     // finding_kind_key must produce serde-compatible snake_case keys
     // so that fixability.by_kind matches the JSON finding group keys.
-    assert_eq!(finding_kind_key(&AuditFinding::CompilerWarning), "compiler_warning");
-    assert_eq!(finding_kind_key(&AuditFinding::UnusedParameter), "unused_parameter");
-    assert_eq!(finding_kind_key(&AuditFinding::UnreferencedExport), "unreferenced_export");
-    assert_eq!(finding_kind_key(&AuditFinding::IntraMethodDuplicate), "intra_method_duplicate");
-    assert_eq!(finding_kind_key(&AuditFinding::OrphanedTest), "orphaned_test");
-    assert_eq!(finding_kind_key(&AuditFinding::MissingTestFile), "missing_test_file");
-    assert_eq!(finding_kind_key(&AuditFinding::MissingTestMethod), "missing_test_method");
-    assert_eq!(finding_kind_key(&AuditFinding::MissingMethod), "missing_method");
+    assert_eq!(
+        finding_kind_key(&AuditFinding::CompilerWarning),
+        "compiler_warning"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::UnusedParameter),
+        "unused_parameter"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::UnreferencedExport),
+        "unreferenced_export"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::IntraMethodDuplicate),
+        "intra_method_duplicate"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::OrphanedTest),
+        "orphaned_test"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::MissingTestFile),
+        "missing_test_file"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::MissingTestMethod),
+        "missing_test_method"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::MissingMethod),
+        "missing_method"
+    );
     assert_eq!(finding_kind_key(&AuditFinding::GodFile), "god_file");
-    assert_eq!(finding_kind_key(&AuditFinding::DuplicateFunction), "duplicate_function");
-    assert_eq!(finding_kind_key(&AuditFinding::NearDuplicate), "near_duplicate");
+    assert_eq!(
+        finding_kind_key(&AuditFinding::DuplicateFunction),
+        "duplicate_function"
+    );
+    assert_eq!(
+        finding_kind_key(&AuditFinding::NearDuplicate),
+        "near_duplicate"
+    );
 }
