@@ -1,9 +1,8 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use homeboy::fleet::{self, Fleet};
+use homeboy::fleet::{self, Fleet, FleetComponentDrift, FleetStatusResult};
 use homeboy::project::Project;
-use homeboy::server::health::ServerHealth;
 use homeboy::EntityCrudOutput;
 
 use super::{CmdResult, DynamicSetArgs};
@@ -124,7 +123,7 @@ pub struct FleetExtra {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub components: Option<std::collections::HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<Vec<FleetProjectStatus>>,
+    pub status: Option<FleetStatusResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check: Option<Vec<homeboy::fleet::FleetProjectCheck>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,26 +135,6 @@ pub struct FleetExtra {
 }
 
 pub type FleetOutput = EntityCrudOutput<Fleet, FleetExtra>;
-
-#[derive(Debug, Default, Serialize)]
-pub struct FleetProjectStatus {
-    pub project_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub server_id: Option<String>,
-    pub components: Vec<FleetComponentStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub health: Option<ServerHealth>,
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct FleetComponentStatus {
-    pub component_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    /// Where the version was resolved from: "live" (SSH) or "cached" (local file)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version_source: Option<String>,
-}
 
 pub fn run(args: FleetArgs, _global: &super::GlobalArgs) -> CmdResult<FleetOutput> {
     match args.command {
@@ -357,36 +336,128 @@ fn components(id: &str) -> CmdResult<FleetOutput> {
 }
 
 fn status(id: &str, cached: bool, health_only: bool) -> CmdResult<FleetOutput> {
-    let project_statuses = fleet::collect_status(id, cached, health_only)?
-        .into_iter()
-        .map(|status| FleetProjectStatus {
-            project_id: status.project_id,
-            server_id: status.server_id,
-            components: status
-                .components
-                .into_iter()
-                .map(|component| FleetComponentStatus {
-                    component_id: component.component_id,
-                    version: component.version,
-                    version_source: component.version_source,
-                })
-                .collect(),
-            health: status.health,
-        })
-        .collect();
+    let result = fleet::collect_status(id, cached, health_only)?;
+
+    // Log human-readable dashboard to stderr
+    log_fleet_dashboard(&result);
+
+    let exit_code = if result.summary.servers.unreachable > 0
+        || result.summary.servers.services_down > 0
+    {
+        1
+    } else {
+        0
+    };
 
     Ok((
         FleetOutput {
             command: "fleet.status".to_string(),
             id: Some(id.to_string()),
             extra: FleetExtra {
-                status: Some(project_statuses),
+                status: Some(result),
                 ..Default::default()
             },
             ..Default::default()
         },
-        0,
+        exit_code,
     ))
+}
+
+/// Log a human-readable fleet status dashboard to stderr.
+fn log_fleet_dashboard(result: &FleetStatusResult) {
+    if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        return;
+    }
+
+    let summary = &result.summary;
+
+    // Fleet summary header
+    eprintln!("┌─── Fleet Status ───────────────────────────────────┐");
+    eprintln!(
+        "│ Servers: {} healthy, {} warning, {} unreachable      ",
+        summary.servers.healthy, summary.servers.warning, summary.servers.unreachable,
+    );
+    if summary.servers.services_up > 0 || summary.servers.services_down > 0 {
+        eprintln!(
+            "│ Services: {} up, {} down                             ",
+            summary.servers.services_up, summary.servers.services_down,
+        );
+    }
+    eprintln!(
+        "│ Components: {} current, {} outdated, {} need bump, {} unknown",
+        summary.components.current,
+        summary.components.needs_update,
+        summary.components.needs_bump,
+        summary.components.unknown,
+    );
+    eprintln!("└────────────────────────────────────────────────────┘");
+
+    // Per-project component table
+    for proj_status in &result.projects {
+        if proj_status.components.is_empty() {
+            continue;
+        }
+
+        let server_label = proj_status
+            .server_id
+            .as_deref()
+            .unwrap_or("unknown");
+
+        // Health indicator
+        let health_icon = match &proj_status.health {
+            Some(h) if h.warnings.is_empty() => "✅",
+            Some(_) => "⚠️ ",
+            None => "❌",
+        };
+
+        eprintln!(
+            "\n{} {} ({})",
+            health_icon, proj_status.project_id, server_label,
+        );
+
+        // Component rows
+        let id_width = proj_status
+            .components
+            .iter()
+            .map(|c| c.component_id.len())
+            .max()
+            .unwrap_or(9)
+            .max(9);
+
+        for comp in &proj_status.components {
+            let local = comp.local_version.as_deref().unwrap_or("-");
+            let remote = comp.remote_version.as_deref().unwrap_or("-");
+            let drift_icon = match &comp.drift {
+                FleetComponentDrift::Current => "✅ current",
+                FleetComponentDrift::NeedsUpdate => "⚠️  outdated",
+                FleetComponentDrift::BehindRemote => "🔙 behind",
+                FleetComponentDrift::NeedsBump => "🔶 needs bump",
+                FleetComponentDrift::DocsOnly => "📝 docs only",
+                FleetComponentDrift::Unknown => "❓ unknown",
+            };
+
+            eprintln!(
+                "  {:<w$}  {} → {}  ({} unreleased)  {}",
+                comp.component_id,
+                local,
+                remote,
+                comp.unreleased_commits,
+                drift_icon,
+                w = id_width,
+            );
+        }
+    }
+
+    // Warnings
+    if !summary.warnings.is_empty() {
+        eprintln!("\n⚠️  Warnings:");
+        for warning in &summary.warnings {
+            eprintln!(
+                "  {} ({}): {}",
+                warning.server_id, warning.project_id, warning.message,
+            );
+        }
+    }
 }
 
 fn check(id: &str, only_outdated: bool) -> CmdResult<FleetOutput> {
