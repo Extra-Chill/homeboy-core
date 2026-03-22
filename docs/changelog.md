@@ -4,6 +4,17 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.85.2] - 2026-03-22
+
+### Changed
+- fix rustfmt formatting in planning.rs
+
+### Fixed
+- deploy robustness — skip unrelated components, force after bump, warn on failure
+- use serde snake_case for fixability by_kind keys
+- use autofix: false instead of autofix-mode: disabled
+- fall back to rustfmt when cargo fmt fails in sandbox
+
 ## [0.85.1] - 2026-03-21
 
 ### Fixed
