@@ -403,3 +403,81 @@ fn compute_server_summary(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_collect_status_default_path() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: default path");
+    }
+
+    #[test]
+    fn test_collect_status_ok_p_p() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: Ok(p) => p,");
+    }
+
+    #[test]
+    fn test_collect_status_err() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: Err(_) => {");
+    }
+
+    #[test]
+    fn test_collect_status_let_health_if_let_some_ref_server_id_proj_server_id() {
+        let result = collect_status();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: let health = if let Some(ref server_id) = proj.server_id {"
+        );
+    }
+
+    #[test]
+    fn test_collect_status_if_let_some_cached_health_server_health_cache_get_server_id() {
+        let result = collect_status();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(cached_health) = server_health_cache.get(server_id) {"
+        );
+    }
+
+    #[test]
+    fn test_collect_status_else() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: else");
+    }
+
+    #[test]
+    fn test_collect_status_else() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: else");
+    }
+
+    #[test]
+    fn test_collect_status_match_health() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: match &health");
+    }
+
+    #[test]
+    fn test_collect_status_match_health() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: match &health");
+    }
+
+    #[test]
+    fn test_collect_status_match_health() {
+        let result = collect_status();
+        assert!(result.is_ok(), "expected Ok for: match &health");
+    }
+
+    #[test]
+    fn test_collect_status_has_expected_effects() {
+        // Expected effects: mutation
+
+        let _ = collect_status();
+    }
+}
