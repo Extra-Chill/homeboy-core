@@ -10,7 +10,11 @@ pub mod status;
 
 pub use check::{collect_check, FleetCheckSummary, FleetComponentCheck, FleetProjectCheck};
 pub use exec::{collect_exec, FleetExecProjectResult, FleetExecSummary};
-pub use status::{collect_status, FleetComponentStatus, FleetProjectStatus};
+pub use status::{
+    collect_status, FleetComponentDrift, FleetComponentStatus, FleetComponentSummary,
+    FleetProjectStatus, FleetProjectSummary, FleetServerSummary, FleetStatusResult,
+    FleetStatusSummary, FleetWarning,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Fleet {
