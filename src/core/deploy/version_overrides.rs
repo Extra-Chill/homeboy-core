@@ -112,7 +112,7 @@ pub(super) fn prefer_installed_binary(build_artifact: &Path) -> Option<std::path
 }
 
 /// Fetch versions from remote server for components.
-pub(super) fn fetch_remote_versions(
+pub fn fetch_remote_versions(
     components: &[Component],
     base_path: &str,
     client: &SshClient,
