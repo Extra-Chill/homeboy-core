@@ -341,13 +341,12 @@ fn status(id: &str, cached: bool, health_only: bool) -> CmdResult<FleetOutput> {
     // Log human-readable dashboard to stderr
     log_fleet_dashboard(&result);
 
-    let exit_code = if result.summary.servers.unreachable > 0
-        || result.summary.servers.services_down > 0
-    {
-        1
-    } else {
-        0
-    };
+    let exit_code =
+        if result.summary.servers.unreachable > 0 || result.summary.servers.services_down > 0 {
+            1
+        } else {
+            0
+        };
 
     Ok((
         FleetOutput {
@@ -398,10 +397,7 @@ fn log_fleet_dashboard(result: &FleetStatusResult) {
             continue;
         }
 
-        let server_label = proj_status
-            .server_id
-            .as_deref()
-            .unwrap_or("unknown");
+        let server_label = proj_status.server_id.as_deref().unwrap_or("unknown");
 
         // Health indicator
         let health_icon = match &proj_status.health {
