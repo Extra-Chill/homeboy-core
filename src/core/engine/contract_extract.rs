@@ -32,6 +32,8 @@ pub fn extract_contracts_from_grammar(
         .iter()
         .filter(|s| s.concept == "function")
         .collect();
+    
+
 
     // Build impl block line ranges for correlating methods with their parent types.
     // Each impl block symbol has a line number and a type_name capture.
@@ -165,8 +167,10 @@ fn find_function_body_range(
             continue;
         }
 
-        // Look for the closing brace (depth returns to fn_depth)
-        if ctx_line.depth <= fn_depth && ctx_line.text.trim().starts_with('}') {
+        // Look for the closing brace. walk_lines records depth_at_start (depth
+        // BEFORE processing braces on this line), so the line with the closing `}`
+        // has depth fn_depth + 1, not fn_depth. Check <= fn_depth + 1.
+        if ctx_line.depth <= fn_depth + 1 && ctx_line.text.trim().starts_with('}') {
             return Some((body_start?, ctx_line.line_num));
         }
     }
