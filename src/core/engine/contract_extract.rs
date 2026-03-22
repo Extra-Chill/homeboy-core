@@ -32,8 +32,6 @@ pub fn extract_contracts_from_grammar(
         .iter()
         .filter(|s| s.concept == "function")
         .collect();
-    
-
 
     // Build impl block line ranges for correlating methods with their parent types.
     // Each impl block symbol has a line number and a type_name capture.
