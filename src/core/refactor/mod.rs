@@ -78,8 +78,8 @@ pub use plan::{
 pub use propagate::{propagate, PropagateConfig, PropagateEdit, PropagateField, PropagateResult};
 pub use rename::{
     apply_renames, find_references, find_references_with_targeting, generate_renames,
-    generate_renames_with_targeting, CaseVariant, FileEdit, FileRename, Reference, RenameResult,
-    RenameScope, RenameSpec, RenameTargeting, RenameWarning,
+    generate_renames_with_targeting, CaseVariant, FileEdit, FileRename, Reference, RenameContext,
+    RenameResult, RenameScope, RenameSpec, RenameTargeting, RenameWarning,
 };
 pub use transform::{
     ad_hoc_transform, apply_transforms, load_transform_set, TransformResult, TransformRule,
