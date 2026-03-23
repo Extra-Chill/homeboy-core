@@ -161,6 +161,9 @@ pub enum AuditFinding {
     /// Compiler warning (dead code, unused import, unused variable, etc).
     /// Detected by running the language compiler/checker (cargo check, tsc, etc).
     CompilerWarning,
+    /// Wrapper file is missing an explicit declaration of what it wraps.
+    /// Detected by tracing calls in the wrapper to infer the implementation target.
+    MissingWrapperDeclaration,
 }
 
 impl AuditFinding {
@@ -200,6 +203,7 @@ impl AuditFinding {
             "undocumented_feature",
             "stale_doc_reference",
             "compiler_warning",
+            "missing_wrapper_declaration",
         ]
     }
 }

@@ -38,6 +38,7 @@ mod test_coverage;
 pub(crate) mod test_mapping;
 mod test_topology;
 pub(crate) mod walker;
+mod wrapper_inference;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;
@@ -499,7 +500,20 @@ fn audit_internal(
         all_findings.extend(compiler_findings);
     }
 
-    // Phase 4m: Impact-scoped filtering — when auditing changed files only,
+    // Phase 4m: Wrapper-to-implementation inference
+    // Detects wrapper files missing explicit declarations of what they wrap.
+    // Uses configurable call pattern tracing to infer the implementation target.
+    let wrapper_findings = wrapper_inference::analyze_wrappers(&all_fingerprints, root);
+    if !wrapper_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Wrapper inference: {} finding(s) (missing wrapper declarations)",
+            wrapper_findings.len()
+        );
+        all_findings.extend(wrapper_findings);
+    }
+
+    // Phase 4n: Impact-scoped filtering — when auditing changed files only,
     // expand scope to include call sites affected by symbol changes, then
     // filter findings to that expanded scope.
     //
