@@ -387,11 +387,12 @@ fn section_name_to_slug(name: &str) -> String {
         })
         .collect();
 
-    cleaned
+    let words: Vec<String> = cleaned
         .split_whitespace()
         .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join("_")
+        .collect();
+
+    truncate_module_name(&words.join("_"))
 }
 
 /// Ensure a group name is a valid Rust module name (identifier).
@@ -427,6 +428,45 @@ fn sanitize_module_name(name: &str) -> String {
         }
     }
     result.trim_end_matches('_').to_string()
+}
+
+/// Maximum number of meaningful words (non-stop-words) in a module name.
+///
+/// Decompose generates module names from section headers, function names, and
+/// cluster labels. Without truncation, verbose source names produce filenames
+/// like `structural_parser_context_aware_iteration_over_source_text.rs`.
+/// This limit keeps names concise (e.g., `structural_parser.rs`).
+const MAX_MODULE_NAME_WORDS: usize = 3;
+
+/// Truncate a module name to at most `MAX_MODULE_NAME_WORDS` meaningful words.
+///
+/// Stop words (prepositions, articles) are dropped entirely rather than counted
+/// toward the limit. This produces names like `grammar_loading` instead of
+/// `grammar_definition_loaded_from_extension_toml_json`.
+fn truncate_module_name(name: &str) -> String {
+    let parts: Vec<&str> = name.split('_').filter(|s| !s.is_empty()).collect();
+
+    let mut meaningful_count = 0;
+    let mut kept: Vec<&str> = Vec::new();
+
+    for part in &parts {
+        if is_stop_word(part) {
+            // Drop stop words entirely — they add length without meaning
+            continue;
+        }
+        meaningful_count += 1;
+        kept.push(part);
+        if meaningful_count >= MAX_MODULE_NAME_WORDS {
+            break;
+        }
+    }
+
+    if kept.is_empty() {
+        // All words were stop words; fall back to the first segment
+        parts.first().map(|s| s.to_string()).unwrap_or_default()
+    } else {
+        kept.join("_")
+    }
 }
 
 /// Assign an item to a section based on its line number.
@@ -585,7 +625,7 @@ fn pick_cluster_label(members: &[String], graph: &BTreeMap<String, HashSet<Strin
         }
     }
 
-    call_count
+    let raw = call_count
         .into_iter()
         .max_by_key(|(_, count)| *count)
         .map(|(name, _)| name.to_string())
@@ -594,7 +634,9 @@ fn pick_cluster_label(members: &[String], graph: &BTreeMap<String, HashSet<Strin
                 .first()
                 .cloned()
                 .unwrap_or_else(|| "group".to_string())
-        })
+        });
+
+    truncate_module_name(&raw)
 }
 
 /// Find a dominant prefix shared by most members of a cluster.
@@ -1201,10 +1243,13 @@ fn split_oversized_group(name: &str, names: &[String]) -> Vec<(String, Vec<Strin
     sub_clusters
         .into_iter()
         .map(|(sub_name, sub_names)| {
+            // Use the sub-cluster name directly instead of compounding
+            // parent_child names. This prevents verbose names like
+            // `convenience_helpers_for_feature_consumers` from stacking.
             let label = if sub_name == "helpers" {
                 name.to_string()
             } else {
-                format!("{}_{}", name, sub_name)
+                truncate_module_name(&sub_name)
             };
             (
                 label,
@@ -1775,9 +1820,10 @@ fn parse_hunk() {}
     fn section_name_to_slug_converts_headers() {
         assert_eq!(section_name_to_slug("Models"), "models");
         assert_eq!(section_name_to_slug("Git operations"), "git_operations");
+        // Long headers are truncated to MAX_MODULE_NAME_WORDS meaningful words
         assert_eq!(
             section_name_to_slug("Diff parsing — extract structural changes"),
-            "diff_parsing_extract_structural_changes"
+            "diff_parsing_extract"
         );
         assert_eq!(section_name_to_slug("Tests"), "tests");
     }
@@ -1881,5 +1927,47 @@ fn parse_hunk() {}
                 g.suggested_target
             );
         }
+    }
+
+    #[test]
+    fn truncate_module_name_limits_word_count() {
+        // Verbose section headers should be truncated
+        assert_eq!(
+            truncate_module_name("structural_parser_context_aware_iteration_over_source_text"),
+            "structural_parser_context"
+        );
+        assert_eq!(
+            truncate_module_name("grammar_definition_loaded_from_extension_toml_json"),
+            "grammar_definition_loaded"
+        );
+        assert_eq!(
+            truncate_module_name("extraction_apply_grammar_patterns_to_get_symbols"),
+            "extraction_apply_grammar"
+        );
+        assert_eq!(
+            truncate_module_name("convenience_helpers_for_feature_consumers"),
+            "convenience_helpers_feature"
+        );
+    }
+
+    #[test]
+    fn truncate_module_name_preserves_short_names() {
+        assert_eq!(truncate_module_name("types"), "types");
+        assert_eq!(truncate_module_name("block_syntax"), "block_syntax");
+        assert_eq!(truncate_module_name("grammar_loading"), "grammar_loading");
+        assert_eq!(truncate_module_name("symbol"), "symbol");
+    }
+
+    #[test]
+    fn truncate_module_name_drops_stop_words() {
+        // Stop words like "for", "from", "to", "in" are dropped, not counted
+        assert_eq!(
+            truncate_module_name("items_for_display"),
+            "items_display"
+        );
+        assert_eq!(
+            truncate_module_name("data_from_source_to_target"),
+            "data_source_target"
+        );
     }
 }
