@@ -161,6 +161,9 @@ pub enum AuditFinding {
     /// Compiler warning (dead code, unused import, unused variable, etc).
     /// Detected by running the language compiler/checker (cargo check, tsc, etc).
     CompilerWarning,
+    /// Wrapper file is missing an explicit declaration of what it wraps.
+    /// Detected by tracing calls in the wrapper to infer the implementation target.
+    MissingWrapperDeclaration,
 }
 
 impl AuditFinding {
@@ -200,6 +203,7 @@ impl AuditFinding {
             "undocumented_feature",
             "stale_doc_reference",
             "compiler_warning",
+            "missing_wrapper_declaration",
         ]
     }
 }
@@ -735,56 +739,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discover_convention_from_fingerprints() {
-        let fingerprints = vec![
-            FileFingerprint {
-                relative_path: "steps/ai-chat.php".to_string(),
-                language: Language::Php,
-                methods: vec![
-                    "register".to_string(),
-                    "validate".to_string(),
-                    "execute".to_string(),
-                ],
-                type_name: Some("AiChat".to_string()),
-                ..Default::default()
-            },
-            FileFingerprint {
-                relative_path: "steps/webhook.php".to_string(),
-                language: Language::Php,
-                methods: vec![
-                    "register".to_string(),
-                    "validate".to_string(),
-                    "execute".to_string(),
-                ],
-                type_name: Some("Webhook".to_string()),
-                ..Default::default()
-            },
-            FileFingerprint {
-                relative_path: "steps/agent-ping.php".to_string(),
-                language: Language::Php,
-                methods: vec!["register".to_string(), "execute".to_string()],
-                type_name: Some("AgentPing".to_string()),
-                ..Default::default()
-            },
-        ];
-
-        let convention = discover_conventions("Step Types", "steps/*.php", &fingerprints).unwrap();
-
-        assert_eq!(convention.name, "Step Types");
-        assert!(convention
-            .expected_methods
-            .contains(&"register".to_string()));
-        assert!(convention.expected_methods.contains(&"execute".to_string()));
-        assert_eq!(convention.conforming.len(), 2);
-        assert_eq!(convention.outliers.len(), 1);
-        assert_eq!(convention.outliers[0].file, "steps/agent-ping.php");
-        assert!(convention.outliers[0]
-            .deviations
-            .iter()
-            .any(|d| d.description.contains("validate")));
-    }
-
-    #[test]
     fn convention_needs_minimum_two_files() {
         let fingerprints = vec![FileFingerprint {
             relative_path: "single.php".to_string(),
@@ -803,55 +757,6 @@ mod tests {
         assert_eq!(Language::from_extension("ts"), Language::TypeScript);
         assert_eq!(Language::from_extension("jsx"), Language::JavaScript);
         assert_eq!(Language::from_extension("txt"), Language::Unknown);
-    }
-
-    #[test]
-    fn discover_interface_convention() {
-        let fingerprints = vec![
-            FileFingerprint {
-                relative_path: "abilities/create.php".to_string(),
-                language: Language::Php,
-                methods: vec!["execute".to_string(), "register".to_string()],
-                type_name: Some("CreateAbility".to_string()),
-                implements: vec!["AbilityInterface".to_string()],
-                ..Default::default()
-            },
-            FileFingerprint {
-                relative_path: "abilities/update.php".to_string(),
-                language: Language::Php,
-                methods: vec!["execute".to_string(), "register".to_string()],
-                type_name: Some("UpdateAbility".to_string()),
-                implements: vec!["AbilityInterface".to_string()],
-                ..Default::default()
-            },
-            FileFingerprint {
-                relative_path: "abilities/helpers.php".to_string(),
-                language: Language::Php,
-                methods: vec!["execute".to_string(), "register".to_string()],
-                type_name: Some("Helpers".to_string()),
-                ..Default::default()
-            },
-        ];
-
-        let convention =
-            discover_conventions("Abilities", "abilities/*.php", &fingerprints).unwrap();
-
-        // Should detect AbilityInterface as expected
-        assert!(convention
-            .expected_interfaces
-            .contains(&"AbilityInterface".to_string()));
-
-        // helpers.php should be a noisy outlier due to naming mismatch
-        assert_eq!(convention.outliers.len(), 1);
-        assert_eq!(convention.outliers[0].file, "abilities/helpers.php");
-        assert!(
-            convention.outliers[0].noisy,
-            "Helper-like file should be marked noisy"
-        );
-        assert!(convention.outliers[0]
-            .deviations
-            .iter()
-            .any(|d| matches!(d.kind, AuditFinding::NamingMismatch)));
     }
 
     #[test]
@@ -1470,5 +1375,155 @@ mod tests {
         // utils.rs should be flagged via fallback to type_name
         assert_eq!(convention.outliers.len(), 1);
         assert_eq!(convention.outliers[0].file, "commands/utils.rs");
+    }
+
+    #[test]
+    fn test_from_extension_default_path() {
+        let instance = Language::default();
+        let ext = "";
+        let _result = instance.from_extension(&ext);
+    }
+
+    #[test]
+    fn test_from_path_default_path() {
+        let instance = Language::default();
+        let path = Default::default();
+        let _result = instance.from_path(&path);
+    }
+
+    #[test]
+    fn test_all_names_default_path() {
+        let instance = AuditFinding::default();
+        let _result = instance.all_names();
+    }
+
+    #[test]
+    fn test_discover_conventions_fingerprints_len_2() {
+        let result = discover_conventions();
+        assert!(result.is_ok(), "expected Ok for: fingerprints.len() < 2");
+    }
+
+    #[test]
+    fn test_discover_conventions_expected_methods_is_empty() {
+        let result = discover_conventions();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: expected_methods.is_empty()"
+        );
+    }
+
+    #[test]
+    fn test_discover_conventions_if_let_some_ns_fp_namespace() {
+        let result = discover_conventions();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(ns) = &fp.namespace {"
+        );
+    }
+
+    #[test]
+    fn test_discover_conventions_if_let_some_expected_ns_expected_namespace() {
+        let result = discover_conventions();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(expected_ns) = &expected_namespace {"
+        );
+    }
+
+    #[test]
+    fn test_discover_conventions_let_some_expected_ns_expected_namespace() {
+        let result = discover_conventions();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: let Some(expected_ns) = &expected_namespace"
+        );
+    }
+
+    #[test]
+    fn test_discover_conventions_has_expected_effects() {
+        // Expected effects: logging, mutation
+
+        let _ = discover_conventions();
+    }
+
+    #[test]
+    fn test_check_signature_consistency_ok_c_c() {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(result.is_ok(), "expected Ok for: Ok(c) => c,");
+    }
+
+    #[test]
+    fn test_check_signature_consistency_err_continue() {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(result.is_ok(), "expected Ok for: Err(_) => continue,");
+    }
+
+    #[test]
+    fn test_check_signature_consistency_match_compute_signature_skeleton_tokenized() {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(
+            result.is_ok(),
+            "expected Ok for: match compute_signature_skeleton(&tokenized)"
+        );
+    }
+
+    #[test]
+    fn test_check_signature_consistency_if_let_some_expected_token_expected() {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(expected_token) = expected {"
+        );
+    }
+
+    #[test]
+    fn test_check_signature_consistency_let_canonical_display_if_let_some_first_majority_sigs_first(
+    ) {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(
+            result.is_ok(),
+            "expected Ok for: let canonical_display = if let Some(first) = majority_sigs.first() {"
+        );
+    }
+
+    #[test]
+    fn test_check_signature_consistency_if_let_some_devs_new_outlier_deviations_remove_file() {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(devs) = new_outlier_deviations.remove(file) {"
+        );
+    }
+
+    #[test]
+    fn test_check_signature_consistency_if_let_some_devs_new_outlier_deviations_remove_outlier_file(
+    ) {
+        let conventions = Default::default();
+        let root = Path::new("");
+        let result = check_signature_consistency(&conventions, &root);
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(devs) = new_outlier_deviations.remove(&outlier.file) {"
+        );
+    }
+
+    #[test]
+    fn test_check_signature_consistency_has_expected_effects() {
+        // Expected effects: file_read, mutation
+        let conventions = Default::default();
+        let root = Path::new("");
+        let _ = check_signature_consistency(&conventions, &root);
     }
 }

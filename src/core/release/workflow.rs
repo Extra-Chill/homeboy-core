@@ -537,7 +537,10 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
 ///
 /// Continue-on-error: if one component fails, the rest still run.
 /// Each component releases independently (own tag, own push).
-pub fn run_batch(component_ids: &[String], input_template: &ReleaseCommandInput) -> BatchReleaseResult {
+pub fn run_batch(
+    component_ids: &[String],
+    input_template: &ReleaseCommandInput,
+) -> BatchReleaseResult {
     let mut results = Vec::new();
     let mut released: u32 = 0;
     let mut skipped: u32 = 0;
@@ -582,12 +585,7 @@ pub fn run_batch(component_ids: &[String], input_template: &ReleaseCommandInput)
                 });
             }
             Err(e) => {
-                log_status!(
-                    "release",
-                    "Failed to release '{}': {}",
-                    component_id,
-                    e
-                );
+                log_status!("release", "Failed to release '{}': {}", component_id, e);
                 failed += 1;
                 results.push(BatchReleaseComponentResult {
                     component_id: component_id.clone(),

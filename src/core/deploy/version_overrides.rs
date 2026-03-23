@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn test_deploy_with_override_has_expected_effects() {
-        // Expected effects: logging, mutation
+        // Expected effects: mutation, logging
 
         let _ = deploy_with_override();
     }
@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn test_run_post_deploy_hooks_has_expected_effects() {
-        // Expected effects: logging, mutation
+        // Expected effects: mutation, logging
 
         let _ = run_post_deploy_hooks();
     }
