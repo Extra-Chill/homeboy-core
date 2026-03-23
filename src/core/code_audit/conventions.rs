@@ -164,6 +164,12 @@ pub enum AuditFinding {
     /// Wrapper file is missing an explicit declaration of what it wraps.
     /// Detected by tracing calls in the wrapper to infer the implementation target.
     MissingWrapperDeclaration,
+    /// Two directories contain overlapping file names with high content similarity.
+    /// Indicates a copy-paste module that was never consolidated.
+    ShadowModule,
+    /// Multiple structs define the same field group — candidates for extraction
+    /// into a shared type and flattening/embedding.
+    RepeatedFieldPattern,
 }
 
 impl AuditFinding {
@@ -204,6 +210,8 @@ impl AuditFinding {
             "stale_doc_reference",
             "compiler_warning",
             "missing_wrapper_declaration",
+            "shadow_module",
+            "repeated_field_pattern",
         ]
     }
 }

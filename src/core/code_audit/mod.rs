@@ -32,6 +32,8 @@ mod layer_ownership;
 pub(crate) mod naming;
 pub mod report;
 pub mod run;
+mod field_patterns;
+mod shadow_modules;
 mod signatures;
 mod structural;
 mod test_coverage;
@@ -513,7 +515,29 @@ fn audit_internal(
         all_findings.extend(wrapper_findings);
     }
 
-    // Phase 4n: Impact-scoped filtering — when auditing changed files only,
+    // Phase 4n: Shadow module detection — directories that are near-copies.
+    let shadow_findings = shadow_modules::run(&all_fingerprints);
+    if !shadow_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Shadow modules: {} finding(s) (duplicate directory structures)",
+            shadow_findings.len()
+        );
+        all_findings.extend(shadow_findings);
+    }
+
+    // Phase 4o: Repeated struct field pattern detection.
+    let field_pattern_findings = field_patterns::run(root);
+    if !field_pattern_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Field patterns: {} finding(s) (repeated struct fields)",
+            field_pattern_findings.len()
+        );
+        all_findings.extend(field_pattern_findings);
+    }
+
+    // Phase 4p: Impact-scoped filtering — when auditing changed files only,
     // expand scope to include call sites affected by symbol changes, then
     // filter findings to that expanded scope.
     //
