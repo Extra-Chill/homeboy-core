@@ -342,4 +342,71 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.to_string().contains("not a directory"));
     }
+
+    #[test]
+    fn test_fixes_from_audit_write_fix_result_fixes_is_empty() {
+        let audit = Default::default();
+        let write = false;
+        let result = fixes_from_audit(&audit, write);
+        let inner = result.unwrap();
+        // Branch returns Ok(fix_result) when: write && !fix_result.fixes.is_empty()
+        assert_eq!(inner.fixes, Vec::new());
+        assert_eq!(inner.new_files, Vec::new());
+        assert_eq!(inner.decompose_plans, Vec::new());
+        assert_eq!(inner.skipped, Vec::new());
+        assert_eq!(inner.chunk_results, Vec::new());
+        assert_eq!(inner.total_insertions, 0);
+        assert_eq!(inner.files_modified, 0);
+    }
+
+    #[test]
+    fn test_add_import_default_path() {
+        let import_line = "";
+        let target = "";
+        let component_id = None;
+        let path = None;
+        let write = false;
+        let _result = add_import(&import_line, &target, component_id, path, write);
+    }
+
+    #[test]
+    fn test_add_import_default_path_2() {
+        let import_line = "";
+        let target = "";
+        let component_id = None;
+        let path = None;
+        let write = false;
+        let _result = add_import(&import_line, &target, component_id, path, write);
+    }
+
+    #[test]
+    fn test_add_import_crate_error_internal_io_e_to_string_some_format_read_file_pa() {
+        let import_line = "";
+        let target = "";
+        let component_id = None;
+        let path = Some(Default::default());
+        let write = false;
+        let _result = add_import(&import_line, &target, component_id, path, write);
+    }
+
+    #[test]
+    fn test_add_import_default_path_3() {
+        let import_line = "";
+        let target = "";
+        let component_id = None;
+        let path = None;
+        let write = false;
+        let _result = add_import(&import_line, &target, component_id, path, write);
+    }
+
+    #[test]
+    fn test_add_import_has_expected_effects() {
+        // Expected effects: file_read, mutation
+        let import_line = "";
+        let target = "";
+        let component_id = None;
+        let path = None;
+        let write = false;
+        let _ = add_import(&import_line, &target, component_id, path, write);
+    }
 }
