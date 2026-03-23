@@ -309,14 +309,12 @@ pub(crate) fn generate_test_method_fixes(
         // Validate brace balance in generated test source before insertion.
         // Unbalanced braces from template expansion (e.g., conditions with raw
         // braces) would break the target file's mod tests {} block.
-        if ext == "rs" {
-            if !grammar_items::validate_brace_balance(&generated.test_source, &grammar) {
-                skipped.push(SkippedFile {
+        if ext == "rs" && !grammar_items::validate_brace_balance(&generated.test_source, &grammar) {
+            skipped.push(SkippedFile {
                     file: source_file.clone(),
                     reason: "Generated test method source has unbalanced braces — skipping to avoid compilation breakage".to_string(),
                 });
-                continue;
-            }
+            continue;
         }
 
         // Determine target file and build insertion code
