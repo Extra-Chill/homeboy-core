@@ -462,6 +462,45 @@ pub fn is_directory_based(id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Check if a project is still using the legacy flat-file layout.
+pub fn needs_directory_migration(id: &str) -> bool {
+    let flat_exists = paths::projects()
+        .map(|p| p.join(format!("{}.json", id)).exists())
+        .unwrap_or(false);
+    flat_exists && !is_directory_based(id)
+}
+
+/// Migrate all flat-file projects to directory-based layout.
+///
+/// Called during `homeboy upgrade` to transparently move projects from
+/// `projects/{id}.json` to `projects/{id}/{id}.json`. Returns a list
+/// of (project_id, success) tuples.
+pub fn migrate_all_to_directories() -> Vec<(String, bool, String)> {
+    let project_ids = match list_ids() {
+        Ok(ids) => ids,
+        Err(_) => return vec![],
+    };
+
+    let mut results = Vec::new();
+
+    for id in &project_ids {
+        if !needs_directory_migration(id) {
+            continue;
+        }
+
+        match migrate_to_directory(id) {
+            Ok(dir) => {
+                results.push((id.clone(), true, format!("migrated to {}", dir.display())));
+            }
+            Err(e) => {
+                results.push((id.clone(), false, e.message.clone()));
+            }
+        }
+    }
+
+    results
+}
+
 /// Get the project directory path for a given project ID.
 /// Returns the directory path regardless of whether the project uses
 /// directory-based or flat-file config.
