@@ -64,16 +64,27 @@ pub fn extract_contracts_from_grammar(
         };
 
         // Extract signature info
-        let params_str = sym.get("params").unwrap_or("");
         let visibility = sym.get("visibility").map(|v| v.trim());
         let is_public = visibility.is_some_and(|v| v.starts_with("pub"));
 
-        // Detect return type from the declaration line(s)
-        let decl_text = raw_lines
-            .get(fn_line.saturating_sub(1))
-            .copied()
-            .unwrap_or("");
-        let return_type = detect_return_shape(decl_text, contract_grammar);
+        // Build the full declaration text by joining lines from the fn keyword
+        // through the opening brace. This handles multi-line signatures where
+        // params and/or return type span multiple lines. (#818)
+        let full_decl = join_declaration_lines(&raw_lines, fn_line, body_start);
+
+        // Detect return type from the FULL declaration (not just the fn line)
+        let return_type = detect_return_shape(&full_decl, contract_grammar);
+
+        // Extract params: prefer the full declaration's param list over the
+        // grammar symbol's single-line capture, which truncates multi-line params.
+        let full_params = extract_params_from_declaration(&full_decl);
+        let params_str_owned;
+        let params_str = if let Some(ref fp) = full_params {
+            fp.as_str()
+        } else {
+            params_str_owned = sym.get("params").unwrap_or("").to_string();
+            &params_str_owned
+        };
 
         // Parse params
         let params = parse_params(params_str, &contract_grammar.param_format);
@@ -99,8 +110,8 @@ pub fn extract_contracts_from_grammar(
         let early_returns = count_early_returns(&body_lines, contract_grammar);
         let calls = detect_calls(&body_lines, &params);
 
-        // Detect async
-        let is_async = decl_text.contains("async ");
+        // Detect async from the full declaration
+        let is_async = full_decl.contains("async ");
 
         // Determine the impl type for ALL functions inside impl blocks (depth > 0).
         // This covers both methods (&self) and associated functions (Type::new()).
@@ -174,6 +185,67 @@ fn find_function_body_range(
     }
 
     None
+}
+
+/// Join lines from the function declaration through the opening brace into a
+/// single string. This captures multi-line signatures where params and/or
+/// the return type span continuation lines.
+///
+/// Example:
+/// ```ignore
+/// pub fn complex_function(
+///     root: &Path,
+///     files: &[PathBuf],
+///     config: &Config,
+/// ) -> Result<(), Error> {
+/// ```
+/// Becomes: `pub fn complex_function( root: &Path, files: &[PathBuf], config: &Config, ) -> Result<(), Error> {`
+fn join_declaration_lines(raw_lines: &[&str], fn_line: usize, body_start: usize) -> String {
+    // fn_line is 1-indexed, body_start is the line with `{`
+    let start_idx = fn_line.saturating_sub(1);
+    let end_idx = body_start.min(raw_lines.len()); // inclusive
+
+    raw_lines[start_idx..end_idx]
+        .iter()
+        .map(|line| line.trim())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Extract the full parameter list from a joined declaration string.
+///
+/// Finds the balanced parenthesized parameter list, handling nested generics
+/// like `HashMap<String, Vec<u8>>` correctly.
+fn extract_params_from_declaration(decl: &str) -> Option<String> {
+    // Find the opening paren after "fn name"
+    let open = decl.find('(')?;
+    let bytes = decl.as_bytes();
+    let mut depth = 0i32;
+    let mut close = None;
+
+    for (i, &b) in bytes[open..].iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let close = close?;
+    // Return the content between parens (exclusive)
+    let params = &decl[open + 1..close];
+    let trimmed = params.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// Detect the return type shape from the function declaration line.
@@ -839,5 +911,81 @@ mod tests {
     fn extract_generic_inner_basic() {
         assert_eq!(extract_generic_inner("Option<String>"), "String");
         assert_eq!(extract_generic_inner("Vec<u8>"), "u8");
+    }
+
+    #[test]
+    fn join_declaration_lines_single_line() {
+        let lines = vec!["pub fn foo(x: u32) -> bool {"];
+        assert_eq!(
+            join_declaration_lines(&lines, 1, 1),
+            "pub fn foo(x: u32) -> bool {"
+        );
+    }
+
+    #[test]
+    fn join_declaration_lines_multi_line_params() {
+        let lines = vec![
+            "pub fn complex(",
+            "    root: &Path,",
+            "    files: &[PathBuf],",
+            "    config: &Config,",
+            ") -> Result<(), Error> {",
+        ];
+        let decl = join_declaration_lines(&lines, 1, 5);
+        assert!(decl.contains("root: &Path,"));
+        assert!(decl.contains("config: &Config,"));
+        assert!(decl.contains("-> Result<(), Error>"));
+    }
+
+    #[test]
+    fn join_declaration_lines_return_type_on_next_line() {
+        let lines = vec![
+            "pub fn long_name(arg: Type)",
+            "    -> Result<ValidationResult, Error>",
+            "{",
+        ];
+        let decl = join_declaration_lines(&lines, 1, 3);
+        assert!(decl.contains("-> Result<ValidationResult, Error>"));
+    }
+
+    #[test]
+    fn extract_params_from_declaration_simple() {
+        let decl = "pub fn foo(x: u32, y: &str) -> bool {";
+        assert_eq!(
+            extract_params_from_declaration(decl),
+            Some("x: u32, y: &str".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_params_from_declaration_nested_generics() {
+        let decl = "pub fn bar(map: HashMap<String, Vec<u8>>, flag: bool) -> () {";
+        assert_eq!(
+            extract_params_from_declaration(decl),
+            Some("map: HashMap<String, Vec<u8>>, flag: bool".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_params_from_declaration_multi_line_joined() {
+        let decl = "pub fn complex( root: &Path, files: &[PathBuf], config: &Config, ) -> Result<(), Error> {";
+        let params = extract_params_from_declaration(decl).unwrap();
+        assert!(params.contains("root: &Path"));
+        assert!(params.contains("files: &[PathBuf]"));
+        assert!(params.contains("config: &Config"));
+    }
+
+    #[test]
+    fn extract_params_from_declaration_no_params() {
+        let decl = "pub fn no_args() -> bool {";
+        assert_eq!(extract_params_from_declaration(decl), None);
+    }
+
+    #[test]
+    fn extract_params_from_declaration_self_receiver() {
+        let decl = "pub fn method(&self, x: u32) -> bool {";
+        let params = extract_params_from_declaration(decl).unwrap();
+        assert!(params.contains("&self"));
+        assert!(params.contains("x: u32"));
     }
 }
