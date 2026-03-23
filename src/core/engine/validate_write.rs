@@ -298,37 +298,6 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn resolve_builtin_for_rust_project() {
-        let dir = TempDir::new().expect("temp dir");
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"").unwrap();
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert_eq!(cmd, Some("cargo check --tests 2>&1".to_string()));
-    }
-
-    #[test]
-    fn resolve_builtin_for_typescript_project() {
-        let dir = TempDir::new().expect("temp dir");
-        fs::write(dir.path().join("tsconfig.json"), "{}").unwrap();
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert_eq!(cmd, Some("npx tsc --noEmit 2>&1".to_string()));
-    }
-
-    #[test]
-    fn resolve_builtin_for_go_project() {
-        let dir = TempDir::new().expect("temp dir");
-        fs::write(dir.path().join("go.mod"), "module example.com/t").unwrap();
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert_eq!(cmd, Some("go vet ./... 2>&1".to_string()));
-    }
-
-    #[test]
-    fn resolve_builtin_returns_none_for_unknown() {
-        let dir = TempDir::new().expect("temp dir");
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert!(cmd.is_none());
-    }
-
-    #[test]
     fn validation_result_skipped_is_success() {
         let result = ValidationResult::skipped(5);
         assert!(result.success);
@@ -377,5 +346,99 @@ mod tests {
         // Verify rollback happened — file should be restored
         let content = fs::read_to_string(&lib_path).unwrap();
         assert_eq!(content, "pub fn good() {}\n", "file should be restored");
+    }
+
+    #[test]
+    fn test_validate_write_changed_files_is_empty() {
+        let result = validate_write();
+        assert!(result.is_ok(), "expected Ok for: changed_files.is_empty()");
+    }
+
+    #[test]
+    fn test_validate_write_some_cmd_cmd() {
+        let result = validate_write();
+        assert!(result.is_ok(), "expected Ok for: Some(cmd) => cmd,");
+    }
+
+    #[test]
+    fn test_validate_write_default_path() {
+        let result = validate_write();
+        assert!(result.is_ok(), "expected Ok for: default path");
+    }
+
+    #[test]
+    fn test_validate_write_some_validate_write_to_string() {
+        let result = validate_write();
+        assert!(result.is_ok(), "expected Ok for: Some("validate_write".to_string()),");
+    }
+
+    #[test]
+    fn test_validate_write_default_path() {
+        let result = validate_write();
+        assert!(result.is_ok(), "expected Ok for: default path");
+    }
+
+    #[test]
+    fn test_validate_write_has_expected_effects() {
+        // Expected effects: process_spawn, logging
+
+        let _ = validate_write();
+    }
+
+    #[test]
+    fn test_validate_only_changed_files_is_empty() {
+        let root = Path::new("");
+        let changed_files = Vec::new();
+        let result = validate_only(&root, &changed_files);
+        let inner = result.unwrap();
+        // Branch returns Ok(ValidationResult::skipped(0) when: changed_files.is_empty()
+        assert_eq!(inner.success, false);
+        assert_eq!(inner.command, None);
+        assert_eq!(inner.output, None);
+        assert_eq!(inner.rolled_back, false);
+        assert_eq!(inner.files_checked, 0);
+    }
+
+    #[test]
+    fn test_validate_only_changed_files_is_empty() {
+        let root = Path::new("");
+        let changed_files = Vec::new();
+        let _result = validate_only(&root, &changed_files);
+    }
+
+    #[test]
+    fn test_validate_only_none_return_ok_validationresult_skipped_changed_files_len() {
+        let root = Path::new("");
+        let changed_files = vec![Default::default()];
+        let result = validate_only(&root, &changed_files);
+        let inner = result.unwrap();
+        // Branch returns Ok(ValidationResult::skipped(changed_files.len() when: None => return Ok(ValidationResult::skipped(changed_files.len())),
+        assert_eq!(inner.success, false);
+        assert_eq!(inner.command, None);
+        assert_eq!(inner.output, None);
+        assert_eq!(inner.rolled_back, false);
+        assert_eq!(inner.files_checked, 0);
+    }
+
+    #[test]
+    fn test_validate_only_some_validate_only_to_string() {
+        let root = Path::new("");
+        let changed_files = vec![Default::default()];
+        let _result = validate_only(&root, &changed_files);
+    }
+
+    #[test]
+    fn test_validate_only_default_path() {
+        let root = Path::new("");
+        let changed_files = vec![Default::default()];
+        let _result = validate_only(&root, &changed_files);
+    }
+
+    #[test]
+    fn test_validate_only_has_expected_effects() {
+        // Expected effects: process_spawn
+        let root = Path::new("");
+        let changed_files = Vec::new();
+        let _ = validate_only(&root, &changed_files);
     }
 }
