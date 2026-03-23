@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use homeboy::code_audit::{AuditFinding, CodeAuditResult};
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::refactor::{
-    self, auto, AddResult, MoveResult, RenameScope, RenameSpec, RenameTargeting,
+    self, auto, AddResult, MoveResult, RenameContext, RenameScope, RenameSpec, RenameTargeting,
 };
 use serde::Serialize;
 
@@ -73,6 +73,10 @@ enum RefactorCommand {
         /// Disable file/directory path renames (content edits only)
         #[arg(long)]
         no_file_renames: bool,
+        /// Syntactic context filter: key (strings/property access), variable/var,
+        /// parameter/param, all (default — match everything)
+        #[arg(long, default_value = "all")]
+        context: String,
         #[command(flatten)]
         write_mode: WriteModeArgs,
     },
@@ -236,6 +240,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             files,
             exclude,
             no_file_renames,
+            context,
             write_mode,
         }) => run_rename(
             &from,
@@ -247,6 +252,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             &files,
             &exclude,
             no_file_renames,
+            &context,
             write_mode.write,
         ),
 
@@ -528,17 +534,20 @@ fn run_rename(
     include_globs: &[String],
     exclude_globs: &[String],
     no_file_renames: bool,
+    context: &str,
     write: bool,
 ) -> CmdResult<RefactorOutput> {
     let scope = RenameScope::from_str(scope)?;
+    let rename_context = RenameContext::from_str(context)?;
 
     let root = refactor::move_items::resolve_root(component_id, path)?;
 
-    let spec = if literal {
+    let mut spec = if literal {
         RenameSpec::literal(from, to, scope.clone())
     } else {
         RenameSpec::new(from, to, scope.clone())
     };
+    spec.rename_context = rename_context;
     let targeting = RenameTargeting {
         include_globs: include_globs.to_vec(),
         exclude_globs: exclude_globs.to_vec(),
