@@ -12,8 +12,8 @@ use glob_match::glob_match;
 use regex::Regex;
 
 use super::conventions::AuditFinding;
-use super::fingerprint::FileFingerprint;
 use super::findings::{Finding, Severity};
+use super::fingerprint::FileFingerprint;
 
 // ============================================================================
 // Configuration
@@ -67,10 +67,7 @@ pub(crate) struct CallMatch {
 /// 1. Check if the expected field exists in the file content
 /// 2. If not, trace calls against configured patterns
 /// 3. Report findings for files with inferred but undeclared implementations
-pub fn analyze_wrappers(
-    fingerprints: &[&FileFingerprint],
-    root: &Path,
-) -> Vec<Finding> {
+pub(crate) fn analyze_wrappers(fingerprints: &[&FileFingerprint], root: &Path) -> Vec<Finding> {
     let Some(config) = load_config(root) else {
         return Vec::new();
     };
@@ -113,10 +110,8 @@ pub fn analyze_wrappers(
             }
 
             // Deduplicate inferred targets
-            let mut inferred_targets: Vec<String> = call_matches
-                .iter()
-                .map(|m| m.captured.clone())
-                .collect();
+            let mut inferred_targets: Vec<String> =
+                call_matches.iter().map(|m| m.captured.clone()).collect();
             inferred_targets.sort();
             inferred_targets.dedup();
 
@@ -230,29 +225,6 @@ fn load_config(root: &Path) -> Option<WrapperInferenceConfig> {
 mod tests {
     use super::*;
 
-    fn make_fingerprint(path: &str, content: &str) -> FileFingerprint {
-        FileFingerprint {
-            relative_path: path.to_string(),
-            content: content.to_string(),
-            ..Default::default()
-        }
-    }
-
-    fn make_rule(
-        name: &str,
-        glob: &str,
-        field: &str,
-        patterns: &[&str],
-    ) -> WrapperRule {
-        WrapperRule {
-            name: name.to_string(),
-            wrapper_glob: glob.to_string(),
-            expected_field: field.to_string(),
-            call_patterns: patterns.iter().map(|p| p.to_string()).collect(),
-            field_format: None,
-        }
-    }
-
     #[test]
     fn test_has_field_php_style() {
         assert!(has_field("'ability' => 'foo'", "ability"));
@@ -325,7 +297,10 @@ mod tests {
         let rule = make_rule("test", "*", "ability", &[]);
         let suggestion = build_suggestion(
             &rule,
-            &["datamachine/search".to_string(), "datamachine/fetch".to_string()],
+            &[
+                "datamachine/search".to_string(),
+                "datamachine/fetch".to_string(),
+            ],
         );
         assert!(suggestion.contains("Multiple implementations"));
         assert!(suggestion.contains("datamachine/search"));
@@ -355,7 +330,8 @@ mod tests {
 
     #[test]
     fn test_analyze_wrappers_detects_missing_field() {
-        let content_missing_field = "class CreatePipeline {\n    PipelineAbilities::createPipeline($args);\n}";
+        let content_missing_field =
+            "class CreatePipeline {\n    PipelineAbilities::createPipeline($args);\n}";
         let fp = make_fingerprint("tools/CreatePipeline.php", content_missing_field);
 
         // File does NOT have 'ability' field
@@ -367,5 +343,30 @@ mod tests {
         let matches = trace_calls(&fp.content, &patterns);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].captured, "PipelineAbilities");
+    }
+
+    #[test]
+    fn test_analyze_wrappers_let_some_config_load_config_root_else() {
+        let result = analyze_wrappers();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: let Some(config) = load_config(root) else {"
+        );
+    }
+
+    #[test]
+    fn test_analyze_wrappers_if_let_some_line_m_line_num() {
+        let result = analyze_wrappers();
+        assert!(
+            result.is_ok(),
+            "expected Ok for: if let Some(line) = m.line_num {"
+        );
+    }
+
+    #[test]
+    fn test_analyze_wrappers_has_expected_effects() {
+        // Expected effects: mutation
+
+        let _ = analyze_wrappers();
     }
 }
