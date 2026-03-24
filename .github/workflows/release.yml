@@ -281,7 +281,7 @@ jobs:
         id: refactor
         run: |
           set +e
-          homeboy refactor homeboy --from all --write --force --path .
+          homeboy refactor homeboy --from all --write --path .
           REFACTOR_EXIT=$?
           set -e
 
