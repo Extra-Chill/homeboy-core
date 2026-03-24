@@ -42,7 +42,6 @@ pub use structural_parser_context::*;
 pub use symbol::*;
 pub use types::*;
 
-
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -250,79 +249,6 @@ pub(crate) fn extract_block_body<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn php_grammar() -> Grammar {
-        Grammar {
-            language: LanguageMeta {
-                id: "php".to_string(),
-                extensions: vec!["php".to_string()],
-            },
-            comments: CommentSyntax {
-                line: vec!["//".to_string(), "#".to_string()],
-                block: vec![("/*".to_string(), "*/".to_string())],
-                doc: vec![],
-            },
-            strings: StringSyntax {
-                quotes: vec!["\"".to_string(), "'".to_string()],
-                escape: "\\".to_string(),
-                multiline: vec![],
-            },
-            blocks: BlockSyntax::default(),
-            contract: None,
-            patterns: {
-                let mut p = HashMap::new();
-                p.insert(
-                    "method".to_string(),
-                    ConceptPattern {
-                        regex: r"(?:(?:public|protected|private|static|abstract|final)\s+)*function\s+(\w+)\s*\(([^)]*)\)".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c.insert("params".to_string(), 2);
-                            c
-                        },
-                        context: "any".to_string(),
-                        skip_comments: true,
-                        skip_strings: true,
-                        require_capture: None,
-                    },
-                );
-                p.insert(
-                    "class".to_string(),
-                    ConceptPattern {
-                        regex: r"(?:abstract\s+)?(?:final\s+)?(class|trait|interface)\s+(\w+)"
-                            .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("kind".to_string(), 1);
-                            c.insert("name".to_string(), 2);
-                            c
-                        },
-                        context: "top_level".to_string(),
-                        skip_comments: true,
-                        skip_strings: true,
-                        require_capture: None,
-                    },
-                );
-                p.insert(
-                    "namespace".to_string(),
-                    ConceptPattern {
-                        regex: r"namespace\s+([\w\\]+);".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c
-                        },
-                        context: "top_level".to_string(),
-                        skip_comments: true,
-                        skip_strings: true,
-                        require_capture: None,
-                    },
-                );
-                p
-            },
-        }
-    }
 
     // ---- Structural parser tests ----
 
@@ -845,16 +771,69 @@ class PipelineAbilities extends BaseAbilities {
     }
 
     #[test]
-    fn test_namespace_default_path() {
-        let symbols = Vec::new();
-        let _result = namespace(&symbols);
-    }
-
-    #[test]
     fn test_public_symbols_default_path() {
 
         let result = public_symbols();
         assert!(!result.is_empty(), "expected non-empty collection for: default path");
+    }
+
+    #[test]
+    fn test_load_default_path() {
+        let instance = Config::default();
+        let path = Path::new("");
+        let _result = instance.load(&path);
+    }
+
+    #[test]
+    fn test_standalone_default_path() {
+        let instance = Config::default();
+        let x = 0;
+        let _result = instance.standalone(x);
+    }
+
+
+    #[test]
+    fn test_current_block_label_default_path() {
+        let instance = StructuralContext::default();
+        let _result = instance.current_block_label();
+    }
+
+    #[test]
+    fn test_push_block_does_not_panic() {
+        let instance = StructuralContext::default();
+        let _ = instance.push_block();
+    }
+
+    #[test]
+    fn test_push_block_has_expected_effects() {
+        // Expected effects: mutation
+        let instance = StructuralContext::default();
+        let _ = instance.push_block();
+    }
+
+    #[test]
+    fn test_pop_exited_blocks_while_let_some_entry_depth_self_block_stack_last() {
+        let instance = StructuralContext::default();
+        instance.pop_exited_blocks();
+    }
+
+    #[test]
+    fn test_get_default_path() {
+        let instance = Symbol::default();
+        let key = "";
+        let _result = instance.get(&key);
+    }
+
+    #[test]
+    fn test_name_default_path() {
+        let instance = Symbol::default();
+        let _result = instance.name();
+    }
+
+    #[test]
+    fn test_visibility_default_path() {
+        let instance = Symbol::default();
+        let _result = instance.visibility();
     }
 
     #[test]

@@ -46,3 +46,76 @@ pub(crate) fn default_context() -> String {
 pub(crate) fn default_true() -> bool {
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_fallback_default_default_path() {
+
+        let _result = default_fallback_default();
+    }
+
+    #[test]
+    fn test_default_group_1_default_path() {
+
+        let _result = default_group_1();
+    }
+
+    #[test]
+    fn test_default_group_2_default_path() {
+
+        let _result = default_group_2();
+    }
+
+    #[test]
+    fn test_default_return_type_separator_default_path() {
+
+        let _result = default_return_type_separator();
+    }
+
+    #[test]
+    fn test_default_param_format_default_path() {
+
+        let _result = default_param_format();
+    }
+
+    #[test]
+    fn test_default_quotes_default_path() {
+
+        let result = default_quotes();
+        assert!(!result.is_empty(), "expected non-empty collection for: default path");
+    }
+
+    #[test]
+    fn test_default_escape_string_default_path() {
+
+        let _result = default_escape_string();
+    }
+
+    #[test]
+    fn test_default_open_default_path() {
+
+        let _result = default_open();
+    }
+
+    #[test]
+    fn test_default_close_default_path() {
+
+        let _result = default_close();
+    }
+
+    #[test]
+    fn test_default_context_default_path() {
+
+        let _result = default_context();
+    }
+
+    #[test]
+    fn test_default_true_default_path() {
+
+        let _result = default_true();
+    }
+
+}

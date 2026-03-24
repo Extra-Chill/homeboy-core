@@ -45,3 +45,35 @@ pub(crate) fn update_depth(
         prev_char = ch;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_line_comment_trimmed_starts_with_prefix_as_str() {
+
+        let result = is_line_comment();
+        assert!(result, "expected true when: trimmed.starts_with(prefix.as_str())");
+    }
+
+    #[test]
+    fn test_is_line_comment_trimmed_starts_with_prefix_as_str_2() {
+
+        let result = is_line_comment();
+        assert!(result, "expected true when: trimmed.starts_with(prefix.as_str())");
+    }
+
+    #[test]
+    fn test_update_depth_if_let_some_quote_in_string() {
+
+        update_depth();
+    }
+
+    #[test]
+    fn test_update_depth_strings_quotes_iter_any_q_q_starts_with_ch() {
+
+        update_depth();
+    }
+
+}

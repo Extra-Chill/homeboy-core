@@ -31,3 +31,34 @@ pub fn load_grammar_json(path: &Path) -> Result<Grammar> {
         )
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_load_grammar_default_path() {
+        let path = Path::new("");
+        let _result = load_grammar(&path);
+    }
+
+    #[test]
+    fn test_load_grammar_some_grammar_load_to_string() {
+        let path = Path::new("");
+        let _result = load_grammar(&path);
+    }
+
+    #[test]
+    fn test_load_grammar_json_default_path() {
+        let path = Path::new("");
+        let _result = load_grammar_json(&path);
+    }
+
+    #[test]
+    fn test_load_grammar_json_some_grammar_load_to_string() {
+        let path = Path::new("");
+        let _result = load_grammar_json(&path);
+    }
+
+}
