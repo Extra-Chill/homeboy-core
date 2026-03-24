@@ -341,5 +341,4 @@ mod tests {
             "Should not upgrade already-pub(crate) function"
         );
     }
-
 }

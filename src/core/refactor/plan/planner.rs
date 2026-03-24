@@ -258,7 +258,11 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
                 snap.capture_file(file);
             }
             if let Err(e) = snap.save() {
-                crate::log_status!("undo", "Warning: failed to save pre-refactor undo snapshot: {}", e);
+                crate::log_status!(
+                    "undo",
+                    "Warning: failed to save pre-refactor undo snapshot: {}",
+                    e
+                );
             }
         }
     }
@@ -299,11 +303,7 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
         // Format generated/modified files so subsequent stages (especially lint)
         // see properly formatted code.
         if stage.summary.files_modified > 0 {
-            format_changed_files(
-                &request.root,
-                &stage.summary.changed_files,
-                &mut warnings,
-            );
+            format_changed_files(&request.root, &stage.summary.changed_files, &mut warnings);
         }
 
         accumulator.extend(stage.fix_results.clone());
@@ -360,9 +360,7 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
             .map(|source| format!("Re-run checks: homeboy {} {}", source, request.component.id))
             .collect()
     } else if files_modified > 0 {
-        vec![
-            "Dry run. Re-run with --write to apply fixes to the working tree.".to_string(),
-        ]
+        vec!["Dry run. Re-run with --write to apply fixes to the working tree.".to_string()]
     } else {
         Vec::new()
     };
@@ -692,7 +690,10 @@ fn run_lint_stage(
     let stage_changed_files = if write {
         let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
         let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
-        after_dirty.into_iter().filter(|f| !before_set.contains(f.as_str())).collect()
+        after_dirty
+            .into_iter()
+            .filter(|f| !before_set.contains(f.as_str()))
+            .collect()
     } else {
         Vec::new()
     };
@@ -759,7 +760,10 @@ fn run_test_stage(
     let stage_changed_files = if write {
         let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
         let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
-        after_dirty.into_iter().filter(|f| !before_set.contains(f.as_str())).collect()
+        after_dirty
+            .into_iter()
+            .filter(|f| !before_set.contains(f.as_str()))
+            .collect()
     } else {
         Vec::new()
     };
