@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.86.2] - 2026-03-24
+
+### Changed
+- remove sandbox from refactor planner, operate on working tree
+
 ## [0.86.1] - 2026-03-24
 
 ### Fixed
