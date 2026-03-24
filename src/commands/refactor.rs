@@ -39,6 +39,10 @@ pub struct RefactorArgs {
     #[command(flatten)]
     baseline_args: BaselineArgs,
 
+    /// Skip the clean working tree check (for CI or when you know what you're doing)
+    #[arg(long)]
+    force: bool,
+
     #[command(flatten)]
     write_mode: WriteModeArgs,
 
@@ -228,6 +232,7 @@ pub fn run(args: RefactorArgs, _global: &crate::commands::GlobalArgs) -> CmdResu
             &args.only,
             &args.exclude,
             &args.setting_args.setting,
+            args.force,
             args.write_mode.write,
         ),
 
@@ -480,6 +485,7 @@ fn run_refactor_sources(
     only: &[String],
     exclude: &[String],
     settings: &[(String, String)],
+    force: bool,
     write: bool,
 ) -> CmdResult<RefactorOutput> {
     let comp = comp.ok_or_else(|| {
@@ -501,6 +507,7 @@ fn run_refactor_sources(
         lint: homeboy::refactor::LintSourceOptions::default(),
         test: homeboy::refactor::TestSourceOptions::default(),
         write,
+        force,
     })?;
     let exit_code = if plan.files_modified > 0 { 1 } else { 0 };
 
