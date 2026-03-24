@@ -1,4 +1,5 @@
 use super::outcome::{AutofixSidecarFiles, FixApplied};
+use crate::engine::run_dir::{self, RunDir};
 use crate::engine::temp;
 use std::path::Path;
 
@@ -14,6 +15,14 @@ impl AutofixSidecarFiles {
         Self {
             results_file: fix_results_temp_path(),
             plan_file: Some(fix_plan_temp_path()),
+        }
+    }
+
+    /// Create sidecar files within a run directory instead of random temp files.
+    pub fn for_run_dir(run_dir: &RunDir) -> Self {
+        Self {
+            results_file: run_dir.step_file(run_dir::files::FIX_RESULTS),
+            plan_file: Some(run_dir.step_file(run_dir::files::FIX_PLAN)),
         }
     }
 

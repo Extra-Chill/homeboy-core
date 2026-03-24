@@ -1,7 +1,7 @@
 use crate::component::{self, Component};
 use crate::engine::local_files::FileSystem;
 use crate::engine::pipeline::{self, PipelineStep};
-use crate::engine::temp;
+use crate::engine::run_dir::{self, RunDir};
 use crate::engine::validation::ValidationCollector;
 use crate::error::{Error, Result};
 use crate::extension::{self, ExtensionManifest};
@@ -426,10 +426,9 @@ fn validate_code_quality(component: &Component) -> Result<()> {
     if let Ok(lint_context) = lint_context {
         log_status!("release", "Running lint ({})...", lint_context.extension_id);
 
-        // Create a temporary findings file so we can compare against baseline
-        let lint_findings_file = temp::runtime_temp_file("homeboy-release-lint", ".json")?;
+        let release_run_dir = RunDir::create()?;
+        let lint_findings_file = release_run_dir.step_file(run_dir::files::LINT_FINDINGS);
 
-        let lint_findings_file_str = lint_findings_file.to_string_lossy().to_string();
         match extension::lint::build_lint_runner(
             component,
             None,
@@ -441,7 +440,7 @@ fn validate_code_quality(component: &Component) -> Result<()> {
             None,
             None,
             None,
-            &lint_findings_file_str,
+            &release_run_dir,
         )
         .and_then(|runner| runner.run())
         {
@@ -457,7 +456,6 @@ fn validate_code_quality(component: &Component) -> Result<()> {
                     let findings =
                         crate::extension::lint::baseline::parse_findings_file(&lint_findings_file)
                             .unwrap_or_default();
-                    let _ = std::fs::remove_file(&lint_findings_file);
 
                     if let Some(baseline) =
                         crate::extension::lint::baseline::load_baseline(source_path)
@@ -484,9 +482,6 @@ fn validate_code_quality(component: &Component) -> Result<()> {
                     }
                 };
 
-                // Clean up findings file if not already removed
-                let _ = std::fs::remove_file(&lint_findings_file);
-
                 if lint_passed {
                     log_status!("release", "Lint passed");
                 } else {
@@ -494,7 +489,6 @@ fn validate_code_quality(component: &Component) -> Result<()> {
                 }
             }
             Err(e) => {
-                let _ = std::fs::remove_file(&lint_findings_file);
                 failures.push(format!("Lint error: {}", e));
             }
         }
@@ -506,19 +500,16 @@ fn validate_code_quality(component: &Component) -> Result<()> {
             "Running tests ({})...",
             test_context.extension_id
         );
-        let results_file = temp::runtime_temp_file("homeboy-release-test", ".json")?;
-        let results_file_str = results_file.to_string_lossy().to_string();
+        let test_run_dir = RunDir::create()?;
         match extension::test::build_test_runner(
             component,
             None,
             &[],
             false,
             false,
-            &results_file_str,
             None,
             None,
-            None,
-            None,
+            &test_run_dir,
         )
         .and_then(|runner| runner.run())
         {

@@ -1,6 +1,7 @@
 use clap::Args;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
+use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::test as extension_test;
 use homeboy::extension::test::{
     detect_test_drift, report, run_scaffold_workflow, TestCommandOutput, TestRunWorkflowArgs,
@@ -179,6 +180,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
     }
 
     // Main test workflow — delegate to core
+    let run_dir = RunDir::create()?;
     let passthrough_args = filter_homeboy_flags(&args.args);
     let workflow = extension_test::run_main_test_workflow(
         &ctx.component,
@@ -211,6 +213,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
             json_summary: args.json_summary,
             passthrough_args: passthrough_args.clone(),
         },
+        &run_dir,
     )?;
 
     Ok(report::from_main_workflow(workflow))

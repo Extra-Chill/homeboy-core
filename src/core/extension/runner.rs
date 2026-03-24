@@ -95,6 +95,13 @@ impl ExtensionRunner {
         self
     }
 
+    /// Set the run directory, injecting HOMEBOY_RUN_DIR and all legacy
+    /// per-file env vars so extension scripts work with either pattern.
+    pub fn with_run_dir(mut self, run_dir: &crate::engine::run_dir::RunDir) -> Self {
+        self.env_vars.extend(run_dir.legacy_env_vars());
+        self
+    }
+
     /// Add arguments to pass to the script.
     pub fn script_args(mut self, args: &[String]) -> Self {
         self.script_args.extend(args.iter().cloned());

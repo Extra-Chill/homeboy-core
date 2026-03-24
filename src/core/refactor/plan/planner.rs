@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::engine::temp;
+use crate::engine::run_dir::{self, RunDir};
 use crate::engine::undo::UndoSnapshot;
 use crate::extension;
 use crate::extension::test::compute_changed_test_files;
@@ -263,6 +263,8 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
         }
     }
 
+    let run_dir = RunDir::create()?;
+
     for source in &sources {
         let stage = match source.as_str() {
             "audit" => plan_audit_stage(
@@ -280,6 +282,7 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
                 &request.lint,
                 scoped_changed_files.as_deref(),
                 request.write,
+                &run_dir,
             )?,
             "test" => run_test_stage(
                 &request.component,
@@ -288,6 +291,7 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
                 &request.test,
                 scoped_test_files.as_deref(),
                 request.write,
+                &run_dir,
             )?,
             _ => unreachable!("sources are normalized before planning"),
         };
@@ -640,10 +644,11 @@ fn run_lint_stage(
     options: &LintSourceOptions,
     changed_files: Option<&[String]>,
     write: bool,
+    run_dir: &RunDir,
 ) -> crate::Result<PlannedStage> {
     let root_str = root.to_string_lossy().to_string();
-    let findings_file = temp::runtime_temp_file("homeboy-lint-findings", ".json")?;
-    let fix_sidecars = auto::AutofixSidecarFiles::for_plan();
+    let findings_file = run_dir.step_file(run_dir::files::LINT_FINDINGS);
+    let fix_sidecars = auto::AutofixSidecarFiles::for_run_dir(run_dir);
     let before_dirty = if write {
         git::get_dirty_files(&root_str).unwrap_or_default()
     } else {
@@ -669,7 +674,6 @@ fn run_lint_stage(
         options.glob.clone()
     };
 
-    let findings_file_str = findings_file.to_string_lossy().to_string();
     let runner = extension::lint::build_lint_runner(
         component,
         None,
@@ -681,22 +685,8 @@ fn run_lint_stage(
         options.sniffs.as_deref(),
         options.exclude_sniffs.as_deref(),
         options.category.as_deref(),
-        &findings_file_str,
+        run_dir,
     )?
-    .env_if(
-        write,
-        "HOMEBOY_FIX_PLAN_FILE",
-        &fix_sidecars
-            .plan_file
-            .as_ref()
-            .expect("plan sidecar initialized")
-            .to_string_lossy(),
-    )
-    .env_if(
-        write,
-        "HOMEBOY_FIX_RESULTS_FILE",
-        &fix_sidecars.results_file.to_string_lossy(),
-    )
     .env_if(write, "HOMEBOY_AUTO_FIX", "1");
 
     runner.run()?;
@@ -713,7 +703,6 @@ fn run_lint_stage(
     let fixes_proposed = fix_results.len();
     let lint_findings =
         crate::extension::lint::baseline::parse_findings_file(&findings_file).unwrap_or_default();
-    let _ = std::fs::remove_file(&findings_file);
 
     Ok(PlannedStage {
         source: "lint".to_string(),
@@ -739,17 +728,16 @@ fn run_test_stage(
     options: &TestSourceOptions,
     changed_test_files: Option<&[String]>,
     write: bool,
+    run_dir: &RunDir,
 ) -> crate::Result<PlannedStage> {
     let root_str = root.to_string_lossy().to_string();
-    let results_file = temp::runtime_temp_file("homeboy-test-results", ".json")?;
-    let fix_sidecars = auto::AutofixSidecarFiles::for_plan();
+    let fix_sidecars = auto::AutofixSidecarFiles::for_run_dir(run_dir);
     let before_dirty = if write {
         git::get_dirty_files(&root_str).unwrap_or_default()
     } else {
         Vec::new()
     };
 
-    let results_file_str = results_file.to_string_lossy().to_string();
     let selected_test_files = options.selected_files.as_deref().or(changed_test_files);
 
     let mut runner = extension::test::build_test_runner(
@@ -758,26 +746,10 @@ fn run_test_stage(
         settings,
         options.skip_lint,
         false,
-        &results_file_str,
-        None,
-        None,
         None,
         selected_test_files,
+        run_dir,
     )?
-    .env_if(
-        write,
-        "HOMEBOY_FIX_PLAN_FILE",
-        &fix_sidecars
-            .plan_file
-            .as_ref()
-            .expect("plan sidecar initialized")
-            .to_string_lossy(),
-    )
-    .env_if(
-        write,
-        "HOMEBOY_FIX_RESULTS_FILE",
-        &fix_sidecars.results_file.to_string_lossy(),
-    )
     .env_if(write, "HOMEBOY_AUTO_FIX", "1");
 
     if !options.script_args.is_empty() {
@@ -796,8 +768,6 @@ fn run_test_stage(
 
     let fix_results = fix_sidecars.consume_fix_results();
     let fixes_proposed = fix_results.len();
-    let _ = std::fs::remove_file(&results_file);
-
     Ok(PlannedStage {
         source: "test".to_string(),
         summary: PlanStageSummary {
