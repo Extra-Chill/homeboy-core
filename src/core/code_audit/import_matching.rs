@@ -91,70 +91,6 @@ pub(crate) fn grouped_import_contains(import: &str, name: &str) -> bool {
     }
 }
 
-/// Check if file content contains a local definition of a name.
-///
-/// Detects `fn name`, `struct name`, `enum name`, `type name`, `const name`,
-/// `static name`, `trait name`, and `macro_rules! name`. Skips import/use
-/// lines to avoid false positives from re-exports.
-///
-/// This prevents the convention detector from flagging a "missing import" when
-/// the file already defines the symbol locally (e.g., `fn default_true()`).
-pub(crate) fn content_defines_name(content: &str, name: &str) -> bool {
-    // Declaration keywords that introduce a named definition
-    const DEF_KEYWORDS: &[&str] = &[
-        "fn ",
-        "struct ",
-        "enum ",
-        "type ",
-        "const ",
-        "static ",
-        "trait ",
-        "macro_rules! ",
-    ];
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        // Skip comments
-        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
-            continue;
-        }
-        // Skip import/use lines
-        if trimmed.starts_with("use ") || trimmed.starts_with("pub use ") {
-            continue;
-        }
-        // Strip visibility modifiers to find the keyword
-        let stripped = trimmed
-            .strip_prefix("pub(crate) ")
-            .or_else(|| trimmed.strip_prefix("pub(super) "))
-            .or_else(|| trimmed.strip_prefix("pub "))
-            .unwrap_or(trimmed);
-        // Also strip async/unsafe/const qualifiers before fn
-        let stripped = stripped.strip_prefix("async ").unwrap_or(stripped);
-        let stripped = stripped.strip_prefix("unsafe ").unwrap_or(stripped);
-
-        for kw in DEF_KEYWORDS {
-            if let Some(rest) = stripped.strip_prefix(kw) {
-                // The name should appear right after the keyword, followed by
-                // a non-identifier char (paren, brace, colon, angle bracket, etc.)
-                if rest.starts_with(name) {
-                    let after = &rest[name.len()..];
-                    if after.is_empty()
-                        || after.starts_with('(')
-                        || after.starts_with('<')
-                        || after.starts_with(':')
-                        || after.starts_with('{')
-                        || after.starts_with(' ')
-                        || after.starts_with(';')
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
 /// Check if file content references a name outside of import/use statements.
 pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
     for line in content.lines() {
@@ -418,4 +354,31 @@ fn default_true() -> bool {
         let result = contains_word();
         assert!(result, "expected true when: before_ok && after_ok");
     }
+
+    #[test]
+    fn test_grouped_import_contains_if_let_some_brace_start_import_find() {
+
+        let _result = grouped_import_contains();
+    }
+
+    #[test]
+    fn test_content_references_name_contains_word_trimmed_name() {
+
+        let result = content_references_name();
+        assert!(result, "expected true when: contains_word(trimmed, name)");
+    }
+
+    #[test]
+    fn test_contains_word_while_let_some_pos_text_start_find_word() {
+
+        let _result = contains_word();
+    }
+
+    #[test]
+    fn test_contains_word_before_ok_after_ok() {
+
+        let result = contains_word();
+        assert!(result, "expected true when: before_ok && after_ok");
+    }
+
 }
