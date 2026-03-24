@@ -10,8 +10,7 @@
 //! 5. Adds a `use` import in the other file to reference the canonical
 //!
 //! Fixes are Safe — the audit has already verified structural identity.
-//! The sandbox validation + cargo check gate catches any breakage before
-//! the fix reaches main.
+//! CI validation catches any breakage before the fix reaches main.
 
 use std::collections::HashMap;
 use std::path::Path;

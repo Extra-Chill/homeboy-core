@@ -7,10 +7,12 @@ use std::time::{Duration, SystemTime};
 
 const HOMEBOY_RUNTIME_TMPDIR_ENV: &str = "HOMEBOY_RUNTIME_TMPDIR";
 
-/// Maximum age for sandbox directories before they are pruned (1 hour).
+/// Maximum age for legacy sandbox directories before they are pruned (1 hour).
+/// These were created by the old refactor sandbox (removed in v0.87). The pruner
+/// stays to clean up any stragglers left from previous versions.
 const STALE_SANDBOX_MAX_AGE: Duration = Duration::from_secs(3600);
 
-/// Prefix used by refactor sandbox directories.
+/// Prefix used by legacy refactor sandbox directories.
 const SANDBOX_PREFIX: &str = "homeboy-refactor-ci-";
 
 fn runtime_root() -> Result<PathBuf> {
@@ -39,13 +41,12 @@ pub fn ensure_runtime_tmp_dir() -> Result<PathBuf> {
     Ok(runtime_dir)
 }
 
-/// Remove sandbox directories older than `STALE_SANDBOX_MAX_AGE`.
+/// Remove legacy sandbox directories older than `STALE_SANDBOX_MAX_AGE`.
 ///
-/// Sandboxes are created by `SandboxDir` (refactor pipeline) and normally
-/// cleaned up by its `Drop` impl. When the process is killed by a signal
-/// (SIGKILL, SIGTERM, Ctrl+C), `Drop` never fires and directories accumulate.
-/// This sweeper runs on the next `ensure_runtime_tmp_dir()` call and prunes
-/// any orphans.
+/// The refactor sandbox was removed in v0.87 — refactoring now operates
+/// directly on the working tree with git as the rollback mechanism.
+/// This sweeper stays to clean up any leftover sandbox directories from
+/// previous versions.
 fn prune_stale_sandboxes(runtime_dir: &Path) {
     let now = SystemTime::now();
 

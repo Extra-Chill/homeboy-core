@@ -13,7 +13,6 @@ pub mod move_items;
 pub mod plan;
 pub mod propagate;
 mod rename;
-mod sandbox;
 pub mod transform;
 
 /// Shared output for refactors/fixes.

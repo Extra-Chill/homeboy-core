@@ -125,6 +125,18 @@ pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>>
     parse_diff_output(&fallback.stdout)
 }
 
+/// Get all dirty files in the working tree (modified, new, deleted).
+/// Returns repo-relative paths. Useful for detecting what changed between
+/// operations on the working tree.
+pub fn get_dirty_files(path: &str) -> Result<Vec<String>> {
+    let changes = get_uncommitted_changes(path)?;
+    let mut files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    files.extend(changes.staged);
+    files.extend(changes.unstaged);
+    files.extend(changes.untracked);
+    Ok(files.into_iter().collect())
+}
+
 /// Parse `git diff --name-only` output into a list of file paths.
 fn parse_diff_output(stdout: &[u8]) -> Result<Vec<String>> {
     let text = String::from_utf8_lossy(stdout);

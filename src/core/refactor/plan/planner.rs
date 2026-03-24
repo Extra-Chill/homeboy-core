@@ -12,10 +12,6 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::verify::AuditConvergenceScoring;
-use crate::refactor::sandbox::{
-    clone_tree, copy_changed_files, diff_tree_snapshots, resolve_build_exclusions, snapshot_tree,
-    SandboxDir,
-};
 
 pub const KNOWN_PLAN_SOURCES: &[&str] = &["audit", "lint", "test"];
 
@@ -223,46 +219,61 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
     let mut warnings = vec![format!("Deterministic merge order: {}", merge_order)];
     let mut accumulator = FixAccumulator::default();
 
-    let build_exclusions = resolve_build_exclusions(&request.component);
-    let working_root = clone_tree(&request.root, &build_exclusions)?;
+    // Save undo snapshot before any modifications so we can roll back.
+    // Captures the current state of all files that might be touched.
+    if request.write {
+        let mut snapshot_files: HashSet<String> = HashSet::new();
+        if let Some(changes) = &original_changes {
+            snapshot_files.extend(changes.staged.iter().cloned());
+            snapshot_files.extend(changes.unstaged.iter().cloned());
+            snapshot_files.extend(changes.untracked.iter().cloned());
+        }
+        if !snapshot_files.is_empty() {
+            let mut snap = UndoSnapshot::new(&request.root, "refactor sources (pre)");
+            for file in &snapshot_files {
+                snap.capture_file(file);
+            }
+            if let Err(e) = snap.save() {
+                crate::log_status!("undo", "Warning: failed to save pre-refactor undo snapshot: {}", e);
+            }
+        }
+    }
 
     for source in &sources {
         let stage = match source.as_str() {
             "audit" => plan_audit_stage(
                 &request.component.id,
-                working_root.path(),
+                &request.root,
                 scoped_changed_files.as_deref(),
                 &request.only,
                 &request.exclude,
-                true,
+                request.write,
             )?,
             "lint" => run_lint_stage(
                 &request.component,
-                &working_root,
+                &request.root,
                 &request.settings,
                 &request.lint,
                 scoped_changed_files.as_deref(),
-                true,
-                &build_exclusions,
+                request.write,
             )?,
             "test" => run_test_stage(
                 &request.component,
-                &working_root,
+                &request.root,
                 &request.settings,
                 &request.test,
                 scoped_test_files.as_deref(),
-                true,
-                &build_exclusions,
+                request.write,
             )?,
             _ => unreachable!("sources are normalized before planning"),
         };
 
-        // Format generated/modified files in the sandbox so subsequent stages
-        // (especially lint) see properly formatted code. Without this, auto-generated
-        // test files cause `cargo fmt --check` to fail during the lint stage.
+        // Format generated/modified files so subsequent stages (especially lint)
+        // see properly formatted code. Without this, auto-generated test files
+        // cause `cargo fmt --check` to fail during the lint stage.
         if stage.summary.files_modified > 0 {
-            format_sandbox(
-                working_root.path(),
+            format_changed_files(
+                &request.root,
                 &stage.summary.changed_files,
                 &mut warnings,
             );
@@ -291,31 +302,11 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
     let files_modified = changed_files.len();
     let applied = request.write && files_modified > 0;
 
-    if request.write && applied {
-        let mut snapshot_files: HashSet<String> = changed_files.iter().cloned().collect();
-        if let Some(changes) = &original_changes {
-            snapshot_files.extend(changes.staged.iter().cloned());
-            snapshot_files.extend(changes.unstaged.iter().cloned());
-            snapshot_files.extend(changes.untracked.iter().cloned());
-        }
-
-        if !snapshot_files.is_empty() {
-            let mut snap = UndoSnapshot::new(&request.root, "refactor sources");
-            for file in &snapshot_files {
-                snap.capture_file(file);
-            }
-            if let Err(e) = snap.save() {
-                crate::log_status!("undo", "Warning: failed to save undo snapshot: {}", e);
-            }
-        }
-
+    if applied {
+        // Run the project's formatter on all changed files.
+        // Non-fatal: formatting failure logs a warning but doesn't block the refactor.
         let abs_changed: Vec<PathBuf> =
             changed_files.iter().map(|f| request.root.join(f)).collect();
-
-        copy_changed_files(working_root.path(), &request.root, &changed_files)?;
-
-        // Run the project's formatter on written files so generated code matches style.
-        // Non-fatal: formatting failure logs a warning but doesn't block the refactor.
         match crate::engine::format_write::format_after_write(&request.root, &abs_changed) {
             Ok(fmt) => {
                 if let Some(cmd) = &fmt.command {
@@ -345,7 +336,7 @@ pub fn build_refactor_plan(request: RefactorPlanRequest) -> crate::Result<Refact
             .collect()
     } else if files_modified > 0 {
         vec![
-            "Plan only. Sandbox passes were used to accumulate fix proposals without touching the real tree. Re-run with --write to apply them.".to_string(),
+            "Dry run. Re-run with --write to apply fixes to the working tree.".to_string(),
         ]
     } else {
         Vec::new()
@@ -412,7 +403,7 @@ pub fn normalize_sources(sources: &[String]) -> crate::Result<Vec<String>> {
     Ok(ordered)
 }
 
-/// Format modified files inside the sandbox between refactor stages.
+/// Format modified files between refactor stages.
 ///
 /// This ensures generated code (test files, refactored sources) is properly
 /// formatted before subsequent stages run. Without this, the lint stage's
@@ -421,26 +412,26 @@ pub fn normalize_sources(sources: &[String]) -> crate::Result<Vec<String>> {
 ///
 /// Uses the same `format_after_write` as the post-write step. Non-fatal:
 /// if formatting fails, it logs a warning and continues.
-fn format_sandbox(sandbox_root: &Path, changed_files: &[String], warnings: &mut Vec<String>) {
+fn format_changed_files(root: &Path, changed_files: &[String], warnings: &mut Vec<String>) {
     if changed_files.is_empty() {
         return;
     }
 
-    let abs_changed: Vec<PathBuf> = changed_files.iter().map(|f| sandbox_root.join(f)).collect();
+    let abs_changed: Vec<PathBuf> = changed_files.iter().map(|f| root.join(f)).collect();
 
-    match crate::engine::format_write::format_after_write(sandbox_root, &abs_changed) {
+    match crate::engine::format_write::format_after_write(root, &abs_changed) {
         Ok(fmt) => {
             if let Some(cmd) = &fmt.command {
                 if fmt.success {
                     crate::log_status!(
                         "format",
-                        "Formatted {} sandbox file(s) via {}",
+                        "Formatted {} file(s) via {}",
                         abs_changed.len(),
                         cmd
                     );
                 } else {
                     warnings.push(format!(
-                        "Sandbox formatter ({}) exited non-zero (continuing)",
+                        "Formatter ({}) exited non-zero (continuing)",
                         cmd
                     ));
                 }
@@ -449,7 +440,7 @@ fn format_sandbox(sandbox_root: &Path, changed_files: &[String], warnings: &mut 
         Err(e) => {
             crate::log_status!(
                 "format",
-                "Warning: sandbox format failed (continuing): {}",
+                "Warning: inter-stage format failed (continuing): {}",
                 e
             );
         }
@@ -623,24 +614,21 @@ fn plan_audit_stage(
 
 fn run_lint_stage(
     component: &Component,
-    sandbox: &SandboxDir,
+    root: &Path,
     settings: &[(String, String)],
     options: &LintSourceOptions,
     changed_files: Option<&[String]>,
-    plan_mode: bool,
-    build_exclusions: &[String],
+    write: bool,
 ) -> crate::Result<PlannedStage> {
-    let mut sandbox_component = component.clone();
-    sandbox_component.local_path = sandbox.path().to_string_lossy().to_string();
+    let root_str = root.to_string_lossy().to_string();
     let findings_file = temp::runtime_temp_file("homeboy-lint-findings", ".json")?;
     let fix_sidecars = auto::AutofixSidecarFiles::for_plan();
-    let before_fix = if plan_mode {
-        Some(snapshot_tree(
-            &sandbox_component.local_path,
-            build_exclusions,
-        )?)
+
+    // Capture dirty files before the lint script runs so we can detect what it changed.
+    let before_dirty = if write {
+        git::get_dirty_files(&root_str).unwrap_or_default()
     } else {
-        None
+        Vec::new()
     };
 
     let selected_files = options.selected_files.as_deref().or(changed_files);
@@ -650,7 +638,7 @@ fn run_lint_stage(
         } else {
             let abs_files: Vec<String> = changed_files
                 .iter()
-                .map(|f| format!("{}/{}", sandbox_component.local_path, f))
+                .map(|f| format!("{}/{}", root_str, f))
                 .collect();
             if abs_files.len() == 1 {
                 Some(abs_files[0].clone())
@@ -664,7 +652,7 @@ fn run_lint_stage(
 
     let findings_file_str = findings_file.to_string_lossy().to_string();
     let runner = extension::lint::build_lint_runner(
-        &sandbox_component,
+        component,
         None,
         settings,
         false,
@@ -677,7 +665,7 @@ fn run_lint_stage(
         &findings_file_str,
     )?
     .env_if(
-        plan_mode,
+        write,
         "HOMEBOY_FIX_PLAN_FILE",
         &fix_sidecars
             .plan_file
@@ -686,20 +674,22 @@ fn run_lint_stage(
             .to_string_lossy(),
     )
     .env_if(
-        plan_mode,
+        write,
         "HOMEBOY_FIX_RESULTS_FILE",
         &fix_sidecars.results_file.to_string_lossy(),
     )
-    .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1");
+    .env_if(write, "HOMEBOY_AUTO_FIX", "1");
 
     runner.run()?;
 
-    let changed_files = if plan_mode {
-        let after_fix = snapshot_tree(&sandbox_component.local_path, build_exclusions)?;
-        before_fix
-            .as_ref()
-            .map(|before| diff_tree_snapshots(before, &after_fix))
-            .unwrap_or_default()
+    // Detect files changed by the lint script using git.
+    let stage_changed_files = if write {
+        let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
+        let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
+        after_dirty
+            .into_iter()
+            .filter(|f| !before_set.contains(f.as_str()))
+            .collect()
     } else {
         Vec::new()
     };
@@ -715,11 +705,11 @@ fn run_lint_stage(
         summary: PlanStageSummary {
             stage: "lint".to_string(),
             planned: true,
-            applied: plan_mode && !changed_files.is_empty(),
+            applied: write && !stage_changed_files.is_empty(),
             fixes_proposed,
-            files_modified: changed_files.len(),
+            files_modified: stage_changed_files.len(),
             detected_findings: Some(lint_findings.len()),
-            changed_files,
+            changed_files: stage_changed_files,
             fix_summary: auto::summarize_optional_fix_results(&fix_results),
             warnings: Vec::new(),
         },
@@ -729,31 +719,28 @@ fn run_lint_stage(
 
 fn run_test_stage(
     component: &Component,
-    sandbox: &SandboxDir,
+    root: &Path,
     settings: &[(String, String)],
     options: &TestSourceOptions,
     changed_test_files: Option<&[String]>,
-    plan_mode: bool,
-    build_exclusions: &[String],
+    write: bool,
 ) -> crate::Result<PlannedStage> {
-    let mut sandbox_component = component.clone();
-    sandbox_component.local_path = sandbox.path().to_string_lossy().to_string();
+    let root_str = root.to_string_lossy().to_string();
     let results_file = temp::runtime_temp_file("homeboy-test-results", ".json")?;
     let fix_sidecars = auto::AutofixSidecarFiles::for_plan();
-    let before_fix = if plan_mode {
-        Some(snapshot_tree(
-            &sandbox_component.local_path,
-            build_exclusions,
-        )?)
+
+    // Capture dirty files before the test script runs.
+    let before_dirty = if write {
+        git::get_dirty_files(&root_str).unwrap_or_default()
     } else {
-        None
+        Vec::new()
     };
 
     let results_file_str = results_file.to_string_lossy().to_string();
     let selected_test_files = options.selected_files.as_deref().or(changed_test_files);
 
     let mut runner = extension::test::build_test_runner(
-        &sandbox_component,
+        component,
         None,
         settings,
         options.skip_lint,
@@ -765,7 +752,7 @@ fn run_test_stage(
         selected_test_files,
     )?
     .env_if(
-        plan_mode,
+        write,
         "HOMEBOY_FIX_PLAN_FILE",
         &fix_sidecars
             .plan_file
@@ -774,11 +761,11 @@ fn run_test_stage(
             .to_string_lossy(),
     )
     .env_if(
-        plan_mode,
+        write,
         "HOMEBOY_FIX_RESULTS_FILE",
         &fix_sidecars.results_file.to_string_lossy(),
     )
-    .env_if(plan_mode, "HOMEBOY_AUTO_FIX", "1");
+    .env_if(write, "HOMEBOY_AUTO_FIX", "1");
 
     if !options.script_args.is_empty() {
         runner = runner.script_args(&options.script_args);
@@ -786,12 +773,14 @@ fn run_test_stage(
 
     runner.run()?;
 
-    let changed_files = if plan_mode {
-        let after_fix = snapshot_tree(&sandbox_component.local_path, build_exclusions)?;
-        before_fix
-            .as_ref()
-            .map(|before| diff_tree_snapshots(before, &after_fix))
-            .unwrap_or_default()
+    // Detect files changed by the test script using git.
+    let stage_changed_files = if write {
+        let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
+        let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
+        after_dirty
+            .into_iter()
+            .filter(|f| !before_set.contains(f.as_str()))
+            .collect()
     } else {
         Vec::new()
     };
@@ -805,11 +794,11 @@ fn run_test_stage(
         summary: PlanStageSummary {
             stage: "test".to_string(),
             planned: true,
-            applied: plan_mode && !changed_files.is_empty(),
+            applied: write && !stage_changed_files.is_empty(),
             fixes_proposed,
-            files_modified: changed_files.len(),
+            files_modified: stage_changed_files.len(),
             detected_findings: None,
-            changed_files,
+            changed_files: stage_changed_files,
             fix_summary: auto::summarize_optional_fix_results(&fix_results),
             warnings: Vec::new(),
         },
