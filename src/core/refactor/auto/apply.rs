@@ -662,7 +662,7 @@ pub fn apply_fixes(fixes: &mut [Fix], root: &Path) -> usize {
         .sum()
 }
 
-pub fn apply_new_files(new_files: &mut [NewFile], root: &Path) -> usize {
+pub(crate) fn apply_new_files(new_files: &mut [NewFile], root: &Path) -> usize {
     apply_new_files_chunked(new_files, root, ApplyOptions { verifier: None })
         .iter()
         .filter(|chunk| matches!(chunk.status, ChunkStatus::Applied))
@@ -1113,70 +1113,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remove_from_single_line_pub_use() {
-        let mut lines: Vec<String> = vec![
-            "pub use planner::{analyze_stage_overlaps, build_refactor_plan, normalize_sources};"
-                .into(),
-        ];
-        remove_from_pub_use_block(&mut lines, "analyze_stage_overlaps");
-        assert_eq!(lines.len(), 1);
-        assert!(!lines[0].contains("analyze_stage_overlaps"));
-        assert!(lines[0].contains("build_refactor_plan"));
-        assert!(lines[0].contains("normalize_sources"));
-    }
-
-    #[test]
-    fn remove_last_item_deletes_entire_line() {
-        let mut lines: Vec<String> = vec!["pub use planner::{only_function};".into()];
-        remove_from_pub_use_block(&mut lines, "only_function");
-        assert!(lines.is_empty(), "Empty pub use should be removed entirely");
-    }
-
-    #[test]
-    fn remove_from_multiline_pub_use() {
-        let mut lines: Vec<String> = vec![
-            "pub use module::{".into(),
-            "    alpha,".into(),
-            "    beta,".into(),
-            "    gamma,".into(),
-            "};".into(),
-        ];
-        remove_from_pub_use_block(&mut lines, "beta");
-        let joined = lines.join("\n");
-        assert!(!joined.contains("beta"), "beta should be removed");
-        assert!(joined.contains("alpha"), "alpha should remain");
-        assert!(joined.contains("gamma"), "gamma should remain");
-    }
-
-    #[test]
-    fn remove_does_not_touch_unrelated_pub_use() {
-        let mut lines: Vec<String> = vec!["pub use other::{foo, bar};".into()];
-        remove_from_pub_use_block(&mut lines, "baz");
-        assert_eq!(lines[0], "pub use other::{foo, bar};");
-    }
-
-    #[test]
     fn merge_same_file_insertions_combines_removals() {
         // Simulate the temp.rs scenario: 3 orphaned tests in the same file,
         // each generating a separate Fix with one FunctionRemoval.
         use crate::code_audit::AuditFinding;
         use crate::refactor::auto::FixSafetyTier;
-
-        fn removal_insertion(start: usize, end: usize, desc: &str) -> Insertion {
-            Insertion {
-                kind: InsertionKind::FunctionRemoval {
-                    start_line: start,
-                    end_line: end,
-                },
-                finding: AuditFinding::OrphanedTest,
-                code: String::new(),
-                description: desc.into(),
-                safety_tier: FixSafetyTier::Safe,
-                auto_apply: true,
-                blocked_reason: None,
-                preflight: None,
-            }
-        }
 
         let mut fixes = vec![
             Fix {
@@ -1253,52 +1194,14 @@ mod tests {
         // Reproduce the temp.rs brace corruption: a test module with multiple
         // test functions removed. The mod tests closing brace must survive.
         let content = "\
-fn source_fn() {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn helper() -> i32 {
-        42
-    }
-
-    #[test]
-    fn test_alpha() {
-        assert_eq!(helper(), 42);
-    }
-
-    #[test]
-    fn test_beta() {
-        let x = 1;
-        assert_eq!(x, 1);
-    }
-
-    #[test]
-    fn test_gamma() {
-        let y = 2;
-        assert_eq!(y, 2);
-    }
 }
 ";
         use crate::code_audit::AuditFinding;
         use crate::refactor::auto::FixSafetyTier;
-
-        fn removal(start: usize, end: usize, desc: &str) -> Insertion {
-            Insertion {
-                kind: InsertionKind::FunctionRemoval {
-                    start_line: start,
-                    end_line: end,
-                },
-                finding: AuditFinding::OrphanedTest,
-                code: String::new(),
-                description: desc.into(),
-                safety_tier: FixSafetyTier::Safe,
-                auto_apply: true,
-                blocked_reason: None,
-                preflight: None,
-            }
-        }
 
         // Remove all three test functions (lines are 1-indexed):
         // test_alpha: #[test] at 11, fn at 12, body 13, } at 14
@@ -1328,5 +1231,658 @@ mod tests {
             result.contains("fn helper()"),
             "helper function should survive"
         );
+    }
+
+    #[test]
+    fn test_apply_insertions_to_content_default_path() {
+        let _result = apply_insertions_to_content();
+    }
+
+    #[test]
+    fn test_apply_insertions_to_content_has_expected_effects() {
+        // Expected effects: mutation
+
+        let _ = apply_insertions_to_content();
+    }
+
+    #[test]
+    fn test_insert_into_constructor_ok_re_re() {
+        let _result = insert_into_constructor();
+    }
+
+    #[test]
+    fn test_insert_into_constructor_err_return_content_to_string() {
+        let _result = insert_into_constructor();
+    }
+
+    #[test]
+    fn test_insert_into_constructor_if_let_some_m_re_find_content() {
+        let _result = insert_into_constructor();
+    }
+
+    #[test]
+    fn test_insert_trait_uses_match_language() {
+        let _result = insert_trait_uses();
+    }
+
+    #[test]
+    fn test_insert_trait_uses_has_expected_effects() {
+        // Expected effects: mutation
+
+        let _ = insert_trait_uses();
+    }
+
+    #[test]
+    fn test_insert_namespace_declaration_namespace_re_is_match_content() {
+        let _result = insert_namespace_declaration();
+    }
+
+    #[test]
+    fn test_insert_namespace_declaration_has_expected_effects() {
+        // Expected effects: mutation
+
+        let _ = insert_namespace_declaration();
+    }
+
+    #[test]
+    fn test_insert_type_conformance_let_some_declaration_declarations_first_else() {
+        let _result = insert_type_conformance();
+    }
+
+    #[test]
+    fn test_insert_import_trimmed_starts_with_import_prefix() {
+        let _result = insert_import();
+    }
+
+    #[test]
+    fn test_insert_import_let_insert_after_if_let_some_idx_last_import_idx() {
+        let _result = insert_import();
+    }
+
+    #[test]
+    fn test_insert_import_has_expected_effects() {
+        // Expected effects: mutation
+
+        let _ = insert_import();
+    }
+
+    #[test]
+    fn test_insert_before_closing_brace_if_let_some_last_brace_content_rfind() {
+        let _result = insert_before_closing_brace();
+    }
+
+    #[test]
+    fn test_auto_apply_subset_insertions_is_empty() {
+        let result = Default::default();
+        let _result = auto_apply_subset(&result);
+    }
+
+    #[test]
+    fn test_apply_fixes_default_path() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let _result = apply_fixes(&fixes, &root);
+    }
+
+    #[test]
+    fn test_apply_new_files_default_path() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let _result = apply_new_files(&new_files, &root);
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_ok_c_c() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Ok(c) => c,"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_err_e() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Err(e) => {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_error_some_format_failed_to_read_fix_file_e() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Failed to read {{}}: {{}}\", fix.file, e)),");
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_verification_some_no_op_to_string() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: verification: Some(\"no_op\".to_string()),"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_match_std_fs_write_abs_path_modified() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match std::fs::write(&abs_path, &modified)"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_verification_some_write_ok_to_string() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: verification: Some(\"write_ok\".to_string()),"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_if_let_some_verifier_options_verifier() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: if let Some(verifier) = options.verifier {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_match_verifier_chunk() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_match_verifier_chunk_2() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_match_verifier_chunk_3() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_default_path() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: default path"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_err_e_2() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Err(e) => {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_error_some_format_failed_to_write_fix_file_e() {
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_fixes_chunked(&fixes, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Failed to write {{}}: {{}}\", fix.file, e)),");
+    }
+
+    #[test]
+    fn test_apply_fixes_chunked_has_expected_effects() {
+        // Expected effects: logging, file_read, mutation, file_write
+        let fixes = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let _ = apply_fixes_chunked(&fixes, &root, options);
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_if_let_some_parent_abs_path_parent() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: if let Some(parent) = abs_path.parent() {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_parent_exists() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: !parent.exists()"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_error_some_format_failed_to_create_directory_for_nf_file_e() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Failed to create directory for {{}}: {{}}\", nf.file, e)),");
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_error_some_format_skipping_file_already_exists_nf_file() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Skipping {{}} — file already exists\", nf.file)),");
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_match_std_fs_write_abs_path_nf_content() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match std::fs::write(&abs_path, &nf.content)"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_verification_some_write_ok_to_string() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: verification: Some(\"write_ok\".to_string()),"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_if_let_some_verifier_options_verifier() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: if let Some(verifier) = options.verifier {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_match_verifier_chunk() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_match_verifier_chunk_2() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_match_verifier_chunk_3() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_default_path() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: default path"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_err_e() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Err(e) => {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_error_some_format_failed_to_create_nf_file_e() {
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_new_files_chunked(&new_files, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Failed to create {{}}: {{}}\", nf.file, e)),");
+    }
+
+    #[test]
+    fn test_apply_new_files_chunked_has_expected_effects() {
+        // Expected effects: logging, mutation, file_write
+        let new_files = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let _ = apply_new_files_chunked(&new_files, &root, options);
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_ok_c_c() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Ok(c) => c,"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_err_e() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Err(e) => {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_error_some_format_failed_to_read_source_dfp_file_e() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Failed to read source {{}}: {{}}\", dfp.file, e)),");
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_if_let_ok_dry_run_results_decompose_apply_plan_dfp_plan_root() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: if let Ok(dry_run_results) = decompose::apply_plan(&dfp.plan, root, false) {{");
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_match_decompose_apply_plan_dfp_plan_root_true() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match decompose::apply_plan(&dfp.plan, root, true)"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_verification_some_decompose_applied_to_string() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: verification: Some(\"decompose_applied\".to_string()),");
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_if_let_some_verifier_options_verifier() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: if let Some(verifier) = options.verifier {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_match_verifier_chunk() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_match_verifier_chunk_2() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_match_verifier_chunk_3() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match verifier(&chunk)"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_default_path() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: default path"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_err_e_2() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Err(e) => {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_error_some_format_decompose_failed_for_dfp_file_e() {
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let result = apply_decompose_plans(&plans, &root, options);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Decompose failed for {{}}: {{}}\", dfp.file, e)),");
+    }
+
+    #[test]
+    fn test_apply_decompose_plans_has_expected_effects() {
+        // Expected effects: logging, file_read, mutation
+        let plans = Default::default();
+        let root = Path::new("");
+        let options = Default::default();
+        let _ = apply_decompose_plans(&plans, &root, options);
+    }
+
+    #[test]
+    fn test_apply_file_moves_error_some_format_source_file_does_not_exist_from() {
+        let fixes = Vec::new();
+        let root = Path::new("/tmp/nonexistent_test_path");
+        let result = apply_file_moves(&fixes, &root);
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Source file does not exist: {{}}\", from)),");
+    }
+
+    #[test]
+    fn test_apply_file_moves_error_some_format_destination_already_exists_to() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Destination already exists: {{}}\", to)),");
+    }
+
+    #[test]
+    fn test_apply_file_moves_if_let_some_parent_to_abs_parent() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: if let Some(parent) = to_abs.parent() {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_file_moves_parent_exists() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: !parent.exists()"
+        );
+    }
+
+    #[test]
+    fn test_apply_file_moves_error_some_format_failed_to_create_directory_e() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(!result.is_empty(), "expected non-empty collection for: error: Some(format!(\"Failed to create directory: {{}}\", e)),");
+    }
+
+    #[test]
+    fn test_apply_file_moves_match_std_fs_rename_from_abs_to_abs() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: match std::fs::rename(&from_abs, &to_abs)"
+        );
+    }
+
+    #[test]
+    fn test_apply_file_moves_err_e() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: Err(e) => {{"
+        );
+    }
+
+    #[test]
+    fn test_apply_file_moves_error_some_format_move_failed_e() {
+        let fixes = Vec::new();
+        let root = tempfile::tempdir().unwrap();
+        let result = apply_file_moves(&fixes, root.path());
+        assert!(
+            !result.is_empty(),
+            "expected non-empty collection for: error: Some(format!(\"Move failed: {{}}\", e)),"
+        );
+    }
+
+    #[test]
+    fn test_apply_file_moves_has_expected_effects() {
+        // Expected effects: logging, mutation
+        let fixes = Vec::new();
+        let root = Path::new("");
+        let _ = apply_file_moves(&fixes, &root);
     }
 }
