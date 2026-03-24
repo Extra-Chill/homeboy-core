@@ -187,4 +187,57 @@ mod tests {
         assert!(result.is_ok(), "expected Ok for: Ok(path)");
     }
 
+
+    #[test]
+    fn test_ensure_runtime_tmp_dir_default_path() {
+
+        let _result = ensure_runtime_tmp_dir();
+    }
+
+    #[test]
+    fn test_ensure_runtime_tmp_dir_some_create_homeboy_runtime_tmp_directory_to_string() {
+
+        let _result = ensure_runtime_tmp_dir();
+    }
+
+    #[test]
+    fn test_ensure_runtime_tmp_dir_default_path_2() {
+
+        let _result = ensure_runtime_tmp_dir();
+    }
+
+    #[test]
+    fn test_ensure_runtime_tmp_dir_ok_runtime_dir() {
+
+        let result = ensure_runtime_tmp_dir();
+        assert!(result.is_ok(), "expected Ok for: Ok(runtime_dir)");
+    }
+
+    #[test]
+    fn test_runtime_temp_file_ok_ensure_runtime_tmp_dir_join_unique_name_prefix_suffix() {
+        let prefix = "";
+        let suffix = "";
+        let result = runtime_temp_file(&prefix, &suffix);
+        assert!(result.is_ok(), "expected Ok for: Ok(ensure_runtime_tmp_dir()?.join(unique_name(prefix, suffix)))");
+    }
+
+    #[test]
+    fn test_runtime_temp_dir_error_internal_io_e_to_string_some_format_create_temp_dir_pr() {
+        let prefix = "";
+        let _result = runtime_temp_dir(&prefix);
+    }
+
+    #[test]
+    fn test_runtime_temp_dir_default_path() {
+        let prefix = "";
+        let _result = runtime_temp_dir(&prefix);
+    }
+
+    #[test]
+    fn test_runtime_temp_dir_ok_path() {
+        let prefix = "";
+        let result = runtime_temp_dir(&prefix);
+        assert!(result.is_ok(), "expected Ok for: Ok(path)");
+    }
+
 }
