@@ -9,6 +9,8 @@ pub use baseline::{BaselineComparison, LintBaseline, LintBaselineMetadata, LintF
 pub use report::LintCommandOutput;
 pub use run::{run_main_lint_workflow, LintRunWorkflowArgs, LintRunWorkflowResult};
 
+use crate::engine::run_dir::RunDir;
+
 pub fn resolve_lint_command(
     component: &Component,
 ) -> crate::error::Result<ExtensionExecutionContext> {
@@ -27,7 +29,7 @@ pub fn build_lint_runner(
     sniffs: Option<&str>,
     exclude_sniffs: Option<&str>,
     category: Option<&str>,
-    findings_file: &str,
+    run_dir: &RunDir,
 ) -> crate::Result<ExtensionRunner> {
     let resolved = resolve_lint_command(component)?;
 
@@ -35,6 +37,7 @@ pub fn build_lint_runner(
         .component(component.clone())
         .path_override(path_override)
         .settings(settings)
+        .with_run_dir(run_dir)
         .env_if(summary, "HOMEBOY_SUMMARY_MODE", "1")
         .env_opt("HOMEBOY_LINT_FILE", &file.map(str::to_string))
         .env_opt("HOMEBOY_LINT_GLOB", &glob.map(str::to_string))
@@ -44,6 +47,5 @@ pub fn build_lint_runner(
             "HOMEBOY_EXCLUDE_SNIFFS",
             &exclude_sniffs.map(str::to_string),
         )
-        .env_opt("HOMEBOY_CATEGORY", &category.map(str::to_string))
-        .env("HOMEBOY_LINT_FINDINGS_FILE", findings_file))
+        .env_opt("HOMEBOY_CATEGORY", &category.map(str::to_string)))
 }

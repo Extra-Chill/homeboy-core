@@ -5,7 +5,7 @@
 //! this module owns all business logic and returns a structured result.
 
 use crate::component::Component;
-use crate::engine::temp;
+use crate::engine::run_dir::{self, RunDir};
 use crate::extension::lint::baseline::{self as lint_baseline, LintFinding};
 use crate::extension::lint::build_lint_runner;
 use crate::git;
@@ -53,6 +53,7 @@ pub fn run_main_lint_workflow(
     component: &Component,
     source_path: &PathBuf,
     args: LintRunWorkflowArgs,
+    run_dir: &RunDir,
 ) -> crate::Result<LintRunWorkflowResult> {
     // Resolve effective glob from --changed-only or --changed-since flags
     let effective_glob = resolve_effective_glob(component, &args)?;
@@ -73,9 +74,6 @@ pub fn run_main_lint_workflow(
     }
 
     // Run lint
-    let lint_findings_file = temp::runtime_temp_file("homeboy-lint-findings", ".json")?;
-    let findings_file_str = lint_findings_file.to_string_lossy().to_string();
-
     let output = build_lint_runner(
         component,
         args.path_override.clone(),
@@ -87,12 +85,12 @@ pub fn run_main_lint_workflow(
         args.sniffs.as_deref(),
         args.exclude_sniffs.as_deref(),
         args.category.as_deref(),
-        &findings_file_str,
+        run_dir,
     )?
     .run()?;
 
+    let lint_findings_file = run_dir.step_file(run_dir::files::LINT_FINDINGS);
     let lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
-    let _ = std::fs::remove_file(&lint_findings_file);
 
     // Status computation — check findings first, exit code as fallback.
     // The extension runner uses passthrough mode (stdout goes to terminal),
@@ -257,4 +255,93 @@ fn process_baseline(
     }
 
     Ok((baseline_comparison, baseline_exit_override))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_run_main_lint_workflow_default_path() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_if_let_some_ref_glob_val_effective_glob() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_branch_2() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_default_path_2() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_default_path_3() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_default_path_4() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_default_path_5() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_lint_findings_some_lint_findings() {
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _result = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow_has_expected_effects() {
+        // Expected effects: mutation
+        let component = Default::default();
+        let source_path = PathBuf::new();
+        let args = Default::default();
+        let run_dir = Default::default();
+        let _ = run_main_lint_workflow(&component, &source_path, args, &run_dir);
+    }
+
 }

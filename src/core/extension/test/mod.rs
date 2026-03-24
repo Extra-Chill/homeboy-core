@@ -58,11 +58,9 @@ pub fn build_test_runner(
     settings: &[(String, String)],
     skip_lint: bool,
     coverage_enabled: bool,
-    results_file: &str,
-    coverage_file: Option<&str>,
-    failures_file: Option<&str>,
     coverage_min: Option<f64>,
     changed_test_files: Option<&[String]>,
+    run_dir: &crate::engine::run_dir::RunDir,
 ) -> crate::Result<ExtensionRunner> {
     let resolved = resolve_test_command(component)?;
 
@@ -70,17 +68,9 @@ pub fn build_test_runner(
         .component(component.clone())
         .path_override(path_override)
         .settings(settings)
+        .with_run_dir(run_dir)
         .env_if(skip_lint, "HOMEBOY_SKIP_LINT", "1")
-        .env_if(coverage_enabled, "HOMEBOY_COVERAGE", "1")
-        .env("HOMEBOY_TEST_RESULTS_FILE", results_file);
-
-    if let Some(file) = coverage_file {
-        runner = runner.env("HOMEBOY_COVERAGE_FILE", file);
-    }
-
-    if let Some(file) = failures_file {
-        runner = runner.env("HOMEBOY_TEST_FAILURES_FILE", file);
-    }
+        .env_if(coverage_enabled, "HOMEBOY_COVERAGE", "1");
 
     if let Some(min) = coverage_min {
         runner = runner.env("HOMEBOY_COVERAGE_MIN", &format!("{}", min));

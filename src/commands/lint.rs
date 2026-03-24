@@ -1,6 +1,7 @@
 use clap::Args;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
+use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::lint::{
     report, run_main_lint_workflow, LintCommandOutput, LintRunWorkflowArgs,
 };
@@ -67,6 +68,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
         ExtensionCapability::Lint,
         args.setting_args.setting.clone(),
     ))?;
+    let run_dir = RunDir::create()?;
 
     let workflow = run_main_lint_workflow(
         &ctx.component,
@@ -100,6 +102,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
             baseline: args.baseline_args.baseline,
             ignore_baseline: args.baseline_args.ignore_baseline,
         },
+        &run_dir,
     )?;
 
     Ok(report::from_main_workflow(workflow))
