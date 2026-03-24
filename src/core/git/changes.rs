@@ -235,7 +235,10 @@ mod tests {
     fn test_get_dirty_files_ok_files_into_iter_collect() {
         let path = "";
         let result = get_dirty_files(&path);
-        assert!(result.is_ok(), "expected Ok for: Ok(files.into_iter().collect())");
+        assert!(
+            result.is_ok(),
+            "expected Ok for: Ok(files.into_iter().collect())"
+        );
     }
 
     #[test]
@@ -283,7 +286,9 @@ mod tests {
         let path = "";
         let baseline_ref = "";
         let result = get_range_diff(&path, &baseline_ref);
-        assert!(result.is_ok(), "expected Ok for: Ok(String::from_utf8_lossy(&output.stdout).to_string())");
+        assert!(
+            result.is_ok(),
+            "expected Ok for: Ok(String::from_utf8_lossy(&output.stdout).to_string())"
+        );
     }
-
 }

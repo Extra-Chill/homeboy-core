@@ -199,9 +199,7 @@ mod tests {
 
         // Legacy env vars
         let env_vars = run_dir.legacy_env_vars();
-        assert!(env_vars
-            .iter()
-            .any(|(k, _)| k == "HOMEBOY_RUN_DIR"));
+        assert!(env_vars.iter().any(|(k, _)| k == "HOMEBOY_RUN_DIR"));
         assert!(env_vars
             .iter()
             .any(|(k, _)| k == "HOMEBOY_LINT_FINDINGS_FILE"));
@@ -223,8 +221,7 @@ mod tests {
     fn read_step_output_present() {
         let run_dir = RunDir::create().expect("should create run dir");
         let path = run_dir.step_file(files::TEST_RESULTS);
-        std::fs::write(&path, r#"{"total":10,"passed":10,"failed":0}"#)
-            .expect("write test file");
+        std::fs::write(&path, r#"{"total":10,"passed":10,"failed":0}"#).expect("write test file");
 
         let output = run_dir
             .read_step_output(files::TEST_RESULTS)

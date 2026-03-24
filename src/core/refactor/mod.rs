@@ -67,12 +67,10 @@ pub use decompose::{
 };
 pub use move_items::{move_items, ImportRewrite, ItemKind, MoveResult, MovedItem};
 pub use plan::{
-    build_refactor_plan, finding_fingerprint, lint_refactor_request,
-    run_audit_refactor, score_delta,
-    test_refactor_request, weighted_finding_score_with,
-    AuditConvergenceScoring, AuditRefactorIterationSummary, AuditRefactorOutcome,
-    LintSourceOptions, PlanOverlap, PlanStageSummary, RefactorPlan, RefactorPlanRequest,
-    TestSourceOptions, KNOWN_PLAN_SOURCES,
+    build_refactor_plan, finding_fingerprint, lint_refactor_request, run_audit_refactor,
+    score_delta, test_refactor_request, weighted_finding_score_with, AuditConvergenceScoring,
+    AuditRefactorIterationSummary, AuditRefactorOutcome, LintSourceOptions, PlanOverlap,
+    PlanStageSummary, RefactorPlan, RefactorPlanRequest, TestSourceOptions, KNOWN_PLAN_SOURCES,
 };
 pub use propagate::{propagate, PropagateConfig, PropagateEdit, PropagateField, PropagateResult};
 pub use rename::{
