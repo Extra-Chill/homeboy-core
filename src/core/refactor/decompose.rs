@@ -322,8 +322,27 @@ fn source_to_test_file(target: &str) -> Option<String> {
 fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
     let ext = Path::new(file).extension()?.to_str()?;
 
-    // Try core grammar engine first — faster and more robust than extension scripts
+    // Prefer the language extension's structural parser when available.
+    // For decomposition quality, the language-aware parser should be the
+    // authoritative source of item boundaries/source extraction. The core
+    // grammar parser remains the fallback for languages without a dedicated
+    // refactor parser.
     if let Some(manifest) = extension::find_extension_for_file_ext(ext, "refactor") {
+        // Try extension script first
+        let command = serde_json::json!({
+            "command": "parse_items",
+            "file_path": file,
+            "content": content,
+        });
+        if let Some(result) = extension::run_refactor_script(&manifest, &command) {
+            if let Some(items) = result.get("items").and_then(|value| serde_json::from_value::<Vec<ParsedItem>>(value.clone()).ok()) {
+                if !items.is_empty() {
+                    return Some(items);
+                }
+            }
+        }
+
+        // Fall back to core grammar parser
         if let Some(ext_path) = &manifest.extension_path {
             let grammar = load_extension_grammar(Path::new(ext_path), ext);
             if let Some(grammar) = grammar {
@@ -333,15 +352,6 @@ fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
                 }
             }
         }
-
-        // Fall back to extension script
-        let command = serde_json::json!({
-            "command": "parse_items",
-            "file_path": file,
-            "content": content,
-        });
-        let result = extension::run_refactor_script(&manifest, &command)?;
-        return serde_json::from_value(result.get("items")?.clone()).ok();
     }
 
     None
