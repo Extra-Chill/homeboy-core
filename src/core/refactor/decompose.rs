@@ -335,7 +335,10 @@ fn parse_items(file: &str, content: &str) -> Option<Vec<ParsedItem>> {
             "content": content,
         });
         if let Some(result) = extension::run_refactor_script(&manifest, &command) {
-            if let Some(items) = result.get("items").and_then(|value| serde_json::from_value::<Vec<ParsedItem>>(value.clone()).ok()) {
+            if let Some(items) = result
+                .get("items")
+                .and_then(|value| serde_json::from_value::<Vec<ParsedItem>>(value.clone()).ok())
+            {
                 if !items.is_empty() {
                     return Some(items);
                 }
