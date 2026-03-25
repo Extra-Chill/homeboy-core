@@ -65,13 +65,32 @@ pub(crate) fn merge_fixes_per_file(fixes: Vec<Fix>) -> Vec<Fix> {
 pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixResult {
     let mut fixes = Vec::new();
     let mut skipped = Vec::new();
-    apply_convention_fixes(result, root, &mut fixes, &mut skipped);
+
+    // ── Phase 0: Identify decompose targets ────────────────────────────
+    // Collect the set of files that will be decomposed BEFORE generating
+    // other fixes. This lets convention fixes and UnreferencedExport skip
+    // these files — decompose's pub use * re-exports handle imports and
+    // visibility, so other fixers' modifications would conflict.
+    let mut decompose_target_files = std::collections::HashSet::new();
+    for finding in &result.findings {
+        if matches!(
+            finding.kind,
+            AuditFinding::GodFile | AuditFinding::HighItemCount
+        ) && !crate::code_audit::walker::is_test_path(&finding.file)
+        {
+            decompose_target_files.insert(finding.file.clone());
+        }
+    }
+
+    // ── Phase 1: Generate content fixes (skip decompose targets) ───────
+    apply_convention_fixes(result, root, &mut fixes, &mut skipped, &decompose_target_files);
 
     let mut new_files = Vec::new();
-    generate_unreferenced_export_fixes(result, root, &mut fixes, &mut skipped);
+    generate_unreferenced_export_fixes(result, root, &mut fixes, &mut skipped, &decompose_target_files);
     generate_duplicate_function_fixes(result, root, &mut fixes, &mut new_files, &mut skipped);
     orphaned_test_fixes::generate_orphaned_test_fixes(result, root, &mut fixes, &mut skipped);
 
+    // ── Phase 2: Build decompose plans ─────────────────────────────────
     let mut decompose_plans = Vec::new();
     let mut decompose_seen = std::collections::HashSet::new();
     for finding in &result.findings {

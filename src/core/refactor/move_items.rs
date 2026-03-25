@@ -444,8 +444,31 @@ pub fn move_items_with_options(
     items_to_remove.sort_by(|a, b| b.start_line.cmp(&a.start_line));
 
     for item in &items_to_remove {
-        let start = item.start_line.saturating_sub(1); // 0-indexed
+        let mut start = item.start_line.saturating_sub(1); // 0-indexed
         let end = item.end_line.saturating_sub(1); // 0-indexed
+
+        // Safety net: extend removal upward to include preceding attributes
+        // and doc comments that belong to this item. Some parsers (extension
+        // scripts) return start_line at the declaration (`pub struct Foo`)
+        // rather than at the first `#[derive(...)]` or `///` line above it.
+        // Without this, attributes get orphaned and attach to the next item.
+        while start > 0 {
+            let prev = lines[start - 1].trim();
+            if prev.starts_with("#[") || prev.starts_with("///") || prev.starts_with("//!") {
+                start -= 1;
+            } else if prev.is_empty() && start >= 2 {
+                // Allow one blank line gap if an attribute is above it
+                let above = lines[start - 2].trim();
+                if above.starts_with("#[") || above.starts_with("///") || above.starts_with("//!")
+                {
+                    start -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
 
         // Also remove any blank line immediately after the item (cosmetic)
         let actual_end = if end + 1 < lines.len() && lines[end + 1].trim().is_empty() {

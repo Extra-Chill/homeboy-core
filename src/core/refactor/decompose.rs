@@ -149,8 +149,14 @@ fn generate_source_module_index(plan: &DecomposePlan, root: &Path) {
         return;
     }
 
+    // Remove use imports that would conflict with the new mod declarations.
+    // When we add `mod grammar;`, any existing `use ...::grammar;` in the
+    // remaining content would create "name defined multiple times" errors.
+    let submodule_names: Vec<&str> = submodules.iter().map(|s| s.name.as_str()).collect();
+    let cleaned_content = remove_conflicting_use_imports(&remaining_content, &submodule_names);
+
     if let Some(content) =
-        super::move_items::ext_generate_module_index(&plan.file, &submodules, &remaining_content)
+        super::move_items::ext_generate_module_index(&plan.file, &submodules, &cleaned_content)
     {
         if let Err(e) = std::fs::write(&source_path, content) {
             eprintln!(
@@ -160,6 +166,44 @@ fn generate_source_module_index(plan: &DecomposePlan, root: &Path) {
             );
         }
     }
+}
+
+/// Remove `use` imports that would conflict with new `mod` declarations.
+///
+/// When decompose generates `mod foo;` + `pub use foo::*;`, any existing
+/// `use some::path::foo;` in the remaining content introduces the name `foo`
+/// twice. This function removes those conflicting imports.
+fn remove_conflicting_use_imports(content: &str, submodule_names: &[&str]) -> String {
+    content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            // Only check use statements
+            if !trimmed.starts_with("use ") && !trimmed.starts_with("pub use ") {
+                return true;
+            }
+            // Check if this use statement brings a conflicting name into scope.
+            // Patterns: `use path::name;` or `use path::name as _;`
+            for name in submodule_names {
+                // Simple tail import: `use something::name;`
+                if trimmed.ends_with(&format!("::{};\n", name))
+                    || trimmed.ends_with(&format!("::{};", name))
+                {
+                    return false;
+                }
+                // Grouped import containing the name: `use something::{name, other};`
+                // Remove the whole line if it only imports the conflicting name,
+                // otherwise leave it (partial removal is too complex for now).
+                if trimmed.contains(&format!("::{{{}}}", name))
+                    || trimmed.contains(&format!("{{ {} }}", name))
+                {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn apply_plan_skeletons(plan: &DecomposePlan, root: &Path) -> Result<Vec<String>> {
