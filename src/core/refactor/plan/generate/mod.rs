@@ -6,6 +6,7 @@ mod doc_fixes;
 mod duplicate_fixes;
 mod intra_duplicate_fixes;
 mod near_duplicate_fixes;
+mod module_surface;
 mod orphaned_test_fixes;
 mod parameter_fixes;
 mod signatures;
@@ -24,6 +25,7 @@ pub(crate) use doc_fixes::is_actionable_comment_finding;
 pub(crate) use duplicate_fixes::{
     generate_duplicate_function_fixes, generate_unreferenced_export_fixes,
 };
+pub(crate) use module_surface::{FileRole, ModuleSurfaceIndex};
 pub(crate) use signatures::{
     extract_signatures, extract_signatures_from_items, find_parsed_item_by_name,
     generate_fallback_signature, generate_method_stub, parse_items_for_dedup,
@@ -66,6 +68,7 @@ pub(crate) fn merge_fixes_per_file(fixes: Vec<Fix>) -> Vec<Fix> {
 pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixResult {
     let mut fixes = Vec::new();
     let mut skipped = Vec::new();
+    let module_surfaces = ModuleSurfaceIndex::build(root);
 
     // ── Phase 0: Build file intent map ─────────────────────────────────
     // Identify structural operations (decompose, move, delete) planned for
@@ -90,8 +93,15 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     apply_convention_fixes(result, root, &mut fixes, &mut skipped);
 
     let mut new_files = Vec::new();
-    generate_unreferenced_export_fixes(result, root, &mut fixes, &mut skipped);
-    generate_duplicate_function_fixes(result, root, &mut fixes, &mut new_files, &mut skipped);
+    generate_unreferenced_export_fixes(result, root, &module_surfaces, &mut fixes, &mut skipped);
+    generate_duplicate_function_fixes(
+        result,
+        root,
+        &module_surfaces,
+        &mut fixes,
+        &mut new_files,
+        &mut skipped,
+    );
     orphaned_test_fixes::generate_orphaned_test_fixes(result, root, &mut fixes, &mut skipped);
 
     // ── Phase 2: Build decompose plans ─────────────────────────────────
@@ -147,7 +157,13 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     test_gen_fixes::generate_test_method_fixes(result, root, &mut fixes, &mut skipped);
     compiler_warning_fixes::generate_compiler_warning_fixes(result, root, &mut fixes, &mut skipped);
     comment_fixes::generate_comment_fixes(result, root, &mut fixes, &mut skipped);
-    near_duplicate_fixes::generate_near_duplicate_fixes(result, root, &mut fixes, &mut skipped);
+    near_duplicate_fixes::generate_near_duplicate_fixes(
+        result,
+        root,
+        &module_surfaces,
+        &mut fixes,
+        &mut skipped,
+    );
     intra_duplicate_fixes::generate_intra_duplicate_fixes(result, root, &mut fixes, &mut skipped);
 
     let mut fixes = merge_fixes_per_file(fixes);
