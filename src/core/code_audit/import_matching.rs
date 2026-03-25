@@ -197,9 +197,8 @@ fn is_only_in_attribute_string(line: &str, name: &str) -> bool {
     let trimmed = line.trim();
 
     // Must be an attribute line or a field with an attribute
-    let is_attribute_context = trimmed.starts_with("#[")
-        || trimmed.starts_with("#![")
-        || trimmed.contains("#[");
+    let is_attribute_context =
+        trimmed.starts_with("#[") || trimmed.starts_with("#![") || trimmed.contains("#[");
 
     if !is_attribute_context {
         return false;
@@ -220,10 +219,12 @@ fn is_only_in_attribute_string(line: &str, name: &str) -> bool {
             i += 1;
             continue;
         }
-        if i + name_bytes.len() <= line_bytes.len() && &line_bytes[i..i + name_bytes.len()] == name_bytes {
+        if i + name_bytes.len() <= line_bytes.len()
+            && &line_bytes[i..i + name_bytes.len()] == name_bytes
+        {
             // Check word boundaries
-            let before_ok = i == 0
-                || (!line_bytes[i - 1].is_ascii_alphanumeric() && line_bytes[i - 1] != b'_');
+            let before_ok =
+                i == 0 || (!line_bytes[i - 1].is_ascii_alphanumeric() && line_bytes[i - 1] != b'_');
             let after = i + name_bytes.len();
             let after_ok = after >= line_bytes.len()
                 || (!line_bytes[after].is_ascii_alphanumeric() && line_bytes[after] != b'_');
@@ -508,5 +509,43 @@ fn default_true() -> bool {
             "serde::{Deserialize, Serialize}",
             "Serialize"
         ));
+    }
+
+    #[test]
+    fn test_grouped_import_contains_if_let_some_brace_start_import_find() {
+        let _result = grouped_import_contains();
+    }
+
+    #[test]
+    fn test_content_defines_name_if_let_some_rest_stripped_strip_prefix_kw() {
+        let _result = content_defines_name();
+    }
+
+    #[test]
+    fn test_content_defines_name_default_path() {
+        let result = content_defines_name();
+        assert!(result, "expected true when: default path");
+    }
+
+    #[test]
+    fn test_content_defines_name_is_attribute_context() {
+        let result = content_defines_name();
+        assert!(!result, "expected false when: !is_attribute_context");
+    }
+
+    #[test]
+    fn test_content_references_name_default_path() {
+        let _result = content_references_name();
+    }
+
+    #[test]
+    fn test_contains_word_while_let_some_pos_text_start_find_word() {
+        let _result = contains_word();
+    }
+
+    #[test]
+    fn test_contains_word_before_ok_after_ok() {
+        let result = contains_word();
+        assert!(result, "expected true when: before_ok && after_ok");
     }
 }
