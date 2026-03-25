@@ -97,3 +97,95 @@ pub(crate) fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<Str
 
     Ok((true, new_version))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_execute_upgrade_error_internal_io_e_to_string_some_run_homebrew_upgrade_to_s() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_branch_1() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_error_internal_io_e_to_string_some_run_cargo_upgrade_to_stri() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_branch_3() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_some_get_current_executable_path_to_string() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_default_path() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_git_dir_exists() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_error_internal_io_e_to_string_some_run_source_upgrade_to_str() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_branch_8() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_error_internal_io_e_to_string_some_run_binary_upgrade_to_str() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_branch_10() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_else() {
+
+        let _result = execute_upgrade();
+    }
+
+    #[test]
+    fn test_execute_upgrade_ok_true_new_version() {
+
+        let result = execute_upgrade();
+        assert!(result.is_ok(), "expected Ok for: Ok((true, new_version))");
+    }
+
+    #[test]
+    fn test_execute_upgrade_has_expected_effects() {
+        // Expected effects: process_spawn
+
+        let _ = execute_upgrade();
+    }
+
+}

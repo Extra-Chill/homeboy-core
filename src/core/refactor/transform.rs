@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
 use crate::engine::local_files;
 use crate::error::{Error, Result};
+use crate::core::extension::grammar::default_context;
 
 // ============================================================================
 // Rule model
@@ -54,10 +55,6 @@ pub struct TransformRule {
 
 fn default_files_glob() -> String {
     "**/*".to_string()
-}
-
-fn default_context() -> String {
-    "line".to_string()
 }
 
 // ============================================================================

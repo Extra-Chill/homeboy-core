@@ -662,7 +662,7 @@ pub fn apply_fixes(fixes: &mut [Fix], root: &Path) -> usize {
         .sum()
 }
 
-pub fn apply_new_files(new_files: &mut [NewFile], root: &Path) -> usize {
+pub(crate) fn apply_new_files(new_files: &mut [NewFile], root: &Path) -> usize {
     apply_new_files_chunked(new_files, root, ApplyOptions { verifier: None })
         .iter()
         .filter(|chunk| matches!(chunk.status, ChunkStatus::Applied))
