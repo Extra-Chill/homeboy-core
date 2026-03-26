@@ -158,8 +158,7 @@ fn run_fix_iteration(
     let root = Path::new(&audit_result.source_path);
     let mut fix_result = super::generate::generate_audit_fixes(audit_result, root, &policy);
     let policy_context = fixer::PreflightContext { root };
-    let policy_summary =
-        fixer::apply_fix_policy(&mut fix_result, true, &policy, &policy_context);
+    let policy_summary = fixer::apply_fix_policy(&mut fix_result, true, &policy, &policy_context);
 
     let mut applied_chunks = 0;
     let mut reverted_chunks = 0;

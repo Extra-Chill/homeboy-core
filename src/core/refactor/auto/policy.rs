@@ -1,5 +1,7 @@
 use crate::code_audit::AuditFinding;
-use crate::refactor::auto::{FixPolicy, FixResult, Insertion, NewFile, PolicySummary, PreflightContext};
+use crate::refactor::auto::{
+    FixPolicy, FixResult, Insertion, NewFile, PolicySummary, PreflightContext,
+};
 
 fn finding_allowed(finding: &AuditFinding, policy: &FixPolicy) -> bool {
     let included = policy
