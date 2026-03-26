@@ -1107,19 +1107,19 @@ fn group_items(file: &str, items: &[ParsedItem], content: &str) -> Vec<Decompose
         .into_iter()
         .filter(|(_, names)| !names.is_empty())
         .map(|(group, names)| {
-            let safe_name = sanitize_module_name(&group);
+            let module_name = sanitize_module_name(&group);
             DecomposeGroup {
                 suggested_target: if stem.is_empty() {
                     // mod.rs: submodules go in the same directory
                     if effective_base.is_empty() {
-                        format!("{safe_name}.{ext}")
+                        format!("{module_name}.{ext}")
                     } else {
-                        format!("{effective_base}/{safe_name}.{ext}")
+                        format!("{effective_base}/{module_name}.{ext}")
                     }
                 } else if effective_base.is_empty() {
-                    format!("{stem}/{safe_name}.{ext}")
+                    format!("{stem}/{module_name}.{ext}")
                 } else {
-                    format!("{effective_base}/{stem}/{safe_name}.{ext}")
+                    format!("{effective_base}/{stem}/{module_name}.{ext}")
                 },
                 name: group,
                 item_names: names,

@@ -594,7 +594,7 @@ fn plan_audit_stage(
         only: (!only.is_empty()).then_some(only.to_vec()),
         exclude: exclude.to_vec(),
     };
-    let preflight_context = fixer::PreflightContext { root };
+    let policy_context = fixer::PreflightContext { root };
     let (fix_result, policy_summary, changed_files, stage_warnings): (
         fixer::FixResult,
         fixer::PolicySummary,
@@ -645,7 +645,7 @@ fn plan_audit_stage(
         )
     } else {
         let policy_summary =
-            fixer::apply_fix_policy(&mut fix_result, false, &policy, &preflight_context);
+            fixer::apply_fix_policy(&mut fix_result, false, &policy, &policy_context);
         let changed_files = collect_audit_changed_files(&fix_result);
         (fix_result, policy_summary, changed_files, Vec::new())
     };

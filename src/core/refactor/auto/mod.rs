@@ -2,7 +2,6 @@ pub mod apply;
 pub mod contracts;
 pub mod outcome;
 pub mod policy;
-pub mod preflight;
 pub mod sidecar;
 pub mod summary;
 pub mod tracking;
@@ -13,15 +12,14 @@ pub use apply::{
 };
 pub use contracts::{
     ApplyChunkResult, ApplyOptions, ChunkStatus, ChunkVerifier, DecomposeFixPlan, Fix, FixPolicy,
-    FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, PolicySummary, PreflightCheck,
-    PreflightContext, PreflightReport, PreflightStatus, RefactorPrimitive, SkippedFile,
+    FixResult, Insertion, InsertionKind, NewFile, PolicySummary, PreflightContext,
+    RefactorPrimitive, SkippedFile,
 };
 pub use outcome::{
     standard_outcome, AppliedAutofixCapture, AutofixMode, AutofixOutcome, AutofixSidecarFiles,
     FixApplied, FixResultsSummary, RuleFixCount,
 };
 pub use policy::apply_fix_policy;
-pub use preflight::{run_fix_preflight, run_insertion_preflight, run_new_file_preflight};
 pub use sidecar::{parse_fix_plan_file, parse_fix_results_file, read_fix_results};
 pub use summary::{
     primitive_name, summarize_audit_fix_result, summarize_fix_results,

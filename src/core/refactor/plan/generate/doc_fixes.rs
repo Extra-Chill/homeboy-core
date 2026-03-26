@@ -1,8 +1,8 @@
 use crate::code_audit::{AuditFinding, CodeAuditResult};
-use crate::core::refactor::auto::{Fix, InsertionKind};
+use crate::core::refactor::auto::{Fix, RefactorPrimitive};
 use std::path::Path;
 
-use super::insertion;
+use super::insertion_with_primitive;
 
 pub(crate) fn extract_suggested_path(suggestion: &str) -> Option<String> {
     // Support both suggestion formats:
@@ -66,8 +66,9 @@ pub(super) fn apply_stale_doc_reference_fixes(result: &CodeAuditResult, fixes: &
             file: finding.file.clone(),
             required_methods: vec![],
             required_registrations: vec![],
-            insertions: vec![insertion(
-                InsertionKind::DocReferenceUpdate {
+            insertions: vec![insertion_with_primitive(
+                RefactorPrimitive::UpdateStaleDocReference,
+                crate::core::refactor::auto::InsertionKind::DocReferenceUpdate {
                     line: line_num,
                     old_ref: old_path.clone(),
                     new_ref: new_path.clone(),
@@ -117,8 +118,9 @@ pub(super) fn apply_broken_doc_reference_fixes(
             file: finding.file.clone(),
             required_methods: vec![],
             required_registrations: vec![],
-            insertions: vec![insertion(
-                InsertionKind::DocLineRemoval { line: line_num },
+            insertions: vec![insertion_with_primitive(
+                RefactorPrimitive::RemoveBrokenDocReferenceLine,
+                crate::core::refactor::auto::InsertionKind::DocLineRemoval { line: line_num },
                 AuditFinding::BrokenDocReference,
                 dead_path.clone(),
                 format!(

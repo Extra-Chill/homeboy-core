@@ -9,7 +9,7 @@
 //! 4. Removes the duplicate copy from the other file
 //! 5. Adds a `use` import in the other file to reference the canonical
 //!
-//! Fixes are Safe — the audit has already verified structural identity.
+//! These edits are automation-eligible — the audit has already verified structural identity.
 //! CI validation catches any breakage before the fix reaches main.
 
 use std::collections::HashMap;
@@ -18,7 +18,9 @@ use std::path::Path;
 use regex::Regex;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
-use crate::refactor::auto::{Fix, FixSafetyTier, Insertion, InsertionKind, SkippedFile};
+use crate::refactor::auto::{Fix, Insertion, InsertionKind, RefactorPrimitive, SkippedFile};
+
+use super::{tagged_import_add, tagged_range_removal, tagged_visibility_change};
 
 /// A parsed near-duplicate finding.
 struct NearDupInfo {
@@ -119,40 +121,28 @@ pub(crate) fn generate_near_duplicate_fixes(
         let canonical_mod = file_to_module_path(canonical_file);
 
         // 1. Remove the duplicate function.
-        let removal = Insertion {
-            primitive: None,
-            kind: InsertionKind::FunctionRemoval {
-                start_line,
-                end_line,
-            },
-            finding: AuditFinding::NearDuplicate,
-            safety_tier: FixSafetyTier::Safe,
-            auto_apply: false,
-            blocked_reason: None,
-            preflight: None,
-            code: String::new(),
-            description: format!(
+        let removal = tagged_range_removal(
+            RefactorPrimitive::RemoveNearDuplicateImplementation,
+            AuditFinding::NearDuplicate,
+            start_line,
+            end_line,
+            format!(
                 "Remove near-duplicate '{}' — canonical copy lives in {}",
                 fn_name, canonical_file
             ),
-        };
+        );
 
         // 2. Add import of the canonical function.
         let import_stmt = format!("use {}::{};", canonical_mod, fn_name);
-        let import = Insertion {
-            primitive: None,
-            kind: InsertionKind::ImportAdd,
-            finding: AuditFinding::NearDuplicate,
-            safety_tier: FixSafetyTier::Safe,
-            auto_apply: false,
-            blocked_reason: None,
-            preflight: None,
-            code: import_stmt,
-            description: format!(
+        let import = tagged_import_add(
+            RefactorPrimitive::ImportCanonicalImplementation,
+            AuditFinding::NearDuplicate,
+            import_stmt,
+            format!(
                 "Import '{}' from canonical location {}",
                 fn_name, canonical_file
             ),
-        };
+        );
 
         fixes.push(Fix {
             file: duplicate_file.to_string(),
@@ -253,24 +243,18 @@ fn build_visibility_upgrade(content: &str, file: &str, fn_name: &str) -> Option<
 
     // It's a private `fn` — upgrade to `pub(crate) fn`.
     let _ = file; // used in description
-    Some(Insertion {
-        primitive: None,
-        kind: InsertionKind::VisibilityChange {
-            line: line_idx + 1,
-            from: "fn ".to_string(),
-            to: "pub(crate) fn ".to_string(),
-        },
-        finding: AuditFinding::NearDuplicate,
-        safety_tier: FixSafetyTier::Safe,
-        auto_apply: false,
-        blocked_reason: None,
-        preflight: None,
-        code: String::new(),
-        description: format!(
+    let insertion = tagged_visibility_change(
+        RefactorPrimitive::WidenCanonicalVisibility,
+        AuditFinding::NearDuplicate,
+        line_idx + 1,
+        "fn ".to_string(),
+        "pub(crate) fn ".to_string(),
+        format!(
             "Make canonical '{}' pub(crate) so the duplicate's import resolves",
             fn_name
         ),
-    })
+    );
+    Some(insertion)
 }
 
 #[cfg(test)]
@@ -324,7 +308,7 @@ mod tests {
             ins.kind,
             InsertionKind::VisibilityChange { line: 1, .. }
         ));
-        assert_eq!(ins.safety_tier, FixSafetyTier::Safe);
+        assert!(!ins.manual_only);
     }
 
     #[test]

@@ -12,7 +12,8 @@
 use std::path::Path;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
-use crate::core::refactor::auto::{Fix, FixSafetyTier, Insertion, InsertionKind, SkippedFile};
+use crate::core::refactor::auto::{Fix, RefactorPrimitive, SkippedFile};
+use super::{tagged_line_replacement, tagged_range_removal};
 
 /// A machine-applicable fix suggestion from the compiler.
 #[derive(Debug, Clone)]
@@ -114,27 +115,16 @@ pub(crate) fn generate_compiler_warning_fixes(
 
 /// Build a Fix that removes lines (for unused imports, dead code).
 fn build_line_removal_fix(suggestion: &CompilerSuggestion) -> Fix {
-    let mut ins = Insertion {
-        primitive: None,
-        kind: InsertionKind::FunctionRemoval {
-            start_line: suggestion.line_start,
-            end_line: suggestion.line_end,
-        },
-        finding: AuditFinding::CompilerWarning,
-        // Compiler-suggested removals are safe — the compiler itself says this code is unused.
-        safety_tier: FixSafetyTier::Safe,
-        auto_apply: true,
-        blocked_reason: None,
-        preflight: None,
-        code: String::new(),
-        description: format!(
+    let ins = tagged_range_removal(
+        RefactorPrimitive::RemoveCompilerDeadCode,
+        AuditFinding::CompilerWarning,
+        suggestion.line_start,
+        suggestion.line_end,
+        format!(
             "Remove {} (compiler: {})",
             suggestion.code, suggestion.message
         ),
-    };
-
-    // Override the default PlanOnly tier from FunctionRemoval.
-    ins.safety_tier = FixSafetyTier::Safe;
+    );
 
     Fix {
         file: suggestion.file.clone(),
@@ -147,21 +137,14 @@ fn build_line_removal_fix(suggestion: &CompilerSuggestion) -> Fix {
 
 /// Build a Fix that replaces text on a single line (for unused_mut, etc.).
 fn build_line_replacement_fix(suggestion: &CompilerSuggestion) -> Fix {
-    let ins = Insertion {
-        primitive: None,
-        kind: InsertionKind::LineReplacement {
-            line: suggestion.line_start,
-            old_text: suggestion.original_text.clone(),
-            new_text: suggestion.replacement.clone(),
-        },
-        finding: AuditFinding::CompilerWarning,
-        safety_tier: FixSafetyTier::Safe,
-        auto_apply: true,
-        blocked_reason: None,
-        preflight: None,
-        code: String::new(),
-        description: format!("Fix {} (compiler: {})", suggestion.code, suggestion.message),
-    };
+    let ins = tagged_line_replacement(
+        RefactorPrimitive::ApplyCompilerReplacement,
+        AuditFinding::CompilerWarning,
+        suggestion.line_start,
+        suggestion.original_text.clone(),
+        suggestion.replacement.clone(),
+        format!("Fix {} (compiler: {})", suggestion.code, suggestion.message),
+    );
 
     Fix {
         file: suggestion.file.clone(),
@@ -372,6 +355,7 @@ fn parse_suggestions(stdout: &str, root: &Path) -> Vec<CompilerSuggestion> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::refactor::InsertionKind;
 
     #[test]
     fn parse_suggestions_extracts_unused_import() {
@@ -417,7 +401,7 @@ mod tests {
         let fix = build_line_removal_fix(&suggestion);
         assert_eq!(fix.file, "src/lib.rs");
         assert_eq!(fix.insertions.len(), 1);
-        assert_eq!(fix.insertions[0].safety_tier, FixSafetyTier::Safe);
+        assert!(!fix.insertions[0].manual_only);
         assert!(matches!(
             fix.insertions[0].kind,
             InsertionKind::FunctionRemoval {
@@ -442,7 +426,7 @@ mod tests {
         let fix = build_line_replacement_fix(&suggestion);
         assert_eq!(fix.file, "src/lib.rs");
         assert_eq!(fix.insertions.len(), 1);
-        assert_eq!(fix.insertions[0].safety_tier, FixSafetyTier::Safe);
+        assert!(!fix.insertions[0].manual_only);
         assert!(matches!(
             fix.insertions[0].kind,
             InsertionKind::LineReplacement { .. }

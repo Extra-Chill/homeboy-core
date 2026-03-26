@@ -1,6 +1,6 @@
 use crate::code_audit::conventions::Language;
 use crate::code_audit::{AuditFinding, CodeAuditResult, DuplicateGroup};
-use crate::core::refactor::auto::{Fix, FixSafetyTier, InsertionKind, NewFile, SkippedFile};
+use crate::core::refactor::auto::{Fix, InsertionKind, NewFile, SkippedFile};
 
 use regex::Regex;
 use std::collections::HashSet;
@@ -389,7 +389,6 @@ pub(crate) fn generate_duplicate_function_fixes(
                     .unwrap_or("SharedTrait");
                 new_files.push(new_file(
                     AuditFinding::DuplicateFunction,
-                    FixSafetyTier::PlanOnly,
                     trait_file.to_string(),
                     trait_content.to_string(),
                     format!(

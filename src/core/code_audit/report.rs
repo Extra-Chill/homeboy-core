@@ -10,7 +10,6 @@ use std::path::Path;
 use crate::code_audit::{
     baseline, AuditFinding, CodeAuditResult, ConventionReport, DirectoryConvention, Severity,
 };
-use crate::refactor::auto::FixSafetyTier;
 use serde::Serialize;
 
 use super::run::AuditRunWorkflowResult;
@@ -91,15 +90,16 @@ pub enum AuditCommandOutput {
 /// Fixability metadata for audit findings — computed without applying fixes.
 ///
 /// Tells CI wrappers how many findings have automated fixes available
-/// and at what safety tier. Use `refactor --from audit --write` to apply.
+/// versus manual-only fixes. Use `refactor --from audit --write` to apply
+/// automation-eligible fixes.
 #[derive(Debug, Serialize)]
 pub struct AuditFixability {
     /// Total findings that have any kind of automated fix.
     pub fixable_count: usize,
-    /// Findings with `Safe` tier — can be auto-applied (preflight runs when applicable).
-    pub safe_count: usize,
-    /// Findings with `PlanOnly` tier — preview only, needs manual review.
-    pub plan_only_count: usize,
+    /// Findings eligible for automated `refactor --from ...` execution.
+    pub automated_count: usize,
+    /// Findings that are manual-only and require explicit command execution.
+    pub manual_only_count: usize,
     /// Breakdown by finding kind.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub by_kind: BTreeMap<String, FixabilityKindBreakdown>,
@@ -109,8 +109,8 @@ pub struct AuditFixability {
 #[derive(Debug, Serialize)]
 pub struct FixabilityKindBreakdown {
     pub total: usize,
-    pub safe: usize,
-    pub plan_only: usize,
+    pub automated: usize,
+    pub manual_only: usize,
 }
 
 /// Build an audit summary from a result and exit code.
@@ -190,9 +190,9 @@ pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
     let context = crate::refactor::auto::PreflightContext { root: source_path };
     crate::refactor::auto::apply_fix_policy(&mut fix_result, false, &policy, &context);
 
-    // Count by safety tier
-    let mut safe_count = 0usize;
-    let mut plan_only = 0usize;
+    // Count by automation eligibility
+    let mut automated_count = 0usize;
+    let mut manual_only = 0usize;
     let mut by_kind: BTreeMap<String, FixabilityKindBreakdown> = BTreeMap::new();
 
     for fix in &fix_result.fixes {
@@ -200,20 +200,17 @@ pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
             let kind_key = finding_kind_key(&insertion.finding);
             let entry = by_kind.entry(kind_key).or_insert(FixabilityKindBreakdown {
                 total: 0,
-                safe: 0,
-                plan_only: 0,
+                automated: 0,
+                manual_only: 0,
             });
             entry.total += 1;
 
-            match insertion.safety_tier {
-                FixSafetyTier::Safe => {
-                    safe_count += 1;
-                    entry.safe += 1;
-                }
-                FixSafetyTier::PlanOnly => {
-                    plan_only += 1;
-                    entry.plan_only += 1;
-                }
+            if insertion.manual_only {
+                manual_only += 1;
+                entry.manual_only += 1;
+            } else {
+                automated_count += 1;
+                entry.automated += 1;
             }
         }
     }
@@ -222,29 +219,26 @@ pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
         let kind_key = finding_kind_key(&new_file.finding);
         let entry = by_kind.entry(kind_key).or_insert(FixabilityKindBreakdown {
             total: 0,
-            safe: 0,
-            plan_only: 0,
+            automated: 0,
+            manual_only: 0,
         });
         entry.total += 1;
 
-        match new_file.safety_tier {
-            FixSafetyTier::Safe => {
-                safe_count += 1;
-                entry.safe += 1;
-            }
-            FixSafetyTier::PlanOnly => {
-                plan_only += 1;
-                entry.plan_only += 1;
-            }
+        if new_file.manual_only {
+            manual_only += 1;
+            entry.manual_only += 1;
+        } else {
+            automated_count += 1;
+            entry.automated += 1;
         }
     }
 
-    let fixable_count = safe_count + plan_only;
+    let fixable_count = automated_count + manual_only;
 
     Some(AuditFixability {
         fixable_count,
-        safe_count,
-        plan_only_count: plan_only,
+        automated_count,
+        manual_only_count: manual_only,
         by_kind,
     })
 }

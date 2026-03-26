@@ -13,15 +13,15 @@
 //! 3. Computes the full line range of the legacy block
 //! 4. Emits a `FunctionRemoval` that removes the comment + the entire block
 //!
-//! When the enclosing block can't be determined, emits a PlanOnly fix for
-//! manual review instead of silently removing just the comment.
+//! When the enclosing block can't be determined, emits a manual-only fix for
+//! human review instead of silently removing just the comment.
 
 use std::path::Path;
 
 use regex::Regex;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
-use crate::refactor::auto::{Fix, FixSafetyTier, Insertion, InsertionKind, SkippedFile};
+use crate::refactor::auto::{Fix, Insertion, InsertionKind, SkippedFile};
 
 /// Classification of the code block a legacy comment annotates.
 #[derive(Debug, PartialEq)]
@@ -43,10 +43,10 @@ enum BlockKind {
 /// Generate fixes that remove legacy/fallback code blocks.
 ///
 /// For `LegacyComment` findings: identifies the enclosing code block and
-/// removes the entire thing (comment + code). Safe when the block boundaries
-/// are clear. PlanOnly when they're ambiguous.
+/// removes the entire thing (comment + code). Automation-eligible when the block
+/// boundaries are clear. Manual-only when they're ambiguous.
 ///
-/// For `TodoMarker` findings: always PlanOnly since TODOs describe work to
+/// For `TodoMarker` findings: always manual-only since TODOs describe work to
 /// be done, not code to be removed.
 pub(crate) fn generate_comment_fixes(
     result: &CodeAuditResult,
@@ -114,13 +114,12 @@ pub(crate) fn generate_comment_fixes(
                     primitive: None,
                     kind: InsertionKind::DocLineRemoval { line: line_num },
                     finding: AuditFinding::TodoMarker,
-                    safety_tier: FixSafetyTier::PlanOnly,
+                    manual_only: true,
                     auto_apply: false,
                     blocked_reason: Some(
                         "TODO markers require human judgment — resolve the TODO, then remove"
                             .to_string(),
                     ),
-                    preflight: None,
                     code: String::new(),
                     description: format!(
                         "TODO marker on line {} in {} — resolve before removing",
@@ -158,26 +157,24 @@ pub(crate) fn generate_comment_fixes(
 
         let (block_kind, start_line, end_line) = classify_and_bound(&lines, comment_idx);
 
-        let (safety, blocked_reason) = match block_kind {
-            BlockKind::Function | BlockKind::GuardClause | BlockKind::MatchArm => {
-                (FixSafetyTier::Safe, None)
-            }
+        let (manual_only, blocked_reason) = match block_kind {
+            BlockKind::Function | BlockKind::GuardClause | BlockKind::MatchArm => (false, None),
             BlockKind::ElseBranch => {
                 // Removing an else branch changes control flow — needs review.
                 (
-                    FixSafetyTier::PlanOnly,
+                    true,
                     Some("Removing else branch changes control flow — verify the if-branch is the canonical path".to_string()),
                 )
             }
             BlockKind::CodeSection => (
-                FixSafetyTier::PlanOnly,
+                true,
                 Some(
                     "Legacy code section boundaries detected heuristically — verify removal range"
                         .to_string(),
                 ),
             ),
             BlockKind::Unknown => (
-                FixSafetyTier::PlanOnly,
+                true,
                 Some(
                     "Could not determine legacy code block boundaries — manual review required"
                         .to_string(),
@@ -212,10 +209,9 @@ pub(crate) fn generate_comment_fixes(
                     end_line,
                 },
                 finding: AuditFinding::LegacyComment,
-                safety_tier: safety,
+                manual_only,
                 auto_apply: false,
                 blocked_reason,
-                preflight: None,
                 code: String::new(),
                 description,
             }],
@@ -676,7 +672,7 @@ mod tests {
     // ── Integration tests ─────────────────────────────────────────────
 
     #[test]
-    fn generates_safe_fix_for_legacy_function() {
+    fn generates_automation_eligible_fix_for_legacy_function() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("src/old.rs");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -704,7 +700,7 @@ mod tests {
 
         assert_eq!(fixes.len(), 1);
         assert_eq!(fixes[0].insertions.len(), 1);
-        assert_eq!(fixes[0].insertions[0].safety_tier, FixSafetyTier::Safe);
+        assert!(!fixes[0].insertions[0].manual_only);
         match &fixes[0].insertions[0].kind {
             InsertionKind::FunctionRemoval {
                 start_line,
@@ -718,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_plan_only_for_else_branch() {
+    fn generates_manual_only_for_else_branch() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("src/branch.rs");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -744,12 +740,12 @@ mod tests {
         generate_comment_fixes(&result, dir.path(), &mut fixes, &mut skipped);
 
         assert_eq!(fixes.len(), 1);
-        assert_eq!(fixes[0].insertions[0].safety_tier, FixSafetyTier::PlanOnly);
+        assert!(fixes[0].insertions[0].manual_only);
         assert!(fixes[0].insertions[0].blocked_reason.is_some());
     }
 
     #[test]
-    fn todo_marker_is_always_plan_only() {
+    fn todo_marker_is_always_manual_only() {
         let mut result = empty_result();
         result.findings.push(Finding {
             convention: "comment_hygiene".to_string(),
@@ -765,7 +761,7 @@ mod tests {
         generate_comment_fixes(&result, Path::new("/tmp"), &mut fixes, &mut skipped);
 
         assert_eq!(fixes.len(), 1);
-        assert_eq!(fixes[0].insertions[0].safety_tier, FixSafetyTier::PlanOnly);
+        assert!(fixes[0].insertions[0].manual_only);
         assert_eq!(fixes[0].insertions[0].finding, AuditFinding::TodoMarker);
     }
 
