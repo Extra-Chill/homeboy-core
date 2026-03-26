@@ -1,10 +1,10 @@
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::code_audit::fingerprint;
-use crate::core::refactor::auto::{Fix, FixSafetyTier, InsertionKind, SkippedFile};
+use crate::core::refactor::auto::{Fix, InsertionKind, RefactorPrimitive, SkippedFile};
 use crate::engine::text::levenshtein;
 use std::path::Path;
 
-use super::insertion;
+use super::{insertion_with_primitive, manual_only};
 
 /// Extract the correct test path from a misplaced test finding description.
 ///
@@ -231,7 +231,8 @@ pub(crate) fn generate_orphaned_test_fixes(
         // Description format: "Test file is misplaced — source moved to '...' (expected test at '...')"
         if finding.description.contains("is misplaced") {
             if let Some(correct_path) = extract_correct_test_path(&finding.description) {
-                let mut ins = insertion(
+                let ins = insertion_with_primitive(
+                    RefactorPrimitive::MoveTestFile,
                     InsertionKind::FileMove {
                         from: finding.file.clone(),
                         to: correct_path.clone(),
@@ -243,7 +244,6 @@ pub(crate) fn generate_orphaned_test_fixes(
                         finding.file, correct_path
                     ),
                 );
-                ins.safety_tier = FixSafetyTier::Safe;
 
                 fixes.push(Fix {
                     file: finding.file.clone(),
@@ -356,7 +356,8 @@ pub(crate) fn generate_orphaned_test_fixes(
 
                 let new_line = old_line.replacen(&actual_old_name, &actual_new_name, 1);
 
-                let mut ins = insertion(
+                let ins = insertion_with_primitive(
+                    RefactorPrimitive::RenameTestMethod,
                     InsertionKind::LineReplacement {
                         line: decl_idx + 1, // 1-indexed
                         old_text: old_line.to_string(),
@@ -372,7 +373,6 @@ pub(crate) fn generate_orphaned_test_fixes(
                         new_source_name
                     ),
                 );
-                ins.safety_tier = FixSafetyTier::Safe;
 
                 fixes.push(Fix {
                     file: finding.file.clone(),
@@ -386,10 +386,9 @@ pub(crate) fn generate_orphaned_test_fixes(
         }
 
         // Fallback: delete the orphaned test if no rename candidate found.
-        // Use PlanOnly tier so deletions require human review — the orphan
-        // detection can produce false positives for behavioral tests that
-        // don't follow the test_<method> naming convention exactly.
-        let mut ins = insertion(
+        // Mark manual-only so automation via `refactor --from` cannot execute it.
+        let ins = manual_only(insertion_with_primitive(
+            RefactorPrimitive::RemoveOrphanedTest,
             InsertionKind::FunctionRemoval {
                 start_line,
                 end_line,
@@ -400,8 +399,7 @@ pub(crate) fn generate_orphaned_test_fixes(
                 "Remove orphaned test `{}` — referenced source method no longer exists",
                 test_method
             ),
-        );
-        ins.safety_tier = FixSafetyTier::PlanOnly;
+        ));
 
         fixes.push(Fix {
             file: finding.file.clone(),

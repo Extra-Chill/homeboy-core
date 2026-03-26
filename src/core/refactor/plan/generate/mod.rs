@@ -10,7 +10,6 @@ mod near_duplicate_fixes;
 mod orphaned_test_fixes;
 mod parameter_fixes;
 mod signatures;
-mod test_gen_fixes;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{DecomposeFixPlan, Fix, FixPolicy, FixResult, SkippedFile};
@@ -20,7 +19,10 @@ use std::path::Path;
 
 use convention_fixes::apply_convention_fixes;
 
-pub(crate) use builders::{insertion, new_file};
+pub(crate) use builders::{
+    insertion, insertion_with_primitive, manual_only, new_file, tagged_import_add,
+    tagged_line_replacement, tagged_range_removal, tagged_visibility_change,
+};
 pub(crate) use doc_fixes::is_actionable_comment_finding;
 pub(crate) use duplicate_fixes::{
     generate_duplicate_function_fixes, generate_unreferenced_export_fixes,
@@ -189,18 +191,6 @@ pub(crate) fn generate_fixes_impl(
     if finding_enabled(&AuditFinding::UnusedParameter) {
         parameter_fixes::generate_parameter_fixes(result, root, &mut fixes, &mut skipped);
     }
-    if finding_enabled(&AuditFinding::MissingTestFile) {
-        test_gen_fixes::generate_test_file_fixes(
-            result,
-            root,
-            &mut new_files,
-            &mut fixes,
-            &mut skipped,
-        );
-    }
-    if finding_enabled(&AuditFinding::MissingTestMethod) {
-        test_gen_fixes::generate_test_method_fixes(result, root, &mut fixes, &mut skipped);
-    }
     if finding_enabled(&AuditFinding::CompilerWarning) {
         compiler_warning_fixes::generate_compiler_warning_fixes(
             result,
@@ -209,7 +199,8 @@ pub(crate) fn generate_fixes_impl(
             &mut skipped,
         );
     }
-    if finding_enabled(&AuditFinding::TodoMarker) || finding_enabled(&AuditFinding::LegacyComment) {
+    if finding_enabled(&AuditFinding::TodoMarker) || finding_enabled(&AuditFinding::LegacyComment)
+    {
         comment_fixes::generate_comment_fixes(result, root, &mut fixes, &mut skipped);
     }
     if finding_enabled(&AuditFinding::NearDuplicate) {

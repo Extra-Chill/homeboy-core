@@ -4,11 +4,11 @@
 //! on the structural relationship between the two occurrences:
 //!
 //! **Adjacent or same-indent duplicates**: The second block is a merge artifact
-//! or copy-paste error. Safe to remove — the first copy already does the work.
+//! or copy-paste error. Automation-eligible removal — the first copy already does the work.
 //!
 //! **Cross-branch duplicates** (different indent levels): The same code appears
 //! in multiple branches (if/else, match arms). These are structural repetition
-//! where the fix requires human judgment about refactoring — PlanOnly with both
+//! where the fix requires human judgment about refactoring — manual-only with both
 //! ranges identified.
 //!
 //! The algorithm is language-agnostic — it operates on line content, indentation
@@ -18,30 +18,31 @@ use std::path::Path;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::engine::local_files;
-use crate::refactor::auto::{Fix, FixSafetyTier, Insertion, InsertionKind, SkippedFile};
+use crate::refactor::auto::{Fix, Insertion, InsertionKind, SkippedFile};
 
 /// Structural relationship between two duplicated blocks.
 enum DupRelation {
     /// Blocks are adjacent — only blank/comment lines between them.
-    /// Second block is a merge artifact. Safe to remove.
+    /// Second block is a merge artifact. Automation-eligible to remove.
     Adjacent,
     /// Blocks are at the same indentation with a small gap of code between.
     /// Likely a copy-paste error — the gap is context that doesn't depend on
-    /// the duplicated block. Safe to remove the second copy.
+    /// the duplicated block. Automation-eligible to remove the second copy.
     SameIndentSmallGap,
     /// Blocks are at the same indentation but with a large gap of code.
-    /// Could be intentional repetition at different stages. PlanOnly.
+    /// Could be intentional repetition at different stages. Manual-only.
     SameIndentLargeGap,
     /// Blocks are at different indentation levels — they're in different
     /// branches (if/else, match arms, nested blocks). Structural repetition
-    /// that requires refactoring to consolidate. PlanOnly.
+    /// that requires refactoring to consolidate. Manual-only.
     CrossBranch,
 }
 
 /// Generate fixes for intra-method duplicates.
 ///
 /// Classifies the structural relationship between the two blocks and generates
-/// either a Safe removal (adjacent/same-indent) or a PlanOnly flag (cross-branch).
+/// either an automation-eligible removal (adjacent/same-indent) or a manual-only
+/// flag (cross-branch).
 pub(crate) fn generate_intra_duplicate_fixes(
     result: &CodeAuditResult,
     root: &Path,
@@ -121,7 +122,7 @@ pub(crate) fn generate_intra_duplicate_fixes(
 
         match relation {
             DupRelation::Adjacent | DupRelation::SameIndentSmallGap => {
-                // Safe to remove the second block.
+                // Automation-eligible removal of the second block.
                 // For adjacent: also remove gap lines (blank/comment between blocks).
                 let removal_start = if matches!(relation, DupRelation::Adjacent) {
                     // Include gap lines.
@@ -166,15 +167,15 @@ pub(crate) fn generate_intra_duplicate_fixes(
                     required_methods: vec![],
                     required_registrations: vec![],
                     insertions: vec![Insertion {
+                        primitive: None,
                         kind: InsertionKind::FunctionRemoval {
                             start_line: removal_start,
                             end_line: second_end,
                         },
                         finding: AuditFinding::IntraMethodDuplicate,
-                        safety_tier: FixSafetyTier::Safe,
+                        manual_only: false,
                         auto_apply: false,
                         blocked_reason: None,
-                        preflight: None,
                         code: String::new(),
                         description: format!(
                             "Remove duplicate block in `{}` (lines {}-{}) — identical to lines {}-{}",
@@ -185,7 +186,7 @@ pub(crate) fn generate_intra_duplicate_fixes(
                 });
             }
             DupRelation::SameIndentLargeGap | DupRelation::CrossBranch => {
-                // PlanOnly — flag both blocks for human review.
+                // Manual-only — flag both blocks for human review.
                 let reason = match relation {
                     DupRelation::CrossBranch => format!(
                         "Cross-branch duplicate in `{}` — same block at different indent levels (branches). \
@@ -204,15 +205,15 @@ pub(crate) fn generate_intra_duplicate_fixes(
                     required_methods: vec![],
                     required_registrations: vec![],
                     insertions: vec![Insertion {
+                        primitive: None,
                         kind: InsertionKind::FunctionRemoval {
                             start_line: second_line,
                             end_line: second_end,
                         },
                         finding: AuditFinding::IntraMethodDuplicate,
-                        safety_tier: FixSafetyTier::PlanOnly,
+                        manual_only: true,
                         auto_apply: false,
                         blocked_reason: Some(reason),
-                        preflight: None,
                         code: String::new(),
                         description: format!(
                             "Duplicate block in `{}`: lines {}-{} and lines {}-{} are identical",

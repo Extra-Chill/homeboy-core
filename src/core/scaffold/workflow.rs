@@ -1,9 +1,3 @@
-//! Test scaffold workflow — orchestrates test stub generation for components.
-//!
-//! Owns the scaffold orchestration flow: language detection, single-file vs batch mode,
-//! user-facing output, and result shaping. The underlying stub generation lives in
-//! `crate::scaffold`; this module provides the component-aware workflow layer.
-
 use crate::component::Component;
 use crate::scaffold::{self, ScaffoldConfig};
 use serde::Serialize;
@@ -28,29 +22,24 @@ pub struct ScaffoldFileOutput {
     pub skipped: bool,
 }
 
-/// Result of a scaffold workflow run, ready for command-layer output assembly.
+/// Result of a scaffold workflow run, ready for command output.
 #[derive(Debug, Clone, Serialize)]
-pub struct ScaffoldWorkflowResult {
+pub struct ScaffoldWorkflowOutput {
     pub component: String,
     pub output: ScaffoldOutput,
 }
 
-/// Run scaffold workflow — generate test stubs from source files.
-///
-/// Handles both single-file mode (`scaffold_file` provided) and batch mode (scan all
-/// untested files). Language detection is automatic (Cargo.toml → Rust, else → PHP).
 pub fn run_scaffold_workflow(
     component_id: &str,
     component: &Component,
-    scaffold_file: Option<&str>,
+    source_file: Option<&str>,
     write: bool,
-) -> crate::Result<ScaffoldWorkflowResult> {
+) -> crate::Result<ScaffoldWorkflowOutput> {
     let source_path = {
         let expanded = shellexpand::tilde(&component.local_path);
         PathBuf::from(expanded.as_ref())
     };
 
-    // Auto-detect language
     let config = if source_path.join("Cargo.toml").exists() {
         ScaffoldConfig::rust()
     } else {
@@ -59,21 +48,19 @@ pub fn run_scaffold_workflow(
 
     let mode_label = if write { "write" } else { "dry-run" };
 
-    let output = if let Some(file) = scaffold_file {
-        run_single_file_scaffold(component_id, &source_path, file, &config, write, mode_label)?
+    let output = if let Some(file) = source_file {
+        run_single_file_scaffold(&source_path, file, &config, write, mode_label)?
     } else {
         run_batch_scaffold(component_id, &source_path, &config, write, mode_label)?
     };
 
-    Ok(ScaffoldWorkflowResult {
+    Ok(ScaffoldWorkflowOutput {
         component: component_id.to_string(),
         output,
     })
 }
 
-/// Scaffold a single source file.
 fn run_single_file_scaffold(
-    _component_id: &str,
     source_path: &PathBuf,
     file: &str,
     config: &ScaffoldConfig,
@@ -81,12 +68,7 @@ fn run_single_file_scaffold(
     mode_label: &str,
 ) -> crate::Result<ScaffoldOutput> {
     let file_path = source_path.join(file);
-    crate::log_status!(
-        "scaffold",
-        "Scaffolding tests for {} ({})",
-        file,
-        mode_label
-    );
+    crate::log_status!("scaffold", "Scaffolding tests for {} ({})", file, mode_label);
 
     let result = scaffold::scaffold_file(&file_path, source_path, config, write)?;
 
@@ -109,7 +91,6 @@ fn run_single_file_scaffold(
         );
 
         if !write {
-            // Show preview
             eprintln!("---");
             for line in result.content.lines().take(40) {
                 eprintln!("{}", line);
@@ -135,7 +116,6 @@ fn run_single_file_scaffold(
     })
 }
 
-/// Scaffold all untested files in a component.
 fn run_batch_scaffold(
     component_id: &str,
     source_path: &PathBuf,
@@ -177,7 +157,6 @@ fn run_batch_scaffold(
             batch.total_stubs
         );
     } else if files_needing_tests > 0 {
-        // Show summary of what would be created
         for result in &batch.results {
             if !result.skipped && result.stub_count > 0 {
                 crate::log_status!(
@@ -191,7 +170,7 @@ fn run_batch_scaffold(
         }
         crate::log_status!(
             "hint",
-            "Run with --write to create test files: homeboy test {} --scaffold --write",
+            "Run with --write to create test files: homeboy scaffold test {} --write",
             component_id
         );
     }

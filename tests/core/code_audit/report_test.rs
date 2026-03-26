@@ -106,8 +106,11 @@ fn test_compute_fixability_counts_fixes_from_real_audit() {
             fix.fixable_count > 0,
             "expected at least one fixable finding"
         );
-        // safe + plan_only should equal fixable_count
-        assert_eq!(fix.fixable_count, fix.safe_count + fix.plan_only_count);
+        // automated + manual_only should equal fixable_count
+        assert_eq!(
+            fix.fixable_count,
+            fix.automated_count + fix.manual_only_count
+        );
         // by_kind should not be empty
         assert!(!fix.by_kind.is_empty(), "expected per-kind breakdown");
     }

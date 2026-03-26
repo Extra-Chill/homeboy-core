@@ -4,7 +4,6 @@ pub mod drift;
 pub mod parsing;
 pub mod report;
 pub mod run;
-pub mod scaffold;
 pub mod workflow;
 
 use crate::component::Component;
@@ -37,9 +36,6 @@ pub use parsing::{
 };
 pub use report::TestCommandOutput;
 pub use run::{run_main_test_workflow, TestRunWorkflowArgs, TestRunWorkflowResult};
-pub use scaffold::{
-    run_scaffold_workflow, ScaffoldFileOutput, ScaffoldOutput, ScaffoldWorkflowResult,
-};
 pub use workflow::{
     auto_fix_test_drift, detect_test_drift, AutoFixDriftOutput, AutoFixDriftWorkflowResult,
     DriftWorkflowResult, MainTestWorkflowResult,

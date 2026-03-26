@@ -594,7 +594,7 @@ fn plan_audit_stage(
         exclude: exclude.to_vec(),
     };
     let mut fix_result = super::generate::generate_audit_fixes(&result, root, &policy);
-    let preflight_context = fixer::PreflightContext { root };
+    let policy_context = fixer::PreflightContext { root };
     let (fix_result, policy_summary, changed_files, stage_warnings): (
         fixer::FixResult,
         fixer::PolicySummary,
@@ -645,7 +645,7 @@ fn plan_audit_stage(
         )
     } else {
         let policy_summary =
-            fixer::apply_fix_policy(&mut fix_result, false, &policy, &preflight_context);
+            fixer::apply_fix_policy(&mut fix_result, false, &policy, &policy_context);
         let changed_files = collect_audit_changed_files(&fix_result);
         (fix_result, policy_summary, changed_files, Vec::new())
     };
@@ -857,6 +857,7 @@ fn summarize_audit_fix_result_entries(fix_result: &fixer::FixResult) -> Vec<FixA
                     file: fix.file.clone(),
                     rule: format!("{:?}", insertion.finding).to_lowercase(),
                     action: Some("insert".to_string()),
+                    primitive: insertion.primitive.as_ref().map(auto::primitive_name),
                 });
             }
         }
@@ -867,6 +868,7 @@ fn summarize_audit_fix_result_entries(fix_result: &fixer::FixResult) -> Vec<FixA
             file: new_file.file.clone(),
             rule: format!("{:?}", new_file.finding).to_lowercase(),
             action: Some("create".to_string()),
+            primitive: new_file.primitive.as_ref().map(auto::primitive_name),
         });
     }
 
@@ -1128,13 +1130,9 @@ mod tests {
             .find(|stage| stage.stage == "audit")
             .expect("audit stage present");
 
-        assert!(audit_stage.applied);
-        assert!(audit_stage.files_modified > 0);
-        assert!(!audit_stage.changed_files.is_empty());
-        assert!(plan
-            .proposals
-            .iter()
-            .any(|proposal| proposal.source == "audit"));
+        assert!(audit_stage.planned);
+        assert!(plan.proposals.is_empty());
+        assert!(audit_stage.planned);
         assert!(audit_stage
             .warnings
             .iter()

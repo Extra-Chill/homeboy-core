@@ -122,8 +122,6 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--ratchet",
                 "--analyze",
                 "--drift",
-                "--scaffold",
-                "--scaffold-file",
                 "--write",
                 "--since",
                 "--changed-since",
@@ -134,6 +132,11 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--help",
                 "-h",
             ],
+        ),
+        (
+            "scaffold",
+            "test",
+            &["--file", "--write", "--path", "--json", "--help", "-h"],
         ),
         (
             "docs",

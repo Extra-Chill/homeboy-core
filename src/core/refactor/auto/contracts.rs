@@ -26,68 +26,47 @@ pub struct Fix {
 /// A single insertion into a file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Insertion {
+    /// Explicit primitive backing this insertion.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub primitive: Option<RefactorPrimitive>,
     /// What kind of fix (mechanical action).
     pub kind: InsertionKind,
     /// The audit finding this insertion addresses.
     pub finding: AuditFinding,
-    /// Safety contract for this insertion.
-    pub safety_tier: FixSafetyTier,
+    /// Whether this insertion is manual-only and must never run via `refactor --from`.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub manual_only: bool,
     /// Whether this fix is eligible for auto-apply under the current policy.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub auto_apply: bool,
     /// Why the fix is not auto-applied under the current policy.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub blocked_reason: Option<String>,
-    /// Deterministic preflight validation report for safe_with_checks writes.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub preflight: Option<PreflightReport>,
     /// The code to insert.
     pub code: String,
     /// Human-readable description.
     pub description: String,
 }
 
-/// Safety classification for automated code fixes.
+/// Explicit primitive operation represented by a refactor action.
 ///
-/// Two tiers: `Safe` fixes are auto-applied (with preflight validation when applicable).
-/// `PlanOnly` fixes are preview-only and require human review.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum FixSafetyTier {
-    /// Fix can be auto-applied. Preflight validation runs when applicable.
-    #[serde(
-        rename = "safe",
-        alias = "safe_auto",
-        alias = "safe_with_checks",
-        alias = "Safe",
-        alias = "SafeAuto",
-        alias = "SafeWithChecks"
-    )]
-    Safe,
-    /// Fix requires human review — never auto-applied.
-    #[serde(rename = "plan_only", alias = "PlanOnly")]
-    PlanOnly,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreflightReport {
-    pub status: PreflightStatus,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub checks: Vec<PreflightCheck>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PreflightStatus {
-    Passed,
-    Failed,
-    NotApplicable,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreflightCheck {
-    pub name: String,
-    pub passed: bool,
-    pub detail: String,
+/// Fixers should populate this whenever the operation maps to a stable engine
+/// primitive so manual refactor commands, CI summaries, and debugging can all
+/// report the same underlying action family.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RefactorPrimitive {
+    MoveTestFile,
+    RenameTestMethod,
+    RemoveOrphanedTest,
+    RemoveCompilerDeadCode,
+    ApplyCompilerReplacement,
+    RemoveUnusedParameter,
+    RemoveNearDuplicateImplementation,
+    ImportCanonicalImplementation,
+    WidenCanonicalVisibility,
+    UpdateStaleDocReference,
+    RemoveBrokenDocReferenceLine,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -171,33 +150,6 @@ pub enum InsertionKind {
     TestModule,
 }
 
-impl InsertionKind {
-    pub fn safety_tier(&self) -> FixSafetyTier {
-        match self {
-            // Safe: all deterministic, mechanical fixes that can be auto-applied.
-            // Preflight validation runs when applicable (registration stubs get
-            // collision checks, visibility changes get simulation checks, etc).
-            Self::ImportAdd
-            | Self::DocReferenceUpdate { .. }
-            | Self::DocLineRemoval { .. }
-            | Self::RegistrationStub
-            | Self::ConstructorWithRegistration
-            | Self::TypeConformance
-            | Self::NamespaceDeclaration
-            | Self::VisibilityChange { .. }
-            | Self::ReexportRemoval { .. }
-            | Self::LineReplacement { .. }
-            | Self::FileMove { .. }
-            | Self::TestModule => FixSafetyTier::Safe,
-
-            // Plan-only: requires human review.
-            Self::MethodStub | Self::FunctionRemoval { .. } | Self::TraitUse => {
-                FixSafetyTier::PlanOnly
-            }
-        }
-    }
-}
-
 /// A file that was skipped by the fixer with a reason.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SkippedFile {
@@ -212,19 +164,20 @@ pub struct SkippedFile {
 pub struct NewFile {
     /// Relative path for the new file.
     pub file: String,
+    /// Explicit primitive backing this file creation.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub primitive: Option<RefactorPrimitive>,
     /// The audit finding this new file addresses.
     pub finding: AuditFinding,
-    /// Safety contract for this file creation.
-    pub safety_tier: FixSafetyTier,
+    /// Whether this file creation is manual-only and must never run via `refactor --from`.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub manual_only: bool,
     /// Whether this file is eligible for auto-apply under the current policy.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub auto_apply: bool,
     /// Why this file is not auto-applied under the current policy.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub blocked_reason: Option<String>,
-    /// Deterministic preflight validation report for safe_with_checks writes.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub preflight: Option<PreflightReport>,
     /// Content to write.
     pub content: String,
     /// Human-readable description.
@@ -339,10 +292,9 @@ pub struct PolicySummary {
     pub auto_apply_new_files: usize,
     pub blocked_insertions: usize,
     pub blocked_new_files: usize,
-    pub preflight_failures: usize,
-    /// Fixes dropped in write mode because they had no auto-applicable insertions
-    /// (e.g., PlanOnly fixes that would waste CI time without being written).
-    pub dropped_plan_only: usize,
+    /// Fixes dropped in write mode because they were manual-only and not eligible
+    /// for automated `refactor --from ...` writes.
+    pub dropped_manual_only: usize,
 }
 
 impl PolicySummary {

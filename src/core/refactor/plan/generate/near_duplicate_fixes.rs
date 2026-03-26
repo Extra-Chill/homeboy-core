@@ -9,7 +9,7 @@
 //! 4. Removes the duplicate copy from the other file
 //! 5. Adds a `use` import in the other file to reference the canonical
 //!
-//! Fixes are Safe — the audit has already verified structural identity.
+//! These edits are automation-eligible — the audit has already verified structural identity.
 //! CI validation catches any breakage before the fix reaches main.
 
 use std::collections::HashMap;
@@ -18,7 +18,9 @@ use std::path::Path;
 use regex::Regex;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
-use crate::refactor::auto::{Fix, FixSafetyTier, Insertion, InsertionKind, SkippedFile};
+use crate::refactor::auto::{Fix, Insertion, InsertionKind, RefactorPrimitive, SkippedFile};
+
+use super::{tagged_import_add, tagged_range_removal, tagged_visibility_change};
 
 use super::{FileRole, ModuleSurfaceIndex};
 
@@ -123,38 +125,28 @@ pub(crate) fn generate_near_duplicate_fixes(
         let canonical_mod = file_to_module_path(canonical_file);
 
         // 1. Remove the duplicate function.
-        let removal = Insertion {
-            kind: InsertionKind::FunctionRemoval {
-                start_line,
-                end_line,
-            },
-            finding: AuditFinding::NearDuplicate,
-            safety_tier: FixSafetyTier::Safe,
-            auto_apply: false,
-            blocked_reason: None,
-            preflight: None,
-            code: String::new(),
-            description: format!(
+        let removal = tagged_range_removal(
+            RefactorPrimitive::RemoveNearDuplicateImplementation,
+            AuditFinding::NearDuplicate,
+            start_line,
+            end_line,
+            format!(
                 "Remove near-duplicate '{}' — canonical copy lives in {}",
                 fn_name, canonical_file
             ),
-        };
+        );
 
         // 2. Add import of the canonical function.
         let import_stmt = format!("use {}::{};", canonical_mod, fn_name);
-        let import = Insertion {
-            kind: InsertionKind::ImportAdd,
-            finding: AuditFinding::NearDuplicate,
-            safety_tier: FixSafetyTier::Safe,
-            auto_apply: false,
-            blocked_reason: None,
-            preflight: None,
-            code: import_stmt,
-            description: format!(
+        let import = tagged_import_add(
+            RefactorPrimitive::ImportCanonicalImplementation,
+            AuditFinding::NearDuplicate,
+            import_stmt,
+            format!(
                 "Import '{}' from canonical location {}",
                 fn_name, canonical_file
             ),
-        };
+        );
 
         fixes.push(Fix {
             file: duplicate_file.to_string(),
@@ -334,23 +326,18 @@ fn build_visibility_upgrade(
 
     // It's a private `fn` — upgrade to `pub(crate) fn`.
     let _ = file; // used in description
-    Some(Insertion {
-        kind: InsertionKind::VisibilityChange {
-            line: line_idx + 1,
-            from: "fn ".to_string(),
-            to: "pub(crate) fn ".to_string(),
-        },
-        finding: AuditFinding::NearDuplicate,
-        safety_tier: FixSafetyTier::Safe,
-        auto_apply: false,
-        blocked_reason: None,
-        preflight: None,
-        code: String::new(),
-        description: format!(
+    let insertion = tagged_visibility_change(
+        RefactorPrimitive::WidenCanonicalVisibility,
+        AuditFinding::NearDuplicate,
+        line_idx + 1,
+        "fn ".to_string(),
+        "pub(crate) fn ".to_string(),
+        format!(
             "Make canonical '{}' pub(crate) so the duplicate's import resolves",
             fn_name
         ),
-    })
+    );
+    Some(insertion)
 }
 
 #[cfg(test)]
@@ -397,10 +384,36 @@ mod tests {
 
     #[test]
     fn build_visibility_upgrade_private_fn() {
-        let index = ModuleSurfaceIndex::default();
+        let index = ModuleSurfaceIndex::from_surfaces(vec![
+            crate::core::refactor::plan::generate::module_surface::ModuleSurface {
+                file: "test.rs".to_string(),
+                module_path: "test".to_string(),
+                language: crate::code_audit::conventions::Language::Rust,
+                role: FileRole::Regular,
+                public_api: ["cache_path".to_string()].into_iter().collect(),
+                imports: vec![],
+                internal_calls: HashSet::new(),
+                call_sites: HashSet::new(),
+                symbols: HashMap::from([(
+                    "cache_path".to_string(),
+                    crate::core::refactor::plan::generate::module_surface::SymbolSurface {
+                        symbol: "cache_path".to_string(),
+                        incoming_callers: vec!["src/consumer.rs".to_string()],
+                        incoming_importers: vec![],
+                        reexport_files: vec![],
+                    },
+                )]),
+            },
+        ]);
         let content = "fn cache_path() -> PathBuf {\n    dirs::cache_dir().unwrap()\n}\n";
         let ins = build_visibility_upgrade(content, "test.rs", "cache_path", &index);
-        assert!(ins.is_none());
+        assert!(ins.is_some());
+        let ins = ins.unwrap();
+        assert!(matches!(
+            ins.kind,
+            InsertionKind::VisibilityChange { line: 1, .. }
+        ));
+        assert!(!ins.manual_only);
     }
 
     #[test]

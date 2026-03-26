@@ -203,7 +203,7 @@ fn priority(intent: &FileIntent) -> u8 {
 mod tests {
     use super::*;
     use crate::code_audit::conventions::AuditFinding;
-    use crate::core::refactor::auto::contracts::{Fix, FixSafetyTier, Insertion, InsertionKind};
+    use crate::core::refactor::auto::contracts::{Fix, Insertion, InsertionKind};
 
     fn make_fix(file: &str, kind: InsertionKind) -> Fix {
         Fix {
@@ -211,12 +211,12 @@ mod tests {
             required_methods: vec![],
             required_registrations: vec![],
             insertions: vec![Insertion {
+                primitive: None,
                 kind,
                 finding: AuditFinding::MissingImport,
-                safety_tier: FixSafetyTier::Safe,
+                manual_only: false,
                 auto_apply: true,
                 blocked_reason: None,
-                preflight: None,
                 code: String::new(),
                 description: "test fix".to_string(),
             }],

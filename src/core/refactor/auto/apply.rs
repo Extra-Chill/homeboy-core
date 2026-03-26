@@ -1208,21 +1208,19 @@ mod tests {
         // Simulate the temp.rs scenario: 3 orphaned tests in the same file,
         // each generating a separate Fix with one FunctionRemoval.
         use crate::code_audit::AuditFinding;
-        use crate::refactor::auto::FixSafetyTier;
-
         fn removal_insertion(start: usize, end: usize, desc: &str) -> Insertion {
             Insertion {
+                primitive: None,
                 kind: InsertionKind::FunctionRemoval {
                     start_line: start,
                     end_line: end,
                 },
                 finding: AuditFinding::OrphanedTest,
+                manual_only: false,
                 code: String::new(),
                 description: desc.into(),
-                safety_tier: FixSafetyTier::Safe,
                 auto_apply: true,
                 blocked_reason: None,
-                preflight: None,
             }
         }
 
@@ -1330,21 +1328,19 @@ mod tests {
 }
 ";
         use crate::code_audit::AuditFinding;
-        use crate::refactor::auto::FixSafetyTier;
-
         fn removal(start: usize, end: usize, desc: &str) -> Insertion {
             Insertion {
+                primitive: None,
                 kind: InsertionKind::FunctionRemoval {
                     start_line: start,
                     end_line: end,
                 },
                 finding: AuditFinding::OrphanedTest,
+                manual_only: false,
                 code: String::new(),
                 description: desc.into(),
-                safety_tier: FixSafetyTier::Safe,
                 auto_apply: true,
                 blocked_reason: None,
-                preflight: None,
             }
         }
 

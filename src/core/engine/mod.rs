@@ -23,6 +23,7 @@ pub(crate) mod local_files;
 pub mod output_parse;
 pub mod pipeline;
 pub mod run_dir;
+pub mod refactor_primitive;
 pub mod shell;
 pub mod symbol_graph;
 pub mod temp;

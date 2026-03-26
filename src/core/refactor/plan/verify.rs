@@ -114,7 +114,7 @@ pub fn run_audit_refactor(
         iteration_summary.score_delta = 0;
 
         if changed_files.is_empty() {
-            iteration_summary.status = "no_safe_changes".to_string();
+            iteration_summary.status = "no_automated_changes".to_string();
         } else {
             iteration_summary.status = "completed".to_string();
         }
@@ -127,9 +127,9 @@ pub fn run_audit_refactor(
         };
         let root = Path::new(&current_result.source_path);
         let mut fix_result = super::generate::generate_audit_fixes(&current_result, root, &policy);
-        let preflight_context = fixer::PreflightContext { root };
+        let policy_context = fixer::PreflightContext { root };
         final_policy_summary =
-            fixer::apply_fix_policy(&mut fix_result, false, &policy, &preflight_context);
+            fixer::apply_fix_policy(&mut fix_result, false, &policy, &policy_context);
         final_fix_result = fix_result;
     }
 
@@ -157,9 +157,9 @@ fn run_fix_iteration(
     };
     let root = Path::new(&audit_result.source_path);
     let mut fix_result = super::generate::generate_audit_fixes(audit_result, root, &policy);
-    let preflight_context = fixer::PreflightContext { root };
+    let policy_context = fixer::PreflightContext { root };
     let policy_summary =
-        fixer::apply_fix_policy(&mut fix_result, true, &policy, &preflight_context);
+        fixer::apply_fix_policy(&mut fix_result, true, &policy, &policy_context);
 
     let mut applied_chunks = 0;
     let mut reverted_chunks = 0;
