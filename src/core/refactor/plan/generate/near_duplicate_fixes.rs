@@ -17,10 +17,8 @@ use std::path::Path;
 
 use regex::Regex;
 
-use crate::code_audit::{AuditFinding, CodeAuditResult};
-use crate::refactor::auto::{Fix, Insertion, InsertionKind, RefactorPrimitive, SkippedFile};
-
 use super::{tagged_import_add, tagged_range_removal, tagged_visibility_change};
+use crate::code_audit::{AuditFinding, CodeAuditResult};
 
 use super::{FileRole, ModuleSurfaceIndex};
 
