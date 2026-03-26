@@ -14,7 +14,7 @@ pub use apply::{
 pub use contracts::{
     ApplyChunkResult, ApplyOptions, ChunkStatus, ChunkVerifier, DecomposeFixPlan, Fix, FixPolicy,
     FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, PolicySummary, PreflightCheck,
-    PreflightContext, PreflightReport, PreflightStatus, SkippedFile,
+    PreflightContext, PreflightReport, PreflightStatus, RefactorPrimitive, SkippedFile,
 };
 pub use outcome::{
     standard_outcome, AppliedAutofixCapture, AutofixMode, AutofixOutcome, AutofixSidecarFiles,
@@ -24,6 +24,7 @@ pub use policy::apply_fix_policy;
 pub use preflight::{run_fix_preflight, run_insertion_preflight, run_new_file_preflight};
 pub use sidecar::{parse_fix_plan_file, parse_fix_results_file, read_fix_results};
 pub use summary::{
-    summarize_audit_fix_result, summarize_fix_results, summarize_optional_fix_results,
+    primitive_name, summarize_audit_fix_result, summarize_fix_results,
+    summarize_optional_fix_results,
 };
 pub use tracking::{changed_file_set, count_newly_changed, newly_changed_files};

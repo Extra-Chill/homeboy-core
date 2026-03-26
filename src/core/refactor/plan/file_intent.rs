@@ -211,6 +211,7 @@ mod tests {
             required_methods: vec![],
             required_registrations: vec![],
             insertions: vec![Insertion {
+                primitive: None,
                 kind,
                 finding: AuditFinding::MissingImport,
                 safety_tier: FixSafetyTier::Safe,

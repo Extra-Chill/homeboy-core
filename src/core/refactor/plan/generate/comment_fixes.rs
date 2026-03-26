@@ -111,6 +111,7 @@ pub(crate) fn generate_comment_fixes(
                 required_methods: vec![],
                 required_registrations: vec![],
                 insertions: vec![Insertion {
+                    primitive: None,
                     kind: InsertionKind::DocLineRemoval { line: line_num },
                     finding: AuditFinding::TodoMarker,
                     safety_tier: FixSafetyTier::PlanOnly,
@@ -205,6 +206,7 @@ pub(crate) fn generate_comment_fixes(
             required_methods: vec![],
             required_registrations: vec![],
             insertions: vec![Insertion {
+                primitive: None,
                 kind: InsertionKind::FunctionRemoval {
                     start_line,
                     end_line,

@@ -34,6 +34,8 @@ pub struct FixApplied {
     pub rule: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primitive: Option<String>,
 }
 
 /// Aggregate summary of extension fix results.
@@ -42,11 +44,19 @@ pub struct FixResultsSummary {
     pub fixes_applied: usize,
     pub files_modified: usize,
     pub rules: Vec<RuleFixCount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub primitives: Vec<PrimitiveFixCount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleFixCount {
     pub rule: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrimitiveFixCount {
+    pub primitive: String,
     pub count: usize,
 }
 

@@ -166,6 +166,7 @@ pub(crate) fn generate_intra_duplicate_fixes(
                     required_methods: vec![],
                     required_registrations: vec![],
                     insertions: vec![Insertion {
+                        primitive: None,
                         kind: InsertionKind::FunctionRemoval {
                             start_line: removal_start,
                             end_line: second_end,
@@ -204,6 +205,7 @@ pub(crate) fn generate_intra_duplicate_fixes(
                     required_methods: vec![],
                     required_registrations: vec![],
                     insertions: vec![Insertion {
+                        primitive: None,
                         kind: InsertionKind::FunctionRemoval {
                             start_line: second_line,
                             end_line: second_end,

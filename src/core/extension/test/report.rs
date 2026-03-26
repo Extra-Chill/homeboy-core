@@ -1,6 +1,6 @@
 //! Test command output builders — owns the unified test output envelope.
 //!
-//! All test sub-workflows (main run, drift detection, auto-fix drift, scaffold)
+//! All test sub-workflows (main run, drift detection, auto-fix drift)
 //! produce domain-specific result types. This module provides the unified output
 //! envelope and builder functions that assemble results into command-ready output.
 
@@ -12,7 +12,6 @@ use crate::refactor::AppliedRefactor;
 use serde::Serialize;
 
 use super::run::TestRunWorkflowResult;
-use super::scaffold::ScaffoldOutput;
 use super::workflow::{AutoFixDriftOutput, AutoFixDriftWorkflowResult, DriftWorkflowResult};
 
 /// Unified output envelope for all test command modes.
@@ -39,8 +38,6 @@ pub struct TestCommandOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drift: Option<DriftReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scaffold: Option<ScaffoldOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_fix_drift: Option<AutoFixDriftOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_scope: Option<TestScopeOutput>,
@@ -63,7 +60,6 @@ pub fn from_main_workflow(result: TestRunWorkflowResult) -> (TestCommandOutput, 
             autofix: result.autofix,
             hints: result.hints,
             drift: None,
-            scaffold: None,
             auto_fix_drift: None,
             test_scope: result.test_scope,
             summary: result.summary,
@@ -87,7 +83,6 @@ pub fn from_drift_workflow(result: DriftWorkflowResult) -> (TestCommandOutput, i
             autofix: None,
             hints: None,
             drift: Some(result.report),
-            scaffold: None,
             auto_fix_drift: None,
             test_scope: None,
             summary: None,
@@ -123,34 +118,7 @@ pub fn from_auto_fix_drift_workflow(
             autofix: None,
             hints: Some(result.hints),
             drift: result.report,
-            scaffold: None,
             auto_fix_drift: Some(result.output),
-            test_scope: None,
-            summary: None,
-        },
-        0,
-    )
-}
-
-/// Build output from a scaffold workflow result.
-pub fn from_scaffold_workflow(
-    component: String,
-    output: ScaffoldOutput,
-) -> (TestCommandOutput, i32) {
-    (
-        TestCommandOutput {
-            status: "scaffold".to_string(),
-            component,
-            exit_code: 0,
-            test_counts: None,
-            coverage: None,
-            baseline_comparison: None,
-            analysis: None,
-            autofix: None,
-            hints: None,
-            drift: None,
-            scaffold: Some(output),
-            auto_fix_drift: None,
             test_scope: None,
             summary: None,
         },

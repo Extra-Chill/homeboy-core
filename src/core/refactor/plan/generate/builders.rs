@@ -8,6 +8,7 @@ pub(crate) fn insertion(
     description: String,
 ) -> Insertion {
     Insertion {
+        primitive: None,
         safety_tier: kind.safety_tier(),
         kind,
         finding,
@@ -28,6 +29,7 @@ pub(crate) fn new_file(
 ) -> NewFile {
     NewFile {
         file,
+        primitive: None,
         finding,
         safety_tier,
         auto_apply: false,

@@ -3,9 +3,7 @@ use clap::Args;
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::test as extension_test;
-use homeboy::extension::test::{
-    detect_test_drift, report, run_scaffold_workflow, TestCommandOutput, TestRunWorkflowArgs,
-};
+use homeboy::extension::test::{detect_test_drift, report, TestCommandOutput, TestRunWorkflowArgs};
 use homeboy::extension::ExtensionCapability;
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
@@ -43,15 +41,7 @@ pub struct TestArgs {
     #[arg(long)]
     drift: bool,
 
-    /// Generate test stubs for untested source files
-    #[arg(long)]
-    scaffold: bool,
-
-    /// Scaffold a specific source file (relative to component root)
-    #[arg(long, value_name = "FILE")]
-    scaffold_file: Option<String>,
-
-    /// Write scaffold files to disk (default: dry-run)
+    /// Write fixes to disk for workflows that support it
     #[arg(long)]
     write: bool,
 
@@ -93,7 +83,6 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
     const HOMEBOY_FLAGS: &[&str] = &[
         "--analyze",
         "--drift",
-        "--scaffold",
         "--write",
         "--json-summary",
         "--baseline",
@@ -109,7 +98,6 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--coverage-min",
         "--since",
         "--changed-since",
-        "--scaffold-file",
         "--setting",
         "--path",
     ];
@@ -157,20 +145,6 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
         ExtensionCapability::Test,
         args.setting_args.setting.clone(),
     ))?;
-
-    // Scaffold mode — delegate to core scaffold workflow
-    if args.scaffold || args.scaffold_file.is_some() {
-        let result = run_scaffold_workflow(
-            args.comp.id(),
-            &ctx.component,
-            args.scaffold_file.as_deref(),
-            args.write,
-        )?;
-        return Ok(report::from_scaffold_workflow(
-            result.component,
-            result.output,
-        ));
-    }
 
     // Drift detection mode — delegate to core drift workflow (read-only)
     // Fixes are owned by `homeboy refactor --from test --write`.
@@ -239,7 +213,6 @@ mod tests {
         let args = vec![
             "--analyze".to_string(),
             "--drift".to_string(),
-            "--scaffold".to_string(),
             "--baseline".to_string(),
             "--ignore-baseline".to_string(),
             "--ratchet".to_string(),
@@ -290,16 +263,6 @@ mod tests {
         ];
         let result = filter_homeboy_flags(&args);
         assert_eq!(result, vec!["--filter=SomeTest"]);
-    }
-
-    #[test]
-    fn filter_strips_scaffold_file() {
-        let args = vec![
-            "--scaffold-file".to_string(),
-            "inc/Core/Foo.php".to_string(),
-        ];
-        let result = filter_homeboy_flags(&args);
-        assert!(result.is_empty());
     }
 
     #[test]

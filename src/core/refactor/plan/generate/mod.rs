@@ -9,7 +9,6 @@ mod near_duplicate_fixes;
 mod orphaned_test_fixes;
 mod parameter_fixes;
 mod signatures;
-mod test_gen_fixes;
 
 use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{DecomposeFixPlan, Fix, FixResult, SkippedFile};
@@ -137,14 +136,6 @@ pub(crate) fn generate_fixes_impl(result: &CodeAuditResult, root: &Path) -> FixR
     doc_fixes::apply_stale_doc_reference_fixes(result, &mut fixes);
     doc_fixes::apply_broken_doc_reference_fixes(result, root, &mut fixes);
     parameter_fixes::generate_parameter_fixes(result, root, &mut fixes, &mut skipped);
-    test_gen_fixes::generate_test_file_fixes(
-        result,
-        root,
-        &mut new_files,
-        &mut fixes,
-        &mut skipped,
-    );
-    test_gen_fixes::generate_test_method_fixes(result, root, &mut fixes, &mut skipped);
     compiler_warning_fixes::generate_compiler_warning_fixes(result, root, &mut fixes, &mut skipped);
     comment_fixes::generate_comment_fixes(result, root, &mut fixes, &mut skipped);
     near_duplicate_fixes::generate_near_duplicate_fixes(result, root, &mut fixes, &mut skipped);

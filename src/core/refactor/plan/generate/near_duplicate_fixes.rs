@@ -120,6 +120,7 @@ pub(crate) fn generate_near_duplicate_fixes(
 
         // 1. Remove the duplicate function.
         let removal = Insertion {
+            primitive: None,
             kind: InsertionKind::FunctionRemoval {
                 start_line,
                 end_line,
@@ -139,6 +140,7 @@ pub(crate) fn generate_near_duplicate_fixes(
         // 2. Add import of the canonical function.
         let import_stmt = format!("use {}::{};", canonical_mod, fn_name);
         let import = Insertion {
+            primitive: None,
             kind: InsertionKind::ImportAdd,
             finding: AuditFinding::NearDuplicate,
             safety_tier: FixSafetyTier::Safe,
@@ -252,6 +254,7 @@ fn build_visibility_upgrade(content: &str, file: &str, fn_name: &str) -> Option<
     // It's a private `fn` — upgrade to `pub(crate) fn`.
     let _ = file; // used in description
     Some(Insertion {
+        primitive: None,
         kind: InsertionKind::VisibilityChange {
             line: line_idx + 1,
             from: "fn ".to_string(),

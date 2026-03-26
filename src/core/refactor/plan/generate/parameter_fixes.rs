@@ -158,6 +158,7 @@ fn build_param_removal(
     let new_sig = format!("({})", new_params_str);
 
     Some(Insertion {
+        primitive: None,
         kind: InsertionKind::LineReplacement {
             line: line_num + 1, // 1-indexed
             old_text: old_sig.to_string(),

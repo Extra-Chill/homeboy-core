@@ -857,6 +857,7 @@ fn summarize_audit_fix_result_entries(fix_result: &fixer::FixResult) -> Vec<FixA
                     file: fix.file.clone(),
                     rule: format!("{:?}", insertion.finding).to_lowercase(),
                     action: Some("insert".to_string()),
+                    primitive: insertion.primitive.as_ref().map(auto::primitive_name),
                 });
             }
         }
@@ -867,6 +868,7 @@ fn summarize_audit_fix_result_entries(fix_result: &fixer::FixResult) -> Vec<FixA
             file: new_file.file.clone(),
             rule: format!("{:?}", new_file.finding).to_lowercase(),
             action: Some("create".to_string()),
+            primitive: new_file.primitive.as_ref().map(auto::primitive_name),
         });
     }
 

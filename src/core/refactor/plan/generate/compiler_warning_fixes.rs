@@ -115,6 +115,7 @@ pub(crate) fn generate_compiler_warning_fixes(
 /// Build a Fix that removes lines (for unused imports, dead code).
 fn build_line_removal_fix(suggestion: &CompilerSuggestion) -> Fix {
     let mut ins = Insertion {
+        primitive: None,
         kind: InsertionKind::FunctionRemoval {
             start_line: suggestion.line_start,
             end_line: suggestion.line_end,
@@ -147,6 +148,7 @@ fn build_line_removal_fix(suggestion: &CompilerSuggestion) -> Fix {
 /// Build a Fix that replaces text on a single line (for unused_mut, etc.).
 fn build_line_replacement_fix(suggestion: &CompilerSuggestion) -> Fix {
     let ins = Insertion {
+        primitive: None,
         kind: InsertionKind::LineReplacement {
             line: suggestion.line_start,
             old_text: suggestion.original_text.clone(),

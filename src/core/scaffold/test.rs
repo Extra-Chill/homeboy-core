@@ -15,6 +15,9 @@ use regex::Regex;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+use crate::code_audit::core_fingerprint::load_grammar_for_ext;
+use crate::core::engine::contract_testgen::GeneratedTestOutput;
+use crate::extension::grammar_items;
 use crate::engine::local_files;
 use crate::error::{Error, Result};
 use crate::extension::grammar;
@@ -87,6 +90,12 @@ pub struct ScaffoldBatchResult {
     pub total_stubs: usize,
     pub total_written: usize,
     pub total_skipped: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestLocation {
+    SeparateFile(PathBuf),
+    InlineModule,
 }
 
 fn is_low_signal_test_name(name: &str) -> bool {
@@ -414,6 +423,97 @@ pub fn test_file_path(source_path: &Path, root: &Path) -> PathBuf {
     }
 
     root.join("tests").join(relative)
+}
+
+pub fn find_test_location(source_file: &str, root: &Path, ext: &str) -> Option<TestLocation> {
+    let source_path = root.join(source_file);
+    let test_path = test_file_path(&source_path, root);
+
+    if test_path.exists() {
+        let relative = test_path
+            .strip_prefix(root)
+            .unwrap_or(&test_path)
+            .to_path_buf();
+        return Some(TestLocation::SeparateFile(relative));
+    }
+
+    if let Ok(content) = std::fs::read_to_string(&source_path) {
+        if ext == "rs" && content.contains("#[cfg(test)]") {
+            return Some(TestLocation::InlineModule);
+        }
+    }
+
+    None
+}
+
+pub fn generated_test_uses_unresolved_types(content: &str) -> bool {
+    content.contains("Default::default()") || content.contains("::default()")
+}
+
+pub fn render_generated_test_scaffold(
+    generated: &GeneratedTestOutput,
+    ext: &str,
+) -> Option<String> {
+    let mut content = String::new();
+    content.push('\n');
+
+    match ext {
+        "rs" => {
+            if let Some(grammar) = load_grammar_for_ext("rs") {
+                if !grammar_items::validate_brace_balance(&generated.test_source, &grammar) {
+                    return None;
+                }
+            }
+
+            content.push_str("#[cfg(test)]\nmod tests {\n");
+            content.push_str("    use super::*;\n");
+
+            for imp in &generated.extra_imports {
+                content.push_str(&format!("    {}\n", imp.trim()));
+            }
+
+            content.push('\n');
+            content.push_str(&generated.test_source);
+            content.push_str("}\n");
+        }
+        "php" => {
+            for imp in &generated.extra_imports {
+                content.push_str(imp);
+                content.push('\n');
+            }
+            if !generated.extra_imports.is_empty() {
+                content.push('\n');
+            }
+            content.push_str(&generated.test_source);
+        }
+        _ => {
+            for imp in &generated.extra_imports {
+                content.push_str(imp);
+                content.push('\n');
+            }
+            if !generated.extra_imports.is_empty() {
+                content.push('\n');
+            }
+            content.push_str(&generated.test_source);
+        }
+    }
+
+    Some(content)
+}
+
+pub fn render_generated_test_append(generated: &GeneratedTestOutput, ext: &str) -> Option<String> {
+    if ext == "rs" {
+        if let Some(grammar) = load_grammar_for_ext("rs") {
+            if !grammar_items::validate_brace_balance(&generated.test_source, &grammar) {
+                return None;
+            }
+        }
+    }
+
+    let mut content = String::new();
+    content.push('\n');
+    content.push_str(&generated.test_source);
+    Some(content)
 }
 
 pub(crate) fn generate_php_test(classes: &[ExtractedClass], config: &ScaffoldConfig) -> String {
@@ -834,4 +934,59 @@ pub fn load_extension_grammar(extension_path: &Path, language: &str) -> Option<g
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_generated_test_scaffold_wraps_rust_output() {
+        let rendered = render_generated_test_scaffold(
+            &GeneratedTestOutput {
+                test_source: "    #[test]\n    fn test_thing() {\n        assert!(true);\n    }\n"
+                    .to_string(),
+                extra_imports: vec!["use std::path::PathBuf;".to_string()],
+                tested_functions: vec!["thing".to_string()],
+            },
+            "rs",
+        )
+        .expect("expected scaffold output");
+
+        assert!(rendered.contains("#[cfg(test)]"));
+        assert!(rendered.contains("use super::*;"));
+        assert!(rendered.contains("use std::path::PathBuf;"));
+        assert!(rendered.contains("fn test_thing()"));
+    }
+
+    #[test]
+    fn generated_test_uses_unresolved_types_detects_default_fallbacks() {
+        assert!(generated_test_uses_unresolved_types(
+            "let value = Default::default();"
+        ));
+        assert!(generated_test_uses_unresolved_types(
+            "let value = Foo::default();"
+        ));
+        assert!(!generated_test_uses_unresolved_types(
+            "let value = Foo::new();"
+        ));
+    }
+
+    #[test]
+    fn render_generated_test_append_wraps_without_mutating_source() {
+        let rendered = render_generated_test_append(
+            &GeneratedTestOutput {
+                test_source: "    #[test]\n    fn test_more() {\n        assert!(true);\n    }\n"
+                    .to_string(),
+                extra_imports: vec![],
+                tested_functions: vec!["more".to_string()],
+            },
+            "rs",
+        )
+        .expect("expected append output");
+
+        assert!(rendered.starts_with('\n'));
+        assert!(rendered.contains("fn test_more()"));
+        assert!(!rendered.contains("mod tests"));
+    }
 }

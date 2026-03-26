@@ -106,6 +106,7 @@ pub fn add_import(
             required_methods: vec![],
             required_registrations: vec![],
             insertions: vec![Insertion {
+                primitive: None,
                 kind: InsertionKind::ImportAdd,
                 finding: crate::code_audit::AuditFinding::MissingImport,
                 safety_tier: InsertionKind::ImportAdd.safety_tier(),

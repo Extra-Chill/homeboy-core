@@ -26,6 +26,9 @@ pub struct Fix {
 /// A single insertion into a file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Insertion {
+    /// Explicit primitive backing this insertion.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub primitive: Option<RefactorPrimitive>,
     /// What kind of fix (mechanical action).
     pub kind: InsertionKind,
     /// The audit finding this insertion addresses.
@@ -46,6 +49,15 @@ pub struct Insertion {
     /// Human-readable description.
     pub description: String,
 }
+
+/// Explicit primitive operation represented by a refactor action.
+///
+/// Fixers should populate this whenever the operation maps to a stable engine
+/// primitive so manual refactor commands, CI summaries, and debugging can all
+/// report the same underlying action family.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RefactorPrimitive {}
 
 /// Safety classification for automated code fixes.
 ///
@@ -212,6 +224,9 @@ pub struct SkippedFile {
 pub struct NewFile {
     /// Relative path for the new file.
     pub file: String,
+    /// Explicit primitive backing this file creation.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub primitive: Option<RefactorPrimitive>,
     /// The audit finding this new file addresses.
     pub finding: AuditFinding,
     /// Safety contract for this file creation.

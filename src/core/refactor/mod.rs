@@ -59,7 +59,8 @@ pub use auto::{
     apply_decompose_plans, apply_fix_policy, apply_fixes, apply_fixes_chunked,
     apply_new_files_chunked, auto_apply_subset, ApplyChunkResult, ApplyOptions, ChunkStatus, Fix,
     FixPolicy, FixResult, FixSafetyTier, Insertion, InsertionKind, NewFile, PolicySummary,
-    PreflightCheck, PreflightContext, PreflightReport, PreflightStatus, SkippedFile,
+    PreflightCheck, PreflightContext, PreflightReport, PreflightStatus, RefactorPrimitive,
+    SkippedFile,
 };
 pub use decompose::{
     apply_plan, apply_plan_skeletons, build_plan, DecomposeAuditImpact, DecomposeGroup,

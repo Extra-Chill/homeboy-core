@@ -1164,6 +1164,7 @@ mod tests {
 
         fn removal_insertion(start: usize, end: usize, desc: &str) -> Insertion {
             Insertion {
+                primitive: None,
                 kind: InsertionKind::FunctionRemoval {
                     start_line: start,
                     end_line: end,
@@ -1286,6 +1287,7 @@ mod tests {
 
         fn removal(start: usize, end: usize, desc: &str) -> Insertion {
             Insertion {
+                primitive: None,
                 kind: InsertionKind::FunctionRemoval {
                     start_line: start,
                     end_line: end,
