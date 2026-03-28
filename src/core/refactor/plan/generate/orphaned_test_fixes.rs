@@ -115,6 +115,103 @@ fn is_method_level_orphan(description: &str) -> bool {
     description.contains("no longer exists")
 }
 
+/// Build a set of line indices (0-indexed) that are inside multi-line string
+/// literals. These lines should be skipped when scanning for function declarations
+/// to avoid matching `fn foo()` patterns embedded in test fixture strings.
+///
+/// Handles:
+/// - `r#"..."#` and `r##"..."##` etc. (Rust raw strings with any number of `#`)
+/// - Regular `"..."` strings that span multiple lines
+///
+/// A line is considered "inside a string" if it falls between the opening and
+/// closing delimiters (exclusive of the line containing the opening delimiter
+/// itself, since that line has real code on it).
+fn lines_inside_string_literals(lines: &[&str]) -> Vec<bool> {
+    let mut inside = vec![false; lines.len()];
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+
+        // Check for raw string opening: r#"  r##"  r###" etc.
+        // We scan each line for a raw string that opens but doesn't close on the same line.
+        if let Some(close_pattern) = find_unclosed_raw_string(line) {
+            // Mark subsequent lines as inside the string until we find the close.
+            let mut j = i + 1;
+            while j < lines.len() {
+                if lines[j].contains(&close_pattern) {
+                    inside[j] = true; // closing line is also inside the string
+                    break;
+                }
+                inside[j] = true;
+                j += 1;
+            }
+            i = if j < lines.len() { j + 1 } else { j };
+            continue;
+        }
+
+        i += 1;
+    }
+
+    inside
+}
+
+/// Check if a line opens a raw string that doesn't close on the same line.
+/// Returns the closing pattern (e.g., `"#` or `"##`) if found, None otherwise.
+fn find_unclosed_raw_string(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip regular strings — they rarely span lines in Rust and we don't want
+        // to confuse `"..."` with the opening of a raw string.
+        if bytes[pos] == b'"' && (pos == 0 || bytes[pos - 1] != b'r') {
+            // Regular string — find closing quote on same line
+            pos += 1;
+            while pos < len {
+                if bytes[pos] == b'"' && bytes[pos - 1] != b'\\' {
+                    pos += 1;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Look for r followed by zero or more # then "
+        if bytes[pos] == b'r' && pos + 1 < len {
+            let hash_start = pos + 1;
+            let mut hash_end = hash_start;
+            while hash_end < len && bytes[hash_end] == b'#' {
+                hash_end += 1;
+            }
+            let hash_count = hash_end - hash_start;
+
+            if hash_count > 0 && hash_end < len && bytes[hash_end] == b'"' {
+                // Found r#..." — build the closing pattern: "followed by hash_count #'s
+                let close_pattern = format!("\"{}",  "#".repeat(hash_count));
+
+                // Check if the closing pattern appears later on the SAME line
+                let after_open = &line[hash_end + 1..];
+                if !after_open.contains(&close_pattern) {
+                    return Some(close_pattern);
+                }
+
+                // Closed on same line — skip past the close and continue
+                if let Some(close_pos) = after_open.find(&close_pattern) {
+                    pos = hash_end + 1 + close_pos + close_pattern.len();
+                    continue;
+                }
+            }
+        }
+
+        pos += 1;
+    }
+
+    None
+}
+
 /// Find a function's line range by name within source content.
 ///
 /// `parse_items_for_dedup` excludes items inside `#[cfg(test)]` modules,
@@ -125,6 +222,7 @@ fn is_method_level_orphan(description: &str) -> bool {
 /// and doc comments above the function.
 fn find_test_function_range(content: &str, fn_name: &str) -> Option<(usize, usize)> {
     let lines: Vec<&str> = content.lines().collect();
+    let string_lines = lines_inside_string_literals(&lines);
 
     // Try the full name first, then without the test_ prefix.
     // Rust inline tests often omit the test_ prefix (relying on #[test] attribute),
@@ -136,7 +234,10 @@ fn find_test_function_range(content: &str, fn_name: &str) -> Option<(usize, usiz
     };
 
     let decl_idx = candidates.iter().find_map(|name| {
-        lines.iter().position(|line| {
+        lines.iter().enumerate().position(|(idx, line)| {
+            if string_lines[idx] {
+                return false;
+            }
             let trimmed = line.trim();
             trimmed.contains(&format!("fn {}(", name))
                 || trimmed.contains(&format!("fn {} (", name))
@@ -768,5 +869,110 @@ mod tests {
             fixes[0].insertions[0].manual_only,
             "Should be manual-only when source file still exists"
         );
+    }
+
+    // ── Regression tests: string literal detection ────────────────────
+
+    #[test]
+    fn does_not_match_function_inside_raw_string() {
+        // Regression: the autofix bot matched `fn test_something()` inside a
+        // raw string literal used as test fixture content and tried to delete it.
+        // This corrupted the file because it removed lines from inside a string.
+        let content = r##"
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_range_simple() {
+        let content = r#"
+fn some_function() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_something() {
+        assert_eq!(1, 1);
+    }
+}
+"#;
+        let range = find_test_function_range(content, "test_something");
+        assert!(range.is_some());
+    }
+}
+"##;
+        // Should find the REAL test_find_range_simple, NOT the embedded test_something.
+        let range = find_test_function_range(content, "test_something");
+        // test_something only exists inside r#"..."# — should not be found as a real function.
+        assert!(
+            range.is_none(),
+            "Should not match fn test_something() inside raw string literal"
+        );
+
+        // The real function test_find_range_simple SHOULD be found.
+        let range = find_test_function_range(content, "test_find_range_simple");
+        assert!(
+            range.is_some(),
+            "Should find the real test_find_range_simple function"
+        );
+    }
+
+    #[test]
+    fn does_not_match_function_inside_raw_string_double_hash() {
+        // Same regression but with r##"..."## (double-hash raw strings).
+        let content = r###"
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_actual_function() {
+        let fixture = r##"
+#[test]
+fn test_phantom() {
+    assert!(true);
+}
+"##;
+        assert!(!fixture.is_empty());
+    }
+}
+"###;
+        // test_phantom is inside r##"..."## — must not be found.
+        let range = find_test_function_range(content, "test_phantom");
+        assert!(
+            range.is_none(),
+            "Should not match fn test_phantom() inside double-hash raw string"
+        );
+
+        // The real function should be found.
+        let range = find_test_function_range(content, "test_actual_function");
+        assert!(
+            range.is_some(),
+            "Should find the real test_actual_function"
+        );
+    }
+
+    #[test]
+    fn lines_inside_string_literals_basic() {
+        let content = r##"fn real_code() {}
+let s = r#"
+fn fake_inside_string() {}
+another fake line
+"#;
+fn more_real_code() {}"##;
+        let lines: Vec<&str> = content.lines().collect();
+        let inside = lines_inside_string_literals(&lines);
+        // Line 0: fn real_code() {}           → false
+        // Line 1: let s = r#"                 → false (opening line has real code)
+        // Line 2: fn fake_inside_string() {}  → true
+        // Line 3: another fake line           → true
+        // Line 4: "#;                         → true (closing line is inside string)
+        // Line 5: fn more_real_code() {}      → false
+        assert!(!inside[0], "real code before string");
+        assert!(!inside[1], "opening line has real code");
+        assert!(inside[2], "content inside raw string");
+        assert!(inside[3], "content inside raw string");
+        assert!(inside[4], "closing delimiter line");
+        assert!(!inside[5], "real code after string");
     }
 }
