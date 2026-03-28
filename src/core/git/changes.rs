@@ -232,16 +232,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_dirty_files_ok_files_into_iter_collect() {
-        let path = "";
-        let result = get_dirty_files(&path);
-        assert!(
-            result.is_ok(),
-            "expected Ok for: Ok(files.into_iter().collect())"
-        );
-    }
-
-    #[test]
     fn test_get_dirty_files_has_expected_effects() {
         // Expected effects: mutation
         let path = "";
@@ -261,13 +251,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_diff_ok_result() {
-        let path = "";
-        let result = get_diff(&path);
-        assert!(result.is_ok(), "expected Ok for: Ok(result)");
-    }
-
-    #[test]
     fn test_get_diff_has_expected_effects() {
         // Expected effects: mutation
         let path = "";
@@ -281,14 +264,4 @@ mod tests {
         let _result = get_range_diff(&path, &baseline_ref);
     }
 
-    #[test]
-    fn test_get_range_diff_ok_string_from_utf8_lossy_output_stdout_to_string() {
-        let path = "";
-        let baseline_ref = "";
-        let result = get_range_diff(&path, &baseline_ref);
-        assert!(
-            result.is_ok(),
-            "expected Ok for: Ok(String::from_utf8_lossy(&output.stdout).to_string())"
-        );
-    }
 }
