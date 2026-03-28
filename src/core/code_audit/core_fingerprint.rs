@@ -299,9 +299,15 @@ pub fn fingerprint_from_grammar(
             seen_methods.insert(f.name.clone());
         }
     }
-    // Add test methods with test_ prefix
+    // Add test methods with test_ prefix.
+    //
+    // Only include functions that have an explicit #[test] attribute.
+    // Functions inside #[cfg(test)] modules without #[test] are helpers
+    // (factories, fixtures, grammar builders) — not actual tests. Including
+    // them causes the orphaned test detector to flag them when no matching
+    // source method exists.
     for f in &functions {
-        if f.is_test {
+        if f.is_test && f.has_test_attr {
             let prefixed = if f.name.starts_with("test_") {
                 f.name.clone()
             } else {
@@ -469,6 +475,10 @@ struct FunctionInfo {
     body: String,
     visibility: String,
     is_test: bool,
+    /// Whether the function has an explicit `#[test]` attribute (vs. just
+    /// being inside a `#[cfg(test)]` module). Helpers inside test modules
+    /// that happen to start with `test_` are NOT actual tests.
+    has_test_attr: bool,
     is_trait_impl: bool,
     params: String,
     _start_line: usize,
@@ -631,6 +641,7 @@ fn extract_functions(
             body,
             visibility,
             is_test,
+            has_test_attr,
             is_trait_impl,
             params,
             _start_line: symbol.line,
@@ -1668,6 +1679,75 @@ fn write(msg: &str) -> bool {
         assert_eq!(
             replace_string_literals(r#"let x = "hello" + 'world'"#),
             "let x = STR + STR"
+        );
+    }
+
+    #[test]
+    fn test_helpers_without_test_attr_not_counted_as_test_methods() {
+        // Regression: functions inside #[cfg(test)] without #[test] attribute
+        // were fingerprinted as test methods. Two cases:
+        //
+        // 1. fn test_insertion() — starts with test_, is a factory helper
+        //    → was included as-is, orphan detector looked for "insertion"
+        //
+        // 2. fn rust_grammar() — doesn't start with test_, is a grammar builder
+        //    → was prefixed to "test_rust_grammar", orphan detector looked for "rust_grammar"
+        //
+        // Both caused false orphaned test findings when no matching source method existed.
+        let grammar = rust_grammar();
+        let content = r#"
+pub fn from_insertion(ins: &str) -> String {
+    ins.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_insertion() -> String {
+        "fixture".to_string()
+    }
+
+    fn rust_grammar() -> String {
+        "grammar".to_string()
+    }
+
+    #[test]
+    fn test_from_insertion() {
+        let result = from_insertion("hello");
+        assert_eq!(result, "hello");
+    }
+}
+"#;
+        let fp = fingerprint_from_grammar(content, &grammar, "src/core/engine/edit_op.rs")
+            .expect("fingerprint should succeed");
+
+        // test_from_insertion has #[test] → should be in methods as "test_from_insertion"
+        assert!(
+            fp.methods.contains(&"test_from_insertion".to_string()),
+            "Actual #[test] function should be in methods list. Methods: {:?}",
+            fp.methods
+        );
+
+        // test_insertion is a helper (no #[test]) → should NOT be in methods list
+        assert!(
+            !fp.methods.contains(&"test_insertion".to_string()),
+            "Helper fn test_insertion() without #[test] should NOT be in methods. Methods: {:?}",
+            fp.methods
+        );
+
+        // rust_grammar is a helper (no #[test]) → should NOT be in methods as test_rust_grammar
+        assert!(
+            !fp.methods.contains(&"test_rust_grammar".to_string()),
+            "Helper fn rust_grammar() without #[test] should NOT be in methods. Methods: {:?}",
+            fp.methods
+        );
+
+        // from_insertion is a real source method → should be in methods list
+        assert!(
+            fp.methods.contains(&"from_insertion".to_string()),
+            "Source method from_insertion should be in methods. Methods: {:?}",
+            fp.methods
         );
     }
 }
