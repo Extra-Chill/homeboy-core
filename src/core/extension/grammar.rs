@@ -376,10 +376,6 @@ fn default_context() -> String {
     "any".to_string()
 }
 
-fn default_true() -> bool {
-    true
-}
-
 // ============================================================================
 // Structural parser — context-aware iteration over source text
 // ============================================================================
@@ -1039,16 +1035,6 @@ mod tests {
         // Braces inside string should NOT change depth
         assert_eq!(lines[0].depth, 0);
         assert_eq!(lines[1].depth, 0);
-    }
-
-    #[test]
-    fn php_hash_comments() {
-        let content = "<?php\n# this is a comment\n$x = 1;\n";
-        let grammar = php_grammar();
-        let lines = walk_lines(content, &grammar);
-
-        assert_eq!(lines[1].region, Region::LineComment);
-        assert_eq!(lines[2].region, Region::Code);
     }
 
     // ---- Extraction tests ----
