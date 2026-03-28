@@ -536,6 +536,22 @@ fn generate_simple_duplicate_fixes(
     };
 
     for remove_file in &group.remove_from {
+        // Integration test files (tests/) are separate compilation units —
+        // they cannot import from each other via `use crate::`. Skip fixes
+        // that would generate invalid cross-crate imports.
+        if crate::code_audit::walker::is_test_path(remove_file)
+            || crate::code_audit::walker::is_test_path(&group.canonical_file)
+        {
+            skipped.push(SkippedFile {
+                file: remove_file.clone(),
+                reason: format!(
+                    "Duplicate `{}` spans integration test files — test binaries cannot cross-import",
+                    group.function_name
+                ),
+            });
+            continue;
+        }
+
         let Some(remove_surface) = module_surfaces.get(remove_file) else {
             skipped.push(SkippedFile {
                 file: remove_file.clone(),
