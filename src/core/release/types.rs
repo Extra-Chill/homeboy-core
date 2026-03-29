@@ -177,6 +177,9 @@ pub struct ReleaseCommandInput {
     pub bump_override: Option<String>,
     #[serde(default)]
     pub skip_publish: bool,
+    /// Git identity for release commits: "bot", "Name <email>", or None (use existing config).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

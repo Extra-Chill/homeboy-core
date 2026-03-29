@@ -26,6 +26,18 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
 
     if !input.dry_run {
         ensure_release_on_default_branch(&component.local_path)?;
+
+        // Configure git identity for release commits/tags
+        if let Some(ref identity_str) = input.git_identity {
+            let identity = git::parse_git_identity(Some(identity_str));
+            git::configure_identity(&component.local_path, &identity)?;
+            log_status!(
+                "release",
+                "Git identity: {} <{}>",
+                identity.name,
+                identity.email
+            );
+        }
     }
 
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
@@ -552,6 +564,13 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
             ..Default::default()
         },
     )?;
+
+    // Configure git identity for recovery commits/tags
+    if let Some(ref identity_str) = input.git_identity {
+        let identity = git::parse_git_identity(Some(identity_str));
+        git::configure_identity(&component.local_path, &identity)?;
+    }
+
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
     let version_info = crate::version::read_component_version(&component)?;
     let current_version = &version_info.version;
@@ -678,6 +697,7 @@ pub fn run_batch(
             skip_checks: input_template.skip_checks,
             bump_override: input_template.bump_override.clone(),
             skip_publish: input_template.skip_publish,
+            git_identity: input_template.git_identity.clone(),
         };
 
         match run_command(input) {
