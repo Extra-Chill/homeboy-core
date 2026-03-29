@@ -74,16 +74,17 @@ pub fn get_uncommitted_changes(path: &str) -> Result<UncommittedChanges> {
 /// (excludes Deleted files since there's nothing to lint).
 /// Returns repo-relative paths.
 ///
-/// Prefers triple-dot (`ref...HEAD`) to get only changes on the current branch
+/// Uses triple-dot (`ref...HEAD`) to get only changes on the current branch
 /// relative to the merge base. In shallow clones (common in CI), the merge base
 /// may not be reachable — the function progressively deepens the repository
-/// until the ancestry is available. Falls back to two-dot (`ref..HEAD`) only
-/// as a last resort when deepening is exhausted.
+/// until the ancestry is available.
+///
+/// Fails explicitly if the merge base cannot be resolved. No silent fallbacks.
 pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>> {
     // Ensure the ref's ancestry is reachable (handles shallow CI clones).
-    ensure_ancestry_for_ref(path, git_ref);
+    ensure_ancestry_for_ref(path, git_ref)?;
 
-    // Try triple-dot (merge-base diff) — shows only changes on the current
+    // Triple-dot (merge-base diff) — shows only changes on the current
     // branch, not changes on the ref's branch.
     let output = execute_git(
         path,
@@ -100,34 +101,12 @@ pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>>
         return parse_diff_output(&output.stdout);
     }
 
-    // Triple-dot failed even after deepening — fall back to two-dot diff
-    // which only needs both commits to exist (produces a broader diff).
     let stderr = String::from_utf8_lossy(&output.stderr);
-    eprintln!(
-        "Three-dot diff failed after ancestry resolution ({}), falling back to two-dot diff",
+    Err(Error::git_command_failed(format!(
+        "git diff {}...HEAD failed: {}",
+        git_ref,
         stderr.trim()
-    );
-
-    let fallback = execute_git(
-        path,
-        &[
-            "diff",
-            "--name-only",
-            "--diff-filter=ACMR",
-            &format!("{}..HEAD", git_ref),
-        ],
-    )
-    .map_err(|e| Error::git_command_failed(e.to_string()))?;
-
-    if !fallback.status.success() {
-        let fallback_stderr = String::from_utf8_lossy(&fallback.stderr);
-        return Err(Error::git_command_failed(format!(
-            "git diff --name-only {}..HEAD failed: {}",
-            git_ref, fallback_stderr
-        )));
-    }
-
-    parse_diff_output(&fallback.stdout)
+    )))
 }
 
 /// Check whether the repo is a shallow clone.
@@ -156,21 +135,25 @@ fn has_merge_base(path: &str, git_ref: &str) -> bool {
 
 /// In shallow clones, the merge base between a ref and HEAD may not be
 /// reachable. This function progressively deepens the repository until the
-/// merge base is available, or gives up after exhausting reasonable depths.
+/// merge base is available.
 ///
 /// Deepening strategy: 50 → 200 → full unshallow. This matches what CI
 /// environments typically need — most PRs have <50 commits, so the first
 /// deepen usually suffices.
-fn ensure_ancestry_for_ref(path: &str, git_ref: &str) {
+///
+/// Returns an error if the merge base cannot be resolved after all attempts.
+fn ensure_ancestry_for_ref(path: &str, git_ref: &str) -> Result<()> {
     // Fast path: merge base already reachable (full clone or sufficient depth).
     if has_merge_base(path, git_ref) {
-        return;
+        return Ok(());
     }
 
     // Only deepen if this is actually a shallow clone. In a full clone,
     // a missing merge base means the ref itself is invalid — deepening won't help.
     if !is_shallow_repo(path) {
-        return;
+        return Err(Error::git_command_failed(format!(
+            "Cannot resolve merge base for {git_ref}: ref is not reachable and repository is not shallow (is the ref valid?)"
+        )));
     }
 
     eprintln!("Shallow clone detected — deepening to resolve merge base for {git_ref}");
@@ -183,7 +166,7 @@ fn ensure_ancestry_for_ref(path: &str, git_ref: &str) {
         let _ = execute_git(path, &["fetch", "--deepen", depth]);
         if has_merge_base(path, git_ref) {
             eprintln!("Merge base found after deepening by {depth} commits");
-            return;
+            return Ok(());
         }
     }
 
@@ -193,8 +176,11 @@ fn ensure_ancestry_for_ref(path: &str, git_ref: &str) {
 
     if has_merge_base(path, git_ref) {
         eprintln!("Merge base found after full unshallow");
+        Ok(())
     } else {
-        eprintln!("Warning: merge base for {git_ref} not found even after unshallow — triple-dot diff will likely fail");
+        Err(Error::git_command_failed(format!(
+            "Cannot resolve merge base for {git_ref} even after full unshallow — the ref may not exist in the remote"
+        )))
     }
 }
 

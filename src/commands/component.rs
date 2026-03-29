@@ -61,8 +61,11 @@ enum ComponentCommand {
     },
     /// Display component configuration
     Show {
-        /// Component ID
-        id: String,
+        /// Component ID (optional when --path is provided)
+        id: Option<String>,
+        /// Discover component from a directory's homeboy.json instead of the registry
+        #[arg(long)]
+        path: Option<String>,
     },
     /// Update component configuration fields
     ///
@@ -278,7 +281,7 @@ pub fn run(
                 0,
             ))
         }
-        ComponentCommand::Show { id } => show(&id),
+        ComponentCommand::Show { id, path } => show(id.as_deref(), path.as_deref()),
         ComponentCommand::Set {
             args,
             local_path,
@@ -333,13 +336,48 @@ fn suggest_project_for_path(local_path: &str) -> Option<String> {
     None
 }
 
-fn show(id: &str) -> CmdResult<ComponentOutput> {
-    let component = component::load(id).map_err(|e| e.with_contextual_hint())?;
+fn show(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
+    let component = match (id, path) {
+        // --path: discover from directory's homeboy.json
+        (_, Some(dir)) => {
+            let dir_path = std::path::Path::new(dir);
+            component::resolve_effective(id, Some(dir), None)
+                .map_err(|_| {
+                    homeboy::Error::validation_invalid_argument(
+                        "path",
+                        format!(
+                            "No homeboy.json found at {} and no registered component matches",
+                            dir_path.display()
+                        ),
+                        None,
+                        Some(vec![
+                            format!("Create homeboy.json in {}", dir_path.display()),
+                            "Or provide a registered component ID".to_string(),
+                        ]),
+                    )
+                })?
+        }
+        // ID only: load from registry
+        (Some(comp_id), None) => {
+            component::load(comp_id).map_err(|e| e.with_contextual_hint())?
+        }
+        // Neither: try CWD discovery
+        (None, None) => {
+            component::resolve_effective(None, None, None)
+                .map_err(|_| {
+                    homeboy::Error::validation_missing_argument(vec![
+                        "id or --path".to_string(),
+                    ])
+                })?
+        }
+    };
+
+    let resolved_id = component.id.clone();
 
     Ok((
         ComponentOutput {
             command: "component.show".to_string(),
-            id: Some(id.to_string()),
+            id: Some(resolved_id.clone()),
             entity: Some({
                 let mut value = serde_json::to_value(&component).map_err(|error| {
                     homeboy::Error::validation_invalid_argument(
@@ -350,7 +388,7 @@ fn show(id: &str) -> CmdResult<ComponentOutput> {
                     )
                 })?;
                 if let Value::Object(ref mut map) = value {
-                    map.insert("id".to_string(), Value::String(component.id.clone()));
+                    map.insert("id".to_string(), Value::String(resolved_id));
                 }
                 value
             }),
