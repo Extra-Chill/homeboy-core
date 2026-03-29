@@ -89,8 +89,7 @@ pub fn capture(component: &Component) -> Option<BuildProvenance> {
 /// Write build provenance to the sidecar file in the component directory.
 pub fn write(component: &Component, provenance: &BuildProvenance) -> std::io::Result<()> {
     let meta_path = meta_path(&component.local_path);
-    let json = serde_json::to_string_pretty(provenance)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(provenance).map_err(std::io::Error::other)?;
     std::fs::write(&meta_path, json)
 }
 
