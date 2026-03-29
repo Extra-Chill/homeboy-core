@@ -57,6 +57,12 @@ pub struct ReleaseArgs {
     /// Use when CI handles publishing after the tag is pushed.
     #[arg(long)]
     skip_publish: bool,
+
+    /// Git identity for release commits and tags.
+    /// Use "bot" for the default CI bot identity, or "Name <email>" for custom.
+    /// When set, configures git user.name and user.email before committing.
+    #[arg(long)]
+    git_identity: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -106,6 +112,7 @@ impl ReleaseArgs {
             bump,
             major,
             skip_publish,
+            git_identity: None,
         }
     }
 }
@@ -132,6 +139,7 @@ pub fn run(
             skip_checks: args.skip_checks,
             bump_override: bump_override.clone(),
             skip_publish: args.skip_publish,
+            git_identity: args.git_identity.clone(),
         })?;
 
         return Ok((
@@ -167,6 +175,7 @@ pub fn run(
         skip_checks: args.skip_checks,
         bump_override,
         skip_publish: args.skip_publish,
+        git_identity: args.git_identity.clone(),
     };
 
     let batch_result = release::run_batch(&component_ids, &input_template);
