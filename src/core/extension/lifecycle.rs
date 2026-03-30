@@ -379,17 +379,11 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         return Err(Error::extension_not_found(extension_id.to_string(), vec![]));
     }
 
-    // Linked extensions are managed externally
+    // Linked extensions: resolve the symlink target and pull the source repo.
+    // The target may be a subdirectory of a larger repo (e.g. homeboy-extensions/wordpress),
+    // so we find the git root and pull from there.
     if is_extension_linked(extension_id) {
-        return Err(Error::validation_invalid_argument(
-            "extension_id",
-            format!(
-                "Extension '{}' is linked. Update the source directory directly.",
-                extension_id
-            ),
-            Some(extension_id.to_string()),
-            None,
-        ));
+        return update_linked_extension(extension_id, &extension_dir, force);
     }
 
     if !force && !is_workdir_clean(&extension_dir) {
@@ -438,6 +432,122 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         url: source_url,
         path: extension_dir,
     })
+}
+
+/// Update a linked extension by pulling the source repository.
+///
+/// Linked extensions are symlinks pointing to a source directory, which may be
+/// a subdirectory of a monorepo (e.g. `homeboy-extensions/wordpress`). This
+/// function resolves the git root, checks out the default branch, and pulls.
+fn update_linked_extension(
+    extension_id: &str,
+    extension_dir: &Path,
+    force: bool,
+) -> Result<UpdateResult> {
+    // Resolve symlink to actual source directory
+    let source_dir = std::fs::read_link(extension_dir).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!("read symlink for {}", extension_id)),
+        )
+    })?;
+
+    // Find the git root (source may be a subdirectory of a larger repo)
+    let git_root_str = git::get_git_root(&source_dir.to_string_lossy())?;
+    let git_root = PathBuf::from(&git_root_str);
+
+    if !force && !is_workdir_clean(&git_root) {
+        return Err(Error::validation_invalid_argument(
+            "extension_id",
+            format!(
+                "Linked extension '{}' source repo has uncommitted changes. Use --force to proceed.",
+                extension_id,
+            ),
+            Some(extension_id.to_string()),
+            None,
+        ));
+    }
+
+    // Checkout the default branch before pulling.
+    // Try main first, fall back to master.
+    let default_branch = detect_default_branch(&git_root).unwrap_or_else(|| "main".to_string());
+    let checkout_output = Command::new("git")
+        .args(["checkout", &default_branch])
+        .current_dir(&git_root)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    if let Ok(output) = &checkout_output {
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log_status!(
+                "extension",
+                "Warning: could not checkout {} for {}: {}",
+                default_branch,
+                extension_id,
+                stderr.trim()
+            );
+            // Continue anyway — pull on current branch is better than nothing
+        }
+    }
+
+    git::pull_repo(&git_root)?;
+
+    // Update .source-revision on the extension symlink target
+    if let Some(rev) = get_short_head_revision(&source_dir) {
+        let _ = std::fs::write(extension_dir.join(".source-revision"), &rev);
+    }
+
+    // Auto-run setup if extension defines a setup_command
+    if let Ok(extension) = load_extension(extension_id) {
+        if extension
+            .runtime()
+            .is_some_and(|r| r.setup_command.is_some())
+        {
+            let _ = run_setup(extension_id);
+        }
+    }
+
+    let url = format!("linked:{}", source_dir.display());
+    Ok(UpdateResult {
+        extension_id: extension_id.to_string(),
+        url,
+        path: source_dir,
+    })
+}
+
+/// Detect the default branch of a git repository.
+/// Checks `refs/remotes/origin/HEAD` first, then tries `main` and `master`.
+fn detect_default_branch(repo_dir: &Path) -> Option<String> {
+    // Try symbolic-ref first (most reliable)
+    let output = git_silent(repo_dir, &["symbolic-ref", "refs/remotes/origin/HEAD"])?;
+    if output.status.success() {
+        let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // refs/remotes/origin/main → main
+        return refname.rsplit('/').next().map(|s| s.to_string());
+    }
+
+    // Fallback: check if main or master exist as local branches
+    for branch in &["main", "master"] {
+        let check = git_silent(repo_dir, &["rev-parse", "--verify", branch])?;
+        if check.status.success() {
+            return Some(branch.to_string());
+        }
+    }
+
+    None
+}
+
+/// Run a git command silently (no stdin/stderr) and return the output.
+fn git_silent(dir: &Path, args: &[&str]) -> Option<std::process::Output> {
+    Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
 }
 
 /// Uninstall a extension. Automatically detects symlinks vs cloned directories.

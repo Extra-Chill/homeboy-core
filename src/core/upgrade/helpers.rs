@@ -145,6 +145,7 @@ pub(crate) fn version_is_newer(latest: &str, current: &str) -> bool {
 pub fn run_upgrade_with_method(
     force: bool,
     method_override: Option<InstallMethod>,
+    skip_extensions: bool,
 ) -> Result<UpgradeResult> {
     let install_method = method_override.unwrap_or_else(detect_install_method);
     let previous_version = current_version().to_string();
@@ -165,8 +166,13 @@ pub fn run_upgrade_with_method(
     if !force {
         let check = check_for_updates()?;
         if !check.update_available {
-            // Even when no binary update is needed, still run config migrations
-            // and extension updates — these are independent of the binary version.
+            // Even when no binary update is needed, still run extension updates
+            // and config migrations — these are independent of the binary version.
+            let (extensions_updated, extensions_skipped) = if skip_extensions {
+                (vec![], vec![])
+            } else {
+                update_all_extensions()
+            };
             let projects_migrated = migrate_all_projects();
             return Ok(UpgradeResult {
                 command: "upgrade".to_string(),
@@ -176,8 +182,8 @@ pub fn run_upgrade_with_method(
                 upgraded: false,
                 message: "Already at latest version".to_string(),
                 restart_required: false,
-                extensions_updated: vec![],
-                extensions_skipped: vec![],
+                extensions_updated,
+                extensions_skipped,
                 projects_migrated,
             });
         }
@@ -189,7 +195,7 @@ pub fn run_upgrade_with_method(
     // Auto-update all installed extensions after a successful upgrade.
     // This prevents CI/local extension version drift that causes baseline
     // mismatches and inconsistent audit findings.
-    let (extensions_updated, extensions_skipped) = if success {
+    let (extensions_updated, extensions_skipped) = if success && !skip_extensions {
         update_all_extensions()
     } else {
         (vec![], vec![])
@@ -270,12 +276,6 @@ fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
     let mut skipped = Vec::new();
 
     for id in &extension_ids {
-        // Skip linked extensions (they're managed externally)
-        if extension::is_extension_linked(id) {
-            skipped.push(id.clone());
-            continue;
-        }
-
         let old_version = extension::load_extension(id)
             .ok()
             .map(|m| m.version.clone())
