@@ -19,6 +19,10 @@ pub struct UpgradeArgs {
     #[arg(long)]
     pub no_restart: bool,
 
+    /// Skip extension updates (only upgrade the binary)
+    #[arg(long)]
+    pub skip_extensions: bool,
+
     /// Override install method detection (homebrew|cargo|source|binary)
     #[arg(long)]
     pub method: Option<String>,
@@ -52,7 +56,7 @@ pub fn run(args: UpgradeArgs, _global: &GlobalArgs) -> CmdResult<Value> {
         })
         .transpose()?;
 
-    let result = upgrade::run_upgrade_with_method(args.force, method_override)?;
+    let result = upgrade::run_upgrade_with_method(args.force, method_override, args.skip_extensions)?;
     let json = serde_json::to_value(&result)
         .map_err(|e| homeboy::Error::internal_json(e.to_string(), None))?;
 
