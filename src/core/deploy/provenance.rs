@@ -36,6 +36,7 @@ pub struct BuildProvenance {
 
 impl BuildProvenance {
     /// Returns true if this build was from the exact tagged commit (not ahead).
+    #[allow(dead_code)]
     pub(crate) fn is_tagged_build(&self) -> bool {
         self.ahead_of_tag == 0 && self.tag.is_some() && !self.dirty
     }

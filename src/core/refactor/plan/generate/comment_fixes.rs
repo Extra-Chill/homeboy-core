@@ -106,7 +106,7 @@ pub(crate) fn generate_comment_fixes(
             _ => continue,
         };
 
-        // TODO markers describe work to be done — always needs human review.
+        // TodoMarker findings describe work to be done — always needs human review.
         if finding_kind == AuditFinding::TodoMarker {
             let ins = manual_blocked(
                 doc_line_removal(

@@ -14,7 +14,6 @@ pub enum FileRole {
 
 #[derive(Debug, Clone)]
 pub struct SymbolSurface {
-    pub symbol: String,
     pub incoming_callers: Vec<String>,
     pub incoming_importers: Vec<String>,
     pub reexport_files: Vec<String>,
@@ -34,11 +33,8 @@ impl SymbolSurface {
 #[derive(Debug, Clone)]
 pub struct ModuleSurface {
     pub file: String,
-    pub module_path: String,
-    pub language: crate::code_audit::conventions::Language,
     pub role: FileRole,
     pub public_api: HashSet<String>,
-    pub imports: Vec<String>,
     pub internal_calls: HashSet<String>,
     pub call_sites: HashSet<String>,
     pub symbols: HashMap<String, SymbolSurface>,
@@ -104,6 +100,7 @@ fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSur
         .iter()
         .map(|site| site.target.clone())
         .collect();
+    let extensions = file_extensions_for(&fp.language);
 
     let mut symbols = HashMap::new();
     for symbol in &public_api {
@@ -111,7 +108,7 @@ fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSur
             symbol,
             &module_path,
             root,
-            &file_extensions_for(&fp.language),
+            &extensions,
         );
         let mut incoming_callers = Vec::new();
         let mut incoming_importers = Vec::new();
@@ -129,7 +126,6 @@ fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSur
         symbols.insert(
             symbol.clone(),
             SymbolSurface {
-                symbol: symbol.clone(),
                 incoming_callers,
                 incoming_importers,
                 reexport_files,
@@ -139,11 +135,8 @@ fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSur
 
     ModuleSurface {
         file,
-        module_path,
-        language: fp.language.clone(),
         role,
         public_api,
-        imports: fp.imports.clone(),
         internal_calls,
         call_sites,
         symbols,
