@@ -387,17 +387,13 @@ mod tests {
         let index = ModuleSurfaceIndex::from_surfaces(vec![
             crate::core::refactor::plan::generate::module_surface::ModuleSurface {
                 file: "test.rs".to_string(),
-                module_path: "test".to_string(),
-                language: crate::code_audit::conventions::Language::Rust,
                 role: FileRole::Regular,
                 public_api: ["cache_path".to_string()].into_iter().collect(),
-                imports: vec![],
                 internal_calls: HashSet::new(),
                 call_sites: HashSet::new(),
                 symbols: HashMap::from([(
                     "cache_path".to_string(),
                     crate::core::refactor::plan::generate::module_surface::SymbolSurface {
-                        symbol: "cache_path".to_string(),
                         incoming_callers: vec!["src/consumer.rs".to_string()],
                         incoming_importers: vec![],
                         reexport_files: vec![],
@@ -441,17 +437,13 @@ mod tests {
         let index = ModuleSurfaceIndex::from_surfaces(vec![
             crate::core::refactor::plan::generate::module_surface::ModuleSurface {
                 file: "src/core/public_api.rs".to_string(),
-                module_path: "core::public_api".to_string(),
-                language: crate::code_audit::conventions::Language::Rust,
                 role: FileRole::PublicApi,
                 public_api: ["run".to_string()].into_iter().collect(),
-                imports: vec![],
                 internal_calls: HashSet::new(),
                 call_sites: HashSet::new(),
                 symbols: HashMap::from([(
                     "run".to_string(),
                     crate::core::refactor::plan::generate::module_surface::SymbolSurface {
-                        symbol: "run".to_string(),
                         incoming_callers: vec!["src/main.rs".to_string()],
                         incoming_importers: vec![],
                         reexport_files: vec![],
@@ -460,17 +452,13 @@ mod tests {
             },
             crate::core::refactor::plan::generate::module_surface::ModuleSurface {
                 file: "src/core/runner.rs".to_string(),
-                module_path: "core::runner".to_string(),
-                language: crate::code_audit::conventions::Language::Rust,
                 role: FileRole::Regular,
                 public_api: ["run".to_string()].into_iter().collect(),
-                imports: vec![],
                 internal_calls: ["run".to_string()].into_iter().collect(),
                 call_sites: HashSet::new(),
                 symbols: HashMap::from([(
                     "run".to_string(),
                     crate::core::refactor::plan::generate::module_surface::SymbolSurface {
-                        symbol: "run".to_string(),
                         incoming_callers: vec!["src/main.rs".to_string()],
                         incoming_importers: vec!["src/core/public_api.rs".to_string()],
                         reexport_files: vec![],
