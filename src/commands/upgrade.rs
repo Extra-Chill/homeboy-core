@@ -56,7 +56,8 @@ pub fn run(args: UpgradeArgs, _global: &GlobalArgs) -> CmdResult<Value> {
         })
         .transpose()?;
 
-    let result = upgrade::run_upgrade_with_method(args.force, method_override, args.skip_extensions)?;
+    let result =
+        upgrade::run_upgrade_with_method(args.force, method_override, args.skip_extensions)?;
     let json = serde_json::to_value(&result)
         .map_err(|e| homeboy::Error::internal_json(e.to_string(), None))?;
 
