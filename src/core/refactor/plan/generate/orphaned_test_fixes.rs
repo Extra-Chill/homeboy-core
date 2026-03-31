@@ -853,14 +853,14 @@ mod tests {
         // test_something only exists inside r#"..."# — should not be found as a real function.
         assert!(
             range.is_none(),
-            "Should not match fn test_something() inside raw string literal"
+            "should not match fn test_something() inside a raw string literal"
         );
 
         // The real function test_find_range_simple SHOULD be found.
         let range = find_test_function_range(content, "test_find_range_simple");
         assert!(
             range.is_some(),
-            "Should find the real test_find_range_simple function"
+            "should find the real test_find_range_simple fn"
         );
     }
 
@@ -886,12 +886,15 @@ fn test_phantom() {
         let range = find_test_function_range(content, "test_phantom");
         assert!(
             range.is_none(),
-            "Should not match fn test_phantom() inside double-hash raw string"
+            "should not match fn test_phantom() inside a double-hash raw string"
         );
 
         // The real function should be found.
         let range = find_test_function_range(content, "test_actual_function");
-        assert!(range.is_some(), "Should find the real test_actual_function");
+        assert!(
+            range.is_some(),
+            "should find the real test_actual_function fn"
+        );
     }
 
     #[test]
