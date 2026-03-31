@@ -104,12 +104,7 @@ fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSur
 
     let mut symbols = HashMap::new();
     for symbol in &public_api {
-        let callers = symbol_graph::trace_symbol_callers(
-            symbol,
-            &module_path,
-            root,
-            &extensions,
-        );
+        let callers = symbol_graph::trace_symbol_callers(symbol, &module_path, root, &extensions);
         let mut incoming_callers = Vec::new();
         let mut incoming_importers = Vec::new();
         for caller in callers {
