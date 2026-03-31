@@ -4,6 +4,23 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.88.0] - 2026-03-31
+
+### Added
+- add autofix safety guards to refactor --write pipeline
+- homeboy upgrade now updates all extensions including linked ones
+- make component ID optional for audit/lint/test/refactor/scaffold
+- add --git-identity flag for CI bot commits
+- skip lint/test stages when cached output shows clean pass
+- add --commit and --git-identity flags
+- resolve shallow clone ancestry for --changed-since diffs
+
+### Fixed
+- resolve Rust 2021 reserved prefix compile errors blocking release
+- remove dead fields to eliminate all compiler warnings
+- auto-detect deploy ownership from parent directory instead of target
+- three bugs — CSS in rename, stale deploy, release --deploy skip
+
 ## [0.87.1] - 2026-03-28
 
 ### Changed
