@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.88.1] - 2026-04-02
+
+### Changed
+- Extract skill to standalone homeboy-skills repo
+- Update audit baseline after file-level components merge
+- Add file-level component deploy strategy
+- Remove .homeboy-build-meta.json sidecar — one homeboy file per repo
+
+### Fixed
+- apply cargo fmt formatting for release
+- ScopedExtensionConfig captures flat extension settings
+
 ## [0.88.0] - 2026-03-31
 
 ### Added
