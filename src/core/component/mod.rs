@@ -830,7 +830,10 @@ mod tests {
 
         let config: ScopedExtensionConfig = serde_json::from_value(json).unwrap();
         assert_eq!(
-            config.settings.get("database_type").and_then(|v| v.as_str()),
+            config
+                .settings
+                .get("database_type")
+                .and_then(|v| v.as_str()),
             Some("mysql")
         );
         assert_eq!(
@@ -858,7 +861,10 @@ mod tests {
         let config: ScopedExtensionConfig = serde_json::from_value(json).unwrap();
         assert_eq!(config.version.as_deref(), Some(">=2.0.0"));
         assert_eq!(
-            config.settings.get("database_type").and_then(|v| v.as_str()),
+            config
+                .settings
+                .get("database_type")
+                .and_then(|v| v.as_str()),
             Some("mysql")
         );
         assert_eq!(
@@ -881,7 +887,10 @@ mod tests {
         let config: ScopedExtensionConfig = serde_json::from_value(json).unwrap();
         // Explicit settings win over flat keys.
         assert_eq!(
-            config.settings.get("database_type").and_then(|v| v.as_str()),
+            config
+                .settings
+                .get("database_type")
+                .and_then(|v| v.as_str()),
             Some("mysql"),
             "explicit settings sub-object should take precedence over flat keys"
         );
