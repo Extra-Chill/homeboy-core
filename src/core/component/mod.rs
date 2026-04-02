@@ -367,8 +367,7 @@ impl Component {
     /// atomic SCP instead of rsync. They skip build, git sync, and tag checkout.
     pub fn is_file_component(&self) -> bool {
         self.deploy_strategy.as_deref() == Some("file")
-            || (std::path::Path::new(&self.local_path).is_file()
-                && self.deploy_strategy.is_none())
+            || (std::path::Path::new(&self.local_path).is_file() && self.deploy_strategy.is_none())
     }
 
     /// Ensure `remote_path` is populated. If empty, attempt auto-resolution.

@@ -260,7 +260,10 @@ fn execute_file_deploy(
         .and_then(|p| p.to_str())
         .unwrap_or(".");
 
-    let mkdir_cmd = format!("mkdir -p {}", crate::engine::shell::quote_path(remote_parent));
+    let mkdir_cmd = format!(
+        "mkdir -p {}",
+        crate::engine::shell::quote_path(remote_parent)
+    );
     log_status!("deploy", "Ensuring remote directory: {}", remote_parent);
     let mkdir_output = ctx.client.execute(&mkdir_cmd);
     if !mkdir_output.success {
@@ -308,7 +311,10 @@ fn execute_file_deploy(
             }
 
             super::version_overrides::run_post_deploy_hooks(
-                &ctx.client, component, install_dir, base_path,
+                &ctx.client,
+                component,
+                install_dir,
+                base_path,
             );
 
             ComponentDeployResult::new(component, base_path)
