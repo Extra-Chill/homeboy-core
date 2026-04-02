@@ -284,12 +284,7 @@ pub(super) fn deploy_with_override(
     vars.insert("domain".to_string(), domain.unwrap_or("").to_string());
     vars.insert(
         "allowRootFlag".to_string(),
-        if ssh_client.user == "root" {
-            "--allow-root"
-        } else {
-            ""
-        }
-        .to_string(),
+        "--allow-root".to_string(),
     );
 
     let install_cmd = render_map(&override_config.install_command, &vars);
