@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.88.2] - 2026-04-03
+
+### Changed
+- fix formatting in version_overrides.rs
+
+### Fixed
+- always pass --allow-root to WP-CLI in WordPress deploy
+
 ## [0.88.1] - 2026-04-02
 
 ### Changed
