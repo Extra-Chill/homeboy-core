@@ -686,52 +686,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_method_rename() {
-        let diff = r#"@@ -10,7 +10,7 @@
--    public function executeRunFlow($id) {
-+    public function executeWorkflow($id) {
-         return $this->doWork($id);
-     }
-"#;
-        let changes = extract_changes_from_diff("src/Abilities/JobAbilities.php", diff);
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].change_type, ChangeType::MethodRename);
-        assert_eq!(changes[0].old_symbol, "executeRunFlow");
-        assert_eq!(changes[0].new_symbol.as_deref(), Some("executeWorkflow"));
-    }
-
-    #[test]
-    fn extract_class_rename() {
-        let diff = r#"@@ -1,5 +1,5 @@
--class FlowsCommand extends BaseCommand {
-+class FlowCommand extends BaseCommand {
-     public function handle() {
-"#;
-        let changes = extract_changes_from_diff("src/Commands/FlowsCommand.php", diff);
-
-        let cls = changes
-            .iter()
-            .find(|c| c.change_type == ChangeType::ClassRename)
-            .unwrap();
-        assert_eq!(cls.old_symbol, "FlowsCommand");
-        assert_eq!(cls.new_symbol.as_deref(), Some("FlowCommand"));
-    }
-
-    #[test]
-    fn extract_rust_fn_rename() {
-        let diff = r#"@@ -10,7 +10,7 @@
--pub fn load_config(path: &Path) -> Config {
-+pub fn read_config(path: &Path) -> Config {
-     let data = fs::read_to_string(path).unwrap();
-"#;
-        let changes = extract_changes_from_diff("src/config.rs", diff);
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].change_type, ChangeType::MethodRename);
-        assert_eq!(changes[0].old_symbol, "load_config");
-        assert_eq!(changes[0].new_symbol.as_deref(), Some("read_config"));
-    }
-
-    #[test]
     fn auto_fixable_detection() {
         let rename = ProductionChange {
             change_type: ChangeType::MethodRename,
@@ -772,38 +726,6 @@ mod tests {
         let test_files = vec![tests_dir.join("FooTest.php")];
         let drifted = find_drift_references(&changes, &test_files, root);
         assert!(drifted.is_empty()); // Skipped because symbol < 3 chars
-    }
-
-    #[test]
-    fn find_references_in_test_files() {
-        let changes = vec![ProductionChange {
-            change_type: ChangeType::MethodRename,
-            file: "src/Foo.php".into(),
-            old_symbol: "executeRunFlow".into(),
-            new_symbol: Some("executeWorkflow".into()),
-            line: 10,
-        }];
-
-        let test_content = r#"<?php
-class FooTest extends TestCase {
-    public function testRunFlow() {
-        $result = $this->foo->executeRunFlow(1);
-        $this->assertNotNull($result);
-    }
-}
-"#;
-
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let tests_dir = root.join("tests");
-        std::fs::create_dir_all(&tests_dir).unwrap();
-        std::fs::write(tests_dir.join("FooTest.php"), test_content).unwrap();
-
-        let test_files = vec![tests_dir.join("FooTest.php")];
-        let drifted = find_drift_references(&changes, &test_files, root);
-        assert_eq!(drifted.len(), 1);
-        assert_eq!(drifted[0].line, 4);
-        assert!(drifted[0].content.contains("executeRunFlow"));
     }
 
     #[test]

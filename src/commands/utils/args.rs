@@ -62,17 +62,6 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
         (
             "component",
             "merge",
-            &[
-                "--json",
-                "--base64",
-                "--replace",
-                "--version-target",
-                "--extension",
-                "--help",
-                "-h",
-            ],
-        ),
-        (
             "server",
             "set",
             &["--json", "--base64", "--replace", "--help", "-h"],
