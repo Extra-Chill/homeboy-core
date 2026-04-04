@@ -870,6 +870,24 @@ fn run_lint_stage(
         options.glob.clone()
     };
 
+    // Helper: build the lint runner with the current stage options.
+    // Used by both the diagnostic pass and the fix-only pass.
+    let build_lint_runner = || {
+        extension::lint::build_lint_runner(
+            component,
+            None,
+            settings,
+            false,
+            options.file.as_deref(),
+            effective_glob.as_deref(),
+            options.errors_only,
+            options.sniffs.as_deref(),
+            options.exclude_sniffs.as_deref(),
+            options.category.as_deref(),
+            run_dir,
+        )
+    };
+
     // ── Phase 1: Diagnose ──────────────────────────────────────────────
     // Run the linter WITHOUT auto-fix. The extension reports findings but
     // does NOT modify files. This separates diagnosis from fix application
@@ -899,21 +917,7 @@ fn run_lint_stage(
         cached_findings
     } else {
         // No cached findings — run the diagnostic pass.
-        let runner = extension::lint::build_lint_runner(
-            component,
-            None,
-            settings,
-            false,
-            options.file.as_deref(),
-            effective_glob.as_deref(),
-            options.errors_only,
-            options.sniffs.as_deref(),
-            options.exclude_sniffs.as_deref(),
-            options.category.as_deref(),
-            run_dir,
-        )?;
-
-        runner.run()?;
+        build_lint_runner()?.run()?;
 
         crate::extension::lint::baseline::parse_findings_file(&findings_file).unwrap_or_default()
     };
@@ -936,22 +940,7 @@ fn run_lint_stage(
 
         // Invoke the extension in fix-only mode — runs fixers without
         // re-running the diagnostic pass.
-        let fix_runner = extension::lint::build_lint_runner(
-            component,
-            None,
-            settings,
-            false,
-            options.file.as_deref(),
-            effective_glob.as_deref(),
-            options.errors_only,
-            options.sniffs.as_deref(),
-            options.exclude_sniffs.as_deref(),
-            options.category.as_deref(),
-            run_dir,
-        )?
-        .env("HOMEBOY_FIX_ONLY", "1");
-
-        fix_runner.run()?;
+        build_lint_runner()?.env("HOMEBOY_FIX_ONLY", "1").run()?;
 
         let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
         let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
@@ -1021,18 +1010,22 @@ fn run_test_stage(
     // ── Phase 1: Diagnose ──────────────────────────────────────────────
     // Run tests WITHOUT auto-fix. The extension reports failures but does
     // NOT modify files. This separates diagnosis from fix application.
-    let runner = extension::test::build_test_runner(
-        component,
-        None,
-        settings,
-        options.skip_lint,
-        false,
-        None,
-        selected_test_files,
-        run_dir,
-    )?;
+    //
+    // Helper: build the test runner with the current stage options.
+    let build_runner = || {
+        extension::test::build_test_runner(
+            component,
+            None,
+            settings,
+            options.skip_lint,
+            false,
+            None,
+            selected_test_files,
+            run_dir,
+        )
+    };
 
-    let mut runner = runner;
+    let mut runner = build_runner()?;
     if !options.script_args.is_empty() {
         runner = runner.script_args(&options.script_args);
     }
@@ -1054,20 +1047,9 @@ fn run_test_stage(
             crate::log_status!("undo", "Warning: failed to save undo snapshot: {}", error);
         }
 
-        // Invoke the extension in fix-only mode.
-        let fix_runner = extension::test::build_test_runner(
-            component,
-            None,
-            settings,
-            options.skip_lint,
-            false,
-            None,
-            selected_test_files,
-            run_dir,
-        )?
-        .env("HOMEBOY_FIX_ONLY", "1");
-
-        let mut fix_runner = fix_runner;
+        // Invoke the extension in fix-only mode. Reuses the same builder
+        // as the diagnostic pass with HOMEBOY_FIX_ONLY=1.
+        let mut fix_runner = build_runner()?.env("HOMEBOY_FIX_ONLY", "1");
         if !options.script_args.is_empty() {
             fix_runner = fix_runner.script_args(&options.script_args);
         }
