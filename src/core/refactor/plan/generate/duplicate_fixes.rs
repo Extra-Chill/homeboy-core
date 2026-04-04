@@ -497,8 +497,7 @@ pub(crate) fn generate_duplicate_function_fixes(
                         // wrong, skip the entire edit for this file to avoid
                         // leaving orphaned trait-use statements (Bug 3).
                         let abs_path = root.join(&file);
-                        let file_content =
-                            std::fs::read_to_string(&abs_path).unwrap_or_default();
+                        let file_content = std::fs::read_to_string(&abs_path).unwrap_or_default();
                         let file_lines: Vec<&str> = file_content.lines().collect();
                         let start_idx = (start as usize).saturating_sub(1);
                         let end_idx = (end as usize).min(file_lines.len());
