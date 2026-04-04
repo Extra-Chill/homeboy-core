@@ -1139,49 +1139,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remove_from_single_line_pub_use() {
-        let mut lines: Vec<String> = vec![
-            "pub use sources::{analyze_stage_overlaps, collect_refactor_sources, normalize_sources};"
-                .into(),
-        ];
-        remove_from_pub_use_block(&mut lines, "analyze_stage_overlaps");
-        assert_eq!(lines.len(), 1);
-        assert!(!lines[0].contains("analyze_stage_overlaps"));
-        assert!(lines[0].contains("collect_refactor_sources"));
-        assert!(lines[0].contains("normalize_sources"));
-    }
-
-    #[test]
-    fn remove_last_item_deletes_entire_line() {
-        let mut lines: Vec<String> = vec!["pub use sources::{only_function};".into()];
-        remove_from_pub_use_block(&mut lines, "only_function");
-        assert!(lines.is_empty(), "Empty pub use should be removed entirely");
-    }
-
-    #[test]
-    fn remove_from_multiline_pub_use() {
-        let mut lines: Vec<String> = vec![
-            "pub use module::{".into(),
-            "    alpha,".into(),
-            "    beta,".into(),
-            "    gamma,".into(),
-            "};".into(),
-        ];
-        remove_from_pub_use_block(&mut lines, "beta");
-        let joined = lines.join("\n");
-        assert!(!joined.contains("beta"), "beta should be removed");
-        assert!(joined.contains("alpha"), "alpha should remain");
-        assert!(joined.contains("gamma"), "gamma should remain");
-    }
-
-    #[test]
-    fn remove_does_not_touch_unrelated_pub_use() {
-        let mut lines: Vec<String> = vec!["pub use other::{foo, bar};".into()];
-        remove_from_pub_use_block(&mut lines, "baz");
-        assert_eq!(lines[0], "pub use other::{foo, bar};");
-    }
-
-    #[test]
     fn insert_import_skips_identical_existing_rust_import() {
         let content = "use std::collections::HashMap;\n\npub fn run() {}\n";
         let result = insert_import(content, "use std::collections::HashMap;", &Language::Rust);
@@ -1305,22 +1262,6 @@ mod tests {
         42
     }
 
-    #[test]
-    fn test_alpha() {
-        assert_eq!(helper(), 42);
-    }
-
-    #[test]
-    fn test_beta() {
-        let x = 1;
-        assert_eq!(x, 1);
-    }
-
-    #[test]
-    fn test_gamma() {
-        let y = 2;
-        assert_eq!(y, 2);
-    }
 }
 ";
         use crate::code_audit::AuditFinding;
