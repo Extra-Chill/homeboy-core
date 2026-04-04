@@ -384,6 +384,7 @@ pub(crate) fn generate_duplicate_function_fixes(
             "canonical_content": canonical_content,
             "files": file_entries,
             "all_file_paths": all_paths,
+            "project_root": root.to_string_lossy(),
         });
 
         let Some(result_val) = crate::extension::run_refactor_script(&manifest, &extract_cmd)
@@ -418,6 +419,28 @@ pub(crate) fn generate_duplicate_function_fixes(
                 reason: format!("Skipped `{}`: {}", group.function_name, reason),
             });
             continue;
+        }
+
+        // Record files that the extension skipped due to body mismatch.
+        if let Some(skipped_arr) = result_val
+            .get("skipped_files")
+            .and_then(|value| value.as_array())
+        {
+            for entry in skipped_arr {
+                let file = entry
+                    .get("file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let reason = entry
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("body mismatch")
+                    .to_string();
+                if !file.is_empty() {
+                    skipped.push(SkippedFile { file, reason });
+                }
+            }
         }
 
         if let (Some(trait_file), Some(trait_content)) = (
@@ -469,6 +492,34 @@ pub(crate) fn generate_duplicate_function_fixes(
                             .get("end_line")
                             .and_then(|value| value.as_u64()),
                     ) {
+                        // Validate that the line range actually contains the
+                        // function declaration. If line numbers are stale or
+                        // wrong, skip the entire edit for this file to avoid
+                        // leaving orphaned trait-use statements (Bug 3).
+                        let abs_path = root.join(&file);
+                        let file_content = std::fs::read_to_string(&abs_path).unwrap_or_default();
+                        let file_lines: Vec<&str> = file_content.lines().collect();
+                        let start_idx = (start as usize).saturating_sub(1);
+                        let end_idx = (end as usize).min(file_lines.len());
+
+                        let fn_pattern = format!("function {}", group.function_name);
+                        let lines_contain_fn = (start_idx..end_idx)
+                            .any(|i| file_lines.get(i).is_some_and(|l| l.contains(&fn_pattern)));
+
+                        if !lines_contain_fn {
+                            skipped.push(SkippedFile {
+                                file: file.clone(),
+                                reason: format!(
+                                    "Line range {}–{} does not contain `function {}` — \
+                                     skipping trait extraction for this file",
+                                    start, end, group.function_name
+                                ),
+                            });
+                            // Skip the entire edit for this file — don't add
+                            // trait-use or import without the removal.
+                            continue;
+                        }
+
                         insertions.push(insertion(
                             InsertionKind::FunctionRemoval {
                                 start_line: start as usize,
