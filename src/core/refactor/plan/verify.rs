@@ -160,17 +160,42 @@ fn run_fix_iteration(
     let mut applied_chunks = 0;
     let mut reverted_chunks = 0;
     let mut total_modified = 0;
-    let mut auto_apply_result = fixer::auto_apply_subset(&fix_result);
-    let changed_files: Vec<String> = auto_apply_result
+
+    // Filter to auto-apply eligible fixes and new files (inlined from removed auto_apply_subset)
+    let mut auto_fixes: Vec<fixer::Fix> = fix_result
         .fixes
         .iter()
-        .map(|fix| fix.file.clone())
-        .chain(
-            auto_apply_result
-                .new_files
+        .filter_map(|fix| {
+            let insertions: Vec<fixer::Insertion> = fix
+                .insertions
                 .iter()
-                .map(|file| file.file.clone()),
-        )
+                .filter(|ins| ins.auto_apply)
+                .cloned()
+                .collect();
+            if insertions.is_empty() {
+                None
+            } else {
+                Some(fixer::Fix {
+                    file: fix.file.clone(),
+                    required_methods: fix.required_methods.clone(),
+                    required_registrations: fix.required_registrations.clone(),
+                    insertions,
+                    applied: false,
+                })
+            }
+        })
+        .collect();
+    let mut auto_new_files: Vec<fixer::NewFile> = fix_result
+        .new_files
+        .iter()
+        .filter(|nf| nf.auto_apply)
+        .cloned()
+        .collect();
+    let mut auto_decompose_plans = fix_result.decompose_plans.clone();
+    let changed_files: Vec<String> = auto_fixes
+        .iter()
+        .map(|fix| fix.file.clone())
+        .chain(auto_new_files.iter().map(|file| file.file.clone()))
         .collect();
 
     if !changed_files.is_empty() {
@@ -186,10 +211,10 @@ fn run_fix_iteration(
     // Apply content fixes, new files, and file moves through the unified
     // EditOp pipeline. This converts Fix/NewFile → TaggedEditOp, applies them
     // via apply_edit_ops(), then runs format_after_write and caller rewriting.
-    if !auto_apply_result.fixes.is_empty() || !auto_apply_result.new_files.is_empty() {
+    if !auto_fixes.is_empty() || !auto_new_files.is_empty() {
         let chunk_results = fixer::apply_fixes_via_edit_ops(
-            &mut auto_apply_result.fixes,
-            &mut auto_apply_result.new_files,
+            &mut auto_fixes,
+            &mut auto_new_files,
             root,
         );
         applied_chunks += chunk_results
@@ -209,16 +234,16 @@ fn run_fix_iteration(
     }
 
     // Decompose plans use their own apply path (out of scope for EditOp migration)
-    if !auto_apply_result.decompose_plans.is_empty() {
+    if !auto_decompose_plans.is_empty() {
         let decompose_chunk_results = fixer::apply_decompose_plans(
-            &mut auto_apply_result.decompose_plans,
+            &mut auto_decompose_plans,
             root,
             fixer::ApplyOptions { verifier: None },
         );
         fix_result.chunk_results.extend(decompose_chunk_results);
     }
 
-    for applied_fix in auto_apply_result.fixes {
+    for applied_fix in auto_fixes {
         if let Some(original) = fix_result
             .fixes
             .iter_mut()
@@ -228,7 +253,7 @@ fn run_fix_iteration(
         }
     }
 
-    for written_file in auto_apply_result.new_files {
+    for written_file in auto_new_files {
         if let Some(original) = fix_result
             .new_files
             .iter_mut()
@@ -238,7 +263,7 @@ fn run_fix_iteration(
         }
     }
 
-    for plan in &auto_apply_result.decompose_plans {
+    for plan in &auto_decompose_plans {
         if let Some(original) = fix_result
             .decompose_plans
             .iter_mut()
