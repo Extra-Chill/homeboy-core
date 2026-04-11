@@ -2,9 +2,7 @@ use crate::core::refactor::decompose;
 use crate::core::refactor::plan::verify::rewrite_callers_after_dedup;
 
 use crate::engine::undo::InMemoryRollback;
-use crate::refactor::auto::{
-    ApplyChunkResult, ApplyOptions, ChunkStatus, DecomposeFixPlan, Fix, NewFile,
-};
+use crate::refactor::auto::{ApplyChunkResult, ChunkStatus, DecomposeFixPlan, Fix, NewFile};
 use std::path::Path;
 
 // ============================================================================
@@ -215,7 +213,6 @@ fn merge_same_file_insertions(fixes: &mut [Fix]) {
 pub fn apply_decompose_plans(
     plans: &mut [DecomposeFixPlan],
     root: &Path,
-    options: ApplyOptions<'_>,
 ) -> Vec<ApplyChunkResult> {
     let mut results = Vec::new();
     for (index, dfp) in plans.iter_mut().enumerate() {
@@ -261,7 +258,7 @@ pub fn apply_decompose_plans(
         match decompose::apply_plan(&dfp.plan, root, true) {
             Ok(move_results) => {
                 let files_modified = move_results.iter().filter(|r| r.applied).count();
-                let mut chunk = ApplyChunkResult {
+                let chunk = ApplyChunkResult {
                     chunk_id: format!("decompose:{}", index + 1),
                     files: all_files,
                     status: ChunkStatus::Applied,
@@ -270,22 +267,6 @@ pub fn apply_decompose_plans(
                     verification: Some("decompose_applied".to_string()),
                     error: None,
                 };
-                if let Some(verifier) = options.verifier {
-                    match verifier(&chunk) {
-                        Ok(verification) => {
-                            chunk.verification = Some(verification);
-                        }
-                        Err(error) => {
-                            rollback.restore_all();
-                            chunk.status = ChunkStatus::Reverted;
-                            chunk.reverted_files = files_modified;
-                            chunk.error = Some(error);
-                            dfp.applied = false;
-                            results.push(chunk);
-                            continue;
-                        }
-                    }
-                }
                 dfp.applied = true;
                 log_status!(
                     "fix",
@@ -317,6 +298,22 @@ mod tests {
     use super::*;
     use crate::code_audit::AuditFinding;
     use crate::refactor::auto::{Insertion, InsertionKind};
+
+    fn removal_insertion(start_line: usize, end_line: usize, description: &str) -> Insertion {
+        Insertion {
+            primitive: None,
+            kind: InsertionKind::FunctionRemoval {
+                start_line,
+                end_line,
+            },
+            finding: AuditFinding::OrphanedTest,
+            manual_only: false,
+            auto_apply: false,
+            blocked_reason: None,
+            code: String::new(),
+            description: description.to_string(),
+        }
+    }
 
     #[test]
     fn merge_same_file_insertions_combines_removals() {

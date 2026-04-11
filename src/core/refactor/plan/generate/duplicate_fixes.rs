@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use super::{
-    find_parsed_item_by_name, insertion, new_file, parse_items_for_dedup, FileRole,
-    ModuleSurfaceIndex,
+    find_parsed_item_by_name, function_removal, insertion, new_file, parse_items_for_dedup,
+    FileRole, ModuleSurfaceIndex,
 };
 
 pub(crate) fn extract_function_name_from_unreferenced(description: &str) -> Option<String> {
@@ -520,12 +520,10 @@ pub(crate) fn generate_duplicate_function_fixes(
                             continue;
                         }
 
-                        insertions.push(insertion(
-                            InsertionKind::FunctionRemoval {
-                                start_line: start as usize,
-                                end_line: end as usize,
-                            },
+                        insertions.push(function_removal(
                             AuditFinding::DuplicateFunction,
+                            start as usize,
+                            end as usize,
                             String::new(),
                             format!(
                                 "Remove duplicate `{}` (extracted to shared trait)",
@@ -688,12 +686,10 @@ fn generate_simple_duplicate_fixes(
         let import_stmt =
             generate_duplicate_import(&group.canonical_file, &group.function_name, &language, root);
 
-        let mut insertions = vec![insertion(
-            InsertionKind::FunctionRemoval {
-                start_line: item.start_line,
-                end_line: item.end_line,
-            },
+        let mut insertions = vec![function_removal(
             AuditFinding::DuplicateFunction,
+            item.start_line,
+            item.end_line,
             String::new(),
             format!(
                 "Remove duplicate `{}` (canonical copy in {})",

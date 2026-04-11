@@ -2,7 +2,7 @@ use crate::code_audit::{AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{Fix, RefactorPrimitive};
 use std::path::Path;
 
-use super::insertion_with_primitive;
+use super::{tagged_doc_line_removal, tagged_doc_reference_update};
 
 pub(crate) fn extract_suggested_path(suggestion: &str) -> Option<String> {
     // Support both suggestion formats:
@@ -66,14 +66,12 @@ pub(super) fn apply_stale_doc_reference_fixes(result: &CodeAuditResult, fixes: &
             file: finding.file.clone(),
             required_methods: vec![],
             required_registrations: vec![],
-            insertions: vec![insertion_with_primitive(
+            insertions: vec![tagged_doc_reference_update(
                 RefactorPrimitive::UpdateStaleDocReference,
-                crate::core::refactor::auto::InsertionKind::DocReferenceUpdate {
-                    line: line_num,
-                    old_ref: old_path.clone(),
-                    new_ref: new_path.clone(),
-                },
                 AuditFinding::StaleDocReference,
+                line_num,
+                old_path.clone(),
+                new_path.clone(),
                 format!("{} → {}", old_path, new_path),
                 format!(
                     "Update stale reference: `{}` → `{}` (line {})",
@@ -118,11 +116,10 @@ pub(super) fn apply_broken_doc_reference_fixes(
             file: finding.file.clone(),
             required_methods: vec![],
             required_registrations: vec![],
-            insertions: vec![insertion_with_primitive(
+            insertions: vec![tagged_doc_line_removal(
                 RefactorPrimitive::RemoveBrokenDocReferenceLine,
-                crate::core::refactor::auto::InsertionKind::DocLineRemoval { line: line_num },
                 AuditFinding::BrokenDocReference,
-                dead_path.clone(),
+                line_num,
                 format!(
                     "Remove dead documentation reference line for `{}` (line {})",
                     dead_path, line_num
