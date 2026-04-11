@@ -106,36 +106,48 @@ pub fn summarize_audit_fix_result(fix_result: &FixResult) -> FixResultsSummary {
     }
 }
 
+/// Derive the primitive name from serde's `#[serde(tag = "type", rename_all = "snake_case")]`
+/// attribute on `RefactorPrimitive`. This eliminates manual match arms — adding a new
+/// variant to the enum automatically works for reporting.
 pub fn primitive_name(primitive: &crate::refactor::RefactorPrimitive) -> String {
-    match primitive {
-        crate::refactor::RefactorPrimitive::MoveTestFile => "move_test_file".to_string(),
-        crate::refactor::RefactorPrimitive::RenameTestMethod => "rename_test_method".to_string(),
-        crate::refactor::RefactorPrimitive::RemoveOrphanedTest => {
-            "remove_orphaned_test".to_string()
-        }
-        crate::refactor::RefactorPrimitive::RemoveCompilerDeadCode => {
-            "remove_compiler_dead_code".to_string()
-        }
-        crate::refactor::RefactorPrimitive::ApplyCompilerReplacement => {
-            "apply_compiler_replacement".to_string()
-        }
-        crate::refactor::RefactorPrimitive::RemoveUnusedParameter => {
-            "remove_unused_parameter".to_string()
-        }
-        crate::refactor::RefactorPrimitive::RemoveNearDuplicateImplementation => {
-            "remove_near_duplicate_implementation".to_string()
-        }
-        crate::refactor::RefactorPrimitive::ImportCanonicalImplementation => {
-            "import_canonical_implementation".to_string()
-        }
-        crate::refactor::RefactorPrimitive::WidenCanonicalVisibility => {
-            "widen_canonical_visibility".to_string()
-        }
-        crate::refactor::RefactorPrimitive::UpdateStaleDocReference => {
-            "update_stale_doc_reference".to_string()
-        }
-        crate::refactor::RefactorPrimitive::RemoveBrokenDocReferenceLine => {
-            "remove_broken_doc_reference_line".to_string()
-        }
+    // RefactorPrimitive uses `#[serde(tag = "type", rename_all = "snake_case")]`.
+    // Serializing to JSON gives `{"type": "snake_case_name", ...}`.
+    // Extract the "type" field value.
+    serde_json::to_value(primitive)
+        .ok()
+        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(String::from))
+        .unwrap_or_else(|| format!("{:?}", primitive).to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::refactor::RefactorPrimitive;
+
+    #[test]
+    fn primitive_name_derives_from_serde() {
+        // Verify serde-derived names match the expected snake_case format.
+        // Adding a new variant to RefactorPrimitive automatically works —
+        // no manual match arm needed.
+        assert_eq!(
+            primitive_name(&RefactorPrimitive::MoveTestFile),
+            "move_test_file"
+        );
+        assert_eq!(
+            primitive_name(&RefactorPrimitive::RemoveOrphanedTest),
+            "remove_orphaned_test"
+        );
+        assert_eq!(
+            primitive_name(&RefactorPrimitive::RemoveNearDuplicateImplementation),
+            "remove_near_duplicate_implementation"
+        );
+        assert_eq!(
+            primitive_name(&RefactorPrimitive::UpdateStaleDocReference),
+            "update_stale_doc_reference"
+        );
+        assert_eq!(
+            primitive_name(&RefactorPrimitive::RemoveBrokenDocReferenceLine),
+            "remove_broken_doc_reference_line"
+        );
     }
 }

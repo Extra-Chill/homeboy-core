@@ -1,9 +1,6 @@
 use crate::code_audit::conventions::AuditFinding;
 use crate::core::refactor::decompose;
 
-/// Callback that verifies an applied chunk, returning Ok(message) or Err(reason).
-pub type ChunkVerifier<'a> = &'a dyn Fn(&ApplyChunkResult) -> Result<String, String>;
-
 /// A planned fix for a single file.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Fix {
@@ -265,11 +262,6 @@ pub struct ApplyChunkResult {
 pub enum ChunkStatus {
     Applied,
     Reverted,
-}
-
-#[derive(Clone)]
-pub struct ApplyOptions<'a> {
-    pub verifier: Option<ChunkVerifier<'a>>,
 }
 
 #[derive(Debug, Clone, Default)]

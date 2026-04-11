@@ -165,8 +165,102 @@ pub fn tagged_visibility_change(
     )
 }
 
+pub fn function_removal(
+    finding: AuditFinding,
+    start_line: usize,
+    end_line: usize,
+    code: String,
+    description: String,
+) -> Insertion {
+    insertion(
+        InsertionKind::FunctionRemoval {
+            start_line,
+            end_line,
+        },
+        finding,
+        code,
+        description,
+    )
+}
+
+pub fn tagged_function_removal(
+    primitive: RefactorPrimitive,
+    finding: AuditFinding,
+    start_line: usize,
+    end_line: usize,
+    description: String,
+) -> Insertion {
+    tagged_insertion(
+        primitive,
+        InsertionKind::FunctionRemoval {
+            start_line,
+            end_line,
+        },
+        finding,
+        String::new(),
+        description,
+    )
+}
+
+pub fn doc_reference_update(
+    finding: AuditFinding,
+    line: usize,
+    old_ref: String,
+    new_ref: String,
+    code: String,
+    description: String,
+) -> Insertion {
+    insertion(
+        InsertionKind::DocReferenceUpdate {
+            line,
+            old_ref,
+            new_ref,
+        },
+        finding,
+        code,
+        description,
+    )
+}
+
+pub fn tagged_doc_reference_update(
+    primitive: RefactorPrimitive,
+    finding: AuditFinding,
+    line: usize,
+    old_ref: String,
+    new_ref: String,
+    code: String,
+    description: String,
+) -> Insertion {
+    tagged_insertion(
+        primitive,
+        InsertionKind::DocReferenceUpdate {
+            line,
+            old_ref,
+            new_ref,
+        },
+        finding,
+        code,
+        description,
+    )
+}
+
 pub fn doc_line_removal(finding: AuditFinding, line: usize, description: String) -> Insertion {
     insertion(
+        InsertionKind::DocLineRemoval { line },
+        finding,
+        String::new(),
+        description,
+    )
+}
+
+pub fn tagged_doc_line_removal(
+    primitive: RefactorPrimitive,
+    finding: AuditFinding,
+    line: usize,
+    description: String,
+) -> Insertion {
+    tagged_insertion(
+        primitive,
         InsertionKind::DocLineRemoval { line },
         finding,
         String::new(),

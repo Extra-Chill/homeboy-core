@@ -235,11 +235,8 @@ fn run_fix_iteration(
 
     // Decompose plans use their own apply path (out of scope for EditOp migration)
     if !auto_decompose_plans.is_empty() {
-        let decompose_chunk_results = fixer::apply_decompose_plans(
-            &mut auto_decompose_plans,
-            root,
-            fixer::ApplyOptions { verifier: None },
-        );
+        let decompose_chunk_results =
+            fixer::apply_decompose_plans(&mut auto_decompose_plans, root);
         fix_result.chunk_results.extend(decompose_chunk_results);
     }
 
