@@ -1107,8 +1107,16 @@ fn extract_field_identifier(trimmed: &str) -> Option<String> {
 // ============================================================================
 
 /// Apply rename edits and file renames to disk.
+///
+/// Content edits are written directly (whole-file replacement). File/directory
+/// renames are routed through `apply_edit_ops()` so they share the same
+/// execution path as the fixer pipeline and other manual commands.
 pub fn apply_renames(result: &mut RenameResult, root: &Path) -> Result<()> {
-    // Apply content edits first
+    use crate::engine::edit_op::rename_file_moves_to_edit_ops;
+    use crate::engine::edit_op_apply::apply_edit_ops;
+
+    // Apply content edits first (whole-file replacement — rename operates at
+    // full-content granularity, not line-level, so these bypass EditOp).
     for edit in &result.edits {
         let path = root.join(&edit.file);
         std::fs::write(&path, &edit.new_content).map_err(|e| {
@@ -1116,31 +1124,40 @@ pub fn apply_renames(result: &mut RenameResult, root: &Path) -> Result<()> {
         })?;
     }
 
-    // Apply file renames (sort by path depth descending so children rename before parents)
-    let mut renames = result.file_renames.clone();
-    renames.sort_by(|a, b| {
-        b.from
-            .matches('/')
-            .count()
-            .cmp(&a.from.matches('/').count())
-    });
+    // Apply file/directory renames through the shared EditOp engine.
+    // apply_edit_ops() handles parent directory creation and error reporting.
+    if !result.file_renames.is_empty() {
+        // Sort by path depth descending so children rename before parents.
+        let mut sorted_renames = result.file_renames.clone();
+        sorted_renames.sort_by(|a, b| {
+            b.from
+                .matches('/')
+                .count()
+                .cmp(&a.from.matches('/').count())
+        });
 
-    for rename in &renames {
-        let from = root.join(&rename.from);
-        let to = root.join(&rename.to);
+        // Temporarily replace file_renames with the sorted order for conversion.
+        let original_renames = std::mem::replace(&mut result.file_renames, sorted_renames);
+        let ops = rename_file_moves_to_edit_ops(result);
+        result.file_renames = original_renames;
 
-        // Create parent dirs if needed
-        if let Some(parent) = to.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+        let report = apply_edit_ops(&ops, root).map_err(|e| {
+            Error::internal_io(
+                format!("apply_edit_ops failed for file renames: {}", e),
+                Some("rename.apply".to_string()),
+            )
+        })?;
 
-        if from.exists() {
-            std::fs::rename(&from, &to).map_err(|e| {
-                Error::internal_io(
-                    e.to_string(),
-                    Some(format!("rename {} → {}", from.display(), to.display())),
-                )
-            })?;
+        if !report.errors.is_empty() {
+            let error_messages: Vec<String> = report
+                .errors
+                .iter()
+                .map(|e| format!("{}: {}", e.file, e.message))
+                .collect();
+            return Err(Error::internal_io(
+                format!("File rename errors: {}", error_messages.join("; ")),
+                Some("rename.apply".to_string()),
+            ));
         }
     }
 

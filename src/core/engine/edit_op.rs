@@ -376,6 +376,41 @@ pub fn transform_result_to_edit_ops(
         .collect()
 }
 
+// ============================================================================
+// Rename command conversions
+// ============================================================================
+
+/// Translate a `FileRename` into a `TaggedEditOp`.
+pub fn file_rename_to_edit_op(
+    rename: &crate::refactor::FileRename,
+) -> TaggedEditOp {
+    TaggedEditOp {
+        op: EditOp::MoveFile {
+            from: rename.from.clone(),
+            to: rename.to.clone(),
+        },
+        primitive: None,
+        finding: None,
+        description: format!("Rename: {} → {}", rename.from, rename.to),
+        manual_only: false,
+    }
+}
+
+/// Translate the file renames from a `RenameResult` into `TaggedEditOp`s.
+///
+/// Only converts file/directory renames (→ `MoveFile`), not content edits.
+/// Content edits operate at whole-file granularity and are applied directly
+/// by the rename engine.
+pub fn rename_file_moves_to_edit_ops(
+    result: &crate::refactor::RenameResult,
+) -> Vec<TaggedEditOp> {
+    result
+        .file_renames
+        .iter()
+        .map(file_rename_to_edit_op)
+        .collect()
+}
+
 // Apply logic lives in `edit_op_apply` — see that module for:
 // resolve_anchor(), apply_edit_ops_to_content(), apply_edit_ops().
 
