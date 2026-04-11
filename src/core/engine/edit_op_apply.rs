@@ -17,7 +17,7 @@ use std::path::Path;
 use super::edit_op::{EditOp, InsertAnchor, TaggedEditOp};
 
 // ============================================================================
-// Import deduplication helpers (ported from auto/apply.rs)
+// Import deduplication helpers
 // ============================================================================
 
 /// Check whether an import line is already present in the file content.
@@ -635,8 +635,9 @@ pub fn apply_edit_ops_to_content(
 
 /// Remove a symbol from `pub use { ... }` re-export blocks.
 ///
-/// This is extracted from the existing `remove_from_pub_use_block()` in
-/// `auto/apply.rs` — same logic, operating on `Vec<String>` lines.
+/// Handles both single-line (`pub use module::{a, b, c};`) and multi-line
+/// re-export blocks. Removes the name and trailing comma. If the block
+/// becomes empty after removal, removes the entire `pub use` statement.
 fn remove_from_reexport_block(lines: &mut Vec<String>, fn_name: &str) {
     let word_pattern = format!(r"\b{}\b", regex::escape(fn_name));
     let word_re = match regex::Regex::new(&word_pattern) {

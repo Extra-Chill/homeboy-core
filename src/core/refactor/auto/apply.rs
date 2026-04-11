@@ -11,16 +11,13 @@ use std::path::Path;
 // EditOp-based apply path (Phase 2 of #1041)
 // ============================================================================
 
-/// Apply fixes by converting them to `EditOp`s and routing through
-/// `apply_edit_ops()`.
+/// Apply fixes and new files through the shared `EditOp` engine.
 ///
-/// This is the new apply path that replaces `apply_fixes_chunked()`. It:
 /// 1. Converts `Fix` → `Vec<TaggedEditOp>` via `fix_to_edit_ops()`
-/// 2. Optionally converts `NewFile` → `TaggedEditOp` via `new_file_to_edit_op()`
-/// 3. Calls `apply_edit_ops()` for the unified execution
+/// 2. Converts `NewFile` → `TaggedEditOp` via `new_file_to_edit_op()`
+/// 3. Calls `apply_edit_ops()` for unified execution (content edits, file moves, file creates)
 /// 4. Runs `format_after_write()` on all modified files
 /// 5. Runs `rewrite_callers_after_dedup()` for duplicate function fixes
-/// 6. Returns `Vec<ApplyChunkResult>` for compatibility with existing reporting
 pub fn apply_fixes_via_edit_ops(
     fixes: &mut [Fix],
     new_files: &mut [NewFile],
