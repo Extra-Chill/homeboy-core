@@ -4,6 +4,31 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.88.8] - 2026-04-18
+
+### Changed
+- Remove pure planner artifacts (Phase 5a of #1041)
+- Phases 3-6: RefactorPrimitive cleanup, EditOp alignment, serde reporting (#1041)
+- Wire propagate command through apply_edit_ops()
+- Clean up stale doc comments referencing removed apply chain
+- Remove legacy InsertionKind dispatch chain — 1,500+ lines of dead code
+- Wire apply_edit_ops() into the fixer pipeline
+- cargo fmt on edit_op_apply.rs
+- Revert "chore(ci): homeboy autofix — refactor (1 files, 15 fixes)"
+- Split apply logic into edit_op_apply.rs to fix audit GodFile/HighItemCount
+- Add apply logic for EditOp — resolve_anchor, apply_edit_ops_to_content, apply_edit_ops
+
+### Fixed
+- surface PHPUnit/runner stdout+stderr on test failure (#1143)
+- component create auto-detects changelog path (#1128)
+- deploy cluster — component set id round-trip + non-git local_path (#1140, #1141)
+- send HOMEBOY_FIX_ONLY=1 to the extension in lint/test fix stages (#1145)
+- auditor false-positives for namespaces, imports, unused params (#1134, #1135, #1136)
+- deploy trio — resolver, Studio cli_path, --head branch warning (#1137, #1138, #1139)
+- discover standalone components from ~/.config/homeboy/components/ (#1131)
+- filter release/version-bump commits from changelog and auto-discover changelog path (#1127, #1128)
+- Fix orphaned test false positives on behavioral/scenario test names
+
 ## [0.88.7] - 2026-04-08
 
 ### Fixed
