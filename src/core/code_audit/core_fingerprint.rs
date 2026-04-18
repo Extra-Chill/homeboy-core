@@ -1860,8 +1860,9 @@ fn write(msg: &str) -> bool {
 
         let content = "<?php\nnamespace DataMachine\\Engine\\AI\\Tools\\Global;\n\nclass WebFetch {\n    public function handle() {}\n}\n";
 
-        let fp = fingerprint_from_grammar(content, &grammar, "inc/Engine/AI/Tools/Global/WebFetch.php")
-            .expect("fingerprint should succeed");
+        let fp =
+            fingerprint_from_grammar(content, &grammar, "inc/Engine/AI/Tools/Global/WebFetch.php")
+                .expect("fingerprint should succeed");
 
         assert_eq!(
             fp.namespace.as_deref(),
@@ -1890,8 +1891,12 @@ fn write(msg: &str) -> bool {
 
         let content = "<?php\n/**\n * Docblock.\n */\n\n\tnamespace DataMachine\\Engine\\AI\\Tools\\Global;\n\nclass AgentMemory {}\n";
 
-        let fp = fingerprint_from_grammar(content, &grammar, "inc/Engine/AI/Tools/Global/AgentMemory.php")
-            .expect("fingerprint should succeed");
+        let fp = fingerprint_from_grammar(
+            content,
+            &grammar,
+            "inc/Engine/AI/Tools/Global/AgentMemory.php",
+        )
+        .expect("fingerprint should succeed");
 
         assert_eq!(
             fp.namespace.as_deref(),
