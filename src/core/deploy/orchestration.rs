@@ -742,17 +742,13 @@ mod tests {
                 .expect("git command")
         };
         assert!(run(&["init", "-q"]).status.success());
-        assert!(
-            run(&["config", "user.email", "test@example.com"])
-                .status
-                .success()
-        );
+        assert!(run(&["config", "user.email", "test@example.com"])
+            .status
+            .success());
         assert!(run(&["config", "user.name", "Test"]).status.success());
-        assert!(
-            run(&["commit", "--allow-empty", "-q", "-m", "init"])
-                .status
-                .success()
-        );
+        assert!(run(&["commit", "--allow-empty", "-q", "-m", "init"])
+            .status
+            .success());
 
         let component = make_component("test", &path.to_string_lossy());
         check_uncommitted_changes(&[component]).expect("clean git repo should pass");
