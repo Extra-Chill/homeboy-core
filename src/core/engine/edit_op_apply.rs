@@ -81,9 +81,7 @@ fn extract_import_alias(import_line: &str) -> Option<String> {
     }
 
     // Extract the last segment: `Foo\Bar\Baz` → `Baz`, `foo::bar::Baz` → `Baz`
-    let last = path
-        .rsplit(['\\', ':'])
-        .find(|s| !s.is_empty())?;
+    let last = path.rsplit(['\\', ':']).find(|s| !s.is_empty())?;
     if last.is_empty() {
         return None;
     }
@@ -105,9 +103,10 @@ fn import_alias_collides(content: &str, import_line: &str, language: &Language) 
         }
         if let Some(existing_alias) = extract_import_alias(trimmed) {
             if existing_alias == candidate_alias
-                && normalize_import_line(trimmed) != normalize_import_line(import_line) {
-                    return true;
-                }
+                && normalize_import_line(trimmed) != normalize_import_line(import_line)
+            {
+                return true;
+            }
         }
     }
 
