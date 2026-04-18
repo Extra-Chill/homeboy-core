@@ -11,7 +11,7 @@ use super::settings::*;
 
 /// Common changelog file locations to check when the configured path doesn't exist.
 /// Ordered by convention preference.
-const CHANGELOG_CANDIDATES: &[&str] = &[
+pub const CHANGELOG_CANDIDATES: &[&str] = &[
     "CHANGELOG.md",
     "docs/CHANGELOG.md",
     "changelog.md",
@@ -19,6 +19,18 @@ const CHANGELOG_CANDIDATES: &[&str] = &[
     "doc/CHANGELOG.md",
     "CHANGES.md",
 ];
+
+/// Discover an existing changelog file under `repo_path` by checking the common
+/// candidate locations. Returns the relative path (as stored in `changelog_target`)
+/// of the first match, or `None` if no candidate exists on disk. (#1128)
+pub fn discover_changelog_relative_path(repo_path: &Path) -> Option<String> {
+    for candidate in CHANGELOG_CANDIDATES {
+        if repo_path.join(candidate).is_file() {
+            return Some((*candidate).to_string());
+        }
+    }
+    None
+}
 
 pub fn resolve_changelog_path(component: &Component) -> Result<PathBuf> {
     // Validate local_path is absolute and exists before any file operations
@@ -102,4 +114,44 @@ pub fn read_component_snapshots(
     });
 
     Ok((last_release, unreleased))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn discover_changelog_prefers_root_when_both_exist() {
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("docs")).unwrap();
+        fs::write(dir.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
+        fs::write(dir.path().join("docs/CHANGELOG.md"), "# Changelog\n").unwrap();
+
+        assert_eq!(
+            discover_changelog_relative_path(dir.path()),
+            Some("CHANGELOG.md".to_string())
+        );
+    }
+
+    #[test]
+    fn discover_changelog_finds_docs_path_when_root_absent() {
+        // This is the html-to-blocks-converter scenario from #1128: the file
+        // lives at docs/CHANGELOG.md but nothing at the repo root.
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("docs")).unwrap();
+        fs::write(dir.path().join("docs/CHANGELOG.md"), "# Changelog\n").unwrap();
+
+        assert_eq!(
+            discover_changelog_relative_path(dir.path()),
+            Some("docs/CHANGELOG.md".to_string())
+        );
+    }
+
+    #[test]
+    fn discover_changelog_returns_none_when_nothing_exists() {
+        let dir = TempDir::new().expect("temp dir");
+        assert_eq!(discover_changelog_relative_path(dir.path()), None);
+    }
 }
