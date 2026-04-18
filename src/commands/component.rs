@@ -241,7 +241,12 @@ pub fn run(
             };
 
             new_component.extract_command = extract_command;
-            new_component.changelog_target = changelog_target;
+            // Respect an explicit --changelog-target flag; otherwise auto-detect
+            // the actual changelog location on disk so generated homeboy.json
+            // files don't ship with a path that doesn't exist. (#1128)
+            new_component.changelog_target = changelog_target.or_else(|| {
+                homeboy::release::changelog::discover_changelog_relative_path(repo_path)
+            });
 
             if !extensions.is_empty() {
                 let mut extension_map = std::collections::HashMap::new();
