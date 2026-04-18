@@ -202,9 +202,10 @@ fn is_release_commit(lower: &str) -> bool {
     if (lower.starts_with("bump")
         || lower.starts_with("version bump")
         || lower.starts_with("version "))
-        && VERSION_NUMBER_RE.is_match(lower) {
-            return true;
-        }
+        && VERSION_NUMBER_RE.is_match(lower)
+    {
+        return true;
+    }
 
     // "release: v0.2.3", "release v0.2.3", "chore(release): v0.2.3"
     if RELEASE_PREFIX_RE.is_match(lower) {
