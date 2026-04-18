@@ -406,12 +406,14 @@ pub fn execute_local_command_passthrough(
         String::from_utf8_lossy(&captured).to_string()
     }
 
-    let stdout_handle = child.stdout.take().map(|pipe| {
-        thread::spawn(move || tee_to(pipe, std::io::stdout()))
-    });
-    let stderr_handle = child.stderr.take().map(|pipe| {
-        thread::spawn(move || tee_to(pipe, std::io::stderr()))
-    });
+    let stdout_handle = child
+        .stdout
+        .take()
+        .map(|pipe| thread::spawn(move || tee_to(pipe, std::io::stdout())));
+    let stderr_handle = child
+        .stderr
+        .take()
+        .map(|pipe| thread::spawn(move || tee_to(pipe, std::io::stderr())));
 
     let status = child.wait();
 

@@ -370,7 +370,10 @@ mod tests {
         let (tail, truncated) = tail_lines(&input, 5);
         assert!(truncated);
         let kept: Vec<&str> = tail.lines().collect();
-        assert_eq!(kept, vec!["line 16", "line 17", "line 18", "line 19", "line 20"]);
+        assert_eq!(
+            kept,
+            vec!["line 16", "line 17", "line 18", "line 19", "line 20"]
+        );
     }
 
     #[test]
@@ -388,4 +391,3 @@ mod tests {
         assert!(!truncated);
     }
 }
-
