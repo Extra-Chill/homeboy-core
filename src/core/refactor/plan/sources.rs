@@ -1110,7 +1110,9 @@ fn count_manual_only_fixes(fix_result: &fixer::FixResult) -> usize {
     let manual_only_fixes = fix_result
         .fixes
         .iter()
-        .filter(|fix| !fix.insertions.is_empty() && fix.insertions.iter().all(|ins| ins.manual_only))
+        .filter(|fix| {
+            !fix.insertions.is_empty() && fix.insertions.iter().all(|ins| ins.manual_only)
+        })
         .count();
     let manual_only_new_files = fix_result
         .new_files
@@ -1722,8 +1724,7 @@ mod tests {
             description: String::new(),
             written: false,
         };
-        let result =
-            fix_result_with(vec![manual_fix, mixed_fix, auto_fix], vec![manual_nf]);
+        let result = fix_result_with(vec![manual_fix, mixed_fix, auto_fix], vec![manual_nf]);
         // Only the entirely-manual-only fix + the manual-only new file count.
         // The mixed fix survives --write, the fully-auto fix is normal.
         assert_eq!(count_manual_only_fixes(&result), 2);
