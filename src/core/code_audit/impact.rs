@@ -160,6 +160,7 @@ pub fn fingerprint_from_git_ref(
         internal_calls: output.internal_calls,
         call_sites: output.call_sites,
         public_api: output.public_api,
+        hook_callbacks: output.hook_callbacks,
         trait_impl_methods: Vec::new(),
     })
 }
