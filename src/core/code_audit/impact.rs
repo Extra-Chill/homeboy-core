@@ -655,15 +655,7 @@ mod tests {
             None,
             vec![("action", "my_custom_action")],
         );
-        let current = make_fingerprint(
-            "Foo.php",
-            vec![],
-            vec![],
-            vec![],
-            None,
-            None,
-            vec![("action", "my_renamed_action")],
-        );
+        let current = make_fingerprint(vec![("action", "my_renamed_action")]);
 
         let diff = diff_fingerprints("Foo.php", &base, &current);
         assert!(diff.removed_hooks.contains(&"my_custom_action".to_string()));
