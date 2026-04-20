@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.88.11] - 2026-04-20
+
+### Fixed
+- reject intra_method_duplicate auto-removal inside open expressions (#1164)
+
 ## [0.88.10] - 2026-04-20
 
 ### Fixed
