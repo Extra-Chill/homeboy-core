@@ -358,19 +358,29 @@ fn value_type_name(value: &Value) -> &'static str {
 // Config Merge/Remove Operations (internal)
 // ============================================================================
 
-/// Normalize JSON object keys to snake_case recursively.
-/// Allows callers to use camelCase, PascalCase, or snake_case interchangeably.
-fn normalize_keys_to_snake_case(value: Value) -> Value {
+/// Normalize top-level JSON object keys to snake_case.
+/// Allows callers to use camelCase, PascalCase, or snake_case interchangeably
+/// for struct-field keys on the patch root (e.g. `componentOverrides` →
+/// `component_overrides`).
+///
+/// **Only the top level is normalized.** Nested keys are preserved verbatim
+/// because they may be user-provided `HashMap<String, _>` lookup keys —
+/// component IDs, hook names, variable names, etc. — where a hyphen, dot, or
+/// mixed case is semantically meaningful and must not be rewritten. See
+/// <https://github.com/Extra-Chill/homeboy/issues/1169> for the bug this guards
+/// against.
+///
+/// If a nested struct field needs case flexibility, the caller should pass it
+/// in its canonical `snake_case` form, or the target struct should declare a
+/// `#[serde(rename = "…")]` attribute so serde handles the alias.
+fn normalize_top_level_keys_to_snake_case(value: Value) -> Value {
     match value {
         Value::Object(map) => {
             let normalized: Map<String, Value> = map
                 .into_iter()
-                .map(|(k, v)| (k.to_snake_case(), normalize_keys_to_snake_case(v)))
+                .map(|(k, v)| (k.to_snake_case(), v))
                 .collect();
             Value::Object(normalized)
-        }
-        Value::Array(arr) => {
-            Value::Array(arr.into_iter().map(normalize_keys_to_snake_case).collect())
         }
         other => other,
     }
@@ -388,8 +398,11 @@ pub(crate) fn merge_config<T: Serialize + DeserializeOwned>(
     patch: Value,
     replace_fields: &[String],
 ) -> Result<MergeFields> {
-    // Normalize keys to snake_case (accepts camelCase, PascalCase, etc.)
-    let patch = normalize_keys_to_snake_case(patch);
+    // Normalize top-level keys to snake_case (accepts camelCase, PascalCase,
+    // etc. for struct-field keys on the patch root). Nested keys are left
+    // verbatim so HashMap lookup keys — component IDs, hook names, etc. —
+    // survive intact. See issue #1169.
+    let patch = normalize_top_level_keys_to_snake_case(patch);
 
     let patch_obj = match &patch {
         Value::Object(obj) => obj,
@@ -1581,6 +1594,96 @@ mod tests {
         let result = merge_config(&mut config, patch, &[]);
         assert!(result.is_ok());
         assert!(config.extensions.is_some());
+    }
+
+    /// Regression for #1169: `normalize_keys_to_snake_case` used to recurse
+    /// into every object, rewriting `HashMap<String, _>` lookup keys that
+    /// happened to contain hyphens or mixed case. The fix normalizes only the
+    /// top level. Nested keys (including component IDs like `simple-dark-mode`)
+    /// must now survive verbatim.
+    #[test]
+    fn merge_config_preserves_hyphenated_nested_keys() {
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        // Patch has a top-level camelCase key (should normalize to snake_case)
+        // and a nested hyphenated key (must stay verbatim).
+        let patch = serde_json::json!({
+            "extensions": {
+                "simple-dark-mode": {
+                    "cli_path": "studio wp"
+                }
+            }
+        });
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(result.is_ok(), "merge failed: {:?}", result.err());
+        let ext = config.extensions.expect("extensions present");
+        assert!(
+            ext.contains_key("simple-dark-mode"),
+            "hyphenated key was mangled; got keys: {:?}",
+            ext.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            !ext.contains_key("simple_dark_mode"),
+            "hyphenated key was silently rewritten to snake_case; got keys: {:?}",
+            ext.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Top-level camelCase / PascalCase keys still normalize to snake_case so
+    /// the existing UX (accepting `componentOverrides` as an alias for
+    /// `component_overrides`) keeps working.
+    #[test]
+    fn merge_config_still_normalizes_top_level_camel_case() {
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        // Camel-cased top-level key for the `extensions` field.
+        let patch = serde_json::json!({
+            "Extensions": {
+                "wordpress": {}
+            }
+        });
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(
+            result.is_ok(),
+            "top-level PascalCase should still normalize; got: {:?}",
+            result.err()
+        );
+        assert!(config.extensions.is_some());
+    }
+
+    /// Dots, spaces, and mixed case inside nested map keys must all be
+    /// preserved. Covers hook names, variable names, and other user-defined
+    /// identifiers that may legitimately contain characters that `to_snake_case`
+    /// would mangle.
+    #[test]
+    fn merge_config_preserves_arbitrary_nested_key_shapes() {
+        let mut config = TestConfig {
+            name: "test".to_string(),
+            ..Default::default()
+        };
+        let patch = serde_json::json!({
+            "extensions": {
+                "with.dot":       { "cli_path": "a" },
+                "with space":     { "cli_path": "b" },
+                "MixedCaseID":    { "cli_path": "c" },
+                "kebab-case-id":  { "cli_path": "d" }
+            }
+        });
+        let result = merge_config(&mut config, patch, &[]);
+        assert!(result.is_ok(), "merge failed: {:?}", result.err());
+        let ext = config.extensions.expect("extensions present");
+        for key in ["with.dot", "with space", "MixedCaseID", "kebab-case-id"] {
+            assert!(
+                ext.contains_key(key),
+                "nested key {:?} was mangled; got keys: {:?}",
+                key,
+                ext.keys().collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
