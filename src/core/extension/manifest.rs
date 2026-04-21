@@ -291,6 +291,11 @@ pub struct ExtensionManifest {
     pub lint: Option<LintConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test: Option<TestConfig>,
+    /// Post-write verify command used as a safety gate after `refactor --from ...`
+    /// autofix writes to disk. If the command exits non-zero, the written files
+    /// are reverted and the fixes are reclassified as declined. See #1167.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autofix_verify: Option<AutofixVerifyConfig>,
 
     // Actions (cross-cutting: used by both platform and executable extensions)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -355,6 +360,12 @@ impl ExtensionManifest {
         self.build
             .as_ref()
             .and_then(|c| c.extension_script.as_deref())
+    }
+
+    /// Convenience: autofix verify config, if this extension declares one.
+    /// See [`AutofixVerifyConfig`] for the contract.
+    pub fn autofix_verify(&self) -> Option<&AutofixVerifyConfig> {
+        self.autofix_verify.as_ref()
     }
 
     /// Convenience: get deploy verifications (empty if no deploy capability).
@@ -672,6 +683,46 @@ pub struct LintConfig {
 pub struct TestConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension_script: Option<String>,
+}
+
+/// Post-write verify contract for autofix. Runs from the component root after
+/// `refactor --from ...` writes edits to disk. A non-zero exit code triggers a
+/// full revert of the written files and marks every auto-applied fix as
+/// declined (with the verify output captured on the chunk).
+///
+/// See #1167 for design rationale. Per-rule safety rails still live in the
+/// fixers (see #1166); this is a general-purpose backstop that catches bugs
+/// any individual rule's rails miss.
+///
+/// Typical extension configurations:
+///
+/// - Rust:      `cargo check --offline` (fast, catches type errors)
+/// - WordPress: `php -l` per changed file (syntax only; lint has already run
+///              as a pre-release gate)
+/// - Generic:   leave unset — verify is opt-in, absent config = no gate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutofixVerifyConfig {
+    /// Executable to run. Resolved against `PATH` unless absolute.
+    pub command: String,
+
+    /// Arguments passed to the command. Each entry is a distinct argv slot —
+    /// no shell splitting. To pass multiple arguments as one string, put them
+    /// in a single entry and wrap the full invocation in `sh -c` yourself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+
+    /// Maximum seconds to wait before killing the verify process. Defaults to
+    /// 120 when absent. A verify that times out is treated as a failure —
+    /// the same as a non-zero exit code — so the autofix reverts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+impl AutofixVerifyConfig {
+    /// Effective timeout in seconds (120 when unset).
+    pub fn effective_timeout_secs(&self) -> u64 {
+        self.timeout_secs.unwrap_or(120)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

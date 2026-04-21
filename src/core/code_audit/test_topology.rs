@@ -386,6 +386,7 @@ JSON
             hooks: std::collections::HashMap::new(),
             settings: vec![],
             requires: None,
+            autofix_verify: None,
             extra: std::collections::HashMap::new(),
             extension_path: Some(dir.path().to_string_lossy().to_string()),
         };
