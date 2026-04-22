@@ -58,6 +58,11 @@ pub struct ReleaseArgs {
     #[arg(long)]
     skip_publish: bool,
 
+    /// Skip the GitHub Release creation step (tag + notes on github.com).
+    /// Use when CI or another pipeline already creates GitHub Releases.
+    #[arg(long)]
+    no_github_release: bool,
+
     /// Git identity for release commits and tags.
     /// Use "bot" for the default CI bot identity, or "Name <email>" for custom.
     /// When set, configures git user.name and user.email before committing.
@@ -112,6 +117,7 @@ impl ReleaseArgs {
             bump,
             major,
             skip_publish,
+            no_github_release: false,
             git_identity: None,
         }
     }
@@ -139,6 +145,7 @@ pub fn run(
             skip_checks: args.skip_checks,
             bump_override: bump_override.clone(),
             skip_publish: args.skip_publish,
+            skip_github_release: args.no_github_release,
             git_identity: args.git_identity.clone(),
         })?;
 
@@ -175,6 +182,7 @@ pub fn run(
         skip_checks: args.skip_checks,
         bump_override,
         skip_publish: args.skip_publish,
+        skip_github_release: args.no_github_release,
         git_identity: args.git_identity.clone(),
     };
 

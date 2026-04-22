@@ -193,6 +193,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         skip_checks: input.skip_checks,
         skip_publish: input.skip_publish,
         deploy: input.deploy,
+        skip_github_release: input.skip_github_release,
     };
 
     if options.dry_run {
@@ -697,6 +698,7 @@ pub fn run_batch(
             skip_checks: input_template.skip_checks,
             bump_override: input_template.bump_override.clone(),
             skip_publish: input_template.skip_publish,
+            skip_github_release: input_template.skip_github_release,
             git_identity: input_template.git_identity.clone(),
         };
 

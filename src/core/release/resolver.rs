@@ -36,7 +36,8 @@ impl PipelineCapabilityResolver for ReleaseCapabilityResolver {
             | ReleaseStepType::GitTag
             | ReleaseStepType::GitPush
             | ReleaseStepType::Cleanup
-            | ReleaseStepType::PostRelease => true,
+            | ReleaseStepType::PostRelease
+            | ReleaseStepType::GitHubRelease => true,
             ReleaseStepType::Package => self.supports_package(),
             ReleaseStepType::Publish(ref target) => self.supports_publish_target(target),
         }

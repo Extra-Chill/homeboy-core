@@ -777,6 +777,28 @@ pub(super) fn changelog_entries_from_json(
     serde_json::from_value(value.clone()).ok()
 }
 
+/// Return true if this component should get a GitHub Release created.
+///
+/// Resolves the remote URL from the component config (preferred) or from
+/// `git remote get-url origin` in the component's local_path, then parses
+/// it as a GitHub URL. Non-GitHub remotes (GitLab, self-hosted, etc.) fall
+/// through cleanly — the step simply isn't added to the plan.
+fn github_release_applies(component: &Component) -> bool {
+    let remote_url = component
+        .remote_url
+        .clone()
+        .or_else(|| {
+            crate::deploy::release_download::detect_remote_url(std::path::Path::new(
+                &component.local_path,
+            ))
+        });
+
+    remote_url
+        .as_deref()
+        .and_then(crate::deploy::release_download::parse_github_url)
+        .is_some()
+}
+
 /// Derive publish targets from extensions that have `release.publish` action.
 fn get_publish_targets(extensions: &[ExtensionManifest]) -> Vec<String> {
     extensions
@@ -917,6 +939,22 @@ fn build_release_steps(
         status: ReleasePlanStatus::Ready,
         missing: vec![],
     });
+
+    // 5a. GitHub Release (create tag+notes on github.com)
+    // Runs in parallel with publish/cleanup — it only needs the tag to be on
+    // the remote. Fails soft when `gh` isn't installed or authenticated.
+    // Skipped entirely for non-GitHub remotes (no remote_url, or non-github URL).
+    if !options.skip_github_release && github_release_applies(component) {
+        steps.push(ReleasePlanStep {
+            id: "github.release".to_string(),
+            step_type: "github.release".to_string(),
+            label: Some("Create GitHub Release".to_string()),
+            needs: vec!["git.push".to_string()],
+            config: std::collections::HashMap::new(),
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
+    }
 
     let mut publish_step_ids: Vec<String> = Vec::new();
 
