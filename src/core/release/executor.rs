@@ -63,6 +63,7 @@ impl ReleaseStepExecutor {
             ReleaseStepType::Publish(target) => self.run_publish(step, &target),
             ReleaseStepType::Cleanup => self.run_cleanup(step),
             ReleaseStepType::PostRelease => self.run_post_release(step),
+            ReleaseStepType::GitHubRelease => self.run_github_release(step),
         }
     }
 
@@ -527,6 +528,240 @@ impl ReleaseStepExecutor {
         ))
     }
 
+    /// Create a GitHub Release for the just-pushed tag.
+    ///
+    /// Reuses the already-finalized changelog section (stored in
+    /// `ReleaseContext::notes` by the version step) as the release body, so the
+    /// notes on github.com match `CHANGELOG.md` exactly.
+    ///
+    /// Fails soft and returns Success with a warning when:
+    /// - `gh` is not installed on PATH
+    /// - `gh auth status` reports unauthenticated
+    /// - A release for the tag already exists (idempotent re-runs)
+    ///
+    /// The fallback `gh release create` command is always printed so the
+    /// operator can finish the release manually without re-deriving the notes.
+    fn run_github_release(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
+        let (tag, notes) = {
+            let context = self.context.lock().map_err(|_| {
+                Error::internal_unexpected("Failed to lock release context".to_string())
+            })?;
+            let tag = context.tag.clone().ok_or_else(|| {
+                Error::internal_unexpected(
+                    "github.release: tag context not set (git.tag must run first)".to_string(),
+                )
+            })?;
+            let notes = context.notes.clone().unwrap_or_default();
+            (tag, notes)
+        };
+
+        let local_path = &self.component.local_path;
+
+        // Resolve owner/repo. Prefer the component's configured remote_url,
+        // falling back to `git remote get-url origin` in the local path.
+        let remote_url = self
+            .component
+            .remote_url
+            .clone()
+            .or_else(|| {
+                crate::deploy::release_download::detect_remote_url(std::path::Path::new(local_path))
+            })
+            .ok_or_else(|| {
+                Error::internal_unexpected(
+                    "github.release: no remote_url configured and git remote get-url origin failed"
+                        .to_string(),
+                )
+            })?;
+
+        let github = crate::deploy::release_download::parse_github_url(&remote_url)
+            .ok_or_else(|| {
+                Error::validation_invalid_argument(
+                    "github.release",
+                    format!("Remote URL '{}' is not a GitHub URL", remote_url),
+                    None,
+                    Some(vec![
+                        "Only github.com remotes are supported for automatic GitHub Releases"
+                            .to_string(),
+                        "Use --no-github-release to skip this step".to_string(),
+                    ]),
+                )
+            })?;
+
+        // Check gh binary exists.
+        if !gh_is_available() {
+            let fallback = fallback_gh_command(&tag);
+            log_status!(
+                "release",
+                "⚠ `gh` CLI not found on PATH — skipping GitHub Release creation"
+            );
+            log_status!("release", "Manual fallback: {}", fallback);
+            return Ok(self.step_result(
+                step,
+                PipelineRunStatus::Success,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "reason": "gh-not-available",
+                    "tag": tag,
+                    "owner": github.owner,
+                    "repo": github.repo,
+                    "fallback_command": fallback,
+                })),
+                None,
+                Vec::new(),
+            ));
+        }
+
+        // Check gh auth. `gh auth status` exits non-zero when unauthenticated.
+        if !gh_is_authenticated() {
+            let fallback = fallback_gh_command(&tag);
+            log_status!(
+                "release",
+                "⚠ `gh` is not authenticated — skipping GitHub Release creation"
+            );
+            log_status!(
+                "release",
+                "Authenticate with `gh auth login`, then manual fallback: {}",
+                fallback
+            );
+            return Ok(self.step_result(
+                step,
+                PipelineRunStatus::Success,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "reason": "gh-not-authenticated",
+                    "tag": tag,
+                    "owner": github.owner,
+                    "repo": github.repo,
+                    "fallback_command": fallback,
+                })),
+                None,
+                Vec::new(),
+            ));
+        }
+
+        // Idempotency: if a release for this tag already exists, skip + warn.
+        // Uses `gh release view <tag> -R <owner>/<repo>` which exits 0 when the
+        // release exists, non-zero otherwise.
+        let repo_flag = format!("{}/{}", github.owner, github.repo);
+        if gh_release_exists(&tag, &repo_flag) {
+            log_status!(
+                "release",
+                "GitHub Release {} already exists for {} — skipping (idempotent)",
+                tag,
+                repo_flag
+            );
+            return Ok(self.step_result(
+                step,
+                PipelineRunStatus::Success,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "reason": "release-already-exists",
+                    "tag": tag,
+                    "owner": github.owner,
+                    "repo": github.repo,
+                })),
+                None,
+                Vec::new(),
+            ));
+        }
+
+        // Write the notes body to a temp file. `gh release create --notes-file`
+        // preserves the exact text, including markdown formatting, that we
+        // already computed for CHANGELOG.md.
+        let notes_body = if notes.trim().is_empty() {
+            format!("Release {}", tag)
+        } else {
+            notes
+        };
+
+        let tmp_dir = crate::engine::temp::runtime_temp_dir("github-release")?;
+        let notes_path = tmp_dir.join(format!("notes-{}.md", sanitize_tag_for_filename(&tag)));
+        std::fs::write(&notes_path, &notes_body).map_err(|e| {
+            Error::internal_io(
+                format!("Failed to write release notes file: {}", e),
+                Some(notes_path.display().to_string()),
+            )
+        })?;
+
+        log_status!(
+            "release",
+            "Creating GitHub Release {} on {}...",
+            tag,
+            repo_flag
+        );
+
+        let output = std::process::Command::new("gh")
+            .args([
+                "release",
+                "create",
+                &tag,
+                "--title",
+                &tag,
+                "--notes-file",
+                notes_path
+                    .to_str()
+                    .ok_or_else(|| {
+                        Error::internal_unexpected(
+                            "github.release: notes-file path is not valid UTF-8".to_string(),
+                        )
+                    })?,
+                "-R",
+                &repo_flag,
+            ])
+            .output()
+            .map_err(|e| {
+                Error::internal_io(
+                    format!("Failed to invoke gh: {}", e),
+                    Some("gh release create".to_string()),
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let fallback = fallback_gh_command(&tag);
+            log_status!(
+                "release",
+                "⚠ `gh release create` failed: {}",
+                stderr.trim()
+            );
+            log_status!("release", "Manual fallback: {}", fallback);
+            return Ok(self.step_result(
+                step,
+                PipelineRunStatus::Success,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "reason": "gh-command-failed",
+                    "tag": tag,
+                    "owner": github.owner,
+                    "repo": github.repo,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "fallback_command": fallback,
+                })),
+                None,
+                Vec::new(),
+            ));
+        }
+
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        log_status!("release", "Created GitHub Release: {}", url);
+
+        Ok(self.step_result(
+            step,
+            PipelineRunStatus::Success,
+            Some(serde_json::json!({
+                "action": "github.release",
+                "tag": tag,
+                "owner": github.owner,
+                "repo": github.repo,
+                "url": url,
+            })),
+            None,
+            Vec::new(),
+        ))
+    }
+
     fn default_commit_message(&self) -> String {
         let context = self.context.lock().ok();
         let version = context
@@ -672,5 +907,93 @@ impl ReleaseStepExecutor {
 impl PipelineStepExecutor for ReleaseStepExecutor {
     fn execute_step(&self, step: &PipelineStep) -> Result<PipelineStepResult> {
         self.execute_core_step(step)
+    }
+}
+
+/// Return true if the `gh` binary is on PATH.
+fn gh_is_available() -> bool {
+    std::process::Command::new("gh")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Return true if `gh auth status` reports an authenticated user for github.com.
+fn gh_is_authenticated() -> bool {
+    std::process::Command::new("gh")
+        .args(["auth", "status", "--hostname", "github.com"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Return true if a GitHub Release for the given tag already exists on the repo.
+fn gh_release_exists(tag: &str, repo_flag: &str) -> bool {
+    std::process::Command::new("gh")
+        .args(["release", "view", tag, "-R", repo_flag])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Build the manual-fallback `gh release create` command string shown to the
+/// operator when the automatic step can't run (no auth, no binary, command
+/// failed). The operator has the `CHANGELOG.md` section at the same version,
+/// so `--notes-file CHANGELOG.md` works if they just want the whole file;
+/// most teams copy the `## vX.Y.Z` block manually.
+fn fallback_gh_command(tag: &str) -> String {
+    format!(
+        "gh release create {} --title {} --notes-file <path-to-release-notes>",
+        tag, tag
+    )
+}
+
+/// Sanitize a tag into a safe filename component. Replaces anything that isn't
+/// alphanumeric, dash, underscore, or dot with '-'. Used only for the temp
+/// notes file name, so collisions aren't a correctness concern.
+fn sanitize_tag_for_filename(tag: &str) -> String {
+    tag.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fallback_gh_command, sanitize_tag_for_filename};
+
+    #[test]
+    fn sanitize_tag_for_filename_preserves_safe_chars() {
+        assert_eq!(sanitize_tag_for_filename("v1.2.3"), "v1.2.3");
+        assert_eq!(
+            sanitize_tag_for_filename("data-machine-v0.70.2"),
+            "data-machine-v0.70.2"
+        );
+    }
+
+    #[test]
+    fn sanitize_tag_for_filename_strips_unsafe_chars() {
+        assert_eq!(sanitize_tag_for_filename("v1.2.3 rc1"), "v1.2.3-rc1");
+        assert_eq!(sanitize_tag_for_filename("feat/foo@1"), "feat-foo-1");
+    }
+
+    #[test]
+    fn fallback_gh_command_includes_tag_twice() {
+        let cmd = fallback_gh_command("v1.2.3");
+        assert!(cmd.contains("gh release create v1.2.3"));
+        assert!(cmd.contains("--title v1.2.3"));
+        assert!(cmd.contains("--notes-file"));
     }
 }

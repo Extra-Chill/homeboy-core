@@ -16,6 +16,7 @@ pub(crate) enum ReleaseStepType {
     Publish(String),
     Cleanup,
     PostRelease,
+    GitHubRelease,
 }
 
 impl ReleaseStepType {
@@ -28,6 +29,7 @@ impl ReleaseStepType {
             "package" => ReleaseStepType::Package,
             "cleanup" => ReleaseStepType::Cleanup,
             "post_release" => ReleaseStepType::PostRelease,
+            "github.release" => ReleaseStepType::GitHubRelease,
             other => {
                 // Strip "publish." prefix at source - single source of truth for format parsing
                 let target = other.strip_prefix("publish.").unwrap_or(other);
@@ -156,6 +158,10 @@ pub struct ReleaseOptions {
     /// Deploy after release — defers artifact cleanup until after deployment.
     #[serde(default)]
     pub deploy: bool,
+    /// Skip the GitHub Release creation step (tag + notes on github.com).
+    /// Use when another pipeline (CI, semantic-release, etc.) already owns that step.
+    #[serde(default)]
+    pub skip_github_release: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -177,6 +183,9 @@ pub struct ReleaseCommandInput {
     pub bump_override: Option<String>,
     #[serde(default)]
     pub skip_publish: bool,
+    /// Skip the GitHub Release creation step (tag + notes on github.com).
+    #[serde(default)]
+    pub skip_github_release: bool,
     /// Git identity for release commits: "bot", "Name <email>", or None (use existing config).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_identity: Option<String>,
