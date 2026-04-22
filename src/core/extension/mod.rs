@@ -22,12 +22,12 @@ pub use runtime_helper::RUNNER_STEPS_ENV;
 
 // Re-export manifest types
 pub use manifest::{
-    ActionConfig, ActionType, AuditCapability, BuildConfig, CliConfig, DatabaseCliConfig,
-    DatabaseConfig, DeployCapability, DeployOverride, DeployVerification, DiscoveryConfig,
-    DocTarget, ExecutableCapability, ExtensionManifest, FeatureContextRule, HttpMethod,
-    InputConfig, LintConfig, OutputConfig, OutputSchema, PlatformCapability, ProvidesConfig,
-    RequirementsConfig, RuntimeConfig, ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig,
-    TestConfig, TestMappingConfig, VersionPatternConfig,
+    ActionConfig, ActionType, AuditCapability, AutofixVerifyConfig, BuildConfig, CliConfig,
+    DatabaseCliConfig, DatabaseConfig, DeployCapability, DeployOverride, DeployVerification,
+    DiscoveryConfig, DocTarget, ExecutableCapability, ExtensionManifest, FeatureContextRule,
+    HttpMethod, InputConfig, LintConfig, OutputConfig, OutputSchema, PlatformCapability,
+    ProvidesConfig, RequirementsConfig, RuntimeConfig, ScriptsConfig, SelectOption, SettingConfig,
+    SinceTagConfig, TestConfig, TestMappingConfig, VersionPatternConfig,
 };
 
 // Re-export version types

@@ -2,6 +2,10 @@ use crate::core::refactor::decompose;
 use crate::core::refactor::plan::verify::rewrite_callers_after_dedup;
 
 use crate::engine::undo::InMemoryRollback;
+use crate::extension::AutofixVerifyConfig;
+use crate::refactor::auto::verify::{
+    applied_files_from_chunks, capture_pre_apply_snapshot, run_verify_gate,
+};
 use crate::refactor::auto::{ApplyChunkResult, ChunkStatus, DecomposeFixPlan, Fix, NewFile};
 use std::path::Path;
 
@@ -169,6 +173,75 @@ pub fn apply_fixes_via_edit_ops(
     }
 
     results
+}
+
+/// Same as [`apply_fixes_via_edit_ops`], but runs the post-write verify gate
+/// (#1167) before returning. When `verify_config` is `Some` and the verify
+/// command exits non-zero (or times out), every file the apply phase touched
+/// is reverted in place and the corresponding `ApplyChunkResult`s are
+/// rewritten to `Reverted` with the verify output attached.
+///
+/// Pass `None` to get the legacy behavior with zero verify overhead (which is
+/// what manual commands like `refactor add` do — a broken build on a manual
+/// invocation is immediately visible to the operator).
+///
+/// The pre-apply file set is computed from `fixes` + `new_files` up front so
+/// we can snapshot originals before the write. Files that don't exist yet
+/// are captured as "created" so the rollback removes them on verify failure.
+pub fn apply_fixes_via_edit_ops_with_verify(
+    fixes: &mut [Fix],
+    new_files: &mut [NewFile],
+    root: &Path,
+    verify_config: Option<&AutofixVerifyConfig>,
+) -> Vec<ApplyChunkResult> {
+    // Collect the union of files the apply phase will touch. Done *before*
+    // the write so the snapshot captures true originals, not post-write state.
+    let mut scope: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for fix in fixes.iter() {
+        if !fix.insertions.is_empty() {
+            scope.insert(fix.file.clone());
+        }
+    }
+    for nf in new_files.iter() {
+        scope.insert(nf.file.clone());
+    }
+
+    let rollback = if verify_config.is_some() {
+        capture_pre_apply_snapshot(root, scope.iter())
+    } else {
+        InMemoryRollback::new()
+    };
+
+    let mut chunk_results = apply_fixes_via_edit_ops(fixes, new_files, root);
+
+    // If we captured a snapshot, run verify against the real applied-file set
+    // (which may be a subset of `scope` if some ops failed during apply).
+    if verify_config.is_some() {
+        // Narrow the snapshot down to files that actually got modified —
+        // verify only needs to revert what the apply phase touched. Files in
+        // `scope` that didn't change are safe to leave alone; the rollback is
+        // keyed by path, so narrowing is an optimization, not a correctness
+        // requirement. The full rollback is passed through so created-file
+        // entries (which may not show up as modifications) are also handled.
+        let _applied = applied_files_from_chunks(&chunk_results);
+
+        let outcome = run_verify_gate(verify_config, &rollback, root, &mut chunk_results);
+
+        // On verify failure, mark fixes as not-applied so downstream summary
+        // reporting reflects reality. The chunk-results rewrite already
+        // captures the user-facing error; this keeps the Fix/NewFile
+        // invariants in sync with ChunkStatus.
+        if !outcome.passed && !outcome.skipped {
+            for fix in fixes.iter_mut() {
+                fix.applied = false;
+            }
+            for nf in new_files.iter_mut() {
+                nf.written = false;
+            }
+        }
+    }
+
+    chunk_results
 }
 
 /// Merge insertions from fixes targeting the same file into the first fix for

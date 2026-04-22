@@ -6,8 +6,11 @@ pub mod policy;
 pub mod sidecar;
 pub mod summary;
 pub mod tracking;
+pub mod verify;
 
-pub use apply::{apply_decompose_plans, apply_fixes_via_edit_ops};
+pub use apply::{
+    apply_decompose_plans, apply_fixes_via_edit_ops, apply_fixes_via_edit_ops_with_verify,
+};
 pub use contracts::{
     ApplyChunkResult, ChunkStatus, DecomposeFixPlan, Fix, FixPolicy, FixResult, Insertion,
     InsertionKind, NewFile, PolicySummary, RefactorPrimitive, SkippedFile,
@@ -24,3 +27,7 @@ pub use summary::{
     summarize_optional_fix_results,
 };
 pub use tracking::{changed_file_set, count_newly_changed, newly_changed_files};
+pub use verify::{
+    applied_files_from_chunks, capture_pre_apply_snapshot, run_verify_gate, VerifyOutcome,
+    VERIFY_ENV_VAR,
+};

@@ -137,6 +137,22 @@ pub fn run_audit_refactor(
     })
 }
 
+fn resolve_verify_config(component_id: &str) -> Option<crate::extension::AutofixVerifyConfig> {
+    use crate::component;
+    use crate::extension;
+
+    let comp = component::load(component_id).ok()?;
+    let extensions = comp.extensions.as_ref()?;
+    for ext_id in extensions.keys() {
+        if let Ok(manifest) = extension::load_extension(ext_id) {
+            if let Some(cfg) = manifest.autofix_verify() {
+                return Some(cfg.clone());
+            }
+        }
+    }
+    None
+}
+
 fn run_fix_iteration(
     audit_result: &CodeAuditResult,
     only_kinds: &[crate::code_audit::AuditFinding],
@@ -158,6 +174,10 @@ fn run_fix_iteration(
     let mut applied_chunks = 0;
     let mut reverted_chunks = 0;
     let mut total_modified = 0;
+
+    // Resolve the verify config from the component's linked extension(s).
+    // When no extension provides autofix_verify, the gate is a no-op.
+    let verify_config = resolve_verify_config(&audit_result.component_id);
 
     // Filter to auto-apply eligible fixes and new files (inlined from removed auto_apply_subset)
     let mut auto_fixes: Vec<fixer::Fix> = fix_result
@@ -209,11 +229,16 @@ fn run_fix_iteration(
     }
 
     // Apply content fixes, new files, and file moves through the unified
-    // EditOp pipeline. This converts Fix/NewFile → TaggedEditOp, applies them
-    // via apply_edit_ops(), then runs format_after_write and caller rewriting.
+    // EditOp pipeline with the post-write verify gate (#1167). When
+    // verify_config is None the gate is skipped, preserving the legacy
+    // behavior for components without a verify-capable extension.
     if !auto_fixes.is_empty() || !auto_new_files.is_empty() {
-        let chunk_results =
-            fixer::apply_fixes_via_edit_ops(&mut auto_fixes, &mut auto_new_files, root);
+        let chunk_results = fixer::apply_fixes_via_edit_ops_with_verify(
+            &mut auto_fixes,
+            &mut auto_new_files,
+            root,
+            verify_config.as_ref(),
+        );
         applied_chunks += chunk_results
             .iter()
             .filter(|chunk| matches!(chunk.status, fixer::ChunkStatus::Applied))
