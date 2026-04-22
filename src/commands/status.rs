@@ -41,13 +41,9 @@ pub struct StatusArgs {
     /// Show only outdated components (local != remote)
     #[arg(long)]
     pub outdated: bool,
-
-    /// Fetch from origin before checking status (detects upstream drift)
-    #[arg(long)]
-    pub fetch: bool,
 }
 
-/// Per-component upstream drift info gathered by `--fetch`.
+/// Per-component upstream drift info.
 #[derive(Debug, Clone, Serialize)]
 pub struct UpstreamDrift {
     pub component_id: String,
@@ -55,7 +51,7 @@ pub struct UpstreamDrift {
     pub ahead: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<u32>,
-    /// Latest tag on origin after fetch (e.g. "v0.8.0").
+    /// Latest tag on origin (e.g. "v0.8.0").
     /// Differs from local version when the local checkout is stale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_origin_tag: Option<String>,
@@ -92,8 +88,8 @@ pub struct ProjectStatusRow {
     pub component_id: String,
     pub local_version: Option<String>,
     pub remote_version: Option<String>,
-    /// Latest tag on origin (only when --fetch is used).
-    /// When this differs from local_version, the local checkout is stale.
+    /// Latest tag on origin. When this differs from local_version, the local
+    /// checkout is stale and needs a pull.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_version: Option<String>,
     pub unreleased_commits: u32,
@@ -209,15 +205,13 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
     let mut upstream_drift = Vec::new();
     let mut clean: usize = 0;
 
-    // Optionally fetch from origin to detect upstream drift
-    if args.fetch {
-        for comp in &components {
-            if let Some(drift) = fetch_upstream_drift_for(&comp.local_path, &comp.id) {
-                if drift.is_behind() {
-                    behind_upstream.push(comp.id.clone());
-                }
-                upstream_drift.push(drift);
+    // Fetch from origin and detect upstream drift for each component
+    for comp in &components {
+        if let Some(drift) = fetch_upstream_drift_for(&comp.local_path, &comp.id) {
+            if drift.is_behind() {
+                behind_upstream.push(comp.id.clone());
             }
+            upstream_drift.push(drift);
         }
     }
 
@@ -272,8 +266,7 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
 /// Project dashboard: show version drift across all components in a project.
 ///
 /// Combines local version, remote (deployed) version, release state, upstream
-/// drift (when `--fetch` is used), and unreleased commit count into a single
-/// view per component.
+/// drift, and unreleased commit count into a single view per component.
 fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<StatusResult> {
     let proj = project::load(project_id)?;
     let components = project::resolve_project_components(&proj)?;
@@ -298,17 +291,13 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
     // Gather remote versions via deploy check mode (handles SSH internally)
     let remote_versions = fetch_project_remote_versions(project_id);
 
-    // Optionally fetch upstream drift
-    let upstream_drift_map: std::collections::HashMap<String, UpstreamDrift> = if args.fetch {
-        components
-            .iter()
-            .filter_map(|c| {
-                fetch_upstream_drift_for(&c.local_path, &c.id).map(|d| (c.id.clone(), d))
-            })
-            .collect()
-    } else {
-        std::collections::HashMap::new()
-    };
+    // Fetch upstream drift for all components
+    let upstream_drift_map: std::collections::HashMap<String, UpstreamDrift> = components
+        .iter()
+        .filter_map(|c| {
+            fetch_upstream_drift_for(&c.local_path, &c.id).map(|d| (c.id.clone(), d))
+        })
+        .collect();
 
     // Build per-component rows
     let mut rows: Vec<ProjectStatusRow> = Vec::new();
@@ -345,7 +334,7 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
             ReleaseStateStatus::NeedsBump => ProjectComponentDashboardStatus::NeedsBump,
             ReleaseStateStatus::DocsOnly => ProjectComponentDashboardStatus::DocsOnly,
             ReleaseStateStatus::Clean => {
-                // Check upstream drift first (only when --fetch was used)
+                // Check upstream drift first
                 if let Some(d) = drift {
                     if d.is_behind() {
                         ProjectComponentDashboardStatus::BehindUpstream
@@ -360,7 +349,7 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
                         }
                     }
                 } else {
-                    // No fetch data — check deployed version
+                    // No upstream data — check deployed version
                     match (&local_ver, &remote_ver) {
                         (Some(local), Some(remote)) if local != remote => {
                             ProjectComponentDashboardStatus::Outdated
@@ -515,9 +504,6 @@ fn log_dashboard_table(rows: &[ProjectStatusRow]) {
         return;
     }
 
-    // Determine whether any row has upstream drift data
-    let has_upstream = rows.iter().any(|r| r.ahead_upstream.is_some() || r.behind_upstream.is_some());
-
     // Calculate column widths
     let id_width = rows
         .iter()
@@ -537,72 +523,47 @@ fn log_dashboard_table(rows: &[ProjectStatusRow]) {
         .max()
         .unwrap_or(6)
         .max(6);
-    let origin_width = if has_upstream {
-        rows.iter()
-            .map(|r| r.origin_version.as_deref().unwrap_or("-").len())
-            .max()
-            .unwrap_or(6)
-            .max(6)
-    } else {
-        6
-    };
+    let origin_width = rows
+        .iter()
+        .map(|r| r.origin_version.as_deref().unwrap_or("-").len())
+        .max()
+        .unwrap_or(6)
+        .max(6);
 
     // Header
-    if has_upstream {
-        eprintln!(
-            "{:<id_w$}  {:<local_w$}  {:<remote_w$}  {:<origin_w$}  {:>10}  {:>8}  Status",
-            "Component",
-            "Local",
-            "Remote",
-            "Origin",
-            "Unreleased",
-            "Upstream",
-            id_w = id_width,
-            local_w = local_width,
-            remote_w = remote_width,
-            origin_w = origin_width,
-        );
-        eprintln!(
-            "{:-<id_w$}  {:-<local_w$}  {:-<remote_w$}  {:-<origin_w$}  {:->10}  {:->8}  {:-<10}",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            id_w = id_width,
-            local_w = local_width,
-            remote_w = remote_width,
-            origin_w = origin_width,
-        );
-    } else {
-        eprintln!(
-            "{:<id_w$}  {:<local_w$}  {:<remote_w$}  {:>10}  Status",
-            "Component",
-            "Local",
-            "Remote",
-            "Unreleased",
-            id_w = id_width,
-            local_w = local_width,
-            remote_w = remote_width,
-        );
-        eprintln!(
-            "{:-<id_w$}  {:-<local_w$}  {:-<remote_w$}  {:->10}  {:-<10}",
-            "",
-            "",
-            "",
-            "",
-            "",
-            id_w = id_width,
-            local_w = local_width,
-            remote_w = remote_width,
-        );
-    }
+    eprintln!(
+        "{:<id_w$}  {:<local_w$}  {:<remote_w$}  {:<origin_w$}  {:>10}  {:>8}  Status",
+        "Component",
+        "Local",
+        "Remote",
+        "Origin",
+        "Unreleased",
+        "Upstream",
+        id_w = id_width,
+        local_w = local_width,
+        remote_w = remote_width,
+        origin_w = origin_width,
+    );
+    eprintln!(
+        "{:-<id_w$}  {:-<local_w$}  {:-<remote_w$}  {:-<origin_w$}  {:->10}  {:->8}  {:-<10}",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        id_w = id_width,
+        local_w = local_width,
+        remote_w = remote_width,
+        origin_w = origin_width,
+    );
 
     for row in rows {
         let local = row.local_version.as_deref().unwrap_or("-");
         let remote = row.remote_version.as_deref().unwrap_or("-");
+        let origin = row.origin_version.as_deref().unwrap_or("-");
+        let upstream = format_upstream(&row.ahead_upstream, &row.behind_upstream);
         let status_icon = match &row.status {
             ProjectComponentDashboardStatus::Current => "✅ current",
             ProjectComponentDashboardStatus::Outdated => "⚠️  outdated",
@@ -613,36 +574,20 @@ fn log_dashboard_table(rows: &[ProjectStatusRow]) {
             ProjectComponentDashboardStatus::Unknown => "❓ unknown",
         };
 
-        if has_upstream {
-            let origin = row.origin_version.as_deref().unwrap_or("-");
-            let upstream = format_upstream(&row.ahead_upstream, &row.behind_upstream);
-            eprintln!(
-                "{:<id_w$}  {:<local_w$}  {:<remote_w$}  {:<origin_w$}  {:>10}  {:>8}  {}",
-                row.component_id,
-                local,
-                remote,
-                origin,
-                row.unreleased_commits,
-                upstream,
-                status_icon,
-                id_w = id_width,
-                local_w = local_width,
-                remote_w = remote_width,
-                origin_w = origin_width,
-            );
-        } else {
-            eprintln!(
-                "{:<id_w$}  {:<local_w$}  {:<remote_w$}  {:>10}  {}",
-                row.component_id,
-                local,
-                remote,
-                row.unreleased_commits,
-                status_icon,
-                id_w = id_width,
-                local_w = local_width,
-                remote_w = remote_width,
-            );
-        }
+        eprintln!(
+            "{:<id_w$}  {:<local_w$}  {:<remote_w$}  {:<origin_w$}  {:>10}  {:>8}  {}",
+            row.component_id,
+            local,
+            remote,
+            origin,
+            row.unreleased_commits,
+            upstream,
+            status_icon,
+            id_w = id_width,
+            local_w = local_width,
+            remote_w = remote_width,
+            origin_w = origin_width,
+        );
     }
 }
 
