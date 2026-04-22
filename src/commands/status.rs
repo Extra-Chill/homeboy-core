@@ -462,7 +462,11 @@ fn get_latest_tag_overall(path: &str) -> Option<String> {
         &["tag", "-l", "--sort=-v:refname"],
     )?;
 
-    output.lines().next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    output
+        .lines()
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Like `fetch_upstream_drift` but sets the component ID in the result.
@@ -516,7 +520,9 @@ fn log_dashboard_table(rows: &[ProjectStatusRow]) {
     }
 
     // Determine whether any row has upstream drift data
-    let has_upstream = rows.iter().any(|r| r.ahead_upstream.is_some() || r.behind_upstream.is_some());
+    let has_upstream = rows
+        .iter()
+        .any(|r| r.ahead_upstream.is_some() || r.behind_upstream.is_some());
 
     // Calculate column widths
     let id_width = rows
