@@ -784,14 +784,11 @@ pub(super) fn changelog_entries_from_json(
 /// it as a GitHub URL. Non-GitHub remotes (GitLab, self-hosted, etc.) fall
 /// through cleanly — the step simply isn't added to the plan.
 fn github_release_applies(component: &Component) -> bool {
-    let remote_url = component
-        .remote_url
-        .clone()
-        .or_else(|| {
-            crate::deploy::release_download::detect_remote_url(std::path::Path::new(
-                &component.local_path,
-            ))
-        });
+    let remote_url = component.remote_url.clone().or_else(|| {
+        crate::deploy::release_download::detect_remote_url(std::path::Path::new(
+            &component.local_path,
+        ))
+    });
 
     remote_url
         .as_deref()

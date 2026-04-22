@@ -573,8 +573,8 @@ impl ReleaseStepExecutor {
                 )
             })?;
 
-        let github = crate::deploy::release_download::parse_github_url(&remote_url)
-            .ok_or_else(|| {
+        let github =
+            crate::deploy::release_download::parse_github_url(&remote_url).ok_or_else(|| {
                 Error::validation_invalid_argument(
                     "github.release",
                     format!("Remote URL '{}' is not a GitHub URL", remote_url),
@@ -698,13 +698,11 @@ impl ReleaseStepExecutor {
                 "--title",
                 &tag,
                 "--notes-file",
-                notes_path
-                    .to_str()
-                    .ok_or_else(|| {
-                        Error::internal_unexpected(
-                            "github.release: notes-file path is not valid UTF-8".to_string(),
-                        )
-                    })?,
+                notes_path.to_str().ok_or_else(|| {
+                    Error::internal_unexpected(
+                        "github.release: notes-file path is not valid UTF-8".to_string(),
+                    )
+                })?,
                 "-R",
                 &repo_flag,
             ])
@@ -720,11 +718,7 @@ impl ReleaseStepExecutor {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let fallback = fallback_gh_command(&tag);
-            log_status!(
-                "release",
-                "⚠ `gh release create` failed: {}",
-                stderr.trim()
-            );
+            log_status!("release", "⚠ `gh release create` failed: {}", stderr.trim());
             log_status!("release", "Manual fallback: {}", fallback);
             return Ok(self.step_result(
                 step,
