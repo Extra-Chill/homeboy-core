@@ -462,8 +462,8 @@ pub(crate) fn run_github_release(
             )
         })?;
 
-    let github = crate::deploy::release_download::parse_github_url(&remote_url).ok_or_else(
-        || {
+    let github =
+        crate::deploy::release_download::parse_github_url(&remote_url).ok_or_else(|| {
             Error::validation_invalid_argument(
                 "github.release",
                 format!("Remote URL '{}' is not a GitHub URL", remote_url),
@@ -474,8 +474,7 @@ pub(crate) fn run_github_release(
                     "Use --no-github-release to skip this step".to_string(),
                 ]),
             )
-        },
-    )?;
+        })?;
 
     if !gh_is_available() {
         let fallback = fallback_gh_command(&tag);
@@ -597,11 +596,7 @@ pub(crate) fn run_github_release(
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let fallback = fallback_gh_command(&tag);
-        log_status!(
-            "release",
-            "⚠ `gh release create` failed: {}",
-            stderr.trim()
-        );
+        log_status!("release", "⚠ `gh release create` failed: {}", stderr.trim());
         log_status!("release", "Manual fallback: {}", fallback);
         return Ok(step_success(
             "github.release",
@@ -652,9 +647,8 @@ fn load_release_notes(component: &Component) -> Result<String> {
 }
 
 fn should_amend_release_commit(local_path: &str) -> Result<bool> {
-    let log_output =
-        crate::git::execute_git_for_release(local_path, &["log", "-1", "--format=%s"])
-            .map_err(|e| Error::internal_io(e.to_string(), Some("git log".to_string())))?;
+    let log_output = crate::git::execute_git_for_release(local_path, &["log", "-1", "--format=%s"])
+        .map_err(|e| Error::internal_io(e.to_string(), Some("git log".to_string())))?;
     if !log_output.status.success() {
         return Ok(false);
     }
@@ -684,10 +678,7 @@ pub(crate) fn build_release_payload(
     extra_config: Option<&std::collections::HashMap<String, serde_json::Value>>,
 ) -> serde_json::Value {
     let version = state.version.clone().unwrap_or_default();
-    let tag = state
-        .tag
-        .clone()
-        .unwrap_or_else(|| format!("v{}", version));
+    let tag = state.tag.clone().unwrap_or_else(|| format!("v{}", version));
     let notes = state.notes.clone().unwrap_or_default();
 
     let mut payload = serde_json::json!({
