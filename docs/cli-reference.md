@@ -248,13 +248,6 @@
 
 - `Show` — Show a changelog (Homeboy's own if no component specified)
 - `component_id` — Component ID to show changelog for
-- `EXAMPLES` — Add changelog items to the configured "next" section  Examples: homeboy changelog add my-plugin "Fixed login bug" homeboy changelog add my-plugin "Removed legacy API" --type Removed homeboy changelog add my-plugin -m "Added search" -m "Added filters"
-- `Add`
-- `json` — JSON input spec for batch operations.  Use "-" to read from stdin, "@file.json" to read from a file, or an inline JSON string.
-- `component_id` — Component ID (non-JSON mode)
-- `positional_message` — Changelog item content (positional, for backward compatibility)
-- `messages` — Changelog message (repeatable: -m "first" -m "second")
-- `entry_type` — Changelog subsection type (Added, Changed, Deprecated, Removed, Fixed, Security, Refactored)
 - `Init` — Initialize a new changelog file
 - `path` — Path for the changelog file (relative to component)
 - `configure` — Also update component config to add changelogTargets
