@@ -50,16 +50,14 @@ Alias for `homeboy release`. Delegates to the release command for full release p
 
 - Writes the new version directly to targets without touching the changelog.
 
-Changelog entries must be added *before* running `version bump` (recommended: `homeboy changelog add --json ...`). Make sure the changelog includes ALL changes since the last update, not just the ones you personally worked on. 
+Changelog entries are generated automatically from conventional-prefixed commits (`feat:` / `fix:` / etc.) at release time — no hand-curation needed.
 
-Recommended release workflow (non-enforced):
+Recommended release workflow:
 
-- Land work as scoped feature/fix commits first.
+- Land work as scoped conventional-prefixed commits (`feat:`, `fix:`, etc.) first.
 - Use `homeboy changes <component_id>` to review everything since the last tag.
-- Add changelog items as user-facing release notes that capture anything impacting user or developer experience (not a copy of commit subjects).
-- Run `homeboy version bump ...` when the only remaining local changes are release metadata (changelog + version).
-
-Note: `--json` for changelog entries is on `homeboy changelog add` (not `homeboy changelog`).
+- Run `homeboy version bump <component_id> <patch|minor|major>` when the only remaining local changes are release metadata.
+- Homeboy generates the changelog section from the commit trail and finalizes it as `## [X.Y.Z] - YYYY-MM-DD` in one shot.
 
 Arguments:
 
@@ -130,11 +128,12 @@ To bypass changelog finalization entirely, use `version set` instead of `version
 
 ### Auto-Generation from Commits
 
-`version bump` can auto-generate changelog entries from commits since the last tag, **but only if:**
+`version bump` generates changelog entries from commits since the last tag. There is no manual entry path — all entries come from commits.
 
-1. All changes are **committed** (uncommitted changes are invisible to auto-gen)
-2. The Unreleased section is **empty** (existing entries skip auto-gen)
-3. At least one commit has an entry-producing prefix
+Requirements:
+
+1. All changes are **committed** (uncommitted changes don't contribute entries).
+2. At least one commit has an entry-producing prefix (see table below).
 
 | Commit prefix | Changelog section |
 |---------------|------------------|
@@ -144,18 +143,9 @@ To bypass changelog finalization entirely, use `version set` instead of `version
 | Other (non-conventional) | Changed |
 | `docs:`, `chore:` | **Skipped**  |
 
-**Important:** If ALL commits are `docs:` or `chore:`, auto-generation produces nothing and you'll get an error.
-
-To manually add entries: `homeboy changelog add <id> "message" --type fixed`
+**Important:** If all commits are `docs:` or `chore:`, no entries get generated and the release errors out. Commit at least one user-facing change with a `feat:`/`fix:`/conventional prefix before releasing.
 
 ## Related Workflows
-
-Before bumping, add changelog entries:
-
-```sh
-homeboy changelog add <component_id> "Added: new feature"
-homeboy changelog add <component_id> -m "Fixed: bug" -m "Changed: behavior"
-```
 
 After bumping, push and optionally tag:
 

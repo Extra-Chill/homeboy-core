@@ -412,7 +412,7 @@ pub(crate) fn build_untracked_hint(path: &str, untracked_count: usize) -> Option
 
 fn resolve_changelog_info(
     component: &crate::component::Component,
-    commits: &[CommitInfo],
+    _commits: &[CommitInfo],
 ) -> Option<ChangelogInfo> {
     let changelog_path = changelog::resolve_changelog_path(component).ok()?;
     let content = std::fs::read_to_string(&changelog_path).ok()?;
@@ -420,19 +420,14 @@ fn resolve_changelog_info(
     let unreleased_entries =
         changelog::count_unreleased_entries(&content, &settings.next_section_aliases);
 
-    let hint = if unreleased_entries == 0 && !commits.is_empty() {
-        Some(format!(
-            "Run `homeboy changelog add {}` before bumping version",
-            component.id
-        ))
-    } else {
-        None
-    };
-
+    // No hint: homeboy auto-generates changelog entries from commits at
+    // release time, so an empty `## Unreleased` section no longer implies
+    // the user needs to do anything. The count itself is still useful
+    // context for `homeboy changes` output.
     Some(ChangelogInfo {
         unreleased_entries,
         path: Some(changelog_path.to_string_lossy().to_string()),
-        hint,
+        hint: None,
     })
 }
 

@@ -12,6 +12,8 @@ homeboy changelog [COMMAND]
 
 In JSON output mode, the default `show` output is returned as JSON (with a `content` field containing the markdown).
 
+> **Note:** Homeboy generates changelog entries automatically from conventional-prefixed commits (`feat:` / `fix:` / etc.) at release time. There is no `changelog add` command — users don't hand-curate changelog bullets. See `homeboy release` and the commits since the last tag.
+
 ## Subcommands
 
 ### Default (show)
@@ -19,37 +21,17 @@ In JSON output mode, the default `show` output is returned as JSON (with a `cont
 ```sh
 homeboy changelog
 homeboy changelog --self
+homeboy changelog show
+homeboy changelog show <component_id>
 ```
 
-Shows the embedded Homeboy CLI changelog documentation (from `docs/changelog.md`).
+Shows the embedded Homeboy CLI changelog documentation (from `docs/changelog.md`), or a specific component's changelog when a component ID is provided.
 
 Options:
 
 - `--self`: Show Homeboy's own changelog (release notes) instead of a component's changelog
 
 This prints raw markdown to stdout.
-
-### `add`
-
-```sh
-homeboy changelog add <component_id> <message>
-homeboy changelog add <component_id> -m "first" -m "second"
-homeboy changelog add <component_id> -m "Bug fix" --type fixed
-homeboy changelog add <component_id> -m "New feature" -t added
-homeboy changelog add --json <spec>
-```
-
-Options:
-
-- `-m, --message <message>`: Changelog message (repeatable)
-- `-t, --type <type>`: Changelog subsection type for Keep a Changelog format. Valid values: `added`, `changed`, `deprecated`, `removed`, `fixed`, `security` (case-insensitive)
-
-Notes:
-
-- The changelog entry is the positional `<message>` value. Use `--json` for multiple messages in one run.
-- Changelog messages are intended to be user-facing release notes (capture anything impacting user or developer experience), not a 1:1 copy of commit subjects.
-- When `--json` is provided, other args are ignored and the payload's `messages` array is applied in order.
-- When `--type` is provided, items are placed under the corresponding Keep a Changelog subsection (e.g., `### Fixed`). If the subsection doesn't exist, it's created in canonical order.
 
 ### `init`
 
@@ -73,21 +55,17 @@ Requirements:
 
 ## Prerequisites
 
-Before using `changelog add`, configure the changelog path:
+Configure the changelog path:
 
 ```sh
 homeboy component set <id> --changelog-target "CHANGELOG.md"
 ```
 
-This is required for both `changelog add` and `version bump`.
+This is required for `version bump` and `release`.
 
 ## Changelog Resolution
 
-For `add`, Homeboy resolves the changelog from the component's `changelog_target` configuration.
-
-Adds one or more changelog items to the configured "next" section in the component's changelog file.
-
-`--json` for this command is an `add` subcommand option (not a root/global flag).
+Homeboy resolves the changelog from the component's `changelog_target` configuration for `show` (when a component ID is given) and for release-time finalization.
 
 Configuration / defaults (strict by default):
 
@@ -102,7 +80,7 @@ Configuration / defaults (strict by default):
 
 Notes:
 
-- Homeboy does not auto-fix existing changelogs. If the next section is missing or empty, commands will error with hints to fix it manually.
+- Homeboy does not auto-fix existing changelogs. If the next section is missing or malformed, commands will error with hints to fix it manually.
 
 
 ## JSON output
@@ -111,9 +89,9 @@ Notes:
 
 `homeboy changelog` returns a tagged union:
 
-- `command`: `show` (default) | `add` | `init`
+- `command`: `show` (default) | `init`
 
-### JSON output (default)
+### JSON output (default / show)
 
 This section applies only when JSON output is used.
 
@@ -123,29 +101,6 @@ This section applies only when JSON output is used.
   "topic_label": "changelog",
   "content": "<markdown content>"
 }
-```
-
-### JSON output (add)
-
-```json
-{
-  "command": "add",
-  "component_id": "<component_id>",
-  "changelog_path": "<absolute/or/resolved/path.md>",
-  "next_section_label": "<label>",
-  "messages": ["<message>", "<message>"],
-  "items_added": 2,
-  "changed": true,
-  "subsection_type": "fixed"
-}
-```
-
-Note: `subsection_type` is only present when `--type` was specified.
-
-Bulk JSON input uses a single object (not an array):
-
-```json
-{ "component_id": "<component_id>", "messages": ["<message>"] }
 ```
 
 ### JSON output (init)
@@ -164,11 +119,11 @@ Bulk JSON input uses a single object (not an array):
 
 ## Errors
 
-- `show`: errors if embedded docs do not contain `changelog`
-- `add`: errors if changelog path cannot be resolved, or if `messages` is empty / contains empty strings
+- `show`: errors if embedded docs do not contain `changelog`, or if the component's changelog path cannot be resolved (when a component ID is provided)
 - `init`: errors if changelog already exists, if component not found, or if no version targets configured
 
 ## Related
 
+- [Release command](release.md) — owns changelog entry generation from commits
 - [Docs command](docs.md)
-- [Changelog content](../changelog.md)
+- [Changelog content](../changelog.md) — homeboy's own historical changelog

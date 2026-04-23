@@ -69,7 +69,7 @@ Commits release changes (version bumps, changelog updates) before tagging.
 
 Release requires a clean working tree, with two exceptions:
 
-- **Changelog**: May have uncommitted entries from `homeboy changelog add`
+- **Changelog**: May have uncommitted entries (these will be finalized during release)
 - **Version targets**: May be staged (though unusual)
 
 These files are modified during the release anyway and included in the release commit.

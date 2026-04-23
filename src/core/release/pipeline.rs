@@ -508,7 +508,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
                 );
             } else if uncommitted.has_changes && !options.dry_run {
                 // Only changelog/version files are uncommitted — auto-stage them
-                // so the release commit includes them (e.g., after `homeboy changelog add`).
+                // so the release commit includes them (auto-generated from commits).
                 // Skip in dry-run mode to avoid mutating working tree.
                 log_status!(
                     "release",
@@ -695,6 +695,7 @@ pub(super) fn resolve_tag_and_commits(
         }
     }
 }
+
 
 /// Fetch from remote and fast-forward if behind.
 ///
