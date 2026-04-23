@@ -20,9 +20,9 @@ mod help_topics;
 
 use commands::utils::{args, entity_suggest, response as output, tty};
 use commands::{
-    api, audit, auth, build, changelog, changes, cli, component, config, db, deploy, extension,
-    file, fleet, git, init, lint, logs, project, refactor, release, scaffold, server, ssh, status,
-    test, transfer, undo, upgrade, validate, version,
+    api, audit, audit_issues, auth, build, changelog, changes, cli, component, config, db, deploy,
+    extension, file, fleet, git, init, lint, logs, project, refactor, release, scaffold, server,
+    ssh, status, test, transfer, undo, upgrade, validate, version,
 };
 use homeboy::extension::load_all_extensions;
 
@@ -102,6 +102,9 @@ enum Commands {
     Scaffold(scaffold::ScaffoldArgs),
     /// Audit code conventions and detect architectural drift
     Audit(audit::AuditArgs),
+    /// Cross-reference audit findings with open GitHub issues
+    #[command(name = "audit-issues")]
+    AuditIssues(audit_issues::AuditIssuesArgs),
     /// Structural refactoring (rename terms across codebase)
     Refactor(refactor::RefactorArgs),
     /// Undo the last write operation (audit fix, refactor, etc.)

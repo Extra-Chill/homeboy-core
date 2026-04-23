@@ -247,6 +247,7 @@ pub fn finalize_set_spec(
 
 pub mod api;
 pub mod audit;
+pub mod audit_issues;
 pub mod auth;
 pub mod build;
 pub mod changelog;
@@ -336,6 +337,7 @@ pub(crate) fn run_json(
         crate::Commands::Release(args) => dispatch!(args, global, release),
         crate::Commands::Scaffold(args) => dispatch!(args, global, scaffold),
         crate::Commands::Audit(args) => dispatch!(args, global, audit),
+        crate::Commands::AuditIssues(args) => dispatch!(args, global, audit_issues),
         crate::Commands::Refactor(args) => dispatch!(args, global, refactor),
         crate::Commands::Undo(args) => dispatch!(args, global, undo),
         crate::Commands::Auth(args) => dispatch!(args, global, auth),

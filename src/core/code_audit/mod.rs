@@ -29,6 +29,7 @@ mod findings;
 pub mod fingerprint;
 pub(crate) mod impact;
 pub(crate) mod import_matching;
+pub mod issue_grouping;
 mod layer_ownership;
 pub(crate) mod naming;
 pub mod report;
