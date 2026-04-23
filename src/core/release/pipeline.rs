@@ -107,12 +107,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     let has_publish_targets = !get_publish_targets(&extensions).is_empty();
     let want_publish = !options.skip_publish && has_publish_targets;
     if want_publish {
-        match executor::run_package(
-            &extensions,
-            &mut state,
-            component_id,
-            &component.local_path,
-        ) {
+        match executor::run_package(&extensions, &mut state, component_id, &component.local_path) {
             Ok(result) => results.push(result),
             Err(err) => results.push(failed_result("package", "package", err)),
         }
@@ -258,10 +253,7 @@ fn derive_overall_status(results: &[ReleaseStepResult]) -> ReleaseStepStatus {
     }
 }
 
-fn build_summary(
-    results: &[ReleaseStepResult],
-    status: &ReleaseStepStatus,
-) -> ReleaseRunSummary {
+fn build_summary(results: &[ReleaseStepResult], status: &ReleaseStepStatus) -> ReleaseRunSummary {
     let succeeded = results
         .iter()
         .filter(|r| matches!(r.status, ReleaseStepStatus::Success))
@@ -376,8 +368,6 @@ fn build_step_summary_line(result: &ReleaseStepResult) -> Option<String> {
         _ => None,
     }
 }
-
-
 
 /// Plan a release: run all preflight validations, then return a description
 /// of the steps the executor will run. Used by `--dry-run` to preview work
@@ -899,8 +889,7 @@ fn generate_changelog_entries(
             format!("No commits since {} — nothing to release", tag_desc),
             Some(format!("Component: {}", component_id)),
             Some(vec![
-                "Homeboy releases are driven by commits. Commit a change, then re-run."
-                    .to_string(),
+                "Homeboy releases are driven by commits. Commit a change, then re-run.".to_string(),
                 format!(
                     "Check status: git log {}..HEAD --oneline",
                     latest_tag.as_deref().unwrap_or("")
@@ -1028,14 +1017,11 @@ fn changelog_entries_to_json(
 /// it as a GitHub URL. Non-GitHub remotes (GitLab, self-hosted, etc.) fall
 /// through cleanly — the step simply isn't added to the plan.
 fn github_release_applies(component: &Component) -> bool {
-    let remote_url = component
-        .remote_url
-        .clone()
-        .or_else(|| {
-            crate::deploy::release_download::detect_remote_url(std::path::Path::new(
-                &component.local_path,
-            ))
-        });
+    let remote_url = component.remote_url.clone().or_else(|| {
+        crate::deploy::release_download::detect_remote_url(std::path::Path::new(
+            &component.local_path,
+        ))
+    });
 
     remote_url
         .as_deref()

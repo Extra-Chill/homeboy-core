@@ -546,6 +546,4 @@ mod tests {
             finalized
         );
     }
-
-
 }
