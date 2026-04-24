@@ -214,11 +214,12 @@ classification block, lines 282–374). It distinguishes 8 failure modes:
 Each produces a distinct `FAILED_STEP` label and either dumps
 diagnostics or replays the tool output.
 
-**Consolidation target:** factor this classifier into a shared
-`runtime/classify-failure.sh` helper (tracked in
+**Consolidation target:** factor this classifier into a future shared
+runtime helper under `src/core/extension/runtime/` (tracked in
 [Extra-Chill/homeboy#1459](https://github.com/Extra-Chill/homeboy/issues/1459))
 so rust, swift, and future extensions produce the same categorized
-surface without re-implementing the logic.
+surface without re-implementing the logic. The helper does not exist
+yet — this is a follow-up deliverable, not a current reference.
 
 ## Command-level behavior
 
