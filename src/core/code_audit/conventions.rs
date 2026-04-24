@@ -181,6 +181,10 @@ pub enum AuditFinding {
     /// guaranteed to exist given plugin requirements, explicit bootstrap
     /// `require`s, or the WordPress core version baseline.
     DeadGuard,
+    /// A group of classes in the same directory subtree share the same overall
+    /// method-shape (same method names + visibilities + order) and have high
+    /// per-method body similarity — candidates for a shared base class.
+    SharedScaffolding,
 }
 
 impl AuditFinding {
@@ -226,6 +230,7 @@ impl AuditFinding {
             "repeated_literal_shape",
             "deprecation_age",
             "dead_guard",
+            "shared_scaffolding",
         ]
     }
 }
