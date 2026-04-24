@@ -20,6 +20,7 @@ mod compiler_warnings;
 pub(crate) mod conventions;
 pub(crate) mod core_fingerprint;
 mod dead_code;
+mod deprecation_age;
 mod discovery;
 pub mod docs;
 pub mod docs_audit;
@@ -547,6 +548,17 @@ fn audit_internal(
             literal_shape_findings.len()
         );
         all_findings.extend(literal_shape_findings);
+    }
+
+    // Phase 4r: Deprecation age detection
+    let deprecation_findings = deprecation_age::run(&all_fingerprints, root);
+    if !deprecation_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Deprecation age: {} finding(s) (stale @deprecated tags)",
+            deprecation_findings.len()
+        );
+        all_findings.extend(deprecation_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,
