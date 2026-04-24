@@ -312,14 +312,61 @@ pub fn write_standalone_registration(component: &Component) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, MutexGuard};
     use tempfile::TempDir;
 
-    // NOTE: Tests that need to override HOME are inherently flaky when run in
-    // parallel because env vars are process-wide. To avoid this, tests that
-    // call load_standalone_components() or write_standalone_registration()
-    // through the real paths module should use `#[ignore]` and be run with
-    // `cargo test -- --ignored --test-threads=1`. Tests that can work with
-    // explicit dir paths should call the underlying logic directly.
+    // Tests that override `HOME` to redirect `paths::components()` are
+    // inherently racy when run in parallel because environment variables
+    // are process-wide. Rather than `#[ignore]`-ing them (which skips
+    // coverage in default `cargo test` runs), we serialize every test in
+    // this module that touches `HOME` through `HOME_LOCK`. Acquire the
+    // guard via `with_home_override()` before any `set_var("HOME", ...)`
+    // and the guard's `Drop` restores the previous value — parallel test
+    // runners block on the mutex instead of racing on the env var.
+    //
+    // The lock is process-local to this module because `HOME` is not
+    // consulted from any other test module in the crate today. If that
+    // changes, the lock should move somewhere more shared (or the
+    // affected code paths should accept an injected config directory so
+    // no env override is needed at all).
+
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serialized guard for tests that override `HOME`.
+    ///
+    /// Acquires `HOME_LOCK`, snapshots the current `HOME`, and installs
+    /// the test-supplied override. When the guard is dropped the previous
+    /// `HOME` is restored and the lock is released.
+    ///
+    /// Panics on a poisoned mutex, which can only happen if a previous
+    /// test panicked while holding the guard — in that case the test
+    /// runner is already reporting a failure, so a follow-up panic here
+    /// is fine.
+    struct HomeGuard {
+        previous: Option<String>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe { std::env::set_var("HOME", value) },
+                None => unsafe { std::env::remove_var("HOME") },
+            }
+        }
+    }
+
+    fn with_home_override(new_home: &std::path::Path) -> HomeGuard {
+        let lock = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", new_home.to_string_lossy().as_ref()) };
+        HomeGuard {
+            previous,
+            _lock: lock,
+        }
+    }
 
     /// Helper: create a standalone component JSON file in a directory.
     fn write_standalone_json(dir: &std::path::Path, id: &str, local_path: &str) {
@@ -389,19 +436,11 @@ mod tests {
         )
         .unwrap();
 
-        // Call load_standalone_components() directly, but first we need
-        // to temporarily point HOME so paths::components() resolves correctly.
-        let original_home = std::env::var("HOME").ok();
-        // SAFETY: this is test-only, single-threaded assertion
-        unsafe { std::env::set_var("HOME", dir.path().to_string_lossy().as_ref()) };
+        // Override HOME via the serialized guard so parallel tests can't
+        // race on this process-global env var. See the HOME_LOCK comment.
+        let _home = with_home_override(dir.path());
 
         let result = load_standalone_components();
-
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         let components = result.unwrap();
         let plugin = components
@@ -449,16 +488,8 @@ mod tests {
         )
         .unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", dir.path().to_string_lossy().as_ref()) };
-
+        let _home = with_home_override(dir.path());
         let result = load_standalone_components();
-
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         let components = result.unwrap();
         assert!(
@@ -482,16 +513,8 @@ mod tests {
         // Create an invalid JSON file
         fs::write(config_components.join("broken.json"), "not valid json").unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", dir.path().to_string_lossy().as_ref()) };
-
+        let _home = with_home_override(dir.path());
         let result = load_standalone_components();
-
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         let components = result.unwrap();
         assert!(
@@ -518,16 +541,8 @@ mod tests {
 
         write_standalone_json(&config_components, "my-plugin", &repo_dir.to_string_lossy());
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", dir.path().to_string_lossy().as_ref()) };
-
+        let _home = with_home_override(dir.path());
         let result = load_standalone_components();
-
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         let components = result.unwrap();
         assert!(
@@ -543,8 +558,7 @@ mod tests {
         let config_dir = dir.path().join(".config").join("homeboy");
         fs::create_dir_all(&config_dir).unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", dir.path().to_string_lossy().as_ref()) };
+        let _home = with_home_override(dir.path());
 
         let component = Component::new(
             "test-plugin".to_string(),
@@ -562,12 +576,6 @@ mod tests {
 
         // Verify we can read it back
         let read_result = load_standalone_components();
-
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         assert!(read_result.is_ok());
         let components = read_result.unwrap();
@@ -600,8 +608,7 @@ mod tests {
         )
         .unwrap();
 
-        let original_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", dir.path().to_string_lossy().as_ref()) };
+        let _home = with_home_override(dir.path());
 
         let component = Component::new(
             "my-comp".to_string(),
@@ -611,12 +618,6 @@ mod tests {
         );
 
         let result = write_standalone_registration(&component);
-
-        if let Some(home) = original_home {
-            unsafe { std::env::set_var("HOME", home) };
-        } else {
-            std::env::remove_var("HOME");
-        }
 
         assert!(result.is_ok());
 
