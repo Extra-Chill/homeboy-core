@@ -43,6 +43,13 @@ pub struct TransformRule {
     /// Replacement template. Supports `$1`, `$2`, `${name}` capture group refs,
     /// `$1:lower`/`:upper`/`:kebab`/`:snake`/`:pascal`/`:camel` case transforms,
     /// and `$$` for a literal dollar sign.
+    ///
+    /// Backslash escapes are collapsed before the template is handed to the
+    /// regex engine: `\\` → one literal backslash, `\n` → newline, `\t` → tab,
+    /// `\r` → CR, `\0` → nul, `\"` → `"`, `\'` → `'`. Unknown escapes pass
+    /// through verbatim. This means that to emit a PHP fully-qualified name
+    /// like `\WP_Foo` on disk, write `\\WP_Foo` in JSON (which decodes to
+    /// `\WP_Foo` in memory — the literal `\` you want). See #1277.
     pub replace: String,
     /// Glob pattern for files to apply to (e.g., `tests/**/*.php`).
     #[serde(default = "default_files_glob")]
@@ -103,6 +110,63 @@ pub struct TransformMatch {
     pub before: String,
     /// Replacement text.
     pub after: String,
+}
+
+// ============================================================================
+// Replacement template unescape
+// ============================================================================
+
+/// Unescape backslash sequences in a replacement template.
+///
+/// Users writing regex-replace rules in `homeboy.json` (or on the CLI) think of
+/// the `replace` value the way they think of sed, shell, or `String.replace` —
+/// `\\` means one literal backslash, `\n` means a newline, `\t` means a tab.
+/// The regex crate's native replacement syntax, on the other hand, passes
+/// backslashes through verbatim and only recognizes `$1`/`${name}`/`$$`. That
+/// left users with no ergonomic way to emit a single literal backslash without
+/// over-escaping in JSON and then hand-collapsing the result.
+///
+/// This helper closes the gap: it runs a single pass over the input and
+/// collapses common C-style escapes so that by the time the regex crate sees
+/// the template, `\\` is already one backslash.
+///
+/// Rules:
+/// - `\\` → one literal backslash
+/// - `\n` → newline, `\t` → tab, `\r` → carriage return, `\0` → nul
+/// - `\"` → `"`, `\'` → `'`
+/// - Any other `\X` is passed through unchanged (so stray escapes don't eat
+///   characters silently — regex-crate `$` syntax keeps working via `$$`).
+///
+/// `$` handling (`$1`, `$$`, `${name}`) is intentionally left to the regex
+/// crate. This pass only touches backslashes.
+///
+/// See: https://github.com/Extra-Chill/homeboy/issues/1277
+pub(crate) fn unescape_replacement_template(template: &str) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut chars = template.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
+            Some('"') => out.push('"'),
+            Some('\'') => out.push('\''),
+            // Unknown escape — preserve both characters so users aren't
+            // surprised by silent character loss.
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 // ============================================================================
@@ -247,6 +311,11 @@ pub fn apply_transforms(
 
         let mut matches = Vec::new();
 
+        // Collapse C-style backslash escapes in the replacement template once
+        // per rule so `\\` in JSON → one literal backslash on disk, matching
+        // sed/shell/String.replace conventions. See #1277.
+        let replace_unescaped = unescape_replacement_template(&rule.replace);
+
         for file_path in matching_files {
             // Read from accumulated edits or original file
             let content = if let Some(edited) = file_edits.get(file_path) {
@@ -265,11 +334,11 @@ pub fn apply_transforms(
                 .to_string();
 
             let (new_content, file_matches) = if rule.context == "file" {
-                apply_file_context(regex, &rule.replace, &content, &relative)
+                apply_file_context(regex, &replace_unescaped, &content, &relative)
             } else if rule.context == "hoist_static" {
-                apply_hoist_static_context(regex, &rule.replace, &content, &relative)
+                apply_hoist_static_context(regex, &replace_unescaped, &content, &relative)
             } else {
-                apply_line_context(regex, &rule.replace, &content, &relative)
+                apply_line_context(regex, &replace_unescaped, &content, &relative)
             };
 
             if !file_matches.is_empty() {
@@ -788,6 +857,96 @@ fn replace_with_case_transforms(regex: &Regex, replace: &str, text: &str) -> Str
 mod tests {
     use super::*;
     use std::fs;
+
+    // --- Replacement unescape tests (regression for #1277) ---
+
+    #[test]
+    fn unescape_collapses_double_backslash_to_one() {
+        // User wrote `\\X` in JSON source → `\\X` (2 bs) after JSON decode.
+        // In Rust source, `"\\\\X"` is that same 2-bs-then-X string.
+        // After unescape, we want 1 bs + X — ready to emit as a literal on disk.
+        assert_eq!(unescape_replacement_template("\\\\X"), "\\X");
+    }
+
+    #[test]
+    fn unescape_preserves_single_literal_backslash_escape_in_php_namespace() {
+        // Reproducer from #1277: ternary_registry_guard rule.
+        // JSON source:        "\\\\WP_Abilities_Registry::get_instance()"
+        // In-memory (Rust):   "\\\\WP_Abilities_Registry::get_instance()" — 2 bs
+        // Want on disk:       "\\WP_Abilities_Registry::get_instance()"   — 1 bs
+        let input = "\\\\WP_Abilities_Registry::get_instance()";
+        let expected = "\\WP_Abilities_Registry::get_instance()";
+        assert_eq!(unescape_replacement_template(input), expected);
+    }
+
+    #[test]
+    fn unescape_handles_control_sequences() {
+        assert_eq!(unescape_replacement_template("a\\nb"), "a\nb");
+        assert_eq!(unescape_replacement_template("a\\tb"), "a\tb");
+        assert_eq!(unescape_replacement_template("a\\rb"), "a\rb");
+        assert_eq!(unescape_replacement_template("a\\0b"), "a\0b");
+    }
+
+    #[test]
+    fn unescape_handles_quote_escapes() {
+        assert_eq!(unescape_replacement_template("\\\""), "\"");
+        assert_eq!(unescape_replacement_template("\\'"), "'");
+    }
+
+    #[test]
+    fn unescape_leaves_dollar_captures_alone() {
+        // `$` syntax is the regex crate's territory; we don't touch it.
+        assert_eq!(unescape_replacement_template("$1"), "$1");
+        assert_eq!(unescape_replacement_template("$$"), "$$");
+        assert_eq!(unescape_replacement_template("${name}"), "${name}");
+    }
+
+    #[test]
+    fn unescape_preserves_unknown_escape_sequences() {
+        // Unknown \X should pass through unchanged — no silent character loss.
+        assert_eq!(unescape_replacement_template("\\q"), "\\q");
+        assert_eq!(unescape_replacement_template("\\!"), "\\!");
+    }
+
+    #[test]
+    fn unescape_handles_trailing_backslash() {
+        assert_eq!(unescape_replacement_template("abc\\"), "abc\\");
+    }
+
+    #[test]
+    fn unescape_is_idempotent_over_single_backslash_runs() {
+        // Triple-backslash in JSON (`\\\`) is invalid JSON, so we never see it.
+        // But `\\\\\\\\` in JSON = 4 bs in memory → should collapse to 2 bs.
+        assert_eq!(unescape_replacement_template("\\\\\\\\"), "\\\\");
+    }
+
+    #[test]
+    fn end_to_end_php_namespace_ternary_replacement() {
+        // Full reproducer from #1277: replacing a class_exists ternary with
+        // a direct \\WP_Abilities_Registry::get_instance() call. Before this
+        // fix, 2 bs in memory → 2 bs on disk (PHP parse error). Now: 2 bs in
+        // memory → 1 bs on disk (valid PHP FQN).
+        let find = r"class_exists\( 'WP_Abilities_Registry' \) \? \\WP_Abilities_Registry::get_instance\(\) : null";
+        // Simulates the in-memory value after JSON decode of `"\\\\WP_Abilities_Registry::get_instance()"`
+        let replace_in_memory = "\\\\WP_Abilities_Registry::get_instance()";
+        let content =
+            "$r = class_exists( 'WP_Abilities_Registry' ) ? \\WP_Abilities_Registry::get_instance() : null;";
+
+        let regex = Regex::new(find).unwrap();
+        let unescaped = unescape_replacement_template(replace_in_memory);
+        let (out, matches) = apply_line_context(&regex, &unescaped, content, "t.php");
+
+        assert_eq!(matches.len(), 1);
+        // One literal backslash before WP_ — the PHP FQN the user intended.
+        assert!(
+            out.contains("= \\WP_Abilities_Registry::get_instance()"),
+            "expected single backslash PHP FQN, got: {out:?}"
+        );
+        assert!(
+            !out.contains("\\\\WP_Abilities_Registry"),
+            "should not emit double backslashes: {out:?}"
+        );
+    }
 
     // --- Rule model tests ---
 

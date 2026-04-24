@@ -187,6 +187,11 @@ enum RefactorCommand {
     /// Replacement templates support capture group refs ($1, $2, ${name}),
     /// case transforms ($1:lower, $1:upper, $1:kebab, $1:snake, $1:pascal, $1:camel),
     /// and literal $ via $$ (important for PHP code where every variable starts with $).
+    ///
+    /// Backslash escapes collapse before regex replacement: `\\` → one literal
+    /// backslash, `\n` → newline, `\t` → tab, `\r` → CR, `\"` / `\'` → the quote.
+    /// Write `\\WP_Foo` in JSON to emit `\WP_Foo` on disk (useful for PHP
+    /// fully-qualified class names). Unknown `\X` sequences pass through as-is.
     Transform {
         /// Transform set name (from homeboy.json transforms key)
         #[arg(value_name = "NAME")]
@@ -200,6 +205,8 @@ enum RefactorCommand {
         /// Supports $1, $2 capture group refs, ${name} named groups,
         /// $1:lower/:upper/:kebab/:snake/:pascal/:camel case transforms,
         /// and $$ for a literal dollar sign.
+        /// Backslash escapes are collapsed: \\ → one literal backslash,
+        /// \n/\t/\r/\0 → the control character, \" / \' → the quote.
         #[arg(long, value_name = "TEMPLATE")]
         replace: Option<String>,
 
