@@ -904,8 +904,12 @@ fn resolve_component_github(
 }
 
 /// Run `gh <args>` swallowing stdout/stderr, return whether it exited successfully.
-/// Used for probe-style `gh` invocations that only care about the exit code.
-fn gh_probe_succeeds(args: &[&str]) -> bool {
+/// Used for probe-style `gh` invocations that only care about the exit code
+/// (e.g. `gh --version`, `gh auth status`, `gh release view`).
+///
+/// Public so other modules can consolidate on one probe helper instead of
+/// reimplementing the same `Command::new + null stdio + status` pattern.
+pub fn gh_probe_succeeds(args: &[&str]) -> bool {
     Command::new("gh")
         .args(args)
         .stdout(std::process::Stdio::null())

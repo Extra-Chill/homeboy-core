@@ -758,33 +758,15 @@ fn store_artifacts_from_output(
 // ---------------------------------------------------------------------------
 
 fn gh_is_available() -> bool {
-    std::process::Command::new("gh")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::git::gh_probe_succeeds(&["--version"])
 }
 
 fn gh_is_authenticated() -> bool {
-    std::process::Command::new("gh")
-        .args(["auth", "status", "--hostname", "github.com"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::git::gh_probe_succeeds(&["auth", "status", "--hostname", "github.com"])
 }
 
 fn gh_release_exists(tag: &str, repo_flag: &str) -> bool {
-    std::process::Command::new("gh")
-        .args(["release", "view", tag, "-R", repo_flag])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::git::gh_probe_succeeds(&["release", "view", tag, "-R", repo_flag])
 }
 
 fn fallback_gh_command(tag: &str) -> String {
