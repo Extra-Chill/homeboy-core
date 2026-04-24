@@ -38,6 +38,7 @@ pub mod report;
 mod requirements;
 pub mod run;
 mod shadow_modules;
+mod shared_scaffolding;
 mod signatures;
 mod structural;
 mod test_coverage;
@@ -574,6 +575,18 @@ fn audit_internal(
             dead_guard_findings.len()
         );
         all_findings.extend(dead_guard_findings);
+    }
+
+    // Phase 4s: Shared scaffolding detection — groups of classes sharing the
+    // same method-shape AND high body similarity, candidates for a shared base.
+    let scaffolding_findings = shared_scaffolding::run(&all_fingerprints);
+    if !scaffolding_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Shared scaffolding: {} finding(s) (candidate base class groups)",
+            scaffolding_findings.len()
+        );
+        all_findings.extend(scaffolding_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,
