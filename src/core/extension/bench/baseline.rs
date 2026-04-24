@@ -48,7 +48,7 @@ pub struct BenchScenarioSnapshot {
 }
 
 impl BenchScenarioSnapshot {
-    pub fn from_scenario(scenario: &BenchScenario) -> Self {
+    pub(crate) fn from_scenario(scenario: &BenchScenario) -> Self {
         Self {
             id: scenario.id.clone(),
             p95_ms: scenario.metrics.p95_ms,
