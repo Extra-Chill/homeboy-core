@@ -632,11 +632,7 @@ fn normalize_line(line: &str) -> String {
 /// Match-arm tails (`)?;`, `Ok((x, 0))`, struct-literal closers) repeated
 /// across sibling arms of a dispatch `match` are structural noise, not
 /// duplication — this filter stops them from tripping the detector.
-fn is_structural_syntax_only(
-    normalized: &[(usize, String)],
-    start: usize,
-    len: usize,
-) -> bool {
+fn is_structural_syntax_only(normalized: &[(usize, String)], start: usize, len: usize) -> bool {
     let end = (start + len).min(normalized.len());
     if start >= end {
         return false;
@@ -649,9 +645,7 @@ fn is_structural_syntax_only(
     }
 
     // Every line must match a known scaffolding shape.
-    window
-        .iter()
-        .all(|(_, line)| is_scaffolding_line(line))
+    window.iter().all(|(_, line)| is_scaffolding_line(line))
 }
 
 /// Lines that look like they do real work: assignment, control flow, or
@@ -698,18 +692,16 @@ fn is_scaffolding_line(normalized: &str) -> bool {
     }
 
     // Pure-punctuation closers: `}`, `},`, `)?;`, `))`, etc.
-    if t.chars().all(|c| matches!(c, '}' | ')' | '?' | ';' | ',' | '(')) {
+    if t.chars()
+        .all(|c| matches!(c, '}' | ')' | '?' | ';' | ',' | '('))
+    {
         return true;
     }
 
     // Bare identifier (optionally trailing comma) — struct-literal field or
     // destructure.
     let core = t.trim_end_matches(',');
-    if !core.is_empty()
-        && core
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !core.is_empty() && core.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return true;
     }
 

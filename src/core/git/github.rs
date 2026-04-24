@@ -420,10 +420,7 @@ pub fn issue_find(
 // ---------------------------------------------------------------------------
 
 /// Open a new pull request.
-pub fn pr_create(
-    component_id: Option<&str>,
-    options: PrCreateOptions,
-) -> Result<GithubPrOutput> {
+pub fn pr_create(component_id: Option<&str>, options: PrCreateOptions) -> Result<GithubPrOutput> {
     let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
