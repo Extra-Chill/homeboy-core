@@ -903,18 +903,23 @@ fn resolve_component_github(
     Ok((id, repo))
 }
 
-/// Error out if `gh` is missing or unauthenticated. Unlike `run_github_release`
-/// (which soft-fails because the tag is already pushed), primitive operations
-/// have no already-committed side effect to preserve — fail loudly.
-fn ensure_gh_ready() -> Result<()> {
-    let available = Command::new("gh")
-        .arg("--version")
+/// Run `gh <args>` swallowing stdout/stderr, return whether it exited successfully.
+/// Used for probe-style `gh` invocations that only care about the exit code.
+fn gh_probe_succeeds(args: &[&str]) -> bool {
+    Command::new("gh")
+        .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
-        .unwrap_or(false);
-    if !available {
+        .unwrap_or(false)
+}
+
+/// Error out if `gh` is missing or unauthenticated. Unlike `run_github_release`
+/// (which soft-fails because the tag is already pushed), primitive operations
+/// have no already-committed side effect to preserve — fail loudly.
+fn ensure_gh_ready() -> Result<()> {
+    if !gh_probe_succeeds(&["--version"]) {
         return Err(Error::internal_io(
             "`gh` CLI not found on PATH".to_string(),
             Some("gh".to_string()),
@@ -922,14 +927,7 @@ fn ensure_gh_ready() -> Result<()> {
         .with_hint("Install the GitHub CLI: https://cli.github.com"));
     }
 
-    let authed = Command::new("gh")
-        .args(["auth", "status", "--hostname", "github.com"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !authed {
+    if !gh_probe_succeeds(&["auth", "status", "--hostname", "github.com"]) {
         return Err(Error::internal_io(
             "`gh` is not authenticated for github.com".to_string(),
             Some("gh auth status".to_string()),
