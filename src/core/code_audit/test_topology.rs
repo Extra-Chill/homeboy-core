@@ -348,8 +348,7 @@ JSON
                 .expect("script metadata should be readable")
                 .permissions();
             perms.set_mode(0o755);
-            std::fs::set_permissions(&script_path, perms)
-                .expect("script should become executable");
+            std::fs::set_permissions(&script_path, perms).expect("script should become executable");
         }
 
         let extension = ExtensionManifest {
