@@ -696,7 +696,6 @@ pub(super) fn resolve_tag_and_commits(
     }
 }
 
-
 /// Fetch from remote and fast-forward if behind.
 ///
 /// Ensures the release commit is created on top of the actual remote HEAD,

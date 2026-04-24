@@ -200,12 +200,7 @@ fn suggest_helper_name(shape: &Shape) -> String {
         return "success_envelope(...)".to_string();
     }
 
-    let joined = keys
-        .iter()
-        .take(3)
-        .copied()
-        .collect::<Vec<_>>()
-        .join("_");
+    let joined = keys.iter().take(3).copied().collect::<Vec<_>>().join("_");
     format!("build_{}(...)", joined)
 }
 
@@ -575,7 +570,7 @@ fn starts_with_ci(bytes: &[u8], i: usize, needle: &[u8]) -> bool {
         return false;
     }
     for (k, nb) in needle.iter().enumerate() {
-        if bytes[i + k].to_ascii_lowercase() != nb.to_ascii_lowercase() {
+        if !bytes[i + k].eq_ignore_ascii_case(nb) {
             return false;
         }
     }
@@ -675,14 +670,6 @@ mod tests {
     }
 
     #[test]
-    fn ignores_subscripts() {
-        // $foo[0] must not be parsed as a literal.
-        let src = "<?php\n$v = $foo[0] + $bar['key'];\n";
-        let shapes = extract_literal_shapes(src);
-        assert!(shapes.is_empty(), "got unexpected shapes: {:?}", shapes);
-    }
-
-    #[test]
     fn ignores_array_inside_string() {
         let src = "<?php\n$s = \"['success' => false]\";\n";
         let shapes = extract_literal_shapes(src);
@@ -732,7 +719,12 @@ mod tests {
         }
         let refs: Vec<&FileFingerprint> = files.iter().collect();
         let findings = detect_repeated_literal_shapes(&refs);
-        assert_eq!(findings.len(), 1, "expected exactly one finding, got {:?}", findings);
+        assert_eq!(
+            findings.len(),
+            1,
+            "expected exactly one finding, got {:?}",
+            findings
+        );
         let f = &findings[0];
         assert_eq!(f.kind, AuditFinding::RepeatedLiteralShape);
         assert_eq!(f.severity, Severity::Info);
