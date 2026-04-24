@@ -2,9 +2,9 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::git::{
-    self, GitOutput, GithubFindOutput, GithubIssueOutput, GithubPrOutput, IssueCreateOptions,
-    IssueFindOptions, IssueState, PrCommentMode, PrCommentOptions, PrCreateOptions, PrEditOptions,
-    PrFindOptions, PrState,
+    self, GitOutput, GithubFindOutput, GithubIssueOutput, GithubPrOutput, IssueCommentOptions,
+    IssueCreateOptions, IssueFindOptions, IssueState, PrCommentMode, PrCommentOptions,
+    PrCreateOptions, PrEditOptions, PrFindOptions, PrState,
 };
 use homeboy::BulkResult;
 
@@ -142,6 +142,11 @@ enum IssueCommand {
         /// Issue label (repeatable)
         #[arg(short, long)]
         label: Vec<String>,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        /// (for unregistered checkouts — CI runners, ad-hoc clones)
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Comment on an existing issue
     Comment {
@@ -159,6 +164,10 @@ enum IssueCommand {
         /// Read body from a file ("-" for stdin)
         #[arg(long, value_name = "PATH")]
         body_file: Option<String>,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Find issues matching filters (dedup primitive)
     Find {
@@ -180,6 +189,10 @@ enum IssueCommand {
         /// Max results (default 30)
         #[arg(long, default_value_t = 30)]
         limit: usize,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
 }
 
@@ -223,6 +236,10 @@ enum PrCommand {
         /// Open as draft
         #[arg(long)]
         draft: bool,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Edit an existing PR's title or body
     Edit {
@@ -244,6 +261,10 @@ enum PrCommand {
         /// Read body from a file ("-" for stdin)
         #[arg(long, value_name = "PATH")]
         body_file: Option<String>,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Find PRs matching filters
     Find {
@@ -265,6 +286,10 @@ enum PrCommand {
         /// Max results (default 30)
         #[arg(long, default_value_t = 30)]
         limit: usize,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Post a comment on a PR. Three modes:
     ///
@@ -324,6 +349,10 @@ enum PrCommand {
         /// alphabetically. Example: `--section-order lint,test,audit`.
         #[arg(long, requires = "comment_key", value_delimiter = ',')]
         section_order: Option<Vec<String>>,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
 }
 
@@ -505,6 +534,7 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
             body,
             body_file,
             label,
+            path,
         } => {
             let body = resolve_body(body, body_file)?.unwrap_or_default();
             let output = git::issue_create(
@@ -513,6 +543,7 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
                     title,
                     body,
                     labels: label,
+                    path,
                 },
             )?;
             Ok((GitCommandOutput::Issue(output), 0))
@@ -522,6 +553,7 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
             number,
             body,
             body_file,
+            path,
         } => {
             let body = resolve_body(body, body_file)?.ok_or_else(|| {
                 homeboy::Error::validation_invalid_argument(
@@ -531,7 +563,10 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
                     None,
                 )
             })?;
-            let output = git::issue_comment(Some(&component_id), number, &body)?;
+            let output = git::issue_comment(
+                Some(&component_id),
+                IssueCommentOptions { number, body, path },
+            )?;
             Ok((GitCommandOutput::Issue(output), 0))
         }
         IssueCommand::Find {
@@ -540,6 +575,7 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
             label,
             state,
             limit,
+            path,
         } => {
             let state = parse_issue_state(&state)?;
             let output = git::issue_find(
@@ -549,6 +585,7 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
                     labels: label,
                     state,
                     limit,
+                    path,
                 },
             )?;
             Ok((GitCommandOutput::Find(output), 0))
@@ -570,6 +607,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
             body,
             body_file,
             draft,
+            path,
         } => {
             let body = resolve_body(body, body_file)?.unwrap_or_default();
             let output = git::pr_create(
@@ -580,6 +618,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
                     title,
                     body,
                     draft,
+                    path,
                 },
             )?;
             Ok((GitCommandOutput::Pr(output), 0))
@@ -590,6 +629,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
             title,
             body,
             body_file,
+            path,
         } => {
             let body = resolve_body(body, body_file)?;
             let output = git::pr_edit(
@@ -598,6 +638,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
                     number,
                     title,
                     body,
+                    path,
                 },
             )?;
             Ok((GitCommandOutput::Pr(output), 0))
@@ -608,6 +649,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
             head,
             state,
             limit,
+            path,
         } => {
             let state = parse_pr_state(&state)?;
             let output = git::pr_find(
@@ -617,6 +659,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
                     head,
                     state,
                     limit,
+                    path,
                 },
             )?;
             Ok((GitCommandOutput::Find(output), 0))
@@ -631,6 +674,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
             section_key,
             header,
             section_order,
+            path,
         } => {
             let body = resolve_body(body, body_file)?.ok_or_else(|| {
                 homeboy::Error::validation_invalid_argument(
@@ -661,8 +705,15 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
                 ),
             };
 
-            let output =
-                git::pr_comment(Some(&component_id), PrCommentOptions { number, body, mode })?;
+            let output = git::pr_comment(
+                Some(&component_id),
+                PrCommentOptions {
+                    number,
+                    body,
+                    mode,
+                    path,
+                },
+            )?;
             Ok((GitCommandOutput::Pr(output), 0))
         }
     }

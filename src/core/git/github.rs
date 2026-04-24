@@ -111,6 +111,10 @@ pub struct IssueCreateOptions {
     pub title: String,
     pub body: String,
     pub labels: Vec<String>,
+    /// Optional workspace path. When set, the component is discovered from
+    /// `<path>/homeboy.json` instead of the global registry — required for
+    /// CI runners and other unregistered-checkout contexts.
+    pub path: Option<String>,
 }
 
 /// Parameters for filtering issues.
@@ -124,6 +128,8 @@ pub struct IssueFindOptions {
     pub state: IssueState,
     /// Cap the number of returned items. Defaults to 30.
     pub limit: usize,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -152,6 +158,8 @@ pub struct PrCreateOptions {
     pub title: String,
     pub body: String,
     pub draft: bool,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
 }
 
 /// Parameters for editing an existing PR.
@@ -160,6 +168,8 @@ pub struct PrEditOptions {
     pub number: u64,
     pub title: Option<String>,
     pub body: Option<String>,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
 }
 
 /// Parameters for filtering PRs.
@@ -169,6 +179,8 @@ pub struct PrFindOptions {
     pub head: Option<String>,
     pub state: PrState,
     pub limit: usize,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -209,6 +221,8 @@ pub struct PrCommentOptions {
     pub number: u64,
     pub body: String,
     pub mode: PrCommentMode,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
 }
 
 impl Default for PrCommentOptions {
@@ -217,6 +231,7 @@ impl Default for PrCommentOptions {
             number: 0,
             body: String::new(),
             mode: PrCommentMode::Fresh,
+            path: None,
         }
     }
 }
@@ -253,6 +268,15 @@ impl Default for PrCommentMode {
     }
 }
 
+/// Parameters for commenting on an existing issue.
+#[derive(Debug, Clone, Default)]
+pub struct IssueCommentOptions {
+    pub number: u64,
+    pub body: String,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Public API — issue
 // ---------------------------------------------------------------------------
@@ -262,7 +286,7 @@ pub fn issue_create(
     component_id: Option<&str>,
     options: IssueCreateOptions,
 ) -> Result<GithubIssueOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     if options.title.trim().is_empty() {
@@ -310,21 +334,20 @@ pub fn issue_create(
 /// Post a comment on an existing issue.
 pub fn issue_comment(
     component_id: Option<&str>,
-    number: u64,
-    body: &str,
+    options: IssueCommentOptions,
 ) -> Result<GithubIssueOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     let repo_flag = format!("{}/{}", repo.owner, repo.repo);
     let args: Vec<String> = vec![
         "issue".into(),
         "comment".into(),
-        number.to_string(),
+        options.number.to_string(),
         "-R".into(),
         repo_flag,
         "--body".into(),
-        body.to_string(),
+        options.body.clone(),
     ];
 
     let output = run_gh(&args)?;
@@ -334,7 +357,7 @@ pub fn issue_comment(
         repo: repo.repo,
         action: "issue.comment".to_string(),
         success: true,
-        number: Some(number),
+        number: Some(options.number),
         url: Some(output.trim().to_string()),
         title: None,
         state: None,
@@ -350,7 +373,7 @@ pub fn issue_find(
     component_id: Option<&str>,
     options: IssueFindOptions,
 ) -> Result<GithubFindOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     let repo_flag = format!("{}/{}", repo.owner, repo.repo);
@@ -398,7 +421,7 @@ pub fn issue_find(
 
 /// Open a new pull request.
 pub fn pr_create(component_id: Option<&str>, options: PrCreateOptions) -> Result<GithubPrOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     if options.title.trim().is_empty() {
@@ -459,7 +482,7 @@ pub fn pr_create(component_id: Option<&str>, options: PrCreateOptions) -> Result
 
 /// Edit an existing pull request's title and/or body.
 pub fn pr_edit(component_id: Option<&str>, options: PrEditOptions) -> Result<GithubPrOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     if options.title.is_none() && options.body.is_none() {
@@ -504,7 +527,7 @@ pub fn pr_edit(component_id: Option<&str>, options: PrEditOptions) -> Result<Git
 
 /// Find PRs matching the given filter.
 pub fn pr_find(component_id: Option<&str>, options: PrFindOptions) -> Result<GithubFindOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     let repo_flag = format!("{}/{}", repo.owner, repo.repo);
@@ -557,7 +580,7 @@ pub fn pr_find(component_id: Option<&str>, options: PrFindOptions) -> Result<Git
 ///   invocation's section under `section_key` into the shared comment tagged
 ///   `<!-- homeboy:comment-key=<comment_key> -->`.
 pub fn pr_comment(component_id: Option<&str>, options: PrCommentOptions) -> Result<GithubPrOutput> {
-    let (id, repo) = resolve_component_github(component_id)?;
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
 
     match options.mode.clone() {
@@ -828,9 +851,17 @@ fn pr_comment_sectioned(
 // ---------------------------------------------------------------------------
 
 /// Resolve a component ID to its GitHub owner/repo via `remote_url` (or git fallback).
-fn resolve_component_github(component_id: Option<&str>) -> Result<(String, GitHubRepo)> {
-    let (id, path) = resolve_target(component_id, None)?;
-    let comp = component::resolve_effective(Some(&id), None, None)?;
+///
+/// `path_override` lets callers point at an unregistered checkout (e.g. a CI
+/// runner workspace with a portable `homeboy.json` but no global component
+/// registry entry). When set, the component is discovered from the portable
+/// config at that path instead of the global registry.
+fn resolve_component_github(
+    component_id: Option<&str>,
+    path_override: Option<&str>,
+) -> Result<(String, GitHubRepo)> {
+    let (id, path) = resolve_target(component_id, path_override)?;
+    let comp = component::resolve_effective(Some(&id), path_override, None)?;
 
     let remote_url = comp
         .remote_url
@@ -847,6 +878,7 @@ fn resolve_component_github(component_id: Option<&str>) -> Result<(String, GitHu
                 Some(vec![
                     "Set it: homeboy component set <id> -- --remote_url https://github.com/<owner>/<repo>".to_string(),
                     "Or configure a git remote in the component's local_path".to_string(),
+                    "Or pass --path <workspace> to discover from a portable homeboy.json".to_string(),
                 ]),
             )
         })?;
@@ -868,18 +900,27 @@ fn resolve_component_github(component_id: Option<&str>) -> Result<(String, GitHu
     Ok((id, repo))
 }
 
-/// Error out if `gh` is missing or unauthenticated. Unlike `run_github_release`
-/// (which soft-fails because the tag is already pushed), primitive operations
-/// have no already-committed side effect to preserve — fail loudly.
-fn ensure_gh_ready() -> Result<()> {
-    let available = Command::new("gh")
-        .arg("--version")
+/// Run `gh <args>` swallowing stdout/stderr, return whether it exited successfully.
+/// Used for probe-style `gh` invocations that only care about the exit code
+/// (e.g. `gh --version`, `gh auth status`, `gh release view`).
+///
+/// Public so other modules can consolidate on one probe helper instead of
+/// reimplementing the same `Command::new + null stdio + status` pattern.
+pub fn gh_probe_succeeds(args: &[&str]) -> bool {
+    Command::new("gh")
+        .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
-        .unwrap_or(false);
-    if !available {
+        .unwrap_or(false)
+}
+
+/// Error out if `gh` is missing or unauthenticated. Unlike `run_github_release`
+/// (which soft-fails because the tag is already pushed), primitive operations
+/// have no already-committed side effect to preserve — fail loudly.
+fn ensure_gh_ready() -> Result<()> {
+    if !gh_probe_succeeds(&["--version"]) {
         return Err(Error::internal_io(
             "`gh` CLI not found on PATH".to_string(),
             Some("gh".to_string()),
@@ -887,14 +928,7 @@ fn ensure_gh_ready() -> Result<()> {
         .with_hint("Install the GitHub CLI: https://cli.github.com"));
     }
 
-    let authed = Command::new("gh")
-        .args(["auth", "status", "--hostname", "github.com"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !authed {
+    if !gh_probe_succeeds(&["auth", "status", "--hostname", "github.com"]) {
         return Err(Error::internal_io(
             "`gh` is not authenticated for github.com".to_string(),
             Some("gh auth status".to_string()),
