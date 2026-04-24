@@ -174,6 +174,9 @@ pub enum AuditFinding {
     /// many times across the codebase — candidate for extraction into a helper
     /// constructor (e.g. `error_envelope($error, $message)`).
     RepeatedLiteralShape,
+    /// Docblock `@deprecated X.Y.Z` tag is older than the configured age
+    /// threshold relative to the component's current version.
+    DeprecationAge,
 }
 
 impl AuditFinding {
@@ -217,6 +220,7 @@ impl AuditFinding {
             "shadow_module",
             "repeated_field_pattern",
             "repeated_literal_shape",
+            "deprecation_age",
         ]
     }
 }
