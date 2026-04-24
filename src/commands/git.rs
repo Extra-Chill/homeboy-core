@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::git::{
-    self, GithubFindOutput, GithubIssueOutput, GithubPrOutput, GitOutput, IssueCreateOptions,
+    self, GitOutput, GithubFindOutput, GithubIssueOutput, GithubPrOutput, IssueCreateOptions,
     IssueFindOptions, IssueState, PrCommentOptions, PrCreateOptions, PrEditOptions, PrFindOptions,
     PrState,
 };
@@ -599,10 +599,8 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
                     None,
                 )
             })?;
-            let output = git::pr_comment(
-                Some(&component_id),
-                PrCommentOptions { number, body, key },
-            )?;
+            let output =
+                git::pr_comment(Some(&component_id), PrCommentOptions { number, body, key })?;
             Ok((GitCommandOutput::Pr(output), 0))
         }
     }
@@ -614,10 +612,7 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
 
 /// Resolve a body argument from either inline `--body` or a file path.
 /// Returns `Ok(None)` if neither is set. Supports `-` for stdin.
-fn resolve_body(
-    inline: Option<String>,
-    file: Option<String>,
-) -> homeboy::Result<Option<String>> {
+fn resolve_body(inline: Option<String>, file: Option<String>) -> homeboy::Result<Option<String>> {
     if let Some(body) = inline {
         return Ok(Some(body));
     }
