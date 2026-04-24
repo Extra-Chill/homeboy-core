@@ -3,8 +3,8 @@ use serde::Serialize;
 
 use homeboy::git::{
     self, GithubFindOutput, GithubIssueOutput, GithubPrOutput, GitOutput, IssueCreateOptions,
-    IssueFindOptions, IssueState, PrCommentOptions, PrCreateOptions, PrEditOptions, PrFindOptions,
-    PrState,
+    IssueFindOptions, IssueState, PrCommentMode, PrCommentOptions, PrCreateOptions, PrEditOptions,
+    PrFindOptions, PrState,
 };
 use homeboy::BulkResult;
 
@@ -266,7 +266,21 @@ enum PrCommand {
         #[arg(long, default_value_t = 30)]
         limit: usize,
     },
-    /// Post a comment on a PR (supports sticky-comment keys)
+    /// Post a comment on a PR. Three modes:
+    ///
+    /// 1. Plain: no marker flags — a fresh comment is appended.
+    /// 2. Sticky single-section (#1334): `--key <k>` finds-or-updates the one
+    ///    comment tagged `<!-- homeboy:key=<k> -->`. The whole `--body` becomes
+    ///    the comment body.
+    /// 3. Sectioned (#1348): `--comment-key <outer> --section-key <inner>`
+    ///    merges `--body` into section `<inner>` of the shared comment tagged
+    ///    `<!-- homeboy:comment-key=<outer> -->`. Other sections are preserved.
+    ///    `--header` sets the line printed after the outer marker on new
+    ///    comments. `--section-order` pins section ordering (CSV of keys);
+    ///    default is alphabetical.
+    ///
+    /// Modes 2 and 3 are mutually exclusive. `--key` with `--comment-key` or
+    /// `--section-key` is an error.
     Comment {
         /// Component ID
         component_id: String,
@@ -283,10 +297,33 @@ enum PrCommand {
         #[arg(long, value_name = "PATH")]
         body_file: Option<String>,
 
-        /// Optional sticky-comment key. When set, an existing comment with this
-        /// marker is updated in place instead of a new one being posted.
-        #[arg(short, long)]
+        /// Sticky whole-body key (mode 2, PR #1334).
+        /// Mutually exclusive with --comment-key / --section-key.
+        #[arg(short, long, conflicts_with_all = ["comment_key", "section_key"])]
         key: Option<String>,
+
+        /// Sectioned mode: outer shared-comment key (mode 3, #1348).
+        /// Must be combined with --section-key.
+        #[arg(long, requires = "section_key")]
+        comment_key: Option<String>,
+
+        /// Sectioned mode: inner per-section key (mode 3, #1348).
+        /// Must be combined with --comment-key.
+        #[arg(long, requires = "comment_key")]
+        section_key: Option<String>,
+
+        /// Sectioned mode: optional header line written after the outer
+        /// marker on freshly-created shared comments (e.g.
+        /// "## Homeboy Results — `<component>`"). Existing comment headers
+        /// are preserved on merge.
+        #[arg(long, requires = "comment_key")]
+        header: Option<String>,
+
+        /// Sectioned mode: CSV of section keys in desired order. Sections
+        /// listed here come first in the given order; others are appended
+        /// alphabetically. Example: `--section-order lint,test,audit`.
+        #[arg(long, requires = "comment_key", value_delimiter = ',')]
+        section_order: Option<Vec<String>>,
     },
 }
 
@@ -590,6 +627,10 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
             body,
             body_file,
             key,
+            comment_key,
+            section_key,
+            header,
+            section_order,
         } => {
             let body = resolve_body(body, body_file)?.ok_or_else(|| {
                 homeboy::Error::validation_invalid_argument(
@@ -599,9 +640,34 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
                     None,
                 )
             })?;
+
+            let mode = match (key, comment_key, section_key) {
+                (Some(k), None, None) => PrCommentMode::StickyWholeBody { key: k },
+                (None, Some(ck), Some(sk)) => PrCommentMode::Sectioned {
+                    comment_key: ck,
+                    section_key: sk,
+                    header,
+                    section_order,
+                },
+                (None, None, None) => {
+                    // Header / section_order without the pair — clap already
+                    // caught this via `requires = "comment_key"`, but double-check.
+                    PrCommentMode::Fresh
+                }
+                // Remaining cases are impossible due to clap `requires` /
+                // `conflicts_with_all`, but keep the match exhaustive.
+                _ => unreachable!(
+                    "clap argument parsing should have rejected incompatible --key / --comment-key / --section-key combos"
+                ),
+            };
+
             let output = git::pr_comment(
                 Some(&component_id),
-                PrCommentOptions { number, body, key },
+                PrCommentOptions {
+                    number,
+                    body,
+                    mode,
+                },
             )?;
             Ok((GitCommandOutput::Pr(output), 0))
         }
