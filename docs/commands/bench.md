@@ -54,6 +54,11 @@ the other capabilities.
   (default `1`). When `> 1`, `--shared-state` is required. Each instance
   receives a distinct `$HOMEBOY_BENCH_INSTANCE_ID` (`0..N-1`) plus
   `$HOMEBOY_BENCH_CONCURRENCY=N`.
+- `--rig <RIG_ID[,RIG_ID...]>`: Pin the run to one or more rigs. Single
+  rig pins the rig and stores its baseline under a rig-scoped key.
+  Multiple rigs (comma-separated) run the same component + workload +
+  iteration count against each rig in sequence and emit a cross-rig
+  comparison envelope. See "Cross-rig comparison" below.
 
 Arguments after `--` are passed verbatim to the extension's bench runner
 script (e.g., `--filter=scenario_id` for selective execution).
@@ -87,6 +92,19 @@ homeboy bench my-component \
 # Workload kills mid-stream on iteration N; iteration N+1 boots fresh
 # against the same on-disk state and audits integrity.
 homeboy bench my-component --shared-state /tmp/bench-durability
+
+# Pin to a single rig — preflight + rig-scoped baseline
+homeboy bench studio --rig studio-trunk
+
+# Cross-rig comparison: same workload, two rigs, side-by-side report.
+# First rig (`studio-trunk`) is the reference; the diff table expresses
+# every other rig's metrics as percent deltas vs the reference.
+homeboy bench studio --rig studio-trunk,studio-combined-fixes --iterations 10
+
+# Three-rig comparison to isolate one PR's contribution.
+homeboy bench studio \
+    --rig trunk,combined-fixes,combined-fixes-without-3120 \
+    --iterations 20
 ```
 
 ## Shared State and Concurrency
@@ -130,6 +148,97 @@ vars flow into the runner:
 Per-instance results are written to `bench-results-i<n>.json` under the
 run dir; homeboy core merges them into the unified `BenchResults`
 envelope before applying baseline comparison.
+
+## Cross-rig comparison
+
+`--rig <a>,<b>[,<c>...]` runs the same component + workload + iteration
+count against each rig in sequence and emits a single comparison
+envelope. Useful for "is my fix actually faster than trunk?" — same
+question, two rigs differing only in component commit state.
+
+### How it runs
+
+For each rig, in input order:
+
+1. Load the rig spec and run `rig check`. Failure aborts the entire
+   comparison — comparing against an unhealthy rig would produce
+   garbage numbers.
+2. Snapshot rig state (each component's git SHA + branch) into the
+   per-rig output entry.
+3. Run bench against the resolved component with the rig pinned.
+
+After every rig finishes, results are aggregated into a
+`BenchComparisonOutput` envelope with `comparison: "cross_rig"`. The
+**first rig in the list is the reference**: per-metric percent deltas
+in the `diff` table express each subsequent rig as `(current -
+reference) / reference * 100`.
+
+### What's intentionally not done
+
+- **No baseline writes.** `--baseline` and `--ratchet` are rejected on
+  cross-rig invocations. Baselines are per-rig; writing one from a
+  comparison would silently bless one rig over the others. Run `homeboy
+  bench --rig <id> --baseline` once per rig to ratchet individually.
+- **No statistical-significance gating.** Two rigs with overlapping
+  `p95_ms` distributions still produce a numeric delta. Treat single-digit
+  percent moves with skepticism. Confidence intervals are a v2 question.
+- **No matrix × rig composition.** `--matrix` and multi-`--rig` together
+  is not yet supported; pick one axis per invocation. Single-rig +
+  matrix continues to work.
+
+### Output shape (cross-rig)
+
+```json
+{
+  "comparison": "cross_rig",
+  "passed": true,
+  "component": "studio",
+  "exit_code": 0,
+  "iterations": 10,
+  "rigs": [
+    {
+      "rig_id": "studio-trunk",
+      "passed": true,
+      "status": "passed",
+      "exit_code": 0,
+      "results": { ... },
+      "rig_state": { "rig_id": "studio-trunk", "captured_at": "...", "components": { ... } }
+    },
+    {
+      "rig_id": "studio-combined-fixes",
+      "passed": true,
+      "status": "passed",
+      "exit_code": 0,
+      "results": { ... },
+      "rig_state": { ... }
+    }
+  ],
+  "diff": {
+    "by_scenario": {
+      "agent_boot": {
+        "p95_ms": {
+          "studio-combined-fixes": {
+            "reference": 31200.0,
+            "current": 19400.0,
+            "delta_percent": -37.82
+          }
+        }
+      }
+    }
+  },
+  "hints": [ ... ]
+}
+```
+
+The reference rig is omitted from the inner `diff.by_scenario.<id>.<metric>`
+map — its delta against itself would always be zero. A scenario or
+metric missing from a non-reference rig is silently skipped (no
+synthetic zeros).
+
+### Exit code
+
+`exit_code` is `0` only when every rig passed. The first non-zero rig
+exit code wins. `passed` is `true` only when every rig passed.
 
 ## Baseline Ratchet Semantics
 
