@@ -54,6 +54,26 @@ pub struct BenchArgs {
     /// component argument is optional — the rig's default fills in.
     #[arg(long, value_name = "RIG_ID")]
     rig: Option<String>,
+
+    /// Mount a stable storage directory across iterations and across
+    /// parallel runner instances (when combined with `--concurrency`).
+    /// The dispatcher exposes the path to workloads via
+    /// `$HOMEBOY_BENCH_SHARED_STATE` so they can persist on-disk state
+    /// (SQLite files, content directories, counter files) that outlives
+    /// a single iteration. Created if it doesn't exist; never cleaned
+    /// up by homeboy — durability and crash-recovery testing depends on
+    /// the directory persisting between runs.
+    #[arg(long, value_name = "DIR")]
+    shared_state: Option<std::path::PathBuf>,
+
+    /// Number of parallel runner instances to spawn. Default `1`. When
+    /// `> 1`, `--shared-state <DIR>` is required: N parallel cold-boots
+    /// without shared state are N independent runs, not a multi-instance
+    /// contention test. Each instance receives a distinct
+    /// `$HOMEBOY_BENCH_INSTANCE_ID` (`0..N-1`); per-instance scenarios
+    /// are merged with `:i<n>` suffixed IDs in the aggregated output.
+    #[arg(long, value_name = "N", default_value_t = 1)]
+    concurrency: u32,
 }
 
 /// Filter out homeboy-owned flags from trailing args before passing to
@@ -77,6 +97,9 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--regression-threshold",
         "--setting",
         "--path",
+        "--shared-state",
+        "--concurrency",
+        "--rig",
     ];
 
     let mut filtered = Vec::new();
@@ -190,6 +213,8 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchCommandOutpu
             json_summary: args.json_summary,
             passthrough_args,
             rig_id: rig_id.clone(),
+            shared_state: args.shared_state.clone(),
+            concurrency: args.concurrency,
         },
         &run_dir,
     )?;
