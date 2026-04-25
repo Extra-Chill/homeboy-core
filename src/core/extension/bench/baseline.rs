@@ -24,7 +24,8 @@ use serde::{Deserialize, Serialize};
 use crate::engine::baseline::{self as generic, BaselineConfig};
 use crate::error::Result;
 
-use super::parsing::{BenchMetricDirection, BenchMetricPolicy, BenchResults, BenchScenario};
+use super::metrics::{resolve_metric_policies, MetricDelta};
+use super::parsing::{BenchResults, BenchScenario};
 
 const BASELINE_KEY: &str = "bench";
 
@@ -137,35 +138,6 @@ pub struct ScenarioDelta {
     pub improvement: bool,
 }
 
-/// Per-metric delta vs baseline. Extensions can opt into comparing any
-/// numeric metric by declaring a policy in the bench results JSON.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct MetricDelta {
-    pub name: String,
-    pub baseline_value: f64,
-    pub current_value: f64,
-    /// Current minus baseline. Positive is not always bad — consult
-    /// `direction` to know whether larger or smaller is better.
-    pub delta: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delta_pct: Option<f64>,
-    pub direction: BenchMetricDirection,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub regression_threshold_percent: Option<f64>,
-    pub regression_threshold_absolute: f64,
-    pub regression: bool,
-    pub improvement: bool,
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedMetricPolicy {
-    name: String,
-    direction: BenchMetricDirection,
-    regression_threshold_percent: Option<f64>,
-    regression_threshold_absolute: f64,
-    zero_baseline_is_neutral: bool,
-}
-
 /// Summary of comparing a current run against a stored baseline.
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchBaselineComparison {
@@ -210,8 +182,8 @@ pub fn load_baseline(source_path: &Path, rig_id: Option<&str>) -> Option<BenchBa
         .flatten()
 }
 
-/// Compare a current run against a loaded baseline at the given p95
-/// regression threshold (as a percentage, e.g. `5.0` = 5%).
+/// Compare a current run against a loaded baseline. The threshold is used
+/// for the legacy p95 policy when the runner does not declare policies.
 pub fn compare(
     current: &BenchResults,
     baseline: &BenchBaseline,
@@ -243,13 +215,13 @@ pub fn compare(
         let mut metric_deltas = Vec::new();
 
         for policy in &metric_policies {
-            let Some(baseline_value) = prior.metric_value(&policy.name) else {
+            let Some(baseline_value) = prior.metric_value(policy.name()) else {
                 continue;
             };
-            let Some(current_value) = scenario.metrics.get(&policy.name) else {
+            let Some(current_value) = scenario.metrics.get(policy.name()) else {
                 continue;
             };
-            metric_deltas.push(compare_metric(policy, baseline_value, current_value));
+            metric_deltas.push(policy.compare(baseline_value, current_value));
         }
 
         let regression = metric_deltas.iter().any(|d| d.regression);
@@ -258,7 +230,7 @@ pub fn compare(
         if regression {
             any_regression = true;
             for delta in metric_deltas.iter().filter(|d| d.regression) {
-                reasons.push(format_metric_reason(&scenario.id, delta));
+                reasons.push(delta.reason(&scenario.id));
             }
         }
         if improvement {
@@ -307,105 +279,11 @@ pub fn compare(
     }
 }
 
-fn resolve_metric_policies(
-    current: &BenchResults,
-    default_threshold_percent: f64,
-) -> Vec<ResolvedMetricPolicy> {
-    if current.metric_policies.is_empty() {
-        let has_p95 = current
-            .scenarios
-            .iter()
-            .any(|scenario| scenario.metrics.get("p95_ms").is_some());
-        if !has_p95 {
-            return Vec::new();
-        }
-        return vec![ResolvedMetricPolicy {
-            name: "p95_ms".to_string(),
-            direction: BenchMetricDirection::LowerIsBetter,
-            regression_threshold_percent: Some(default_threshold_percent),
-            regression_threshold_absolute: 0.0,
-            zero_baseline_is_neutral: true,
-        }];
-    }
-
-    current
-        .metric_policies
-        .iter()
-        .map(|(name, policy)| resolve_metric_policy(name, policy))
-        .collect()
-}
-
-fn resolve_metric_policy(name: &str, policy: &BenchMetricPolicy) -> ResolvedMetricPolicy {
-    ResolvedMetricPolicy {
-        name: name.to_string(),
-        direction: policy.direction,
-        regression_threshold_percent: policy.regression_threshold_percent,
-        regression_threshold_absolute: policy.regression_threshold_absolute.unwrap_or(0.0),
-        zero_baseline_is_neutral: false,
-    }
-}
-
-fn compare_metric(
-    policy: &ResolvedMetricPolicy,
-    baseline_value: f64,
-    current_value: f64,
-) -> MetricDelta {
-    let delta = current_value - baseline_value;
-    let bad_delta = match policy.direction {
-        BenchMetricDirection::LowerIsBetter => delta,
-        BenchMetricDirection::HigherIsBetter => -delta,
-    };
-    let delta_pct = if baseline_value != 0.0 {
-        Some((delta / baseline_value) * 100.0)
-    } else {
-        None
-    };
-    let bad_delta_pct = if baseline_value != 0.0 {
-        Some((bad_delta / baseline_value.abs()) * 100.0)
-    } else {
-        None
-    };
-
-    let worse = bad_delta > 0.0;
-    let regression = if policy.zero_baseline_is_neutral && baseline_value == 0.0 {
-        false
-    } else {
-        let exceeds_absolute = bad_delta > policy.regression_threshold_absolute;
-        let exceeds_percent = match policy.regression_threshold_percent {
-            Some(threshold) => bad_delta_pct.map(|pct| pct > threshold).unwrap_or(worse),
-            None => true,
-        };
-        worse && exceeds_absolute && exceeds_percent
-    };
-
-    MetricDelta {
-        name: policy.name.clone(),
-        baseline_value,
-        current_value,
-        delta,
-        delta_pct,
-        direction: policy.direction,
-        regression_threshold_percent: policy.regression_threshold_percent,
-        regression_threshold_absolute: policy.regression_threshold_absolute,
-        regression,
-        improvement: bad_delta < 0.0,
-    }
-}
-
-fn format_metric_reason(scenario_id: &str, delta: &MetricDelta) -> String {
-    let pct = delta
-        .delta_pct
-        .map(|p| format!(" ({:+.1}%)", p))
-        .unwrap_or_default();
-    format!(
-        "{}: {} {:.2} → {:.2}{}",
-        scenario_id, delta.name, delta.baseline_value, delta.current_value, pct
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::parsing::{BenchMetrics, BenchResults, BenchScenario};
+    use super::super::parsing::{
+        BenchMetricDirection, BenchMetricPolicy, BenchMetrics, BenchResults, BenchScenario,
+    };
     use super::*;
 
     fn scenario(id: &str, p95_ms: f64) -> BenchScenario {

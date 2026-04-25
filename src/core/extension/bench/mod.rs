@@ -5,9 +5,9 @@
 //! It shares the runner contract (env-var-driven, JSON-output-file), the
 //! manifest shape (`bench: { extension_script: "..." }`), and the baseline
 //! ratchet primitive (`engine::baseline`). What makes bench distinct is the
-//! **threshold-based regression check on p95 latency** — see
+//! **threshold-based regression check on numeric metrics** — see
 //! [`baseline::compare`] for the logic and [`baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT`]
-//! for the default.
+//! for the legacy p95 default.
 //!
 //! Contract with extension scripts:
 //! - `$HOMEBOY_BENCH_RESULTS_FILE` — path to write the JSON envelope to.
@@ -18,6 +18,7 @@
 //! See `docs/commands/bench.md` for the end-user view.
 
 pub mod baseline;
+pub mod metrics;
 pub mod parsing;
 pub mod report;
 pub mod run;
@@ -30,6 +31,7 @@ pub use baseline::{
     BenchBaselineComparison, BenchBaselineMetadata, BenchScenarioSnapshot, ScenarioDelta,
     DEFAULT_REGRESSION_THRESHOLD_PERCENT,
 };
+pub use metrics::MetricDelta;
 pub use parsing::{
     parse_bench_results_file, parse_bench_results_str, BenchMemory, BenchMetrics, BenchResults,
     BenchScenario,
