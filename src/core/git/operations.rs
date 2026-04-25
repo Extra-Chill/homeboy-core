@@ -781,7 +781,12 @@ pub fn push_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
 
 /// Pull remote changes for a component.
 pub fn pull(component_id: Option<&str>) -> Result<GitOutput> {
-    let (id, path) = resolve_target(component_id, None)?;
+    pull_at(component_id, None)
+}
+
+/// Like [`pull`] but with an explicit path override for git operations.
+pub fn pull_at(component_id: Option<&str>, path_override: Option<&str>) -> Result<GitOutput> {
+    let (id, path) = resolve_target(component_id, path_override)?;
     let output =
         execute_git(&path, &["pull"]).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "pull", output))

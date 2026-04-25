@@ -27,12 +27,20 @@ enum GitCommand {
         #[arg(long)]
         json: Option<String>,
 
-        /// Component ID (non-JSON mode)
+        /// Component ID (non-JSON mode). When omitted, the component is
+        /// auto-detected from CWD via the registry or a portable
+        /// `homeboy.json`.
         component_id: Option<String>,
+
+        /// Workspace path to operate on directly. Useful for unregistered
+        /// checkouts (CI runners, ad-hoc clones, worktrees).
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Commit changes (by default stages all, use flags for granular control)
     Commit {
-        /// Component ID (optional if provided in JSON body)
+        /// Component ID (optional if provided in JSON body or auto-detected
+        /// from CWD).
         component_id: Option<String>,
 
         /// Commit message or JSON spec (auto-detected).
@@ -65,6 +73,11 @@ enum GitCommand {
         /// Explicit include list (repeatable)
         #[arg(long, num_args = 1.., conflicts_with = "exclude", conflicts_with = "files")]
         include: Option<Vec<String>>,
+
+        /// Workspace path to operate on directly. Useful for unregistered
+        /// checkouts (CI runners, ad-hoc clones, worktrees).
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Push local commits to remote
     Push {
@@ -73,12 +86,19 @@ enum GitCommand {
         #[arg(long)]
         json: Option<String>,
 
-        /// Component ID (non-JSON mode)
+        /// Component ID (non-JSON mode). When omitted, the component is
+        /// auto-detected from CWD via the registry or a portable
+        /// `homeboy.json`.
         component_id: Option<String>,
 
         /// Push tags as well
         #[arg(long)]
         tags: bool,
+
+        /// Workspace path to operate on directly. Useful for unregistered
+        /// checkouts (CI runners, ad-hoc clones, worktrees).
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Pull remote changes
     Pull {
@@ -87,12 +107,20 @@ enum GitCommand {
         #[arg(long)]
         json: Option<String>,
 
-        /// Component ID (non-JSON mode)
+        /// Component ID (non-JSON mode). When omitted, the component is
+        /// auto-detected from CWD via the registry or a portable
+        /// `homeboy.json`.
         component_id: Option<String>,
+
+        /// Workspace path to operate on directly. Useful for unregistered
+        /// checkouts (CI runners, ad-hoc clones, worktrees).
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Create a git tag
     Tag {
-        /// Component ID
+        /// Component ID. When omitted, the component is auto-detected from
+        /// CWD via the registry or a portable `homeboy.json`.
         component_id: Option<String>,
 
         /// Tag name (e.g., v0.1.2)
@@ -103,6 +131,11 @@ enum GitCommand {
         /// Tag message (creates annotated tag)
         #[arg(short, long)]
         message: Option<String>,
+
+        /// Workspace path to operate on directly. Useful for unregistered
+        /// checkouts (CI runners, ad-hoc clones, worktrees).
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
     },
     /// Manage GitHub issues for a component
     Issue(IssueArgs),
@@ -384,14 +417,18 @@ pub enum GitCommandOutput {
 
 pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<GitCommandOutput> {
     match args.command {
-        GitCommand::Status { json, component_id } => {
+        GitCommand::Status {
+            json,
+            component_id,
+            path,
+        } => {
             if let Some(spec) = json {
                 let output = git::status_bulk(&spec)?;
                 let exit_code = if output.summary.failed > 0 { 1 } else { 0 };
                 return Ok((GitCommandOutput::Bulk(output), exit_code));
             }
 
-            let output = git::status(component_id.as_deref())?;
+            let output = git::status_at(component_id.as_deref(), path.as_deref())?;
             let exit_code = output.exit_code;
             Ok((GitCommandOutput::Single(output), exit_code))
         }
@@ -404,6 +441,7 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
             files,
             exclude,
             include,
+            path,
         } => {
             // Explicit --json flag always uses JSON mode
             if let Some(json_spec) = json {
@@ -467,7 +505,12 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
                 exclude,
                 amend: false,
             };
-            let output = git::commit(component_id.as_deref(), final_message.as_deref(), options)?;
+            let output = git::commit_at(
+                component_id.as_deref(),
+                final_message.as_deref(),
+                options,
+                path.as_deref(),
+            )?;
             let exit_code = output.exit_code;
             Ok((GitCommandOutput::Single(output), exit_code))
         }
@@ -475,6 +518,7 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
             json,
             component_id,
             tags,
+            path,
         } => {
             if let Some(spec) = json {
                 let output = git::push_bulk(&spec)?;
@@ -482,18 +526,22 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
                 return Ok((GitCommandOutput::Bulk(output), exit_code));
             }
 
-            let output = git::push(component_id.as_deref(), tags)?;
+            let output = git::push_at(component_id.as_deref(), tags, path.as_deref())?;
             let exit_code = output.exit_code;
             Ok((GitCommandOutput::Single(output), exit_code))
         }
-        GitCommand::Pull { json, component_id } => {
+        GitCommand::Pull {
+            json,
+            component_id,
+            path,
+        } => {
             if let Some(spec) = json {
                 let output = git::pull_bulk(&spec)?;
                 let exit_code = if output.summary.failed > 0 { 1 } else { 0 };
                 return Ok((GitCommandOutput::Bulk(output), exit_code));
             }
 
-            let output = git::pull(component_id.as_deref())?;
+            let output = git::pull_at(component_id.as_deref(), path.as_deref())?;
             let exit_code = output.exit_code;
             Ok((GitCommandOutput::Single(output), exit_code))
         }
@@ -501,6 +549,7 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
             component_id,
             tag_name,
             message,
+            path,
         } => {
             // Derive tag from version if not provided
             let final_tag = match tag_name {
@@ -525,10 +574,11 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
                 }
             };
 
-            let output = git::tag(
+            let output = git::tag_at(
                 component_id.as_deref(),
                 Some(&final_tag),
                 message.as_deref(),
+                path.as_deref(),
             )?;
             let exit_code = output.exit_code;
             Ok((GitCommandOutput::Single(output), exit_code))
