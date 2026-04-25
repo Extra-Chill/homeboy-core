@@ -1,16 +1,20 @@
 //! Bench main workflow: invoke extension runner, load JSON, apply baseline.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
 
 use serde::Serialize;
 
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::extension::bench::baseline::{self, BenchBaselineComparison};
-use crate::extension::bench::parsing::{self, BenchResults};
-use crate::extension::{resolve_execution_context, ExtensionCapability, ExtensionRunner};
+use crate::extension::bench::parsing::{self, BenchResults, BenchScenario};
+use crate::extension::{
+    resolve_execution_context, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner,
+};
 
 #[derive(Debug, Clone)]
 pub struct BenchRunWorkflowArgs {
@@ -28,6 +32,17 @@ pub struct BenchRunWorkflowArgs {
     /// unpinned baselines stay in separate slots inside `homeboy.json`.
     /// `None` preserves the original baseline shape exactly.
     pub rig_id: Option<String>,
+    /// Optional shared-state directory mounted across iterations and
+    /// instances. When set, the dispatcher exposes the path to workloads
+    /// via `$HOMEBOY_BENCH_SHARED_STATE` so they can persist on-disk
+    /// state (SQLite files, content directories, counter files) that
+    /// outlives a single iteration. Required when `concurrency > 1`.
+    pub shared_state: Option<PathBuf>,
+    /// Number of parallel runner instances to spawn. `1` (default)
+    /// preserves single-instance behaviour. `> 1` requires `shared_state`
+    /// to be set — N independent cold-boots without shared state would
+    /// be N independent runs, not a multi-instance contention test.
+    pub concurrency: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,35 +62,78 @@ pub struct BenchRunWorkflowResult {
 /// envelope to `$HOMEBOY_BENCH_RESULTS_FILE`. Iteration count is passed
 /// via `$HOMEBOY_BENCH_ITERATIONS`. Runner exit code is taken as the
 /// primary signal; baseline regressions can override to 1.
+///
+/// ## Shared state and concurrency
+///
+/// When `args.shared_state` is set, the path is exported as
+/// `$HOMEBOY_BENCH_SHARED_STATE` so workloads can persist on-disk state
+/// across iterations.
+///
+/// When `args.concurrency > 1`, N runner instances are spawned in
+/// parallel threads. Each gets a distinct `$HOMEBOY_BENCH_INSTANCE_ID`
+/// (`0..N-1`), `$HOMEBOY_BENCH_CONCURRENCY` (`N`), and a per-instance
+/// results file (`bench-results-i<n>.json` under the run dir). After all
+/// instances finish, their `BenchResults` are merged: scenario IDs are
+/// suffixed with `:i<n>` so each instance's measurements stay
+/// distinguishable in the aggregated envelope and the baseline. This
+/// keeps the regression checker working unchanged — a regression in
+/// instance 2 surfaces as a regression on `<id>:i2`, not as silent
+/// averaging.
 pub fn run_main_bench_workflow(
     component: &Component,
     source_path: &PathBuf,
     args: BenchRunWorkflowArgs,
     run_dir: &RunDir,
 ) -> Result<BenchRunWorkflowResult> {
-    let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
+    if args.concurrency == 0 {
+        return Err(Error::validation_invalid_argument(
+            "concurrency",
+            "must be >= 1",
+            None,
+            None,
+        ));
+    }
+    if args.concurrency > 1 && args.shared_state.is_none() {
+        return Err(Error::validation_invalid_argument(
+            "concurrency",
+            "--concurrency > 1 requires --shared-state <DIR>; \
+             N parallel cold-boots without shared state are N independent \
+             runs, not a multi-instance contention test",
+            None,
+            None,
+        ));
+    }
+
+    if let Some(ref shared) = args.shared_state {
+        std::fs::create_dir_all(shared).map_err(|e| {
+            Error::internal_io(
+                format!(
+                    "Failed to create shared-state dir {}: {}",
+                    shared.display(),
+                    e
+                ),
+                Some("bench.run.shared_state".to_string()),
+            )
+        })?;
+    }
+
     let execution_context = resolve_execution_context(component, ExtensionCapability::Bench)?;
 
-    let runner_output = ExtensionRunner::for_context(execution_context)
-        .component(component.clone())
-        .path_override(args.path_override.clone())
-        .settings(&args.settings)
-        .with_run_dir(run_dir)
-        .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
-        .script_args(&args.passthrough_args)
-        .run()?;
-
-    let parsed = if results_file.exists() {
-        parsing::parse_bench_results_file(&results_file).ok()
+    let (parsed, runner_success, runner_exit_code) = if args.concurrency <= 1 {
+        let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
+        let runner_output =
+            build_runner(&execution_context, component, &args, run_dir, None)?.run()?;
+        let parsed = if results_file.exists() {
+            parsing::parse_bench_results_file(&results_file).ok()
+        } else {
+            None
+        };
+        (parsed, runner_output.success, runner_output.exit_code)
     } else {
-        None
+        run_concurrent_instances(&execution_context, component, &args, run_dir)?
     };
 
-    let status = if runner_output.success {
-        "passed"
-    } else {
-        "failed"
-    };
+    let status = if runner_success { "passed" } else { "failed" };
 
     let rig_id = args.rig_id.as_deref();
 
@@ -134,7 +192,7 @@ pub fn run_main_bench_workflow(
 
     let hints = if hints.is_empty() { None } else { Some(hints) };
 
-    let exit_code = baseline_exit_override.unwrap_or(runner_output.exit_code);
+    let exit_code = baseline_exit_override.unwrap_or(runner_exit_code);
 
     Ok(BenchRunWorkflowResult {
         status: status.to_string(),
@@ -145,4 +203,170 @@ pub fn run_main_bench_workflow(
         baseline_comparison,
         hints,
     })
+}
+
+/// Per-instance results filename within the run dir.
+///
+/// Single source of truth so the runner-side override and the parent
+/// reader agree on the path. Single-instance runs keep the legacy
+/// `bench-results.json` filename for backward compatibility with any
+/// extension that hardcodes it.
+fn instance_results_filename(instance_id: u32) -> String {
+    format!("bench-results-i{}.json", instance_id)
+}
+
+/// Build the `ExtensionRunner` for a single bench invocation.
+///
+/// `instance` is `Some((id, total))` for multi-instance runs (each gets
+/// its own results file + instance/concurrency env vars), or `None` for
+/// the legacy single-instance path.
+fn build_runner(
+    execution_context: &ExtensionExecutionContext,
+    component: &Component,
+    args: &BenchRunWorkflowArgs,
+    run_dir: &RunDir,
+    instance: Option<(u32, u32)>,
+) -> Result<ExtensionRunner> {
+    let mut runner = ExtensionRunner::for_context(execution_context.clone())
+        .component(component.clone())
+        .path_override(args.path_override.clone())
+        .settings(&args.settings)
+        .with_run_dir(run_dir)
+        .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
+        .script_args(&args.passthrough_args);
+
+    if let Some(ref shared) = args.shared_state {
+        runner = runner.env("HOMEBOY_BENCH_SHARED_STATE", &shared.to_string_lossy());
+    }
+
+    if let Some((instance_id, concurrency)) = instance {
+        let results_path = run_dir.step_file(&instance_results_filename(instance_id));
+        runner = runner
+            .env(
+                "HOMEBOY_BENCH_RESULTS_FILE",
+                &results_path.to_string_lossy(),
+            )
+            .env("HOMEBOY_BENCH_INSTANCE_ID", &instance_id.to_string())
+            .env("HOMEBOY_BENCH_CONCURRENCY", &concurrency.to_string());
+    }
+
+    Ok(runner)
+}
+
+/// Spawn N runner instances in parallel, wait for all, aggregate.
+///
+/// Returns `(merged_results, all_succeeded, exit_code)`. Per-instance
+/// scenarios are merged with `:i<n>` suffixed IDs so each instance's
+/// measurements stay distinct in the envelope and the baseline. If any
+/// instance failed, the aggregate run reports failure with that
+/// instance's exit code (first failure wins).
+fn run_concurrent_instances(
+    execution_context: &ExtensionExecutionContext,
+    component: &Component,
+    args: &BenchRunWorkflowArgs,
+    run_dir: &RunDir,
+) -> Result<(Option<BenchResults>, bool, i32)> {
+    let concurrency = args.concurrency;
+    let execution_context = Arc::new(execution_context.clone());
+    let component = Arc::new(component.clone());
+    let args_arc = Arc::new(args.clone());
+    let run_dir = Arc::new(run_dir.clone());
+
+    let mut handles = Vec::with_capacity(concurrency as usize);
+    for instance_id in 0..concurrency {
+        let ctx = Arc::clone(&execution_context);
+        let comp = Arc::clone(&component);
+        let a = Arc::clone(&args_arc);
+        let rd = Arc::clone(&run_dir);
+        handles.push(thread::spawn(move || -> Result<(u32, _)> {
+            let runner = build_runner(&ctx, &comp, &a, &rd, Some((instance_id, concurrency)))?;
+            let output = runner.run()?;
+            Ok((instance_id, output))
+        }));
+    }
+
+    let mut per_instance: Vec<(u32, crate::extension::RunnerOutput)> =
+        Vec::with_capacity(concurrency as usize);
+    for h in handles {
+        match h.join() {
+            Ok(Ok(pair)) => per_instance.push(pair),
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(Error::internal_unexpected("bench instance thread panicked")),
+        }
+    }
+
+    per_instance.sort_by_key(|(id, _)| *id);
+
+    // First failure wins for the exit code surface; status is "all-or-nothing".
+    let mut all_success = true;
+    let mut first_failure_exit: Option<i32> = None;
+    for (_, output) in &per_instance {
+        if !output.success {
+            all_success = false;
+            if first_failure_exit.is_none() {
+                first_failure_exit = Some(output.exit_code);
+            }
+        }
+    }
+    let exit_code = if all_success {
+        0
+    } else {
+        first_failure_exit.unwrap_or(1)
+    };
+
+    // Read & merge per-instance results files.
+    let mut merged_scenarios: Vec<BenchScenario> = Vec::new();
+    let mut component_id_seen: Option<String> = None;
+    let mut iterations_seen: Option<u64> = None;
+    let mut metric_policies_seen: std::collections::BTreeMap<String, parsing::BenchMetricPolicy> =
+        std::collections::BTreeMap::new();
+
+    for (instance_id, _) in &per_instance {
+        let path = run_dir.step_file(&instance_results_filename(*instance_id));
+        if !path.exists() {
+            continue;
+        }
+        let parsed = match parsing::parse_bench_results_file(&path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if component_id_seen.is_none() {
+            component_id_seen = Some(parsed.component_id.clone());
+        }
+        if iterations_seen.is_none() {
+            iterations_seen = Some(parsed.iterations);
+        }
+        for (k, v) in parsed.metric_policies.into_iter() {
+            metric_policies_seen.entry(k).or_insert(v);
+        }
+        for mut scenario in parsed.scenarios {
+            scenario.id = format!("{}:i{}", scenario.id, instance_id);
+            merged_scenarios.push(scenario);
+        }
+    }
+
+    let merged = if merged_scenarios.is_empty() && component_id_seen.is_none() {
+        None
+    } else {
+        Some(BenchResults {
+            component_id: component_id_seen.unwrap_or_else(|| args.component_id.clone()),
+            iterations: iterations_seen.unwrap_or(args.iterations),
+            scenarios: merged_scenarios,
+            metric_policies: metric_policies_seen,
+        })
+    };
+
+    Ok((merged, all_success, exit_code))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instance_results_filename_is_distinct_per_instance() {
+        assert_eq!(instance_results_filename(0), "bench-results-i0.json");
+        assert_eq!(instance_results_filename(7), "bench-results-i7.json");
+        assert_ne!(instance_results_filename(0), instance_results_filename(1));
+    }
 }
