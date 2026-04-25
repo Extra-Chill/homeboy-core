@@ -23,6 +23,8 @@ use homeboy::git;
 use super::utils::args::{BaselineArgs, PositionalComponentArgs};
 use super::{audit, lint, test, CmdResult, GlobalArgs};
 
+mod render;
+
 #[derive(Args, Debug, Clone)]
 pub struct ReviewArgs {
     #[command(flatten)]
@@ -50,8 +52,21 @@ pub struct ReviewArgs {
     #[arg(long, hide = true)]
     pub json: bool,
 
+    /// Output format. Default JSON envelope; `--report=pr-comment` emits a
+    /// markdown PR-comment section instead, suitable for piping to
+    /// `homeboy git pr comment --body-file`.
+    #[arg(long, value_name = "FORMAT", value_parser = ["pr-comment"])]
+    pub report: Option<String>,
+
     #[command(flatten)]
     pub baseline_args: BaselineArgs,
+}
+
+/// True when the caller asked for a markdown PR-comment section instead of
+/// the structured JSON envelope. Used by the top-level dispatcher to route
+/// the response through `RawOutputMode::Markdown`.
+pub(crate) fn is_markdown_mode(args: &ReviewArgs) -> bool {
+    args.report.as_deref() == Some("pr-comment")
 }
 
 /// Per-stage section of the consolidated review output.
@@ -311,6 +326,16 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
     Ok((output, overall_exit))
 }
 
+/// Markdown output mode — runs the JSON path internally and renders the
+/// envelope into a PR-comment section. The body is just the section content;
+/// the consumer (`homeboy git pr comment --header`) owns the wrapping
+/// section header.
+pub fn run_markdown(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<String> {
+    let (output, exit_code) = run(args, global)?;
+    let md = render::render_pr_comment(&output);
+    Ok((md, exit_code))
+}
+
 fn stage_skipped<T: Serialize>(stage: &str, reason: &str) -> ReviewStage<T> {
     ReviewStage {
         stage: stage.to_string(),
@@ -429,6 +454,29 @@ mod tests {
     }
 
     #[test]
+    fn parses_report_pr_comment() {
+        let cli = TestCli::try_parse_from(["test", "my-comp", "--report=pr-comment"])
+            .expect("should parse");
+        assert_eq!(cli.review.report.as_deref(), Some("pr-comment"));
+        assert!(is_markdown_mode(&cli.review));
+    }
+
+    #[test]
+    fn rejects_unknown_report_format() {
+        let result = TestCli::try_parse_from(["test", "my-comp", "--report=slack"]);
+        assert!(
+            result.is_err(),
+            "clap whitelist must reject unknown report formats"
+        );
+    }
+
+    #[test]
+    fn is_markdown_mode_false_without_flag() {
+        let cli = TestCli::try_parse_from(["test", "my-comp"]).expect("should parse");
+        assert!(!is_markdown_mode(&cli.review));
+    }
+
+    #[test]
     fn parses_with_no_component() {
         let cli = TestCli::try_parse_from(["test", "--changed-since", "main"])
             .expect("should parse without positional component");
@@ -483,6 +531,7 @@ mod tests {
             changed_only: false,
             summary: false,
             json: false,
+            report: None,
             baseline_args: BaselineArgs::default(),
         };
         assert_eq!(scope_flag_suffix(&args, true), " --changed-since=trunk");
@@ -500,6 +549,7 @@ mod tests {
             changed_only: true,
             summary: false,
             json: false,
+            report: None,
             baseline_args: BaselineArgs::default(),
         };
         assert_eq!(scope_flag_suffix(&args, true), " --changed-only");
@@ -519,6 +569,7 @@ mod tests {
             changed_only: false,
             summary: false,
             json: false,
+            report: None,
             baseline_args: BaselineArgs::default(),
         };
         assert_eq!(scope_flag_suffix(&args, true), "");
