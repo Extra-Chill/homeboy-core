@@ -65,6 +65,12 @@ homeboy review --changed-only
 
 # Full sweep — equivalent to running audit + lint + test back-to-back
 homeboy review my-plugin
+
+# Render a PR-comment markdown section directly to a file, then post it
+homeboy review my-plugin --changed-since=main --report=pr-comment > /tmp/section.md
+homeboy git pr comment my-plugin --number 42 --comment-key ci:my-plugin \
+  --section-key review --body-file /tmp/section.md \
+  --header "## Homeboy Results — \`my-plugin\`"
 ```
 
 ## Empty-changeset short-circuit
@@ -118,6 +124,75 @@ Each stage's `output` field carries the same structured payload that running
 `homeboy <stage>` directly would produce, so downstream consumers (the sectioned
 PR-comment primitive, CI wrappers) can render per-stage detail without needing
 a separate invocation.
+
+## Output formats
+
+`review` supports two output shapes, selected via `--report`.
+
+### Default — JSON envelope
+
+The default output is the structured `{success, data: ReviewCommandOutput}`
+envelope shown above. Suitable for programmatic consumers, CI wrappers, and
+the agent surface. Every field that a per-stage command would emit is
+preserved under `data.audit.output`, `data.lint.output`, `data.test.output`.
+
+### `--report=pr-comment` — markdown PR-comment section
+
+Renders the same envelope into a markdown PR-comment section, ready to pipe
+into `homeboy git pr comment --body-file`. The renderer emits **only the
+section body** — the consumer (`homeboy git pr comment --header`) owns the
+wrapping `### Title` heading.
+
+Per-stage shape:
+
+- Header line per stage: `:white_check_mark: **<stage>**` for pass,
+  `:x: **<stage>**` for fail, `:fast_forward: **<stage>** — skipped (<reason>)`
+  when the stage was skipped (e.g. empty changeset).
+- Audit body: top finding categories (by `convention`) with counts, capped at
+  10 categories with a `… N more` overflow line.
+- Lint body: top sniff codes (by `category`) with counts, same 10-cap.
+- Test body: failure summary line (`**N failed** out of M total`) plus pass
+  and skip counts. Per-test failure names are not surfaced — that data isn't
+  on `TestCommandOutput`.
+- Each ran stage ends with a `> Deep dive: homeboy <cmd> ...` blockquote
+  pointing the reviewer at the per-stage command for full detail.
+
+Above the stages, the renderer emits a scope banner
+(`:zap: Scope: **changed files only** (since \`<ref>\`)` or
+`:information_source: Scope: **full**`) and a total-findings line
+(`**N** finding(s) across M stage(s)`).
+
+**Out of scope for this renderer.** Action-level signals — autofix banners,
+fallback-binary warnings, tooling-version footers, scope-mode resolution
+notes — are not present in `ReviewCommandOutput` and are not rendered. The
+GitHub Action layer continues to emit those as separate sections (or via
+`--banner` flags in a future PR).
+
+Example:
+
+```bash
+homeboy review my-plugin --changed-since=main --report=pr-comment
+```
+
+```markdown
+:zap: Scope: **changed files only** (since `main`)
+
+**4** finding(s) across 3 stage(s)
+
+:x: **audit**
+- **ability-shape** — 3 finding(s)
+- **naming-convention** — 1 finding(s)
+- _Total: 4 finding(s)_
+> Deep dive: homeboy audit my-plugin --changed-since=main
+
+:white_check_mark: **lint**
+> Deep dive: homeboy lint my-plugin --changed-since=main
+
+:white_check_mark: **test**
+- 87 passed
+- 2 skipped
+> Deep dive: homeboy test my-plugin --changed-since=main
+```
 
 ## Exit codes
 

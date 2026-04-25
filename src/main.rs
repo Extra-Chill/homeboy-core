@@ -142,6 +142,9 @@ fn response_mode(command: &Commands) -> ResponseMode {
         Commands::Changelog(args) if changelog::is_show_markdown(args) => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
+        Commands::Review(args) if review::is_markdown_mode(args) => {
+            ResponseMode::Raw(RawOutputMode::Markdown)
+        }
         Commands::List => ResponseMode::Raw(RawOutputMode::Markdown),
         _ => ResponseMode::Json,
     }

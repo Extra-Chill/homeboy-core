@@ -284,11 +284,12 @@ pub mod version;
 
 pub(crate) fn run_markdown(
     command: crate::Commands,
-    _global: &GlobalArgs,
+    global: &GlobalArgs,
 ) -> homeboy::Result<(String, i32)> {
     match command {
         crate::Commands::Docs(args) => docs::run_markdown(args),
         crate::Commands::Changelog(args) => changelog::run_markdown(args),
+        crate::Commands::Review(args) => review::run_markdown(args, global),
         _ => Err(homeboy::Error::validation_invalid_argument(
             "output_mode",
             "Command does not support markdown output",
