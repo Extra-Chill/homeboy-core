@@ -783,6 +783,39 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
 mod tests {
     use super::*;
 
+    /// Return `true` only when the Rust grammar is discoverable via the
+    /// extension registry.
+    ///
+    /// `check_signature_consistency` → `extract_signatures_from_items` →
+    /// `load_grammar_for_ext("rs")` depends on the `rust` extension being
+    /// installed under `~/.config/homeboy/extensions/`. In CI that's
+    /// guaranteed, but on developer machines (or minimal dev setups that
+    /// only have the `wordpress` extension) it may be absent — without
+    /// this guard the signature-consistency tests fail with a confusing
+    /// assertion instead of a clear skip.
+    ///
+    /// Tests that parse real Rust source via the grammar call this helper
+    /// and early-return when it reports `false`. `eprintln!` surfaces the
+    /// skip in test output so the gap is visible rather than silent.
+    fn rust_grammar_available() -> bool {
+        crate::core::code_audit::core_fingerprint::load_grammar_for_ext("rs").is_some()
+    }
+
+    /// Short-circuit the calling test when the Rust grammar isn't
+    /// available, emitting a notice to stderr so CI output still records
+    /// the skip.
+    macro_rules! require_rust_grammar {
+        ($test_name:expr) => {
+            if !rust_grammar_available() {
+                eprintln!(
+                    "skip: {} requires the `rust` extension/grammar to be installed",
+                    $test_name
+                );
+                return;
+            }
+        };
+    }
+
     #[test]
     fn convention_needs_minimum_two_files() {
         let fingerprints = vec![FileFingerprint {
@@ -879,7 +912,10 @@ mod tests {
 
     #[test]
     fn signature_check_detects_mismatch() {
-        // Uses Rust files so the test works in CI (only rust extension/grammar installed)
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed).
+        // When the grammar isn't discoverable (e.g. dev machine without the rust
+        // extension installed), skip instead of failing the assertion downstream.
+        require_rust_grammar!("signature_check_detects_mismatch");
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(dir.join("handlers")).unwrap();
@@ -936,7 +972,8 @@ mod tests {
 
     #[test]
     fn signature_check_adds_to_existing_outliers() {
-        // Uses Rust files so the test works in CI (only rust extension/grammar installed)
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed).
+        require_rust_grammar!("signature_check_adds_to_existing_outliers");
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(dir.join("handlers")).unwrap();
@@ -1002,7 +1039,8 @@ mod tests {
 
     #[test]
     fn signature_check_no_change_when_all_match() {
-        // Uses Rust files so the test works in CI
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed).
+        require_rust_grammar!("signature_check_no_change_when_all_match");
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(dir.join("handlers")).unwrap();
@@ -1073,8 +1111,9 @@ mod tests {
 
     #[test]
     fn signature_check_majority_wins() {
-        // Uses Rust files so the test works in CI (only rust extension/grammar installed)
+        // Uses Rust files so the test works in CI (only rust extension/grammar installed).
         // 2 files have one signature (2 params), 1 file has another (1 param) — the 2-file version is canonical
+        require_rust_grammar!("signature_check_majority_wins");
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
         std::fs::create_dir_all(dir.join("handlers")).unwrap();
