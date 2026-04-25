@@ -19,7 +19,7 @@ use regex::Regex;
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
-use super::idiomatic::is_trivial_method;
+use super::idiomatic::{is_trivial_method, test_covers_method};
 use super::test_mapping::{
     build_source_name_index, partition_fingerprints, source_to_test_path, test_to_source_path,
 };
@@ -106,17 +106,6 @@ pub(crate) fn analyze_test_coverage(
                 continue; // No tests at all — skip method-level checks
             }
 
-            // Check method coverage: combine inline test methods + dedicated test file methods
-            let mut covered_methods: HashSet<&str> = HashSet::new();
-
-            // Inline test methods — authored with `#[test]`, tracked separately
-            // from production methods so prefix-string ambiguity can't leak.
-            for method in &source_fp.test_methods {
-                if let Some(source_method) = method.strip_prefix(&config.method_prefix) {
-                    covered_methods.insert(source_method);
-                }
-            }
-
             // Methods from dedicated test file — for Rust, these are also
             // structural (top-level `#[test]` functions in `tests/`). For
             // extension-fingerprinted languages the core list is empty so we
@@ -132,17 +121,28 @@ pub(crate) fn analyze_test_coverage(
             } else {
                 Vec::new()
             };
-            for method in dedicated_test_methods {
-                if let Some(source_method) = method.strip_prefix(&config.method_prefix) {
-                    covered_methods.insert(source_method);
-                }
-            }
 
             // Build set of source method names for orphaned test detection.
             // Test methods already live in `source_fp.test_methods` — `.methods`
             // contains only non-test functions, so no prefix filter needed.
             let source_methods: HashSet<&str> =
                 source_fp.methods.iter().map(|m| m.as_str()).collect();
+
+            // Check method coverage: combine inline test methods + dedicated
+            // test file methods, accepting either literal-prefix matches or
+            // token-bounded substring matches (see `test_covers_method`).
+            let mut covered_methods: HashSet<&str> = HashSet::new();
+            for source_method in &source_methods {
+                let covered = source_fp
+                    .test_methods
+                    .iter()
+                    .map(|s| s.as_str())
+                    .chain(dedicated_test_methods.iter().copied())
+                    .any(|test| test_covers_method(test, source_method, &config.method_prefix));
+                if covered {
+                    covered_methods.insert(*source_method);
+                }
+            }
 
             // Find source methods without tests (Check 2: MissingTestMethod)
             for method in &source_methods {
@@ -232,10 +232,17 @@ pub(crate) fn analyze_test_coverage(
                 source_fp.methods.iter().map(|m| m.as_str()).collect();
 
             if !test_methods.is_empty() {
-                let covered_methods: HashSet<&str> = test_methods
-                    .iter()
-                    .filter_map(|m| m.strip_prefix(&config.method_prefix))
-                    .collect();
+                // Coverage accepts either literal-prefix matches or
+                // token-bounded substring matches (see `test_covers_method`).
+                let mut covered_methods: HashSet<&str> = HashSet::new();
+                for source_method in source_fp.methods.iter().map(|m| m.as_str()) {
+                    let covered = test_methods.iter().any(|test| {
+                        test_covers_method(test, source_method, &config.method_prefix)
+                    });
+                    if covered {
+                        covered_methods.insert(source_method);
+                    }
+                }
 
                 let test_file_label = test_fp
                     .map(|fp| fp.relative_path.clone())
@@ -1340,6 +1347,111 @@ mod tests {
                 .map(|f| &f.description)
                 .collect::<Vec<_>>()
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ========================================================================
+    // MissingTestMethod integration with substring matching (#1518)
+    //
+    // Unit tests for the `test_covers_method` predicate itself live in
+    // `super::idiomatic::tests`. These exercise the full
+    // `analyze_test_coverage` pipeline.
+    // ========================================================================
+
+    #[test]
+    fn missing_test_method_skipped_for_descriptive_test() {
+        // Regression for #1518: a behavior-describing test name should be
+        // recognized as coverage for the source method it references.
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_descriptive_inline");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/core")).unwrap();
+
+        // Source method: fingerprint_content. Inline test:
+        // fingerprint_content_matches_fingerprint_file (no `test_` prefix
+        // because it's a behavior-describing name, but #[test]-attributed
+        // upstream so it lives in `test_methods`).
+        let source = make_fp_split(
+            "src/core/fingerprint.rs",
+            vec!["fingerprint_content"],
+            vec!["fingerprint_content_matches_fingerprint_file"],
+        );
+
+        let findings = analyze_test_coverage(&dir, &[&source], &config);
+
+        let missing: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::MissingTestMethod)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Descriptive test name should be recognized as coverage. \
+             Findings: {:?}",
+            missing.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_test_method_still_emits_for_uncovered_method() {
+        // Regression guard: substring matching must not turn into a free pass.
+        // A source method with no test (literal or descriptive) still emits.
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_still_emits");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/core")).unwrap();
+
+        let source = make_fp_split(
+            "src/core/something.rs",
+            vec!["something_uncovered"],
+            vec!["totally_unrelated_test", "another_unrelated_one"],
+        );
+
+        let findings = analyze_test_coverage(&dir, &[&source], &config);
+
+        let missing: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::MissingTestMethod)
+            .collect();
+        assert_eq!(
+            missing.len(),
+            1,
+            "Uncovered source method must still emit. Findings: {:?}",
+            missing.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+        assert!(missing[0].description.contains("something_uncovered"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphaned_test_unaffected_by_substring_relaxation() {
+        // Orphaned-test detection still uses the strict prefix path. A
+        // `test_foo` with no `foo` source method emits an orphan finding,
+        // unaffected by the new substring relaxation in coverage detection.
+        let config = make_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_orphan_strict");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+
+        // Source has `bar`. Test file has `test_foo` (orphan, foo doesn't
+        // exist) and `test_bar` (valid).
+        let source = make_fp("src/mod.rs", vec!["bar"]);
+        let test = make_fp("tests/mod_test.rs", vec!["test_foo", "test_bar"]);
+
+        let findings = analyze_test_coverage(&dir, &[&source, &test], &config);
+
+        let orphaned: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| {
+                f.kind == AuditFinding::OrphanedTest && f.description.contains("no longer exists")
+            })
+            .collect();
+        assert_eq!(orphaned.len(), 1);
+        assert!(orphaned[0].description.contains("test_foo"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
