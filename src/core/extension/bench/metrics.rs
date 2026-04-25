@@ -132,3 +132,108 @@ pub(crate) fn resolve_metric_policies(
         .map(|(name, policy)| ResolvedMetricPolicy::custom(name, policy))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::super::parsing::{BenchMetrics, BenchScenario};
+    use super::*;
+
+    fn policy(direction: BenchMetricDirection) -> BenchMetricPolicy {
+        BenchMetricPolicy {
+            direction,
+            regression_threshold_percent: Some(5.0),
+            regression_threshold_absolute: None,
+        }
+    }
+
+    fn results(metrics: BTreeMap<String, f64>) -> BenchResults {
+        BenchResults {
+            component_id: "demo".to_string(),
+            iterations: 10,
+            scenarios: vec![BenchScenario {
+                id: "scenario".to_string(),
+                file: None,
+                iterations: 10,
+                metrics: BenchMetrics { values: metrics },
+                memory: None,
+            }],
+            metric_policies: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_reason() {
+        let delta = MetricDelta {
+            name: "error_rate".to_string(),
+            baseline_value: 0.01,
+            current_value: 0.02,
+            delta: 0.01,
+            delta_pct: Some(100.0),
+            direction: BenchMetricDirection::LowerIsBetter,
+            regression: true,
+            improvement: false,
+        };
+
+        assert_eq!(
+            delta.reason("http"),
+            "http: error_rate 0.01 → 0.02 (+100.0%)"
+        );
+    }
+
+    #[test]
+    fn test_name() {
+        let resolved = ResolvedMetricPolicy::legacy_p95(5.0);
+
+        assert_eq!(resolved.name(), "p95_ms");
+    }
+
+    #[test]
+    fn test_compare() {
+        let resolved = ResolvedMetricPolicy::custom(
+            "requests_per_second",
+            &policy(BenchMetricDirection::HigherIsBetter),
+        );
+        let delta = resolved.compare(100.0, 90.0);
+
+        assert!(delta.regression);
+        assert_eq!(delta.delta, -10.0);
+    }
+
+    #[test]
+    fn test_custom() {
+        let resolved = ResolvedMetricPolicy::custom(
+            "error_rate",
+            &BenchMetricPolicy {
+                direction: BenchMetricDirection::LowerIsBetter,
+                regression_threshold_percent: None,
+                regression_threshold_absolute: Some(0.01),
+            },
+        );
+        let delta = resolved.compare(0.0, 0.02);
+
+        assert_eq!(resolved.name(), "error_rate");
+        assert!(delta.regression);
+    }
+
+    #[test]
+    fn test_legacy_p95() {
+        let resolved = ResolvedMetricPolicy::legacy_p95(5.0);
+        let delta = resolved.compare(0.0, 10.0);
+
+        assert_eq!(resolved.name(), "p95_ms");
+        assert!(!delta.regression);
+    }
+
+    #[test]
+    fn test_resolve_metric_policies() {
+        let mut metrics = BTreeMap::new();
+        metrics.insert("p95_ms".to_string(), 100.0);
+
+        let resolved = resolve_metric_policies(&results(metrics), 5.0);
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name(), "p95_ms");
+    }
+}

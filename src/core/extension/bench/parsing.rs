@@ -162,6 +162,33 @@ mod tests {
     }
 
     #[test]
+    fn test_get() {
+        let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
+        let metrics = &parsed.scenarios[0].metrics;
+
+        assert_eq!(metrics.get("p95_ms"), Some(145.0));
+        assert_eq!(metrics.get("missing"), None);
+    }
+
+    #[test]
+    fn test_parse_bench_results_str() {
+        let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
+
+        assert_eq!(parsed.component_id, "example");
+    }
+
+    #[test]
+    fn test_parse_bench_results_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bench-results.json");
+        std::fs::write(&path, VALID_RESULTS).unwrap();
+
+        let parsed = parse_bench_results_file(&path).unwrap();
+
+        assert_eq!(parsed.scenarios.len(), 1);
+    }
+
+    #[test]
     fn parses_arbitrary_numeric_metrics_and_policies() {
         let raw = r#"{
             "component_id": "example",

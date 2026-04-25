@@ -329,6 +329,55 @@ mod tests {
     }
 
     #[test]
+    fn test_from_scenario() {
+        let scenario = scenario("snapshot", 123.0);
+        let snapshot = BenchScenarioSnapshot::from_scenario(&scenario);
+
+        assert_eq!(snapshot.id, "snapshot");
+        assert_eq!(snapshot.metric_value("p95_ms"), Some(123.0));
+        assert!(snapshot.metric_value("mean_ms").unwrap() > 110.0);
+    }
+
+    #[test]
+    fn test_save_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = results(vec![scenario("a", 100.0)]);
+        let path = save_baseline(dir.path(), "demo", &run, None).unwrap();
+
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn test_load_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = results(vec![scenario("a", 100.0)]);
+        save_baseline(dir.path(), "demo", &run, None).unwrap();
+
+        let loaded = load_baseline(dir.path(), None).unwrap();
+
+        assert_eq!(loaded.context_id, "demo");
+        assert_eq!(loaded.metadata.scenarios.len(), 1);
+    }
+
+    #[test]
+    fn test_compare() {
+        let dir = tempfile::tempdir().unwrap();
+        save_baseline(
+            dir.path(),
+            "demo",
+            &results(vec![scenario("a", 100.0)]),
+            None,
+        )
+        .unwrap();
+        let baseline = load_baseline(dir.path(), None).unwrap();
+
+        let comparison = compare(&results(vec![scenario("a", 106.0)]), &baseline, 5.0);
+
+        assert!(comparison.regression);
+        assert_eq!(comparison.scenarios.len(), 1);
+    }
+
+    #[test]
     fn save_and_load_roundtrips() {
         let dir = tempfile::tempdir().unwrap();
         let run = results(vec![scenario("a", 100.0), scenario("b", 200.0)]);
