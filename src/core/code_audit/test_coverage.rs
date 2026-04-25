@@ -155,7 +155,7 @@ pub(crate) fn analyze_test_coverage(
                 if !covered_methods.contains(method) {
                     findings.push(Finding {
                         convention: "test_coverage".to_string(),
-                        severity: severity.clone(),
+                        severity: Severity::Info,
                         file: source_fp.relative_path.clone(),
                         description: format!(
                             "Method '{}' has no corresponding test (expected '{}{}')",
@@ -259,7 +259,7 @@ pub(crate) fn analyze_test_coverage(
                     if !covered_methods.contains(method.as_str()) {
                         findings.push(Finding {
                             convention: "test_coverage".to_string(),
-                            severity: severity.clone(),
+                            severity: Severity::Info,
                             file: source_fp.relative_path.clone(),
                             description: format!(
                                 "Method '{}' has no corresponding test in '{}'",
@@ -784,10 +784,10 @@ mod tests {
             .collect();
         // "stop" and "reset" should be missing tests
         assert_eq!(missing_methods.len(), 2);
-        // Critical path (core/) should produce Warning severity
-        assert!(missing_methods
-            .iter()
-            .all(|f| f.severity == Severity::Warning));
+        // MissingTestMethod is informational; the rule no longer drives autofix or
+        // critical-path warnings. (#1518: severity demotion alongside the
+        // synthesis-pipeline removal.)
+        assert!(missing_methods.iter().all(|f| f.severity == Severity::Info));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

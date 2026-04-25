@@ -59,7 +59,6 @@ Homeboy provides tooling for AI-assisted documentation generation and maintenanc
 
 - `homeboy docs audit <component>` - Validate documentation links, detect stale references and gaps
 - `homeboy docs map <component>` - Generate machine-optimized codebase map for AI context
-- `homeboy docs generate --json` - Bulk create documentation files from JSON spec
 - `homeboy docs documentation/index` - Documentation philosophy and principles
 - `homeboy docs documentation/alignment` - Instructions for maintaining existing docs
 - `homeboy docs documentation/generation` - Instructions for generating new docs

@@ -7,8 +7,6 @@ homeboy docs [TOPIC]
 homeboy docs list
 homeboy docs audit <component-id> [--features] [--docs-dir <DIR>]
 homeboy docs map <component-id> [--write] [--include-private]
-homeboy docs generate --json '<spec>'
-homeboy docs generate --from-audit @audit.json
 ```
 
 ## Description
@@ -22,8 +20,6 @@ This command renders documentation topics and provides tooling for documentation
 **Audit** validates documentation links, detects stale references, identifies undocumented features, and flags priority docs that need review.
 
 **Map** generates machine-optimized codebase maps for AI documentation.
-
-**Generate** creates documentation files in bulk from a JSON spec or from audit output.
 
 ## Subcommands
 
@@ -41,7 +37,7 @@ homeboy docs audit /path/to/project --docs-dir documentation
 - `<component-id>`: Component ID or filesystem path to audit (required)
 
 **Options:**
-- `--features`: Include full list of all detected features in output (needed for `generate --from-audit`)
+- `--features`: Include full list of all detected features in output
 - `--docs-dir <DIR>`: Docs directory relative to component root (overrides config, default: `docs`)
 
 **Output fields:**
@@ -138,47 +134,6 @@ homeboy docs map my-plugin --source-dirs src,lib
 
 **Markdown output (--write):** Generates module pages, class hierarchy, hooks summary. Large modules (>30 classes) are split into sub-pages by class name prefix.
 
-### `generate`
-
-Creates or updates documentation files from a JSON spec or from audit output.
-
-**From JSON spec:**
-```sh
-homeboy docs generate --json '<spec>'
-homeboy docs generate @spec.json
-homeboy docs generate -  # read from stdin
-```
-
-**JSON Spec Format:**
-```json
-{
-  "output_dir": "docs",
-  "files": [
-    { "path": "engine.md", "content": "Full markdown content here..." },
-    { "path": "handlers.md", "title": "Handler System" },
-    { "path": "api/auth.md" }
-  ]
-}
-```
-
-**File spec options:**
-- `path` (required): Relative path within output_dir
-- `content`: Full markdown content to write
-- `title`: Creates file with `# {title}\n` (used if no content)
-- Neither: Uses filename converted to title case; infers section headings from sibling docs
-
-**From audit output:**
-```sh
-homeboy docs audit my-plugin --features > audit.json
-homeboy docs generate --from-audit @audit.json
-homeboy docs generate --from-audit @audit.json --dry-run
-```
-
-Generates reference documentation from detected features, grouped by extension-configured labels and written to configured doc targets.
-
-**Options:**
-- `--dry-run`: Show what would be generated without writing files
-
 ## Topic Display
 
 ### Default (render topic)
@@ -210,8 +165,7 @@ Typical documentation workflow using these commands:
 1. **Audit**: `homeboy docs audit <component>` — find broken refs, stale docs, undocumented features
 2. **Learn**: `homeboy docs documentation/generation` — read guidelines
 3. **Map**: `homeboy docs map <component>` — generate codebase map for AI context
-4. **Generate**: `homeboy docs generate --from-audit @audit.json` — bulk create from audit data
-5. **Maintain**: `homeboy docs documentation/alignment` — keep docs current
+4. **Maintain**: `homeboy docs documentation/alignment` — keep docs current
 
 ## Errors
 
