@@ -99,7 +99,7 @@ Homeboy's convention-based code quality analysis. Unlike traditional linters tha
 - **Structural health** — god files, high item counts
 - **Documentation** — broken references, stale claims, missing feature docs
 
-**Autofix:** `homeboy refactor --from audit --write` generates test scaffolds, narrows visibility, adds missing imports, and more. Findings that can't be auto-fixed are filed as GitHub issues.
+**Autofix:** `homeboy refactor --from audit --write` narrows visibility, adds missing imports, removes orphaned tests, and more. Findings that can't be auto-fixed are filed as GitHub issues.
 
 ### Release
 
@@ -272,4 +272,4 @@ Key fields:
 
 5. **Monotonic improvement.** The baseline ratchet ensures the codebase never gets worse. Every merge is at least as good as what came before.
 
-6. **Humans provide features, code maintains itself.** The end state is a system where the only human work is writing new features. Formatting, test scaffolding, convention compliance, versioning, changelogs, releases, and deployment are all automated.
+6. **Humans provide features, code maintains itself.** The end state is a system where the only human work is writing features and tests. Formatting, convention compliance, versioning, changelogs, releases, and deployment are all automated.

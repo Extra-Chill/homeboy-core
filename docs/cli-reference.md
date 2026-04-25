@@ -337,21 +337,16 @@
 
 ### `DocsCommand`
 
-- `Scaffold` — Analyze codebase and report documentation status (read-only)
+- `Map` — Generate a machine-optimized codebase map for AI documentation
 - `component_id` — Component to analyze
-- `docs_dir` — Docs directory to check for existing documentation (default: docs)
 - `source_dirs` — Source directories to analyze (comma-separated, or repeat flag). Overrides auto-detection.
-- `source_extensions` — File extensions to detect as source code (default: php,rs,js,ts,py,go,java,rb,swift,kt)
-- `detect_by_extension` — Include all directories containing source files (extension-based detection)
+- `include_private` — Include private methods and internals (default: public API surface only)
+- `write` — Write markdown documentation files to disk (default: JSON to stdout)
+- `output_dir` — Output directory for markdown files (default: docs)
 - `Audit` — Audit documentation for broken links and stale references
 - `component_id` — Component ID or direct filesystem path to audit
 - `docs_dir` — Docs directory relative to component/project root (overrides config, default: docs)
 - `features` — Include full list of all detected features in output
-- `Generate` — Generate documentation files from JSON spec
-- `spec` — JSON spec (positional, supports @file and - for stdin)
-- `json` — Explicit JSON spec (takes precedence over positional)
-- `from_audit` — Generate docs from audit output (pipe from `docs audit --features` or use @file)
-- `dry_run` — Show what would be generated without writing files
 
 ### `ExtensionCommand`
 
