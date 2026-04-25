@@ -14,7 +14,9 @@
 pub mod baseline;
 mod checks;
 pub mod codebase_map;
+mod comment_blocks;
 mod comment_hygiene;
+mod upstream_workaround;
 pub mod compare;
 mod compiler_warnings;
 pub(crate) mod conventions;
