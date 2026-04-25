@@ -23,6 +23,7 @@
 - [project](project.md)
 - [refactor](refactor.md)
 - [release](release.md) — local release pipeline
+- [review](review.md) — scoped audit + lint + test umbrella for PR-style changes
 - [rig](rig.md) — reproducible local dev environments ([spec](rig-spec.md))
 - [server](server.md)
 - [ssh](ssh.md)
