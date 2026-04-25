@@ -12,56 +12,56 @@ use super::{CmdResult, GlobalArgs};
 #[derive(Args)]
 pub struct TestArgs {
     #[command(flatten)]
-    comp: PositionalComponentArgs,
+    pub comp: PositionalComponentArgs,
 
     /// Skip linting before running tests
     #[arg(long)]
-    skip_lint: bool,
+    pub skip_lint: bool,
 
     /// Collect code coverage (requires xdebug/pcov for PHP, cargo-tarpaulin for Rust)
     #[arg(long)]
-    coverage: bool,
+    pub coverage: bool,
 
     /// Minimum coverage percentage — fail if below this threshold (implies --coverage)
     #[arg(long, value_name = "PERCENT")]
-    coverage_min: Option<f64>,
+    pub coverage_min: Option<f64>,
 
     #[command(flatten)]
-    baseline_args: BaselineArgs,
+    pub baseline_args: BaselineArgs,
 
     /// Analyze test failures — cluster by root cause and suggest fixes
     #[arg(long)]
-    analyze: bool,
+    pub analyze: bool,
 
     /// Detect test drift — cross-reference production changes with test files
     #[arg(long)]
-    drift: bool,
+    pub drift: bool,
 
     /// Write fixes to disk for workflows that support it
     #[arg(long)]
-    write: bool,
+    pub write: bool,
 
     /// Git ref to compare against for drift detection (tag, commit, branch)
     #[arg(long, value_name = "REF", default_value = "HEAD~10")]
-    since: String,
+    pub since: String,
 
     /// Limit test execution to files changed since this git ref (PR impact scope)
     #[arg(long, value_name = "REF")]
-    changed_since: Option<String>,
+    pub changed_since: Option<String>,
 
     #[command(flatten)]
-    setting_args: SettingArgs,
+    pub setting_args: SettingArgs,
 
     /// Additional arguments to pass to the test runner (must follow --)
     #[arg(last = true)]
-    args: Vec<String>,
+    pub args: Vec<String>,
 
     #[command(flatten)]
-    _json: HiddenJsonArgs,
+    pub _json: HiddenJsonArgs,
 
     /// Print compact machine-readable summary (for CI wrappers)
     #[arg(long)]
-    json_summary: bool,
+    pub json_summary: bool,
 }
 
 /// Filter out homeboy-owned flags from trailing args before passing to extension scripts.

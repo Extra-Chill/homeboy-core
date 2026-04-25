@@ -13,52 +13,52 @@ use super::{CmdResult, GlobalArgs};
 #[derive(Args)]
 pub struct LintArgs {
     #[command(flatten)]
-    comp: PositionalComponentArgs,
+    pub comp: PositionalComponentArgs,
 
     /// Show compact summary instead of full output
     #[arg(long)]
-    summary: bool,
+    pub summary: bool,
 
     /// Lint only a single file (path relative to component root)
     #[arg(long)]
-    file: Option<String>,
+    pub file: Option<String>,
 
     /// Lint only files matching glob pattern (e.g., "inc/**/*.php")
     #[arg(long)]
-    glob: Option<String>,
+    pub glob: Option<String>,
 
     /// Lint only files modified in the working tree (staged, unstaged, untracked)
     #[arg(long, conflicts_with = "changed_since")]
-    changed_only: bool,
+    pub changed_only: bool,
 
     /// Lint only files changed since a git ref (branch, tag, or SHA) — CI-friendly
     #[arg(long, conflicts_with = "changed_only")]
-    changed_since: Option<String>,
+    pub changed_since: Option<String>,
 
     /// Show only errors, suppress warnings
     #[arg(long)]
-    errors_only: bool,
+    pub errors_only: bool,
 
     /// Only check specific sniffs (comma-separated codes)
     #[arg(long)]
-    sniffs: Option<String>,
+    pub sniffs: Option<String>,
 
     /// Exclude sniffs from checking (comma-separated codes)
     #[arg(long)]
-    exclude_sniffs: Option<String>,
+    pub exclude_sniffs: Option<String>,
 
     /// Filter by category: security, i18n, yoda, whitespace
     #[arg(long)]
-    category: Option<String>,
+    pub category: Option<String>,
 
     #[command(flatten)]
-    setting_args: SettingArgs,
+    pub setting_args: SettingArgs,
 
     #[command(flatten)]
-    baseline_args: BaselineArgs,
+    pub baseline_args: BaselineArgs,
 
     #[command(flatten)]
-    _json: HiddenJsonArgs,
+    pub _json: HiddenJsonArgs,
 }
 
 pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput> {
