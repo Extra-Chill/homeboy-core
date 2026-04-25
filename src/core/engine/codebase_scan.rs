@@ -555,6 +555,71 @@ pub fn discover_casing(root: &Path, term: &str, config: &ScanConfig) -> Vec<(Str
 }
 
 // ============================================================================
+// In-memory snapshot — single-walk, single-read primitive
+// ============================================================================
+
+/// One-shot in-memory view of a codebase: a single walk + a single read pass.
+///
+/// Built by [`CodebaseSnapshot::build`] from a root directory and a [`ScanConfig`].
+/// Subsequent consumers (audit detectors, fingerprint indexes, symbol graphs, etc.)
+/// borrow content from this snapshot instead of re-walking the tree and re-reading
+/// each file. See Extra-Chill/homeboy#1492.
+///
+/// Files that fail to read as UTF-8 are silently dropped — same behavior as the
+/// pre-snapshot `walk_files` + `std::fs::read_to_string` callsites this replaces.
+///
+/// This is slice 1 of #1492 — pure addition, no consumer migration. The new
+/// type is opt-in primitive scaffolding; existing audit/fixability/refactor
+/// pipelines still go through `walk_files` + `fingerprint_file` directly.
+#[derive(Debug, Clone)]
+pub struct CodebaseSnapshot {
+    root: PathBuf,
+    files: Vec<(PathBuf, String)>,
+}
+
+impl CodebaseSnapshot {
+    /// Walk `root` once with `config`, read each matching file once, collect
+    /// (path, content) pairs in walk order. Files that fail to read as UTF-8
+    /// are skipped without erroring.
+    pub fn build(root: &Path, config: &ScanConfig) -> Self {
+        let paths = walk_files(root, config);
+        let mut files = Vec::with_capacity(paths.len());
+        for path in paths {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => files.push((path, content)),
+                Err(_) => continue,
+            }
+        }
+        Self {
+            root: root.to_path_buf(),
+            files,
+        }
+    }
+
+    /// Root directory the snapshot was built from.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Number of files captured in the snapshot (post-read-filter).
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Whether the snapshot is empty.
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    /// Iterate `(path, content)` pairs in walk order.
+    pub fn iter(&self) -> impl Iterator<Item = (&Path, &str)> {
+        self.files
+            .iter()
+            .map(|(path, content)| (path.as_path(), content.as_str()))
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -838,6 +903,80 @@ mod tests {
 
         assert_eq!(results.len(), 1); // Only "WPAgent" matches (WP_AGENT has an underscore)
         assert_eq!(results[0].matched, "WPAgent");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- CodebaseSnapshot tests ---
+
+    #[test]
+    fn snapshot_build_matches_walk_files() {
+        let dir = std::env::temp_dir().join("homeboy_snapshot_walk_parity_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(dir.join("src/sub"));
+        let _ = std::fs::create_dir_all(dir.join("node_modules"));
+
+        std::fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(dir.join("src/sub/lib.rs"), "pub fn lib() {}\n").unwrap();
+        std::fs::write(dir.join("src/style.css"), "body{}\n").unwrap();
+        std::fs::write(dir.join("node_modules/skip.rs"), "skipped\n").unwrap();
+
+        let config = ScanConfig::default();
+        let walked = walk_files(&dir, &config);
+        let snapshot = CodebaseSnapshot::build(&dir, &config);
+
+        let walked_set: std::collections::HashSet<PathBuf> = walked.into_iter().collect();
+        let snapshot_set: std::collections::HashSet<PathBuf> =
+            snapshot.iter().map(|(p, _)| p.to_path_buf()).collect();
+
+        assert_eq!(snapshot_set, walked_set);
+        assert_eq!(snapshot.len(), snapshot_set.len());
+        assert_eq!(snapshot.root(), dir.as_path());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_reads_each_file_exactly_once() {
+        let dir = std::env::temp_dir().join("homeboy_snapshot_content_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+
+        std::fs::write(dir.join("alpha.rs"), "alpha content\n").unwrap();
+        std::fs::write(dir.join("beta.rs"), "beta content\n").unwrap();
+        std::fs::write(dir.join("gamma.md"), "# gamma\n").unwrap();
+
+        let snapshot = CodebaseSnapshot::build(&dir, &ScanConfig::default());
+
+        // Collect (filename, content) pairs and verify each file's content
+        // is present exactly once — no duplicate reads, no missing files.
+        let mut by_name: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (path, content) in snapshot.iter() {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            by_name.entry(name).or_default().push(content.to_string());
+        }
+
+        assert_eq!(by_name.get("alpha.rs").map(|v| v.len()), Some(1));
+        assert_eq!(by_name.get("beta.rs").map(|v| v.len()), Some(1));
+        assert_eq!(by_name.get("gamma.md").map(|v| v.len()), Some(1));
+        assert_eq!(by_name.get("alpha.rs").unwrap()[0], "alpha content\n");
+        assert_eq!(by_name.get("beta.rs").unwrap()[0], "beta content\n");
+        assert_eq!(by_name.get("gamma.md").unwrap()[0], "# gamma\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_empty_for_empty_dir() {
+        let dir = std::env::temp_dir().join("homeboy_snapshot_empty_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+
+        let snapshot = CodebaseSnapshot::build(&dir, &ScanConfig::default());
+        assert!(snapshot.is_empty());
+        assert_eq!(snapshot.len(), 0);
+        assert_eq!(snapshot.iter().count(), 0);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
