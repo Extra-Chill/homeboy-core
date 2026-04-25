@@ -18,12 +18,9 @@
 //!       "file": "tests/bench/some-workload.ext",
 //!       "iterations": 10,
 //!       "metrics": {
-//!         "mean_ms": 120.3,
-//!         "p50_ms": 118.0,
 //!         "p95_ms": 145.0,
-//!         "p99_ms": 160.0,
-//!         "min_ms": 110.0,
-//!         "max_ms": 172.0
+//!         "status_500_count": 0,
+//!         "error_rate": 0.0
 //!       },
 //!       "memory": { "peak_bytes": 41943040 }
 //!     }
@@ -31,6 +28,7 @@
 //! }
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -44,6 +42,8 @@ pub struct BenchResults {
     pub component_id: String,
     pub iterations: u64,
     pub scenarios: Vec<BenchScenario>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metric_policies: BTreeMap<String, BenchMetricPolicy>,
 }
 
 /// One scenario's measurements.
@@ -62,15 +62,34 @@ pub struct BenchScenario {
     pub memory: Option<BenchMemory>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct BenchMetrics {
+    #[serde(flatten)]
+    pub values: BTreeMap<String, f64>,
+}
+
+impl BenchMetrics {
+    pub fn get(&self, key: &str) -> Option<f64> {
+        self.values.get(key).copied()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct BenchMetrics {
-    pub mean_ms: f64,
-    pub p50_ms: f64,
-    pub p95_ms: f64,
-    pub p99_ms: f64,
-    pub min_ms: f64,
-    pub max_ms: f64,
+pub struct BenchMetricPolicy {
+    pub direction: BenchMetricDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_threshold_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_threshold_absolute: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BenchMetricDirection {
+    #[serde(rename = "lower_is_better", alias = "lower")]
+    LowerIsBetter,
+    #[serde(rename = "higher_is_better", alias = "higher")]
+    HigherIsBetter,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -138,8 +157,79 @@ mod tests {
         let scenario = &parsed.scenarios[0];
         assert_eq!(scenario.id, "scenario_one");
         assert_eq!(scenario.file.as_deref(), Some("bench/one.ext"));
-        assert_eq!(scenario.metrics.p95_ms, 145.0);
+        assert_eq!(scenario.metrics.get("p95_ms"), Some(145.0));
         assert_eq!(scenario.memory.as_ref().unwrap().peak_bytes, 41943040);
+    }
+
+    #[test]
+    fn test_get() {
+        let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
+        let metrics = &parsed.scenarios[0].metrics;
+
+        assert_eq!(metrics.get("p95_ms"), Some(145.0));
+        assert_eq!(metrics.get("missing"), None);
+    }
+
+    #[test]
+    fn test_parse_bench_results_str() {
+        let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
+
+        assert_eq!(parsed.component_id, "example");
+    }
+
+    #[test]
+    fn test_parse_bench_results_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bench-results.json");
+        std::fs::write(&path, VALID_RESULTS).unwrap();
+
+        let parsed = parse_bench_results_file(&path).unwrap();
+
+        assert_eq!(parsed.scenarios.len(), 1);
+    }
+
+    #[test]
+    fn parses_arbitrary_numeric_metrics_and_policies() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 10,
+            "metric_policies": {
+                "error_rate": {
+                    "direction": "lower_is_better",
+                    "regression_threshold_absolute": 0.01
+                },
+                "requests_per_second": {
+                    "direction": "higher",
+                    "regression_threshold_percent": 5.0
+                }
+            },
+            "scenarios": [
+                {
+                    "id": "concurrent_http",
+                    "iterations": 10,
+                    "metrics": {
+                        "total_requests": 1200,
+                        "status_500_count": 0,
+                        "error_rate": 0.0,
+                        "requests_per_second": 180.5
+                    }
+                }
+            ]
+        }"#;
+
+        let parsed = parse_bench_results_str(raw).unwrap();
+        let scenario = &parsed.scenarios[0];
+
+        assert_eq!(scenario.metrics.get("status_500_count"), Some(0.0));
+        assert_eq!(scenario.metrics.get("requests_per_second"), Some(180.5));
+        assert_eq!(
+            parsed.metric_policies["error_rate"].direction,
+            BenchMetricDirection::LowerIsBetter
+        );
+        assert_eq!(
+            parsed.metric_policies["requests_per_second"].direction,
+            BenchMetricDirection::HigherIsBetter
+        );
     }
 
     #[test]
@@ -191,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_required_metric() {
+    fn rejects_non_numeric_metric_values() {
         let raw = r#"{
             "component_id": "example",
             "iterations": 10,
@@ -200,11 +290,7 @@ mod tests {
                     "id": "scenario_one",
                     "iterations": 10,
                     "metrics": {
-                        "mean_ms": 120.5,
-                        "p50_ms": 118.0,
-                        "p95_ms": 145.0,
-                        "p99_ms": 160.0,
-                        "min_ms": 110.0
+                        "error_rate": "bad"
                     }
                 }
             ]
@@ -216,8 +302,8 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         assert!(
-            inner.contains("max_ms") || inner.contains("missing field"),
-            "expected missing-field error, got details: {}",
+            inner.contains("invalid type") || inner.contains("f64"),
+            "expected invalid-metric error, got details: {}",
             inner
         );
     }
