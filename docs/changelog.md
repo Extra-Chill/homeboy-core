@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.90.2] - 2026-04-25
+
+### Fixed
+- cfg-gate symlink call in pipeline.rs (round 2 of #1496)
+
 ## [0.90.1] - 2026-04-25
 
 ### Fixed
