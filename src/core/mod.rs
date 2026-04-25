@@ -31,7 +31,6 @@ pub use extension::build;
 // Consumers within the crate have been updated to canonical paths; these re-exports
 // preserve the public API for external users of the library.
 pub use code_audit::codebase_map;
-pub use code_audit::docs;
 pub use engine::cli_tool;
 pub use engine::hooks;
 pub use server::api;

@@ -4,7 +4,6 @@ use std::path::Path;
 
 use crate::help_topics;
 use homeboy::code_audit::codebase_map;
-use homeboy::code_audit::docs_audit::AuditResult;
 use homeboy::component;
 
 use super::CmdResult;
@@ -46,24 +45,6 @@ pub enum DocsCommand {
         #[arg(long, default_value = "docs")]
         output_dir: String,
     },
-
-    /// Generate documentation files from JSON spec
-    Generate {
-        /// JSON spec (positional, supports @file and - for stdin)
-        spec: Option<String>,
-
-        /// Explicit JSON spec (takes precedence over positional)
-        #[arg(long, value_name = "JSON")]
-        json: Option<String>,
-
-        /// Generate docs from audit output (pipe from `docs audit --features` or use @file)
-        #[arg(long, value_name = "AUDIT_JSON")]
-        from_audit: Option<String>,
-
-        /// Show what would be generated without writing files
-        #[arg(long)]
-        dry_run: bool,
-    },
 }
 
 // ============================================================================
@@ -76,8 +57,8 @@ pub enum DocsOutput {
     #[serde(rename = "docs.map")]
     Map(codebase_map::CodebaseMap),
 
-    #[serde(rename = "docs.generate")]
-    Generate {
+    #[serde(rename = "docs.map.write")]
+    MapWrite {
         files_created: Vec<String>,
         files_updated: Vec<String>,
         hints: Vec<String>,
@@ -88,12 +69,9 @@ pub enum DocsOutput {
 // Public API
 // ============================================================================
 
-/// Check if this invocation should return JSON (map or generate subcommand)
+/// Check if this invocation should return JSON (map subcommand)
 pub(crate) fn is_json_mode(args: &DocsArgs) -> bool {
-    matches!(
-        args.command,
-        Some(DocsCommand::Map { .. }) | Some(DocsCommand::Generate { .. })
-    )
+    matches!(args.command, Some(DocsCommand::Map { .. }))
 }
 
 /// Markdown output mode (topic display, list)
@@ -110,7 +88,7 @@ pub fn run_markdown(args: DocsArgs) -> CmdResult<String> {
     Ok((resolved.content, 0))
 }
 
-/// JSON output mode (map, generate subcommands)
+/// JSON output mode (map subcommand)
 pub fn run(args: DocsArgs, _global: &super::GlobalArgs) -> CmdResult<DocsOutput> {
     match args.command {
         Some(DocsCommand::Map {
@@ -120,27 +98,12 @@ pub fn run(args: DocsArgs, _global: &super::GlobalArgs) -> CmdResult<DocsOutput>
             write,
             output_dir,
         }) => run_map(&component_id, source_dirs, include_private, write, &output_dir),
-        Some(DocsCommand::Generate {
-            spec,
-            json,
-            from_audit,
-            dry_run,
-        }) => {
-            if let Some(ref audit_source) = from_audit {
-                run_generate_from_audit(audit_source, dry_run)
-            } else {
-                let json_spec = json.as_deref().or(spec.as_deref());
-                run_generate(json_spec)
-            }
-        }
         None => Err(homeboy::Error::validation_invalid_argument(
             "command",
-            "JSON output requires map or generate subcommand. Use `homeboy docs <topic>` for topic display.",
+            "JSON output requires the map subcommand. Use `homeboy docs <topic>` for topic display.",
             None,
             Some(vec![
                 "homeboy docs map <component-id>".to_string(),
-                "homeboy docs generate --json '<spec>'".to_string(),
-                "homeboy docs generate --from-audit @audit.json".to_string(),
                 "homeboy docs commands/deploy".to_string(),
             ]),
         )),
@@ -171,7 +134,7 @@ fn run_map(
         let base = Path::new(&comp.local_path).join(output_dir);
         let files = codebase_map::render_map_to_markdown(&map, &base)?;
         return Ok((
-            DocsOutput::Generate {
+            DocsOutput::MapWrite {
                 files_created: files,
                 files_updated: vec![],
                 hints: vec![format!(
@@ -185,74 +148,4 @@ fn run_map(
     }
 
     Ok((DocsOutput::Map(map), 0))
-}
-
-fn run_generate(json_spec: Option<&str>) -> CmdResult<DocsOutput> {
-    let spec_str = json_spec.ok_or_else(|| {
-        homeboy::Error::validation_invalid_argument(
-            "json",
-            "Generate requires a JSON spec. Use --json or provide as positional argument.",
-            None,
-            Some(vec![
-                r#"homeboy docs generate --json '{"output_dir":"docs","files":[{"path":"test.md","title":"Test"}]}'"#.to_string(),
-            ]),
-        )
-    })?;
-
-    let json_content = super::merge_json_sources(Some(spec_str), &[])?;
-    let spec: homeboy::code_audit::docs::GenerateSpec = serde_json::from_value(json_content)
-        .map_err(|e| {
-            homeboy::Error::validation_invalid_json(
-                e,
-                Some("parse generate spec".to_string()),
-                None,
-            )
-        })?;
-
-    let result = homeboy::code_audit::docs::generate_from_spec(&spec)?;
-
-    Ok((
-        DocsOutput::Generate {
-            files_created: result.files_created,
-            files_updated: result.files_updated,
-            hints: result.hints,
-        },
-        0,
-    ))
-}
-
-fn run_generate_from_audit(source: &str, dry_run: bool) -> CmdResult<DocsOutput> {
-    // Read audit JSON from @file, stdin (-), file path, or inline string.
-    let effective_source = if !source.starts_with('{')
-        && !source.starts_with('[')
-        && source != "-"
-        && !source.starts_with('@')
-        && std::path::Path::new(source).exists()
-    {
-        format!("@{}", source)
-    } else {
-        source.to_string()
-    };
-    let json_content = super::merge_json_sources(Some(&effective_source), &[])?;
-
-    // Parse audit result — handle both envelope and raw formats
-    let audit: AuditResult = if let Some(data) = json_content.get("data") {
-        serde_json::from_value(data.clone())
-    } else {
-        serde_json::from_value(json_content)
-    }
-    .map_err(|e| {
-        homeboy::Error::validation_invalid_json(e, Some("parse audit result".to_string()), None)
-    })?;
-
-    let result = homeboy::code_audit::docs::generate_from_audit(&audit, dry_run)?;
-
-    Ok((
-        DocsOutput::Generate {
-            files_created: result.files_created,
-            files_updated: result.files_updated,
-            hints: result.hints,
-        },
-        0,
-    ))
 }

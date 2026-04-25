@@ -23,7 +23,6 @@ mod dead_code;
 mod dead_guard;
 mod deprecation_age;
 mod discovery;
-pub mod docs;
 pub mod docs_audit;
 mod duplication;
 mod field_patterns;
