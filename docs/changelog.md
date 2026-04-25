@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.93.0] - 2026-04-25
+
+### Added
+- rebase, cherry-pick, --force-with-lease + rig GitOps
+
 ## [0.92.0] - 2026-04-25
 
 ### Added
