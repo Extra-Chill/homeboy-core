@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn test_groups_contiguous_lines() {
+    fn test_extract_groups_contiguous_lines() {
         let fp = make_fp(
             "src/example.php",
             Language::Php,
@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phpdoc() {
+    fn test_extract_phpdoc() {
         let fp = make_fp(
             "src/example.php",
             Language::Php,
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_language_returns_empty() {
+    fn test_extract_unknown_language_returns_empty() {
         let fp = make_fp("README", Language::Unknown, "// not a comment block\n");
         assert!(extract(&fp).is_empty());
     }
