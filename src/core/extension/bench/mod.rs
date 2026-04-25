@@ -36,7 +36,10 @@ pub use parsing::{
     parse_bench_results_file, parse_bench_results_str, BenchMemory, BenchMetrics, BenchResults,
     BenchScenario,
 };
-pub use report::{from_main_workflow, from_main_workflow_with_rig, BenchCommandOutput};
+pub use report::{
+    aggregate_comparison, from_main_workflow, from_main_workflow_with_rig, BenchCommandOutput,
+    BenchComparisonDiff, BenchComparisonOutput, MetricDelta as ReportMetricDelta, RigBenchEntry,
+};
 pub use run::{run_main_bench_workflow, BenchRunWorkflowArgs, BenchRunWorkflowResult};
 
 pub fn resolve_bench_command(

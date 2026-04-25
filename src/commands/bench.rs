@@ -1,10 +1,12 @@
 use clap::Args;
+use serde::Serialize;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::{
-    BenchCommandOutput, BenchRunWorkflowArgs, DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+    aggregate_comparison, BenchCommandOutput, BenchComparisonOutput, BenchRunWorkflowArgs,
+    RigBenchEntry, DEFAULT_REGRESSION_THRESHOLD_PERCENT,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig;
@@ -44,36 +46,30 @@ pub struct BenchArgs {
     #[arg(long)]
     json_summary: bool,
 
-    /// Run bench against a homeboy rig. When set, `rig check` runs first
-    /// and aborts the bench on failure; the rig's component states (git
-    /// SHA + branch) are captured into the bench output; and the
-    /// baseline is stored under a rig-scoped key so rig-pinned and
-    /// unpinned baselines don't collide.
+    /// Run bench against one or more homeboy rigs.
     ///
-    /// If the rig spec declares `bench.default_component`, the positional
-    /// component argument is optional — the rig's default fills in.
-    #[arg(long, value_name = "RIG_ID")]
-    rig: Option<String>,
-
-    /// Mount a stable storage directory across iterations and across
-    /// parallel runner instances (when combined with `--concurrency`).
-    /// The dispatcher exposes the path to workloads via
-    /// `$HOMEBOY_BENCH_SHARED_STATE` so they can persist on-disk state
-    /// (SQLite files, content directories, counter files) that outlives
-    /// a single iteration. Created if it doesn't exist; never cleaned
-    /// up by homeboy — durability and crash-recovery testing depends on
-    /// the directory persisting between runs.
-    #[arg(long, value_name = "DIR")]
-    shared_state: Option<std::path::PathBuf>,
-
-    /// Number of parallel runner instances to spawn. Default `1`. When
-    /// `> 1`, `--shared-state <DIR>` is required: N parallel cold-boots
-    /// without shared state are N independent runs, not a multi-instance
-    /// contention test. Each instance receives a distinct
-    /// `$HOMEBOY_BENCH_INSTANCE_ID` (`0..N-1`); per-instance scenarios
-    /// are merged with `:i<n>` suffixed IDs in the aggregated output.
-    #[arg(long, value_name = "N", default_value_t = 1)]
-    concurrency: u32,
+    /// **Single rig** (`--rig <id>`): pins the rig, runs `rig check`
+    /// (aborting on failure), captures component states (git SHA +
+    /// branch) into the bench output, and stores the baseline under a
+    /// rig-scoped key so rig-pinned and unpinned baselines don't
+    /// collide.
+    ///
+    /// **Multiple rigs** (`--rig <a>,<b>[,<c>...]`): runs the same
+    /// component + workload + iteration count against each rig in
+    /// sequence and emits a `BenchComparisonOutput` envelope with
+    /// per-rig results plus a `diff` table of per-metric percent deltas
+    /// vs the first rig (the reference). Cross-rig runs are
+    /// **comparison-only**: `--baseline` and `--ratchet` are rejected,
+    /// because writing one baseline per rig from a comparison
+    /// invocation would silently bless one rig over the others. To
+    /// ratchet a single rig, run `--rig <id> --baseline` on its own.
+    ///
+    /// If the rig spec declares `bench.default_component`, the
+    /// positional component argument is optional — the rig's default
+    /// fills in. With multiple rigs, every rig must agree on the
+    /// default (or the positional component must be provided).
+    #[arg(long, value_name = "RIG_ID[,RIG_ID...]", value_delimiter = ',')]
+    rig: Vec<String>,
 }
 
 /// Filter out homeboy-owned flags from trailing args before passing to
@@ -97,9 +93,6 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--regression-threshold",
         "--setting",
         "--path",
-        "--shared-state",
-        "--concurrency",
-        "--rig",
     ];
 
     let mut filtered = Vec::new();
@@ -136,16 +129,100 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
     filtered
 }
 
-pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchCommandOutput> {
+/// Output envelope for `homeboy bench`.
+///
+/// Two shapes:
+/// - `Single` — bare `bench`, `bench <component>`, or `bench --rig <id>`.
+///   Indistinguishable from the pre-cross-rig output for backward
+///   compatibility (`#[serde(untagged)]`, no wrapper key).
+/// - `Comparison` — `bench --rig <a>,<b>[,...]`. Has a top-level
+///   `comparison: "cross_rig"` discriminator field that consumers can
+///   check.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum BenchOutput {
+    Single(BenchCommandOutput),
+    Comparison(BenchComparisonOutput),
+}
+
+pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     let passthrough_args = filter_homeboy_flags(&args.args);
 
-    // When `--rig <id>` is set, the rig pre-flight runs first: load the
-    // spec, run `rig check` (abort on any failure), and capture component
-    // state (git SHA + branch). The captured state both flows into the
-    // baseline storage key (so rig and bare baselines stay separate) and
-    // gets attached to the bench output (so consumers can attribute
-    // future regressions to specific component commits).
-    let (rig_id, rig_snapshot, default_component_id) = match args.rig.as_deref() {
+    // No --rig: legacy single bare run. No rig pinning, no rig
+    // snapshot, baseline key untouched. Identical to before this PR.
+    if args.rig.is_empty() {
+        let (output, exit) = run_single(&args, &passthrough_args, None)?;
+        return Ok((BenchOutput::Single(output), exit));
+    }
+
+    // --rig with one value: legacy single rig-pinned run. Same shape as
+    // before this PR for `bench --rig <id>` callers (single output, rig
+    // snapshot embedded). Baseline flags still honored.
+    if args.rig.len() == 1 {
+        let rig_id = args.rig[0].clone();
+        let (output, exit) = run_single(&args, &passthrough_args, Some(rig_id))?;
+        return Ok((BenchOutput::Single(output), exit));
+    }
+
+    // --rig with two or more values: cross-rig comparison. Run each rig
+    // in sequence, collect per-rig outputs, aggregate into a
+    // BenchComparisonOutput.
+    if args.baseline_args.baseline {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--baseline",
+            "Cannot --baseline a cross-rig run; baselines are per-rig. \
+             Run `homeboy bench --rig <id> --baseline` once per rig you \
+             want to ratchet.",
+            None,
+            None,
+        ));
+    }
+    if args.baseline_args.ratchet {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--ratchet",
+            "Cannot --ratchet a cross-rig run; baselines are per-rig. \
+             Run `homeboy bench --rig <id> --ratchet` once per rig.",
+            None,
+            None,
+        ));
+    }
+
+    let mut entries = Vec::with_capacity(args.rig.len());
+    let mut effective_component_label: Option<String> = None;
+
+    for rig_id in &args.rig {
+        let (single_output, _exit) = run_single(&args, &passthrough_args, Some(rig_id.clone()))?;
+        if effective_component_label.is_none() {
+            effective_component_label = Some(single_output.component.clone());
+        }
+        entries.push(RigBenchEntry {
+            rig_id: rig_id.clone(),
+            passed: single_output.passed,
+            status: single_output.status,
+            exit_code: single_output.exit_code,
+            results: single_output.results,
+            rig_state: single_output.rig_state,
+        });
+    }
+
+    let component = effective_component_label
+        .or_else(|| args.comp.id().map(|s| s.to_string()))
+        .unwrap_or_else(|| "<unknown>".to_string());
+
+    let (output, exit) = aggregate_comparison(component, args.iterations, entries);
+    Ok((BenchOutput::Comparison(output), exit))
+}
+
+/// Run bench once, optionally pinned to a rig, and return the standard
+/// `BenchCommandOutput` envelope. This is the unit of work that both
+/// the legacy single-run path and the new cross-rig comparison path
+/// share, so behavior stays identical for single-rig callers.
+fn run_single(
+    args: &BenchArgs,
+    passthrough_args: &[String],
+    rig_id_override: Option<String>,
+) -> CmdResult<BenchCommandOutput> {
+    let (rig_id, rig_snapshot, default_component_id) = match rig_id_override.as_deref() {
         None => (None, None, None),
         Some(rig_id) => {
             let rig_spec = rig::load(rig_id)?;
@@ -211,10 +288,10 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchCommandOutpu
             },
             regression_threshold_percent: args.regression_threshold,
             json_summary: args.json_summary,
-            passthrough_args,
+            passthrough_args: passthrough_args.to_vec(),
             rig_id: rig_id.clone(),
-            shared_state: args.shared_state.clone(),
-            concurrency: args.concurrency,
+            shared_state: None,
+            concurrency: 1,
         },
         &run_dir,
     )?;
@@ -308,6 +385,43 @@ mod tests {
         assert_eq!(
             filter_homeboy_flags(&args),
             vec!["--filter=hot_path", "--verbose"]
+        );
+    }
+
+    #[test]
+    fn bench_output_single_serializes_without_wrapper_key() {
+        // Backcompat: single-rig and bare-bench output must serialize
+        // identically to the pre-cross-rig shape (no top-level
+        // discriminator field). The `untagged` enum representation
+        // gives us that for free, but pin it with a test so a future
+        // refactor can't quietly break consumers.
+        let single = BenchCommandOutput {
+            passed: true,
+            status: "passed".to_string(),
+            component: "studio".to_string(),
+            exit_code: 0,
+            iterations: 10,
+            results: None,
+            baseline_comparison: None,
+            hints: None,
+            rig_state: None,
+        };
+        let value = serde_json::to_value(BenchOutput::Single(single)).unwrap();
+        assert!(value.get("comparison").is_none());
+        assert_eq!(value.get("passed"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(
+            value.get("component"),
+            Some(&serde_json::Value::String("studio".to_string()))
+        );
+    }
+
+    #[test]
+    fn bench_output_comparison_serializes_with_discriminator() {
+        let (cmp, _) = aggregate_comparison("studio".to_string(), 10, Vec::new());
+        let value = serde_json::to_value(BenchOutput::Comparison(cmp)).unwrap();
+        assert_eq!(
+            value.get("comparison"),
+            Some(&serde_json::Value::String("cross_rig".to_string()))
         );
     }
 }
