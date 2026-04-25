@@ -1,4 +1,4 @@
-//! Bench baseline — ratchet for scenario latency (p95) regressions.
+//! Bench baseline — ratchet for scenario metric regressions.
 //!
 //! Stored under `homeboy.json` → `baselines.bench` via the generic
 //! `engine::baseline` primitive, alongside `baselines.test` and
@@ -7,18 +7,16 @@
 //! tracks through the generic `new_items` / `resolved_fingerprints`
 //! lanes automatically.
 //!
-//! On top of that, bench adds a **threshold-based regression check**:
-//! a scenario regresses when its current `p95_ms` exceeds its baseline
-//! `p95_ms` by more than the configured percentage. Improvements (p95
-//! got faster) are celebrated and only written back to the baseline
-//! when `--ratchet` is set.
+//! On top of that, bench adds a **threshold-based regression check**.
+//! Runners may declare metric policies for arbitrary numeric metrics
+//! (lower-is-better error rates, higher-is-better throughput, etc.). If
+//! they do not, Homeboy preserves the original p95 latency behavior.
 //!
-//! Default threshold is 5%. p95 was chosen as the signal over mean
-//! because p95 is less sensitive than mean to one-off GC pauses but
-//! more sensitive than p99 to genuine regressions. Callers can pass
-//! any threshold per run via the command flag.
+//! Default p95 threshold is 5%. Callers can pass any threshold per run
+//! via the command flag, while runner-declared policies can carry their
+//! own percent or absolute tolerances.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -26,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::baseline::{self as generic, BaselineConfig};
 use crate::error::Result;
 
-use super::parsing::{BenchResults, BenchScenario};
+use super::parsing::{BenchMetricDirection, BenchMetricPolicy, BenchResults, BenchScenario};
 
 const BASELINE_KEY: &str = "bench";
 
@@ -56,19 +54,37 @@ pub const DEFAULT_REGRESSION_THRESHOLD_PERCENT: f64 = 5.0;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BenchScenarioSnapshot {
     pub id: String,
-    pub p95_ms: f64,
-    pub p50_ms: f64,
-    pub mean_ms: f64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metrics: BTreeMap<String, f64>,
+    /// Legacy fields from the first bench baseline shape. They remain
+    /// readable so existing baselines keep working, but new baselines store
+    /// metrics under the generic `metrics` map.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_ms: Option<f64>,
 }
 
 impl BenchScenarioSnapshot {
     pub(crate) fn from_scenario(scenario: &BenchScenario) -> Self {
         Self {
             id: scenario.id.clone(),
-            p95_ms: scenario.metrics.p95_ms,
-            p50_ms: scenario.metrics.p50_ms,
-            mean_ms: scenario.metrics.mean_ms,
+            metrics: scenario.metrics.values.clone(),
+            p95_ms: None,
+            p50_ms: None,
+            mean_ms: None,
         }
+    }
+
+    fn metric_value(&self, name: &str) -> Option<f64> {
+        self.metrics.get(name).copied().or_else(|| match name {
+            "p95_ms" => self.p95_ms,
+            "p50_ms" => self.p50_ms,
+            "mean_ms" => self.mean_ms,
+            _ => None,
+        })
     }
 }
 
@@ -77,10 +93,13 @@ impl generic::Fingerprintable for BenchScenarioSnapshot {
         self.id.clone()
     }
     fn description(&self) -> String {
-        format!(
-            "p95 {:.2}ms (p50 {:.2}ms, mean {:.2}ms)",
-            self.p95_ms, self.p50_ms, self.mean_ms
-        )
+        if let Some(p95) = self.metric_value("p95_ms") {
+            return format!("p95 {:.2}ms", p95);
+        }
+        if let Some((name, value)) = self.metrics.iter().next() {
+            return format!("{} {:.2}", name, value);
+        }
+        "no metrics".to_string()
     }
     fn context_label(&self) -> String {
         self.id.clone()
@@ -103,14 +122,48 @@ pub type BenchBaseline = generic::Baseline<BenchBaselineMetadata>;
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ScenarioDelta {
     pub id: String,
-    pub baseline_p95_ms: f64,
-    pub current_p95_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_p95_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_p95_ms: Option<f64>,
     /// Current minus baseline in ms. Negative = faster.
-    pub p95_delta_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_delta_ms: Option<f64>,
     /// (current - baseline) / baseline * 100. Negative = faster.
-    pub p95_delta_pct: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_delta_pct: Option<f64>,
+    pub metric_deltas: Vec<MetricDelta>,
     pub regression: bool,
     pub improvement: bool,
+}
+
+/// Per-metric delta vs baseline. Extensions can opt into comparing any
+/// numeric metric by declaring a policy in the bench results JSON.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MetricDelta {
+    pub name: String,
+    pub baseline_value: f64,
+    pub current_value: f64,
+    /// Current minus baseline. Positive is not always bad — consult
+    /// `direction` to know whether larger or smaller is better.
+    pub delta: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_pct: Option<f64>,
+    pub direction: BenchMetricDirection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regression_threshold_percent: Option<f64>,
+    pub regression_threshold_absolute: f64,
+    pub regression: bool,
+    pub improvement: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedMetricPolicy {
+    name: String,
+    direction: BenchMetricDirection,
+    regression_threshold_percent: Option<f64>,
+    regression_threshold_absolute: f64,
+    zero_baseline_is_neutral: bool,
 }
 
 /// Summary of comparing a current run against a stored baseline.
@@ -179,6 +232,7 @@ pub fn compare(
     let mut reasons = Vec::new();
     let mut has_improvements = false;
     let mut any_regression = false;
+    let metric_policies = resolve_metric_policies(current, threshold_percent);
 
     for scenario in &current.scenarios {
         let Some(prior) = baseline_by_id.get(scenario.id.as_str()) else {
@@ -186,40 +240,49 @@ pub fn compare(
             continue;
         };
 
-        let baseline_p95 = prior.p95_ms;
-        let current_p95 = scenario.metrics.p95_ms;
-        let delta_ms = current_p95 - baseline_p95;
+        let mut metric_deltas = Vec::new();
 
-        // Guard against zero-valued baselines — anything-over-zero is
-        // infinite % regression, which is noise for a micro-benchmark
-        // that legitimately measured 0ms. Treat them as no-delta.
-        let delta_pct = if baseline_p95 > 0.0 {
-            (delta_ms / baseline_p95) * 100.0
-        } else {
-            0.0
-        };
+        for policy in &metric_policies {
+            let Some(baseline_value) = prior.metric_value(&policy.name) else {
+                continue;
+            };
+            let Some(current_value) = scenario.metrics.get(&policy.name) else {
+                continue;
+            };
+            metric_deltas.push(compare_metric(policy, baseline_value, current_value));
+        }
 
-        let threshold_ratio = 1.0 + (threshold_percent / 100.0);
-        let regression = baseline_p95 > 0.0 && current_p95 > baseline_p95 * threshold_ratio;
-        let improvement = delta_ms < 0.0;
+        let regression = metric_deltas.iter().any(|d| d.regression);
+        let improvement = metric_deltas.iter().any(|d| d.improvement);
 
         if regression {
             any_regression = true;
-            reasons.push(format!(
-                "{}: p95 {:.2}ms → {:.2}ms ({:+.1}%)",
-                scenario.id, baseline_p95, current_p95, delta_pct
-            ));
+            for delta in metric_deltas.iter().filter(|d| d.regression) {
+                reasons.push(format_metric_reason(&scenario.id, delta));
+            }
         }
         if improvement {
             has_improvements = true;
         }
 
+        let baseline_p95 = prior.metric_value("p95_ms");
+        let current_p95 = scenario.metrics.get("p95_ms");
+        let p95_delta_ms = baseline_p95.zip(current_p95).map(|(b, c)| c - b);
+        let p95_delta_pct = baseline_p95.zip(current_p95).and_then(|(b, c)| {
+            if b > 0.0 {
+                Some(((c - b) / b) * 100.0)
+            } else {
+                None
+            }
+        });
+
         scenario_deltas.push(ScenarioDelta {
             id: scenario.id.clone(),
             baseline_p95_ms: baseline_p95,
             current_p95_ms: current_p95,
-            p95_delta_ms: delta_ms,
-            p95_delta_pct: delta_pct,
+            p95_delta_ms,
+            p95_delta_pct,
+            metric_deltas,
             regression,
             improvement,
         });
@@ -244,24 +307,124 @@ pub fn compare(
     }
 }
 
+fn resolve_metric_policies(
+    current: &BenchResults,
+    default_threshold_percent: f64,
+) -> Vec<ResolvedMetricPolicy> {
+    if current.metric_policies.is_empty() {
+        let has_p95 = current
+            .scenarios
+            .iter()
+            .any(|scenario| scenario.metrics.get("p95_ms").is_some());
+        if !has_p95 {
+            return Vec::new();
+        }
+        return vec![ResolvedMetricPolicy {
+            name: "p95_ms".to_string(),
+            direction: BenchMetricDirection::LowerIsBetter,
+            regression_threshold_percent: Some(default_threshold_percent),
+            regression_threshold_absolute: 0.0,
+            zero_baseline_is_neutral: true,
+        }];
+    }
+
+    current
+        .metric_policies
+        .iter()
+        .map(|(name, policy)| resolve_metric_policy(name, policy))
+        .collect()
+}
+
+fn resolve_metric_policy(name: &str, policy: &BenchMetricPolicy) -> ResolvedMetricPolicy {
+    ResolvedMetricPolicy {
+        name: name.to_string(),
+        direction: policy.direction,
+        regression_threshold_percent: policy.regression_threshold_percent,
+        regression_threshold_absolute: policy.regression_threshold_absolute.unwrap_or(0.0),
+        zero_baseline_is_neutral: false,
+    }
+}
+
+fn compare_metric(
+    policy: &ResolvedMetricPolicy,
+    baseline_value: f64,
+    current_value: f64,
+) -> MetricDelta {
+    let delta = current_value - baseline_value;
+    let bad_delta = match policy.direction {
+        BenchMetricDirection::LowerIsBetter => delta,
+        BenchMetricDirection::HigherIsBetter => -delta,
+    };
+    let delta_pct = if baseline_value != 0.0 {
+        Some((delta / baseline_value) * 100.0)
+    } else {
+        None
+    };
+    let bad_delta_pct = if baseline_value != 0.0 {
+        Some((bad_delta / baseline_value.abs()) * 100.0)
+    } else {
+        None
+    };
+
+    let worse = bad_delta > 0.0;
+    let regression = if policy.zero_baseline_is_neutral && baseline_value == 0.0 {
+        false
+    } else {
+        let exceeds_absolute = bad_delta > policy.regression_threshold_absolute;
+        let exceeds_percent = match policy.regression_threshold_percent {
+            Some(threshold) => bad_delta_pct.map(|pct| pct > threshold).unwrap_or(worse),
+            None => true,
+        };
+        worse && exceeds_absolute && exceeds_percent
+    };
+
+    MetricDelta {
+        name: policy.name.clone(),
+        baseline_value,
+        current_value,
+        delta,
+        delta_pct,
+        direction: policy.direction,
+        regression_threshold_percent: policy.regression_threshold_percent,
+        regression_threshold_absolute: policy.regression_threshold_absolute,
+        regression,
+        improvement: bad_delta < 0.0,
+    }
+}
+
+fn format_metric_reason(scenario_id: &str, delta: &MetricDelta) -> String {
+    let pct = delta
+        .delta_pct
+        .map(|p| format!(" ({:+.1}%)", p))
+        .unwrap_or_default();
+    format!(
+        "{}: {} {:.2} → {:.2}{}",
+        scenario_id, delta.name, delta.baseline_value, delta.current_value, pct
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::parsing::{BenchMetrics, BenchResults, BenchScenario};
     use super::*;
 
     fn scenario(id: &str, p95_ms: f64) -> BenchScenario {
+        let mut values = BTreeMap::new();
+        values.insert("mean_ms".to_string(), p95_ms * 0.9);
+        values.insert("p50_ms".to_string(), p95_ms * 0.85);
+        values.insert("p95_ms".to_string(), p95_ms);
+        values.insert("p99_ms".to_string(), p95_ms * 1.05);
+        values.insert("min_ms".to_string(), p95_ms * 0.7);
+        values.insert("max_ms".to_string(), p95_ms * 1.1);
+        metric_scenario(id, values)
+    }
+
+    fn metric_scenario(id: &str, metrics: BTreeMap<String, f64>) -> BenchScenario {
         BenchScenario {
             id: id.to_string(),
             file: None,
             iterations: 10,
-            metrics: BenchMetrics {
-                mean_ms: p95_ms * 0.9,
-                p50_ms: p95_ms * 0.85,
-                p95_ms,
-                p99_ms: p95_ms * 1.05,
-                min_ms: p95_ms * 0.7,
-                max_ms: p95_ms * 1.1,
-            },
+            metrics: BenchMetrics { values: metrics },
             memory: None,
         }
     }
@@ -271,6 +434,19 @@ mod tests {
             component_id: "demo".to_string(),
             iterations: 10,
             scenarios,
+            metric_policies: BTreeMap::new(),
+        }
+    }
+
+    fn results_with_policies(
+        scenarios: Vec<BenchScenario>,
+        metric_policies: BTreeMap<String, BenchMetricPolicy>,
+    ) -> BenchResults {
+        BenchResults {
+            component_id: "demo".to_string(),
+            iterations: 10,
+            scenarios,
+            metric_policies,
         }
     }
 
@@ -285,7 +461,10 @@ mod tests {
         assert_eq!(loaded.metadata.iterations, 10);
         assert_eq!(loaded.metadata.scenarios.len(), 2);
         assert_eq!(loaded.metadata.scenarios[0].id, "a");
-        assert_eq!(loaded.metadata.scenarios[0].p95_ms, 100.0);
+        assert_eq!(
+            loaded.metadata.scenarios[0].metric_value("p95_ms"),
+            Some(100.0)
+        );
     }
 
     #[test]
@@ -301,7 +480,7 @@ mod tests {
         assert!(!comparison.regression);
         assert!(!comparison.has_improvements);
         assert_eq!(comparison.scenarios.len(), 1);
-        assert_eq!(comparison.scenarios[0].p95_delta_ms, 0.0);
+        assert_eq!(comparison.scenarios[0].p95_delta_ms, Some(0.0));
     }
 
     #[test]
@@ -343,8 +522,9 @@ mod tests {
         assert!(comparison.scenarios[0].regression);
         assert_eq!(comparison.reasons.len(), 1);
         assert!(comparison.reasons[0].contains("a:"));
-        assert!(comparison.reasons[0].contains("100.00ms"));
-        assert!(comparison.reasons[0].contains("106.00ms"));
+        assert!(comparison.reasons[0].contains("p95_ms"));
+        assert!(comparison.reasons[0].contains("100.00"));
+        assert!(comparison.reasons[0].contains("106.00"));
     }
 
     #[test]
@@ -365,7 +545,7 @@ mod tests {
         assert!(!comparison.regression);
         assert!(comparison.has_improvements);
         assert!(comparison.scenarios[0].improvement);
-        assert_eq!(comparison.scenarios[0].p95_delta_ms, -20.0);
+        assert_eq!(comparison.scenarios[0].p95_delta_ms, Some(-20.0));
     }
 
     #[test]
@@ -437,7 +617,105 @@ mod tests {
         let current = results(vec![scenario("a", 5.0)]);
         let comparison = compare(&current, &baseline, 5.0);
         assert!(!comparison.regression);
-        assert_eq!(comparison.scenarios[0].p95_delta_pct, 0.0);
+        assert_eq!(comparison.scenarios[0].p95_delta_pct, None);
+    }
+
+    #[test]
+    fn lower_is_better_custom_metric_regresses_on_absolute_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut baseline_metrics = BTreeMap::new();
+        baseline_metrics.insert("error_rate".to_string(), 0.0);
+        let baseline_run = results(vec![metric_scenario("http", baseline_metrics)]);
+        save_baseline(dir.path(), "demo", &baseline_run, None).unwrap();
+        let baseline = load_baseline(dir.path(), None).unwrap();
+
+        let mut current_metrics = BTreeMap::new();
+        current_metrics.insert("error_rate".to_string(), 0.02);
+        let mut policies = BTreeMap::new();
+        policies.insert(
+            "error_rate".to_string(),
+            BenchMetricPolicy {
+                direction: BenchMetricDirection::LowerIsBetter,
+                regression_threshold_percent: None,
+                regression_threshold_absolute: Some(0.01),
+            },
+        );
+
+        let current =
+            results_with_policies(vec![metric_scenario("http", current_metrics)], policies);
+        let comparison = compare(&current, &baseline, 5.0);
+
+        assert!(comparison.regression);
+        assert_eq!(comparison.scenarios[0].metric_deltas[0].name, "error_rate");
+        assert!(comparison.scenarios[0].metric_deltas[0].regression);
+        assert!(comparison.reasons[0].contains("error_rate"));
+    }
+
+    #[test]
+    fn higher_is_better_custom_metric_regresses_on_percent_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut baseline_metrics = BTreeMap::new();
+        baseline_metrics.insert("requests_per_second".to_string(), 100.0);
+        let baseline_run = results(vec![metric_scenario("throughput", baseline_metrics)]);
+        save_baseline(dir.path(), "demo", &baseline_run, None).unwrap();
+        let baseline = load_baseline(dir.path(), None).unwrap();
+
+        let mut current_metrics = BTreeMap::new();
+        current_metrics.insert("requests_per_second".to_string(), 90.0);
+        let mut policies = BTreeMap::new();
+        policies.insert(
+            "requests_per_second".to_string(),
+            BenchMetricPolicy {
+                direction: BenchMetricDirection::HigherIsBetter,
+                regression_threshold_percent: Some(5.0),
+                regression_threshold_absolute: None,
+            },
+        );
+
+        let current = results_with_policies(
+            vec![metric_scenario("throughput", current_metrics)],
+            policies,
+        );
+        let comparison = compare(&current, &baseline, 5.0);
+
+        assert!(comparison.regression);
+        assert_eq!(comparison.scenarios[0].metric_deltas[0].delta, -10.0);
+        assert!(comparison.scenarios[0].metric_deltas[0].regression);
+    }
+
+    #[test]
+    fn custom_metric_policies_disable_implicit_p95_comparison() {
+        let dir = tempfile::tempdir().unwrap();
+        save_baseline(
+            dir.path(),
+            "demo",
+            &results(vec![scenario("mixed", 100.0)]),
+            None,
+        )
+        .unwrap();
+        let baseline = load_baseline(dir.path(), None).unwrap();
+
+        let mut current = scenario("mixed", 200.0);
+        current.metrics.values.insert("error_rate".to_string(), 0.0);
+        let mut policies = BTreeMap::new();
+        policies.insert(
+            "error_rate".to_string(),
+            BenchMetricPolicy {
+                direction: BenchMetricDirection::LowerIsBetter,
+                regression_threshold_percent: None,
+                regression_threshold_absolute: Some(0.0),
+            },
+        );
+
+        let comparison = compare(
+            &results_with_policies(vec![current], policies),
+            &baseline,
+            5.0,
+        );
+
+        assert!(!comparison.regression);
+        assert_eq!(comparison.scenarios[0].metric_deltas.len(), 0);
+        assert_eq!(comparison.scenarios[0].p95_delta_ms, Some(100.0));
     }
 
     #[test]
@@ -467,11 +745,17 @@ mod tests {
         .unwrap();
 
         let unpinned = load_baseline(dir.path(), None).expect("unpinned baseline present");
-        assert_eq!(unpinned.metadata.scenarios[0].p95_ms, 100.0);
+        assert_eq!(
+            unpinned.metadata.scenarios[0].metric_value("p95_ms"),
+            Some(100.0)
+        );
 
         let pinned = load_baseline(dir.path(), Some("studio-playground-dev"))
             .expect("rig-pinned baseline present");
-        assert_eq!(pinned.metadata.scenarios[0].p95_ms, 200.0);
+        assert_eq!(
+            pinned.metadata.scenarios[0].metric_value("p95_ms"),
+            Some(200.0)
+        );
 
         // Different rig identifier returns None — no cross-rig leakage.
         assert!(load_baseline(dir.path(), Some("other-rig")).is_none());
