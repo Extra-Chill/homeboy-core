@@ -4,6 +4,47 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.90.0] - 2026-04-25
+
+### Added
+- gate autofix by finding confidence
+- add --rig flag for rig-pinned benchmarking (closes #1466)
+- add verification phase contract
+- introduce rig primitive for local dev environments (Phase 1, closes #1461)
+- add Bench capability — sibling of Lint/Test/Build with p95 regression ratchet
+- --footer / --footer-file on sectioned pr comment (closes #1470)
+- --path flag on git issue/pr subcommands for unregistered checkouts
+- sectioned PR comment primitive (closes #1348)
+- shared-scaffolding detector (closes #1272)
+- dead-guard detector (closes #1270)
+- deprecation-age detector (closes #1271)
+- GitHub issue and PR primitives on `homeboy git`
+- repeated-literal-shape detector (closes #1274)
+- add component.not_attached error for registered-but-unattached components
+- auto-create GitHub Release after tag push
+- post-write verify gate for automated refactor (#1167)
+- add --fetch flag for upstream drift detection
+
+### Changed
+- chmod +x topology script in test_run_topology_script
+- pass expected-commands to stop orphan-reconciliation churn
+- complete changelog automation transition
+- collapse pipeline/executor/resolver into straight-line script
+- extract shared FileStateEntry primitive for both undo paths
+
+### Fixed
+- refresh baseline on top of #1490 (post-#1491 rebase)
+- refresh baseline after #1487, #1480, #1468, #1385 merges
+- split inline test methods from production methods in fingerprint (closes #1471)
+- resolve three post-rig findings + refresh baseline, format main
+- collapse backslash escapes in replacement templates
+- invoke extension scripts directly to respect shebangs
+- release pipeline errors that teach — explicit versions, recovery hints
+- treat non-git install dirs as clean on update
+- restore test_script() and test_mapping() accessors
+- auto-init missing changelog on first release
+- preserve nested HashMap lookup keys in merge_config normalization
+
 ## [0.89.1] - 2026-04-21
 
 ### Fixed
