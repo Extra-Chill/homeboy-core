@@ -17,12 +17,12 @@
 //! versions) are out of scope — those are not present in `ReviewCommandOutput`.
 //! See follow-up: `feat(review): --banner key=value for action-level signals`.
 
-use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use homeboy::code_audit::AuditCommandOutput;
 use homeboy::extension::lint::LintCommandOutput;
 use homeboy::extension::test::TestCommandOutput;
+use homeboy::top_n::top_n_by;
 
 use super::{ReviewCommandOutput, ReviewStage};
 
@@ -146,35 +146,23 @@ fn render_test_stage(out: &mut String, stage: &ReviewStage<TestCommandOutput>) {
 /// with counts. Empty bodies mean no findings; we say nothing.
 fn render_audit_body(out: &mut String, output: &AuditCommandOutput) {
     let findings = audit_findings(output);
-    if findings.is_empty() {
+    let buckets = top_n_by(findings, |label| label.clone(), TOP_N);
+    if buckets.is_empty() {
         return;
     }
-    let total = findings.len();
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for label in findings {
-        *counts.entry(label).or_insert(0) += 1;
-    }
-    // Sort by count desc, then alpha for stability.
-    let mut ordered: Vec<(String, usize)> = counts.into_iter().collect();
-    ordered.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-    let shown = ordered.len().min(TOP_N);
-    for (label, count) in ordered.iter().take(shown) {
+    for (label, count) in &buckets.items {
         let _ = writeln!(out, "- **{}** — {} finding(s)", label, count);
     }
-    if ordered.len() > TOP_N {
+    if buckets.remainder > 0 {
         let _ = writeln!(
             out,
             "- _… {} more categor{}_",
-            ordered.len() - TOP_N,
-            if ordered.len() - TOP_N == 1 {
-                "y"
-            } else {
-                "ies"
-            }
+            buckets.remainder,
+            if buckets.remainder == 1 { "y" } else { "ies" }
         );
     }
-    let _ = writeln!(out, "- _Total: {} finding(s)_", total);
+    let _ = writeln!(out, "- _Total: {} finding(s)_", buckets.total);
 }
 
 /// Pull labels for grouping audit findings. We use the convention name when
@@ -207,22 +195,15 @@ fn render_lint_body(out: &mut String, output: &LintCommandOutput) {
         Some(f) if !f.is_empty() => f,
         _ => return,
     };
-    let total = findings.len();
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for f in findings {
-        *counts.entry(f.category.clone()).or_insert(0) += 1;
-    }
-    let mut ordered: Vec<(String, usize)> = counts.into_iter().collect();
-    ordered.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-    let shown = ordered.len().min(TOP_N);
-    for (code, count) in ordered.iter().take(shown) {
+    let buckets = top_n_by(findings, |f| f.category.clone(), TOP_N);
+    for (code, count) in &buckets.items {
         let _ = writeln!(out, "- `{}` — {} finding(s)", code, count);
     }
-    if ordered.len() > TOP_N {
-        let _ = writeln!(out, "- _… {} more sniff(s)_", ordered.len() - TOP_N);
+    if buckets.remainder > 0 {
+        let _ = writeln!(out, "- _… {} more sniff(s)_", buckets.remainder);
     }
-    let _ = writeln!(out, "- _Total: {} finding(s)_", total);
+    let _ = writeln!(out, "- _Total: {} finding(s)_", buckets.total);
 }
 
 /// Render the test stage body — failure count + pass-summary line. Per-test
