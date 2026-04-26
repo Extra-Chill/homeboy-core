@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.101.0] - 2026-04-26
+
+### Added
+- add bench-audit-self workload for homeboy bench dogfood
+
 ## [0.100.0] - 2026-04-26
 
 ### Added
