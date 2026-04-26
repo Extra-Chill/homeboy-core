@@ -292,6 +292,7 @@ pub mod file;
 pub mod fleet;
 pub mod git;
 pub mod init;
+pub mod issues;
 pub mod lint;
 pub mod logs;
 pub mod project;
@@ -362,6 +363,7 @@ pub(crate) fn run_json(
         crate::Commands::Docs(args) => dispatch!(args, global, docs),
         crate::Commands::Changelog(args) => dispatch!(args, global, changelog),
         crate::Commands::Git(args) => dispatch!(args, global, git),
+        crate::Commands::Issues(args) => dispatch!(args, global, issues),
         crate::Commands::Version(args) => dispatch!(args, global, version),
         crate::Commands::Build(args) => dispatch!(args, global, build),
         crate::Commands::Validate(args) => dispatch!(args, global, validate),

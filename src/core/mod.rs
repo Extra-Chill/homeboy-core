@@ -11,6 +11,7 @@ pub mod error;
 pub mod extension;
 pub mod fleet;
 pub mod git;
+pub mod issues;
 pub mod output;
 pub mod project;
 pub mod refactor;
