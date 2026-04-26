@@ -91,6 +91,7 @@ mod patch {
             shared_paths: Vec::new(),
             pipeline,
             bench: None,
+            bench_workloads: Default::default(),
         }
     }
 

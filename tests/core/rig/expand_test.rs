@@ -17,6 +17,7 @@ fn rig_with(id: &str, components: HashMap<String, ComponentSpec>) -> RigSpec {
         shared_paths: Vec::new(),
         pipeline: Default::default(),
         bench: None,
+        bench_workloads: Default::default(),
     }
 }
 

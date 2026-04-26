@@ -47,6 +47,15 @@ pub struct RigSpec {
     /// populated when the rig is meant to drive a benchmark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bench: Option<BenchSpec>,
+
+    /// Out-of-tree bench workloads keyed by extension id.
+    ///
+    /// These are private, rig-owned workloads that should run alongside the
+    /// component's in-tree bench discovery when `homeboy bench --rig <id>` is
+    /// invoked. Values support the same `~`, `${env.NAME}`, and
+    /// `${components.<id>.path}` expansion as other rig path fields.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub bench_workloads: HashMap<String, Vec<String>>,
 }
 
 /// Bench composition for a rig. Currently minimal — pins which component

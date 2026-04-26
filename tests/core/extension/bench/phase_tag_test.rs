@@ -48,6 +48,7 @@ fn scenario(id: &str, metrics: &[(&str, f64)]) -> BenchScenario {
     BenchScenario {
         id: id.to_string(),
         file: None,
+        source: None,
         iterations: 10,
         metrics: BenchMetrics { values },
         memory: None,
@@ -147,6 +148,34 @@ fn policy_without_phase_field_parses_as_none() {
         "missing phase field should deserialize as None"
     );
     assert_eq!(pol.direction, BenchMetricDirection::LowerIsBetter);
+}
+
+#[test]
+fn scenario_source_round_trips_for_rig_workload_origin() {
+    let raw = r#"{
+        "component_id": "demo",
+        "iterations": 1,
+        "scenarios": [
+            {
+                "id": "cold-boot",
+                "file": "/private/benches/cold-boot.php",
+                "source": "rig",
+                "iterations": 1,
+                "metrics": { "p95_ms": 100.0 }
+            }
+        ]
+    }"#;
+
+    let parsed = parse_bench_results_str(raw).unwrap();
+    let scenario = parsed.scenarios.first().expect("scenario");
+    assert_eq!(scenario.source.as_deref(), Some("rig"));
+
+    let serialized = serde_json::to_string(&parsed).unwrap();
+    assert!(
+        serialized.contains("\"source\":\"rig\""),
+        "scenario source should serialize for report consumers: {}",
+        serialized
+    );
 }
 
 // 3. None phase is omitted entirely from the wire form (back-compat

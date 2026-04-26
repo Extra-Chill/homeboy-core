@@ -56,6 +56,10 @@ pub struct BenchScenario {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// Scenario origin. Dispatchers use `in_tree` for component-owned
+    /// workloads and `rig` for out-of-tree workloads supplied by a rig spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub iterations: u64,
     pub metrics: BenchMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]

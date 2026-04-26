@@ -301,6 +301,7 @@ mod tests {
         BenchScenario {
             id: id.to_string(),
             file: None,
+            source: None,
             iterations: 10,
             metrics: BenchMetrics { values: metrics },
             memory: None,

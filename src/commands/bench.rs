@@ -1,5 +1,6 @@
 use clap::Args;
 use serde::Serialize;
+use std::path::PathBuf;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
@@ -9,7 +10,7 @@ use homeboy::extension::bench::{
     RigBenchEntry, DEFAULT_REGRESSION_THRESHOLD_PERCENT,
 };
 use homeboy::extension::ExtensionCapability;
-use homeboy::rig;
+use homeboy::rig::{self, RigSpec};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -292,8 +293,8 @@ fn run_single(
     passthrough_args: &[String],
     rig_id_override: Option<String>,
 ) -> CmdResult<BenchCommandOutput> {
-    let (rig_id, rig_snapshot, default_component_id) = match rig_id_override.as_deref() {
-        None => (None, None, None),
+    let (rig_id, rig_snapshot, default_component_id, rig_spec) = match rig_id_override.as_deref() {
+        None => (None, None, None, None),
         Some(rig_id) => {
             let rig_spec = rig::load(rig_id)?;
             let check_report = rig::run_check(&rig_spec)?;
@@ -309,7 +310,12 @@ fn run_single(
                 .bench
                 .as_ref()
                 .and_then(|b| b.default_component.clone());
-            (Some(rig_spec.id.clone()), Some(snapshot), default)
+            (
+                Some(rig_spec.id.clone()),
+                Some(snapshot),
+                default,
+                Some(rig_spec),
+            )
         }
     };
 
@@ -330,6 +336,15 @@ fn run_single(
     ))?;
 
     let run_dir = RunDir::create()?;
+
+    let extra_workloads = rig_spec
+        .as_ref()
+        .and_then(|spec| {
+            ctx.extension_id
+                .as_deref()
+                .map(|id| bench_workloads_for_extension(spec, id))
+        })
+        .unwrap_or_default();
 
     let workflow = extension_bench::run_main_bench_workflow(
         &ctx.component,
@@ -374,6 +389,7 @@ fn run_single(
             rig_id: rig_id.clone(),
             shared_state: None,
             concurrency: 1,
+            extra_workloads,
         },
         &run_dir,
     )?;
@@ -382,6 +398,16 @@ fn run_single(
         workflow,
         rig_snapshot,
     ))
+}
+
+fn bench_workloads_for_extension(rig_spec: &RigSpec, extension_id: &str) -> Vec<PathBuf> {
+    rig_spec
+        .bench_workloads
+        .get(extension_id)
+        .into_iter()
+        .flat_map(|paths| paths.iter())
+        .map(|path| PathBuf::from(rig::expand::expand_vars(rig_spec, path)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -393,6 +419,38 @@ mod tests {
         let args = vec!["--ratchet".to_string(), "--filter=Scenario".to_string()];
         let result = filter_homeboy_flags(&args);
         assert_eq!(result, vec!["--filter=Scenario"]);
+    }
+
+    #[test]
+    fn bench_workloads_for_extension_filters_and_expands_paths() {
+        std::env::set_var("HOMEBOY_TEST_BENCH_ROOT", "/tmp/private-benches");
+        let rig_spec: RigSpec = serde_json::from_str(
+            r#"{
+                "id": "studio",
+                "components": {
+                    "playground": { "path": "/tmp/playground" }
+                },
+                "bench_workloads": {
+                    "wordpress": [
+                        "${env.HOMEBOY_TEST_BENCH_ROOT}/cold-boot.php",
+                        "${components.playground.path}/fixtures/wc-loaded.php"
+                    ],
+                    "nodejs": ["/tmp/node-only.bench.ts"]
+                }
+            }"#,
+        )
+        .expect("parse rig spec");
+
+        let workloads = bench_workloads_for_extension(&rig_spec, "wordpress");
+
+        assert_eq!(
+            workloads,
+            vec![
+                PathBuf::from("/tmp/private-benches/cold-boot.php"),
+                PathBuf::from("/tmp/playground/fixtures/wc-loaded.php"),
+            ]
+        );
+        assert!(bench_workloads_for_extension(&rig_spec, "rust").is_empty());
     }
 
     #[test]
