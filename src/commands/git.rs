@@ -3,9 +3,9 @@ use serde::Serialize;
 
 use homeboy::git::{
     self, CherryPickOptions, GitOutput, GithubFindOutput, GithubIssueOutput, GithubPrOutput,
-    IssueCommentOptions, IssueCreateOptions, IssueFindOptions, IssueState, PrCommentMode,
-    PrCommentOptions, PrCreateOptions, PrEditOptions, PrFindOptions, PrState, PushOptions,
-    RebaseOptions, StackOptions, StackOutput,
+    IssueCloseOptions, IssueCloseReason, IssueCommentOptions, IssueCreateOptions, IssueEditOptions,
+    IssueFindOptions, IssueState, PrCommentMode, PrCommentOptions, PrCreateOptions, PrEditOptions,
+    PrFindOptions, PrState, PushOptions, RebaseOptions, StackOptions, StackOutput,
 };
 use homeboy::BulkResult;
 
@@ -332,6 +332,67 @@ enum IssueCommand {
         /// Max results (default 30)
         #[arg(long, default_value_t = 30)]
         limit: usize,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
+    },
+    /// Close an existing issue with a typed reason
+    Close {
+        /// Component ID
+        component_id: String,
+
+        /// Issue number
+        #[arg(short, long)]
+        number: u64,
+
+        /// Close reason: completed (default) or not-planned. Use
+        /// `not-planned` to suppress re-filing by `homeboy issues reconcile`
+        /// — the GitHub-native signal for "we have decided not to fix this."
+        #[arg(short, long, default_value = "completed")]
+        reason: String,
+
+        /// Optional closing comment (markdown). Posted before the state
+        /// transition. Prefer --comment-file for long content.
+        #[arg(short, long, conflicts_with = "comment_file")]
+        comment: Option<String>,
+
+        /// Read closing comment from a file ("-" for stdin)
+        #[arg(long, value_name = "PATH")]
+        comment_file: Option<String>,
+
+        /// Workspace path to discover the component from a portable homeboy.json
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
+    },
+    /// Edit an existing issue's title, body, or labels
+    Edit {
+        /// Component ID
+        component_id: String,
+
+        /// Issue number
+        #[arg(short, long)]
+        number: u64,
+
+        /// New title (optional)
+        #[arg(short, long)]
+        title: Option<String>,
+
+        /// New body (markdown). Prefer --body-file for long content.
+        #[arg(short, long, conflicts_with = "body_file")]
+        body: Option<String>,
+
+        /// Read body from a file ("-" for stdin)
+        #[arg(long, value_name = "PATH")]
+        body_file: Option<String>,
+
+        /// Add labels (repeatable)
+        #[arg(long = "add-label", value_name = "LABEL")]
+        add_labels: Vec<String>,
+
+        /// Remove labels (repeatable)
+        #[arg(long = "remove-label", value_name = "LABEL")]
+        remove_labels: Vec<String>,
 
         /// Workspace path to discover the component from a portable homeboy.json
         #[arg(long, value_name = "PATH")]
@@ -830,6 +891,51 @@ fn run_issue(args: IssueArgs) -> CmdResult<GitCommandOutput> {
             )?;
             Ok((GitCommandOutput::Find(output), 0))
         }
+        IssueCommand::Close {
+            component_id,
+            number,
+            reason,
+            comment,
+            comment_file,
+            path,
+        } => {
+            let reason = parse_issue_close_reason(&reason)?;
+            let comment = resolve_body(comment, comment_file)?;
+            let output = git::issue_close(
+                Some(&component_id),
+                IssueCloseOptions {
+                    number,
+                    reason,
+                    comment,
+                    path,
+                },
+            )?;
+            Ok((GitCommandOutput::Issue(output), 0))
+        }
+        IssueCommand::Edit {
+            component_id,
+            number,
+            title,
+            body,
+            body_file,
+            add_labels,
+            remove_labels,
+            path,
+        } => {
+            let body = resolve_body(body, body_file)?;
+            let output = git::issue_edit(
+                Some(&component_id),
+                IssueEditOptions {
+                    number,
+                    title,
+                    body,
+                    add_labels,
+                    remove_labels,
+                    path,
+                },
+            )?;
+            Ok((GitCommandOutput::Issue(output), 0))
+        }
     }
 }
 
@@ -1012,6 +1118,21 @@ fn parse_issue_state(s: &str) -> homeboy::Result<IssueState> {
             format!("Unknown issue state '{}'", other),
             None,
             Some(vec!["Use one of: open, closed, all".into()]),
+        )),
+    }
+}
+
+fn parse_issue_close_reason(s: &str) -> homeboy::Result<IssueCloseReason> {
+    // Accept both kebab-case (CLI ergonomic) and snake_case (matches GitHub
+    // GraphQL state_reason values for symmetry with `--json stateReason`).
+    match s {
+        "completed" => Ok(IssueCloseReason::Completed),
+        "not-planned" | "not_planned" => Ok(IssueCloseReason::NotPlanned),
+        other => Err(homeboy::Error::validation_invalid_argument(
+            "reason",
+            format!("Unknown close reason '{}'", other),
+            None,
+            Some(vec!["Use one of: completed, not-planned".into()]),
         )),
     }
 }

@@ -99,6 +99,17 @@ pub struct GithubFindItem {
     pub title: String,
     pub url: String,
     pub state: String,
+    /// GitHub `stateReason` (issues only). One of `completed`, `not_planned`,
+    /// `reopened`, or `null`. Empty string when absent or for PRs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub state_reason: String,
+    /// GitHub `closedAt` ISO-8601 timestamp (issues only). Empty when absent
+    /// (open issues) or for PRs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub closed_at: String,
+    /// Labels attached to the issue/PR. Used for label-based suppression.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +279,72 @@ pub enum PrCommentMode {
     },
 }
 
-/// Parameters for commenting on an existing issue.
+/// Parameters for closing an existing issue with a reason.
+///
+/// `reason` defaults to `Completed` (the GitHub-native signal for "the
+/// underlying problem was resolved"). `NotPlanned` is preserved across CI
+/// runs by `homeboy issues reconcile` as the "do not re-file" signal.
+#[derive(Debug, Clone, Default)]
+pub struct IssueCloseOptions {
+    pub number: u64,
+    /// Close-reason. `Completed` (default) is the GitHub-native signal for
+    /// "the underlying problem was resolved." `NotPlanned` is the GitHub-native
+    /// signal for "we've decided not to fix this" — used by `homeboy issues
+    /// reconcile` to suppress re-filing on subsequent runs.
+    pub reason: IssueCloseReason,
+    /// Optional closing comment posted before the state transition. Useful
+    /// for explaining why the issue is being closed (e.g. "All findings have
+    /// been resolved" / "Closed as duplicate of #N" / "Closed as upstream bug").
+    pub comment: Option<String>,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum IssueCloseReason {
+    #[default]
+    Completed,
+    NotPlanned,
+}
+
+impl IssueCloseReason {
+    /// Render for the `gh issue close --reason` flag. GitHub's CLI uses the
+    /// space-form (`"not planned"`) but the underlying GraphQL `state_reason`
+    /// uses the underscore form (`not_planned`). `IssueState::Reason` parsing
+    /// reads the underscore form from `gh ... --json stateReason`.
+    fn as_gh_flag(self) -> &'static str {
+        match self {
+            IssueCloseReason::Completed => "completed",
+            IssueCloseReason::NotPlanned => "not planned",
+        }
+    }
+
+    /// Parse from the GraphQL `state_reason` field on a closed issue.
+    /// Returns `None` when the value is unknown or absent (open issues).
+    pub fn from_graphql(s: &str) -> Option<Self> {
+        match s {
+            "completed" | "COMPLETED" => Some(IssueCloseReason::Completed),
+            "not_planned" | "NOT_PLANNED" => Some(IssueCloseReason::NotPlanned),
+            _ => None,
+        }
+    }
+}
+
+/// Parameters for editing an existing issue.
+#[derive(Debug, Clone, Default)]
+pub struct IssueEditOptions {
+    pub number: u64,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    /// Labels to add. Mirrors `gh issue edit --add-label` (repeatable).
+    pub add_labels: Vec<String>,
+    /// Labels to remove. Mirrors `gh issue edit --remove-label`.
+    pub remove_labels: Vec<String>,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
+}
+
+/// Parameters for posting a comment on an existing issue.
 #[derive(Debug, Clone, Default)]
 pub struct IssueCommentOptions {
     pub number: u64,
@@ -364,11 +440,120 @@ pub fn issue_comment(
     })
 }
 
+/// Close an existing issue with a typed reason.
+///
+/// `gh issue close --reason` accepts `completed | not planned | duplicate`.
+/// We expose the two semantically-meaningful values via [`IssueCloseReason`];
+/// `duplicate` is a special-case of "not planned" and not modeled here. Use
+/// [`IssueCloseOptions::comment`] to leave a closing comment in the same
+/// invocation (mirrors `gh issue close --comment`).
+pub fn issue_close(
+    component_id: Option<&str>,
+    options: IssueCloseOptions,
+) -> Result<GithubIssueOutput> {
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
+    ensure_gh_ready()?;
+
+    let repo_flag = format!("{}/{}", repo.owner, repo.repo);
+    let mut args: Vec<String> = vec![
+        "issue".into(),
+        "close".into(),
+        options.number.to_string(),
+        "-R".into(),
+        repo_flag,
+        "--reason".into(),
+        options.reason.as_gh_flag().to_string(),
+    ];
+    if let Some(comment) = &options.comment {
+        args.push("--comment".into());
+        args.push(comment.clone());
+    }
+
+    let _ = run_gh(&args)?;
+    Ok(GithubIssueOutput {
+        component_id: id,
+        owner: repo.owner,
+        repo: repo.repo,
+        action: "issue.close".to_string(),
+        success: true,
+        number: Some(options.number),
+        url: None,
+        title: None,
+        state: Some("closed".to_string()),
+    })
+}
+
+/// Edit an existing issue's title, body, or labels.
+///
+/// At least one of `title`, `body`, `add_labels`, or `remove_labels` must be
+/// provided. Mirrors `gh issue edit <n> [--title ...] [--body ...]
+/// [--add-label ...] [--remove-label ...]`. Used by `homeboy issues reconcile`
+/// to refresh the body of existing issues (open OR closed) so the latest
+/// finding count and run link stay visible without duplicating the issue.
+pub fn issue_edit(
+    component_id: Option<&str>,
+    options: IssueEditOptions,
+) -> Result<GithubIssueOutput> {
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
+    ensure_gh_ready()?;
+
+    if options.title.is_none()
+        && options.body.is_none()
+        && options.add_labels.is_empty()
+        && options.remove_labels.is_empty()
+    {
+        return Err(Error::validation_invalid_argument(
+            "title/body/labels",
+            "At least one of --title, --body, --add-label, or --remove-label must be provided",
+            None,
+            None,
+        ));
+    }
+
+    let repo_flag = format!("{}/{}", repo.owner, repo.repo);
+    let mut args: Vec<String> = vec![
+        "issue".into(),
+        "edit".into(),
+        options.number.to_string(),
+        "-R".into(),
+        repo_flag,
+    ];
+    if let Some(title) = &options.title {
+        args.push("--title".into());
+        args.push(title.clone());
+    }
+    if let Some(body) = &options.body {
+        args.push("--body".into());
+        args.push(body.clone());
+    }
+    for label in &options.add_labels {
+        args.push("--add-label".into());
+        args.push(label.clone());
+    }
+    for label in &options.remove_labels {
+        args.push("--remove-label".into());
+        args.push(label.clone());
+    }
+
+    let output = run_gh(&args)?;
+    Ok(GithubIssueOutput {
+        component_id: id,
+        owner: repo.owner,
+        repo: repo.repo,
+        action: "issue.edit".to_string(),
+        success: true,
+        number: Some(options.number),
+        url: Some(output.trim().to_string()),
+        title: options.title,
+        state: None,
+    })
+}
+
 /// Find issues matching the given filter. Useful for dedup before creating.
 ///
-/// Uses `gh issue list --json number,title,url,state,labels` and filters
-/// locally (title and label conjunctions are simpler to enforce client-side
-/// than via the gh search syntax).
+/// Uses `gh issue list --json number,title,url,state,stateReason,closedAt,labels`
+/// and filters locally (title and label conjunctions are simpler to enforce
+/// client-side than via the gh search syntax).
 pub fn issue_find(
     component_id: Option<&str>,
     options: IssueFindOptions,
@@ -392,7 +577,7 @@ pub fn issue_find(
         "--limit".into(),
         limit.to_string(),
         "--json".into(),
-        "number,title,url,state,labels".into(),
+        "number,title,url,state,stateReason,closedAt,labels".into(),
     ];
     // Pass labels through gh to narrow the server-side result set; we still
     // enforce the exact label-set conjunction locally in case gh changes the
@@ -1297,6 +1482,10 @@ fn parse_issue_list_json(raw: &str, options: &IssueFindOptions) -> Result<Vec<Gi
         title: String,
         url: String,
         state: String,
+        #[serde(default, rename = "stateReason")]
+        state_reason: Option<String>,
+        #[serde(default, rename = "closedAt")]
+        closed_at: Option<String>,
         #[serde(default)]
         labels: Vec<RawLabel>,
     }
@@ -1325,6 +1514,9 @@ fn parse_issue_list_json(raw: &str, options: &IssueFindOptions) -> Result<Vec<Gi
             title: i.title,
             url: i.url,
             state: i.state,
+            state_reason: i.state_reason.unwrap_or_default(),
+            closed_at: i.closed_at.unwrap_or_default(),
+            labels: i.labels.into_iter().map(|l| l.name).collect(),
         })
         .collect();
     Ok(out)
@@ -1348,6 +1540,9 @@ fn parse_pr_list_json(raw: &str) -> Result<Vec<GithubFindItem>> {
             title: p.title,
             url: p.url,
             state: p.state,
+            state_reason: String::new(),
+            closed_at: String::new(),
+            labels: Vec::new(),
         })
         .collect())
 }
@@ -1453,6 +1648,121 @@ mod tests {
     fn pr_state_gh_flag() {
         assert_eq!(PrState::Open.as_gh_flag(), "open");
         assert_eq!(PrState::Merged.as_gh_flag(), "merged");
+    }
+
+    #[test]
+    fn issue_close_reason_gh_flag() {
+        assert_eq!(IssueCloseReason::Completed.as_gh_flag(), "completed");
+        assert_eq!(IssueCloseReason::NotPlanned.as_gh_flag(), "not planned");
+    }
+
+    #[test]
+    fn issue_close_reason_from_graphql_completed() {
+        assert_eq!(
+            IssueCloseReason::from_graphql("completed"),
+            Some(IssueCloseReason::Completed)
+        );
+        assert_eq!(
+            IssueCloseReason::from_graphql("COMPLETED"),
+            Some(IssueCloseReason::Completed)
+        );
+    }
+
+    #[test]
+    fn issue_close_reason_from_graphql_not_planned() {
+        assert_eq!(
+            IssueCloseReason::from_graphql("not_planned"),
+            Some(IssueCloseReason::NotPlanned)
+        );
+        assert_eq!(
+            IssueCloseReason::from_graphql("NOT_PLANNED"),
+            Some(IssueCloseReason::NotPlanned)
+        );
+    }
+
+    #[test]
+    fn issue_close_reason_from_graphql_unknown_returns_none() {
+        assert!(IssueCloseReason::from_graphql("").is_none());
+        assert!(IssueCloseReason::from_graphql("reopened").is_none());
+        assert!(IssueCloseReason::from_graphql("nonsense").is_none());
+    }
+
+    #[test]
+    fn parse_issue_list_extracts_state_reason_and_closed_at() {
+        // gh issue list --json includes stateReason + closedAt fields when
+        // requested. Closed-completed, closed-not_planned, and open issues
+        // are represented in this fixture.
+        let raw = r#"[
+            {
+                "number": 100,
+                "title": "audit: thing in repo (3)",
+                "url": "https://github.com/o/r/issues/100",
+                "state": "OPEN",
+                "stateReason": null,
+                "closedAt": null,
+                "labels": [{"name":"audit"}]
+            },
+            {
+                "number": 101,
+                "title": "audit: other in repo (5)",
+                "url": "https://github.com/o/r/issues/101",
+                "state": "CLOSED",
+                "stateReason": "completed",
+                "closedAt": "2026-04-25T12:00:00Z",
+                "labels": [{"name":"audit"}]
+            },
+            {
+                "number": 102,
+                "title": "audit: muted in repo (12)",
+                "url": "https://github.com/o/r/issues/102",
+                "state": "CLOSED",
+                "stateReason": "not_planned",
+                "closedAt": "2026-04-26T03:00:00Z",
+                "labels": [{"name":"audit"},{"name":"wontfix"}]
+            }
+        ]"#;
+        let opts = IssueFindOptions {
+            state: IssueState::All,
+            ..Default::default()
+        };
+        let items = parse_issue_list_json(raw, &opts).unwrap();
+        assert_eq!(items.len(), 3);
+
+        // Open issue: empty state_reason and closed_at, single label.
+        assert_eq!(items[0].number, 100);
+        assert_eq!(items[0].state, "OPEN");
+        assert_eq!(items[0].state_reason, "");
+        assert_eq!(items[0].closed_at, "");
+        assert_eq!(items[0].labels, vec!["audit".to_string()]);
+
+        // Closed completed: state_reason populated, closed_at populated.
+        assert_eq!(items[1].number, 101);
+        assert_eq!(items[1].state, "CLOSED");
+        assert_eq!(items[1].state_reason, "completed");
+        assert_eq!(items[1].closed_at, "2026-04-25T12:00:00Z");
+
+        // Closed not_planned with suppression label.
+        assert_eq!(items[2].number, 102);
+        assert_eq!(items[2].state_reason, "not_planned");
+        assert_eq!(
+            items[2].labels,
+            vec!["audit".to_string(), "wontfix".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_issue_list_handles_missing_optional_fields() {
+        // Older gh versions or projects without state-reason support emit
+        // payloads without those fields. Default-deserialize to empty.
+        let raw = r#"[
+            {"number":1,"title":"x","url":"u","state":"open","labels":[]}
+        ]"#;
+        let opts = IssueFindOptions::default();
+        let items = parse_issue_list_json(raw, &opts).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].state_reason, "");
+        assert_eq!(items[0].closed_at, "");
+        assert!(items[0].labels.is_empty());
     }
 
     // -----------------------------------------------------------------------

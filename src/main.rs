@@ -21,8 +21,8 @@ mod help_topics;
 use commands::utils::{args, entity_suggest, response as output, tty};
 use commands::{
     api, audit, auth, bench, build, changelog, changes, cli, component, config, db, deploy,
-    extension, file, fleet, git, init, lint, logs, project, refactor, release, review, rig, server,
-    ssh, status, test, transfer, undo, upgrade, validate, version,
+    extension, file, fleet, git, init, issues, lint, logs, project, refactor, release, review, rig,
+    server, ssh, status, test, transfer, undo, upgrade, validate, version,
 };
 use homeboy::extension::load_all_extensions;
 
@@ -90,6 +90,8 @@ enum Commands {
     Changelog(changelog::ChangelogArgs),
     /// Git operations for components
     Git(git::GitArgs),
+    /// Reconcile findings against an issue tracker
+    Issues(issues::IssuesArgs),
     /// Version management for components
     Version(version::VersionArgs),
     /// Build a component
