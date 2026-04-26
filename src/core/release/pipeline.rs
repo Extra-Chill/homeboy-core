@@ -951,7 +951,7 @@ fn generate_changelog_entries(
     // tagging. No new entries to generate; let the rest of the pipeline
     // (tag + push) finish the job.
     let changelog_path = changelog::resolve_changelog_path(component)?;
-    let changelog_content = crate::engine::local_files::local().read(&changelog_path)?;
+    let changelog_content = read_changelog_for_release(component, &changelog_path, dry_run)?;
     let latest_changelog_version = changelog::get_latest_finalized_version(&changelog_content);
     if let (Some(latest_tag), Some(changelog_ver_str)) = (&latest_tag, latest_changelog_version) {
         let tag_version = latest_tag.trim_start_matches('v');
@@ -1402,14 +1402,47 @@ fn validate_working_tree_fail_fast(component: &Component) -> Result<()> {
     ))
 }
 
+fn read_changelog_for_release(
+    component: &Component,
+    changelog_path: &std::path::Path,
+    dry_run: bool,
+) -> Result<String> {
+    match crate::engine::local_files::local().read(changelog_path) {
+        Ok(content) => Ok(content),
+        Err(err) if dry_run && is_file_not_found_error(&err) => {
+            log_status!(
+                "release",
+                "Would initialize changelog at {} (first release for {})",
+                changelog_path.display(),
+                component.id
+            );
+            Ok(changelog::INITIAL_CHANGELOG_CONTENT.to_string())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn is_file_not_found_error(err: &Error) -> bool {
+    let detail = err
+        .details
+        .get("error")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+
+    err.message.contains("File not found")
+        || err.message.contains("No such file")
+        || detail.contains("File not found")
+        || detail.contains("No such file")
+}
+
 /// First-release bootstrap: if the component's configured `changelog_target`
-/// doesn't exist on disk (and no fallback candidate exists), create an empty
+/// doesn't exist on disk (and no fallback candidate exists), create a minimal
 /// changelog scaffold so `resolve_changelog_path` + `finalize_with_generated_entries`
 /// downstream have a file to work with.
 ///
-/// Writes only a `# Changelog` title — no `## Unreleased` section. The
-/// downstream `finalize_with_generated_entries` handles inserting the new
-/// `## [x.y.z] - YYYY-MM-DD` section directly. See #1172 + #1205.
+/// Writes the standard first-run seed — no `## Unreleased` section. The downstream
+/// `finalize_with_generated_entries` handles inserting the new `## [x.y.z] - YYYY-MM-DD`
+/// section directly. See #1172 + #1205.
 ///
 /// No-op when:
 /// - `changelog_target` is unset (resolver emits a teaching error downstream),
@@ -1434,9 +1467,10 @@ fn ensure_changelog_initialized(component: &Component) -> Result<()> {
         crate::engine::local_files::local().ensure_dir(parent)?;
     }
 
-    // Title only. `finalize_with_generated_entries` will create the
+    // Seed only. `finalize_with_generated_entries` will create the
     // `## [X.Y.Z]` section directly on top of this.
-    crate::engine::local_files::local().write(&configured_path, "# Changelog\n\n")?;
+    crate::engine::local_files::local()
+        .write(&configured_path, changelog::INITIAL_CHANGELOG_CONTENT)?;
 
     log_status!(
         "release",
@@ -1506,7 +1540,7 @@ fn get_unexpected_uncommitted_files(
 mod tests {
     use super::{
         ensure_changelog_initialized, filter_homeboy_managed, get_unexpected_uncommitted_files,
-        is_homeboy_managed_path, strip_pr_reference,
+        is_homeboy_managed_path, read_changelog_for_release, strip_pr_reference,
     };
     use crate::component::Component;
     use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
@@ -1681,7 +1715,7 @@ mod tests {
         ensure_changelog_initialized(&component).expect("preflight should bootstrap");
 
         let content = std::fs::read_to_string(&changelog_path).expect("file created");
-        assert!(content.contains("# Changelog"), "has title: {}", content);
+        assert_eq!(content, super::changelog::INITIAL_CHANGELOG_CONTENT);
         assert!(
             !content.contains("## Unreleased"),
             "should NOT pre-create Unreleased section (legacy): {}",
@@ -1762,6 +1796,22 @@ mod tests {
             let path = entry.unwrap().path();
             panic!("should have created nothing, but found: {}", path.display());
         }
+    }
+
+    #[test]
+    fn read_changelog_for_release_uses_seed_for_missing_dry_run_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let component = component_with_changelog_target(&temp, Some("CHANGELOG.md"));
+        let changelog_path = temp.path().join("CHANGELOG.md");
+
+        let content = read_changelog_for_release(&component, &changelog_path, true)
+            .expect("dry-run should simulate first-run seed");
+
+        assert_eq!(content, super::changelog::INITIAL_CHANGELOG_CONTENT);
+        assert!(
+            !changelog_path.exists(),
+            "dry-run must not create the changelog on disk"
+        );
     }
 
     #[test]
