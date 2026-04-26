@@ -29,6 +29,39 @@ fn test_bench_spec_deserializes_both_fields() {
 }
 
 #[test]
+fn test_rig_spec_deserializes_bench_workloads_by_extension() {
+    let spec: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "studio",
+            "bench_workloads": {
+                "wordpress": [
+                    "/private/benches/cold-boot.php",
+                    "~/benches/wc-loaded.php"
+                ],
+                "nodejs": ["/private/benches/electron-startup.bench.ts"]
+            }
+        }"#,
+    )
+    .expect("parse RigSpec");
+
+    assert_eq!(
+        spec.bench_workloads
+            .get("wordpress")
+            .expect("wordpress workloads"),
+        &vec![
+            "/private/benches/cold-boot.php".to_string(),
+            "~/benches/wc-loaded.php".to_string(),
+        ]
+    );
+    assert_eq!(
+        spec.bench_workloads
+            .get("nodejs")
+            .expect("nodejs workloads"),
+        &vec!["/private/benches/electron-startup.bench.ts".to_string()]
+    );
+}
+
+#[test]
 fn test_bench_spec_default_component_only_back_compat() {
     // Pre-PR specs declare only `default_component`; the new field
     // must default to None so existing rigs keep parsing.
@@ -63,6 +96,7 @@ fn test_rig_spec_without_bench_block_back_compat() {
     let json = r#"{ "id": "no-bench" }"#;
     let spec: RigSpec = serde_json::from_str(json).expect("parse");
     assert!(spec.bench.is_none());
+    assert!(spec.bench_workloads.is_empty());
 }
 
 #[test]

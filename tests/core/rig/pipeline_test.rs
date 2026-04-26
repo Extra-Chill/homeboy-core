@@ -90,6 +90,7 @@ mod patch {
             symlinks: Vec::new(),
             pipeline,
             bench: None,
+            bench_workloads: Default::default(),
         }
     }
 

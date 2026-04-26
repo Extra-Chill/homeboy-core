@@ -43,6 +43,7 @@ fn minimal_spec(id: &str) -> RigSpec {
         symlinks: Vec::new(),
         pipeline: HashMap::new(),
         bench: None,
+        bench_workloads: HashMap::new(),
     }
 }
 
@@ -241,6 +242,7 @@ fn test_snapshot_state() {
         symlinks: Vec::new(),
         pipeline: HashMap::new(),
         bench: None,
+        bench_workloads: HashMap::new(),
     };
 
     let snapshot = snapshot_state(&rig);

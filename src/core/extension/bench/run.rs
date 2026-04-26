@@ -49,6 +49,9 @@ pub struct BenchRunWorkflowArgs {
     /// to be set — N independent cold-boots without shared state would
     /// be N independent runs, not a multi-instance contention test.
     pub concurrency: u32,
+    /// Rig-declared out-of-tree workloads to run alongside in-tree discovery.
+    /// Exported to dispatchers as `HOMEBOY_BENCH_EXTRA_WORKLOADS`.
+    pub extra_workloads: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -242,6 +245,13 @@ fn build_runner(
         .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
         .script_args(&args.passthrough_args);
 
+    if !args.extra_workloads.is_empty() {
+        runner = runner.env(
+            "HOMEBOY_BENCH_EXTRA_WORKLOADS",
+            &extra_workloads_env_value(&args.extra_workloads)?,
+        );
+    }
+
     if let Some(ref shared) = args.shared_state {
         runner = runner.env("HOMEBOY_BENCH_SHARED_STATE", &shared.to_string_lossy());
     }
@@ -258,6 +268,21 @@ fn build_runner(
     }
 
     Ok(runner)
+}
+
+fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
+    let joined = std::env::join_paths(paths)
+        .map_err(|e| {
+            Error::validation_invalid_argument(
+                "bench_workloads",
+                format!("bench workload path cannot be exported: {}", e),
+                None,
+                None,
+            )
+        })?
+        .to_string_lossy()
+        .to_string();
+    Ok(joined)
 }
 
 /// Spawn N runner instances in parallel, wait for all, aggregate.
@@ -375,5 +400,18 @@ mod tests {
         assert_eq!(instance_results_filename(0), "bench-results-i0.json");
         assert_eq!(instance_results_filename(7), "bench-results-i7.json");
         assert_ne!(instance_results_filename(0), instance_results_filename(1));
+    }
+
+    #[test]
+    fn extra_workloads_env_value_joins_paths_for_runner_contract() {
+        let paths = vec![
+            PathBuf::from("/tmp/bench-one.php"),
+            PathBuf::from("/tmp/bench-two.php"),
+        ];
+
+        assert_eq!(
+            extra_workloads_env_value(&paths).unwrap(),
+            "/tmp/bench-one.php:/tmp/bench-two.php"
+        );
     }
 }

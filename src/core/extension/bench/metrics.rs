@@ -157,6 +157,7 @@ mod tests {
             scenarios: vec![BenchScenario {
                 id: "scenario".to_string(),
                 file: None,
+                source: None,
                 iterations: 10,
                 metrics: BenchMetrics { values: metrics },
                 memory: None,
