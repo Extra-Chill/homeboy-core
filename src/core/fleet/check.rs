@@ -45,6 +45,7 @@ pub fn collect_check(
             component_ids: vec![],
             all: true,
             outdated: false,
+            behind_upstream: false,
             dry_run: false,
             check: true,
             force: false,
@@ -68,12 +69,15 @@ pub fn collect_check(
                         Some(deploy::ComponentStatus::UpToDate) => "up_to_date",
                         Some(deploy::ComponentStatus::NeedsUpdate) => "needs_update",
                         Some(deploy::ComponentStatus::BehindRemote) => "behind_remote",
+                        Some(deploy::ComponentStatus::BehindUpstream) => "behind_upstream",
                         Some(deploy::ComponentStatus::Unknown) | None => "unknown",
                     };
 
                     match status_str {
                         "up_to_date" => summary.components_up_to_date += 1,
-                        "needs_update" | "behind_remote" => summary.components_needs_update += 1,
+                        "needs_update" | "behind_remote" | "behind_upstream" => {
+                            summary.components_needs_update += 1
+                        }
                         _ => summary.components_unknown += 1,
                     }
 

@@ -472,6 +472,7 @@ fn fetch_project_remote_versions(project_id: &str) -> std::collections::HashMap<
         component_ids: vec![],
         all: true,
         outdated: false,
+        behind_upstream: false,
         dry_run: false,
         check: true,
         force: false,

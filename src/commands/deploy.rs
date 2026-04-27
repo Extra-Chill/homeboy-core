@@ -35,9 +35,12 @@ pub struct DeployArgs {
     /// Deploy all configured components
     #[arg(long)]
     pub all: bool,
-    /// Deploy only outdated components
+    /// Deploy only components whose local version differs from deployed remote
     #[arg(long)]
     pub outdated: bool,
+    /// Deploy only components whose local checkout is behind upstream
+    #[arg(long, conflicts_with = "outdated")]
+    pub behind_upstream: bool,
     /// Preview what would be deployed without executing
     #[arg(long)]
     pub dry_run: bool,
@@ -79,6 +82,7 @@ pub struct DeployOutput {
     pub project_id: String,
     pub all: bool,
     pub outdated: bool,
+    pub behind_upstream: bool,
     pub dry_run: bool,
     pub check: bool,
     pub force: bool,
@@ -167,6 +171,7 @@ pub fn run(
             project_id,
             all: args.all,
             outdated: args.outdated,
+            behind_upstream: args.behind_upstream,
             dry_run: args.dry_run,
             check: args.check,
             force: args.force,
@@ -205,7 +210,11 @@ fn resolve_single_deploy_target(args: &DeployArgs) -> homeboy::Result<(String, V
             }
             comps.extend(args.component_ids.clone());
 
-            let has_selector_flag = args.all || args.outdated || args.check || args.json.is_some();
+            let has_selector_flag = args.all
+                || args.outdated
+                || args.behind_upstream
+                || args.check
+                || args.json.is_some();
             if comps.is_empty() && !has_selector_flag {
                 return Err(homeboy::Error::validation_invalid_argument(
                     "input",
@@ -267,6 +276,7 @@ fn build_config(args: &DeployArgs, skip_build: bool) -> DeployConfig {
         component_ids: args.component_ids.clone(),
         all: args.all,
         outdated: args.outdated,
+        behind_upstream: args.behind_upstream,
         dry_run: args.dry_run,
         check: args.check,
         force: args.force,

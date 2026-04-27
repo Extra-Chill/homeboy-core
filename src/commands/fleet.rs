@@ -432,6 +432,7 @@ fn log_fleet_dashboard(result: &FleetStatusResult) {
                 FleetComponentDrift::Current => "✅ current",
                 FleetComponentDrift::NeedsUpdate => "⚠️  outdated",
                 FleetComponentDrift::BehindRemote => "🔙 behind",
+                FleetComponentDrift::BehindUpstream => "⬇️  behind upstream",
                 FleetComponentDrift::NeedsBump => "🔶 needs bump",
                 FleetComponentDrift::DocsOnly => "📝 docs only",
                 FleetComponentDrift::Unknown => "❓ unknown",
