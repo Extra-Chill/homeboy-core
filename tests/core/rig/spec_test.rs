@@ -154,7 +154,7 @@ fn test_spec_check_step_with_command_probe() {
     let steps = spec.pipeline.get("check").unwrap();
     assert_eq!(steps.len(), 1);
     match &steps[0] {
-        PipelineStep::Check { label, spec } => {
+        PipelineStep::Check { label, spec, .. } => {
             assert_eq!(label.as_deref(), Some("docker daemon running"));
             assert_eq!(spec.command.as_deref(), Some("docker info"));
             assert_eq!(spec.expect_exit, Some(0));
@@ -177,9 +177,48 @@ fn test_spec_build_step_parses() {
     let spec: RigSpec = serde_json::from_str(json).expect("parse");
     let steps = spec.pipeline.get("up").unwrap();
     match &steps[0] {
-        PipelineStep::Build { component, label } => {
+        PipelineStep::Build {
+            component, label, ..
+        } => {
             assert_eq!(component, "studio");
             assert_eq!(label.as_deref(), Some("compile studio"));
+        }
+        other => panic!("expected Build, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_spec_pipeline_step_id_and_dependencies_parse() {
+    let json = r#"{
+        "id": "r",
+        "components": {
+            "studio": { "path": "/tmp/studio" },
+            "playground": { "path": "/tmp/playground" }
+        },
+        "pipeline": {
+            "up": [
+                { "kind": "build", "id": "playground-build", "component": "playground" },
+                {
+                    "kind": "build",
+                    "id": "studio-install",
+                    "component": "studio",
+                    "depends_on": ["playground-build"]
+                }
+            ]
+        }
+    }"#;
+    let spec: RigSpec = serde_json::from_str(json).expect("parse");
+    let steps = spec.pipeline.get("up").unwrap();
+    match &steps[1] {
+        PipelineStep::Build {
+            step_id,
+            depends_on,
+            component,
+            ..
+        } => {
+            assert_eq!(step_id.as_deref(), Some("studio-install"));
+            assert_eq!(depends_on, &vec!["playground-build".to_string()]);
+            assert_eq!(component, "studio");
         }
         other => panic!("expected Build, got {:?}", other),
     }
@@ -279,6 +318,7 @@ fn test_spec_patch_step_parses_full_shape() {
             content,
             op,
             label,
+            ..
         } => {
             assert_eq!(component, "playground");
             assert_eq!(file, "packages/php-wasm/compile/dns_polyfill.c");

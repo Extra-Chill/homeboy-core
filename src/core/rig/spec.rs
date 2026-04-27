@@ -216,6 +216,12 @@ pub struct SharedPathSpec {
 pub enum PipelineStep {
     /// Start/stop/health-check a declared service.
     Service {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Service ID (must exist in `services`).
         id: String,
         /// Operation: `start`, `stop`, or `health`.
@@ -230,6 +236,12 @@ pub enum PipelineStep {
     /// path is resolved from the rig's `components` map, so the component
     /// doesn't need to be registered in homeboy's global registry.
     Build {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Component ID — must exist in the rig's `components` map.
         component: String,
         /// Human-readable label shown during execution.
@@ -244,6 +256,12 @@ pub enum PipelineStep {
     /// rigs actually need (MVP): `status`, `pull`, `fetch`, `checkout`,
     /// `current-branch`. More can land as follow-up.
     Git {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Component ID — must exist in the rig's `components` map.
         component: String,
         /// Operation name.
@@ -264,6 +282,12 @@ pub enum PipelineStep {
     /// typed steps pick up homeboy's existing error mapping, extension
     /// hooks, and registry awareness for free.
     Command {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Shell command to execute. Runs via `sh -c` (or `cmd /C` on Windows).
         #[serde(rename = "command")]
         cmd: String,
@@ -280,12 +304,24 @@ pub enum PipelineStep {
 
     /// Ensure a declared symlink exists (or verify it in `check` pipelines).
     Symlink {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Operation: `ensure` or `verify`.
         op: SymlinkOp,
     },
 
     /// Ensure, verify, or clean up declared shared dependency paths.
     SharedPath {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Operation: `ensure`, `verify`, or `cleanup`.
         op: SharedPathOp,
     },
@@ -307,6 +343,12 @@ pub enum PipelineStep {
     /// for it. Use this in `check` pipelines so a stale or unpatched
     /// checkout is reported as a failure, not silently re-patched.
     Patch {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Component ID — must exist in the rig's `components` map.
         component: String,
         /// File to patch, relative to the component's path. Tilde +
@@ -336,6 +378,12 @@ pub enum PipelineStep {
 
     /// Pre-flight / health check. Non-fatal in `up` (warns), fatal in `check`.
     Check {
+        /// Optional stable node ID for dependency-aware pipeline ordering.
+        #[serde(default, rename = "id", skip_serializing_if = "Option::is_none")]
+        step_id: Option<String>,
+        /// Step IDs that must run before this step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        depends_on: Vec<String>,
         /// Human-readable label.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
