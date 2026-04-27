@@ -180,3 +180,16 @@ fn visible_subcommands(command: &Command, remaining_depth: usize) -> Vec<Command
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exposes_self_status_command() {
+        let surface = current_command_surface();
+
+        assert!(surface.contains_path(&["self"]));
+        assert!(surface.contains_path(&["self", "status"]));
+    }
+}

@@ -435,4 +435,18 @@ mod tests {
         assert_eq!(json["homebrew"]["error"], "brew unavailable");
         assert_eq!(json["version_relation"], "unknown");
     }
+
+    #[test]
+    fn test_collect_status() {
+        let status = collect_status_with(
+            None,
+            || Ok(upgrade::current_version().to_string()),
+            |_cmd, _args| Err("external probe skipped".to_string()),
+        );
+
+        assert_eq!(status.active_binary, "unknown");
+        assert_eq!(status.active_version, upgrade::current_version());
+        assert_eq!(status.install_method, InstallMethod::Unknown);
+        assert_eq!(status.version_relation, VersionRelation::Current);
+    }
 }
