@@ -242,6 +242,16 @@ bench workflows:
       "passed": true,
       "status": "passed",
       "exit_code": 0,
+      "artifacts": [
+        {
+          "scenario_id": "agent_boot",
+          "run_index": 0,
+          "name": "raw_result",
+          "path": "bench-artifacts/agent_boot/run-0/raw-result.json",
+          "kind": "json",
+          "label": "Raw result"
+        }
+      ],
       "results": { ... },
       "rig_state": { "rig_id": "studio-trunk", "captured_at": "...", "components": { ... } }
     },
@@ -275,6 +285,13 @@ The reference rig is omitted from the inner `diff.by_scenario.<id>.<metric>`
 map — its delta against itself would always be zero. A scenario or
 metric missing from a non-reference rig is silently skipped (no
 synthetic zeros).
+
+Each rig entry also includes an `artifacts` index when workloads emit
+artifact pointers. The full-fidelity data remains nested under
+`results.scenarios[].artifacts` and `results.scenarios[].runs[].artifacts`,
+but the index makes proof artifacts easy to find in cross-rig output.
+`run_index` is zero-based and omitted for scenario-level artifacts that
+are not tied to a specific `--runs` iteration.
 
 ### Exit code
 
@@ -366,7 +383,14 @@ The extension's bench script must:
           "agent_loop_ms": [1100.0, 1200.0, 1300.0]
         }
       },
-      "memory": { "peak_bytes": 41943040 }
+      "memory": { "peak_bytes": 41943040 },
+      "artifacts": {
+        "raw_result": {
+          "path": "bench-artifacts/scenario_slug/raw-result.json",
+          "kind": "json",
+          "label": "Raw result"
+        }
+      }
     }
   ]
 }
@@ -402,6 +426,9 @@ The extension's bench script must:
   of file basenames alone.
 - `memory` is optional. Extensions that can't measure peak memory omit it.
 - `file` is optional but recommended for diagnostics.
+- `artifacts` is optional. Values are local paths plus optional `kind` and
+  `label` metadata. Homeboy preserves and indexes these pointers but does
+  not upload, retain, or diff artifact contents.
 
 ### Environment variables injected
 

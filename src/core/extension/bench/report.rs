@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use super::artifact::BenchArtifact;
 use super::baseline::BenchBaselineComparison;
 use super::distribution::BenchRunDistribution;
 use super::parsing::{BenchMetricPhase, BenchResults, BenchScenario};
@@ -17,6 +18,8 @@ pub struct BenchCommandOutput {
     pub component: String,
     pub exit_code: i32,
     pub iterations: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<BenchArtifactRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<BenchResults>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -55,6 +58,11 @@ pub fn from_main_workflow_with_rig(
             component: result.component,
             exit_code,
             iterations: result.iterations,
+            artifacts: result
+                .results
+                .as_ref()
+                .map(collect_artifacts)
+                .unwrap_or_default(),
             results: result.results,
             gate_failures: result.gate_failures,
             baseline_comparison: result.baseline_comparison,
@@ -130,12 +138,66 @@ pub struct RigBenchEntry {
     pub passed: bool,
     pub status: String,
     pub exit_code: i32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<BenchArtifactRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<BenchResults>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rig_state: Option<RigStateSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
+}
+
+/// A compact, grep-friendly pointer to an artifact emitted by a bench
+/// scenario. `results` remains the full-fidelity source of truth; this
+/// index surfaces the paths that users need immediately after a run.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct BenchArtifactRef {
+    pub scenario_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_index: Option<usize>,
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+pub fn collect_artifacts(results: &BenchResults) -> Vec<BenchArtifactRef> {
+    let mut artifacts = Vec::new();
+    for scenario in &results.scenarios {
+        artifacts.extend(
+            scenario
+                .artifacts
+                .iter()
+                .map(|(name, artifact)| artifact_ref(&scenario.id, None, name, artifact)),
+        );
+        if let Some(runs) = &scenario.runs {
+            for (index, run) in runs.iter().enumerate() {
+                artifacts.extend(run.artifacts.iter().map(|(name, artifact)| {
+                    artifact_ref(&scenario.id, Some(index), name, artifact)
+                }));
+            }
+        }
+    }
+    artifacts
+}
+
+fn artifact_ref(
+    scenario_id: &str,
+    run_index: Option<usize>,
+    name: &str,
+    artifact: &BenchArtifact,
+) -> BenchArtifactRef {
+    BenchArtifactRef {
+        scenario_id: scenario_id.to_string(),
+        run_index,
+        name: name.to_string(),
+        path: artifact.path.clone(),
+        kind: artifact.kind.clone(),
+        label: artifact.label.clone(),
+    }
 }
 
 /// Per-scenario, per-metric percent deltas of each non-reference rig vs
@@ -603,8 +665,10 @@ fn format_failure_hint(failure: &BenchComparisonFailure) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extension::bench::artifact::BenchArtifact;
     use crate::extension::bench::parsing::{
-        BenchMetricDirection, BenchMetricPhase, BenchMetricPolicy, BenchMetrics, BenchScenario,
+        BenchMetricDirection, BenchMetricPhase, BenchMetricPolicy, BenchMetrics, BenchRunSnapshot,
+        BenchScenario,
     };
 
     fn scenario(id: &str, metrics: &[(&str, f64)]) -> BenchScenario {
@@ -674,12 +738,21 @@ mod tests {
         }
     }
 
+    fn artifact(path: &str, kind: Option<&str>, label: Option<&str>) -> BenchArtifact {
+        BenchArtifact {
+            path: path.to_string(),
+            kind: kind.map(str::to_string),
+            label: label.map(str::to_string),
+        }
+    }
+
     fn entry(rig_id: &str, passed: bool, results: Option<BenchResults>) -> RigBenchEntry {
         RigBenchEntry {
             rig_id: rig_id.to_string(),
             passed,
             status: if passed { "passed" } else { "failed" }.to_string(),
             exit_code: if passed { 0 } else { 1 },
+            artifacts: results.as_ref().map(collect_artifacts).unwrap_or_default(),
             results,
             rig_state: None,
             failure: None,
@@ -692,6 +765,7 @@ mod tests {
             passed: false,
             status: "failed".to_string(),
             exit_code: 2,
+            artifacts: Vec::new(),
             results: None,
             rig_state: None,
             failure: Some(BenchRunFailure {
@@ -799,6 +873,91 @@ mod tests {
         assert_eq!(out.exit_code, 0);
         assert_eq!(out.iterations, 10);
         assert_eq!(exit, 0);
+    }
+
+    #[test]
+    fn artifact_index_surfaces_scenario_and_per_run_artifacts() {
+        let mut scenario = scenario("agent-runtime", &[("p95_ms", 100.0)]);
+        scenario.artifacts.insert(
+            "summary".to_string(),
+            artifact("artifacts/summary.json", Some("json"), Some("Summary")),
+        );
+        scenario.runs = Some(vec![
+            BenchRunSnapshot {
+                metrics: scenario.metrics.clone(),
+                memory: None,
+                artifacts: [(
+                    "raw_result".to_string(),
+                    artifact("artifacts/run-0/raw.json", Some("json"), Some("Raw result")),
+                )]
+                .into(),
+            },
+            BenchRunSnapshot {
+                metrics: scenario.metrics.clone(),
+                memory: None,
+                artifacts: [(
+                    "raw_result".to_string(),
+                    artifact("artifacts/run-1/raw.json", None, None),
+                )]
+                .into(),
+            },
+        ]);
+
+        let indexed = collect_artifacts(&results(vec![scenario]));
+
+        assert_eq!(indexed.len(), 3);
+        assert_eq!(indexed[0].scenario_id, "agent-runtime");
+        assert_eq!(indexed[0].run_index, None);
+        assert_eq!(indexed[0].name, "summary");
+        assert_eq!(indexed[0].path, "artifacts/summary.json");
+        assert_eq!(indexed[0].kind.as_deref(), Some("json"));
+        assert_eq!(indexed[0].label.as_deref(), Some("Summary"));
+        assert_eq!(indexed[1].run_index, Some(0));
+        assert_eq!(indexed[1].name, "raw_result");
+        assert_eq!(indexed[1].path, "artifacts/run-0/raw.json");
+        assert_eq!(indexed[2].run_index, Some(1));
+        assert_eq!(indexed[2].path, "artifacts/run-1/raw.json");
+    }
+
+    #[test]
+    fn cross_rig_output_serializes_artifact_index() {
+        let mut ref_scenario = scenario("agent-runtime", &[("p95_ms", 100.0)]);
+        ref_scenario.runs = Some(vec![BenchRunSnapshot {
+            metrics: ref_scenario.metrics.clone(),
+            memory: None,
+            artifacts: [(
+                "raw_result".to_string(),
+                artifact("baseline/run-0/raw.json", None, None),
+            )]
+            .into(),
+        }]);
+        let mut candidate_scenario = scenario("agent-runtime", &[("p95_ms", 80.0)]);
+        candidate_scenario.runs = Some(vec![BenchRunSnapshot {
+            metrics: candidate_scenario.metrics.clone(),
+            memory: None,
+            artifacts: [(
+                "raw_result".to_string(),
+                artifact("candidate/run-0/raw.json", None, None),
+            )]
+            .into(),
+        }]);
+
+        let entries = vec![
+            entry("baseline", true, Some(results(vec![ref_scenario]))),
+            entry("candidate", true, Some(results(vec![candidate_scenario]))),
+        ];
+        let (out, _) = aggregate_comparison("studio".into(), 10, entries);
+        let value = serde_json::to_value(out).expect("serialize comparison");
+
+        assert_eq!(
+            value["rigs"][0]["artifacts"][0]["path"],
+            "baseline/run-0/raw.json"
+        );
+        assert_eq!(value["rigs"][0]["artifacts"][0]["run_index"], 0);
+        assert_eq!(
+            value["rigs"][1]["artifacts"][0]["path"],
+            "candidate/run-0/raw.json"
+        );
     }
 
     #[test]
