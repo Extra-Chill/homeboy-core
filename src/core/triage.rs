@@ -8,7 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use crate::component;
@@ -1113,11 +1113,6 @@ pub fn parse_stale_days(input: &str) -> Result<i64> {
         ));
     }
     Ok(days)
-}
-
-#[allow(dead_code)]
-fn _pathbuf(path: &str) -> PathBuf {
-    PathBuf::from(path)
 }
 
 #[cfg(test)]
