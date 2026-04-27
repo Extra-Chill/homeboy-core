@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::extension::bench::parsing::{BenchMetrics, BenchResults, BenchScenario};
+use crate::extension::bench::parsing::{BenchArtifact, BenchMetrics, BenchResults, BenchScenario};
 use crate::extension::bench::run::aggregate_runs;
 
 fn scenario(id: &str, metrics: &[(&str, f64)]) -> BenchScenario {
@@ -32,6 +32,7 @@ fn scenario(id: &str, metrics: &[(&str, f64)]) -> BenchScenario {
             distributions: BTreeMap::new(),
         },
         memory: None,
+        artifacts: BTreeMap::new(),
         runs: None,
         runs_summary: None,
     }
@@ -91,6 +92,15 @@ mod cases {
         approx_eq(summary.stdev, (20000.0_f64 / 3.0).sqrt());
         approx_eq(summary.cv_pct, summary.stdev / 200.0 * 100.0);
         assert_eq!(summary.n, 3);
+        assert_eq!(summary.min, 100.0);
+        assert_eq!(summary.max, 300.0);
+        assert_eq!(summary.mean, 200.0);
+        assert_eq!(summary.p50, 200.0);
+        assert_eq!(summary.p95, 290.0);
+        assert_eq!(
+            scenario.metrics.distribution("install_ms"),
+            Some(&[100.0, 200.0, 300.0][..])
+        );
     }
 
     #[test]
@@ -164,6 +174,41 @@ mod cases {
                 .unwrap()
                 .n,
             2
+        );
+    }
+
+    #[test]
+    fn runs_preserve_per_run_artifacts() {
+        let mut first = scenario("agent", &[("success_rate", 1.0)]);
+        first.artifacts.insert(
+            "transcript".to_string(),
+            BenchArtifact {
+                path: "artifacts/run-1/transcript.json".to_string(),
+                kind: Some("json".to_string()),
+                label: Some("Run 1 transcript".to_string()),
+            },
+        );
+        let mut second = scenario("agent", &[("success_rate", 1.0)]);
+        second.artifacts.insert(
+            "transcript".to_string(),
+            BenchArtifact {
+                path: "artifacts/run-2/transcript.json".to_string(),
+                kind: Some("json".to_string()),
+                label: Some("Run 2 transcript".to_string()),
+            },
+        );
+
+        let aggregated = aggregate_runs(&[results(vec![first]), results(vec![second])]).unwrap();
+        let runs = aggregated.scenarios[0].runs.as_ref().unwrap();
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(
+            runs[0].artifacts["transcript"].path,
+            "artifacts/run-1/transcript.json"
+        );
+        assert_eq!(
+            runs[1].artifacts["transcript"].path,
+            "artifacts/run-2/transcript.json"
         );
     }
 }

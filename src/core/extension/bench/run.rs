@@ -447,15 +447,17 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
     }
 
     let mut values = BTreeMap::new();
+    let mut distributions = BTreeMap::new();
     let mut summary = BTreeMap::new();
     for (name, samples) in metric_values {
         values.insert(name.clone(), percentile(&samples, 50.0));
+        distributions.insert(name.clone(), samples.clone());
         summary.insert(name, distribution(&samples));
     }
 
     template.metrics = BenchMetrics {
         values,
-        distributions: BTreeMap::new(),
+        distributions,
     };
     template.memory = None;
     template.runs = Some(
@@ -464,6 +466,7 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
             .map(|scenario| BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
                 memory: scenario.memory.clone(),
+                artifacts: scenario.artifacts.clone(),
             })
             .collect(),
     );
@@ -490,9 +493,14 @@ fn distribution(samples: &[f64]) -> BenchRunDistribution {
     };
 
     BenchRunDistribution {
+        n: samples.len() as u64,
+        min: samples.iter().copied().fold(f64::INFINITY, f64::min),
+        max: samples.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        mean,
         stdev,
         cv_pct,
-        n: samples.len() as u64,
+        p50: percentile(samples, 50.0),
+        p95: percentile(samples, 95.0),
     }
 }
 
@@ -733,6 +741,7 @@ mod tests {
                     distributions: BTreeMap::new(),
                 },
                 memory: None,
+                artifacts: BTreeMap::new(),
                 runs: None,
                 runs_summary: None,
             }],

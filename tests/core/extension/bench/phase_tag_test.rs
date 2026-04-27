@@ -60,6 +60,7 @@ fn scenario(id: &str, metrics: &[(&str, f64)]) -> BenchScenario {
             distributions: BTreeMap::new(),
         },
         memory: None,
+        artifacts: BTreeMap::new(),
         runs: None,
         runs_summary: None,
     }
