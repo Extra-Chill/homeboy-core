@@ -164,7 +164,7 @@ pub struct BenchArtifactRef {
     pub label: Option<String>,
 }
 
-pub fn collect_artifacts(results: &BenchResults) -> Vec<BenchArtifactRef> {
+pub(crate) fn collect_artifacts(results: &BenchResults) -> Vec<BenchArtifactRef> {
     let mut artifacts = Vec::new();
     for scenario in &results.scenarios {
         artifacts.extend(
@@ -876,7 +876,7 @@ mod tests {
     }
 
     #[test]
-    fn artifact_index_surfaces_scenario_and_per_run_artifacts() {
+    fn test_collect_artifacts() {
         let mut scenario = scenario("agent-runtime", &[("p95_ms", 100.0)]);
         scenario.artifacts.insert(
             "summary".to_string(),

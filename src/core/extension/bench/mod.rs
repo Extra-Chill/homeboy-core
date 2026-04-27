@@ -47,8 +47,8 @@ pub use parsing::{
     BenchGateResult, BenchMemory, BenchMetrics, BenchResults, BenchScenario,
 };
 pub use report::{
-    aggregate_comparison, collect_artifacts, from_main_workflow, from_main_workflow_with_rig,
-    BenchArtifactRef, BenchCommandOutput, BenchComparisonDiff, BenchComparisonOutput,
+    aggregate_comparison, from_main_workflow, from_main_workflow_with_rig, BenchArtifactRef,
+    BenchCommandOutput, BenchComparisonDiff, BenchComparisonOutput,
     MetricDelta as ReportMetricDelta, RigBenchEntry,
 };
 pub use run::{
