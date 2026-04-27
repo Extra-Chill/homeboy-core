@@ -178,6 +178,7 @@ fn github_to_tracked(item: crate::git::GithubFindItem) -> Option<TrackedIssue> {
     Some(TrackedIssue {
         number: item.number,
         title: item.title,
+        body: item.body,
         url: item.url,
         state,
         labels: item.labels,
@@ -197,6 +198,7 @@ mod tests {
         GithubFindItem {
             number: 1,
             title: "t".into(),
+            body: String::new(),
             url: "u".into(),
             state: state.into(),
             state_reason: state_reason.into(),

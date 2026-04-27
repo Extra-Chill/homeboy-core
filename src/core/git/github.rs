@@ -97,6 +97,8 @@ pub struct GithubFindOutput {
 pub struct GithubFindItem {
     pub number: u64,
     pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub body: String,
     pub url: String,
     pub state: String,
     /// GitHub `stateReason` (issues only). One of `completed`, `not_planned`,
@@ -551,7 +553,7 @@ pub fn issue_edit(
 
 /// Find issues matching the given filter. Useful for dedup before creating.
 ///
-/// Uses `gh issue list --json number,title,url,state,stateReason,closedAt,labels`
+/// Uses `gh issue list --json number,title,body,url,state,stateReason,closedAt,labels`
 /// and filters locally (title and label conjunctions are simpler to enforce
 /// client-side than via the gh search syntax).
 pub fn issue_find(
@@ -577,7 +579,7 @@ pub fn issue_find(
         "--limit".into(),
         limit.to_string(),
         "--json".into(),
-        "number,title,url,state,stateReason,closedAt,labels".into(),
+        "number,title,body,url,state,stateReason,closedAt,labels".into(),
     ];
     // Pass labels through gh to narrow the server-side result set; we still
     // enforce the exact label-set conjunction locally in case gh changes the
@@ -1480,6 +1482,8 @@ fn parse_issue_list_json(raw: &str, options: &IssueFindOptions) -> Result<Vec<Gi
     struct RawIssue {
         number: u64,
         title: String,
+        #[serde(default)]
+        body: Option<String>,
         url: String,
         state: String,
         #[serde(default, rename = "stateReason")]
@@ -1512,6 +1516,7 @@ fn parse_issue_list_json(raw: &str, options: &IssueFindOptions) -> Result<Vec<Gi
         .map(|i| GithubFindItem {
             number: i.number,
             title: i.title,
+            body: i.body.unwrap_or_default(),
             url: i.url,
             state: i.state,
             state_reason: i.state_reason.unwrap_or_default(),
@@ -1538,6 +1543,7 @@ fn parse_pr_list_json(raw: &str) -> Result<Vec<GithubFindItem>> {
         .map(|p| GithubFindItem {
             number: p.number,
             title: p.title,
+            body: String::new(),
             url: p.url,
             state: p.state,
             state_reason: String::new(),
