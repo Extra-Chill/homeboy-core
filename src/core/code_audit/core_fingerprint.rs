@@ -992,24 +992,9 @@ fn extract_namespace(symbols: &[Symbol], relative_path: &str, lang_id: &str) -> 
         }
     }
 
-    // Rust: derive from crate:: imports or file path
+    // Rust module namespace is determined by file location. `crate::...`
+    // imports are cross-module references, not declarations of this file's module.
     if lang_id == "rust" {
-        // Count crate:: use paths
-        let mut module_counts: HashMap<&str, usize> = HashMap::new();
-        for s in symbols.iter().filter(|s| s.concept == "import") {
-            if let Some(path) = s.get("path") {
-                if let Some(rest) = path.strip_prefix("crate::") {
-                    if let Some(module) = rest.split("::").next() {
-                        *module_counts.entry(module).or_insert(0) += 1;
-                    }
-                }
-            }
-        }
-        if let Some((most_common, _)) = module_counts.iter().max_by_key(|(_, count)| *count) {
-            return Some(format!("crate::{}", most_common));
-        }
-
-        // Fall back to file path
         let parts: Vec<&str> = relative_path.trim_end_matches(".rs").split('/').collect();
         if parts.len() > 2 {
             let ns = parts[1..parts.len() - 1].join("::");
@@ -1565,6 +1550,37 @@ mod tests {
             )
             .expect("Failed to parse minimal grammar")
         }
+    }
+
+    #[test]
+    fn rust_namespace_comes_from_file_path_not_crate_imports() {
+        let grammar = rust_grammar();
+
+        let command_content = r#"
+use crate::help_topics;
+
+pub fn run() {
+    help_topics::print_all();
+}
+"#;
+        let command_fp =
+            fingerprint_from_grammar(command_content, &grammar, "src/commands/docs.rs")
+                .expect("fingerprint should succeed");
+
+        assert_eq!(command_fp.namespace.as_deref(), Some("crate::commands"));
+
+        let nested_content = r#"
+use crate::Result;
+
+pub fn undo() -> Result<()> {
+    Ok(())
+}
+"#;
+        let nested_fp =
+            fingerprint_from_grammar(nested_content, &grammar, "src/core/engine/undo.rs")
+                .expect("fingerprint should succeed");
+
+        assert_eq!(nested_fp.namespace.as_deref(), Some("crate::core::engine"));
     }
 
     #[test]
