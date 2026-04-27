@@ -90,6 +90,33 @@ pub struct TestMappingConfig {
     pub skip_test_patterns: Vec<String>,
 }
 
+/// Test drift convention: how source and test files are selected for drift scans.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TestDriftConfig {
+    /// Source directories to scan (relative to component root).
+    pub source_dirs: Vec<String>,
+    /// Test directories to scan (relative to component root).
+    pub test_dirs: Vec<String>,
+    /// File extensions to include when building source/test glob patterns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_extensions: Vec<String>,
+    /// Whether the language supports inline tests. Stored for consumers that
+    /// need it; drift scanning still uses source/test glob patterns.
+    #[serde(default)]
+    pub inline_tests: bool,
+}
+
+impl From<&TestMappingConfig> for TestDriftConfig {
+    fn from(config: &TestMappingConfig) -> Self {
+        Self {
+            source_dirs: config.source_dirs.clone(),
+            test_dirs: config.test_dirs.clone(),
+            file_extensions: Vec::new(),
+            inline_tests: config.inline_tests,
+        }
+    }
+}
+
 fn default_test_prefix() -> String {
     "test_".to_string()
 }
@@ -404,6 +431,18 @@ impl ExtensionManifest {
     /// declared under the audit capability.
     pub fn test_mapping(&self) -> Option<&TestMappingConfig> {
         self.audit.as_ref().and_then(|a| a.test_mapping.as_ref())
+    }
+
+    /// Convenience accessor for the test drift selection contract.
+    ///
+    /// `test.drift` is the primary home. `audit.test_mapping` remains a
+    /// fallback so installed extensions keep their existing drift behavior until
+    /// their manifests are refreshed.
+    pub fn test_drift(&self) -> Option<TestDriftConfig> {
+        self.test
+            .as_ref()
+            .and_then(|t| t.drift.clone())
+            .or_else(|| self.test_mapping().map(TestDriftConfig::from))
     }
 
     /// Convenience accessor for extension-supplied generic audit detector rules.
@@ -764,6 +803,9 @@ pub struct TestConfig {
     pub extension_script: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_parse: Option<ParseSpec>,
+    /// Source/test selection contract used by changed-test and drift workflows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drift: Option<TestDriftConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

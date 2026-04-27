@@ -1,7 +1,6 @@
 use crate::component::Component;
-use crate::extension::test::drift::{
-    detect_drift, generate_transform_rules, DriftOptions, DriftReport,
-};
+use crate::extension::test::drift::{detect_drift, generate_transform_rules, DriftReport};
+use crate::extension::test::resolve_drift_options;
 use crate::extension::test::TestScopeOutput;
 use crate::extension::test::{ChangeType, TestAnalysis};
 use crate::extension::test::{TestBaselineComparison, TestCounts};
@@ -59,11 +58,6 @@ pub fn detect_test_drift(
     component: &Component,
     since: &str,
 ) -> Result<DriftWorkflowResult, crate::Error> {
-    let source_path = {
-        let expanded = shellexpand::tilde(&component.local_path);
-        std::path::PathBuf::from(expanded.as_ref())
-    };
-
     crate::log_status!(
         "drift",
         "Detecting test drift since {} in {}",
@@ -71,11 +65,7 @@ pub fn detect_test_drift(
         component_id
     );
 
-    let opts = if source_path.join("Cargo.toml").exists() {
-        DriftOptions::rust(&source_path, since)
-    } else {
-        DriftOptions::php(&source_path, since)
-    };
+    let opts = resolve_drift_options(component, since)?;
 
     let report = detect_drift(component_id, &opts)?;
 
@@ -200,11 +190,7 @@ pub fn auto_fix_test_drift(
         std::path::PathBuf::from(expanded.as_ref())
     };
 
-    let opts = if source_path.join("Cargo.toml").exists() {
-        DriftOptions::rust(&source_path, since)
-    } else {
-        DriftOptions::php(&source_path, since)
-    };
+    let opts = resolve_drift_options(component, since)?;
 
     crate::log_status!(
         "test",

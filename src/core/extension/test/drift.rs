@@ -9,11 +9,13 @@
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::code_audit::walker::is_test_path;
 use crate::error::{Error, Result};
+use crate::extension::TestDriftConfig;
 use crate::git;
 
 // ============================================================================
@@ -98,23 +100,23 @@ pub struct DriftReport {
 // ============================================================================
 
 /// Options for drift detection.
-pub struct DriftOptions<'a> {
+pub struct DriftOptions {
     /// Component root directory.
-    pub root: &'a Path,
+    pub root: PathBuf,
     /// Git ref to compare against (tag, commit, branch).
-    pub since: &'a str,
+    pub since: String,
     /// Glob patterns for production files (non-test).
     pub source_patterns: Vec<String>,
     /// Glob patterns for test files.
     pub test_patterns: Vec<String>,
 }
 
-impl<'a> DriftOptions<'a> {
+impl DriftOptions {
     /// Create options with common defaults for a PHP project.
-    pub fn php(root: &'a Path, since: &'a str) -> Self {
+    pub fn php(root: &Path, since: &str) -> Self {
         Self {
-            root,
-            since,
+            root: root.to_path_buf(),
+            since: since.to_string(),
             source_patterns: vec![
                 "src/**/*.php".into(),
                 "inc/**/*.php".into(),
@@ -125,25 +127,61 @@ impl<'a> DriftOptions<'a> {
     }
 
     /// Create options with common defaults for a Rust project.
-    pub fn rust(root: &'a Path, since: &'a str) -> Self {
+    pub fn rust(root: &Path, since: &str) -> Self {
         Self {
-            root,
-            since,
+            root: root.to_path_buf(),
+            since: since.to_string(),
             source_patterns: vec!["src/**/*.rs".into()],
             test_patterns: vec!["tests/**/*.rs".into()],
         }
     }
+
+    /// Create options from an extension-declared drift selection contract.
+    pub fn from_config(
+        root: &Path,
+        since: &str,
+        config: &TestDriftConfig,
+        fallback_extensions: &[String],
+    ) -> Self {
+        let extensions = if config.file_extensions.is_empty() {
+            fallback_extensions
+        } else {
+            &config.file_extensions
+        };
+
+        Self {
+            root: root.to_path_buf(),
+            since: since.to_string(),
+            source_patterns: glob_patterns(&config.source_dirs, extensions),
+            test_patterns: glob_patterns(&config.test_dirs, extensions),
+        }
+    }
+}
+
+fn glob_patterns(dirs: &[String], extensions: &[String]) -> Vec<String> {
+    dirs.iter()
+        .flat_map(|dir| {
+            extensions.iter().map(move |extension| {
+                let extension = extension.trim_start_matches('.');
+                if dir.is_empty() || dir == "." {
+                    format!("**/*.{}", extension)
+                } else {
+                    format!("{}/**/*.{}", dir.trim_end_matches('/'), extension)
+                }
+            })
+        })
+        .collect()
 }
 
 /// Detect test drift by cross-referencing git changes with test files.
 pub fn detect_drift(component: &str, opts: &DriftOptions) -> Result<DriftReport> {
     // Step 1: Get changed production files from git diff
-    let changed_files = get_changed_files(opts.root, opts.since)?;
+    let changed_files = get_changed_files(&opts.root, &opts.since)?;
 
     // Filter to production files only (exclude tests)
     let prod_files: Vec<&str> = changed_files
         .iter()
-        .filter(|f| !is_test_path(f))
+        .filter(|f| !is_test_path(f) && matches_any_pattern(f, &opts.source_patterns))
         .map(|s| s.as_str())
         .collect();
 
@@ -162,13 +200,13 @@ pub fn detect_drift(component: &str, opts: &DriftOptions) -> Result<DriftReport>
     // Step 2: Parse diffs to extract structural changes
     let mut changes = Vec::new();
     for file in &prod_files {
-        let diff = get_file_diff(opts.root, opts.since, file)?;
+        let diff = get_file_diff(&opts.root, &opts.since, file)?;
         let file_changes = extract_changes_from_diff(file, &diff);
         changes.extend(file_changes);
     }
 
     // Also detect file renames
-    let renames = get_renamed_files(opts.root, opts.since)?;
+    let renames = get_renamed_files(&opts.root, &opts.since)?;
     for (old, new) in &renames {
         if !is_test_path(old) {
             changes.push(ProductionChange {
@@ -182,8 +220,8 @@ pub fn detect_drift(component: &str, opts: &DriftOptions) -> Result<DriftReport>
     }
 
     // Step 3: Scan test files for references to changed symbols
-    let test_files = collect_test_files(opts.root);
-    let drifted = find_drift_references(&changes, &test_files, opts.root);
+    let test_files = collect_test_files(&opts.root, &opts.test_patterns);
+    let drifted = find_drift_references(&changes, &test_files, &opts.root);
 
     // Step 4: Build report
     let total_drifted_files = {
@@ -458,24 +496,36 @@ fn extract_changes_from_diff(file: &str, diff: &str) -> Vec<ProductionChange> {
 // Test file scanning
 // ============================================================================
 
-/// Collect all test files in the repo.
-fn collect_test_files(root: &Path) -> Vec<PathBuf> {
-    let tests_dir = root.join("tests");
-    if !tests_dir.exists() {
-        return Vec::new();
-    }
-
-    collect_files_recursive(&tests_dir)
+fn matches_any_pattern(path: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        glob::Pattern::new(pattern)
+            .map(|compiled| compiled.matches_path(Path::new(path)))
+            .unwrap_or(false)
+    })
 }
 
-fn collect_files_recursive(dir: &Path) -> Vec<PathBuf> {
+/// Collect test files in the repo using extension-declared glob patterns.
+fn collect_test_files(root: &Path, test_patterns: &[String]) -> Vec<PathBuf> {
     use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
 
     let config = ScanConfig {
         extensions: ExtensionFilter::All,
         ..Default::default()
     };
-    codebase_scan::walk_files(dir, &config)
+    let mut files = BTreeSet::new();
+
+    for file in codebase_scan::walk_files(root, &config) {
+        let relative = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .to_string_lossy()
+            .to_string();
+        if matches_any_pattern(&relative, test_patterns) {
+            files.insert(file);
+        }
+    }
+
+    files.into_iter().collect()
 }
 
 /// Scan test files for references to changed production symbols.
