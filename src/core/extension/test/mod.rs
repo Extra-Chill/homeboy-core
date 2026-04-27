@@ -79,6 +79,39 @@ pub fn build_test_runner(
     Ok(runner)
 }
 
+fn component_source_path(component: &Component) -> PathBuf {
+    let expanded = shellexpand::tilde(&component.local_path);
+    PathBuf::from(expanded.as_ref())
+}
+
+/// Resolve drift detection options from the component's linked test extension.
+///
+/// `test.drift` is the primary contract. Installed extensions that only have
+/// the older `audit.test_mapping` shape still work through the manifest
+/// accessor fallback.
+pub fn resolve_drift_options(
+    component: &Component,
+    since: &str,
+) -> crate::error::Result<DriftOptions> {
+    let source_path = component_source_path(component);
+
+    if let Some(extensions) = &component.extensions {
+        for extension_id in extensions.keys() {
+            let manifest = crate::extension::load_extension(extension_id)?;
+            if let Some(config) = manifest.test_drift() {
+                return Ok(DriftOptions::from_config(
+                    &source_path,
+                    since,
+                    &config,
+                    manifest.provided_file_extensions(),
+                ));
+            }
+        }
+    }
+
+    Ok(DriftOptions::php(&source_path, since))
+}
+
 /// Compute which test files are impacted by changes since a git ref.
 ///
 /// Combines two sources: (1) changed files that are test paths, and
@@ -89,18 +122,11 @@ pub fn compute_changed_test_files(
     component: &Component,
     git_ref: &str,
 ) -> crate::error::Result<Vec<String>> {
-    let source_path = {
-        let expanded = shellexpand::tilde(&component.local_path);
-        PathBuf::from(expanded.as_ref())
-    };
+    let source_path = component_source_path(component);
 
     let changed_files = git::get_files_changed_since(&source_path.to_string_lossy(), git_ref)?;
 
-    let opts = if source_path.join("Cargo.toml").exists() {
-        DriftOptions::rust(&source_path, git_ref)
-    } else {
-        DriftOptions::php(&source_path, git_ref)
-    };
+    let opts = resolve_drift_options(component, git_ref)?;
 
     let report = drift::detect_drift(&component.id, &opts)?;
     let mut selected: BTreeSet<String> = BTreeSet::new();
@@ -139,9 +165,42 @@ pub fn compute_changed_test_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extension::TestDriftConfig;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn drift_options_use_extension_drift_config() {
+        let dir = TempDir::new().expect("temp dir should be created");
+        let config = TestDriftConfig {
+            source_dirs: vec!["src".to_string(), "inc".to_string()],
+            test_dirs: vec!["tests".to_string()],
+            file_extensions: vec!["php".to_string()],
+            inline_tests: false,
+        };
+
+        let opts = DriftOptions::from_config(dir.path(), "HEAD~1", &config, &["rs".to_string()]);
+
+        assert_eq!(opts.source_patterns, vec!["src/**/*.php", "inc/**/*.php"]);
+        assert_eq!(opts.test_patterns, vec!["tests/**/*.php"]);
+    }
+
+    #[test]
+    fn drift_options_fall_back_to_extension_file_extensions() {
+        let dir = TempDir::new().expect("temp dir should be created");
+        let config = TestDriftConfig {
+            source_dirs: vec!["src".to_string()],
+            test_dirs: vec!["tests".to_string()],
+            file_extensions: Vec::new(),
+            inline_tests: true,
+        };
+
+        let opts = DriftOptions::from_config(dir.path(), "HEAD~1", &config, &["rs".to_string()]);
+
+        assert_eq!(opts.source_patterns, vec!["src/**/*.rs"]);
+        assert_eq!(opts.test_patterns, vec!["tests/**/*.rs"]);
+    }
 
     #[test]
     fn compute_changed_test_scope_detects_new_test_file() {

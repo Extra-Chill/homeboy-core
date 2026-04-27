@@ -33,7 +33,7 @@ pub use manifest::{
     FileContainsCondition, HttpMethod, InputConfig, LintConfig, OutputConfig, OutputSchema,
     PlatformCapability, ProvidesConfig, RemotePathInferenceRule, RequirementsConfig, RuntimeConfig,
     RuntimeRequirementsConfig, ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig,
-    TestConfig, TestMappingConfig, VersionPatternConfig,
+    TestConfig, TestDriftConfig, TestMappingConfig, VersionPatternConfig,
 };
 
 // Re-export version types
