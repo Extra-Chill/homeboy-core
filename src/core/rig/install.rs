@@ -6,7 +6,7 @@
 //! linking `~/.config/homeboy/rigs/<id>.json` to the package spec.
 
 use crate::error::{Error, Result};
-use crate::{extension, git, paths};
+use crate::{extension, git, paths, stack};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,11 +20,19 @@ pub struct DiscoveredRig {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DiscoveredStack {
+    pub id: String,
+    pub description: String,
+    pub stack_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RigInstallResult {
     pub source: String,
     pub package_path: PathBuf,
     pub linked: bool,
     pub installed: Vec<InstalledRig>,
+    pub installed_stacks: Vec<InstalledStack>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,11 +53,33 @@ pub struct InstalledRig {
     pub source_revision: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledStack {
+    pub id: String,
+    pub description: String,
+    pub path: PathBuf,
+    pub spec_path: PathBuf,
+    pub source_revision: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RigSourceMetadata {
     pub source: String,
     pub package_path: String,
     pub rig_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_path: Option<String>,
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StackSourceMetadata {
+    pub source: String,
+    pub package_path: String,
+    pub stack_path: String,
+    pub discovery_path: String,
     pub linked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_revision: Option<String>,
@@ -59,11 +89,32 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
     let prepared = prepare_source(source)?;
     let discovered = discover_rigs(&prepared.discovery_path)?;
     let selected = select_rigs(discovered, id, all, source)?;
+    let discovered_stacks = discover_stacks(&prepared.discovery_path)?;
 
     fs::create_dir_all(paths::rigs()?)
         .map_err(|e| Error::internal_io(e.to_string(), Some("create rigs dir".into())))?;
+    fs::create_dir_all(paths::stacks()?)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create stacks dir".into())))?;
     fs::create_dir_all(paths::rig_sources()?)
         .map_err(|e| Error::internal_io(e.to_string(), Some("create rig sources dir".into())))?;
+    fs::create_dir_all(paths::stack_sources()?)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create stack sources dir".into())))?;
+
+    for stack in &discovered_stacks {
+        let target = paths::stack_config(&stack.id)?;
+        if target.exists() || fs::symlink_metadata(&target).is_ok() {
+            return Err(Error::validation_invalid_argument(
+                "stack_id",
+                format!(
+                    "Stack '{}' already exists at {}",
+                    stack.id,
+                    target.display()
+                ),
+                Some(stack.id.clone()),
+                None,
+            ));
+        }
+    }
 
     let mut installed = Vec::new();
     for rig in selected {
@@ -83,6 +134,7 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
             source: prepared.source.clone(),
             package_path: prepared.package_path.to_string_lossy().to_string(),
             rig_path: rig.rig_path.to_string_lossy().to_string(),
+            discovery_path: Some(prepared.discovery_path.to_string_lossy().to_string()),
             linked: prepared.linked,
             source_revision: prepared.source_revision.clone(),
         };
@@ -97,16 +149,47 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
         });
     }
 
+    let mut installed_stacks = Vec::new();
+    for stack in discovered_stacks {
+        let target = paths::stack_config(&stack.id)?;
+        link_or_copy_file(&stack.stack_path, &target)?;
+
+        let metadata = StackSourceMetadata {
+            source: prepared.source.clone(),
+            package_path: prepared.package_path.to_string_lossy().to_string(),
+            stack_path: stack.stack_path.to_string_lossy().to_string(),
+            discovery_path: prepared.discovery_path.to_string_lossy().to_string(),
+            linked: prepared.linked,
+            source_revision: prepared.source_revision.clone(),
+        };
+        write_stack_source_metadata(&stack.id, &metadata)?;
+
+        installed_stacks.push(InstalledStack {
+            id: stack.id,
+            description: stack.description,
+            path: target,
+            spec_path: stack.stack_path,
+            source_revision: prepared.source_revision.clone(),
+        });
+    }
+
     Ok(RigInstallResult {
         source: prepared.source,
         package_path: prepared.package_path,
         linked: prepared.linked,
         installed,
+        installed_stacks,
     })
 }
 
 pub fn read_source_metadata(id: &str) -> Option<RigSourceMetadata> {
     let path = paths::rig_source_metadata(id).ok()?;
+    let content = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub fn read_stack_source_metadata(id: &str) -> Option<StackSourceMetadata> {
+    let path = paths::stack_source_metadata(id).ok()?;
     let content = fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
@@ -247,6 +330,61 @@ pub fn discover_rigs(package_path: &Path) -> Result<Vec<DiscoveredRig>> {
     Ok(rigs)
 }
 
+pub fn discover_stacks(package_path: &Path) -> Result<Vec<DiscoveredStack>> {
+    let stacks_dir = package_path.join("stacks");
+    if !stacks_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut stacks = Vec::new();
+    for entry in fs::read_dir(&stacks_dir)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read stacks dir".into())))?
+    {
+        let entry = entry
+            .map_err(|e| Error::internal_io(e.to_string(), Some("read stack entry".into())))?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        stacks.push(discovered_stack_from_path(&path)?);
+    }
+
+    stacks.sort_by(|a, b| a.id.cmp(&b.id));
+    stacks.dedup_by(|a, b| a.id == b.id);
+    Ok(stacks)
+}
+
+fn discovered_stack_from_path(path: &Path) -> Result<DiscoveredStack> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read stack spec".into())))?;
+    let mut spec: stack::StackSpec = serde_json::from_str(&content).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some(format!("parse stack spec {}", path.display())),
+            Some(content.chars().take(200).collect()),
+        )
+    })?;
+    if spec.id.is_empty() {
+        spec.id = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                Error::validation_invalid_argument(
+                    "stack_id",
+                    "Stack spec has no id and no filename fallback",
+                    None,
+                    None,
+                )
+            })?
+            .to_string();
+    }
+    Ok(DiscoveredStack {
+        id: spec.id,
+        description: spec.description,
+        stack_path: path.to_path_buf(),
+    })
+}
+
 fn discovered_from_path(
     path: &Path,
     fallback_name: Option<&std::ffi::OsStr>,
@@ -323,6 +461,16 @@ pub(crate) fn write_source_metadata(id: &str, metadata: &RigSourceMetadata) -> R
         .map_err(|e| Error::internal_json(e.to_string(), Some("serialize rig source".into())))?;
     fs::write(&path, format!("{}\n", content))
         .map_err(|e| Error::internal_io(e.to_string(), Some("write rig source".into())))
+}
+
+pub(crate) fn write_stack_source_metadata(id: &str, metadata: &StackSourceMetadata) -> Result<()> {
+    fs::create_dir_all(paths::stack_sources()?)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("create stack sources dir".into())))?;
+    let path = paths::stack_source_metadata(id)?;
+    let content = serde_json::to_string_pretty(metadata)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize stack source".into())))?;
+    fs::write(&path, format!("{}\n", content))
+        .map_err(|e| Error::internal_io(e.to_string(), Some("write stack source".into())))
 }
 
 pub(crate) fn link_or_copy_file(source: &Path, target: &Path) -> Result<()> {

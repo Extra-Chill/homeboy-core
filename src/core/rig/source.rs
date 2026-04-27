@@ -8,13 +8,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::install::{link_or_copy_file, write_source_metadata, RigSourceMetadata};
+use super::install::{
+    discover_stacks, link_or_copy_file, write_source_metadata, write_stack_source_metadata,
+    RigSourceMetadata, StackSourceMetadata,
+};
 
 mod types;
 pub use types::{
-    InvalidRigSourceMetadata, RemovedRigSourceRig, RigSourceGroup, RigSourceListResult,
-    RigSourceRemoveResult, RigSourceRig, RigSourceUpdateResult, RigSourceUpdatedRig,
-    SkippedRigSourceRig, SkippedRigSourceUpdate,
+    InvalidRigSourceMetadata, RemovedRigSourceRig, RemovedRigSourceStack, RigSourceGroup,
+    RigSourceListResult, RigSourceRemoveResult, RigSourceRig, RigSourceStack,
+    RigSourceUpdateResult, RigSourceUpdatedRig, RigSourceUpdatedStack, SkippedRigSourceRig,
+    SkippedRigSourceStack, SkippedRigSourceUpdate,
 };
 
 pub fn list_sources() -> Result<RigSourceListResult> {
@@ -55,7 +59,9 @@ pub fn remove_source(selector: &str) -> Result<RigSourceRemoveResult> {
 
     let source = matches.into_iter().next().expect("checked non-empty");
     let mut removed = Vec::new();
+    let mut removed_stacks = Vec::new();
     let mut skipped = Vec::new();
+    let mut skipped_stacks = Vec::new();
     for rig in &source.rigs {
         let metadata_path = paths::rig_source_metadata(&rig.id)?;
         let config_path = PathBuf::from(&rig.config_path);
@@ -73,6 +79,31 @@ pub fn remove_source(selector: &str) -> Result<RigSourceRemoveResult> {
                 id: rig.id.clone(),
                 config_path: rig.config_path.clone(),
                 reason: "config file no longer points at the recorded rig source".to_string(),
+            });
+        }
+    }
+    for stack in &source.stacks {
+        let metadata_path = paths::stack_source_metadata(&stack.id)?;
+        let config_path = PathBuf::from(&stack.config_path);
+        let remove_config = stack.config_present && stack.config_owned;
+        if remove_config {
+            fs::remove_file(&config_path).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("remove stack config".into()))
+            })?;
+        }
+
+        remove_source_metadata(&metadata_path)?;
+        if remove_config || !stack.config_present {
+            removed_stacks.push(RemovedRigSourceStack {
+                id: stack.id.clone(),
+                config_path: stack.config_path.clone(),
+                metadata_path: metadata_path.to_string_lossy().to_string(),
+            });
+        } else {
+            skipped_stacks.push(SkippedRigSourceStack {
+                id: stack.id.clone(),
+                config_path: stack.config_path.clone(),
+                reason: "config file no longer points at the recorded stack source".to_string(),
             });
         }
     }
@@ -95,7 +126,9 @@ pub fn remove_source(selector: &str) -> Result<RigSourceRemoveResult> {
         selector: selector.to_string(),
         source,
         removed,
+        removed_stacks,
         skipped,
+        skipped_stacks,
         removed_package_path,
     })
 }
@@ -138,6 +171,7 @@ pub fn update_source_for_rig(id: &str) -> Result<RigSourceUpdateResult> {
 pub fn update_all_sources() -> Result<RigSourceUpdateResult> {
     let mut aggregate = RigSourceUpdateResult {
         updated: Vec::new(),
+        updated_stacks: Vec::new(),
         skipped: Vec::new(),
     };
     for source in list_sources()?.sources {
@@ -149,10 +183,18 @@ pub fn update_all_sources() -> Result<RigSourceUpdateResult> {
                     reason: "linked local sources are updated in place outside homeboy".to_string(),
                 });
             }
+            for stack in source.stacks {
+                aggregate.skipped.push(SkippedRigSourceUpdate {
+                    id: stack.id,
+                    source: source.source.clone(),
+                    reason: "linked local sources are updated in place outside homeboy".to_string(),
+                });
+            }
             continue;
         }
         let result = update_group(source)?;
         aggregate.updated.extend(result.updated);
+        aggregate.updated_stacks.extend(result.updated_stacks);
         aggregate.skipped.extend(result.skipped);
     }
     Ok(aggregate)
@@ -174,6 +216,7 @@ fn update_group(source: RigSourceGroup) -> Result<RigSourceUpdateResult> {
     let source_revision = short_head_revision(&package_path);
 
     let mut updated = Vec::new();
+    let mut updated_stacks = Vec::new();
     let mut skipped = Vec::new();
     for rig in source.rigs {
         let rig_path = PathBuf::from(&rig.rig_path);
@@ -206,6 +249,7 @@ fn update_group(source: RigSourceGroup) -> Result<RigSourceUpdateResult> {
             source: source.source.clone(),
             package_path: source.package_path.clone(),
             rig_path: rig.rig_path.clone(),
+            discovery_path: Some(source.discovery_path.clone()),
             linked: false,
             source_revision: source_revision.clone(),
         };
@@ -221,7 +265,50 @@ fn update_group(source: RigSourceGroup) -> Result<RigSourceUpdateResult> {
         });
     }
 
-    Ok(RigSourceUpdateResult { updated, skipped })
+    let current_stacks = discover_stacks(Path::new(&source.discovery_path))?;
+    for stack in current_stacks {
+        let existing = source.stacks.iter().find(|entry| entry.id == stack.id);
+        let config_path = paths::stack_config(&stack.id)?;
+        if config_path.exists() || fs::symlink_metadata(&config_path).is_ok() {
+            if existing.is_none_or(|entry| !entry.config_owned) {
+                skipped.push(SkippedRigSourceUpdate {
+                    id: stack.id,
+                    source: source.source.clone(),
+                    reason: "config file no longer points at the recorded stack source".to_string(),
+                });
+                continue;
+            }
+            fs::remove_file(&config_path).map_err(|e| {
+                Error::internal_io(e.to_string(), Some("replace stack config link".into()))
+            })?;
+        }
+        link_or_copy_file(&stack.stack_path, &config_path)?;
+
+        let metadata = StackSourceMetadata {
+            source: source.source.clone(),
+            package_path: source.package_path.clone(),
+            stack_path: stack.stack_path.to_string_lossy().to_string(),
+            discovery_path: source.discovery_path.clone(),
+            linked: false,
+            source_revision: source_revision.clone(),
+        };
+        write_stack_source_metadata(&stack.id, &metadata)?;
+
+        updated_stacks.push(RigSourceUpdatedStack {
+            id: stack.id,
+            source: source.source.clone(),
+            path: config_path.to_string_lossy().to_string(),
+            spec_path: stack.stack_path.to_string_lossy().to_string(),
+            previous_revision: previous_revision.clone(),
+            source_revision: source_revision.clone(),
+        });
+    }
+
+    Ok(RigSourceUpdateResult {
+        updated,
+        updated_stacks,
+        skipped,
+    })
 }
 
 fn short_head_revision(path: &Path) -> Option<String> {
@@ -261,20 +348,29 @@ struct RigSourceEntry {
 #[derive(Debug)]
 struct SourceEntries {
     valid: Vec<RigSourceEntry>,
+    valid_stacks: Vec<StackSourceEntry>,
     invalid: Vec<InvalidRigSourceMetadata>,
+}
+
+#[derive(Debug)]
+struct StackSourceEntry {
+    id: String,
+    metadata: StackSourceMetadata,
 }
 
 fn read_source_entries() -> Result<SourceEntries> {
     let dir = paths::rig_sources()?;
+    let mut invalid = Vec::new();
     if !dir.exists() {
+        let valid_stacks = read_stack_source_entries(&mut invalid)?;
         return Ok(SourceEntries {
             valid: Vec::new(),
-            invalid: Vec::new(),
+            valid_stacks,
+            invalid,
         });
     }
 
     let mut valid = Vec::new();
-    let mut invalid = Vec::new();
     for entry in fs::read_dir(&dir)
         .map_err(|e| Error::internal_io(e.to_string(), Some("read rig sources dir".into())))?
     {
@@ -309,9 +405,61 @@ fn read_source_entries() -> Result<SourceEntries> {
         }
     }
 
+    let valid_stacks = read_stack_source_entries(&mut invalid)?;
     valid.sort_by(|a, b| a.id.cmp(&b.id));
     invalid.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(SourceEntries { valid, invalid })
+    Ok(SourceEntries {
+        valid,
+        valid_stacks,
+        invalid,
+    })
+}
+
+fn read_stack_source_entries(
+    invalid: &mut Vec<InvalidRigSourceMetadata>,
+) -> Result<Vec<StackSourceEntry>> {
+    let dir = paths::stack_sources()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut valid = Vec::new();
+    for entry in fs::read_dir(&dir)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read stack sources dir".into())))?
+    {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(e.to_string(), Some("read stack source entry".into()))
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let id = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(id) => id.to_string(),
+            None => continue,
+        };
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                invalid.push(InvalidRigSourceMetadata {
+                    id,
+                    metadata_path: path.to_string_lossy().to_string(),
+                    error: err.to_string(),
+                });
+                continue;
+            }
+        };
+        match serde_json::from_str::<StackSourceMetadata>(&content) {
+            Ok(metadata) => valid.push(StackSourceEntry { id, metadata }),
+            Err(err) => invalid.push(InvalidRigSourceMetadata {
+                id,
+                metadata_path: path.to_string_lossy().to_string(),
+                error: err.to_string(),
+            }),
+        }
+    }
+    valid.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(valid)
 }
 
 fn group_source_entries(entries: SourceEntries) -> RigSourceListResult {
@@ -330,9 +478,15 @@ fn group_source_entries(entries: SourceEntries) -> RigSourceListResult {
                 source: entry.metadata.source.clone(),
                 package_id: package_id_from_path(&entry.metadata.package_path),
                 package_path: entry.metadata.package_path.clone(),
+                discovery_path: entry
+                    .metadata
+                    .discovery_path
+                    .clone()
+                    .unwrap_or_else(|| infer_discovery_path(&entry.metadata.rig_path)),
                 linked: entry.metadata.linked,
                 source_revision: entry.metadata.source_revision.clone(),
                 rigs: Vec::new(),
+                stacks: Vec::new(),
             })
             .rigs
             .push(RigSourceRig {
@@ -346,14 +500,65 @@ fn group_source_entries(entries: SourceEntries) -> RigSourceListResult {
             });
     }
 
+    for entry in entries.valid_stacks {
+        let key = format!("{}\0{}", entry.metadata.source, entry.metadata.package_path);
+        let config_path = paths::stack_config(&entry.id).ok();
+        let config_present = config_path.as_ref().is_some_and(|path| path.exists());
+        let config_owned = config_path
+            .as_ref()
+            .is_some_and(|path| rig_config_matches_source(path, &entry.metadata.stack_path));
+
+        groups
+            .entry(key)
+            .or_insert_with(|| RigSourceGroup {
+                source: entry.metadata.source.clone(),
+                package_id: package_id_from_path(&entry.metadata.package_path),
+                package_path: entry.metadata.package_path.clone(),
+                discovery_path: entry.metadata.discovery_path.clone(),
+                linked: entry.metadata.linked,
+                source_revision: entry.metadata.source_revision.clone(),
+                rigs: Vec::new(),
+                stacks: Vec::new(),
+            })
+            .stacks
+            .push(RigSourceStack {
+                id: entry.id,
+                stack_path: entry.metadata.stack_path,
+                config_path: config_path
+                    .map(|path| path.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                config_present,
+                config_owned,
+            });
+    }
+
     let mut sources = groups.into_values().collect::<Vec<_>>();
     for source in &mut sources {
         source.rigs.sort_by(|a, b| a.id.cmp(&b.id));
+        source.stacks.sort_by(|a, b| a.id.cmp(&b.id));
     }
 
     RigSourceListResult {
         sources,
         invalid: entries.invalid,
+    }
+}
+
+fn infer_discovery_path(rig_path: &str) -> String {
+    let path = Path::new(rig_path);
+    match path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+    {
+        Some("rigs") => path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string(),
+        _ => path.parent().unwrap_or(path).to_string_lossy().to_string(),
     }
 }
 

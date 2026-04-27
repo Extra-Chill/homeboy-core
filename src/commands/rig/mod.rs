@@ -10,9 +10,9 @@ use clap::{Args, Subcommand};
 use homeboy::rig;
 
 use self::output::{
-    RigAppOutput, RigCheckOutput, RigDownOutput, RigInstallOutput, RigInstalledSummary,
-    RigListOutput, RigShowOutput, RigSourceSummary, RigStatusOutput, RigSummary, RigSyncOutput,
-    RigUpOutput, RigUpdateOutput,
+    RigAppOutput, RigCheckOutput, RigDownOutput, RigInstallOutput, RigInstalledStackSummary,
+    RigInstalledSummary, RigListOutput, RigShowOutput, RigSourceSummary, RigStatusOutput,
+    RigSummary, RigSyncOutput, RigUpOutput, RigUpdateOutput,
 };
 use super::CmdResult;
 
@@ -186,6 +186,17 @@ fn install(source: &str, id: Option<&str>, all: bool) -> CmdResult<RigCommandOut
                     path: rig.path.to_string_lossy().to_string(),
                     spec_path: rig.spec_path.to_string_lossy().to_string(),
                     source_revision: rig.source_revision,
+                })
+                .collect(),
+            installed_stacks: result
+                .installed_stacks
+                .into_iter()
+                .map(|stack| RigInstalledStackSummary {
+                    id: stack.id,
+                    description: stack.description,
+                    path: stack.path.to_string_lossy().to_string(),
+                    spec_path: stack.spec_path.to_string_lossy().to_string(),
+                    source_revision: stack.source_revision,
                 })
                 .collect(),
         }),

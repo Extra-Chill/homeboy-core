@@ -100,6 +100,16 @@ pub fn rig_source_metadata(id: &str) -> Result<PathBuf> {
     Ok(rig_sources()?.join(format!("{}.json", id)))
 }
 
+/// Stack source metadata directory (~/.config/homeboy/stack-sources/)
+pub fn stack_sources() -> Result<PathBuf> {
+    Ok(homeboy()?.join("stack-sources"))
+}
+
+/// Stack source metadata file (~/.config/homeboy/stack-sources/{id}.json)
+pub fn stack_source_metadata(id: &str) -> Result<PathBuf> {
+    Ok(stack_sources()?.join(format!("{}.json", id)))
+}
+
 /// Rig state directory (~/.config/homeboy/rigs/{id}.state/)
 /// Holds service PIDs, logs, and last check results.
 pub fn rig_state_dir(id: &str) -> Result<PathBuf> {
