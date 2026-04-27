@@ -65,6 +65,89 @@ pub struct BenchRunWorkflowResult {
     pub hints: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BenchListWorkflowArgs {
+    pub component_label: String,
+    pub component_id: String,
+    pub path_override: Option<String>,
+    pub settings: Vec<(String, String)>,
+    pub settings_json: Vec<(String, serde_json::Value)>,
+    pub passthrough_args: Vec<String>,
+    pub extra_workloads: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BenchListWorkflowResult {
+    pub component: String,
+    pub component_id: String,
+    pub scenarios: Vec<BenchScenario>,
+    pub count: usize,
+}
+
+/// Discover bench scenarios without executing workloads.
+pub fn run_bench_list_workflow(
+    component: &Component,
+    args: BenchListWorkflowArgs,
+    run_dir: &RunDir,
+) -> Result<BenchListWorkflowResult> {
+    let execution_context = resolve_execution_context(component, ExtensionCapability::Bench)?;
+    let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
+
+    let runner_output = build_runner(
+        &execution_context,
+        component,
+        &BenchRunWorkflowArgs {
+            component_label: args.component_label.clone(),
+            component_id: args.component_id.clone(),
+            path_override: args.path_override,
+            settings: args.settings,
+            settings_json: args.settings_json,
+            iterations: 0,
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent: 0.0,
+            json_summary: false,
+            passthrough_args: args.passthrough_args,
+            rig_id: None,
+            shared_state: None,
+            concurrency: 1,
+            extra_workloads: args.extra_workloads,
+        },
+        run_dir,
+        None,
+    )?
+    .env("HOMEBOY_BENCH_LIST_ONLY", "1")
+    .run()?;
+
+    if !runner_output.success {
+        return Err(Error::validation_invalid_argument(
+            "bench_list",
+            format!(
+                "bench scenario discovery failed with exit code {}",
+                runner_output.exit_code
+            ),
+            Some(format!(
+                "stdout:\n{}\n\nstderr:\n{}",
+                runner_output.stdout, runner_output.stderr
+            )),
+            None,
+        ));
+    }
+
+    let parsed = parsing::parse_bench_results_file(&results_file)?;
+    let count = parsed.scenarios.len();
+
+    Ok(BenchListWorkflowResult {
+        component: args.component_label,
+        component_id: parsed.component_id,
+        scenarios: parsed.scenarios,
+        count,
+    })
+}
+
 /// Runs the extension's bench script and produces a structured result.
 ///
 /// Same runner contract as test/lint/build: the script writes a JSON
@@ -394,6 +477,7 @@ fn run_concurrent_instances(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn instance_results_filename_is_distinct_per_instance() {
@@ -413,5 +497,65 @@ mod tests {
             extra_workloads_env_value(&paths).unwrap(),
             "/tmp/bench-one.php:/tmp/bench-two.php"
         );
+    }
+
+    #[test]
+    fn test_run_bench_list_workflow() {
+        let result = BenchListWorkflowResult {
+            component: "homeboy".to_string(),
+            component_id: "homeboy".to_string(),
+            count: 1,
+            scenarios: vec![BenchScenario {
+                id: "audit-self".to_string(),
+                file: Some("src/bin/bench-audit-self.rs".to_string()),
+                source: Some("in_tree".to_string()),
+                default_iterations: Some(10),
+                tags: Vec::new(),
+                iterations: 0,
+                metrics: parsing::BenchMetrics {
+                    values: BTreeMap::new(),
+                    distributions: BTreeMap::new(),
+                },
+                memory: None,
+            }],
+        };
+
+        assert_eq!(result.count, result.scenarios.len());
+        assert_eq!(result.scenarios[0].iterations, 0);
+        assert!(result.scenarios[0].metrics.values.is_empty());
+        assert_eq!(result.scenarios[0].default_iterations, Some(10));
+    }
+
+    #[test]
+    fn test_run_main_bench_workflow() {
+        let run_dir = RunDir::create().expect("run dir");
+        let err = run_main_bench_workflow(
+            &Component::default(),
+            &PathBuf::from("/tmp/homeboy"),
+            BenchRunWorkflowArgs {
+                component_label: "homeboy".to_string(),
+                component_id: "homeboy".to_string(),
+                path_override: None,
+                settings: Vec::new(),
+                settings_json: Vec::new(),
+                iterations: 1,
+                baseline_flags: BaselineFlags {
+                    baseline: false,
+                    ignore_baseline: true,
+                    ratchet: false,
+                },
+                regression_threshold_percent: 5.0,
+                json_summary: false,
+                passthrough_args: Vec::new(),
+                rig_id: None,
+                shared_state: None,
+                concurrency: 0,
+                extra_workloads: Vec::new(),
+            },
+            &run_dir,
+        )
+        .expect_err("zero concurrency must fail before runner resolution");
+
+        assert!(format!("{}", err).contains("concurrency"));
     }
 }
