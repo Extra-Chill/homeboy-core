@@ -65,10 +65,12 @@ fn write_and_commit(dir: &TempDir, path: &str, file: &str, body: &str, msg: &str
 fn meta(state: &str, head_sha: &str) -> PrMeta {
     PrMeta {
         head_sha: head_sha.to_string(),
-        head_owner: "Automattic".to_string(),
-        head_name: "studio".to_string(),
+        head_owner: Some("Automattic".to_string()),
+        head_name: Some("studio".to_string()),
         state: state.to_string(),
         title: Some("test PR".to_string()),
+        url: Some("https://github.com/Automattic/studio/pull/1".to_string()),
+        review_decision: None,
         merged_at: if state == "MERGED" {
             Some("2026-04-26T00:00:00Z".to_string())
         } else {
