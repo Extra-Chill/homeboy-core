@@ -2,26 +2,9 @@ use homeboy::component;
 use homeboy::extension;
 use std::fs;
 use std::path::Path;
-use std::sync::Mutex;
 
-static HOME_LOCK: Mutex<()> = Mutex::new(());
-
-fn with_isolated_home<T>(f: impl FnOnce(&Path) -> T) -> T {
-    let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let old_home = std::env::var_os("HOME");
-    let home = tempfile::tempdir().expect("home tempdir");
-
-    std::env::set_var("HOME", home.path());
-    let result = f(home.path());
-
-    if let Some(value) = old_home {
-        std::env::set_var("HOME", value);
-    } else {
-        std::env::remove_var("HOME");
-    }
-
-    result
-}
+mod test_support;
+use test_support::with_isolated_home;
 
 fn write_extension_fixture(root: &Path, id: &str) {
     let dir = root.join(id);
@@ -62,8 +45,9 @@ fn write_component_fixture(root: &Path, extensions: &[&str]) {
 }
 
 #[test]
-fn install_for_component_installs_multiple_extensions() {
+fn test_install_for_component_installs_multiple_extensions() {
     with_isolated_home(|home| {
+        let home = home.path();
         let source = home.join("source");
         write_extension_fixture(&source, "alpha");
         write_extension_fixture(&source, "beta");
@@ -93,8 +77,9 @@ fn install_for_component_installs_multiple_extensions() {
 }
 
 #[test]
-fn install_for_component_skips_already_installed_extensions() {
+fn test_install_for_component_skips_already_installed_extensions() {
     with_isolated_home(|home| {
+        let home = home.path();
         let source = home.join("source");
         write_extension_fixture(&source, "alpha");
         write_extension_fixture(&source, "beta");
@@ -121,8 +106,9 @@ fn install_for_component_skips_already_installed_extensions() {
 }
 
 #[test]
-fn install_for_component_uses_path_based_portable_component_config() {
+fn test_install_for_component_uses_path_based_portable_component_config() {
     with_isolated_home(|home| {
+        let home = home.path();
         let source = home.join("source");
         write_extension_fixture(&source, "alpha");
         write_extension_fixture(&source, "beta");
