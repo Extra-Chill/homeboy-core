@@ -11,3 +11,7 @@ pub struct BenchArtifact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/core/extension/bench/artifact_test.rs"]
+mod artifact_test;

@@ -99,5 +99,9 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
 }
 
 #[cfg(test)]
+#[path = "../../../../tests/core/extension/bench/aggregation_test.rs"]
+mod aggregation_test;
+
+#[cfg(test)]
 #[path = "../../../../tests/core/extension/bench/runs_flag_test.rs"]
 mod runs_flag_test;

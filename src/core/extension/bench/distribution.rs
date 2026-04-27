@@ -60,3 +60,7 @@ pub(crate) fn percentile(samples: &[f64], pct: f64) -> f64 {
         sorted[lower] * (1.0 - weight) + sorted[upper] * weight
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/core/extension/bench/distribution_test.rs"]
+mod distribution_test;

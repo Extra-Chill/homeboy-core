@@ -2,6 +2,13 @@ use std::collections::BTreeMap;
 
 use crate::extension::bench::parsing::{BenchMetrics, BenchResults, BenchScenario};
 
+pub(crate) fn approx_eq(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 1e-9,
+        "expected {expected}, got {actual}"
+    );
+}
+
 pub(crate) fn scenario_with_iterations(
     id: &str,
     metrics: &[(&str, f64)],
@@ -42,3 +49,7 @@ pub(crate) fn results_with_scenarios(
         metric_policies: BTreeMap::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/core/extension/bench/test_support_test.rs"]
+mod test_support_test;
