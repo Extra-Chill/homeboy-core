@@ -4,6 +4,17 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.116.0] - 2026-04-27
+
+### Added
+- add scenario selector
+- report active binary status
+- summarize cross-rig variance
+
+### Fixed
+- surface cross-rig failure stderr
+- isolate update-all package failures
+
 ## [0.115.0] - 2026-04-27
 
 ### Added
