@@ -72,6 +72,7 @@ fn test_expand_vars_unterminated_braces() {
 
 #[test]
 fn test_expand_resources_expands_path_entries_only() {
+    let previous_resource_path = std::env::var("RIG_RESOURCE_PATH").ok();
     std::env::set_var("RIG_RESOURCE_PATH", "studio@resources");
     let home = tempfile::tempdir().expect("home");
     let previous_home = std::env::var("HOME").ok();
@@ -99,28 +100,31 @@ fn test_expand_resources_expands_path_entries_only() {
     rig.resources.process_patterns = vec!["wordpress-server-child.mjs".to_string()];
 
     let resources = expand_resources(&rig);
+    let expected_paths = vec![
+        home.path()
+            .join("Developer/studio@resources")
+            .to_string_lossy()
+            .to_string(),
+        home.path()
+            .join("Developer/studio/apps/cli")
+            .to_string_lossy()
+            .to_string(),
+    ];
+
+    match previous_resource_path {
+        Some(value) => std::env::set_var("RIG_RESOURCE_PATH", value),
+        None => std::env::remove_var("RIG_RESOURCE_PATH"),
+    }
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
     assert_eq!(resources.exclusive, vec!["studio-runtime"]);
     assert_eq!(resources.ports, vec![9724]);
     assert_eq!(
         resources.process_patterns,
         vec!["wordpress-server-child.mjs"]
     );
-    assert_eq!(
-        resources.paths,
-        vec![
-            home.path()
-                .join("Developer/studio@resources")
-                .to_string_lossy()
-                .to_string(),
-            home.path()
-                .join("Developer/studio/apps/cli")
-                .to_string_lossy()
-                .to_string(),
-        ]
-    );
-
-    match previous_home {
-        Some(value) => std::env::set_var("HOME", value),
-        None => std::env::remove_var("HOME"),
-    }
+    assert_eq!(resources.paths, expected_paths);
 }
