@@ -103,6 +103,18 @@ const CANDIDATE_WITHOUT_BASELINE: &str = r#"{
     "bench": { "default_component": "homeboy" }
 }"#;
 
+const CANDIDATE_MATRIX_WITH_BASELINE: &str = r#"{
+    "id": "candidate",
+    "components": {
+        "homeboy": { "path": "/tmp/homeboy" },
+        "homeboy-rust": { "path": "/tmp/homeboy-rust" }
+    },
+    "bench": {
+        "components": ["homeboy", "homeboy-rust"],
+        "default_baseline_rig": "homeboy-main"
+    }
+}"#;
+
 const CANDIDATE_SELF_REFERENCE: &str = r#"{
     "id": "candidate",
     "components": { "homeboy": { "path": "/tmp/homeboy" } },
@@ -207,6 +219,41 @@ mod cases {
             result.is_none(),
             "multi-rig user input must short-circuit before any rig::load"
         );
+    }
+
+    #[test]
+    fn test_component_matrix_suppresses_default_baseline_expansion() {
+        // A single-rig component matrix should fan out under one rig-state
+        // snapshot. Auto-upgrading it into a cross-rig comparison would
+        // change the command into a different axis before the matrix runner
+        // sees the spec.
+        with_isolated_home(|home| {
+            write_rig_fixture(home, "candidate", CANDIDATE_MATRIX_WITH_BASELINE);
+            let args = make_args(vec!["candidate".to_string()], false, false, false);
+            let result = maybe_expand_default_baseline(&args.run).expect("dispatch ok");
+            assert!(
+                result.is_none(),
+                "component matrix must remain a single-rig dispatch"
+            );
+        });
+    }
+
+    #[test]
+    fn test_explicit_component_still_allows_default_baseline_expansion() {
+        // Passing a component removes the matrix axis, so the existing
+        // default_baseline_rig compatibility path remains valid.
+        with_isolated_home(|home| {
+            write_rig_fixture(home, "candidate", CANDIDATE_MATRIX_WITH_BASELINE);
+            let mut args = make_args(vec!["candidate".to_string()], false, false, false);
+            args.run.comp.component = Some("homeboy".to_string());
+            let expanded = maybe_expand_default_baseline(&args.run)
+                .expect("dispatch ok")
+                .expect("expansion applied");
+            assert_eq!(
+                expanded,
+                vec!["homeboy-main".to_string(), "candidate".to_string()]
+            );
+        });
     }
 
     #[test]

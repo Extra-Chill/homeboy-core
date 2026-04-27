@@ -54,10 +54,12 @@ the other capabilities.
 - `--json-summary`: Include a compact machine-readable summary in the
   JSON output envelope (for CI wrappers).
 - `--rig <RIG_ID[,RIG_ID...]>`: Pin the run to one or more rigs. Single
-  rig pins the rig and stores its baseline under a rig-scoped key.
-  Multiple rigs (comma-separated) run the same component + workload +
-  iteration count against each rig in sequence and emit a cross-rig
-  comparison envelope. See "Cross-rig comparison" below.
+  rig pins the rig and stores its baseline under a rig-scoped key. If
+  that rig declares `bench.components`, the command fans out across those
+  components under one rig-state snapshot. Multiple rigs (comma-separated)
+  run the same component + workload + iteration count against each rig in
+  sequence and emit a cross-rig comparison envelope. See "Cross-rig
+  comparison" below.
 - `--ignore-default-baseline`: Skip automatic single-rig expansion when
   the rig declares `bench.default_baseline_rig`.
 
@@ -101,6 +103,9 @@ homeboy bench my-component --shared-state /tmp/homeboy-bench --concurrency 4
 
 # Pin to a single rig — preflight + rig-scoped baseline
 homeboy bench studio --rig studio-trunk
+
+# Pin to one rig and run every component declared in bench.components
+homeboy bench --rig mdi-substrates --shared-state /tmp/mdi-bench
 
 # Cross-rig comparison: same workload, two rigs, side-by-side report.
 # First rig (`studio-trunk`) is the reference; the diff table expresses
@@ -156,6 +161,7 @@ bench workflows:
 {
   "bench": {
     "default_component": "studio",
+    "components": ["studio", "playground"],
     "default_baseline_rig": "studio-trunk"
   },
   "bench_workloads": {
@@ -167,10 +173,16 @@ bench workflows:
 - `bench.default_component` lets `homeboy bench --rig <id>` omit the
   positional component. With multiple rigs, every rig must agree on the
   default unless the component is provided explicitly.
+- `bench.components` lets `homeboy bench --rig <id>` fan out across a list
+  of components from one rig spec. Scenarios are merged into the standard
+  single-run envelope with `:c<component>` suffixes (for example
+  `cold-boot:cstudio`). When `--shared-state <dir>` is provided, each
+  component gets its own `<dir>/<component>` subdirectory.
 - `bench.default_baseline_rig` upgrades `homeboy bench --rig <candidate>`
   into `homeboy bench --rig <baseline>,<candidate>` unless the invocation
   already lists multiple rigs, writes a baseline (`--baseline` / `--ratchet`),
-  or passes `--ignore-default-baseline`.
+  passes `--ignore-default-baseline`, or the candidate rig declares a
+  multi-component `bench.components` matrix.
 - `bench_workloads` supplies rig-owned workload files keyed by extension ID.
   Paths support `~`, `${env.NAME}`, and `${components.<id>.path}` expansion.
 

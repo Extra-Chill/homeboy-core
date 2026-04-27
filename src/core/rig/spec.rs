@@ -58,11 +58,10 @@ pub struct RigSpec {
     pub bench_workloads: HashMap<String, Vec<String>>,
 }
 
-/// Bench composition for a rig. Currently minimal — pins which component
-/// `homeboy rig bench` benchmarks when no explicit `--component` flag is
-/// passed. Matrix expansion + custom precheck + per-component overrides
-/// are deferred to follow-ups (see Extra-Chill/homeboy#1466 follow-up
-/// issues).
+/// Bench composition for a rig. Pins which component(s) `homeboy bench
+/// --rig <id>` benchmarks when no explicit component is passed. The
+/// singular `default_component` remains supported for existing specs;
+/// new multi-component rigs should use `components`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchSpec {
     /// Component ID to benchmark when `homeboy rig bench <rig>` is invoked
@@ -70,6 +69,13 @@ pub struct BenchSpec {
     /// CLI when this isn't set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_component: Option<String>,
+
+    /// Component IDs to benchmark as one rig-pinned matrix when
+    /// `homeboy bench --rig <id>` is invoked without a positional
+    /// component. Each component runs independently; the command-level
+    /// output merges scenarios with a `:c<component>` suffix.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<String>,
 
     /// When set, `homeboy bench --rig <this-rig>` is automatically
     /// upgraded into a two-rig comparison `--rig <baseline>,<this-rig>`,
