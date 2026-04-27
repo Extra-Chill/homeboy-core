@@ -33,6 +33,8 @@ pub(crate) fn normalize_signature(sig: &str) -> String {
         .replace_all(&normalized, "")
         .to_string();
 
+    let normalized = strip_declaration_only_modifiers(&normalized);
+
     // Strip trailing body markers FIRST — the `{ }` or `{ ... }` are not part of
     // the function's structural contract and contain parens (e.g., `Ok(())`) that
     // confuse `strip_return_type`'s `rfind(')')`.
@@ -44,6 +46,7 @@ pub(crate) fn normalize_signature(sig: &str) -> String {
     // PHP:  "function foo(): ?array" → "function foo()"
     // Rust: "fn foo() -> Result<T>" → "fn foo()"
     let normalized = strip_return_type(&normalized);
+    let normalized = strip_declaration_terminator(&normalized);
 
     // Strip parameter type annotations — only arity and parameter names matter
     // for structural comparison.  This is language-agnostic: for each comma-
@@ -54,6 +57,19 @@ pub(crate) fn normalize_signature(sig: &str) -> String {
     // Already-untyped params pass through unchanged.
 
     strip_param_types(&normalized)
+}
+
+/// Strip declaration-only modifiers that do not affect callable structure.
+fn strip_declaration_only_modifiers(sig: &str) -> String {
+    Regex::new(r"\babstract\s+")
+        .unwrap()
+        .replace_all(sig, "")
+        .to_string()
+}
+
+/// Strip a trailing declaration terminator from body-less signatures.
+fn strip_declaration_terminator(sig: &str) -> String {
+    sig.trim_end().trim_end_matches(';').trim_end().to_string()
 }
 
 /// Strip parameter type annotations from a signature string.
@@ -377,6 +393,29 @@ mod tests {
             "Token count should match regardless of return type: {:?} vs {:?}",
             with_return,
             without_return
+        );
+    }
+
+    #[test]
+    fn php_abstract_return_type_matches_concrete_tokens() {
+        let abstract_decl =
+            tokenize_signature("abstract protected function runRetentionCleanup(): array;");
+        let concrete_impl = tokenize_signature("protected function runRetentionCleanup(): array {");
+
+        assert_eq!(
+            abstract_decl, concrete_impl,
+            "Abstract declaration and concrete implementation should share callable structure"
+        );
+    }
+
+    #[test]
+    fn php_declaration_terminator_not_structural() {
+        let declaration = tokenize_signature("abstract protected function execute($config);");
+        let implementation = tokenize_signature("protected function execute($config) {");
+
+        assert_eq!(
+            declaration, implementation,
+            "Body-less declaration terminator should not affect signature structure"
         );
     }
 
