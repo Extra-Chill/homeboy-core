@@ -121,6 +121,14 @@ pub(crate) fn has_import_with_context(
         }
     }
 
+    // Rust imports can be scoped inside nested modules, especially
+    // `#[cfg(test)] mod tests`. The flat fingerprint import list can miss that
+    // context, so verify whether an in-content `use` covers every reference in
+    // its enclosing block before suggesting a broader top-level import.
+    if expected.contains("::") && rust_scoped_import_satisfies(expected, file_content, terminal) {
+        return true;
+    }
+
     // 4. Local definition check: if the file defines the symbol locally,
     //    it doesn't need an import (e.g., `fn default_true() -> bool { true }`)
     if !terminal.is_empty() && content_defines_name(file_content, terminal) {
@@ -145,6 +153,109 @@ pub(crate) fn grouped_import_contains(import: &str, name: &str) -> bool {
     } else {
         false
     }
+}
+
+fn rust_scoped_import_satisfies(expected: &str, content: &str, terminal: &str) -> bool {
+    if terminal.is_empty() {
+        return false;
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return false;
+    }
+
+    let scopes = rust_brace_scopes(&lines);
+    let mut import_scopes = Vec::new();
+    let mut references = Vec::new();
+
+    for (line_index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
+            continue;
+        }
+
+        if rust_use_line_satisfies(trimmed, expected, terminal) {
+            import_scopes.push(innermost_scope_for_line(&scopes, line_index));
+            continue;
+        }
+
+        if !contains_word(trimmed, terminal) {
+            continue;
+        }
+        if is_only_in_attribute_string(trimmed, terminal) {
+            continue;
+        }
+        references.push(line_index);
+    }
+
+    !references.is_empty()
+        && !import_scopes.is_empty()
+        && references.iter().all(|reference| {
+            import_scopes
+                .iter()
+                .any(|(start, end)| *start <= *reference && *reference <= *end)
+        })
+}
+
+fn rust_use_line_satisfies(line: &str, expected: &str, terminal: &str) -> bool {
+    let Some(rest) = line
+        .strip_prefix("use ")
+        .or_else(|| line.strip_prefix("pub use "))
+    else {
+        return false;
+    };
+
+    let import = rest.trim_end_matches(';').trim();
+    if import == expected {
+        return true;
+    }
+
+    if (import.contains("::{") || import.contains("\\{"))
+        && grouped_import_contains(import, terminal)
+    {
+        let expected_ns = namespace_of(expected);
+        return !expected_ns.is_empty()
+            && (import.starts_with(&format!("{}::{{", expected_ns))
+                || import.starts_with(&format!("{}\\{{", expected_ns)));
+    }
+
+    false
+}
+
+fn rust_brace_scopes(lines: &[&str]) -> Vec<(usize, usize)> {
+    let last_line = lines.len().saturating_sub(1);
+    let mut scopes = vec![(0, last_line)];
+    let mut stack: Vec<usize> = Vec::new();
+
+    for (line_index, line) in lines.iter().enumerate() {
+        for ch in line.chars() {
+            match ch {
+                '{' => stack.push(line_index),
+                '}' => {
+                    if let Some(start) = stack.pop() {
+                        scopes.push((start, line_index));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for start in stack {
+        scopes.push((start, last_line));
+    }
+
+    scopes
+}
+
+fn innermost_scope_for_line(scopes: &[(usize, usize)], line: usize) -> (usize, usize) {
+    scopes
+        .iter()
+        .copied()
+        .filter(|(start, end)| *start <= line && line <= *end)
+        .min_by_key(|(start, end)| end.saturating_sub(*start))
+        .unwrap_or((0, line))
 }
 
 /// Check if file content contains a local definition of a name.
@@ -452,6 +563,38 @@ fn default_true() -> bool {
         let imports = vec![];
         let content = "fn build() -> Config { Config::default() }\n";
         assert!(!has_import("crate::types::Config", &imports, content));
+    }
+
+    #[test]
+    fn has_import_nested_rust_test_module_import_satisfies_local_usage() {
+        let imports = vec![];
+        let content = r#"
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    fn helper(values: BTreeMap<String, f64>) {}
+}
+"#;
+
+        assert!(has_import("std::collections::BTreeMap", &imports, content));
+    }
+
+    #[test]
+    fn has_import_nested_rust_import_does_not_satisfy_outer_usage() {
+        let imports = vec![];
+        let content = r#"
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    fn helper(values: BTreeMap<String, f64>) {}
+}
+
+fn production(values: BTreeMap<String, f64>) {}
+"#;
+
+        assert!(!has_import("std::collections::BTreeMap", &imports, content));
     }
 
     #[test]
