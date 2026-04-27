@@ -1,12 +1,10 @@
 # PR quality pipeline.
 #
-# Build once, then strict serial pipeline: audit → lint → test → auto-refactor
+# Build once, then strict serial pipeline: audit → lint → test
 # A single build job compiles homeboy from source and shares the binary
 # via artifact. Each stage downloads it instead of rebuilding.
-# The single auto-refactor phase owns automated writes. It must still run after
-# failing read-only stages on same-repo PRs so autofix can commit repairs
-# back to the branch. If fixes are committed, the App token push triggers a
-# full re-run.
+# Auto-refactor is intentionally disabled on PRs while high-throughput cleanup
+# work is in flight; failed read-only stages should be fixed explicitly.
 # Scoped to changed files only (--changed-since via scope module).
 #
 # Fork PRs: CI runs read-only checks (no autofix, no baseline writes).
@@ -156,42 +154,4 @@ jobs:
         with:
           binary-path: .homeboy-bin/homeboy
           commands: test
-          app-token: ${{ steps.app-token.outputs.token || '' }}
-
-  # ── Stage 4: Auto-refactor ──
-  # Single end-of-pipeline mutation phase. Must run even when earlier
-  # read-only jobs fail so same-repo PRs can autofix and push repairs.
-  refactor:
-    name: Auto-refactor
-    needs: [build, audit, lint, test]
-    if: ${{ always() && needs.build.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Download homeboy binary
-        uses: actions/download-artifact@v4
-        with:
-          name: homeboy-binary
-          path: .homeboy-bin
-
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        continue-on-error: true
-        with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
-
-      - uses: Extra-Chill/homeboy-action@v2
-        with:
-          binary-path: .homeboy-bin/homeboy
-          commands: 'refactor --from all'
-          autofix: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'true' || 'false' }}
-          autofix-mode: 'on-failure'
-          autofix-max-commits: '3'
-          comment-section-title: 'Auto-refactor'
           app-token: ${{ steps.app-token.outputs.token || '' }}
