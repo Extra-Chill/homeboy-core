@@ -52,13 +52,13 @@ fn rig_bench_components(spec: &RigSpec) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn rig_component_path(spec: &RigSpec, component_id: &str) -> Option<String> {
+pub(super) fn rig_component_path(spec: &RigSpec, component_id: &str) -> Option<String> {
     spec.components
         .get(component_id)
         .map(|component| rig::expand::expand_vars(spec, &component.path))
 }
 
-fn rig_component_for_bench(spec: &RigSpec, component_id: &str) -> Option<Component> {
+pub(super) fn rig_component_for_bench(spec: &RigSpec, component_id: &str) -> Option<Component> {
     let rig_component = spec.components.get(component_id)?;
     let extensions = rig_component.extensions.clone()?;
     let mut component = Component {
