@@ -466,6 +466,7 @@ fn execute_deployment(
             component_ids: vec![component_id.to_string()],
             all: false,
             outdated: false,
+            behind_upstream: false,
             dry_run: false,
             check: false,
             // Force: the release pipeline just committed and tagged, so the

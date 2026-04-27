@@ -33,6 +33,8 @@ pub enum FleetComponentDrift {
     NeedsUpdate,
     /// Remote version is ahead of local
     BehindRemote,
+    /// Local checkout is behind its upstream branch
+    BehindUpstream,
     /// Has unreleased code commits (needs version bump)
     NeedsBump,
     /// Only docs changes since last tag
@@ -266,6 +268,7 @@ fn collect_project_component_statuses(
         component_ids: vec![],
         all: true,
         outdated: false,
+        behind_upstream: false,
         dry_run: false,
         check: true,
         force: false,
@@ -288,9 +291,9 @@ fn collect_project_component_statuses(
                 component_summary.total += 1;
                 match &drift {
                     FleetComponentDrift::Current => component_summary.current += 1,
-                    FleetComponentDrift::NeedsUpdate | FleetComponentDrift::BehindRemote => {
-                        component_summary.needs_update += 1
-                    }
+                    FleetComponentDrift::NeedsUpdate
+                    | FleetComponentDrift::BehindRemote
+                    | FleetComponentDrift::BehindUpstream => component_summary.needs_update += 1,
                     FleetComponentDrift::NeedsBump => component_summary.needs_bump += 1,
                     FleetComponentDrift::DocsOnly => component_summary.docs_only += 1,
                     FleetComponentDrift::Unknown => component_summary.unknown += 1,
@@ -369,6 +372,7 @@ fn resolve_component_drift(
         Some(deploy::ComponentStatus::UpToDate) => FleetComponentDrift::Current,
         Some(deploy::ComponentStatus::NeedsUpdate) => FleetComponentDrift::NeedsUpdate,
         Some(deploy::ComponentStatus::BehindRemote) => FleetComponentDrift::BehindRemote,
+        Some(deploy::ComponentStatus::BehindUpstream) => FleetComponentDrift::BehindUpstream,
         Some(deploy::ComponentStatus::Unknown) | None => FleetComponentDrift::Unknown,
     };
 

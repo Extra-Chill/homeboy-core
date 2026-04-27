@@ -133,6 +133,7 @@ pub fn run_multi(
             component_ids: component_ids.to_vec(),
             all: config.all,
             outdated: config.outdated,
+            behind_upstream: config.behind_upstream,
             dry_run: config.dry_run,
             check: config.check,
             force: config.force,

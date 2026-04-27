@@ -162,9 +162,43 @@ pub(super) fn plan_components(
         return Ok(selected);
     }
 
+    if config.behind_upstream {
+        let selected = select_behind_upstream_components(all_components);
+
+        if selected.is_empty() {
+            return Err(Error::validation_invalid_argument(
+                "behind_upstream",
+                "No components behind upstream found",
+                None,
+                None,
+            ));
+        }
+
+        return Ok(selected);
+    }
+
     Err(Error::validation_missing_argument(vec![
-        "component IDs, --all, --outdated, or --check".to_string(),
+        "component IDs, --all, --outdated, --behind-upstream, or --check".to_string(),
     ]))
+}
+
+fn select_behind_upstream_components(all_components: &[Component]) -> Vec<Component> {
+    all_components
+        .iter()
+        .filter(|component| component_is_behind_upstream(component))
+        .cloned()
+        .collect()
+}
+
+fn component_is_behind_upstream(component: &Component) -> bool {
+    if component.is_file_component() {
+        return false;
+    }
+
+    matches!(
+        git::fetch_and_get_behind_count(&component.local_path),
+        Ok(Some(_))
+    )
 }
 
 /// Calculate component status based on local and remote versions.
@@ -172,6 +206,10 @@ pub(super) fn calculate_component_status(
     component: &Component,
     remote_versions: &HashMap<String, String>,
 ) -> ComponentStatus {
+    if component_is_behind_upstream(component) {
+        return ComponentStatus::BehindUpstream;
+    }
+
     let local_version = version::get_component_version(component);
     let remote_version = remote_versions.get(&component.id);
 
@@ -333,4 +371,119 @@ pub(super) fn load_project_components(
         deployable,
         skipped,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn run_git(path: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .expect("git command");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_source_repo(path: &Path) {
+        run_git(path, &["init", "-q", "-b", "main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test"]);
+        std::fs::write(path.join("component.txt"), "v1\n").expect("write v1");
+        run_git(path, &["add", "component.txt"]);
+        run_git(path, &["commit", "-q", "-m", "initial"]);
+    }
+
+    fn commit_upstream_change(path: &Path) {
+        std::fs::write(path.join("component.txt"), "v2\n").expect("write v2");
+        run_git(path, &["add", "component.txt"]);
+        run_git(path, &["commit", "-q", "-m", "upstream"]);
+    }
+
+    fn clone_repo(source: &Path, target: &Path) {
+        let output = std::process::Command::new("git")
+            .args([
+                "clone",
+                "-q",
+                source.to_str().expect("source path"),
+                target.to_str().expect("target path"),
+            ])
+            .output()
+            .expect("git clone");
+        assert!(
+            output.status.success(),
+            "git clone failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn component(id: &str, path: &Path) -> Component {
+        Component::new(
+            id.to_string(),
+            path.to_string_lossy().to_string(),
+            String::new(),
+            None,
+        )
+    }
+
+    #[test]
+    fn select_behind_upstream_components_finds_stale_checkout() {
+        let temp = TempDir::new().expect("temp dir");
+        let source = temp.path().join("source");
+        let local = temp.path().join("local");
+        std::fs::create_dir(&source).expect("source dir");
+
+        init_source_repo(&source);
+        clone_repo(&source, &local);
+        commit_upstream_change(&source);
+
+        let stale = component("stale", &local);
+        let selected = select_behind_upstream_components(std::slice::from_ref(&stale));
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "stale");
+    }
+
+    #[test]
+    fn component_status_reports_behind_upstream_before_deployed_version_match() {
+        let temp = TempDir::new().expect("temp dir");
+        let source = temp.path().join("source");
+        let local = temp.path().join("local");
+        std::fs::create_dir(&source).expect("source dir");
+
+        init_source_repo(&source);
+        clone_repo(&source, &local);
+        commit_upstream_change(&source);
+
+        let stale = component("stale", &local);
+        let remote_versions = HashMap::from([("stale".to_string(), "1.0.0".to_string())]);
+
+        assert!(matches!(
+            calculate_component_status(&stale, &remote_versions),
+            ComponentStatus::BehindUpstream
+        ));
+    }
+
+    #[test]
+    fn select_behind_upstream_components_skips_current_checkout() {
+        let temp = TempDir::new().expect("temp dir");
+        let source = temp.path().join("source");
+        let local = temp.path().join("local");
+        std::fs::create_dir(&source).expect("source dir");
+
+        init_source_repo(&source);
+        clone_repo(&source, &local);
+
+        let current = component("current", &local);
+        let selected = select_behind_upstream_components(&[current]);
+
+        assert!(selected.is_empty());
+    }
 }

@@ -40,6 +40,7 @@ pub struct DeployConfig {
     pub component_ids: Vec<String>,
     pub all: bool,
     pub outdated: bool,
+    pub behind_upstream: bool,
     pub dry_run: bool,
     pub check: bool,
     pub force: bool,
@@ -83,6 +84,8 @@ pub enum ComponentStatus {
     NeedsUpdate,
     /// Remote version ahead of local (local behind)
     BehindRemote,
+    /// Local checkout is behind its upstream branch
+    BehindUpstream,
     /// Cannot determine status
     Unknown,
 }

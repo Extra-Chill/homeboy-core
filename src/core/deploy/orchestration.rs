@@ -72,11 +72,12 @@ pub(super) fn deploy_components(
         .iter()
         .filter_map(|c| version::get_component_version(c).map(|v| (c.id.clone(), v)))
         .collect();
-    let remote_versions = if config.outdated || config.dry_run || config.check {
-        fetch_remote_versions(&components, base_path, &ctx.client)
-    } else {
-        HashMap::new()
-    };
+    let remote_versions =
+        if config.outdated || config.behind_upstream || config.dry_run || config.check {
+            fetch_remote_versions(&components, base_path, &ctx.client)
+        } else {
+            HashMap::new()
+        };
 
     // Check and dry-run modes return early without building or deploying
     if config.check {
@@ -662,6 +663,7 @@ fn clone_config(config: &DeployConfig) -> DeployConfig {
         component_ids: config.component_ids.clone(),
         all: config.all,
         outdated: config.outdated,
+        behind_upstream: config.behind_upstream,
         dry_run: config.dry_run,
         check: config.check,
         force: config.force,
@@ -721,6 +723,7 @@ mod tests {
             component_ids: vec![],
             all: false,
             outdated: false,
+            behind_upstream: false,
             dry_run: false,
             check: false,
             force: false,

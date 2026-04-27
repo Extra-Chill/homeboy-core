@@ -43,6 +43,7 @@ fn collect_component_versions(project_id: &str) -> Option<Vec<ProjectComponentSt
         component_ids: vec![],
         all: true,
         outdated: false,
+        behind_upstream: false,
         dry_run: false,
         check: true,
         force: false,
