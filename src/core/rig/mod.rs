@@ -33,8 +33,9 @@ pub mod toolchain;
 
 pub use app::{AppLauncherAction, AppLauncherOptions, AppLauncherReport};
 pub use install::{
-    discover_rigs, install, read_source_metadata, DiscoveredRig, RigInstallResult,
-    RigSourceMetadata,
+    discover_rigs, discover_stacks, install, read_source_metadata, read_stack_source_metadata,
+    DiscoveredRig, DiscoveredStack, InstalledStack, RigInstallResult, RigSourceMetadata,
+    StackSourceMetadata,
 };
 pub use lease::{acquire_active_run_lease, ActiveRigRunLease, RigRunLease};
 pub use pipeline::{PipelineOutcome, PipelineStepOutcome};
@@ -45,9 +46,10 @@ pub use runner::{
 pub use service::{DiscoveredProcess, ServiceStatus};
 pub use source::{
     list_sources, remove_source, update_all_sources, update_source_for_rig,
-    InvalidRigSourceMetadata, RemovedRigSourceRig, RigSourceGroup, RigSourceListResult,
-    RigSourceRemoveResult, RigSourceRig, RigSourceUpdateResult, RigSourceUpdatedRig,
-    SkippedRigSourceRig, SkippedRigSourceUpdate,
+    InvalidRigSourceMetadata, RemovedRigSourceRig, RemovedRigSourceStack, RigSourceGroup,
+    RigSourceListResult, RigSourceRemoveResult, RigSourceRig, RigSourceStack,
+    RigSourceUpdateResult, RigSourceUpdatedRig, RigSourceUpdatedStack, SkippedRigSourceRig,
+    SkippedRigSourceStack, SkippedRigSourceUpdate,
 };
 pub use spec::{
     AppLauncherPlatform, AppLauncherPreflight, AppLauncherSpec, BenchSpec, CheckSpec,

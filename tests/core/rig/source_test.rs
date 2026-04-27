@@ -30,6 +30,29 @@ fn minimal_rig(id: &str) -> String {
     )
 }
 
+fn write_stack(package: &Path, id: &str, component: &str) -> std::path::PathBuf {
+    let stacks_dir = package.join("stacks");
+    fs::create_dir_all(&stacks_dir).expect("stacks dir");
+    let stack_path = stacks_dir.join(format!("{}.json", id));
+    fs::write(&stack_path, minimal_stack(id, component)).expect("stack json");
+    stack_path
+}
+
+fn minimal_stack(id: &str, component: &str) -> String {
+    format!(
+        r#"{{
+            "id": "{}",
+            "description": "{} stack",
+            "component": "{}",
+            "component_path": "${{env.DEV_ROOT}}/{}",
+            "base": {{ "remote": "origin", "branch": "main" }},
+            "target": {{ "remote": "origin", "branch": "dev/combined-fixes" }},
+            "prs": []
+        }}"#,
+        id, id, component, component
+    )
+}
+
 fn run_git(dir: &Path, args: &[&str]) {
     let output = Command::new("git")
         .args(args)
@@ -99,6 +122,23 @@ fn test_list_sources() {
     assert!(result.sources[0].rigs[0].config_present);
     assert!(result.sources[0].rigs[0].config_owned);
     assert_eq!(result.sources[0].rigs[1].id, "beta");
+}
+
+#[test]
+fn list_sources_reports_stack_specs_from_package() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "alpha", &minimal_rig("alpha"));
+    write_stack(package.path(), "alpha-combined", "alpha");
+
+    install(package.path().to_str().unwrap(), None, false).expect("install");
+
+    let result = list_sources().expect("sources");
+    assert_eq!(result.sources.len(), 1);
+    assert_eq!(result.sources[0].stacks.len(), 1);
+    assert_eq!(result.sources[0].stacks[0].id, "alpha-combined");
+    assert!(result.sources[0].stacks[0].config_present);
+    assert!(result.sources[0].stacks[0].config_owned);
 }
 
 #[test]
@@ -236,6 +276,78 @@ fn update_git_source_fast_forwards_package_and_refreshes_metadata() {
 }
 
 #[test]
+fn update_git_source_refreshes_owned_stack_specs() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "alpha", &minimal_rig("alpha"));
+    let source_stack = write_stack(package.path(), "alpha-combined", "alpha");
+    let bare = create_bare_source(package.path());
+    let source = bare
+        .path()
+        .join("rig-package.git")
+        .to_string_lossy()
+        .to_string();
+
+    install(&source, None, false).expect("install");
+    let before = crate::rig::read_stack_source_metadata("alpha-combined")
+        .expect("stack metadata")
+        .source_revision;
+
+    fs::write(
+        &source_stack,
+        minimal_stack("alpha-combined", "alpha").replace("alpha-combined stack", "updated stack"),
+    )
+    .expect("update stack");
+    commit_package(package.path(), "update alpha stack");
+    run_git(package.path(), &["push", &source, "HEAD:main"]);
+
+    let result = update_source_for_rig("alpha").expect("update rig source");
+
+    assert_eq!(result.updated_stacks.len(), 1);
+    assert_eq!(result.updated_stacks[0].id, "alpha-combined");
+    assert_ne!(result.updated_stacks[0].source_revision, before);
+    let installed = fs::read_to_string(crate::paths::stack_config("alpha-combined").unwrap())
+        .expect("installed stack");
+    assert!(installed.contains("updated stack"));
+}
+
+#[test]
+fn update_git_source_skips_user_replaced_stack_specs() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "alpha", &minimal_rig("alpha"));
+    let source_stack = write_stack(package.path(), "alpha-combined", "alpha");
+    let bare = create_bare_source(package.path());
+    let source = bare
+        .path()
+        .join("rig-package.git")
+        .to_string_lossy()
+        .to_string();
+
+    install(&source, None, false).expect("install");
+    let config = crate::paths::stack_config("alpha-combined").expect("stack config");
+    fs::remove_file(&config).expect("remove symlink");
+    fs::write(&config, minimal_stack("alpha-combined", "manual")).expect("manual stack");
+    fs::write(
+        &source_stack,
+        minimal_stack("alpha-combined", "alpha").replace("alpha-combined stack", "updated stack"),
+    )
+    .expect("update source stack");
+    commit_package(package.path(), "update alpha stack");
+    run_git(package.path(), &["push", &source, "HEAD:main"]);
+
+    let result = update_source_for_rig("alpha").expect("update rig source");
+
+    assert!(result.updated_stacks.is_empty());
+    assert_eq!(result.skipped.len(), 1);
+    assert_eq!(result.skipped[0].id, "alpha-combined");
+    assert!(result.skipped[0].reason.contains("stack source"));
+    let installed = fs::read_to_string(config).expect("manual stack");
+    assert!(installed.contains("manual"));
+    assert!(!installed.contains("updated stack"));
+}
+
+#[test]
 fn update_all_skips_linked_local_sources() {
     let _home = HomeGuard::new();
     let package = tempfile::tempdir().expect("package");
@@ -248,6 +360,25 @@ fn update_all_skips_linked_local_sources() {
     assert_eq!(result.skipped.len(), 1);
     assert_eq!(result.skipped[0].id, "alpha");
     assert!(result.skipped[0].reason.contains("linked local sources"));
+}
+
+#[test]
+fn update_all_skips_linked_local_stack_sources() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "alpha", &minimal_rig("alpha"));
+    write_stack(package.path(), "alpha-combined", "alpha");
+
+    install(package.path().to_str().unwrap(), None, false).expect("install linked");
+    let result = update_all_sources().expect("update all");
+
+    assert!(result.updated.is_empty());
+    assert!(result.updated_stacks.is_empty());
+    assert_eq!(result.skipped.len(), 2);
+    assert!(result
+        .skipped
+        .iter()
+        .any(|skipped| skipped.id == "alpha-combined"));
 }
 
 #[test]

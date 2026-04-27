@@ -105,10 +105,21 @@ pub struct RigInstallOutput {
     pub package_path: String,
     pub linked: bool,
     pub installed: Vec<RigInstalledSummary>,
+    pub installed_stacks: Vec<RigInstalledStackSummary>,
 }
 
 #[derive(Serialize)]
 pub struct RigInstalledSummary {
+    pub id: String,
+    pub description: String,
+    pub path: String,
+    pub spec_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RigInstalledStackSummary {
     pub id: String,
     pub description: String,
     pub path: String,

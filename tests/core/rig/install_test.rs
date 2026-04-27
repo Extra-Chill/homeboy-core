@@ -1,6 +1,9 @@
 //! Rig install lifecycle tests. Covers `src/core/rig/install.rs`.
 
-use crate::rig::{declared_id, discover_rigs, install, list, list_ids, load, read_source_metadata};
+use crate::rig::{
+    declared_id, discover_rigs, install, list, list_ids, load, read_source_metadata,
+    read_stack_source_metadata,
+};
 use crate::test_support::HomeGuard;
 use std::fs;
 use std::path::Path;
@@ -27,6 +30,29 @@ fn minimal_rig(id: &str) -> String {
             }}
         }}"#,
         id, id, id
+    )
+}
+
+fn write_stack(package: &Path, id: &str, component: &str) -> std::path::PathBuf {
+    let stacks_dir = package.join("stacks");
+    fs::create_dir_all(&stacks_dir).expect("stacks dir");
+    let stack_path = stacks_dir.join(format!("{}.json", id));
+    fs::write(&stack_path, minimal_stack(id, component)).expect("stack json");
+    stack_path
+}
+
+fn minimal_stack(id: &str, component: &str) -> String {
+    format!(
+        r#"{{
+            "id": "{}",
+            "description": "{} stack",
+            "component": "{}",
+            "component_path": "${{env.DEV_ROOT}}/{}",
+            "base": {{ "remote": "origin", "branch": "main" }},
+            "target": {{ "remote": "origin", "branch": "dev/combined-fixes" }},
+            "prs": []
+        }}"#,
+        id, id, component, component
     )
 }
 
@@ -135,6 +161,34 @@ fn test_read_source_metadata_after_local_install() {
     let metadata = read_source_metadata("alpha").expect("metadata");
     assert!(metadata.linked);
     assert_eq!(metadata.rig_path, source.to_string_lossy());
+}
+
+#[test]
+fn install_package_with_sibling_stacks_installs_stack_specs() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "studio", &minimal_rig("studio"));
+    let stack_path = write_stack(package.path(), "studio-combined", "studio");
+
+    let result = install(package.path().to_str().unwrap(), None, false).expect("install");
+
+    assert_eq!(result.installed.len(), 1);
+    assert_eq!(result.installed_stacks.len(), 1);
+    assert_eq!(result.installed_stacks[0].id, "studio-combined");
+    let installed = crate::paths::stack_config("studio-combined").expect("stack path");
+    assert!(installed.exists());
+    #[cfg(unix)]
+    assert_eq!(fs::read_link(&installed).expect("symlink"), stack_path);
+    assert_eq!(crate::stack::list().expect("stack list").len(), 1);
+    assert_eq!(
+        crate::stack::load("studio-combined")
+            .expect("load stack")
+            .component,
+        "studio"
+    );
+    let metadata = read_stack_source_metadata("studio-combined").expect("stack metadata");
+    assert!(metadata.linked);
+    assert_eq!(metadata.stack_path, stack_path.to_string_lossy());
 }
 
 #[test]
@@ -313,6 +367,35 @@ fn git_url_subpath_installs_single_rig_directory() {
     let metadata = read_source_metadata("studio").expect("metadata");
     assert_eq!(metadata.source, root_source.to_string_lossy());
     assert!(metadata.rig_path.ends_with("packages/studio/rig.json"));
+}
+
+#[test]
+fn git_url_subpath_installs_only_stacks_under_selected_subpath() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    let selected = package.path().join("packages").join("studio");
+    write_single_rig(&selected, "studio", &minimal_rig("studio"));
+    write_stack(&selected, "studio-combined", "studio");
+    write_stack(package.path(), "root-combined", "root");
+    let bare = bare_package(package.path());
+    let source = format!(
+        "{}//packages/studio",
+        bare.path().join("rig-package.git").to_string_lossy()
+    );
+
+    let result = install(&source, None, false).expect("install subpath");
+
+    assert_eq!(result.installed_stacks.len(), 1);
+    assert_eq!(result.installed_stacks[0].id, "studio-combined");
+    assert!(crate::paths::stack_config("studio-combined")
+        .unwrap()
+        .exists());
+    assert!(!crate::paths::stack_config("root-combined")
+        .unwrap()
+        .exists());
+    let stacks = crate::stack::list().expect("stack list");
+    assert_eq!(stacks.len(), 1);
+    assert_eq!(stacks[0].id, "studio-combined");
 }
 
 #[test]
