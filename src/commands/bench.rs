@@ -25,6 +25,14 @@ pub struct BenchArgs {
     #[arg(long, default_value_t = 10)]
     iterations: u64,
 
+    /// Directory shared across bench runner instances.
+    #[arg(long, value_name = "DIR")]
+    shared_state: Option<PathBuf>,
+
+    /// Number of concurrent bench runner instances.
+    #[arg(long, default_value_t = 1)]
+    concurrency: u32,
+
     #[command(flatten)]
     baseline_args: BaselineArgs,
 
@@ -99,6 +107,8 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
 
     const HOMEBOY_VALUE_FLAGS: &[&str] = &[
         "--iterations",
+        "--shared-state",
+        "--concurrency",
         "--regression-threshold",
         "--setting",
         "--path",
@@ -387,8 +397,8 @@ fn run_single(
             json_summary: args.json_summary,
             passthrough_args: passthrough_args.to_vec(),
             rig_id: rig_id.clone(),
-            shared_state: None,
-            concurrency: 1,
+            shared_state: args.shared_state.clone(),
+            concurrency: args.concurrency,
             extra_workloads,
         },
         &run_dir,
@@ -413,6 +423,14 @@ fn bench_workloads_for_extension(rig_spec: &RigSpec, extension_id: &str) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    /// Minimal CLI wrapper to exercise clap parsing of `BenchArgs`.
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        bench: BenchArgs,
+    }
 
     #[test]
     fn filter_strips_boolean_flags() {
@@ -478,6 +496,41 @@ mod tests {
     #[test]
     fn filter_strips_iterations_equals_form() {
         let args = vec!["--iterations=50".to_string(), "--keep".to_string()];
+        assert_eq!(filter_homeboy_flags(&args), vec!["--keep"]);
+    }
+
+    #[test]
+    fn parses_shared_state_and_concurrency_flags() {
+        let cli = TestCli::try_parse_from([
+            "bench",
+            "homeboy",
+            "--shared-state",
+            "/tmp/foo",
+            "--concurrency",
+            "4",
+        ])
+        .expect("shared-state and concurrency flags should parse");
+
+        assert_eq!(cli.bench.shared_state, Some(PathBuf::from("/tmp/foo")));
+        assert_eq!(cli.bench.concurrency, 4);
+    }
+
+    #[test]
+    fn filter_strips_shared_state_and_concurrency_forms() {
+        let args = vec![
+            "--shared-state".to_string(),
+            "/tmp/foo".to_string(),
+            "--concurrency".to_string(),
+            "4".to_string(),
+            "--filter=Scenario".to_string(),
+        ];
+        assert_eq!(filter_homeboy_flags(&args), vec!["--filter=Scenario"]);
+
+        let args = vec![
+            "--shared-state=/tmp/foo".to_string(),
+            "--concurrency=4".to_string(),
+            "--keep".to_string(),
+        ];
         assert_eq!(filter_homeboy_flags(&args), vec!["--keep"]);
     }
 
