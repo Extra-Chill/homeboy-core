@@ -4,6 +4,7 @@ use homeboy::component::Component;
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
+use homeboy::extension::bench::report::collect_artifacts;
 use homeboy::extension::bench::{BenchCommandOutput, BenchResults, BenchRunWorkflowArgs};
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, BenchSpec, RigSpec, RigStateSnapshot};
@@ -187,6 +188,12 @@ pub(super) fn run_single_rig(
         }
     }
 
+    let merged_results = merge_matrix_results(&matrix_components, &outputs);
+    let artifacts = merged_results
+        .as_ref()
+        .map(collect_artifacts)
+        .unwrap_or_default();
+
     Ok((
         BenchCommandOutput {
             passed: outputs.iter().all(|output| output.passed),
@@ -194,7 +201,8 @@ pub(super) fn run_single_rig(
             component: matrix_components.join(","),
             exit_code,
             iterations: args.iterations,
-            results: merge_matrix_results(&matrix_components, &outputs),
+            artifacts,
+            results: merged_results,
             gate_failures: outputs
                 .iter()
                 .flat_map(|output| output.gate_failures.clone())
@@ -576,6 +584,7 @@ mod tests {
             component: component.to_string(),
             exit_code: 0,
             iterations: 10,
+            artifacts: results.as_ref().map(collect_artifacts).unwrap_or_default(),
             results,
             gate_failures: Vec::new(),
             baseline_comparison: None,
