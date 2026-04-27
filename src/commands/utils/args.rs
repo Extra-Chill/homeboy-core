@@ -148,6 +148,8 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--ignore-default-baseline",
                 "--ratchet",
                 "--regression-threshold",
+                "--shared-state",
+                "--concurrency",
                 "--rig",
                 "--setting",
                 "--path",
@@ -436,6 +438,22 @@ mod normalize_tests {
             "--iterations",
             "1",
             "--ignore-default-baseline",
+        ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    /// `bench` owns shared-state/concurrency. They must remain named CLI
+    /// flags even when placed after the positional component.
+    #[test]
+    fn bench_shared_state_flags_after_component_are_not_separated() {
+        let input = argv(&[
+            "homeboy",
+            "bench",
+            "my-comp",
+            "--shared-state",
+            "/tmp/homeboy-bench",
+            "--concurrency=4",
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);

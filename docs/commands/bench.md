@@ -41,6 +41,11 @@ the other capabilities.
   (default `5.0`) used when the runner does not declare `metric_policies`.
   A p95 scenario regresses when its current `p95_ms` exceeds
   `baseline.p95_ms * (1 + threshold/100)`.
+- `--shared-state <DIR>`: Directory shared across iterations and concurrent
+  runner instances. Forwarded to workloads via
+  `$HOMEBOY_BENCH_SHARED_STATE`.
+- `--concurrency <N>`: Number of parallel bench runner instances to spawn
+  (default `1`). Values greater than `1` require `--shared-state`.
 - `--setting <key=value>`: Override component settings (may be repeated).
 - `--setting-json <key=json>`: Override component settings with typed JSON
   values for arrays, objects, numbers, booleans, or null.
@@ -75,6 +80,9 @@ homeboy bench my-component --ratchet
 
 # Select a single scenario via passthrough args
 homeboy bench my-component -- --filter=hot_path
+
+# Share warm state across invocations and run four instances in parallel
+homeboy bench my-component --shared-state /tmp/homeboy-bench --concurrency 4
 
 # Pin to a single rig — preflight + rig-scoped baseline
 homeboy bench studio --rig studio-trunk
