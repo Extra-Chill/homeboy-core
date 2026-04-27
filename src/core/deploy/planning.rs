@@ -206,14 +206,10 @@ pub(super) fn calculate_component_status(
     component: &Component,
     remote_versions: &HashMap<String, String>,
 ) -> ComponentStatus {
-    if component_is_behind_upstream(component) {
-        return ComponentStatus::BehindUpstream;
-    }
-
     let local_version = version::get_component_version(component);
     let remote_version = remote_versions.get(&component.id);
 
-    match (local_version, remote_version) {
+    let version_status = match (local_version, remote_version) {
         (None, None) => ComponentStatus::Unknown,
         (None, Some(_)) => ComponentStatus::NeedsUpdate,
         (Some(_), None) => ComponentStatus::NeedsUpdate,
@@ -224,6 +220,13 @@ pub(super) fn calculate_component_status(
                 ComponentStatus::NeedsUpdate
             }
         }
+    };
+
+    if matches!(version_status, ComponentStatus::UpToDate) && component_is_behind_upstream(component)
+    {
+        ComponentStatus::BehindUpstream
+    } else {
+        version_status
     }
 }
 
@@ -376,6 +379,7 @@ pub(super) fn load_project_components(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::VersionTarget;
     use tempfile::TempDir;
 
     fn run_git(path: &Path, args: &[&str]) {
@@ -433,6 +437,16 @@ mod tests {
         )
     }
 
+    fn versioned_component(id: &str, path: &Path, version: &str) -> Component {
+        std::fs::write(path.join("VERSION"), format!("{}\n", version)).expect("version file");
+        let mut component = component(id, path);
+        component.version_targets = Some(vec![VersionTarget {
+            file: "VERSION".to_string(),
+            pattern: Some(r"^(.+)$".to_string()),
+        }]);
+        component
+    }
+
     #[test]
     fn select_behind_upstream_components_finds_stale_checkout() {
         let temp = TempDir::new().expect("temp dir");
@@ -452,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn component_status_reports_behind_upstream_before_deployed_version_match() {
+    fn component_status_reports_behind_upstream_when_deployed_version_matches() {
         let temp = TempDir::new().expect("temp dir");
         let source = temp.path().join("source");
         let local = temp.path().join("local");
@@ -462,12 +476,32 @@ mod tests {
         clone_repo(&source, &local);
         commit_upstream_change(&source);
 
-        let stale = component("stale", &local);
+        let stale = versioned_component("stale", &local, "1.0.0");
         let remote_versions = HashMap::from([("stale".to_string(), "1.0.0".to_string())]);
 
         assert!(matches!(
             calculate_component_status(&stale, &remote_versions),
             ComponentStatus::BehindUpstream
+        ));
+    }
+
+    #[test]
+    fn component_status_preserves_deployed_version_drift_when_checkout_is_behind_upstream() {
+        let temp = TempDir::new().expect("temp dir");
+        let source = temp.path().join("source");
+        let local = temp.path().join("local");
+        std::fs::create_dir(&source).expect("source dir");
+
+        init_source_repo(&source);
+        clone_repo(&source, &local);
+        commit_upstream_change(&source);
+
+        let stale = versioned_component("stale", &local, "1.0.0");
+        let remote_versions = HashMap::from([("stale".to_string(), "2.0.0".to_string())]);
+
+        assert!(matches!(
+            calculate_component_status(&stale, &remote_versions),
+            ComponentStatus::NeedsUpdate
         ));
     }
 
