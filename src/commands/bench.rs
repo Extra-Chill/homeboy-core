@@ -37,6 +37,11 @@ struct BenchListArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
 
+    /// Discover scenarios using a rig's component path, extension config,
+    /// and rig-declared bench workloads.
+    #[arg(long, value_name = "RIG_ID", value_delimiter = ',')]
+    rig: Vec<String>,
+
     #[command(flatten)]
     setting_args: SettingArgs,
 
@@ -149,6 +154,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--shared-state",
         "--concurrency",
         "--regression-threshold",
+        "--rig",
         "--setting",
         "--path",
     ];
@@ -297,15 +303,36 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
 
 fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
     let passthrough_args = filter_homeboy_flags(&args.args);
-    let effective_id = args.comp.resolve_id()?;
+    let rig_spec = load_list_rig(args)?;
+    let effective_id = resolve_list_component_id(args, rig_spec.as_ref())?;
+    let path_override = args.comp.path.clone().or_else(|| {
+        rig_spec
+            .as_ref()
+            .and_then(|spec| matrix::rig_component_path(spec, &effective_id))
+    });
+    let component_override = rig_spec
+        .as_ref()
+        .and_then(|spec| matrix::rig_component_for_bench(spec, &effective_id));
 
-    let ctx = execution_context::resolve(&ResolveOptions::with_capability_and_json(
-        &effective_id,
-        args.comp.path.clone(),
-        ExtensionCapability::Bench,
-        args.setting_args.setting.clone(),
-        args.setting_args.setting_json.clone(),
-    ))?;
+    let ctx = execution_context::resolve_with_component(
+        &ResolveOptions::with_capability_and_json(
+            &effective_id,
+            path_override.clone(),
+            ExtensionCapability::Bench,
+            args.setting_args.setting.clone(),
+            args.setting_args.setting_json.clone(),
+        ),
+        component_override,
+    )?;
+
+    let extra_workloads = rig_spec
+        .as_ref()
+        .and_then(|spec| {
+            ctx.extension_id
+                .as_deref()
+                .map(|id| bench_workloads_for_extension(spec, id))
+        })
+        .unwrap_or_default();
 
     let run_dir = RunDir::create()?;
     let output = extension_bench::run_bench_list_workflow(
@@ -313,7 +340,7 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
         BenchListWorkflowArgs {
             component_label: effective_id,
             component_id: ctx.component_id.clone(),
-            path_override: args.comp.path.clone(),
+            path_override,
             settings: ctx
                 .settings
                 .iter()
@@ -331,12 +358,56 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
                 })
                 .collect(),
             passthrough_args,
-            extra_workloads: Vec::new(),
+            extra_workloads,
         },
         &run_dir,
     )?;
 
     Ok((BenchOutput::List(output), 0))
+}
+
+fn load_list_rig(args: &BenchListArgs) -> homeboy::Result<Option<RigSpec>> {
+    match args.rig.as_slice() {
+        [] => Ok(None),
+        [rig_id] => Ok(Some(rig::load(rig_id)?)),
+        _ => Err(homeboy::Error::validation_invalid_argument(
+            "--rig",
+            "bench list accepts exactly one rig id",
+            None,
+            None,
+        )),
+    }
+}
+
+fn resolve_list_component_id(
+    args: &BenchListArgs,
+    rig_spec: Option<&RigSpec>,
+) -> homeboy::Result<String> {
+    if let Some(id) = args.comp.id() {
+        return Ok(id.to_string());
+    }
+
+    if let Some(spec) = rig_spec {
+        if let Some(default) = spec
+            .bench
+            .as_ref()
+            .and_then(|bench| matrix::bench_component_ids(bench).into_iter().next())
+        {
+            return Ok(default);
+        }
+
+        return Err(homeboy::Error::validation_invalid_argument(
+            "bench.default_component",
+            format!(
+                "rig '{}' does not declare bench.default_component; pass a component id or add bench.default_component to the rig spec",
+                spec.id
+            ),
+            None,
+            None,
+        ));
+    }
+
+    args.comp.resolve_id()
 }
 
 /// Resolve the candidate rig's `bench.default_baseline_rig` and, when
@@ -426,7 +497,12 @@ fn bench_workloads_for_extension(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::with_isolated_home;
     use clap::Parser;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
 
     /// Minimal CLI wrapper to exercise clap parsing of `BenchArgs`.
     #[derive(Parser)]
@@ -435,11 +511,191 @@ mod tests {
         bench: BenchArgs,
     }
 
+    fn write_bench_extension(home: &TempDir) {
+        let extension_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("extensions")
+            .join("nodejs");
+        fs::create_dir_all(&extension_dir).expect("mkdir extension");
+        fs::write(
+            extension_dir.join("nodejs.json"),
+            r#"{
+                "name": "Node.js",
+                "version": "0.0.0",
+                "bench": { "extension_script": "bench-runner.sh" }
+            }"#,
+        )
+        .expect("write extension manifest");
+
+        let script_path = extension_dir.join("bench-runner.sh");
+        fs::write(
+            &script_path,
+            r#"#!/bin/sh
+if [ -n "$HOMEBOY_BENCH_EXTRA_WORKLOADS" ]; then
+  scenario="rig-extra"
+else
+  scenario="in-tree"
+fi
+cat > "$HOMEBOY_BENCH_RESULTS_FILE" <<JSON
+{
+  "component_id": "$HOMEBOY_COMPONENT_ID",
+  "iterations": 0,
+  "scenarios": [
+    { "id": "$scenario", "iterations": 0, "metrics": { "p95_ms": 1.0 } }
+  ],
+  "metric_policies": { "p95_ms": { "direction": "lower_is_better" } }
+}
+JSON
+"#,
+        )
+        .expect("write bench script");
+
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(&script_path)
+                .expect("script metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&script_path, permissions).expect("chmod script");
+        }
+    }
+
+    fn write_registered_component(home: &TempDir, component_id: &str, path: &std::path::Path) {
+        let component_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("components");
+        fs::create_dir_all(&component_dir).expect("mkdir components");
+        fs::write(
+            component_dir.join(format!("{}.json", component_id)),
+            serde_json::json!({
+                "id": component_id,
+                "local_path": path,
+                "extensions": { "nodejs": {} }
+            })
+            .to_string(),
+        )
+        .expect("write component");
+    }
+
+    fn write_rig(home: &TempDir, rig_id: &str, component_id: &str, path: &std::path::Path) {
+        let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+        fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+        fs::write(
+            rig_dir.join(format!("{}.json", rig_id)),
+            format!(
+                r#"{{
+                    "components": {{
+                        "{component_id}": {{
+                            "path": "{}",
+                            "extensions": {{ "nodejs": {{}} }}
+                        }}
+                    }},
+                    "bench": {{ "default_component": "{component_id}" }},
+                    "bench_workloads": {{ "nodejs": ["${{components.{component_id}.path}}/private.bench.js"] }}
+                }}"#,
+                path.display()
+            ),
+        )
+        .expect("write rig");
+    }
+
+    fn list_args(component: Option<&str>, rig: Vec<String>) -> BenchListArgs {
+        BenchListArgs {
+            comp: PositionalComponentArgs {
+                component: component.map(str::to_string),
+                path: None,
+            },
+            rig,
+            setting_args: SettingArgs::default(),
+            args: Vec::new(),
+        }
+    }
+
     #[test]
     fn filter_strips_boolean_flags() {
         let args = vec!["--ratchet".to_string(), "--filter=Scenario".to_string()];
         let result = filter_homeboy_flags(&args);
         assert_eq!(result, vec!["--filter=Scenario"]);
+    }
+
+    #[test]
+    fn parses_bench_list_rig_flag() {
+        let cli = TestCli::try_parse_from(["bench", "list", "--rig", "studio-bfb"])
+            .expect("bench list --rig should parse");
+
+        match cli.bench.command.expect("list command") {
+            BenchCommand::List(args) => assert_eq!(args.rig, vec!["studio-bfb".to_string()]),
+        }
+    }
+
+    #[test]
+    fn run_list_uses_rig_default_component_and_workloads() {
+        with_isolated_home(|home| {
+            write_bench_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_rig(home, "studio-bfb", "studio", component_dir.path());
+
+            let (output, exit_code) = run_list(&list_args(None, vec!["studio-bfb".to_string()]))
+                .expect("rig bench list should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                BenchOutput::List(result) => {
+                    assert_eq!(result.component, "studio");
+                    assert_eq!(result.component_id, "studio");
+                    assert_eq!(result.count, 1);
+                    assert_eq!(result.scenarios[0].id, "rig-extra");
+                }
+                _ => panic!("expected list output"),
+            }
+        });
+    }
+
+    #[test]
+    fn run_list_preserves_registered_component_path() {
+        with_isolated_home(|home| {
+            write_bench_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_registered_component(home, "studio", component_dir.path());
+
+            let (output, exit_code) = run_list(&list_args(Some("studio"), Vec::new()))
+                .expect("plain bench list should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                BenchOutput::List(result) => {
+                    assert_eq!(result.component, "studio");
+                    assert_eq!(result.component_id, "studio");
+                    assert_eq!(result.count, 1);
+                    assert_eq!(result.scenarios[0].id, "in-tree");
+                }
+                _ => panic!("expected list output"),
+            }
+        });
+    }
+
+    #[test]
+    fn run_list_requires_rig_default_component_when_component_omitted() {
+        with_isolated_home(|home| {
+            let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+            fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+            fs::write(rig_dir.join("empty.json"), r#"{ "bench": {} }"#).expect("write rig");
+
+            let err = match run_list(&list_args(None, vec!["empty".to_string()])) {
+                Ok(_) => panic!("missing default component should error"),
+                Err(err) => err,
+            };
+            let message = err.to_string();
+            assert!(
+                message.contains("bench.default_component"),
+                "expected default-component error, got: {}",
+                message
+            );
+        });
     }
 
     #[test]
