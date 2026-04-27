@@ -160,6 +160,10 @@ mod tests {
                 helper_path.display(),
                 script_dir.display()
             ))
+            .env_remove("HOMEBOY_EXTENSION_PATH")
+            .env_remove("HOMEBOY_COMPONENT_PATH")
+            .env_remove("HOMEBOY_COMPONENT_ID")
+            .env_remove("HOMEBOY_PROJECT_PATH")
             .output()
             .expect("run bash");
 
