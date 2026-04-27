@@ -7,14 +7,15 @@ use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::{
     aggregate_comparison, BenchCommandOutput, BenchComparisonOutput, BenchListWorkflowArgs,
-    BenchListWorkflowResult, BenchRunWorkflowArgs, RigBenchEntry,
-    DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+    BenchListWorkflowResult, RigBenchEntry, DEFAULT_REGRESSION_THRESHOLD_PERCENT,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, RigSpec};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
+
+mod matrix;
 
 #[derive(Args)]
 pub struct BenchArgs {
@@ -207,7 +208,7 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     // No --rig: legacy single bare run. No rig pinning, no rig
     // snapshot, baseline key untouched. Identical to before this PR.
     if run_args.rig.is_empty() {
-        let (output, exit) = run_single(run_args, &passthrough_args, None)?;
+        let (output, exit) = matrix::run_single(run_args, &passthrough_args, None)?;
         return Ok((BenchOutput::Single(output), exit));
     }
 
@@ -225,12 +226,13 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
         return run(expanded_args, _global);
     }
 
-    // --rig with one value: legacy single rig-pinned run. Same shape as
-    // before this PR for `bench --rig <id>` callers (single output, rig
-    // snapshot embedded). Baseline flags still honored.
+    // --rig with one value: single rig-pinned run. A rig that declares
+    // bench.components fans out across those components while preserving
+    // one rig-state snapshot. Rigs with only default_component keep the
+    // legacy one-component shape.
     if run_args.rig.len() == 1 {
         let rig_id = run_args.rig[0].clone();
-        let (output, exit) = run_single(run_args, &passthrough_args, Some(rig_id))?;
+        let (output, exit) = matrix::run_single_rig(run_args, &passthrough_args, rig_id)?;
         return Ok((BenchOutput::Single(output), exit));
     }
 
@@ -261,7 +263,8 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     let mut effective_component_label: Option<String> = None;
 
     for rig_id in &run_args.rig {
-        let (single_output, _exit) = run_single(run_args, &passthrough_args, Some(rig_id.clone()))?;
+        let (single_output, _exit) =
+            matrix::run_single(run_args, &passthrough_args, Some(rig_id.clone()))?;
         if effective_component_label.is_none() {
             effective_component_label = Some(single_output.component.clone());
         }
@@ -351,6 +354,15 @@ fn maybe_expand_default_baseline(args: &BenchRunArgs) -> homeboy::Result<Option<
 
     let candidate = &args.rig[0];
     let candidate_spec = rig::load(candidate)?;
+    if args.comp.id().is_none()
+        && candidate_spec
+            .bench
+            .as_ref()
+            .map(|b| matrix::bench_component_ids(b).len() > 1)
+            .unwrap_or(false)
+    {
+        return Ok(None);
+    }
     let Some(baseline_rig_id) = candidate_spec
         .bench
         .as_ref()
@@ -373,122 +385,6 @@ fn maybe_expand_default_baseline(args: &BenchRunArgs) -> homeboy::Result<Option<
     }
 
     Ok(Some(vec![baseline_rig_id, candidate.clone()]))
-}
-
-/// Run bench once, optionally pinned to a rig, and return the standard
-/// `BenchCommandOutput` envelope. This is the unit of work that both
-/// the legacy single-run path and the new cross-rig comparison path
-/// share, so behavior stays identical for single-rig callers.
-fn run_single(
-    args: &BenchRunArgs,
-    passthrough_args: &[String],
-    rig_id_override: Option<String>,
-) -> CmdResult<BenchCommandOutput> {
-    let (rig_id, rig_snapshot, default_component_id, rig_spec) = match rig_id_override.as_deref() {
-        None => (None, None, None, None),
-        Some(rig_id) => {
-            let rig_spec = rig::load(rig_id)?;
-            let check_report = rig::run_check(&rig_spec)?;
-            if !check_report.success {
-                return Err(homeboy::Error::rig_pipeline_failed(
-                    &rig_spec.id,
-                    "check",
-                    "rig check failed; refusing to run bench against an unhealthy rig",
-                ));
-            }
-            let snapshot = rig::snapshot_state(&rig_spec);
-            let default = rig_spec
-                .bench
-                .as_ref()
-                .and_then(|b| b.default_component.clone());
-            (
-                Some(rig_spec.id.clone()),
-                Some(snapshot),
-                default,
-                Some(rig_spec),
-            )
-        }
-    };
-
-    // Component resolution: explicit positional > rig.bench.default_component
-    // > auto-detect from CWD (the existing PositionalComponentArgs path).
-    let effective_id = match (args.comp.id(), default_component_id) {
-        (Some(id), _) => id.to_string(),
-        (None, Some(default)) => default,
-        (None, None) => args.comp.resolve_id()?,
-    };
-
-    let ctx = execution_context::resolve(&ResolveOptions::with_capability_and_json(
-        &effective_id,
-        args.comp.path.clone(),
-        ExtensionCapability::Bench,
-        args.setting_args.setting.clone(),
-        args.setting_args.setting_json.clone(),
-    ))?;
-
-    let run_dir = RunDir::create()?;
-
-    let extra_workloads = rig_spec
-        .as_ref()
-        .and_then(|spec| {
-            ctx.extension_id
-                .as_deref()
-                .map(|id| bench_workloads_for_extension(spec, id))
-        })
-        .unwrap_or_default();
-
-    let workflow = extension_bench::run_main_bench_workflow(
-        &ctx.component,
-        &ctx.source_path,
-        BenchRunWorkflowArgs {
-            component_label: effective_id.clone(),
-            component_id: ctx.component_id.clone(),
-            path_override: args.comp.path.clone(),
-            // Split ctx.settings by JSON shape: strings flow through the
-            // legacy `settings` channel (string-coerced for downstream
-            // consumers), non-string types (objects, arrays, numbers,
-            // bools, nulls) flow through `settings_json` so type is
-            // preserved end-to-end. Without the split, non-string values
-            // would be `.to_string()`'d into JSON literals and downstream
-            // `jq -c '.field'` extractions would surface a string-encoded
-            // JSON object instead of the actual object.
-            settings: ctx
-                .settings
-                .iter()
-                .filter_map(|(k, v)| match v {
-                    serde_json::Value::String(s) => Some((k.clone(), s.clone())),
-                    _ => None,
-                })
-                .collect(),
-            settings_json: ctx
-                .settings
-                .iter()
-                .filter_map(|(k, v)| match v {
-                    serde_json::Value::String(_) => None,
-                    other => Some((k.clone(), other.clone())),
-                })
-                .collect(),
-            iterations: args.iterations,
-            baseline_flags: homeboy::engine::baseline::BaselineFlags {
-                baseline: args.baseline_args.baseline,
-                ignore_baseline: args.baseline_args.ignore_baseline,
-                ratchet: args.baseline_args.ratchet,
-            },
-            regression_threshold_percent: args.regression_threshold,
-            json_summary: args.json_summary,
-            passthrough_args: passthrough_args.to_vec(),
-            rig_id: rig_id.clone(),
-            shared_state: args.shared_state.clone(),
-            concurrency: args.concurrency,
-            extra_workloads,
-        },
-        &run_dir,
-    )?;
-
-    Ok(extension_bench::from_main_workflow_with_rig(
-        workflow,
-        rig_snapshot,
-    ))
 }
 
 fn bench_workloads_for_extension(rig_spec: &RigSpec, extension_id: &str) -> Vec<PathBuf> {

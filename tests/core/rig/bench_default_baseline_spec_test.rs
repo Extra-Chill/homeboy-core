@@ -25,7 +25,30 @@ fn test_bench_spec_deserializes_both_fields() {
         }"#,
     );
     assert_eq!(spec.default_component.as_deref(), Some("homeboy"));
+    assert!(spec.components.is_empty());
     assert_eq!(spec.default_baseline_rig.as_deref(), Some("homeboy-main"));
+}
+
+#[test]
+fn test_bench_spec_deserializes_component_matrix() {
+    let spec = bench_from(
+        r#"{
+            "id": "mdi-substrates",
+            "bench": {
+                "components": ["mdi-sdi", "mdi-mirror", "mdi-primary"]
+            }
+        }"#,
+    );
+
+    assert_eq!(
+        spec.components,
+        vec![
+            "mdi-sdi".to_string(),
+            "mdi-mirror".to_string(),
+            "mdi-primary".to_string(),
+        ]
+    );
+    assert!(spec.default_component.is_none());
 }
 
 #[test]
@@ -72,6 +95,7 @@ fn test_bench_spec_default_component_only_back_compat() {
         }"#,
     );
     assert_eq!(spec.default_component.as_deref(), Some("homeboy"));
+    assert!(spec.components.is_empty());
     assert!(spec.default_baseline_rig.is_none());
 }
 
@@ -114,7 +138,29 @@ fn test_bench_spec_round_trip_preserves_both_fields() {
 
     let bench = reparsed.bench.expect("bench preserved");
     assert_eq!(bench.default_component.as_deref(), Some("homeboy"));
+    assert!(bench.components.is_empty());
     assert_eq!(bench.default_baseline_rig.as_deref(), Some("homeboy-main"));
+}
+
+#[test]
+fn test_bench_spec_round_trip_preserves_component_matrix() {
+    let original_json = r#"{
+        "id": "mdi-substrates",
+        "bench": {
+            "components": ["mdi-sdi", "mdi-mirror"],
+            "default_baseline_rig": "mdi-main"
+        }
+    }"#;
+    let spec: RigSpec = serde_json::from_str(original_json).expect("parse");
+    let re_serialized = serde_json::to_string(&spec).expect("serialize");
+    let reparsed: RigSpec = serde_json::from_str(&re_serialized).expect("reparse");
+
+    let bench = reparsed.bench.expect("bench preserved");
+    assert_eq!(
+        bench.components,
+        vec!["mdi-sdi".to_string(), "mdi-mirror".to_string()]
+    );
+    assert_eq!(bench.default_baseline_rig.as_deref(), Some("mdi-main"));
 }
 
 #[test]
@@ -131,6 +177,11 @@ fn test_bench_spec_skips_serializing_none_fields() {
     assert!(
         !re_serialized.contains("default_component"),
         "expected default_component absent from re-serialized JSON, got: {}",
+        re_serialized
+    );
+    assert!(
+        !re_serialized.contains("components"),
+        "expected empty components absent from re-serialized JSON, got: {}",
         re_serialized
     );
     assert!(re_serialized.contains("default_baseline_rig"));
