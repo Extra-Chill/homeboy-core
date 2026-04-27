@@ -30,12 +30,14 @@ pub mod apply;
 pub(crate) mod git;
 pub mod inspect;
 pub(crate) mod pr_meta;
+pub mod push;
 pub mod spec;
 pub mod status;
 pub mod sync;
 
 pub use apply::{apply, AppliedPr, ApplyOutput, PickOutcome};
 pub use inspect::{inspect, inspect_at, InspectCommit, InspectOptions, InspectOutput, InspectPr};
+pub use push::{push, PushOutput, PushStatus};
 pub use spec::{
     exists, expand_path, list, list_ids, load, parse_git_ref, save, GitRef, StackPrEntry, StackSpec,
 };
