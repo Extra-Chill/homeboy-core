@@ -592,8 +592,8 @@ mod tests {
         ])
         .expect("shared-state and concurrency flags should parse");
 
-        assert_eq!(cli.bench.shared_state, Some(PathBuf::from("/tmp/foo")));
-        assert_eq!(cli.bench.concurrency, 4);
+        assert_eq!(cli.bench.run.shared_state, Some(PathBuf::from("/tmp/foo")));
+        assert_eq!(cli.bench.run.concurrency, 4);
     }
 
     #[test]
