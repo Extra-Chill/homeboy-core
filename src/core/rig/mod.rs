@@ -30,8 +30,10 @@ pub mod state;
 
 pub use app::{AppLauncherAction, AppLauncherOptions, AppLauncherReport};
 pub use install::{
-    discover_rigs, install, read_source_metadata, DiscoveredRig, RigInstallResult,
-    RigSourceMetadata,
+    discover_rigs, install, list_sources, read_source_metadata, remove_source, DiscoveredRig,
+    InvalidRigSourceMetadata, RemovedRigSourceRig, RigInstallResult, RigSourceGroup,
+    RigSourceListResult, RigSourceMetadata, RigSourceRemoveResult, RigSourceRig,
+    SkippedRigSourceRig,
 };
 pub use pipeline::{PipelineOutcome, PipelineStepOutcome};
 pub use runner::{

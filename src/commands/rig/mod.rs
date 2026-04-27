@@ -10,7 +10,8 @@ use homeboy::rig;
 
 use self::output::{
     RigAppOutput, RigCheckOutput, RigDownOutput, RigInstallOutput, RigInstalledSummary,
-    RigListOutput, RigShowOutput, RigSourceSummary, RigStatusOutput, RigSummary, RigUpOutput,
+    RigListOutput, RigShowOutput, RigSourceSummary, RigSourcesOutput, RigSourcesReport,
+    RigStatusOutput, RigSummary, RigUpOutput,
 };
 use super::CmdResult;
 
@@ -60,10 +61,26 @@ enum RigCommand {
         #[arg(long)]
         all: bool,
     },
+    /// Inspect or remove installed rig sources
+    Sources {
+        #[command(subcommand)]
+        command: RigSourcesCommand,
+    },
     /// Install, update, or remove this rig's desktop app launcher.
     App {
         #[command(subcommand)]
         command: RigAppCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum RigSourcesCommand {
+    /// List installed rig source packages
+    List,
+    /// Remove rigs installed from a source package
+    Remove {
+        /// Source URL/path, package path, or package ID from `rig sources list`
+        source: String,
     },
 }
 
@@ -104,6 +121,7 @@ pub fn run(args: RigArgs, _global: &super::GlobalArgs) -> CmdResult<RigCommandOu
         RigCommand::Down { rig_id } => down(&rig_id),
         RigCommand::Status { rig_id } => status(&rig_id),
         RigCommand::Install { source, id, all } => install(&source, id.as_deref(), all),
+        RigCommand::Sources { command } => sources(command),
         RigCommand::App { command } => app(command),
     }
 }
@@ -160,6 +178,33 @@ fn install(source: &str, id: Option<&str>, all: bool) -> CmdResult<RigCommandOut
                     source_revision: rig.source_revision,
                 })
                 .collect(),
+        }),
+        0,
+    ))
+}
+
+fn sources(command: RigSourcesCommand) -> CmdResult<RigCommandOutput> {
+    match command {
+        RigSourcesCommand::List => sources_list(),
+        RigSourcesCommand::Remove { source } => sources_remove(&source),
+    }
+}
+
+fn sources_list() -> CmdResult<RigCommandOutput> {
+    Ok((
+        RigCommandOutput::Sources(RigSourcesOutput {
+            command: "rig.sources.list",
+            report: RigSourcesReport::List(rig::list_sources()?),
+        }),
+        0,
+    ))
+}
+
+fn sources_remove(source: &str) -> CmdResult<RigCommandOutput> {
+    Ok((
+        RigCommandOutput::Sources(RigSourcesOutput {
+            command: "rig.sources.remove",
+            report: RigSourcesReport::Remove(rig::remove_source(source)?),
         }),
         0,
     ))
