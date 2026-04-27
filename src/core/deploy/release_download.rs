@@ -37,33 +37,47 @@ impl GitHubRepo {
 /// Supports:
 /// - `https://github.com/owner/repo`
 /// - `https://github.com/owner/repo.git`
+/// - `https://user:token@github.com/owner/repo.git`
 /// - `git@github.com:owner/repo.git`
 pub fn parse_github_url(url: &str) -> Option<GitHubRepo> {
     // HTTPS format
-    if let Some(rest) = url
-        .strip_prefix("https://github.com/")
-        .or_else(|| url.strip_prefix("http://github.com/"))
-    {
-        let rest = rest.trim_end_matches(".git").trim_end_matches('/');
-        let parts: Vec<&str> = rest.splitn(3, '/').collect();
-        if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-            return Some(GitHubRepo {
-                owner: parts[0].to_string(),
-                repo: parts[1].to_string(),
-            });
-        }
+    if let Some(repo) = parse_github_http_url(url) {
+        return Some(repo);
     }
 
     // SSH format
     if let Some(rest) = url.strip_prefix("git@github.com:") {
-        let rest = rest.trim_end_matches(".git").trim_end_matches('/');
-        let parts: Vec<&str> = rest.splitn(3, '/').collect();
-        if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-            return Some(GitHubRepo {
-                owner: parts[0].to_string(),
-                repo: parts[1].to_string(),
-            });
+        if let Some(repo) = parse_owner_repo(rest) {
+            return Some(repo);
         }
+    }
+
+    None
+}
+
+fn parse_github_http_url(url: &str) -> Option<GitHubRepo> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let (host, path) = rest.split_once('/')?;
+
+    // GitHub HTTPS remotes may include credentials before the host, e.g.
+    // https://x-access-token:TOKEN@github.com/owner/repo.git.
+    if host.rsplit('@').next()? != "github.com" {
+        return None;
+    }
+
+    parse_owner_repo(path)
+}
+
+fn parse_owner_repo(path: &str) -> Option<GitHubRepo> {
+    let path = path.trim_end_matches('/').trim_end_matches(".git");
+    let parts: Vec<&str> = path.splitn(3, '/').collect();
+    if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        return Some(GitHubRepo {
+            owner: parts[0].to_string(),
+            repo: parts[1].to_string(),
+        });
     }
 
     None
@@ -210,6 +224,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_github_url_authenticated_https() {
+        let repo =
+            parse_github_url("https://x-access-token:TOKEN@github.com/Extra-Chill/homeboy.git")
+                .unwrap();
+        assert_eq!(repo.owner, "Extra-Chill");
+        assert_eq!(repo.repo, "homeboy");
+    }
+
+    #[test]
+    fn parse_github_url_authenticated_https_user_token() {
+        let repo =
+            parse_github_url("https://user:token@github.com/Extra-Chill/homeboy.git").unwrap();
+        assert_eq!(repo.owner, "Extra-Chill");
+        assert_eq!(repo.repo, "homeboy");
+    }
+
+    #[test]
+    fn parse_github_url_authenticated_http() {
+        let repo =
+            parse_github_url("http://user:token@github.com/Extra-Chill/homeboy.git").unwrap();
+        assert_eq!(repo.owner, "Extra-Chill");
+        assert_eq!(repo.repo, "homeboy");
+    }
+
+    #[test]
     fn parse_github_url_ssh() {
         let repo = parse_github_url("git@github.com:Extra-Chill/homeboy.git").unwrap();
         assert_eq!(repo.owner, "Extra-Chill");
@@ -226,6 +265,8 @@ mod tests {
     #[test]
     fn parse_github_url_invalid() {
         assert!(parse_github_url("https://gitlab.com/foo/bar").is_none());
+        assert!(parse_github_url("https://github.com.evil/foo/bar").is_none());
+        assert!(parse_github_url("https://token@github.com.evil/foo/bar").is_none());
         assert!(parse_github_url("not a url").is_none());
         assert!(parse_github_url("").is_none());
     }
