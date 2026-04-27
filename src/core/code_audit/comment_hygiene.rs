@@ -46,7 +46,9 @@ fn analyze_comment_hygiene(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
                 ));
             }
 
-            if LEGACY_MARKERS.iter().any(|m| has_legacy_marker(comment, m)) {
+            if !is_cli_option_doc_comment(comment)
+                && LEGACY_MARKERS.iter().any(|m| has_legacy_marker(comment, m))
+            {
                 findings.push(make_finding(
                     fp,
                     AuditFinding::LegacyComment,
@@ -147,6 +149,27 @@ fn has_legacy_marker(comment: &str, marker: &str) -> bool {
     lower.starts_with(marker)
 }
 
+fn is_cli_option_doc_comment(comment: &str) -> bool {
+    let trimmed = comment.trim_start();
+    let Some(rest) = trimmed.strip_prefix("--") else {
+        return false;
+    };
+
+    let option_name: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+        .collect();
+
+    if option_name.is_empty() {
+        return false;
+    }
+
+    matches!(
+        rest.chars().nth(option_name.len()),
+        Some(':') | Some(' ') | None
+    )
+}
+
 fn normalized_comment(comment: &str) -> &str {
     comment.trim_start_matches(['-', '*', ' ']).trim()
 }
@@ -238,6 +261,32 @@ mod tests {
         assert!(!has_legacy_marker(
             "Legacy hook fields are merged during deserialization",
             "legacy:"
+        ));
+    }
+
+    #[test]
+    fn test_cli_option_docs_do_not_count_as_legacy_comments() {
+        let fp = make_fp(
+            "src/commands/release.rs",
+            Language::Rust,
+            "// --outdated: only components with unreleased code commits\nfn x() {}",
+        );
+
+        let findings = analyze_comment_hygiene(&[&fp]);
+        assert!(!findings
+            .iter()
+            .any(|f| f.kind == AuditFinding::LegacyComment));
+    }
+
+    #[test]
+    fn test_is_cli_option_doc_comment() {
+        assert!(is_cli_option_doc_comment(
+            "--outdated: only components with unreleased code commits"
+        ));
+        assert!(is_cli_option_doc_comment("--dry-run run without changes"));
+        assert!(!is_cli_option_doc_comment("- outdated implementation note"));
+        assert!(!is_cli_option_doc_comment(
+            "temporary --outdated compatibility"
         ));
     }
 
