@@ -114,8 +114,8 @@ fn invocation_tokens(lines: &[&str], start: usize) -> Option<InvocationTokens> {
 
     let variable = invocation_variable_name(line);
     let mut tokens = token_sources_from_line(line, start + 1)?;
-    let has_homeboy_binary = strip_homeboy_binary(&mut tokens);
-    if !has_homeboy_binary && !has_homeboy_wrapper_provenance(lines, start) {
+    let has_homeboy_binary = InvocationClassifier::strip_homeboy_binary(&mut tokens);
+    if !has_homeboy_binary && !InvocationClassifier::has_homeboy_wrapper_provenance(lines, start) {
         return None;
     }
 
@@ -123,7 +123,7 @@ fn invocation_tokens(lines: &[&str], start: usize) -> Option<InvocationTokens> {
         .iter()
         .map(|token| token.value.clone())
         .collect::<Vec<_>>();
-    if values.is_empty() || !is_homeboy_command_candidate(&values) {
+    if values.is_empty() || !InvocationClassifier::is_homeboy_command_candidate(&values) {
         return None;
     }
 
@@ -150,52 +150,6 @@ fn invocation_tokens(lines: &[&str], start: usize) -> Option<InvocationTokens> {
     }
 
     Some(InvocationTokens { tokens })
-}
-
-fn strip_homeboy_binary(tokens: &mut Vec<TokenSource>) -> bool {
-    let Some(first) = tokens.first() else {
-        return false;
-    };
-
-    if is_homeboy_binary_token(&first.value) {
-        tokens.remove(0);
-        return true;
-    }
-
-    false
-}
-
-fn is_homeboy_binary_token(token: &str) -> bool {
-    token
-        .rsplit(['/', '\\'])
-        .next()
-        .is_some_and(|name| name == "homeboy")
-}
-
-fn has_homeboy_wrapper_provenance(lines: &[&str], start: usize) -> bool {
-    let Some(line) = lines.get(start) else {
-        return false;
-    };
-
-    if calls_homeboy_wrapper(line) {
-        return true;
-    }
-
-    if !line.contains("var args") && !line.contains("let args") {
-        return false;
-    }
-
-    let end = (start + 25).min(lines.len().saturating_sub(1));
-    start < end
-        && lines[start + 1..=end]
-            .iter()
-            .any(|next| calls_homeboy_wrapper(next) && next.contains("args"))
-}
-
-fn calls_homeboy_wrapper(line: &str) -> bool {
-    line.contains("executeCommand(")
-        || line.contains("executeWithStdin(")
-        || line.contains("cli.execute(")
 }
 
 fn validate_invocation(tokens: &[String]) -> Option<String> {
@@ -228,13 +182,6 @@ fn should_skip_for_stale_command_detector(tokens: &[String]) -> bool {
     }
 
     false
-}
-
-fn is_homeboy_command_candidate(tokens: &[String]) -> bool {
-    let Some(command) = tokens.first() else {
-        return false;
-    };
-    current_command_surface().contains_path(&[command.as_str()])
 }
 
 fn looks_like_invocation_array(line: &str) -> bool {
@@ -374,6 +321,63 @@ fn display_shape(tokens: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+struct InvocationClassifier;
+
+impl InvocationClassifier {
+    fn strip_homeboy_binary(tokens: &mut Vec<TokenSource>) -> bool {
+        let Some(first) = tokens.first() else {
+            return false;
+        };
+
+        if Self::is_homeboy_binary_token(&first.value) {
+            tokens.remove(0);
+            return true;
+        }
+
+        false
+    }
+
+    fn has_homeboy_wrapper_provenance(lines: &[&str], start: usize) -> bool {
+        let Some(line) = lines.get(start) else {
+            return false;
+        };
+
+        if Self::calls_homeboy_wrapper(line) {
+            return true;
+        }
+
+        if !line.contains("var args") && !line.contains("let args") {
+            return false;
+        }
+
+        let end = (start + 25).min(lines.len().saturating_sub(1));
+        start < end
+            && lines[start + 1..=end]
+                .iter()
+                .any(|next| Self::calls_homeboy_wrapper(next) && next.contains("args"))
+    }
+
+    fn is_homeboy_command_candidate(tokens: &[String]) -> bool {
+        let Some(command) = tokens.first() else {
+            return false;
+        };
+        current_command_surface().contains_path(&[command.as_str()])
+    }
+
+    fn is_homeboy_binary_token(token: &str) -> bool {
+        token
+            .rsplit(['/', '\\'])
+            .next()
+            .is_some_and(|name| name == "homeboy")
+    }
+
+    fn calls_homeboy_wrapper(line: &str) -> bool {
+        line.contains("executeCommand(")
+            || line.contains("executeWithStdin(")
+            || line.contains("cli.execute(")
+    }
 }
 
 struct PlaceholderSynthesizer;
