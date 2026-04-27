@@ -25,15 +25,14 @@ pub mod install;
 pub mod pipeline;
 pub mod runner;
 pub mod service;
+pub mod source;
 pub mod spec;
 pub mod state;
 
 pub use app::{AppLauncherAction, AppLauncherOptions, AppLauncherReport};
 pub use install::{
-    discover_rigs, install, list_sources, read_source_metadata, remove_source, DiscoveredRig,
-    InvalidRigSourceMetadata, RemovedRigSourceRig, RigInstallResult, RigSourceGroup,
-    RigSourceListResult, RigSourceMetadata, RigSourceRemoveResult, RigSourceRig,
-    SkippedRigSourceRig,
+    discover_rigs, install, read_source_metadata, DiscoveredRig, RigInstallResult,
+    RigSourceMetadata,
 };
 pub use pipeline::{PipelineOutcome, PipelineStepOutcome};
 pub use runner::{
@@ -41,6 +40,10 @@ pub use runner::{
     DownReport, RigStateSnapshot, RigStatusReport, UpReport,
 };
 pub use service::{DiscoveredProcess, ServiceStatus};
+pub use source::{
+    list_sources, remove_source, InvalidRigSourceMetadata, RemovedRigSourceRig, RigSourceGroup,
+    RigSourceListResult, RigSourceRemoveResult, RigSourceRig, SkippedRigSourceRig,
+};
 pub use spec::{
     AppLauncherPlatform, AppLauncherPreflight, AppLauncherSpec, BenchSpec, CheckSpec,
     ComponentSpec, DiscoverSpec, NewerThanSpec, PatchOp, PipelineStep, RigSpec, ServiceKind,
