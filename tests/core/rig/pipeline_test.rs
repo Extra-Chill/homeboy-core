@@ -217,6 +217,7 @@ mod dag {
                 remote_url: None,
                 stack: None,
                 branch: None,
+                extensions: None,
             },
         );
         components.insert(
@@ -226,6 +227,7 @@ mod dag {
                 remote_url: None,
                 stack: None,
                 branch: None,
+                extensions: None,
             },
         );
 
@@ -283,6 +285,7 @@ mod patch {
                 remote_url: None,
                 stack: None,
                 branch: None,
+                extensions: None,
             },
         );
         let mut pipeline = HashMap::new();

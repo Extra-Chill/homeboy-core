@@ -137,12 +137,32 @@ impl ResolveOptions {
 /// 4. **Extension**: resolved from component's linked extensions for the requested capability
 /// 5. **Settings**: extension manifest defaults → component-level → CLI overrides
 pub fn resolve(options: &ResolveOptions) -> Result<ExecutionContext> {
+    resolve_with_component(options, None)
+}
+
+/// Resolve a unified execution context, optionally starting from an in-memory
+/// component supplied by a higher-level dispatcher.
+///
+/// Rig-pinned bench runs use this to provide private extension config from the
+/// rig spec without requiring global component registration or repo-owned
+/// `homeboy.json`. Other commands should continue using [`resolve()`].
+pub fn resolve_with_component(
+    options: &ResolveOptions,
+    component_override: Option<Component>,
+) -> Result<ExecutionContext> {
     // 1. Resolve component
-    let component = component::resolve_effective(
-        options.component_id.as_deref(),
-        options.path_override.as_deref(),
-        None,
-    )?;
+    let component = if let Some(mut component) = component_override {
+        if let Some(path) = options.path_override.as_deref() {
+            component.local_path = path.to_string();
+        }
+        component
+    } else {
+        component::resolve_effective(
+            options.component_id.as_deref(),
+            options.path_override.as_deref(),
+            None,
+        )?
+    };
 
     // 2. Resolve source path
     let source_path = if let Some(ref path) = options.path_override {

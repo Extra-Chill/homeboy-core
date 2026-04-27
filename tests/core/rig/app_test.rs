@@ -17,6 +17,7 @@ fn rig_with_launcher(install_dir: &str) -> RigSpec {
             remote_url: None,
             stack: None,
             branch: None,
+            extensions: None,
         },
     );
 
