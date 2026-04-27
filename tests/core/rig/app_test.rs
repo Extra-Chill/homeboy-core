@@ -29,6 +29,7 @@ fn rig_with_launcher(install_dir: &str) -> RigSpec {
         services: Default::default(),
         symlinks: Vec::new(),
         shared_paths: Vec::new(),
+        resources: Default::default(),
         pipeline: Default::default(),
         bench: None,
         bench_workloads: Default::default(),

@@ -40,6 +40,13 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_paths: Vec<SharedPathSpec>,
 
+    /// Shared resources this rig may exclusively own or touch while active.
+    ///
+    /// Phase 1 is declarative only: these are parsed, validated by serde, and
+    /// displayed for operators. Runtime lock/conflict enforcement is deferred.
+    #[serde(default, skip_serializing_if = "RigResourcesSpec::is_empty")]
+    pub resources: RigResourcesSpec,
+
     /// Pipelines for `up`, `check`, `down`, and custom verbs. MVP uses `up`,
     /// `check`, and `down`; future phases will add `sync`, `bench`, etc.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -65,6 +72,35 @@ pub struct RigSpec {
     /// `homeboy rig check` and `homeboy rig up` before opening the target app.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_launcher: Option<AppLauncherSpec>,
+}
+
+/// Declarative resources a rig owns or touches while active.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RigResourcesSpec {
+    /// Logical resource tokens that should not overlap with another active rig.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclusive: Vec<String>,
+
+    /// Filesystem paths the rig may mutate or require exclusive access to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+
+    /// TCP ports the rig may bind or assume ownership of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
+
+    /// Process command-line substrings the rig may stop or inspect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub process_patterns: Vec<String>,
+}
+
+impl RigResourcesSpec {
+    pub fn is_empty(&self) -> bool {
+        self.exclusive.is_empty()
+            && self.paths.is_empty()
+            && self.ports.is_empty()
+            && self.process_patterns.is_empty()
+    }
 }
 
 /// Desktop launcher settings for a rig.

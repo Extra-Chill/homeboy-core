@@ -226,10 +226,12 @@ fn update(rig_id: Option<&str>, all: bool) -> CmdResult<RigCommandOutput> {
 
 fn show(rig_id: &str) -> CmdResult<RigCommandOutput> {
     let rig = rig::load(rig_id)?;
+    let resources = rig::expand::expand_resources(&rig);
     Ok((
         RigCommandOutput::Show(RigShowOutput {
             command: "rig.show",
             rig,
+            resources,
         }),
         0,
     ))
