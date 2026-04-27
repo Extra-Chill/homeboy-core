@@ -37,6 +37,7 @@ fn test_expand_vars_component_path() {
         ComponentSpec {
             path: "/tmp/studio".to_string(),
             remote_url: None,
+            triage_remote_url: None,
             stack: None,
             branch: None,
         },
