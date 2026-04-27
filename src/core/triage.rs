@@ -180,6 +180,8 @@ pub struct TriagePrItem {
     pub updated_at: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -726,7 +728,7 @@ fn parse_prs(
         .into_iter()
         .map(|item| {
             let stale = is_stale(item.updated_at.as_deref(), stale_cutoff);
-            TriagePrItem {
+            let mut pr = TriagePrItem {
                 number: item.number,
                 title: item.title,
                 url: item.url,
@@ -745,9 +747,51 @@ fn parse_prs(
                 author: item.author.and_then(|a| a.login),
                 updated_at: item.updated_at,
                 stale,
-            }
+                next_action: None,
+            };
+            pr.next_action = derive_pr_next_action(&pr);
+            pr
         })
         .collect())
+}
+
+fn derive_pr_next_action(pr: &TriagePrItem) -> Option<String> {
+    let checks = pr.checks.as_deref();
+    let review = pr.review_decision.as_deref();
+    let merge = pr.merge_state.as_deref();
+
+    if pr.draft && checks == Some("FAILURE") {
+        return Some("draft_with_failing_checks".to_string());
+    }
+    if checks == Some("FAILURE") {
+        return Some("checks_failed".to_string());
+    }
+    if review == Some("APPROVED") && is_dirty_merge_state(merge) {
+        return Some("approved_but_dirty".to_string());
+    }
+    if review == Some("APPROVED") && merge == Some("CLEAN") && checks == Some("PENDING") {
+        return Some("approved_but_pending_checks".to_string());
+    }
+    if review == Some("APPROVED") && merge == Some("CLEAN") && checks == Some("SUCCESS") {
+        return Some("clean_and_ready".to_string());
+    }
+    if matches!(merge, Some("BEHIND" | "DIRTY")) {
+        return Some("needs_rebase".to_string());
+    }
+    if review == Some("REVIEW_REQUIRED") {
+        return Some("review_required".to_string());
+    }
+    if pr.stale {
+        return Some("stale_pr".to_string());
+    }
+    None
+}
+
+fn is_dirty_merge_state(merge: Option<&str>) -> bool {
+    matches!(
+        merge,
+        Some("BEHIND" | "BLOCKED" | "DIRTY" | "HAS_HOOKS" | "UNSTABLE")
+    )
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -831,37 +875,20 @@ fn build_actions(
 ) -> Vec<TriageAction> {
     let mut actions = Vec::new();
     if let Some(prs) = pull_requests {
-        let failing = prs
-            .items
-            .iter()
-            .filter(|pr| pr.checks.as_deref() == Some("FAILURE"))
-            .count();
-        if failing > 0 {
-            actions.push(TriageAction {
-                kind: "failing_checks".to_string(),
-                severity: "high".to_string(),
-                label: pluralize(failing, "PR has failing checks", "PRs have failing checks"),
-            });
+        let mut action_counts = BTreeMap::<String, usize>::new();
+        for pr in &prs.items {
+            if let Some(next_action) = &pr.next_action {
+                *action_counts.entry(next_action.clone()).or_default() += 1;
+            }
         }
-        let needs_review = prs
-            .items
-            .iter()
-            .filter(|pr| pr.review_decision.as_deref() == Some("REVIEW_REQUIRED"))
-            .count();
-        if needs_review > 0 {
-            actions.push(TriageAction {
-                kind: "review_required".to_string(),
-                severity: "medium".to_string(),
-                label: pluralize(needs_review, "PR needs review", "PRs need review"),
-            });
-        }
-        let stale = prs.items.iter().filter(|pr| pr.stale).count();
-        if stale > 0 {
-            actions.push(TriageAction {
-                kind: "stale_prs".to_string(),
-                severity: "low".to_string(),
-                label: pluralize(stale, "stale PR", "stale PRs"),
-            });
+        for &kind in PR_ACTION_PRIORITY {
+            if let Some(count) = action_counts.get(kind) {
+                actions.push(TriageAction {
+                    kind: kind.to_string(),
+                    severity: pr_action_severity(kind).to_string(),
+                    label: pr_action_label(kind, *count),
+                });
+            }
         }
     }
     if let Some(issues) = issues {
@@ -904,6 +931,49 @@ fn build_actions(
         }
     }
     actions
+}
+
+const PR_ACTION_PRIORITY: &[&str] = &[
+    "draft_with_failing_checks",
+    "checks_failed",
+    "approved_but_dirty",
+    "needs_rebase",
+    "review_required",
+    "approved_but_pending_checks",
+    "clean_and_ready",
+    "stale_pr",
+];
+
+fn pr_action_severity(kind: &str) -> &'static str {
+    match kind {
+        "draft_with_failing_checks" | "checks_failed" | "approved_but_dirty" | "needs_rebase" => {
+            "high"
+        }
+        "review_required" | "approved_but_pending_checks" | "clean_and_ready" => "medium",
+        _ => "low",
+    }
+}
+
+fn pr_action_label(kind: &str, count: usize) -> String {
+    match kind {
+        "draft_with_failing_checks" => pluralize(
+            count,
+            "draft PR has failing checks",
+            "draft PRs have failing checks",
+        ),
+        "checks_failed" => pluralize(count, "PR has failed checks", "PRs have failed checks"),
+        "approved_but_dirty" => pluralize(count, "approved PR is dirty", "approved PRs are dirty"),
+        "needs_rebase" => pluralize(count, "PR needs rebase", "PRs need rebase"),
+        "review_required" => pluralize(count, "PR needs review", "PRs need review"),
+        "approved_but_pending_checks" => pluralize(
+            count,
+            "approved PR is waiting on checks",
+            "approved PRs are waiting on checks",
+        ),
+        "clean_and_ready" => pluralize(count, "PR is clean and ready", "PRs are clean and ready"),
+        "stale_pr" => pluralize(count, "stale PR", "stale PRs"),
+        _ => pluralize(count, "PR needs action", "PRs need action"),
+    }
 }
 
 fn pluralize(count: usize, singular: &str, plural: &str) -> String {
@@ -1122,6 +1192,7 @@ mod tests {
         assert!(items[0].review_decision.is_none());
         assert!(items[0].merge_state.is_none());
         assert!(items[0].check_failures.is_empty());
+        assert!(items[0].next_action.is_none());
     }
 
     #[test]
@@ -1186,6 +1257,119 @@ mod tests {
     }
 
     #[test]
+    fn parse_prs_derives_next_action_labels() {
+        let raw = r#"[
+            {
+              "number": 1,
+              "title": "Broken checks",
+              "url": "https://github.com/o/r/pull/1",
+              "state": "OPEN",
+              "isDraft": false,
+              "reviewDecision": "",
+              "mergeStateStatus": "CLEAN",
+              "statusCheckRollup": [{"status":"COMPLETED","conclusion":"FAILURE"}],
+              "labels": [],
+              "assignees": [],
+              "author": {"login":"chubes4"},
+              "updatedAt": "2026-04-26T00:00:00Z"
+            },
+            {
+              "number": 2,
+              "title": "Approved dirty",
+              "url": "https://github.com/o/r/pull/2",
+              "state": "OPEN",
+              "isDraft": false,
+              "reviewDecision": "APPROVED",
+              "mergeStateStatus": "DIRTY",
+              "statusCheckRollup": [{"status":"COMPLETED","conclusion":"SUCCESS"}],
+              "labels": [],
+              "assignees": [],
+              "author": {"login":"chubes4"},
+              "updatedAt": "2026-04-26T00:00:00Z"
+            },
+            {
+              "number": 3,
+              "title": "Ready",
+              "url": "https://github.com/o/r/pull/3",
+              "state": "OPEN",
+              "isDraft": false,
+              "reviewDecision": "APPROVED",
+              "mergeStateStatus": "CLEAN",
+              "statusCheckRollup": [{"status":"COMPLETED","conclusion":"SUCCESS"}],
+              "labels": [],
+              "assignees": [],
+              "author": {"login":"chubes4"},
+              "updatedAt": "2026-04-26T00:00:00Z"
+            },
+            {
+              "number": 4,
+              "title": "Needs eyes",
+              "url": "https://github.com/o/r/pull/4",
+              "state": "OPEN",
+              "isDraft": false,
+              "reviewDecision": "REVIEW_REQUIRED",
+              "mergeStateStatus": "CLEAN",
+              "statusCheckRollup": [{"status":"COMPLETED","conclusion":"SUCCESS"}],
+              "labels": [],
+              "assignees": [],
+              "author": {"login":"chubes4"},
+              "updatedAt": "2026-04-26T00:00:00Z"
+            },
+            {
+              "number": 5,
+              "title": "Pending",
+              "url": "https://github.com/o/r/pull/5",
+              "state": "OPEN",
+              "isDraft": false,
+              "reviewDecision": "APPROVED",
+              "mergeStateStatus": "CLEAN",
+              "statusCheckRollup": [{"status":"IN_PROGRESS","conclusion":null}],
+              "labels": [],
+              "assignees": [],
+              "author": {"login":"chubes4"},
+              "updatedAt": "2026-04-26T00:00:00Z"
+            }
+        ]"#;
+
+        let items = parse_prs(raw, None, false).unwrap();
+        let actions: Vec<_> = items
+            .iter()
+            .map(|item| item.next_action.as_deref().unwrap())
+            .collect();
+        assert_eq!(
+            actions,
+            vec![
+                "checks_failed",
+                "approved_but_dirty",
+                "clean_and_ready",
+                "review_required",
+                "approved_but_pending_checks",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_actions_prioritizes_pr_next_actions() {
+        let prs = TriagePrBucket {
+            open: 4,
+            items: vec![
+                triage_pr_with_action("clean_and_ready"),
+                triage_pr_with_action("checks_failed"),
+                triage_pr_with_action("review_required"),
+                triage_pr_with_action("checks_failed"),
+            ],
+        };
+
+        let actions = build_actions(None, Some(&prs));
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0].kind, "checks_failed");
+        assert_eq!(actions[0].severity, "high");
+        assert_eq!(actions[0].label, "2 PRs have failed checks");
+        assert_eq!(actions[1].kind, "review_required");
+        assert_eq!(actions[2].kind, "clean_and_ready");
+    }
+
+    #[test]
     fn summarize_counts_component_actions() {
         let component = TriageComponentReport {
             component_id: "data-machine".to_string(),
@@ -1240,12 +1424,13 @@ mod tests {
                     author: None,
                     updated_at: None,
                     stale: false,
+                    next_action: Some("checks_failed".to_string()),
                 }],
             }),
             actions: vec![TriageAction {
-                kind: "failing_checks".to_string(),
+                kind: "checks_failed".to_string(),
                 severity: "high".to_string(),
-                label: "1 PR has failing checks".to_string(),
+                label: "1 PR has failed checks".to_string(),
             }],
             error: None,
         };
@@ -1257,5 +1442,25 @@ mod tests {
         assert_eq!(summary.needs_review, 1);
         assert_eq!(summary.failing_checks, 1);
         assert_eq!(summary.actions, 1);
+    }
+
+    fn triage_pr_with_action(action: &str) -> TriagePrItem {
+        TriagePrItem {
+            number: 1,
+            title: "PR".to_string(),
+            url: "https://github.com/o/r/pull/1".to_string(),
+            state: "OPEN".to_string(),
+            draft: false,
+            review_decision: None,
+            checks: None,
+            check_failures: Vec::new(),
+            merge_state: None,
+            labels: vec![],
+            assignees: vec![],
+            author: None,
+            updated_at: None,
+            stale: false,
+            next_action: Some(action.to_string()),
+        }
     }
 }
