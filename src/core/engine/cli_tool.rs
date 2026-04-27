@@ -258,7 +258,11 @@ fn build_project_command(
         }
     }
 
-    for flag in matching_auto_flags(cli_config, project_server_user(project).as_deref()) {
+    for flag in matching_auto_flags(
+        extension_id,
+        cli_config,
+        project_server_user(project).as_deref(),
+    ) {
         rendered.push(' ');
         rendered.push_str(flag);
     }
@@ -271,13 +275,29 @@ fn project_server_user(project: &Project) -> Option<String> {
     server::load(server_id).ok().map(|svr| svr.user)
 }
 
-fn matching_auto_flags<'a>(cli_config: &'a CliConfig, server_user: Option<&str>) -> Vec<&'a str> {
+fn matching_auto_flags<'a>(
+    extension_id: &str,
+    cli_config: &'a CliConfig,
+    server_user: Option<&str>,
+) -> Vec<&'a str> {
+    if cli_config.auto_flags.is_empty() {
+        return legacy_default_auto_flags(extension_id, server_user);
+    }
+
     cli_config
         .auto_flags
         .iter()
         .filter(|auto_flag| auto_flag_matches(auto_flag, server_user))
         .map(|auto_flag| auto_flag.flag.as_str())
         .collect()
+}
+
+fn legacy_default_auto_flags(extension_id: &str, server_user: Option<&str>) -> Vec<&'static str> {
+    if extension_id == "wordpress" && server_user == Some("root") {
+        vec!["--allow-root"]
+    } else {
+        Vec::new()
+    }
 }
 
 fn auto_flag_matches(auto_flag: &CliAutoFlag, server_user: Option<&str>) -> bool {
@@ -398,15 +418,15 @@ mod tests {
         ]);
 
         assert_eq!(
-            matching_auto_flags(&config, Some("root")),
+            matching_auto_flags("wordpress", &config, Some("root")),
             vec!["--allow-root"]
         );
         assert_eq!(
-            matching_auto_flags(&config, Some("deploy")),
+            matching_auto_flags("wordpress", &config, Some("deploy")),
             vec!["--as-deploy"]
         );
-        assert!(matching_auto_flags(&config, Some("www-data")).is_empty());
-        assert!(matching_auto_flags(&config, None).is_empty());
+        assert!(matching_auto_flags("wordpress", &config, Some("www-data")).is_empty());
+        assert!(matching_auto_flags("wordpress", &config, None).is_empty());
     }
 
     #[test]
@@ -417,10 +437,25 @@ mod tests {
         }]);
 
         assert_eq!(
-            matching_auto_flags(&config, Some("root")),
+            matching_auto_flags("wordpress", &config, Some("root")),
             vec!["--global-flag"]
         );
-        assert_eq!(matching_auto_flags(&config, None), vec!["--global-flag"]);
+        assert_eq!(
+            matching_auto_flags("wordpress", &config, None),
+            vec!["--global-flag"]
+        );
+    }
+
+    #[test]
+    fn legacy_wordpress_auto_flag_still_applies_without_manifest_flags() {
+        let config = cli_config(Vec::new());
+
+        assert_eq!(
+            matching_auto_flags("wordpress", &config, Some("root")),
+            vec!["--allow-root"]
+        );
+        assert!(matching_auto_flags("wordpress", &config, Some("deploy")).is_empty());
+        assert!(matching_auto_flags("custom", &config, Some("root")).is_empty());
     }
 
     #[test]
