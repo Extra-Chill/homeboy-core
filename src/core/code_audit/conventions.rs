@@ -137,6 +137,8 @@ pub enum AuditFinding {
     MissingTestMethod,
     /// Test file or test method has no corresponding source file/method.
     OrphanedTest,
+    /// Test method has a placeholder/no-op body that does not exercise product code.
+    VacuousTest,
     /// Comment starts with TODO/FIXME/HACK/XXX marker.
     TodoMarker,
     /// Comment starts with stale or legacy phrasing.
@@ -248,6 +250,7 @@ impl AuditFinding {
             "missing_test_file",
             "missing_test_method",
             "orphaned_test",
+            "vacuous_test",
             "todo_marker",
             "legacy_comment",
             "layer_ownership_violation",

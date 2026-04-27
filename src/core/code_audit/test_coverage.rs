@@ -23,6 +23,7 @@ use super::idiomatic::{is_trivial_method, test_covers_method};
 use super::test_mapping::{
     build_source_name_index, partition_fingerprints, source_to_test_path, test_to_source_path,
 };
+use super::test_vacuity::{find_vacuous_test_methods, rust_crate_name};
 use crate::extension::TestMappingConfig;
 
 /// Analyze test coverage gaps given source fingerprints and a test mapping config.
@@ -45,6 +46,8 @@ pub(crate) fn analyze_test_coverage(
         .iter()
         .map(|fp| (fp.relative_path.as_str(), *fp))
         .collect();
+
+    let crate_name = rust_crate_name(root);
 
     // Check 1 & 2: For each source file, check for corresponding test file and methods
     for source_fp in &source_fps {
@@ -128,6 +131,14 @@ pub(crate) fn analyze_test_coverage(
             let source_methods: HashSet<&str> =
                 source_fp.methods.iter().map(|m| m.as_str()).collect();
 
+            find_vacuous_test_methods(
+                &mut findings,
+                source_fp,
+                &source_fp.test_methods,
+                &source_methods,
+                crate_name.as_deref(),
+            );
+
             // Check method coverage: combine inline test methods + dedicated
             // test file methods, accepting either literal-prefix matches or
             // token-bounded substring matches (see `test_covers_method`).
@@ -188,6 +199,13 @@ pub(crate) fn analyze_test_coverage(
 
             // Also check dedicated test file methods against this source
             if let Some(test_fingerprint) = test_fp {
+                find_vacuous_test_methods(
+                    &mut findings,
+                    test_fingerprint,
+                    &collect_test_methods_from_fp(test_fingerprint, config),
+                    &HashSet::new(),
+                    crate_name.as_deref(),
+                );
                 find_orphaned_test_methods(
                     &mut findings,
                     &test_fingerprint.relative_path,
@@ -275,6 +293,15 @@ pub(crate) fn analyze_test_coverage(
                 }
 
                 // Check 4b: Orphaned test methods (external file)
+                if let Some(test_fingerprint) = test_fp {
+                    find_vacuous_test_methods(
+                        &mut findings,
+                        test_fingerprint,
+                        &test_methods,
+                        &HashSet::new(),
+                        crate_name.as_deref(),
+                    );
+                }
                 find_orphaned_test_methods(
                     &mut findings,
                     &test_file_label,
@@ -711,6 +738,16 @@ mod tests {
         }
     }
 
+    fn make_rust_test_fp(path: &str, methods: Vec<&str>, content: &str) -> FileFingerprint {
+        FileFingerprint {
+            relative_path: path.to_string(),
+            language: Language::Rust,
+            methods: methods.into_iter().map(String::from).collect(),
+            content: content.to_string(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn source_to_test_path_basic() {
         let config = make_config();
@@ -971,6 +1008,69 @@ fn test_chat_tools() {
             coverage_findings.is_empty(),
             "Fully tested source should have no coverage findings"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vacuous_test_detects_assert_true_placeholder() {
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_vacuous_assert_true");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"homeboy\"\n").unwrap();
+
+        let source = make_fp("src/commands/refactor.rs", vec!["run"]);
+        let test = make_rust_test_fp(
+            "tests/commands/refactor_test.rs",
+            vec!["test_run"],
+            r#"
+                #[test]
+                fn test_run() {
+                    // Keep this named coverage test to satisfy audit mapping.
+                    assert!(true);
+                }
+            "#,
+        );
+
+        let findings = analyze_test_coverage(&dir, &[&source, &test], &config);
+
+        let vacuous: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::VacuousTest)
+            .collect();
+        assert_eq!(vacuous.len(), 1);
+        assert!(vacuous[0].description.contains("test_run"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vacuous_test_skips_imported_product_calls() {
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_real_product_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"homeboy\"\n").unwrap();
+
+        let source = make_fp("src/deploy.rs", vec!["parse_bulk_component_ids"]);
+        let test = make_rust_test_fp(
+            "tests/deploy_test.rs",
+            vec!["test_parse_bulk_component_ids_supports_json_array"],
+            r##"
+                use homeboy::deploy::parse_bulk_component_ids;
+
+                #[test]
+                fn test_parse_bulk_component_ids_supports_json_array() {
+                    let ids = parse_bulk_component_ids(r#"[\"api\",\"web\"]"#).unwrap();
+                    assert_eq!(ids, vec!["api", "web"]);
+                }
+            "##,
+        );
+
+        let findings = analyze_test_coverage(&dir, &[&source, &test], &config);
+
+        assert!(!findings.iter().any(|f| f.kind == AuditFinding::VacuousTest));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
