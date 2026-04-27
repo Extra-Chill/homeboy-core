@@ -3,15 +3,10 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-04-27T01:56:20Z",
+      "created_at": "2026-04-27T03:28:05Z",
       "item_count": 760,
       "known_fingerprints": [
         "Commands::src/commands/docs.rs::NamespaceMismatch",
-        "Stack (Tests)::tests/core/stack/inspect_test.rs::MissingMethod",
-        "Stack (Tests)::tests/core/stack/inspect_test.rs::MissingMethod",
-        "Stack (Tests)::tests/core/stack/spec_test.rs::MissingMethod",
-        "Stack (Tests)::tests/core/stack/spec_test.rs::MissingMethod",
-        "Stack (Tests)::tests/core/stack/spec_test.rs::MissingMethod",
         "comment_hygiene::src/commands/release.rs::LegacyComment",
         "dead_code::src/commands/utils/entity_suggest.rs::UnreferencedExport",
         "dead_code::src/commands/utils/entity_suggest.rs::UnreferencedExport",
@@ -39,7 +34,6 @@
         "dead_code::src/core/extension/execution.rs::UnreferencedExport",
         "dead_code::src/core/extension/execution.rs::UnreferencedExport",
         "dead_code::src/core/extension/lifecycle.rs::UnreferencedExport",
-        "dead_code::src/core/extension/lifecycle.rs::UnreferencedExport",
         "dead_code::src/core/extension/runner.rs::UnreferencedExport",
         "dead_code::src/core/extension/runner.rs::UnusedParameter",
         "dead_code::src/core/extension/runner_contract.rs::UnreferencedExport",
@@ -52,7 +46,6 @@
         "dead_code::src/core/git/operations.rs::UnreferencedExport",
         "dead_code::src/core/issues/plan.rs::UnreferencedExport",
         "dead_code::src/core/issues/plan.rs::UnreferencedExport",
-        "dead_code::src/core/paths.rs::UnreferencedExport",
         "dead_code::src/core/paths.rs::UnreferencedExport",
         "dead_code::src/core/paths.rs::UnreferencedExport",
         "dead_code::src/core/refactor/auto/apply.rs::UnreferencedExport",
@@ -90,6 +83,7 @@
         "field_patterns::src/core/code_audit/codebase_map.rs::RepeatedFieldPattern",
         "field_patterns::src/core/code_audit/conventions.rs::RepeatedFieldPattern",
         "field_patterns::src/core/code_audit/conventions.rs::RepeatedFieldPattern",
+        "field_patterns::src/core/code_audit/field_patterns.rs::RepeatedFieldPattern",
         "field_patterns::src/core/code_audit/findings.rs::RepeatedFieldPattern",
         "field_patterns::src/core/code_audit/fingerprint.rs::RepeatedFieldPattern",
         "field_patterns::src/core/code_audit/mod.rs::RepeatedFieldPattern",
@@ -315,7 +309,6 @@
         "structural::src/core/rig/spec.rs::HighItemCount",
         "structural::src/core/server/health.rs::HighItemCount",
         "structural::src/core/triage.rs::HighItemCount",
-        "structural::src/main.rs::HighItemCount",
         "structural::tests/core/rig/check_test.rs::HighItemCount",
         "structural::tests/core/rig/spec_test.rs::HighItemCount",
         "test_coverage::src/core/code_audit/baseline.rs::MissingTestMethod",
@@ -607,6 +600,10 @@
         "test_coverage::src/core/paths.rs::MissingTestMethod",
         "test_coverage::src/core/paths.rs::MissingTestMethod",
         "test_coverage::src/core/paths.rs::MissingTestMethod",
+        "test_coverage::src/core/paths.rs::MissingTestMethod",
+        "test_coverage::src/core/paths.rs::MissingTestMethod",
+        "test_coverage::src/core/paths.rs::MissingTestMethod",
+        "test_coverage::src/core/paths.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
@@ -771,16 +768,14 @@
         "test_coverage::tests/core/rig/bench_default_baseline_spec_test.rs::OrphanedTest"
       ],
       "metadata": {
-        "alignment_score": 0.875,
+        "alignment_score": 0.9047619104385376,
         "known_outliers": [
           "src/commands/docs.rs",
-          "tests/core/stack/inspect_test.rs",
-          "tests/core/stack/spec_test.rs",
           "src/core/engine/undo/rollback.rs",
           "src/core/engine/undo/snapshot.rs",
           "src/core/engine/undo/entry.rs"
         ],
-        "outliers_count": 6
+        "outliers_count": 4
       }
     }
   },
