@@ -370,6 +370,27 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_with_component() {
+        let dir = TempDir::new().expect("temp dir");
+        let root = dir.path();
+        fs::create_dir_all(root).expect("create dir");
+
+        let component = Component {
+            id: "rig-owned".to_string(),
+            local_path: root.to_string_lossy().to_string(),
+            ..Component::default()
+        };
+        let options = ResolveOptions::source_only("registered-id", None);
+
+        let ctx = resolve_with_component(&options, Some(component))
+            .expect("in-memory component should resolve");
+
+        assert_eq!(ctx.component_id, "rig-owned");
+        assert_eq!(ctx.source_path, root);
+        assert!(ctx.extension_id.is_none());
+    }
+
+    #[test]
     fn resolve_capability_raw_path_reports_unsupported_shape() {
         let dir = TempDir::new().expect("temp dir");
         let root = dir.path();
