@@ -792,6 +792,27 @@ const MIN_LCS_RATIO: f64 = 0.5;
 /// from methods that share only 1-2 trivial calls like `to_string`.
 const MIN_SHARED_CALLS: usize = 3;
 
+/// Common plumbing calls that are useful in a method body but too generic to
+/// carry signal for workflow-level similarity. Keep these out of the scoring
+/// pass so filesystem scans, command wrappers, and terminal renderers do not
+/// look like extractable parallel implementations.
+const PLUMBING_CALLS: &[&str] = &[
+    "args",
+    "current_dir",
+    "from_utf8_lossy",
+    "is_dir",
+    "is_terminal",
+    "max",
+    "output",
+    "path",
+    "read_dir",
+    "read_to_string",
+    "run_git",
+    "stderr",
+    "success",
+    "to_str",
+];
+
 /// Ubiquitous stdlib/trait method calls that appear in almost every function
 /// and carry no signal for parallel implementation detection. Two functions
 /// both calling `.to_string()` does not mean they implement the same workflow.
@@ -928,6 +949,14 @@ fn extract_calls_from_body(body: &str) -> Vec<String> {
     }
 
     calls
+}
+
+fn signal_calls(calls: &[String]) -> Vec<String> {
+    calls
+        .iter()
+        .filter(|call| !PLUMBING_CALLS.contains(&call.as_str()))
+        .cloned()
+        .collect()
 }
 
 /// Check if a name is a language keyword (not a function call).
@@ -1155,15 +1184,22 @@ pub(crate) fn detect_parallel_implementations(
                 continue;
             }
 
-            let jaccard = jaccard_similarity(&a.calls, &b.calls);
-            let lcs = lcs_ratio(&a.calls, &b.calls);
+            let a_signal = signal_calls(&a.calls);
+            let b_signal = signal_calls(&b.calls);
+
+            if a_signal.len() < MIN_CALL_COUNT || b_signal.len() < MIN_CALL_COUNT {
+                continue;
+            }
+
+            let jaccard = jaccard_similarity(&a_signal, &b_signal);
+            let lcs = lcs_ratio(&a_signal, &b_signal);
 
             if jaccard >= MIN_JACCARD_SIMILARITY && lcs >= MIN_LCS_RATIO {
                 // Find the shared calls for the description
                 let set_a: std::collections::HashSet<&str> =
-                    a.calls.iter().map(|s| s.as_str()).collect();
+                    a_signal.iter().map(|s| s.as_str()).collect();
                 let set_b: std::collections::HashSet<&str> =
-                    b.calls.iter().map(|s| s.as_str()).collect();
+                    b_signal.iter().map(|s| s.as_str()).collect();
                 let mut shared: Vec<&&str> = set_a.intersection(&set_b).collect();
 
                 // Require a minimum absolute number of shared calls.
@@ -2046,6 +2082,83 @@ fn process_twice() -> Result {
             findings.is_empty(),
             "Methods with < MIN_CALL_COUNT calls should be skipped"
         );
+    }
+
+    #[test]
+    fn no_parallel_for_plumbing_only_call_patterns() {
+        let fs_helper = make_fingerprint_with_content(
+            "src/files.rs",
+            &["plugin_header_version"],
+            "fn plugin_header_version() {\n    path();\n    read_dir();\n    to_str();\n    success();\n}",
+        );
+        let extension_scan = make_fingerprint_with_content(
+            "src/extensions.rs",
+            &["scan_available_extensions"],
+            "fn scan_available_extensions() {\n    path();\n    read_dir();\n    to_str();\n    is_dir();\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&fs_helper, &extension_scan],
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Plumbing-only filesystem call overlap should not flag"
+        );
+    }
+
+    #[test]
+    fn no_parallel_for_command_wrapper_plumbing() {
+        let command_runner = make_fingerprint_with_content(
+            "src/command.rs",
+            &["succeeded_in"],
+            "fn succeeded_in() {\n    args();\n    current_dir();\n    output();\n    success();\n}",
+        );
+        let branch_reader = make_fingerprint_with_content(
+            "src/stack.rs",
+            &["current_branch"],
+            "fn current_branch() {\n    args();\n    current_dir();\n    output();\n    success();\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&command_runner, &branch_reader],
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Shared Command setup/result checks are plumbing, not a workflow"
+        );
+    }
+
+    #[test]
+    fn detects_parallel_implementation_after_plumbing_filter() {
+        let apply = make_fingerprint_with_content(
+            "src/core/stack/apply.rs",
+            &["apply_stack"],
+            "fn apply_stack() {\n    ensure_head_remote();\n    checkout_force();\n    fetch_pr_meta();\n    cherry_pick();\n    record_applied_pr();\n    run_git();\n    success();\n}",
+        );
+        let sync = make_fingerprint_with_content(
+            "src/core/stack/sync.rs",
+            &["sync_stack"],
+            "fn sync_stack() {\n    ensure_head_remote();\n    checkout_force();\n    fetch_pr_meta();\n    cherry_pick();\n    record_synced_pr();\n    run_git();\n    success();\n}",
+        );
+
+        let findings =
+            detect_parallel_implementations(&[&apply, &sync], &std::collections::HashSet::new());
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "Domain-heavy stack pairs should still flag"
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.description.contains("`ensure_head_remote`")));
+        assert!(findings
+            .iter()
+            .all(|finding| !finding.description.contains("`run_git`")));
     }
 
     #[test]
