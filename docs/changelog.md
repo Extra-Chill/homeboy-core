@@ -4,6 +4,31 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.113.0] - 2026-04-27
+
+### Added
+- support manifest-driven auto flags
+- extract stale CLI invocations from shell scripts
+- support extension env detectors
+
+### Changed
+- keep install-for-component coverage in lifecycle
+- isolate env-sensitive tests
+
+### Fixed
+- select behind-upstream components
+- detect unwired nested Rust tests
+- suppress generic repeated field pairs
+- tune intra-method duplicate noise
+- filter plumbing calls from parallel implementation scoring
+- classify vacuous tests separately
+- parse Rust parameter types correctly
+- respect nested Rust import scopes
+- derive Rust namespaces from file paths
+- ignore CLI option docs in legacy comments
+- tune structural count findings
+- ignore external CLI invocations
+
 ## [0.112.0] - 2026-04-27
 
 ### Added
