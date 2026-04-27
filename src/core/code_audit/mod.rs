@@ -123,6 +123,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_test_coverage: bool,
     pub(crate) run_layer_ownership: bool,
     pub(crate) run_test_topology: bool,
+    pub(crate) run_rust_test_wiring: bool,
     pub(crate) run_docs: bool,
     pub(crate) run_compiler_warnings: bool,
     pub(crate) run_wrapper_inference: bool,
@@ -150,6 +151,7 @@ impl AuditExecutionPlan {
             run_test_coverage: true,
             run_layer_ownership: true,
             run_test_topology: true,
+            run_rust_test_wiring: true,
             run_docs: true,
             run_compiler_warnings: true,
             run_wrapper_inference: true,
@@ -253,6 +255,11 @@ impl AuditExecutionPlan {
                     AuditFinding::InlineTestModule,
                     AuditFinding::ScatteredTestFile,
                 ],
+            ),
+            run_rust_test_wiring: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::UnwiredNestedRustTest],
             ),
             run_docs: Self::family_enabled(
                 only,
@@ -878,7 +885,11 @@ fn audit_internal(
     // Phase 4i2: Rust nested test harness wiring checks. Cargo only
     // auto-discovers direct `tests/*.rs` integration tests; nested tests need
     // explicit `#[path = "..."]` wiring from a source module.
-    let rust_test_wiring_findings = rust_test_wiring::run(root);
+    let rust_test_wiring_findings = if plan.run_rust_test_wiring {
+        rust_test_wiring::run(root)
+    } else {
+        Vec::new()
+    };
     if !rust_test_wiring_findings.is_empty() {
         log_status!(
             "audit",
@@ -1281,6 +1292,18 @@ fn audit_root_only(
                 topology_findings.len()
             );
             findings.extend(topology_findings);
+        }
+    }
+
+    if plan.run_rust_test_wiring {
+        let rust_test_wiring_findings = rust_test_wiring::run(root);
+        if !rust_test_wiring_findings.is_empty() {
+            log_status!(
+                "audit",
+                "Rust test wiring: {} finding(s) (nested tests not wired into Cargo)",
+                rust_test_wiring_findings.len()
+            );
+            findings.extend(rust_test_wiring_findings);
         }
     }
 
