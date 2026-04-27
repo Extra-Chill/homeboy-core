@@ -303,8 +303,9 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
 
 fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
     let passthrough_args = filter_homeboy_flags(&args.args);
-    let rig_spec = load_list_rig(args)?;
-    let effective_id = resolve_list_component_id(args, rig_spec.as_ref())?;
+    let rig_context = load_list_rig(args)?;
+    let rig_spec = rig_context.as_ref().map(|context| &context.spec);
+    let effective_id = resolve_list_component_id(args, rig_spec)?;
     let path_override = args.comp.path.clone().or_else(|| {
         rig_spec
             .as_ref()
@@ -328,9 +329,15 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
     let extra_workloads = rig_spec
         .as_ref()
         .and_then(|spec| {
-            ctx.extension_id
-                .as_deref()
-                .map(|id| bench_workloads_for_extension(spec, id))
+            ctx.extension_id.as_deref().map(|id| {
+                bench_workloads_for_extension(
+                    spec,
+                    rig_context
+                        .as_ref()
+                        .and_then(|context| context.package_root.as_deref()),
+                    id,
+                )
+            })
         })
         .unwrap_or_default();
 
@@ -366,10 +373,20 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
     Ok((BenchOutput::List(output), 0))
 }
 
-fn load_list_rig(args: &BenchListArgs) -> homeboy::Result<Option<RigSpec>> {
+struct ListRigContext {
+    spec: RigSpec,
+    package_root: Option<PathBuf>,
+}
+
+fn load_list_rig(args: &BenchListArgs) -> homeboy::Result<Option<ListRigContext>> {
     match args.rig.as_slice() {
         [] => Ok(None),
-        [rig_id] => Ok(Some(rig::load(rig_id)?)),
+        [rig_id] => {
+            let spec = rig::load(rig_id)?;
+            let package_root = rig::read_source_metadata(&spec.id)
+                .map(|metadata| PathBuf::from(metadata.package_path));
+            Ok(Some(ListRigContext { spec, package_root }))
+        }
         _ => Err(homeboy::Error::validation_invalid_argument(
             "--rig",
             "bench list accepts exactly one rig id",
