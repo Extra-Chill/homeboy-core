@@ -19,6 +19,7 @@ use super::conventions::{AuditFinding, Language};
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
 use super::requirements::{known_available_symbols, KnownSymbols};
+use crate::component::AuditConfig;
 
 /// Kinds of guards we detect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,14 @@ struct Guard {
 }
 
 pub(super) fn run(fingerprints: &[&FileFingerprint], root: &Path) -> Vec<Finding> {
+    run_with_config(fingerprints, root, &AuditConfig::default())
+}
+
+pub(super) fn run_with_config(
+    fingerprints: &[&FileFingerprint],
+    root: &Path,
+    audit_config: &AuditConfig,
+) -> Vec<Finding> {
     let known = known_available_symbols(root);
     if known.functions.is_empty() && known.classes.is_empty() && known.constants.is_empty() {
         return Vec::new();
@@ -56,7 +65,7 @@ pub(super) fn run(fingerprints: &[&FileFingerprint], root: &Path) -> Vec<Finding
             continue;
         }
         for guard in extract_guards(&fp.content) {
-            if guard_is_contextual(fp, &guard) {
+            if guard_is_contextual(fp, &guard, audit_config) {
                 continue;
             }
             if symbol_is_known(&known, &guard) {
@@ -93,22 +102,18 @@ fn symbol_is_known(known: &KnownSymbols, guard: &Guard) -> bool {
     }
 }
 
-fn guard_is_contextual(fp: &FileFingerprint, guard: &Guard) -> bool {
-    is_lifecycle_or_test_path(&fp.relative_path)
+fn guard_is_contextual(fp: &FileFingerprint, guard: &Guard, audit_config: &AuditConfig) -> bool {
+    is_lifecycle_or_test_path(&fp.relative_path, audit_config)
         || guard_defines_stub(&fp.content, guard)
         || guard_loads_symbol_provider(&fp.content, guard)
 }
 
-fn is_lifecycle_or_test_path(path: &str) -> bool {
+fn is_lifecycle_or_test_path(path: &str, audit_config: &AuditConfig) -> bool {
     let normalized = path.replace('\\', "/");
-    normalized.starts_with("tests/")
-        || normalized.contains("/tests/")
-        || normalized == "uninstall.php"
-        || normalized.ends_with("/uninstall.php")
-        || normalized == "activate.php"
-        || normalized.ends_with("/activate.php")
-        || normalized.starts_with("inc/migrations/")
-        || normalized.contains("/inc/migrations/")
+    audit_config
+        .lifecycle_path_globs
+        .iter()
+        .any(|pattern| glob_match::glob_match(pattern, &normalized))
 }
 
 fn guard_defines_stub(content: &str, guard: &Guard) -> bool {
@@ -357,7 +362,7 @@ if ( ! function_exists('wp_json_encode') ) {
     }
 
     #[test]
-    fn lifecycle_paths_are_not_production_dead_guards() {
+    fn configured_lifecycle_paths_are_not_production_dead_guards() {
         let tmp = tempfile::tempdir().unwrap();
         write_plugin_main(tmp.path(), Some("6.0"), "");
         let fp = make_fp(
@@ -369,7 +374,11 @@ if ( function_exists('as_unschedule_all_actions') ) {
 "#,
         );
 
-        let findings = run(&[&fp], tmp.path());
+        let config = AuditConfig {
+            lifecycle_path_globs: vec!["uninstall.php".to_string()],
+            ..Default::default()
+        };
+        let findings = run_with_config(&[&fp], tmp.path(), &config);
         assert!(
             findings.is_empty(),
             "uninstall context is not normal runtime"

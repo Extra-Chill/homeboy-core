@@ -117,6 +117,25 @@ pub struct ScopeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuditConfig {
+    /// Class/base names whose public methods are invoked by a runtime dispatcher.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_entrypoint_extends: Vec<String>,
+    /// Source markers that indicate public methods are runtime-dispatched.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_entrypoint_markers: Vec<String>,
+    /// Paths whose guards run outside normal production runtime assumptions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lifecycle_path_globs: Vec<String>,
+    /// Type suffixes that mark convention outliers as intentional utilities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub utility_suffixes: Vec<String>,
+    /// Files exempt from convention outlier checks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub convention_exception_globs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(from = "RawComponent", into = "RawComponent")]
 pub struct Component {
     pub id: String,
@@ -143,6 +162,8 @@ pub struct Component {
     pub docs_dir: Option<String>,
     pub docs_dirs: Vec<String>,
     pub scopes: Option<ScopeConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<AuditConfig>,
     /// Override the CLI path used by extension deploy install steps.
     /// For example, Studio sites need "studio wp" instead of the default "wp".
     pub cli_path: Option<String>,
@@ -203,6 +224,8 @@ struct RawComponent {
     docs_dirs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scopes: Option<ScopeConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audit: Option<AuditConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cli_path: Option<String>,
 }
@@ -250,6 +273,7 @@ impl From<RawComponent> for Component {
             docs_dir: raw.docs_dir,
             docs_dirs: raw.docs_dirs,
             scopes: raw.scopes,
+            audit: raw.audit,
             cli_path: raw.cli_path,
         }
     }
@@ -281,6 +305,7 @@ impl From<Component> for RawComponent {
             docs_dir: c.docs_dir,
             docs_dirs: c.docs_dirs,
             scopes: c.scopes,
+            audit: c.audit,
             cli_path: c.cli_path,
         }
     }
@@ -349,6 +374,7 @@ impl Component {
             docs_dir: None,
             docs_dirs: Vec::new(),
             scopes: None,
+            audit: None,
             cli_path: None,
         }
     }

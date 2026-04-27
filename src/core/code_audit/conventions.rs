@@ -11,6 +11,7 @@ use super::fingerprint::FileFingerprint;
 use super::import_matching::has_import_with_context;
 use super::naming::{detect_naming_suffix, suffix_matches};
 use super::signatures::{compute_signature_skeleton, tokenize_signature};
+use crate::component::AuditConfig;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -289,6 +290,20 @@ pub fn discover_conventions(
     glob_pattern: &str,
     fingerprints: &[FileFingerprint],
 ) -> Option<Convention> {
+    discover_conventions_with_config(
+        group_name,
+        glob_pattern,
+        fingerprints,
+        &AuditConfig::default(),
+    )
+}
+
+pub fn discover_conventions_with_config(
+    group_name: &str,
+    glob_pattern: &str,
+    fingerprints: &[FileFingerprint],
+    audit_config: &AuditConfig,
+) -> Option<Convention> {
     if fingerprints.len() < 2 {
         return None; // Need at least 2 files to detect a pattern
     }
@@ -418,11 +433,12 @@ pub fn discover_conventions(
                     .iter()
                     .all(|name| !suffix_matches(name, suffix))
         });
-        let utility_like = helper_like && is_utility_like_file(fp);
+        let utility_like = helper_like && is_utility_like_file(fp, audit_config);
+        let convention_exempt = is_convention_exception(fp, audit_config);
 
         let mut deviations = Vec::new();
 
-        if helper_like && !utility_like {
+        if helper_like && !utility_like && !convention_exempt {
             let suffix = naming_suffix.as_deref().unwrap_or("member");
             deviations.push(Deviation {
                 kind: AuditFinding::NamingMismatch,
@@ -442,7 +458,7 @@ pub fn discover_conventions(
 
         // Check missing methods
         for expected in &expected_methods {
-            if helper_like {
+            if helper_like || convention_exempt {
                 continue;
             }
             if !fp.methods.contains(expected) {
@@ -459,7 +475,7 @@ pub fn discover_conventions(
 
         // Check missing registrations
         for expected in &expected_registrations {
-            if helper_like {
+            if helper_like || convention_exempt {
                 continue;
             }
             if !fp.registrations.contains(expected) {
@@ -476,7 +492,7 @@ pub fn discover_conventions(
 
         // Check missing interfaces/traits
         for expected in &expected_interfaces {
-            if helper_like {
+            if helper_like || convention_exempt {
                 continue;
             }
             if !fp.implements.contains(expected) {
@@ -585,22 +601,7 @@ fn declared_trait_name(fp: &FileFingerprint) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-fn is_utility_like_file(fp: &FileFingerprint) -> bool {
-    let suffixes = [
-        "Helper",
-        "Helpers",
-        "Constants",
-        "Categories",
-        "Sanitizer",
-        "Renderer",
-        "Validator",
-        "Verifier",
-        "Resolver",
-        "Factory",
-        "Builder",
-        "Result",
-        "Scheduling",
-    ];
+fn is_utility_like_file(fp: &FileFingerprint, audit_config: &AuditConfig) -> bool {
     let names_to_check: Vec<&str> = if !fp.type_names.is_empty() {
         fp.type_names.iter().map(|s| s.as_str()).collect()
     } else {
@@ -608,9 +609,20 @@ fn is_utility_like_file(fp: &FileFingerprint) -> bool {
     };
 
     declared_trait_name(fp).is_some()
-        || names_to_check
-            .iter()
-            .any(|name| suffixes.iter().any(|suffix| name.ends_with(suffix)))
+        || names_to_check.iter().any(|name| {
+            audit_config
+                .utility_suffixes
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        })
+}
+
+fn is_convention_exception(fp: &FileFingerprint, audit_config: &AuditConfig) -> bool {
+    let normalized = fp.relative_path.replace('\\', "/");
+    audit_config
+        .convention_exception_globs
+        .iter()
+        .any(|pattern| glob_match::glob_match(pattern, &normalized))
 }
 
 // ============================================================================
@@ -841,6 +853,27 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
 mod tests {
     use super::*;
 
+    fn wordpress_like_audit_config() -> AuditConfig {
+        AuditConfig {
+            utility_suffixes: vec![
+                "Helper".to_string(),
+                "Helpers".to_string(),
+                "Constants".to_string(),
+                "Categories".to_string(),
+                "Sanitizer".to_string(),
+                "Renderer".to_string(),
+                "Validator".to_string(),
+                "Verifier".to_string(),
+                "Resolver".to_string(),
+                "Factory".to_string(),
+                "Builder".to_string(),
+                "Result".to_string(),
+                "Scheduling".to_string(),
+            ],
+            ..Default::default()
+        }
+    }
+
     /// Return `true` only when the Rust grammar is discoverable via the
     /// extension registry.
     ///
@@ -921,8 +954,13 @@ mod tests {
             },
         ];
 
-        let convention =
-            discover_conventions("Abilities", "abilities/*.php", &fingerprints).unwrap();
+        let convention = discover_conventions_with_config(
+            "Abilities",
+            "abilities/*.php",
+            &fingerprints,
+            &wordpress_like_audit_config(),
+        )
+        .unwrap();
 
         assert!(
             convention.outliers.is_empty(),
@@ -996,7 +1034,13 @@ mod tests {
             },
         ];
 
-        let convention = discover_conventions("Chat", "chat/*.php", &fingerprints).unwrap();
+        let convention = discover_conventions_with_config(
+            "Chat",
+            "chat/*.php",
+            &fingerprints,
+            &wordpress_like_audit_config(),
+        )
+        .unwrap();
         assert!(
             convention.expected_interfaces.is_empty(),
             "traits should not be treated as interfaces: {:?}",
@@ -1040,7 +1084,13 @@ mod tests {
             },
         ];
 
-        let convention = discover_conventions("Api", "api/*.php", &fingerprints).unwrap();
+        let convention = discover_conventions_with_config(
+            "Api",
+            "api/*.php",
+            &fingerprints,
+            &wordpress_like_audit_config(),
+        )
+        .unwrap();
         assert!(
             convention
                 .outliers
@@ -1078,7 +1128,13 @@ mod tests {
             },
         ];
 
-        let convention = discover_conventions("Chat", "chat/*.php", &fingerprints).unwrap();
+        let convention = discover_conventions_with_config(
+            "Chat",
+            "chat/*.php",
+            &fingerprints,
+            &wordpress_like_audit_config(),
+        )
+        .unwrap();
         assert!(
             convention
                 .outliers

@@ -11,6 +11,7 @@ use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
 use super::walker::is_test_path;
+use crate::component::AuditConfig;
 
 /// A cross-file caller record: which files call a function and with how many args.
 struct CallerRecord {
@@ -56,6 +57,14 @@ fn build_caller_map(
 pub(crate) fn analyze_dead_code(
     owned: &[&FileFingerprint],
     reference: &[&FileFingerprint],
+) -> Vec<Finding> {
+    analyze_dead_code_with_config(owned, reference, &AuditConfig::default())
+}
+
+pub(crate) fn analyze_dead_code_with_config(
+    owned: &[&FileFingerprint],
+    reference: &[&FileFingerprint],
+    audit_config: &AuditConfig,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -173,7 +182,7 @@ pub(crate) fn analyze_dead_code(
                 if !referenced_elsewhere {
                     // Skip common entry points and framework methods that are called
                     // by the runtime, not by other source files.
-                    if is_framework_entry_point(export, fp) {
+                    if is_framework_entry_point(export, fp, audit_config) {
                         continue;
                     }
 
@@ -251,7 +260,7 @@ pub(crate) fn analyze_dead_code(
 ///
 /// These are common patterns across languages where functions are invoked by
 /// convention/framework rather than explicit calls from other source files.
-fn is_framework_entry_point(name: &str, fp: &FileFingerprint) -> bool {
+fn is_framework_entry_point(name: &str, fp: &FileFingerprint, audit_config: &AuditConfig) -> bool {
     // Common entry points across all languages
     let universal_entry_points = [
         "main", "new", "default", "from", "try_from", "into", "drop", "clone", "fmt", "display",
@@ -292,9 +301,9 @@ fn is_framework_entry_point(name: &str, fp: &FileFingerprint) -> bool {
         }
     }
 
-    // PHP/WordPress-specific: hook callbacks, lifecycle methods
+    // PHP/framework-specific: hook callbacks, lifecycle methods
     if matches!(fp.language, super::conventions::Language::Php) {
-        if is_wp_cli_command_file(fp) {
+        if is_runtime_entrypoint_file(fp, audit_config) {
             return true;
         }
 
@@ -328,13 +337,16 @@ fn is_framework_entry_point(name: &str, fp: &FileFingerprint) -> bool {
     false
 }
 
-fn is_wp_cli_command_file(fp: &FileFingerprint) -> bool {
+fn is_runtime_entrypoint_file(fp: &FileFingerprint, audit_config: &AuditConfig) -> bool {
     let extends = fp.extends.as_deref().unwrap_or("");
-    extends.ends_with("WP_CLI_Command")
-        || extends.ends_with("BaseCommand")
-        || fp.content.contains("@subcommand")
-        || fp.content.contains("## OPTIONS")
-        || fp.content.contains("## EXAMPLES")
+    audit_config
+        .runtime_entrypoint_extends
+        .iter()
+        .any(|expected| extends.ends_with(expected))
+        || audit_config
+            .runtime_entrypoint_markers
+            .iter()
+            .any(|marker| fp.content.contains(marker))
 }
 
 // ============================================================================
@@ -854,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn wp_cli_command_methods_are_runtime_entry_points() {
+    fn configured_runtime_command_methods_are_entry_points() {
         let mut fp = make_fingerprint(
             "inc/Cli/Commands/EmailCommand.php",
             vec!["test_connection"],
@@ -880,7 +892,13 @@ class EmailCommand extends BaseCommand {
 "#
         .to_string();
 
-        let findings = analyze_dead_code(&[&fp], &[]);
+        let config = AuditConfig {
+            runtime_entrypoint_extends: vec!["BaseCommand".to_string()],
+            runtime_entrypoint_markers: vec!["@subcommand".to_string(), "## EXAMPLES".to_string()],
+            ..Default::default()
+        };
+
+        let findings = analyze_dead_code_with_config(&[&fp], &[], &config);
         let unreferenced: Vec<&Finding> = findings
             .iter()
             .filter(|f| f.kind == AuditFinding::UnreferencedExport)
