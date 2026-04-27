@@ -13,6 +13,7 @@
 
 pub mod baseline;
 mod checks;
+mod cli_invocation_arguments;
 pub mod codebase_map;
 mod comment_blocks;
 mod comment_hygiene;
@@ -300,12 +301,12 @@ fn audit_internal(
         .files_walked
         .saturating_sub(discovery.files_fingerprinted);
     let stale_cli_findings = stale_cli_invocation::run(root);
+    let cli_argument_findings = cli_invocation_arguments::run(root);
 
     if discovery.groups.is_empty() {
         let mut warnings = Vec::new();
         let unclaimed = walker::count_unclaimed_source_files(root);
         let total_skipped = files_skipped + unclaimed;
-
         if unclaimed > 0 {
             warnings.push(format!(
                 "Found {} source file(s) but no installed extension provides fingerprinting for these file types. \
@@ -344,14 +345,14 @@ fn audit_internal(
             summary: AuditSummary {
                 files_scanned: 0,
                 conventions_detected: 0,
-                outliers_found: stale_cli_findings.len(),
+                outliers_found: stale_cli_findings.len() + cli_argument_findings.len(),
                 alignment_score: None,
                 files_skipped: total_skipped,
                 warnings,
             },
             conventions: vec![],
             directory_conventions: vec![],
-            findings: stale_cli_findings,
+            findings: [stale_cli_findings, cli_argument_findings].concat(),
             duplicate_groups: vec![],
         });
     }
@@ -385,6 +386,16 @@ fn audit_internal(
             stale_cli_findings.len()
         );
         all_findings.extend(stale_cli_findings);
+    }
+
+    // Phase 4a: Homeboy shell-out argument-shape drift detection.
+    if !cli_argument_findings.is_empty() {
+        log_status!(
+            "audit",
+            "CLI argument shapes: {} finding(s) (stale Homeboy shell-out forms)",
+            cli_argument_findings.len()
+        );
+        all_findings.extend(cli_argument_findings);
     }
 
     // Phase 4b: Structural complexity analysis (god files, high item counts)
