@@ -218,6 +218,8 @@ pub enum AuditFinding {
     GlobalEnvMutationGuard,
     /// Source code shells out to a Homeboy CLI command shape that no longer exists.
     StaleCliInvocation,
+    /// Homeboy shell-out consumer uses a known-stale argument shape.
+    StaleCliArgumentShape,
 }
 
 impl AuditFinding {
@@ -271,6 +273,7 @@ impl AuditFinding {
             "option_scope_drift",
             "global_env_mutation_guard",
             "stale_cli_invocation",
+            "stale_cli_argument_shape",
         ]
     }
 }
