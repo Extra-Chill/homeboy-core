@@ -42,9 +42,16 @@ fn analyze_swift_file(file: &str, content: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     for idx in 0..lines.len() {
-        if let Some(tokens) = invocation_tokens(&lines, idx) {
+        if let Some(invocation) = invocation_tokens(&lines, idx) {
+            let tokens = invocation.values();
             if let Some(error) = validate_invocation(&tokens) {
-                findings.push(finding(file, idx + 1, &display_shape(&tokens), &error));
+                findings.push(finding(
+                    file,
+                    idx + 1,
+                    &display_shape(&tokens),
+                    &invocation.source_summary(),
+                    &error,
+                ));
             }
         }
     }
@@ -52,14 +59,42 @@ fn analyze_swift_file(file: &str, content: &str) -> Vec<Finding> {
     findings
 }
 
-fn finding(file: &str, line: usize, shape: &str, parser_error: &str) -> Finding {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TokenSource {
+    value: String,
+    line: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct InvocationTokens {
+    tokens: Vec<TokenSource>,
+}
+
+impl InvocationTokens {
+    fn values(&self) -> Vec<String> {
+        self.tokens
+            .iter()
+            .map(|token| token.value.clone())
+            .collect()
+    }
+
+    fn source_summary(&self) -> String {
+        self.tokens
+            .iter()
+            .map(|token| format!("{}@{}", token.value, token.line))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn finding(file: &str, line: usize, shape: &str, sources: &str, parser_error: &str) -> Finding {
     Finding {
         convention: "cli_invocation_arguments".to_string(),
         severity: Severity::Warning,
         file: file.to_string(),
         description: format!(
-            "Homeboy shell-out uses an argument shape rejected by the current CLI parser at line {}: `{}`",
-            line, shape
+            "Homeboy shell-out uses an argument shape rejected by the current CLI parser at line {}: `{}` (token sources: {})",
+            line, shape, sources
         ),
         suggestion: format!(
             "Update this shell-out to match Homeboy's current Clap command surface. Parser error: {}",
@@ -69,47 +104,58 @@ fn finding(file: &str, line: usize, shape: &str, parser_error: &str) -> Finding 
     }
 }
 
-fn invocation_tokens(lines: &[&str], start: usize) -> Option<Vec<String>> {
+fn invocation_tokens(lines: &[&str], start: usize) -> Option<InvocationTokens> {
     let line = lines.get(start)?;
     if !looks_like_invocation_array(line) {
         return None;
     }
 
-    let mut tokens = swift_string_array_items(line)?;
-    if tokens.is_empty() {
-        return None;
-    }
-
+    let variable = invocation_variable_name(line);
+    let mut tokens = token_sources_from_line(line, start + 1)?;
     let has_homeboy_binary = strip_homeboy_binary(&mut tokens);
     if !has_homeboy_binary && !has_homeboy_wrapper_provenance(lines, start) {
         return None;
     }
 
-    if tokens.is_empty() || !is_homeboy_command_candidate(&tokens) {
+    let values = tokens
+        .iter()
+        .map(|token| token.value.clone())
+        .collect::<Vec<_>>();
+    if values.is_empty() || !is_homeboy_command_candidate(&values) {
         return None;
     }
 
+    let mut brace_depth = lines
+        .iter()
+        .take(start + 1)
+        .map(|line| brace_delta(line))
+        .sum::<isize>();
     let end = (start + 25).min(lines.len().saturating_sub(1));
-    if start < end {
-        for next in &lines[start + 1..=end] {
-            if !looks_like_argument_append(next) {
-                continue;
-            }
-            if let Some(extra) = swift_string_array_items(next) {
-                tokens.extend(extra);
-            }
+    for (idx, next) in lines.iter().enumerate().take(end + 1).skip(start + 1) {
+        let previous_depth = brace_depth;
+        brace_depth += brace_delta(next);
+
+        if previous_depth <= 0 {
+            break;
+        }
+
+        if !looks_like_argument_append(next, variable.as_deref()) {
+            continue;
+        }
+        if let Some(extra) = token_sources_from_line(next, idx + 1) {
+            tokens.extend(extra);
         }
     }
 
-    Some(tokens)
+    Some(InvocationTokens { tokens })
 }
 
-fn strip_homeboy_binary(tokens: &mut Vec<String>) -> bool {
+fn strip_homeboy_binary(tokens: &mut Vec<TokenSource>) -> bool {
     let Some(first) = tokens.first() else {
         return false;
     };
 
-    if is_homeboy_binary_token(first) {
+    if is_homeboy_binary_token(&first.value) {
         tokens.remove(0);
         return true;
     }
@@ -195,8 +241,14 @@ fn looks_like_invocation_array(line: &str) -> bool {
     line.contains("args") || line.contains("execute") || line.contains("arguments")
 }
 
-fn looks_like_argument_append(line: &str) -> bool {
-    line.contains("args +=") || line.contains("args.append(contentsOf:")
+fn looks_like_argument_append(line: &str, variable: Option<&str>) -> bool {
+    let Some(variable) = variable else {
+        return false;
+    };
+
+    let trimmed = line.trim_start();
+    trimmed.contains(&format!("{variable} +="))
+        || trimmed.contains(&format!("{variable}.append(contentsOf:"))
 }
 
 fn swift_string_array_items(line: &str) -> Option<Vec<String>> {
@@ -219,6 +271,56 @@ fn swift_string_array_items(line: &str) -> Option<Vec<String>> {
     }
 
     Some(items)
+}
+
+fn token_sources_from_line(line: &str, line_number: usize) -> Option<Vec<TokenSource>> {
+    swift_string_array_items(line).map(|items| {
+        items
+            .into_iter()
+            .map(|value| TokenSource {
+                value,
+                line: line_number,
+            })
+            .collect()
+    })
+}
+
+fn invocation_variable_name(line: &str) -> Option<String> {
+    let before_array = line.split('[').next()?;
+    let before_equals = before_array.rsplit('=').nth(1)?;
+    before_equals
+        .split_whitespace()
+        .last()
+        .map(|name| name.trim().trim_start_matches("var ").trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn brace_delta(line: &str) -> isize {
+    let mut delta = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in line.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => delta += 1,
+            '}' => delta -= 1,
+            _ => {}
+        }
+    }
+
+    delta
 }
 
 fn split_swift_array_items(inner: &str) -> Vec<String> {
@@ -344,11 +446,98 @@ func directHomeboy(component: String) {
 }
 "#;
 
-        let findings = analyze_swift_file("HomeboyCLI.swift", source);
+        let findings = analyze_swift_file("Process.swift", source);
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].description.contains("fleet create"));
         assert!(findings[0].suggestion.contains("unexpected argument"));
+    }
+
+    #[test]
+    fn swift_wrapper_single_optional_path_does_not_synthesize_repeated_path() {
+        let source = r#"
+func benchList(componentID: String, path: String?) async throws {
+    var args = ["bench", "list", componentID]
+    if let path {
+        args += ["--path", path]
+    }
+    try await cli.executeCommand(args)
+}
+
+func versionShow(componentID: String, path: String?) async throws {
+    var args = ["version", "show", componentID]
+    if let path {
+        args += ["--path", path]
+    }
+    try await cli.executeCommand(args)
+}
+"#;
+
+        let findings = analyze_swift_file("HomeboyCLI.swift", source);
+
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+    }
+
+    #[test]
+    fn swift_arguments_from_unrelated_functions_do_not_leak() {
+        let source = r#"
+func status() async throws {
+    let args = ["status", "--full"]
+    try await cli.executeCommand(args)
+}
+
+func versionShow(componentID: String, path: String?) async throws {
+    var args = ["version", "show", componentID]
+    if let path {
+        args += ["--path", path]
+    }
+    try await cli.executeCommand(args)
+}
+"#;
+
+        let findings = analyze_swift_file("HomeboyCLI.swift", source);
+
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+    }
+
+    #[test]
+    fn current_status_full_shape_does_not_pick_up_nonexistent_path() {
+        let source = r#"
+func workspaceStatus() async throws {
+    let args = ["status", "--full"]
+    try await cli.executeCommand(args)
+}
+
+func componentVersion(componentID: String, path: String?) async throws {
+    var arguments = ["version", "show", componentID]
+    if let path {
+        arguments.append(contentsOf: ["--path", path])
+    }
+    try await cli.executeCommand(arguments)
+}
+"#;
+
+        let findings = analyze_swift_file("HomeboyCLI.swift", source);
+
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+    }
+
+    #[test]
+    fn stale_argument_shape_reports_token_source_lines() {
+        let source = r#"
+func fleetCreate(id: String, projectID: String) async throws {
+    var args = ["fleet", "create", id]
+    args += ["--project", projectID]
+    try await cli.executeCommand(args)
+}
+"#;
+
+        let findings = analyze_swift_file("HomeboyCLI.swift", source);
+
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].description.contains("token sources:"));
+        assert!(findings[0].description.contains("fleet@3"));
+        assert!(findings[0].description.contains("--project@4"));
     }
 
     #[test]
