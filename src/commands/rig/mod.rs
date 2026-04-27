@@ -1,6 +1,7 @@
 //! `homeboy rig` command — CLI surface for the rig primitive.
 
 mod output;
+mod sources;
 
 pub use output::RigCommandOutput;
 
@@ -60,6 +61,11 @@ enum RigCommand {
         #[arg(long)]
         all: bool,
     },
+    /// Inspect or remove installed rig sources
+    Sources {
+        #[command(subcommand)]
+        command: sources::RigSourcesCommand,
+    },
     /// Install, update, or remove this rig's desktop app launcher.
     App {
         #[command(subcommand)]
@@ -104,6 +110,7 @@ pub fn run(args: RigArgs, _global: &super::GlobalArgs) -> CmdResult<RigCommandOu
         RigCommand::Down { rig_id } => down(&rig_id),
         RigCommand::Status { rig_id } => status(&rig_id),
         RigCommand::Install { source, id, all } => install(&source, id.as_deref(), all),
+        RigCommand::Sources { command } => sources::run(command),
         RigCommand::App { command } => app(command),
     }
 }
