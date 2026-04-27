@@ -46,6 +46,7 @@ mod signatures;
 mod structural;
 mod test_coverage;
 pub(crate) mod test_mapping;
+mod test_quality;
 mod test_topology;
 mod upstream_workaround;
 pub(crate) mod walker;
@@ -514,6 +515,17 @@ fn audit_internal(
             topology_findings.len()
         );
         all_findings.extend(topology_findings);
+    }
+
+    // Phase 4i2: Test-quality checks for placeholders and unsafe global state guards.
+    let test_quality_findings = test_quality::run(root);
+    if !test_quality_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Test quality: {} finding(s) (vacuous tests, global env guards)",
+            test_quality_findings.len()
+        );
+        all_findings.extend(test_quality_findings);
     }
 
     // Phase 4j: Documentation drift detection (broken/stale references in markdown)

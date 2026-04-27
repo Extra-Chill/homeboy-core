@@ -662,12 +662,20 @@ struct Foo {
     std: io::Result<()>,
 }
 "#;
+    }
+
+    #[test]
+    fn fixture_two() {
         let _ = r#"
 struct Foo {
     std: fs::PathBuf,
     std: io::Result<()>,
 }
 "#;
+    }
+
+    #[test]
+    fn fixture_three() {
         let _ = r#"
 struct Foo {
     std: fs::PathBuf,
