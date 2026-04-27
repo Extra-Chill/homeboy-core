@@ -4,6 +4,60 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.103.0] - 2026-04-27
+
+### Added
+- render native outputs for reconcile
+- update installed package sources
+- centralize runner support contracts
+- detect stale Homeboy CLI argument shapes
+- detect stale Homeboy CLI invocations
+- expose command surface registry
+- detect weak test hygiene
+- manage installed rig sources
+- add dev app launcher
+- detect facade passthrough classes
+- install shareable rig packages
+- expose failed tests in output
+- add requested PHP drift detectors
+- order pipeline steps by dependency graph
+- add rig component matrix
+- add scenario discovery
+- add component set attention reports
+- add variance-aware metric comparisons
+- pass rig-declared workloads to runners
+- support shared dependency paths
+- default baseline rig — auto-upgrade single-rig runs into comparisons
+- add measurement-phase tag (cold/warm/amortized) to BenchMetricPolicy
+
+### Changed
+- consolidate shared test fixtures
+- disable PR auto-refactor job
+- share top-N grouping
+
+### Fixed
+- flag vacuous test placeholders
+- tighten detector precision
+- key reconcile matches by category
+- accept raw path positional targets
+- centralize rig HOME isolation
+- ignore inline Rust test fixtures in field patterns
+- source false-positive rules from config
+- normalize abstract signature declarations
+- keep review-only findings out of issue filing
+- harden local service supervision
+- allow tagged deploys with unreleased head
+- discover renamed workspace components
+- classify runner infrastructure failures
+- reject duplicate scenario ids
+- preserve shared-state CLI flags
+- restore shared-state CLI flags
+- ignore nested field-shaped syntax
+- clarify build and review setup guidance
+- simulate missing changelog in dry run
+- parse positional bump argument
+- set restart_required only for source installs
+
 ## [0.102.0] - 2026-04-26
 
 ### Added
