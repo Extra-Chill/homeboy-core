@@ -91,6 +91,7 @@ mod dag {
             shared_paths: Vec::new(),
             pipeline,
             bench: None,
+            app_launcher: None,
             bench_workloads: Default::default(),
         }
     }
@@ -296,6 +297,7 @@ mod patch {
             pipeline,
             bench: None,
             bench_workloads: Default::default(),
+            app_launcher: None,
         }
     }
 
@@ -506,6 +508,7 @@ mod shared_path {
             pipeline,
             bench: None,
             bench_workloads: Default::default(),
+            app_launcher: None,
         }
     }
 
