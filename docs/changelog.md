@@ -4,6 +4,13 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.110.0] - 2026-04-27
+
+### Added
+- add sync diff preview
+- declare rig resources
+- add no-spec-edit rebase verb
+
 ## [0.109.0] - 2026-04-27
 
 ### Added
