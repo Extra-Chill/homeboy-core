@@ -477,6 +477,7 @@ fn run_concurrent_instances(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn instance_results_filename_is_distinct_per_instance() {
@@ -496,5 +497,65 @@ mod tests {
             extra_workloads_env_value(&paths).unwrap(),
             "/tmp/bench-one.php:/tmp/bench-two.php"
         );
+    }
+
+    #[test]
+    fn test_run_bench_list_workflow() {
+        let result = BenchListWorkflowResult {
+            component: "homeboy".to_string(),
+            component_id: "homeboy".to_string(),
+            count: 1,
+            scenarios: vec![BenchScenario {
+                id: "audit-self".to_string(),
+                file: Some("src/bin/bench-audit-self.rs".to_string()),
+                source: Some("in_tree".to_string()),
+                default_iterations: Some(10),
+                tags: Vec::new(),
+                iterations: 0,
+                metrics: parsing::BenchMetrics {
+                    values: BTreeMap::new(),
+                    distributions: BTreeMap::new(),
+                },
+                memory: None,
+            }],
+        };
+
+        assert_eq!(result.count, result.scenarios.len());
+        assert_eq!(result.scenarios[0].iterations, 0);
+        assert!(result.scenarios[0].metrics.values.is_empty());
+        assert_eq!(result.scenarios[0].default_iterations, Some(10));
+    }
+
+    #[test]
+    fn test_run_main_bench_workflow() {
+        let run_dir = RunDir::create().expect("run dir");
+        let err = run_main_bench_workflow(
+            &Component::default(),
+            &PathBuf::from("/tmp/homeboy"),
+            BenchRunWorkflowArgs {
+                component_label: "homeboy".to_string(),
+                component_id: "homeboy".to_string(),
+                path_override: None,
+                settings: Vec::new(),
+                settings_json: Vec::new(),
+                iterations: 1,
+                baseline_flags: BaselineFlags {
+                    baseline: false,
+                    ignore_baseline: true,
+                    ratchet: false,
+                },
+                regression_threshold_percent: 5.0,
+                json_summary: false,
+                passthrough_args: Vec::new(),
+                rig_id: None,
+                shared_state: None,
+                concurrency: 0,
+                extra_workloads: Vec::new(),
+            },
+            &run_dir,
+        )
+        .expect_err("zero concurrency must fail before runner resolution");
+
+        assert!(format!("{}", err).contains("concurrency"));
     }
 }

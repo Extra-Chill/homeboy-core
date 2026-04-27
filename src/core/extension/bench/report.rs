@@ -163,7 +163,7 @@ impl BenchPhaseGroups {
     /// without a policy or without a `phase` tag fall into `untagged`.
     /// Within each phase bucket the metric names are kept in
     /// alphabetical order so the render is stable across runs.
-    pub fn from_policies(
+    fn from_policies(
         policies: &BTreeMap<String, super::parsing::BenchMetricPolicy>,
         metric_names: &std::collections::BTreeSet<String>,
     ) -> Self {
@@ -184,7 +184,7 @@ impl BenchPhaseGroups {
     /// name is in the `untagged` bucket. Used to suppress the
     /// `phase_groups` field entirely so back-compat consumers see no
     /// change in the JSON envelope.
-    pub fn is_phaseless(&self) -> bool {
+    fn is_phaseless(&self) -> bool {
         self.cold.is_empty() && self.warm.is_empty() && self.amortized.is_empty()
     }
 }
@@ -357,7 +357,9 @@ pub fn aggregate_comparison(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extension::bench::parsing::{BenchMetrics, BenchScenario};
+    use crate::extension::bench::parsing::{
+        BenchMetricDirection, BenchMetricPhase, BenchMetricPolicy, BenchMetrics, BenchScenario,
+    };
 
     fn scenario(id: &str, metrics: &[(&str, f64)]) -> BenchScenario {
         let mut values = BTreeMap::new();
@@ -397,6 +399,99 @@ mod tests {
             results,
             rig_state: None,
         }
+    }
+
+    #[test]
+    fn test_from_main_workflow() {
+        let (out, exit) = from_main_workflow(BenchRunWorkflowResult {
+            status: "passed".to_string(),
+            component: "homeboy".to_string(),
+            exit_code: 0,
+            iterations: 3,
+            results: None,
+            baseline_comparison: None,
+            hints: None,
+        });
+
+        assert!(out.passed);
+        assert_eq!(out.component, "homeboy");
+        assert_eq!(out.iterations, 3);
+        assert_eq!(exit, 0);
+    }
+
+    #[test]
+    fn test_from_main_workflow_with_rig() {
+        let (out, exit) = from_main_workflow_with_rig(
+            BenchRunWorkflowResult {
+                status: "failed".to_string(),
+                component: "homeboy".to_string(),
+                exit_code: 1,
+                iterations: 1,
+                results: None,
+                baseline_comparison: None,
+                hints: Some(vec!["check output".to_string()]),
+            },
+            None,
+        );
+
+        assert!(!out.passed);
+        assert_eq!(out.exit_code, 1);
+        assert_eq!(out.hints.as_ref().unwrap()[0], "check output");
+        assert_eq!(exit, 1);
+    }
+
+    #[test]
+    fn test_from_policies() {
+        let mut policies = BTreeMap::new();
+        policies.insert(
+            "boot_ms".to_string(),
+            BenchMetricPolicy {
+                direction: BenchMetricDirection::LowerIsBetter,
+                regression_threshold_percent: None,
+                regression_threshold_absolute: None,
+                variance_aware: false,
+                min_iterations_for_variance: None,
+                regression_test: None,
+                phase: Some(BenchMetricPhase::Cold),
+            },
+        );
+
+        let metric_names = ["boot_ms".to_string(), "p95_ms".to_string()].into();
+        let groups = BenchPhaseGroups::from_policies(&policies, &metric_names);
+
+        assert_eq!(groups.cold, vec!["boot_ms".to_string()]);
+        assert_eq!(groups.untagged, vec!["p95_ms".to_string()]);
+    }
+
+    #[test]
+    fn test_is_phaseless() {
+        assert!(BenchPhaseGroups {
+            cold: Vec::new(),
+            warm: Vec::new(),
+            amortized: Vec::new(),
+            untagged: vec!["p95_ms".to_string()],
+        }
+        .is_phaseless());
+
+        assert!(!BenchPhaseGroups {
+            cold: vec!["boot_ms".to_string()],
+            warm: Vec::new(),
+            amortized: Vec::new(),
+            untagged: Vec::new(),
+        }
+        .is_phaseless());
+    }
+
+    #[test]
+    fn test_aggregate_comparison() {
+        let r = results(vec![scenario("boot", &[("p95_ms", 100.0)])]);
+        let entries = vec![entry("a", true, Some(r.clone())), entry("b", true, Some(r))];
+        let (out, exit) = aggregate_comparison("studio".into(), 10, entries);
+
+        assert!(out.passed);
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.iterations, 10);
+        assert_eq!(exit, 0);
     }
 
     #[test]
