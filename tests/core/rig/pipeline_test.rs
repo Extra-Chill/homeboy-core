@@ -56,6 +56,209 @@ fn test_pipeline_step_outcome_omits_error_when_absent() {
     assert!(!json.contains("\"error\""));
 }
 
+// ---- Dependency-aware ordering ---------------------------------------------
+
+mod dag {
+    use std::collections::HashMap;
+    use std::fs;
+
+    use crate::rig::pipeline::run_pipeline;
+    use crate::rig::spec::{ComponentSpec, PipelineStep, RigSpec};
+
+    fn command(id: &str, depends_on: &[&str], cmd: String, cwd: Option<String>) -> PipelineStep {
+        PipelineStep::Command {
+            step_id: Some(id.to_string()),
+            depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
+            cmd,
+            cwd,
+            env: HashMap::new(),
+            label: Some(id.to_string()),
+        }
+    }
+
+    fn rig_with_steps(
+        steps: Vec<PipelineStep>,
+        components: HashMap<String, ComponentSpec>,
+    ) -> RigSpec {
+        let mut pipeline = HashMap::new();
+        pipeline.insert("up".to_string(), steps);
+        RigSpec {
+            id: "dag-test".to_string(),
+            description: String::new(),
+            components,
+            services: Default::default(),
+            symlinks: Vec::new(),
+            shared_paths: Vec::new(),
+            pipeline,
+            bench: None,
+            bench_workloads: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_pipeline_orders_steps_by_dependencies() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let log = tmp.path().join("order.txt");
+        let log_arg = log.to_string_lossy();
+        let rig = rig_with_steps(
+            vec![
+                command(
+                    "studio-build",
+                    &["studio-install"],
+                    format!("printf 'build\\n' >> {}", log_arg),
+                    None,
+                ),
+                command(
+                    "playground-build",
+                    &[],
+                    format!("printf 'playground\\n' >> {}", log_arg),
+                    None,
+                ),
+                command(
+                    "studio-install",
+                    &["playground-build"],
+                    format!("printf 'install\\n' >> {}", log_arg),
+                    None,
+                ),
+            ],
+            HashMap::new(),
+        );
+
+        let out = run_pipeline(&rig, "up", true).expect("pipeline");
+        assert!(out.is_success(), "outcomes: {:?}", out.steps);
+        assert_eq!(
+            fs::read_to_string(&log).expect("read log"),
+            "playground\ninstall\nbuild\n"
+        );
+        assert_eq!(
+            out.steps
+                .iter()
+                .map(|s| s.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["playground-build", "studio-install", "studio-build"]
+        );
+    }
+
+    #[test]
+    fn test_pipeline_errors_on_missing_dependency() {
+        let rig = rig_with_steps(
+            vec![command(
+                "studio-build",
+                &["missing-step"],
+                "true".to_string(),
+                None,
+            )],
+            HashMap::new(),
+        );
+
+        let err = run_pipeline(&rig, "up", true).expect_err("missing dependency errors");
+        let msg = err.to_string();
+        assert!(msg.contains("missing step id 'missing-step'"), "{msg}");
+    }
+
+    #[test]
+    fn test_pipeline_errors_on_dependency_cycle() {
+        let rig = rig_with_steps(
+            vec![
+                command("a", &["b"], "true".to_string(), None),
+                command("b", &["a"], "true".to_string(), None),
+            ],
+            HashMap::new(),
+        );
+
+        let err = run_pipeline(&rig, "up", true).expect_err("cycle errors");
+        let msg = err.to_string();
+        assert!(msg.contains("dependency cycle"), "{msg}");
+        assert!(msg.contains("'a'"), "{msg}");
+        assert!(msg.contains("'b'"), "{msg}");
+    }
+
+    #[test]
+    fn test_pipeline_preserves_linear_order_without_dependencies() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let log = tmp.path().join("linear.txt");
+        let log_arg = log.to_string_lossy();
+        let rig = rig_with_steps(
+            vec![
+                command("one", &[], format!("printf 'one\\n' >> {}", log_arg), None),
+                command("two", &[], format!("printf 'two\\n' >> {}", log_arg), None),
+                command(
+                    "three",
+                    &[],
+                    format!("printf 'three\\n' >> {}", log_arg),
+                    None,
+                ),
+            ],
+            HashMap::new(),
+        );
+
+        let out = run_pipeline(&rig, "up", true).expect("pipeline");
+        assert!(out.is_success());
+        assert_eq!(
+            fs::read_to_string(&log).expect("read log"),
+            "one\ntwo\nthree\n"
+        );
+    }
+
+    #[test]
+    fn test_pipeline_keeps_cross_component_path_expansion_after_reordering() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let component_a = tmp.path().join("component-a");
+        let component_b = tmp.path().join("component-b");
+        fs::create_dir_all(&component_a).expect("component a");
+        fs::create_dir_all(&component_b).expect("component b");
+
+        let mut components = HashMap::new();
+        components.insert(
+            "a".to_string(),
+            ComponentSpec {
+                path: component_a.to_string_lossy().into_owned(),
+                remote_url: None,
+                stack: None,
+                branch: None,
+            },
+        );
+        components.insert(
+            "b".to_string(),
+            ComponentSpec {
+                path: component_b.to_string_lossy().into_owned(),
+                remote_url: None,
+                stack: None,
+                branch: None,
+            },
+        );
+
+        let rig = rig_with_steps(
+            vec![
+                command(
+                    "write-from-a",
+                    &["prepare-b"],
+                    "printf 'from-a' > ${components.b.path}/from-a.txt".to_string(),
+                    Some("${components.a.path}".to_string()),
+                ),
+                command(
+                    "prepare-b",
+                    &[],
+                    "printf 'ready' > ready.txt".to_string(),
+                    Some("${components.b.path}".to_string()),
+                ),
+            ],
+            components,
+        );
+
+        let out = run_pipeline(&rig, "up", true).expect("pipeline");
+        assert!(out.is_success(), "outcomes: {:?}", out.steps);
+        assert_eq!(
+            fs::read_to_string(component_b.join("ready.txt")).expect("ready"),
+            "ready"
+        );
+        assert_eq!(
+            fs::read_to_string(component_b.join("from-a.txt")).expect("from-a"),
+            "from-a"
+        );
+    }
+}
+
 // ---- Patch step end-to-end -------------------------------------------------
 //
 // The patch step is the smallest of the three new pipeline kinds and the
@@ -103,6 +306,8 @@ mod patch {
         fs::write(&file, "original\n").expect("write");
 
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "MARKER-XYZ".to_string(),
@@ -128,6 +333,8 @@ mod patch {
         let before = fs::read_to_string(&file).expect("read before");
 
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "MARKER-XYZ".to_string(),
@@ -150,6 +357,8 @@ mod patch {
         fs::write(&file, "line1\n/* ANCHOR */\nline3\n").expect("write");
 
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "MARKER-INSERTED".to_string(),
@@ -174,6 +383,8 @@ mod patch {
         fs::write(&file, "no anchor here\n").expect("write");
 
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "MARKER".to_string(),
@@ -197,6 +408,8 @@ mod patch {
 
         // Marker not in content ⇒ would re-apply forever.
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "M".to_string(),
@@ -217,6 +430,8 @@ mod patch {
         fs::write(&file, "/* ALREADY-PATCHED */\n").expect("write");
 
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "ALREADY-PATCHED".to_string(),
@@ -238,6 +453,8 @@ mod patch {
         let before = fs::read_to_string(&file).expect("read before");
 
         let step = PipelineStep::Patch {
+            step_id: None,
+            depends_on: Vec::new(),
             component: "c".to_string(),
             file: "x.c".to_string(),
             marker: "M-MISSING".to_string(),
@@ -271,7 +488,14 @@ mod shared_path {
 
     fn rig_with_shared_path(id: &str, shared: SharedPathSpec, op: SharedPathOp) -> RigSpec {
         let mut pipeline = HashMap::new();
-        pipeline.insert("up".to_string(), vec![PipelineStep::SharedPath { op }]);
+        pipeline.insert(
+            "up".to_string(),
+            vec![PipelineStep::SharedPath {
+                step_id: None,
+                depends_on: Vec::new(),
+                op,
+            }],
+        );
         RigSpec {
             id: id.to_string(),
             description: String::new(),

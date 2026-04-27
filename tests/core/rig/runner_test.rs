@@ -206,6 +206,8 @@ fn test_run_down_cleans_state_owned_shared_paths() {
         pipeline.insert(
             "up".to_string(),
             vec![PipelineStep::SharedPath {
+                step_id: None,
+                depends_on: Vec::new(),
                 op: SharedPathOp::Ensure,
             }],
         );
