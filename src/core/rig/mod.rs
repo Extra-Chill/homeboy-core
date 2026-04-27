@@ -48,8 +48,8 @@ pub use source::{
 };
 pub use spec::{
     AppLauncherPlatform, AppLauncherPreflight, AppLauncherSpec, BenchSpec, CheckSpec,
-    ComponentSpec, DiscoverSpec, NewerThanSpec, PatchOp, PipelineStep, RigSpec, ServiceKind,
-    ServiceSpec, SharedPathOp, SharedPathSpec, StackOp, SymlinkSpec, TimeSource,
+    ComponentSpec, DiscoverSpec, NewerThanSpec, PatchOp, PipelineStep, RigResourcesSpec, RigSpec,
+    ServiceKind, ServiceSpec, SharedPathOp, SharedPathSpec, StackOp, SymlinkSpec, TimeSource,
 };
 pub use stack::{
     plan_stack_sync, run_component_sync, run_sync, RigStackPlanEntry, RigStackSyncEntry,

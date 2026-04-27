@@ -3,7 +3,7 @@
 //! Audit convention requires a `test_expand_vars` method matching the sole
 //! public function of the module; additional cases cover edge conditions.
 
-use crate::rig::expand::expand_vars;
+use crate::rig::expand::{expand_resources, expand_vars};
 use crate::rig::spec::{ComponentSpec, RigSpec};
 use std::collections::HashMap;
 
@@ -15,6 +15,7 @@ fn rig_with(id: &str, components: HashMap<String, ComponentSpec>) -> RigSpec {
         services: Default::default(),
         symlinks: Vec::new(),
         shared_paths: Vec::new(),
+        resources: Default::default(),
         pipeline: Default::default(),
         bench: None,
         bench_workloads: Default::default(),
@@ -67,4 +68,59 @@ fn test_expand_vars_unknown_token_is_literal() {
 fn test_expand_vars_unterminated_braces() {
     let rig = rig_with("t", HashMap::new());
     assert_eq!(expand_vars(&rig, "${unterminated"), "${unterminated");
+}
+
+#[test]
+fn test_expand_resources_expands_path_entries_only() {
+    std::env::set_var("RIG_RESOURCE_PATH", "studio@resources");
+    let home = tempfile::tempdir().expect("home");
+    let previous_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", home.path());
+
+    let mut components = HashMap::new();
+    components.insert(
+        "studio".to_string(),
+        ComponentSpec {
+            path: "~/Developer/studio".to_string(),
+            remote_url: None,
+            triage_remote_url: None,
+            stack: None,
+            branch: None,
+            extensions: None,
+        },
+    );
+    let mut rig = rig_with("t", components);
+    rig.resources.exclusive = vec!["studio-runtime".to_string()];
+    rig.resources.paths = vec![
+        "~/Developer/${env.RIG_RESOURCE_PATH}".to_string(),
+        "${components.studio.path}/apps/cli".to_string(),
+    ];
+    rig.resources.ports = vec![9724];
+    rig.resources.process_patterns = vec!["wordpress-server-child.mjs".to_string()];
+
+    let resources = expand_resources(&rig);
+    assert_eq!(resources.exclusive, vec!["studio-runtime"]);
+    assert_eq!(resources.ports, vec![9724]);
+    assert_eq!(
+        resources.process_patterns,
+        vec!["wordpress-server-child.mjs"]
+    );
+    assert_eq!(
+        resources.paths,
+        vec![
+            home.path()
+                .join("Developer/studio@resources")
+                .to_string_lossy()
+                .to_string(),
+            home.path()
+                .join("Developer/studio/apps/cli")
+                .to_string_lossy()
+                .to_string(),
+        ]
+    );
+
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
 }

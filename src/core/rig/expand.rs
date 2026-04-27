@@ -10,12 +10,23 @@
 //! Unknown `${...}` patterns are left untouched so users get a clear
 //! command-run failure instead of a silent empty string.
 
-use super::spec::RigSpec;
+use super::spec::{RigResourcesSpec, RigSpec};
 use crate::expand;
 
 /// Expand variables + tilde in a string.
 pub fn expand_vars(rig: &RigSpec, input: &str) -> String {
     expand::expand_with_tilde(input, |token| resolve_token(rig, token))
+}
+
+/// Return a copy of the rig resource declarations with path entries expanded.
+pub fn expand_resources(rig: &RigSpec) -> RigResourcesSpec {
+    let mut resources = rig.resources.clone();
+    resources.paths = resources
+        .paths
+        .iter()
+        .map(|path| expand_vars(rig, path))
+        .collect();
+    resources
 }
 
 fn resolve_token(rig: &RigSpec, token: &str) -> Option<String> {

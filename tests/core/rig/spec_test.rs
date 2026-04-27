@@ -1,7 +1,9 @@
 //! Spec parsing tests — serde round-trips, pipeline step discriminants,
 //! service-kind parsing. Covers `src/core/rig/spec.rs`.
 
-use crate::rig::{PipelineStep, RigSpec, ServiceKind, ServiceSpec, SharedPathSpec, SymlinkSpec};
+use crate::rig::{
+    PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathSpec, SymlinkSpec,
+};
 
 /// Canonical fixture matching the studio-playground-dev shape used as the
 /// first real consumer of the rig primitive.
@@ -29,6 +31,12 @@ const STUDIO_PLAYGROUND_SPEC: &str = r#"{
             "target": "~/Developer/studio/node_modules"
         }
     ],
+    "resources": {
+        "exclusive": ["studio-runtime"],
+        "paths": ["~/Developer/studio@bfb-mu-plugin-agent-output"],
+        "ports": [9724],
+        "process_patterns": ["wordpress-server-child.mjs"]
+    },
     "pipeline": {
         "up": [
             { "kind": "service", "id": "tarball-server", "op": "start" },
@@ -61,6 +69,7 @@ fn test_spec_parses_studio_playground_fixture() {
     assert_eq!(spec.services.len(), 1);
     assert_eq!(spec.symlinks.len(), 1);
     assert_eq!(spec.shared_paths.len(), 1);
+    assert_eq!(spec.resources.exclusive, vec!["studio-runtime"]);
     assert_eq!(spec.pipeline.get("up").unwrap().len(), 3);
     assert_eq!(spec.pipeline.get("check").unwrap().len(), 4);
     assert_eq!(spec.pipeline.get("down").unwrap().len(), 2);
@@ -115,7 +124,47 @@ fn test_spec_minimal_only_required_fields() {
     assert!(spec.services.is_empty());
     assert!(spec.symlinks.is_empty());
     assert!(spec.shared_paths.is_empty());
+    assert!(spec.resources.is_empty());
     assert!(spec.pipeline.is_empty());
+}
+
+#[test]
+fn test_spec_resources_block_parses_full_shape() {
+    let json = r#"{
+        "id": "studio-bfb",
+        "resources": {
+            "exclusive": ["studio-runtime"],
+            "paths": ["~/Developer/studio@bfb-mu-plugin-agent-output"],
+            "ports": [9724],
+            "process_patterns": ["wordpress-server-child.mjs"]
+        }
+    }"#;
+    let spec: RigSpec = serde_json::from_str(json).expect("parse");
+    assert_eq!(spec.resources.exclusive, vec!["studio-runtime"]);
+    assert_eq!(
+        spec.resources.paths,
+        vec!["~/Developer/studio@bfb-mu-plugin-agent-output"]
+    );
+    assert_eq!(spec.resources.ports, vec![9724]);
+    assert_eq!(
+        spec.resources.process_patterns,
+        vec!["wordpress-server-child.mjs"]
+    );
+}
+
+#[test]
+fn test_spec_resources_defaults_and_serializes_away_when_missing() {
+    let spec: RigSpec = serde_json::from_str(r#"{"id":"tiny"}"#).expect("parse");
+    assert_eq!(spec.resources, RigResourcesSpec::default());
+    let json = serde_json::to_string(&spec).expect("serialize");
+    assert!(!json.contains("resources"));
+}
+
+#[test]
+fn test_spec_resources_rejects_invalid_port_shape() {
+    let json = r#"{"id":"bad","resources":{"ports":[70000]}}"#;
+    let err = serde_json::from_str::<RigSpec>(json).expect_err("u16 port rejected");
+    assert!(err.to_string().contains("70000"));
 }
 
 #[test]

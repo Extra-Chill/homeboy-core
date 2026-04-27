@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-use homeboy::rig::{self, RigSpec};
+use homeboy::rig::{self, RigResourcesSpec, RigSpec};
 
 /// Tagged union of every rig command's output. `untagged` so each variant
 /// serializes to its own shape — consumers discriminate on the `command`
@@ -59,6 +59,8 @@ pub struct RigSourceSummary {
 pub struct RigShowOutput {
     pub command: &'static str,
     pub rig: RigSpec,
+    #[serde(skip_serializing_if = "RigResourcesSpec::is_empty")]
+    pub resources: RigResourcesSpec,
 }
 
 #[derive(Serialize)]
@@ -141,4 +143,45 @@ pub struct RigAppOutput {
     pub command: &'static str,
     #[serde(flatten)]
     pub report: rig::AppLauncherReport,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rig_show_output_includes_expanded_resources() {
+        let output = RigShowOutput {
+            command: "rig.show",
+            rig: RigSpec {
+                id: "studio-bfb".to_string(),
+                description: String::new(),
+                components: Default::default(),
+                services: Default::default(),
+                symlinks: Vec::new(),
+                shared_paths: Vec::new(),
+                resources: RigResourcesSpec {
+                    paths: vec!["~/Developer/studio".to_string()],
+                    ..Default::default()
+                },
+                pipeline: Default::default(),
+                bench: None,
+                bench_workloads: Default::default(),
+                app_launcher: None,
+            },
+            resources: RigResourcesSpec {
+                exclusive: vec!["studio-runtime".to_string()],
+                paths: vec!["/Users/chubes/Developer/studio".to_string()],
+                ports: vec![9724],
+                process_patterns: vec!["wordpress-server-child.mjs".to_string()],
+            },
+        };
+
+        let json = serde_json::to_string(&output).expect("serialize");
+        assert!(json.contains("\"command\":\"rig.show\""));
+        assert!(json.contains("\"resources\""));
+        assert!(json.contains("/Users/chubes/Developer/studio"));
+        assert!(json.contains("studio-runtime"));
+        assert!(json.contains("wordpress-server-child.mjs"));
+    }
 }

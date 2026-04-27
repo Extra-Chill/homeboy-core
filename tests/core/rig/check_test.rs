@@ -15,6 +15,7 @@ fn minimal_rig() -> RigSpec {
         services: Default::default(),
         symlinks: Vec::new(),
         shared_paths: Vec::new(),
+        resources: Default::default(),
         pipeline: Default::default(),
         bench: None,
         bench_workloads: Default::default(),
