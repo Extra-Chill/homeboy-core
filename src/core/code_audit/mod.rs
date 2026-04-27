@@ -48,6 +48,7 @@ mod structural;
 mod test_coverage;
 pub(crate) mod test_mapping;
 mod test_topology;
+mod test_vacuity;
 mod upstream_workaround;
 pub(crate) mod walker;
 mod wrapper_inference;
