@@ -343,6 +343,10 @@ The extension's bench script must:
 - Scenario-level unknown keys are **tolerated**, so extensions can emit
   additional metadata (tags, environment info, warmup counts) without
   breaking parsing.
+- Scenario `id` values must be unique within one bench results envelope.
+  Workload-discovering runners should derive ids from paths relative to
+  the bench root (for example, `reads/heavy.php` → `reads-heavy`) instead
+  of file basenames alone.
 - `memory` is optional. Extensions that can't measure peak memory omit it.
 - `file` is optional but recommended for diagnostics.
 

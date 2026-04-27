@@ -217,8 +217,31 @@ pub fn parse_bench_results_str(raw: &str) -> Result<BenchResults> {
             Some("bench.parsing.deserialize".to_string()),
         )
     })?;
+    validate_unique_scenario_ids(&parsed)?;
     validate_variance_policies(&parsed)?;
     Ok(parsed)
+}
+
+fn validate_unique_scenario_ids(results: &BenchResults) -> Result<()> {
+    let mut seen: BTreeMap<&str, Option<&str>> = BTreeMap::new();
+
+    for scenario in &results.scenarios {
+        if let Some(first_file) = seen.insert(&scenario.id, scenario.file.as_deref()) {
+            let first = first_file.unwrap_or("<unknown>");
+            let second = scenario.file.as_deref().unwrap_or("<unknown>");
+            return Err(Error::validation_invalid_argument(
+                "scenarios.id",
+                format!(
+                    "duplicate bench scenario id `{}` from `{}` and `{}`; scenario ids must be unique, so dispatchers should derive ids from workload paths relative to the bench root or fail discovery before emitting results",
+                    scenario.id, first, second
+                ),
+                Some(scenario.id.clone()),
+                Some(vec![first.to_string(), second.to_string()]),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_variance_policies(results: &BenchResults) -> Result<()> {
@@ -432,6 +455,76 @@ mod tests {
         let parsed = parse_bench_results_str(raw).unwrap();
         assert_eq!(parsed.scenarios.len(), 1);
         assert_eq!(parsed.scenarios[0].id, "scenario_one");
+    }
+
+    #[test]
+    fn rejects_duplicate_scenario_ids_from_same_basename_subdirs() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 10,
+            "scenarios": [
+                {
+                    "id": "heavy",
+                    "file": "tests/bench/reads/heavy.php",
+                    "iterations": 10,
+                    "metrics": { "p95_ms": 10.0 }
+                },
+                {
+                    "id": "heavy",
+                    "file": "tests/bench/writes/heavy.php",
+                    "iterations": 10,
+                    "metrics": { "p95_ms": 20.0 }
+                }
+            ]
+        }"#;
+
+        let err = parse_bench_results_str(raw).unwrap_err();
+        let problem = err
+            .details
+            .get("problem")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        assert!(
+            problem.contains("duplicate bench scenario id `heavy`"),
+            "expected duplicate-id problem, got: {}",
+            problem
+        );
+        assert!(problem.contains("tests/bench/reads/heavy.php"));
+        assert!(problem.contains("tests/bench/writes/heavy.php"));
+        assert!(problem.contains("workload paths relative to the bench root"));
+        assert_eq!(
+            err.details.get("id").and_then(|v| v.as_str()),
+            Some("heavy")
+        );
+    }
+
+    #[test]
+    fn accepts_relative_path_scenario_ids_for_same_basename_subdirs() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 10,
+            "scenarios": [
+                {
+                    "id": "reads-heavy",
+                    "file": "tests/bench/reads/heavy.php",
+                    "iterations": 10,
+                    "metrics": { "p95_ms": 10.0 }
+                },
+                {
+                    "id": "writes-heavy",
+                    "file": "tests/bench/writes/heavy.php",
+                    "iterations": 10,
+                    "metrics": { "p95_ms": 20.0 }
+                }
+            ]
+        }"#;
+
+        let parsed = parse_bench_results_str(raw).unwrap();
+
+        assert_eq!(parsed.scenarios.len(), 2);
+        assert_eq!(parsed.scenarios[0].id, "reads-heavy");
+        assert_eq!(parsed.scenarios[1].id, "writes-heavy");
     }
 
     #[test]
