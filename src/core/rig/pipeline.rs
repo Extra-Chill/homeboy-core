@@ -1,12 +1,12 @@
-//! Linear pipeline executor.
+//! Rig pipeline executor.
 //!
-//! MVP is a straight for-loop over `PipelineStep`s. DAG + caching is
-//! explicitly Phase 3 (tracked in Extra-Chill/homeboy#1464).
+//! Optional step IDs plus `depends_on` edges are topologically ordered before
+//! sequential execution. Caching and parallelism are later #1464 phases.
 //!
 //! Every step emits a `PipelineStepOutcome`. The runner aggregates them into
 //! a `PipelineOutcome` with overall success/failure.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -36,7 +36,6 @@ pub struct PipelineStepOutcome {
     pub error: Option<String>,
 }
 
-/// Aggregate result of a pipeline run.
 #[derive(Debug, Clone, Serialize)]
 pub struct PipelineOutcome {
     pub name: String,
@@ -51,19 +50,16 @@ impl PipelineOutcome {
     }
 }
 
-/// Run a named pipeline from a rig spec.
-///
-/// `fail_fast = true` means the pipeline aborts on first failure (good for
-/// `up` — later steps usually depend on earlier ones). `fail_fast = false`
-/// runs every step (good for `check` — report everything wrong at once).
 pub fn run_pipeline(rig: &RigSpec, name: &str, fail_fast: bool) -> Result<PipelineOutcome> {
     let steps = rig.pipeline.get(name).cloned().unwrap_or_default();
-    let mut outcomes = Vec::with_capacity(steps.len());
+    let ordered_indices = order_pipeline_steps(rig, name, &steps)?;
+    let mut outcomes = Vec::with_capacity(ordered_indices.len());
     let mut failed = 0;
     let mut passed = 0;
     let mut aborted = false;
 
-    for (idx, step) in steps.iter().enumerate() {
+    for idx in ordered_indices {
+        let step = &steps[idx];
         if aborted {
             outcomes.push(PipelineStepOutcome {
                 kind: step_kind(step).to_string(),
@@ -117,7 +113,7 @@ pub fn run_pipeline(rig: &RigSpec, name: &str, fail_fast: bool) -> Result<Pipeli
 
 fn run_step(rig: &RigSpec, step: &PipelineStep) -> Result<()> {
     match step {
-        PipelineStep::Service { id, op } => run_service_step(rig, id, *op),
+        PipelineStep::Service { id, op, .. } => run_service_step(rig, id, *op),
         PipelineStep::Build { component, .. } => run_build_step(rig, component),
         PipelineStep::Git {
             component,
@@ -130,9 +126,10 @@ fn run_step(rig: &RigSpec, step: &PipelineStep) -> Result<()> {
             cwd,
             env,
             label: _,
+            ..
         } => run_command_step(rig, cmd, cwd.as_deref(), env),
-        PipelineStep::Symlink { op } => run_symlink_step(rig, *op),
-        PipelineStep::SharedPath { op } => run_shared_path_step(rig, *op),
+        PipelineStep::Symlink { op, .. } => run_symlink_step(rig, *op),
+        PipelineStep::SharedPath { op, .. } => run_shared_path_step(rig, *op),
         PipelineStep::Patch {
             component,
             file,
@@ -146,17 +143,130 @@ fn run_step(rig: &RigSpec, step: &PipelineStep) -> Result<()> {
     }
 }
 
-/// Cleanup shared paths created by this rig.
-///
-/// `run_down` calls this unconditionally as a safety net, even when a spec
-/// author forgets to include an explicit `shared-path cleanup` step.
+fn order_pipeline_steps(
+    rig: &RigSpec,
+    pipeline_name: &str,
+    steps: &[PipelineStep],
+) -> Result<Vec<usize>> {
+    if steps.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut id_to_index = HashMap::new();
+    for (idx, step) in steps.iter().enumerate() {
+        if let Some(id) = step_id(step) {
+            if let Some(previous_idx) = id_to_index.insert(id, idx) {
+                return Err(Error::rig_pipeline_failed(
+                    &rig.id,
+                    pipeline_name,
+                    format!(
+                        "duplicate pipeline step id '{}' at positions {} and {}",
+                        id, previous_idx, idx
+                    ),
+                ));
+            }
+        }
+    }
+
+    let mut indegree = vec![0usize; steps.len()];
+    let mut dependents = vec![Vec::<usize>::new(); steps.len()];
+
+    for (idx, step) in steps.iter().enumerate() {
+        for dependency_id in step_dependencies(step) {
+            let Some(&dependency_idx) = id_to_index.get(dependency_id.as_str()) else {
+                return Err(Error::rig_pipeline_failed(
+                    &rig.id,
+                    pipeline_name,
+                    format!(
+                        "pipeline step {} depends on missing step id '{}'",
+                        step_node_label(step, idx),
+                        dependency_id
+                    ),
+                ));
+            };
+            indegree[idx] += 1;
+            dependents[dependency_idx].push(idx);
+        }
+    }
+
+    for child_indices in &mut dependents {
+        child_indices.sort_unstable();
+    }
+
+    let mut ready = VecDeque::new();
+    for (idx, count) in indegree.iter().enumerate() {
+        if *count == 0 {
+            ready.push_back(idx);
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(steps.len());
+    while let Some(idx) = ready.pop_front() {
+        ordered.push(idx);
+        for dependent_idx in dependents[idx].iter().copied() {
+            indegree[dependent_idx] -= 1;
+            if indegree[dependent_idx] == 0 {
+                ready.push_back(dependent_idx);
+            }
+        }
+    }
+
+    if ordered.len() != steps.len() {
+        let cycle_members = steps
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, step)| (indegree[idx] > 0).then(|| step_node_label(step, idx)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::rig_pipeline_failed(
+            &rig.id,
+            pipeline_name,
+            format!(
+                "pipeline dependency cycle detected involving {}",
+                cycle_members
+            ),
+        ));
+    }
+
+    Ok(ordered)
+}
+
+fn step_id(step: &PipelineStep) -> Option<&str> {
+    match step {
+        PipelineStep::Service { step_id, .. }
+        | PipelineStep::Build { step_id, .. }
+        | PipelineStep::Git { step_id, .. }
+        | PipelineStep::Command { step_id, .. }
+        | PipelineStep::Symlink { step_id, .. }
+        | PipelineStep::SharedPath { step_id, .. }
+        | PipelineStep::Patch { step_id, .. }
+        | PipelineStep::Check { step_id, .. } => step_id.as_deref(),
+    }
+}
+
+fn step_dependencies(step: &PipelineStep) -> &[String] {
+    match step {
+        PipelineStep::Service { depends_on, .. }
+        | PipelineStep::Build { depends_on, .. }
+        | PipelineStep::Git { depends_on, .. }
+        | PipelineStep::Command { depends_on, .. }
+        | PipelineStep::Symlink { depends_on, .. }
+        | PipelineStep::SharedPath { depends_on, .. }
+        | PipelineStep::Patch { depends_on, .. }
+        | PipelineStep::Check { depends_on, .. } => depends_on,
+    }
+}
+
+fn step_node_label(step: &PipelineStep, idx: usize) -> String {
+    step_id(step)
+        .map(|id| format!("'{}'", id))
+        .unwrap_or_else(|| format!("at position {}", idx))
+}
+
 pub fn cleanup_shared_paths(rig: &RigSpec) -> Result<()> {
     run_shared_path_step(rig, SharedPathOp::Cleanup)
 }
 
-/// Resolve a component reference from the rig spec and return its expanded
-/// absolute path. Centralized so `build` and `git` steps share the error
-/// surface and spec validation.
 fn resolve_component_path(rig: &RigSpec, component_id: &str) -> Result<(ComponentSpec, String)> {
     let component = rig.components.get(component_id).ok_or_else(|| {
         Error::rig_pipeline_failed(
@@ -210,7 +320,6 @@ fn run_build_step(rig: &RigSpec, component_id: &str) -> Result<()> {
 fn run_git_step(rig: &RigSpec, component_id: &str, op: GitOp, extra_args: &[String]) -> Result<()> {
     let (_, path) = resolve_component_path(rig, component_id)?;
 
-    // Build the argv — op-specific base plus user-supplied extras.
     let base_args: Vec<String> = match op {
         GitOp::Status => vec!["status".into(), "--porcelain=v1".into()],
         GitOp::Pull => vec!["pull".into()],
@@ -348,7 +457,6 @@ fn ensure_symlink(rig: &RigSpec, link: &SymlinkSpec) -> Result<()> {
         })?;
     }
 
-    // If the link exists pointing at the right target, no-op.
     if link_path.exists() || link_path.is_symlink() {
         if let Ok(current) = std::fs::read_link(&link_path) {
             if current == target_path {
@@ -386,9 +494,6 @@ fn create_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
 
 #[cfg(not(unix))]
 fn create_symlink(_target: &Path, _link: &Path) -> std::io::Result<()> {
-    // Rigs are Unix-only by design (see core/rig/service.rs). Windows users
-    // who reach this path get a clear error from rig_pipeline_failed instead
-    // of a compile failure.
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "rig symlinks are not supported on this platform (Unix only)",
@@ -501,8 +606,6 @@ fn ensure_shared_path(
             ))
         }
         Ok(_) => {
-            // Local dependencies already exist in this checkout. Leave them
-            // alone and forget any stale ownership marker for this path.
             if state.shared_paths.remove(&key).is_some() {
                 *state_changed = true;
             }
@@ -791,8 +894,10 @@ fn step_kind(step: &PipelineStep) -> &'static str {
 
 fn step_label(rig: &RigSpec, step: &PipelineStep, idx: usize) -> String {
     match step {
-        PipelineStep::Service { id, op } => format!("service {} {}", id, serialize_op(*op)),
-        PipelineStep::Build { component, label } => label
+        PipelineStep::Service { id, op, .. } => format!("service {} {}", id, serialize_op(*op)),
+        PipelineStep::Build {
+            component, label, ..
+        } => label
             .clone()
             .unwrap_or_else(|| format!("build {}", component)),
         PipelineStep::Git {
@@ -800,6 +905,7 @@ fn step_label(rig: &RigSpec, step: &PipelineStep, idx: usize) -> String {
             op,
             args,
             label,
+            ..
         } => label.clone().unwrap_or_else(|| {
             let joined = if args.is_empty() {
                 String::new()
@@ -811,8 +917,10 @@ fn step_label(rig: &RigSpec, step: &PipelineStep, idx: usize) -> String {
         PipelineStep::Command { cmd, label, .. } => label
             .clone()
             .unwrap_or_else(|| truncate(&expand_vars(rig, cmd), 80)),
-        PipelineStep::Symlink { op } => format!("symlink {}", serialize_symlink_op(*op)),
-        PipelineStep::SharedPath { op } => format!("shared-path {}", serialize_shared_path_op(*op)),
+        PipelineStep::Symlink { op, .. } => format!("symlink {}", serialize_symlink_op(*op)),
+        PipelineStep::SharedPath { op, .. } => {
+            format!("shared-path {}", serialize_shared_path_op(*op))
+        }
         PipelineStep::Patch {
             component,
             file,

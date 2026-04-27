@@ -203,6 +203,15 @@ pub enum AuditFinding {
     /// Class whose public methods are mostly single-expression delegates to an
     /// internal member — usually a split-then-rejoin facade or legacy wrapper.
     FacadePassthrough,
+    /// SQL uses LIKE to match exact JSON key/value semantics in a blob column
+    /// such as metadata, engine_data, config, or payload.
+    JsonLikeExactMatch,
+    /// String literal duplicates a slug value that is already centralized in a
+    /// class constant, making drift possible despite the constant existing.
+    ConstantBackedSlugLiteral,
+    /// Comments/docblocks promise network/site-option storage while nearby code
+    /// uses single-site get_option/update_option calls.
+    OptionScopeDrift,
 }
 
 impl AuditFinding {
@@ -251,6 +260,9 @@ impl AuditFinding {
             "upstream_workaround",
             "shared_scaffolding",
             "facade_passthrough",
+            "json_like_exact_match",
+            "constant_backed_slug_literal",
+            "option_scope_drift",
         ]
     }
 }
