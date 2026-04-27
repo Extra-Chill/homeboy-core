@@ -26,14 +26,13 @@ pub fn reconcile(
     existing: &[TrackedIssue],
     config: &ReconcileConfig,
 ) -> ReconcilePlan {
-    // Index existing issues by (command, component, category). The category
-    // key is parsed from the title shape `<command>: <label> in <component>`
-    // — this matches the convention `auto-file-categorized-issues.sh` has
-    // been writing for ~year. Future trackers may store the category in a
-    // structured field instead.
+    // Index existing issues by (command, component, category). New issues carry
+    // a stable hidden body key; legacy action-created issues fall back to the
+    // title shape `<command>: <label> in <component>`.
     let mut by_category: BTreeMap<(String, String, String), Vec<&TrackedIssue>> = BTreeMap::new();
     for issue in existing {
-        if let Some(key) = parse_category_key(&issue.title) {
+        if let Some(key) = parse_issue_key(&issue.body).or_else(|| parse_category_key(&issue.title))
+        {
             by_category.entry(key).or_default().push(issue);
         }
     }
@@ -61,7 +60,7 @@ pub fn reconcile(
             group.component_id.clone(),
             group.category.clone(),
         );
-        let matches = by_category.get(&key).cloned().unwrap_or_default();
+        let matches = collect_matches(&by_category, group, &key);
         let review_only = is_review_only(group, config);
 
         // Phase 2: dispatch on (existing-issue-shape, count).
@@ -114,7 +113,7 @@ pub fn reconcile(
             actions.push(ReconcileAction::Update {
                 number: keep,
                 title: render_title(group),
-                body: group.body.clone(),
+                body: body_with_issue_key(group),
                 category: group.category.clone(),
                 count: group.count,
             });
@@ -158,7 +157,7 @@ pub fn reconcile(
                     }
                     actions.push(ReconcileAction::UpdateClosed {
                         number: closed.number,
-                        body: group.body.clone(),
+                        body: body_with_issue_key(group),
                         category: group.category.clone(),
                         count: group.count,
                     });
@@ -180,7 +179,7 @@ pub fn reconcile(
                         component_id: group.component_id.clone(),
                         category: group.category.clone(),
                         title: render_title(group),
-                        body: group.body.clone(),
+                        body: body_with_issue_key(group),
                         labels: vec![group.command.clone()],
                         count: group.count,
                     });
@@ -205,13 +204,46 @@ pub fn reconcile(
             component_id: group.component_id.clone(),
             category: group.category.clone(),
             title: render_title(group),
-            body: group.body.clone(),
+            body: body_with_issue_key(group),
             labels: vec![group.command.clone()],
             count: group.count,
         });
     }
 
     ReconcilePlan { actions }
+}
+
+fn collect_matches<'a>(
+    by_category: &BTreeMap<(String, String, String), Vec<&'a TrackedIssue>>,
+    group: &IssueGroup,
+    key: &(String, String, String),
+) -> Vec<&'a TrackedIssue> {
+    let mut matches = by_category.get(key).cloned().unwrap_or_default();
+
+    // Legacy action-created issues did not carry the stable body key. If the
+    // displayed label does not round-trip to the canonical category (notably
+    // aggregate test failures: `_aggregate` -> `test failure (exit 101)`),
+    // recognize the old title-derived key once so the update path writes the
+    // stable key instead of filing a duplicate.
+    let legacy_category = group.label_or_category().replace(' ', "_");
+    if legacy_category != group.category {
+        let legacy_key = (
+            group.command.clone(),
+            group.component_id.clone(),
+            legacy_category,
+        );
+        if let Some(legacy_matches) = by_category.get(&legacy_key) {
+            let mut seen: Vec<u64> = matches.iter().map(|i| i.number).collect();
+            for issue in legacy_matches {
+                if !seen.contains(&issue.number) {
+                    matches.push(issue);
+                    seen.push(issue.number);
+                }
+            }
+        }
+    }
+
+    matches
 }
 
 fn is_review_only(group: &IssueGroup, config: &ReconcileConfig) -> bool {
@@ -238,6 +270,49 @@ fn render_title(group: &IssueGroup) -> String {
         group.component_id,
         group.count
     )
+}
+
+const ISSUE_KEY_PREFIX: &str = "<!-- homeboy:issues-reconcile-key=";
+
+fn issue_key(command: &str, component: &str, category: &str) -> String {
+    format!("{}:{}:{}", command, component, category)
+}
+
+fn issue_key_marker(group: &IssueGroup) -> String {
+    format!(
+        "{}{} -->",
+        ISSUE_KEY_PREFIX,
+        issue_key(&group.command, &group.component_id, &group.category)
+    )
+}
+
+fn body_with_issue_key(group: &IssueGroup) -> String {
+    if group.body.contains(ISSUE_KEY_PREFIX) {
+        group.body.clone()
+    } else if group.body.is_empty() {
+        issue_key_marker(group)
+    } else {
+        format!("{}\n\n{}", issue_key_marker(group), group.body)
+    }
+}
+
+fn parse_issue_key(body: &str) -> Option<(String, String, String)> {
+    let start = body.find(ISSUE_KEY_PREFIX)? + ISSUE_KEY_PREFIX.len();
+    let rest = &body[start..];
+    let end = rest.find(" -->")?;
+    let key = &rest[..end];
+    let mut parts = key.splitn(3, ':');
+    let command = parts.next()?.trim();
+    let component = parts.next()?.trim();
+    let category = parts.next()?.trim();
+    if command.is_empty() || component.is_empty() || category.is_empty() {
+        return None;
+    }
+    Some((
+        command.to_string(),
+        component.to_string(),
+        category.to_string(),
+    ))
 }
 
 fn close_resolved_comment(label: &str) -> String {
@@ -327,6 +402,7 @@ mod tests {
         TrackedIssue {
             number,
             title: format!("audit: {} in data-machine ({})", category_label, count),
+            body: String::new(),
             url: format!("https://github.com/o/r/issues/{}", number),
             state,
             labels: vec!["audit".into()],
@@ -704,6 +780,104 @@ mod tests {
         assert_eq!(cmd, "test");
         assert_eq!(comp, "homeboy");
         assert_eq!(cat, "failures");
+    }
+
+    #[test]
+    fn issue_body_key_takes_precedence_over_title_label() {
+        let mut existing = issue(
+            1682,
+            "test failure (exit 101)",
+            TrackedIssueState::Open,
+            101,
+        );
+        existing.title = "test: test failure (exit 101) in homeboy (101)".into();
+        existing.body =
+            "<!-- homeboy:issues-reconcile-key=test:homeboy:_aggregate -->\n\nold".into();
+        existing.labels = vec!["test".into()];
+
+        let groups = vec![IssueGroup {
+            command: "test".into(),
+            component_id: "homeboy".into(),
+            category: "_aggregate".into(),
+            count: 101,
+            label: "test failure (exit 101)".into(),
+            body: "new body".into(),
+            confidence: None,
+        }];
+
+        let plan = reconcile(&groups, &[existing], &cfg());
+        assert_eq!(plan.actions.len(), 1);
+        match &plan.actions[0] {
+            ReconcileAction::Update { number, body, .. } => {
+                assert_eq!(*number, 1682);
+                assert!(body.contains("homeboy:issues-reconcile-key=test:homeboy:_aggregate"));
+                assert!(body.contains("new body"));
+            }
+            other => panic!("expected Update, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn legacy_aggregate_title_updates_instead_of_filing_duplicate() {
+        let existing = TrackedIssue {
+            number: 1676,
+            title: "test: test failure (exit 101) in homeboy (101)".into(),
+            body: String::new(),
+            url: "https://github.com/o/r/issues/1676".into(),
+            state: TrackedIssueState::Open,
+            labels: vec!["test".into()],
+        };
+        let groups = vec![IssueGroup {
+            command: "test".into(),
+            component_id: "homeboy".into(),
+            category: "_aggregate".into(),
+            count: 101,
+            label: "test failure (exit 101)".into(),
+            body: "fresh aggregate body".into(),
+            confidence: None,
+        }];
+
+        let plan = reconcile(&groups, &[existing], &cfg());
+        assert_eq!(plan.actions.len(), 1);
+        match &plan.actions[0] {
+            ReconcileAction::Update {
+                number,
+                title,
+                body,
+                category,
+                ..
+            } => {
+                assert_eq!(*number, 1676);
+                assert_eq!(title, "test: test failure (exit 101) in homeboy (101)");
+                assert_eq!(category, "_aggregate");
+                assert!(body
+                    .starts_with("<!-- homeboy:issues-reconcile-key=test:homeboy:_aggregate -->"));
+            }
+            other => panic!("expected Update, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn file_new_body_includes_stable_issue_key() {
+        let groups = vec![IssueGroup {
+            command: "test".into(),
+            component_id: "homeboy".into(),
+            category: "_aggregate".into(),
+            count: 101,
+            label: "test failure (exit 101)".into(),
+            body: "body".into(),
+            confidence: None,
+        }];
+
+        let plan = reconcile(&groups, &[], &cfg());
+        match &plan.actions[0] {
+            ReconcileAction::FileNew { body, .. } => {
+                assert!(body
+                    .starts_with("<!-- homeboy:issues-reconcile-key=test:homeboy:_aggregate -->"));
+                assert!(body.contains("body"));
+            }
+            other => panic!("expected FileNew, got {:?}", other),
+        }
     }
 
     #[test]

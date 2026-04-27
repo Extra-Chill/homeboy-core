@@ -46,6 +46,8 @@ pub struct IssueGroup {
 pub struct TrackedIssue {
     pub number: u64,
     pub title: String,
+    #[serde(default)]
+    pub body: String,
     pub url: String,
     pub state: TrackedIssueState,
     pub labels: Vec<String>,
