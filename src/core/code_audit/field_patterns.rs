@@ -150,6 +150,9 @@ fn detect_repeated_field_patterns(root: &Path) -> Vec<Finding> {
 
         let mut sorted_fields = fields.clone();
         sorted_fields.sort_by(|a, b| a.name.cmp(&b.name).then(a.field_type.cmp(&b.field_type)));
+        if is_low_value_generic_group(&sorted_fields, locations) {
+            continue;
+        }
         let field_names: Vec<&str> = sorted_fields.iter().map(|f| f.name.as_str()).collect();
         let struct_names: Vec<String> = locations
             .iter()
@@ -431,6 +434,68 @@ fn is_test_path(path: &str) -> bool {
         || lower.ends_with("_test.php")
         || lower.ends_with(".test.ts")
         || lower.ends_with(".test.js")
+}
+
+fn is_low_value_generic_group(fields: &[FieldSignature], locations: &[(String, String)]) -> bool {
+    if fields.len() != 2 {
+        return false;
+    }
+
+    let mut names: Vec<&str> = fields.iter().map(|field| field.name.as_str()).collect();
+    names.sort_unstable();
+    let is_generic_pair = matches!(
+        names.as_slice(),
+        ["from", "to"]
+            | ["host", "port"]
+            | ["local_version", "remote_version"]
+            | ["new_version", "old_version"]
+            | ["stderr", "stdout"]
+    );
+    if !is_generic_pair {
+        return false;
+    }
+
+    let module = |file: &str| {
+        file.rsplit_once('/')
+            .map(|(module, _)| module)
+            .unwrap_or("")
+            .to_string()
+    };
+    let shared_module = locations
+        .first()
+        .map(|(file, _)| {
+            locations
+                .iter()
+                .all(|(other, _)| module(other) == module(file))
+        })
+        .unwrap_or(false);
+    if shared_module {
+        return false;
+    }
+
+    let suffix = |name: &str| {
+        let start = name
+            .char_indices()
+            .filter_map(|(index, ch)| ch.is_uppercase().then_some(index))
+            .next_back()?;
+        let suffix = &name[start..];
+        let generic_suffix = matches!(
+            suffix,
+            "Client" | "Config" | "Output" | "Result" | "Row" | "Server" | "Summary"
+        );
+        (suffix.len() > 2 && !generic_suffix).then_some(suffix.to_string())
+    };
+
+    let shared_suffix = locations
+        .first()
+        .and_then(|(_, name)| suffix(name))
+        .map(|first| {
+            locations
+                .iter()
+                .all(|(_, name)| suffix(name).as_ref() == Some(&first))
+        })
+        .unwrap_or(false);
+    !shared_suffix
 }
 
 fn strip_rust_cfg_test_modules(content: &str) -> String {
@@ -926,6 +991,118 @@ struct Foo {
         assert!(findings
             .iter()
             .all(|f| f.kind == AuditFinding::RepeatedFieldPattern));
+    }
+
+    #[test]
+    fn suppresses_generic_pairs_across_unrelated_modules() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for (module, name, fields) in [
+            (
+                "ssh",
+                "SshConnectOutput",
+                "stdout: String,\n    stderr: String,",
+            ),
+            ("db", "DbResult", "stdout: String,\n    stderr: String,"),
+            (
+                "fleet",
+                "FleetExecProjectResult",
+                "stdout: String,\n    stderr: String,",
+            ),
+            (
+                "database",
+                "DatabaseConfig",
+                "host: String,\n    port: u16,",
+            ),
+            ("server", "Server", "host: String,\n    port: u16,"),
+            ("client", "SshClient", "host: String,\n    port: u16,"),
+            ("rename", "RenameSummary", "from: String,\n    to: String,"),
+            (
+                "variant",
+                "VariantSummary",
+                "from: String,\n    to: String,",
+            ),
+            ("file", "FileRename", "from: String,\n    to: String,"),
+            (
+                "deploy",
+                "DeployStatusRow",
+                "local_version: String,\n    remote_version: String,",
+            ),
+            (
+                "fleet_status",
+                "FleetStatusRow",
+                "local_version: String,\n    remote_version: String,",
+            ),
+            (
+                "release",
+                "ReleaseStatusRow",
+                "local_version: String,\n    remote_version: String,",
+            ),
+        ] {
+            let module_dir = dir.path().join("src").join(module);
+            std::fs::create_dir_all(&module_dir).unwrap();
+            std::fs::write(
+                module_dir.join("types.rs"),
+                format!("struct {name} {{\n    {fields}\n}}\n"),
+            )
+            .unwrap();
+        }
+
+        let findings = detect_repeated_field_patterns(dir.path());
+        assert!(
+            findings.is_empty(),
+            "generic DTO field pairs across unrelated modules should not become extraction work: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn keeps_generic_pair_signal_with_local_or_suffix_affinity() {
+        let dir = tempfile::tempdir().unwrap();
+        let network = dir.path().join("src/network");
+        std::fs::create_dir_all(&network).unwrap();
+
+        for name in &["PrimaryEndpoint", "ReplicaEndpoint", "FallbackEndpoint"] {
+            std::fs::write(
+                network.join(format!("{}.rs", name.to_lowercase())),
+                format!("struct {name} {{\n    host: String,\n    port: u16,\n}}\n"),
+            )
+            .unwrap();
+        }
+
+        for (module, name) in &[
+            ("filesystem", "FileRename"),
+            ("workspace", "WorkspaceRename"),
+            ("package", "PackageRename"),
+        ] {
+            let module_dir = dir.path().join("src").join(module);
+            std::fs::create_dir_all(&module_dir).unwrap();
+            std::fs::write(
+                module_dir.join("rename.rs"),
+                format!("struct {name} {{\n    from: String,\n    to: String,\n}}\n"),
+            )
+            .unwrap();
+        }
+
+        let descriptions: Vec<String> = detect_repeated_field_patterns(dir.path())
+            .into_iter()
+            .map(|finding| finding.description)
+            .collect();
+
+        assert!(
+            descriptions
+                .iter()
+                .any(|description| description.contains("[host, port]")),
+            "generic pairs inside one module should still report: {:?}",
+            descriptions
+        );
+        assert!(
+            descriptions
+                .iter()
+                .any(|description| description.contains("[from, to]")),
+            "generic pairs on structs with a shared suffix should still report: {:?}",
+            descriptions
+        );
     }
 
     #[test]
