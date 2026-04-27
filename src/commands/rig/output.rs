@@ -19,6 +19,7 @@ pub enum RigCommandOutput {
     Check(RigCheckOutput),
     Down(RigDownOutput),
     Status(RigStatusOutput),
+    Install(RigInstallOutput),
 }
 
 #[derive(Serialize)]
@@ -34,6 +35,18 @@ pub struct RigSummary {
     pub component_count: usize,
     pub service_count: usize,
     pub pipelines: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<RigSourceSummary>,
+}
+
+#[derive(Serialize)]
+pub struct RigSourceSummary {
+    pub source: String,
+    pub package_path: String,
+    pub rig_path: String,
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -68,4 +81,23 @@ pub struct RigStatusOutput {
     pub command: &'static str,
     #[serde(flatten)]
     pub report: rig::RigStatusReport,
+}
+
+#[derive(Serialize)]
+pub struct RigInstallOutput {
+    pub command: &'static str,
+    pub source: String,
+    pub package_path: String,
+    pub linked: bool,
+    pub installed: Vec<RigInstalledSummary>,
+}
+
+#[derive(Serialize)]
+pub struct RigInstalledSummary {
+    pub id: String,
+    pub description: String,
+    pub path: String,
+    pub spec_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
 }

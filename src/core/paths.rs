@@ -80,6 +80,26 @@ pub fn rig_config(id: &str) -> Result<PathBuf> {
     Ok(rigs()?.join(format!("{}.json", id)))
 }
 
+/// Installed rig package directory (~/.config/homeboy/rig-packages/)
+pub fn rig_packages() -> Result<PathBuf> {
+    Ok(homeboy()?.join("rig-packages"))
+}
+
+/// Cloned rig package path (~/.config/homeboy/rig-packages/{id}/)
+pub fn rig_package(id: &str) -> Result<PathBuf> {
+    Ok(rig_packages()?.join(id))
+}
+
+/// Rig source metadata directory (~/.config/homeboy/rig-sources/)
+pub fn rig_sources() -> Result<PathBuf> {
+    Ok(homeboy()?.join("rig-sources"))
+}
+
+/// Rig source metadata file (~/.config/homeboy/rig-sources/{id}.json)
+pub fn rig_source_metadata(id: &str) -> Result<PathBuf> {
+    Ok(rig_sources()?.join(format!("{}.json", id)))
+}
+
 /// Rig state directory (~/.config/homeboy/rigs/{id}.state/)
 /// Holds service PIDs, logs, and last check results.
 pub fn rig_state_dir(id: &str) -> Result<PathBuf> {

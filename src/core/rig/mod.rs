@@ -20,12 +20,17 @@
 
 pub mod check;
 pub mod expand;
+pub mod install;
 pub mod pipeline;
 pub mod runner;
 pub mod service;
 pub mod spec;
 pub mod state;
 
+pub use install::{
+    discover_rigs, install, read_source_metadata, DiscoveredRig, RigInstallResult,
+    RigSourceMetadata,
+};
 pub use pipeline::{PipelineOutcome, PipelineStepOutcome};
 pub use runner::{
     run_check, run_down, run_status, run_up, snapshot_state, CheckReport, ComponentSnapshot,
