@@ -7,7 +7,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use homeboy::stack::{
-    self, ApplyOutput, GitRef, InspectOptions, InspectOutput, StackPrEntry, StackSpec,
+    self, ApplyOutput, GitRef, InspectOptions, InspectOutput, PushOutput, StackPrEntry, StackSpec,
     StatusOutput, SyncOutput,
 };
 
@@ -103,6 +103,11 @@ enum StackCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Push the materialized target branch to its configured remote.
+    Push {
+        /// Stack ID.
+        stack_id: String,
+    },
     /// Spec-less inspection of the current branch as a stack of commits.
     /// Replaces the previous `homeboy git stack` command (re-homed into
     /// the stack domain).
@@ -136,6 +141,7 @@ pub enum StackCommandOutput {
     Apply(StackApplyOutput),
     Status(StackStatusOutput),
     Sync(StackSyncOutput),
+    Push(StackPushOutput),
     Inspect(StackInspectOutput),
 }
 
@@ -190,6 +196,13 @@ pub struct StackSyncOutput {
 }
 
 #[derive(Serialize)]
+pub struct StackPushOutput {
+    pub command: &'static str,
+    #[serde(flatten)]
+    pub report: PushOutput,
+}
+
+#[derive(Serialize)]
 pub struct StackInspectOutput {
     pub command: &'static str,
     #[serde(flatten)]
@@ -229,6 +242,7 @@ pub fn run(args: StackArgs, _global: &super::GlobalArgs) -> CmdResult<StackComma
         StackCommand::Apply { stack_id } => apply(&stack_id),
         StackCommand::Status { stack_id } => status(&stack_id),
         StackCommand::Sync { stack_id, dry_run } => sync(&stack_id, dry_run),
+        StackCommand::Push { stack_id } => push(&stack_id),
         StackCommand::Inspect {
             component_id,
             base,
@@ -443,6 +457,18 @@ fn sync(stack_id: &str, dry_run: bool) -> CmdResult<StackCommandOutput> {
             report,
         }),
         exit_code,
+    ))
+}
+
+fn push(stack_id: &str) -> CmdResult<StackCommandOutput> {
+    let spec = stack::load(stack_id)?;
+    let report = stack::push(&spec)?;
+    Ok((
+        StackCommandOutput::Push(StackPushOutput {
+            command: "stack.push",
+            report,
+        }),
+        0,
     ))
 }
 
