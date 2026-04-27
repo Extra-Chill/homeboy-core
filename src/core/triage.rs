@@ -125,6 +125,17 @@ pub struct TriageRepo {
     pub owner: String,
     pub name: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_repo: Option<TriageRepoRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triage_remote_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TriageRepoRef {
+    pub owner: String,
+    pub name: String,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,6 +230,7 @@ struct ComponentRef {
     component_id: String,
     local_path: String,
     remote_url: Option<String>,
+    triage_remote_url: Option<String>,
     sources: BTreeSet<String>,
     usage: BTreeSet<String>,
 }
@@ -228,6 +240,7 @@ impl ComponentRef {
         component_id: String,
         local_path: String,
         remote_url: Option<String>,
+        triage_remote_url: Option<String>,
         source: String,
     ) -> Self {
         let mut sources = BTreeSet::new();
@@ -236,6 +249,7 @@ impl ComponentRef {
             component_id,
             local_path,
             remote_url,
+            triage_remote_url,
             sources,
             usage: BTreeSet::new(),
         }
@@ -280,6 +294,7 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
                 comp.id,
                 comp.local_path,
                 comp.remote_url,
+                comp.triage_remote_url,
                 format!("component:{component_id}"),
             )])
         }
@@ -290,6 +305,8 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
                 .into_iter()
                 .map(|attachment| {
                     let comp = component::load(&attachment.id).ok();
+                    let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
+                    let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
                     ComponentRef::new(
                         attachment.id.clone(),
                         if attachment.local_path.is_empty() {
@@ -299,7 +316,8 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
                         } else {
                             attachment.local_path
                         },
-                        comp.and_then(|c| c.remote_url),
+                        remote_url,
+                        triage_remote_url,
                         format!("project:{project_id}"),
                     )
                 })
@@ -315,6 +333,7 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
                     component_id.clone(),
                     path,
                     component_spec.remote_url.clone(),
+                    component_spec.triage_remote_url.clone(),
                     format!("rig:{rig_id}"),
                 );
                 component_ref.usage.insert(rig_id.to_string());
@@ -333,6 +352,8 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
     for proj in project::list()? {
         for attachment in proj.components {
             let comp = component::load(&attachment.id).ok();
+            let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
+            let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
             let mut component_ref = ComponentRef::new(
                 attachment.id.clone(),
                 if attachment.local_path.is_empty() {
@@ -342,7 +363,8 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
                 } else {
                     attachment.local_path
                 },
-                comp.and_then(|c| c.remote_url),
+                remote_url,
+                triage_remote_url,
                 format!("project:{}", proj.id),
             );
             component_ref.usage.insert(proj.id.clone());
@@ -356,6 +378,7 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
                 component_id.clone(),
                 rig::expand::expand_vars(&spec, &component_spec.path),
                 component_spec.remote_url.clone(),
+                component_spec.triage_remote_url.clone(),
                 format!("rig:{}", spec.id),
             );
             component_ref.usage.insert(spec.id.clone());
@@ -367,7 +390,13 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
         let source = format!("component:{}", comp.id);
         merge_component_ref(
             &mut refs,
-            ComponentRef::new(comp.id, comp.local_path, comp.remote_url, source),
+            ComponentRef::new(
+                comp.id,
+                comp.local_path,
+                comp.remote_url,
+                comp.triage_remote_url,
+                source,
+            ),
         );
     }
 
@@ -386,6 +415,9 @@ fn merge_component_ref(refs: &mut BTreeMap<String, ComponentRef>, component_ref:
     if entry.remote_url.is_none() {
         entry.remote_url = component_ref.remote_url;
     }
+    if entry.triage_remote_url.is_none() {
+        entry.triage_remote_url = component_ref.triage_remote_url;
+    }
 }
 
 fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
@@ -394,8 +426,12 @@ fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
 
     for component_ref in component_refs {
         match resolve_repo(&component_ref) {
-            Ok(repo) => {
-                let key = format!("{}/{}", repo.owner.to_lowercase(), repo.repo.to_lowercase());
+            Ok(resolved_repo) => {
+                let key = format!(
+                    "{}/{}",
+                    resolved_repo.repo.owner.to_lowercase(),
+                    resolved_repo.repo.repo.to_lowercase()
+                );
                 let entry = resolved.entry(key).or_insert_with(|| component_ref.clone());
                 entry.sources.extend(component_ref.sources);
                 entry.usage.extend(component_ref.usage);
@@ -404,6 +440,9 @@ fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
                 }
                 if entry.remote_url.is_none() {
                     entry.remote_url = component_ref.remote_url;
+                }
+                if entry.triage_remote_url.is_none() {
+                    entry.triage_remote_url = component_ref.triage_remote_url;
                 }
             }
             Err(_) => unresolved.push(component_ref),
@@ -426,6 +465,8 @@ fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
         };
         for attachment in proj.components {
             let comp = component::load(&attachment.id).ok();
+            let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
+            let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
             let entry = refs.entry(attachment.id.clone()).or_insert_with(|| {
                 ComponentRef::new(
                     attachment.id.clone(),
@@ -436,14 +477,18 @@ fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
                     } else {
                         attachment.local_path.clone()
                     },
-                    comp.as_ref().and_then(|c| c.remote_url.clone()),
+                    remote_url.clone(),
+                    triage_remote_url.clone(),
                     format!("fleet:{fleet_id}"),
                 )
             });
             entry.sources.insert(format!("project:{project_id}"));
             entry.usage.insert(project_id.clone());
             if entry.remote_url.is_none() {
-                entry.remote_url = comp.and_then(|c| c.remote_url);
+                entry.remote_url = remote_url;
+            }
+            if entry.triage_remote_url.is_none() {
+                entry.triage_remote_url = triage_remote_url;
             }
             if entry.local_path.is_empty() && !attachment.local_path.is_empty() {
                 entry.local_path = attachment.local_path;
@@ -454,26 +499,60 @@ fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
     Ok(refs.into_values().collect())
 }
 
-fn resolve_repo(component_ref: &ComponentRef) -> std::result::Result<GitHubRepo, String> {
-    let remote_url = component_ref
+#[derive(Debug, Clone)]
+struct ResolvedRepo {
+    repo: GitHubRepo,
+    triage_remote_url: Option<String>,
+    source_repo: Option<GitHubRepo>,
+}
+
+fn resolve_repo(component_ref: &ComponentRef) -> std::result::Result<ResolvedRepo, String> {
+    let source_remote_url = component_ref
         .remote_url
         .clone()
-        .or_else(|| detect_remote_url(Path::new(&component_ref.local_path)))
-        .ok_or_else(|| "missing_remote_url_and_no_git_origin".to_string())?;
+        .or_else(|| detect_remote_url(Path::new(&component_ref.local_path)));
 
-    parse_github_url(&remote_url).ok_or_else(|| "remote_url_is_not_github".to_string())
+    let triage_remote_url = component_ref
+        .triage_remote_url
+        .clone()
+        .or_else(|| source_remote_url.clone())
+        .ok_or_else(|| "missing_remote_url_and_no_git_origin".to_string())?;
+    let repo = parse_github_url(&triage_remote_url).ok_or_else(|| {
+        if component_ref.triage_remote_url.is_some() {
+            "triage_remote_url_is_not_github".to_string()
+        } else {
+            "remote_url_is_not_github".to_string()
+        }
+    })?;
+
+    let source_repo = source_remote_url
+        .and_then(|url| parse_github_url(&url))
+        .filter(|source| source.owner != repo.owner || source.repo != repo.repo);
+
+    Ok(ResolvedRepo {
+        repo,
+        triage_remote_url: component_ref.triage_remote_url.clone(),
+        source_repo,
+    })
 }
 
 fn fetch_component_report(
     component_ref: &ComponentRef,
-    repo: GitHubRepo,
+    resolved: ResolvedRepo,
     options: &TriageOptions,
 ) -> TriageComponentReport {
+    let repo = resolved.repo;
     let repo_output = TriageRepo {
         provider: "github",
         owner: repo.owner.clone(),
         name: repo.repo.clone(),
         url: format!("https://github.com/{}/{}", repo.owner, repo.repo),
+        source_repo: resolved.source_repo.map(|source| TriageRepoRef {
+            owner: source.owner.clone(),
+            name: source.repo.clone(),
+            url: format!("https://github.com/{}/{}", source.owner, source.repo),
+        }),
+        triage_remote_url: resolved.triage_remote_url,
     };
     let stale_cutoff = options
         .stale_days
@@ -1059,6 +1138,7 @@ mod tests {
             "intelligence".to_string(),
             "/tmp/intelligence".to_string(),
             Some("https://github.com/Automattic/intelligence.git".to_string()),
+            None,
             "project:intelligence-chubes4".to_string(),
         );
         project_ref.usage.insert("intelligence-chubes4".to_string());
@@ -1067,6 +1147,7 @@ mod tests {
             "intelligence-dev".to_string(),
             "/tmp/intelligence-dev".to_string(),
             Some("git@github.com:Automattic/intelligence.git".to_string()),
+            None,
             "rig:intelligence-chubes4".to_string(),
         );
         rig_ref.usage.insert("intelligence-chubes4".to_string());
@@ -1075,6 +1156,7 @@ mod tests {
             "standalone".to_string(),
             "/tmp/standalone".to_string(),
             Some("https://github.com/Extra-Chill/standalone.git".to_string()),
+            None,
             "component:standalone".to_string(),
         );
 
@@ -1104,11 +1186,13 @@ mod tests {
             "data-machine".to_string(),
             "/tmp/data-machine".to_string(),
             Some("https://github.com/Extra-Chill/data-machine.git".to_string()),
+            None,
             "component:data-machine".to_string(),
         );
         let unresolved = ComponentRef::new(
             "local-only".to_string(),
             "".to_string(),
+            None,
             None,
             "component:local-only".to_string(),
         );
@@ -1381,6 +1465,8 @@ mod tests {
                 owner: "Extra-Chill".to_string(),
                 name: "data-machine".to_string(),
                 url: "https://github.com/Extra-Chill/data-machine".to_string(),
+                source_repo: None,
+                triage_remote_url: None,
             },
             issues: Some(TriageIssueBucket {
                 open: 2,
@@ -1462,5 +1548,152 @@ mod tests {
             stale: false,
             next_action: Some(action.to_string()),
         }
+    }
+
+    #[test]
+    fn resolve_repo_prefers_triage_remote_without_losing_source_repo() {
+        let component_ref = ComponentRef::new(
+            "playground".to_string(),
+            "/tmp/playground".to_string(),
+            Some("https://github.com/chubes4/wordpress-playground.git".to_string()),
+            Some("https://github.com/WordPress/wordpress-playground.git".to_string()),
+            "component:playground".to_string(),
+        );
+
+        let resolved = resolve_repo(&component_ref).unwrap();
+
+        assert_eq!(resolved.repo.owner, "WordPress");
+        assert_eq!(resolved.repo.repo, "wordpress-playground");
+        assert_eq!(
+            resolved.triage_remote_url.as_deref(),
+            Some("https://github.com/WordPress/wordpress-playground.git")
+        );
+        let source = resolved.source_repo.expect("source repo differs");
+        assert_eq!(source.owner, "chubes4");
+        assert_eq!(source.repo, "wordpress-playground");
+    }
+
+    #[test]
+    fn resolve_repo_allows_triage_remote_without_git_source_remote() {
+        let component_ref = ComponentRef::new(
+            "playground".to_string(),
+            "/tmp/not-a-git-repo".to_string(),
+            None,
+            Some("https://github.com/WordPress/wordpress-playground.git".to_string()),
+            "rig:studio".to_string(),
+        );
+
+        let resolved = resolve_repo(&component_ref).unwrap();
+
+        assert_eq!(resolved.repo.owner, "WordPress");
+        assert_eq!(resolved.repo.repo, "wordpress-playground");
+        assert!(resolved.source_repo.is_none());
+    }
+
+    #[test]
+    fn fetch_component_report_surfaces_source_repo_when_triage_differs() {
+        let component_ref = ComponentRef::new(
+            "playground".to_string(),
+            "/tmp/playground".to_string(),
+            Some("https://github.com/chubes4/wordpress-playground.git".to_string()),
+            Some("https://github.com/WordPress/wordpress-playground.git".to_string()),
+            "rig:studio".to_string(),
+        );
+        let resolved = resolve_repo(&component_ref).unwrap();
+
+        let report = fetch_component_report(
+            &component_ref,
+            resolved,
+            &TriageOptions {
+                include_issues: false,
+                include_prs: false,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(report.repo.owner, "WordPress");
+        assert_eq!(report.repo.name, "wordpress-playground");
+        assert_eq!(
+            report.repo.triage_remote_url.as_deref(),
+            Some("https://github.com/WordPress/wordpress-playground.git")
+        );
+        assert_eq!(
+            report.repo.source_repo,
+            Some(TriageRepoRef {
+                owner: "chubes4".to_string(),
+                name: "wordpress-playground".to_string(),
+                url: "https://github.com/chubes4/wordpress-playground".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn component_target_threads_registered_triage_remote_override() {
+        crate::test_support::with_isolated_home(|home| {
+            let checkout = home.path().join("playground");
+            std::fs::create_dir_all(&checkout).unwrap();
+            let component_dir = home.path().join(".config/homeboy/components");
+            std::fs::create_dir_all(&component_dir).unwrap();
+            std::fs::write(
+                component_dir.join("playground.json"),
+                format!(
+                    r#"{{
+                    "local_path": "{}",
+                    "remote_url": "https://github.com/chubes4/wordpress-playground.git",
+                    "triage_remote_url": "https://github.com/WordPress/wordpress-playground.git"
+                }}"#,
+                    checkout.display()
+                ),
+            )
+            .unwrap();
+
+            let refs =
+                resolve_target_components(&TriageTarget::Component("playground".into())).unwrap();
+
+            assert_eq!(refs.len(), 1);
+            assert_eq!(
+                refs[0].triage_remote_url.as_deref(),
+                Some("https://github.com/WordPress/wordpress-playground.git")
+            );
+            assert_eq!(
+                resolve_repo(&refs[0]).unwrap().repo.owner,
+                "WordPress".to_string()
+            );
+        });
+    }
+
+    #[test]
+    fn rig_target_threads_rig_component_triage_remote_override() {
+        crate::test_support::with_isolated_home(|home| {
+            let rig_dir = home.path().join(".config/homeboy/rigs");
+            std::fs::create_dir_all(&rig_dir).unwrap();
+            std::fs::write(
+                rig_dir.join("studio.json"),
+                r#"{
+                    "id": "studio",
+                    "components": {
+                        "playground": {
+                            "path": "/tmp/playground",
+                            "remote_url": "https://github.com/chubes4/wordpress-playground.git",
+                            "triage_remote_url": "https://github.com/WordPress/wordpress-playground.git"
+                        }
+                    }
+                }"#,
+            )
+            .unwrap();
+
+            let refs = resolve_target_components(&TriageTarget::Rig("studio".into())).unwrap();
+
+            assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].component_id, "playground");
+            assert_eq!(
+                refs[0].triage_remote_url.as_deref(),
+                Some("https://github.com/WordPress/wordpress-playground.git")
+            );
+            assert_eq!(
+                resolve_repo(&refs[0]).unwrap().repo.owner,
+                "WordPress".to_string()
+            );
+        });
     }
 }

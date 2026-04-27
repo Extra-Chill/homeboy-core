@@ -139,6 +139,9 @@ pub struct Component {
     /// Git remote URL for the component's source repository (e.g., GitHub URL).
     /// Used by deploy to download release artifacts or initialize server-side git repos.
     pub remote_url: Option<String>,
+    /// Reporting-only GitHub remote override for `homeboy triage`.
+    /// Does not affect git, deploy, or release operations.
+    pub triage_remote_url: Option<String>,
     pub auto_cleanup: bool,
     pub docs_dir: Option<String>,
     pub docs_dirs: Vec<String>,
@@ -197,6 +200,8 @@ struct RawComponent {
     git_deploy: Option<GitDeployConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    triage_remote_url: Option<String>,
     #[serde(default)]
     auto_cleanup: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -250,6 +255,7 @@ impl From<RawComponent> for Component {
             deploy_strategy: raw.deploy_strategy,
             git_deploy: raw.git_deploy,
             remote_url: raw.remote_url,
+            triage_remote_url: raw.triage_remote_url,
             auto_cleanup: raw.auto_cleanup,
             docs_dir: raw.docs_dir,
             docs_dirs: raw.docs_dirs,
@@ -282,6 +288,7 @@ impl From<Component> for RawComponent {
             deploy_strategy: c.deploy_strategy,
             git_deploy: c.git_deploy,
             remote_url: c.remote_url,
+            triage_remote_url: c.triage_remote_url,
             auto_cleanup: c.auto_cleanup,
             docs_dir: c.docs_dir,
             docs_dirs: c.docs_dirs,
@@ -351,6 +358,7 @@ impl Component {
             deploy_strategy: None,
             git_deploy: None,
             remote_url: None,
+            triage_remote_url: None,
             auto_cleanup: false,
             docs_dir: None,
             docs_dirs: Vec::new(),

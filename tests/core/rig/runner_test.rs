@@ -293,6 +293,7 @@ fn test_snapshot_state() {
         ComponentSpec {
             path: "/tmp/homeboy-snapshot-test-not-a-repo-z".to_string(),
             remote_url: None,
+            triage_remote_url: None,
             stack: None,
             branch: None,
         },
@@ -302,6 +303,7 @@ fn test_snapshot_state() {
         ComponentSpec {
             path: "/tmp/homeboy-snapshot-test-not-a-repo-a".to_string(),
             remote_url: None,
+            triage_remote_url: None,
             stack: None,
             branch: None,
         },

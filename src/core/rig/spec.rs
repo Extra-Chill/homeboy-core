@@ -170,6 +170,11 @@ pub struct ComponentSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_url: Option<String>,
 
+    /// Reporting-only GitHub remote override for `homeboy triage rig`.
+    /// Does not affect git, deploy, release, or rig pipeline operations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage_remote_url: Option<String>,
+
     /// Stack ID this component should track (Phase 2 — not enforced in MVP,
     /// but the field is reserved so existing specs don't break on upgrade).
     #[serde(default, skip_serializing_if = "Option::is_none")]

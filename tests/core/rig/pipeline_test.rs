@@ -215,6 +215,7 @@ mod dag {
             ComponentSpec {
                 path: component_a.to_string_lossy().into_owned(),
                 remote_url: None,
+                triage_remote_url: None,
                 stack: None,
                 branch: None,
             },
@@ -224,6 +225,7 @@ mod dag {
             ComponentSpec {
                 path: component_b.to_string_lossy().into_owned(),
                 remote_url: None,
+                triage_remote_url: None,
                 stack: None,
                 branch: None,
             },
@@ -281,6 +283,7 @@ mod patch {
             ComponentSpec {
                 path: component_path.to_string(),
                 remote_url: None,
+                triage_remote_url: None,
                 stack: None,
                 branch: None,
             },
