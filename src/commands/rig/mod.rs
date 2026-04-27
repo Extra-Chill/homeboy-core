@@ -9,8 +9,8 @@ use clap::{Args, Subcommand};
 use homeboy::rig;
 
 use self::output::{
-    RigCheckOutput, RigDownOutput, RigListOutput, RigShowOutput, RigStatusOutput, RigSummary,
-    RigUpOutput,
+    RigCheckOutput, RigDownOutput, RigInstallOutput, RigInstalledSummary, RigListOutput,
+    RigShowOutput, RigSourceSummary, RigStatusOutput, RigSummary, RigUpOutput,
 };
 use super::CmdResult;
 
@@ -49,6 +49,17 @@ enum RigCommand {
         /// Rig ID
         rig_id: String,
     },
+    /// Install rigs from a local package path or git URL
+    Install {
+        /// Git URL or local path containing rig.json or rigs/<id>/rig.json
+        source: String,
+        /// Install a specific rig from a multi-rig package
+        #[arg(long)]
+        id: Option<String>,
+        /// Install every rig in the package
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 pub fn run(args: RigArgs, _global: &super::GlobalArgs) -> CmdResult<RigCommandOutput> {
@@ -59,6 +70,7 @@ pub fn run(args: RigArgs, _global: &super::GlobalArgs) -> CmdResult<RigCommandOu
         RigCommand::Check { rig_id } => check(&rig_id),
         RigCommand::Down { rig_id } => down(&rig_id),
         RigCommand::Status { rig_id } => status(&rig_id),
+        RigCommand::Install { source, id, all } => install(&source, id.as_deref(), all),
     }
 }
 
@@ -70,6 +82,13 @@ fn list() -> CmdResult<RigCommandOutput> {
             let mut pipelines: Vec<String> = r.pipeline.keys().cloned().collect();
             pipelines.sort();
             RigSummary {
+                source: rig::read_source_metadata(&r.id).map(|source| RigSourceSummary {
+                    source: source.source,
+                    package_path: source.package_path,
+                    rig_path: source.rig_path,
+                    linked: source.linked,
+                    source_revision: source.source_revision,
+                }),
                 id: r.id,
                 description: r.description,
                 component_count: r.components.len(),
@@ -83,6 +102,30 @@ fn list() -> CmdResult<RigCommandOutput> {
         RigCommandOutput::List(RigListOutput {
             command: "rig.list",
             rigs: summaries,
+        }),
+        0,
+    ))
+}
+
+fn install(source: &str, id: Option<&str>, all: bool) -> CmdResult<RigCommandOutput> {
+    let result = rig::install(source, id, all)?;
+    Ok((
+        RigCommandOutput::Install(RigInstallOutput {
+            command: "rig.install",
+            source: result.source,
+            package_path: result.package_path.to_string_lossy().to_string(),
+            linked: result.linked,
+            installed: result
+                .installed
+                .into_iter()
+                .map(|rig| RigInstalledSummary {
+                    id: rig.id,
+                    description: rig.description,
+                    path: rig.path.to_string_lossy().to_string(),
+                    spec_path: rig.spec_path.to_string_lossy().to_string(),
+                    source_revision: rig.source_revision,
+                })
+                .collect(),
         }),
         0,
     ))
