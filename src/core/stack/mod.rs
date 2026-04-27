@@ -41,4 +41,4 @@ pub use spec::{
     exists, expand_path, list, list_ids, load, parse_git_ref, save, GitRef, StackPrEntry, StackSpec,
 };
 pub use status::{status, LocalState, StatusOutput, StatusPr};
-pub use sync::{sync, DroppedPr, SyncOutput};
+pub use sync::{diff, sync, DiffOutput, DroppedPr, ReplayedPr, SyncOutput, UncertainPr};
