@@ -1013,6 +1013,83 @@ mod tests {
     }
 
     #[test]
+    fn rest_utility_classes_do_not_need_route_registration() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "api/PostsController.php".to_string(),
+                language: Language::Php,
+                methods: vec!["register_routes".to_string()],
+                registrations: vec!["rest_api_init".to_string()],
+                type_name: Some("PostsController".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "api/PagesController.php".to_string(),
+                language: Language::Php,
+                methods: vec!["register_routes".to_string()],
+                registrations: vec!["rest_api_init".to_string()],
+                type_name: Some("PagesController".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "api/WebhookVerifier.php".to_string(),
+                language: Language::Php,
+                methods: vec!["verify".to_string()],
+                type_name: Some("WebhookVerifier".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        let convention = discover_conventions("Api", "api/*.php", &fingerprints).unwrap();
+        assert!(
+            convention
+                .outliers
+                .iter()
+                .flat_map(|o| &o.deviations)
+                .all(|d| d.kind != AuditFinding::MissingRegistration
+                    && d.kind != AuditFinding::MissingMethod),
+            "REST utility classes should not be treated as endpoint registrants"
+        );
+    }
+
+    #[test]
+    fn factories_do_not_need_methods_of_created_type() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "chat/DatabaseConversationStore.php".to_string(),
+                language: Language::Php,
+                methods: vec!["update_title".to_string(), "delete_session".to_string()],
+                type_name: Some("DatabaseConversationStore".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "chat/MemoryConversationStore.php".to_string(),
+                language: Language::Php,
+                methods: vec!["update_title".to_string(), "delete_session".to_string()],
+                type_name: Some("MemoryConversationStore".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "chat/ConversationStoreFactory.php".to_string(),
+                language: Language::Php,
+                methods: vec!["get".to_string()],
+                type_name: Some("ConversationStoreFactory".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        let convention = discover_conventions("Chat", "chat/*.php", &fingerprints).unwrap();
+        assert!(
+            convention
+                .outliers
+                .iter()
+                .flat_map(|o| &o.deviations)
+                .all(|d| d.kind != AuditFinding::MissingMethod),
+            "factories produce stores; they should not implement store methods"
+        );
+    }
+
+    #[test]
     fn no_interface_convention_when_none_shared() {
         let fingerprints = vec![
             FileFingerprint {
