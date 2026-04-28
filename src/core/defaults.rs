@@ -10,6 +10,9 @@ pub struct HomeboyConfig {
     #[serde(default)]
     pub defaults: Defaults,
 
+    #[serde(default)]
+    pub triage: TriageConfig,
+
     /// Enable automatic update check on startup (default: true).
     /// Disable with `homeboy config set /update_check false`
     /// or set HOMEBOY_NO_UPDATE_CHECK=1.
@@ -21,6 +24,7 @@ impl Default for HomeboyConfig {
     fn default() -> Self {
         Self {
             defaults: Defaults::default(),
+            triage: TriageConfig::default(),
             update_check: true,
         }
     }
@@ -28,6 +32,12 @@ impl Default for HomeboyConfig {
 
 pub fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TriageConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority_labels: Option<Vec<String>>,
 }
 
 /// All configurable defaults that can be overridden via homeboy.json
@@ -403,4 +413,33 @@ pub fn config_path() -> crate::Result<String> {
 /// Get built-in defaults (ignoring any file config)
 pub fn builtin_defaults() -> Defaults {
     Defaults::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn homeboy_config_parses_triage_priority_labels() {
+        let config: HomeboyConfig = serde_json::from_str(
+            r#"{
+                "triage": {
+                    "priority_labels": ["security", "urgent"]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.triage.priority_labels,
+            Some(vec!["security".to_string(), "urgent".to_string()])
+        );
+    }
+
+    #[test]
+    fn homeboy_config_leaves_triage_priority_labels_unset_by_default() {
+        let config = HomeboyConfig::default();
+
+        assert!(config.triage.priority_labels.is_none());
+    }
 }
