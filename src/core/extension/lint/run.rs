@@ -46,6 +46,12 @@ pub struct LintRunWorkflowResult {
     pub lint_findings: Option<Vec<LintFinding>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScopedLintRun {
+    glob: String,
+    step: Option<&'static str>,
+}
+
 /// Run the main lint workflow.
 ///
 /// Handles changed-file scoping, autofix planning, lint runner execution,
@@ -56,12 +62,11 @@ pub fn run_main_lint_workflow(
     args: LintRunWorkflowArgs,
     run_dir: &RunDir,
 ) -> crate::Result<LintRunWorkflowResult> {
-    // Resolve effective glob from --changed-only or --changed-since flags
-    let effective_glob = resolve_effective_glob(component, &args)?;
+    let scoped_runs = resolve_scoped_lint_runs(component, &args)?;
 
     // Early exit if changed-file mode produced no files
-    if let Some(ref glob_val) = effective_glob {
-        if glob_val.is_empty() {
+    if let Some(ref runs) = scoped_runs {
+        if runs.is_empty() {
             return Ok(LintRunWorkflowResult {
                 status: "passed".to_string(),
                 component: args.component_label,
@@ -75,20 +80,25 @@ pub fn run_main_lint_workflow(
     }
 
     // Run lint
-    let output = build_lint_runner(
-        component,
-        args.path_override.clone(),
-        &args.settings,
-        args.summary,
-        args.file.as_deref(),
-        effective_glob.as_deref(),
-        args.errors_only,
-        args.sniffs.as_deref(),
-        args.exclude_sniffs.as_deref(),
-        args.category.as_deref(),
-        run_dir,
-    )?
-    .run()?;
+    let output = if let Some(runs) = scoped_runs {
+        run_scoped_lint_runs(component, &args, run_dir, &runs)?
+    } else {
+        build_lint_runner(
+            component,
+            args.path_override.clone(),
+            &args.settings,
+            args.summary,
+            args.file.as_deref(),
+            args.glob.as_deref(),
+            args.errors_only,
+            args.sniffs.as_deref(),
+            args.exclude_sniffs.as_deref(),
+            args.category.as_deref(),
+            None,
+            run_dir,
+        )?
+        .run()?
+    };
 
     let lint_findings_file = run_dir.step_file(run_dir::files::LINT_FINDINGS);
     let lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
@@ -167,6 +177,56 @@ pub fn run_main_lint_workflow(
     })
 }
 
+fn run_scoped_lint_runs(
+    component: &Component,
+    args: &LintRunWorkflowArgs,
+    run_dir: &RunDir,
+    runs: &[ScopedLintRun],
+) -> crate::Result<extension::RunnerOutput> {
+    let mut success = true;
+    let mut exit_code = 0;
+
+    for (index, run) in runs.iter().enumerate() {
+        let scoped_run_dir;
+        let active_run_dir = if index == 0 {
+            run_dir
+        } else {
+            scoped_run_dir = RunDir::create()?;
+            &scoped_run_dir
+        };
+
+        let output = build_lint_runner(
+            component,
+            args.path_override.clone(),
+            &args.settings,
+            args.summary,
+            args.file.as_deref(),
+            Some(run.glob.as_str()),
+            args.errors_only,
+            args.sniffs.as_deref(),
+            args.exclude_sniffs.as_deref(),
+            args.category.as_deref(),
+            run.step,
+            active_run_dir,
+        )?
+        .run()?;
+
+        if !output.success {
+            success = false;
+            if exit_code == 0 {
+                exit_code = output.exit_code;
+            }
+        }
+    }
+
+    Ok(extension::RunnerOutput {
+        exit_code,
+        success,
+        stdout: String::new(),
+        stderr: String::new(),
+    })
+}
+
 pub fn run_self_check_lint_workflow(
     component: &Component,
     source_path: &Path,
@@ -193,15 +253,15 @@ pub fn run_self_check_lint_workflow(
     })
 }
 
-/// Resolve effective glob from --changed-only or --changed-since flags.
+/// Resolve runner-compatible scopes from --changed-only or --changed-since flags.
 ///
-/// Returns `Some("")` (empty string) when changed-file mode is active but no files
-/// were found — the caller should treat this as an early "passed" exit.
+/// Returns `Some(Vec::new())` when changed-file mode is active but no compatible
+/// files were found — the caller should treat this as an early "passed" exit.
 /// Returns `None` when no changed-file scoping is active (use args.glob directly).
-fn resolve_effective_glob(
+fn resolve_scoped_lint_runs(
     component: &Component,
     args: &LintRunWorkflowArgs,
-) -> crate::Result<Option<String>> {
+) -> crate::Result<Option<Vec<ScopedLintRun>>> {
     if args.changed_only {
         let uncommitted = git::get_uncommitted_changes(&component.local_path)?;
         let mut changed_files: Vec<String> = Vec::new();
@@ -211,70 +271,83 @@ fn resolve_effective_glob(
 
         if changed_files.is_empty() {
             println!("No files in working tree changes");
-            return Ok(Some(String::new()));
+            return Ok(Some(Vec::new()));
         }
 
-        let abs_files: Vec<String> = changed_files
-            .iter()
-            .map(|f| format!("{}/{}", component.local_path, f))
-            .collect();
-
-        if abs_files.len() == 1 {
-            Ok(Some(abs_files[0].clone()))
-        } else {
-            Ok(Some(format!("{{{}}}", abs_files.join(","))))
-        }
+        Ok(Some(build_changed_lint_runs(component, &changed_files)))
     } else if let Some(ref git_ref) = args.changed_since {
         let changed_files = git::get_files_changed_since(&component.local_path, git_ref)?;
 
         if changed_files.is_empty() {
             println!("No files changed since {}", git_ref);
-            return Ok(Some(String::new()));
+            return Ok(Some(Vec::new()));
         }
 
-        let abs_files: Vec<String> = changed_files
-            .iter()
-            .map(|f| format!("{}/{}", component.local_path, f))
-            .collect();
-
-        if abs_files.len() == 1 {
-            Ok(Some(abs_files[0].clone()))
-        } else {
-            Ok(Some(format!("{{{}}}", abs_files.join(","))))
-        }
+        Ok(Some(build_changed_lint_runs(component, &changed_files)))
     } else {
-        Ok(args.glob.clone())
+        Ok(None)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::component::SelfCheckConfig;
+fn build_changed_lint_runs(component: &Component, changed_files: &[String]) -> Vec<ScopedLintRun> {
+    if !component_uses_extension(component, "wordpress") {
+        return vec![ScopedLintRun {
+            glob: glob_for_files(&component.local_path, changed_files),
+            step: None,
+        }];
+    }
 
-    #[test]
-    fn test_run_self_check_lint_workflow() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(dir.path().join("lint.sh"), "printf lint-ok\n")
-            .expect("script should be written");
+    let php_files: Vec<String> = changed_files
+        .iter()
+        .filter(|file| has_extension(file, &["php"]))
+        .cloned()
+        .collect();
+    let js_files: Vec<String> = changed_files
+        .iter()
+        .filter(|file| has_extension(file, &["js", "jsx", "ts", "tsx"]))
+        .cloned()
+        .collect();
 
-        let mut component = Component::new(
-            "fixture".to_string(),
-            dir.path().to_string_lossy().to_string(),
-            "".to_string(),
-            None,
-        );
-        component.self_checks = Some(SelfCheckConfig {
-            lint: vec!["sh lint.sh".to_string()],
-            test: Vec::new(),
+    let mut runs = Vec::new();
+    if !php_files.is_empty() {
+        runs.push(ScopedLintRun {
+            glob: glob_for_files(&component.local_path, &php_files),
+            step: Some("phpcs,phpstan"),
         });
+    }
+    if !js_files.is_empty() {
+        runs.push(ScopedLintRun {
+            glob: glob_for_files(&component.local_path, &js_files),
+            step: Some("eslint"),
+        });
+    }
+    runs
+}
 
-        let result = run_self_check_lint_workflow(&component, dir.path(), "fixture".to_string())
-            .expect("lint self-check should run");
+fn component_uses_extension(component: &Component, extension_id: &str) -> bool {
+    component
+        .extensions
+        .as_ref()
+        .is_some_and(|extensions| extensions.contains_key(extension_id))
+}
 
-        assert_eq!(result.status, "passed");
-        assert_eq!(result.exit_code, 0);
-        assert_eq!(result.component, "fixture");
+fn has_extension(file: &str, extensions: &[&str]) -> bool {
+    Path::new(file)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extensions.contains(&extension))
+}
+
+fn glob_for_files(root: &str, files: &[String]) -> String {
+    let abs_files: Vec<String> = files
+        .iter()
+        .map(|file| format!("{}/{}", root, file))
+        .collect();
+
+    if abs_files.len() == 1 {
+        abs_files[0].clone()
+    } else {
+        format!("{{{}}}", abs_files.join(","))
     }
 }
 
@@ -320,4 +393,131 @@ fn process_baseline(
     }
 
     Ok((baseline_comparison, baseline_exit_override))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::{ScopedExtensionConfig, SelfCheckConfig};
+    use std::collections::HashMap;
+
+    fn wordpress_component(root: &str) -> Component {
+        let mut component = Component::new(
+            "fixture".to_string(),
+            root.to_string(),
+            "".to_string(),
+            None,
+        );
+        component.extensions = Some(HashMap::from([(
+            "wordpress".to_string(),
+            ScopedExtensionConfig::default(),
+        )]));
+        component
+    }
+
+    #[test]
+    fn test_run_self_check_lint_workflow() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("lint.sh"), "printf lint-ok\n")
+            .expect("script should be written");
+
+        let mut component = Component::new(
+            "fixture".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            "".to_string(),
+            None,
+        );
+        component.self_checks = Some(SelfCheckConfig {
+            lint: vec!["sh lint.sh".to_string()],
+            test: Vec::new(),
+        });
+
+        let result = run_self_check_lint_workflow(&component, dir.path(), "fixture".to_string())
+            .expect("lint self-check should run");
+
+        assert_eq!(result.status, "passed");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.component, "fixture");
+    }
+
+    #[test]
+    fn wordpress_changed_php_files_route_to_php_steps_only() {
+        let component = wordpress_component("/repo");
+        let runs = build_changed_lint_runs(
+            &component,
+            &["data-machine.php".to_string(), "inc/Foo.php".to_string()],
+        );
+
+        assert_eq!(
+            runs,
+            vec![ScopedLintRun {
+                glob: "{/repo/data-machine.php,/repo/inc/Foo.php}".to_string(),
+                step: Some("phpcs,phpstan"),
+            }]
+        );
+    }
+
+    #[test]
+    fn wordpress_changed_markdown_files_do_not_route_to_eslint() {
+        let component = wordpress_component("/repo");
+        let runs = build_changed_lint_runs(
+            &component,
+            &[
+                "docs/core-system/agent-bundles.md".to_string(),
+                "README.md".to_string(),
+            ],
+        );
+
+        assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn wordpress_changed_mixed_php_and_js_files_split_by_runner() {
+        let component = wordpress_component("/repo");
+        let runs = build_changed_lint_runs(
+            &component,
+            &[
+                "inc/Foo.php".to_string(),
+                "docs/notes.md".to_string(),
+                "assets/app.js".to_string(),
+                "assets/view.tsx".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            runs,
+            vec![
+                ScopedLintRun {
+                    glob: "/repo/inc/Foo.php".to_string(),
+                    step: Some("phpcs,phpstan"),
+                },
+                ScopedLintRun {
+                    glob: "{/repo/assets/app.js,/repo/assets/view.tsx}".to_string(),
+                    step: Some("eslint"),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn non_wordpress_changed_files_keep_existing_single_runner_scope() {
+        let component = Component::new(
+            "fixture".to_string(),
+            "/repo".to_string(),
+            "".to_string(),
+            None,
+        );
+        let runs = build_changed_lint_runs(
+            &component,
+            &["src/main.rs".to_string(), "README.md".to_string()],
+        );
+
+        assert_eq!(
+            runs,
+            vec![ScopedLintRun {
+                glob: "{/repo/src/main.rs,/repo/README.md}".to_string(),
+                step: None,
+            }]
+        );
+    }
 }
