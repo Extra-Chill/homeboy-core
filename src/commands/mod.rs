@@ -300,6 +300,7 @@ pub mod logs;
 pub mod project;
 pub mod refactor;
 pub mod release;
+pub mod report;
 pub mod review;
 pub mod rig;
 pub mod self_cmd;
@@ -324,6 +325,7 @@ pub fn run_markdown(
         crate::cli_surface::Commands::Docs(args) => docs::run_markdown(args),
         crate::cli_surface::Commands::Changelog(args) => changelog::run_markdown(args),
         crate::cli_surface::Commands::Review(args) => review::run_markdown(args, global),
+        crate::cli_surface::Commands::Report(args) => report::run_markdown(args),
         _ => Err(homeboy::Error::validation_invalid_argument(
             "output_mode",
             "Command does not support markdown output",
@@ -377,6 +379,7 @@ pub fn run_json(
         crate::cli_surface::Commands::Validate(args) => dispatch!(args, global, validate),
         crate::cli_surface::Commands::Changes(args) => dispatch!(args, global, changes),
         crate::cli_surface::Commands::Release(args) => dispatch!(args, global, release),
+        crate::cli_surface::Commands::Report(args) => dispatch!(args, global, report),
         crate::cli_surface::Commands::Review(args) => dispatch!(args, global, review),
         crate::cli_surface::Commands::Audit(args) => dispatch!(args, global, audit),
         crate::cli_surface::Commands::Refactor(args) => dispatch!(args, global, refactor),

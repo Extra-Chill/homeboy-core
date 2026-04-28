@@ -1,0 +1,24 @@
+{
+  "success": false,
+  "data": {
+    "passed": false,
+    "test_counts": {
+      "total": 12,
+      "passed": 10,
+      "failed": 2,
+      "skipped": 0
+    },
+    "failed_tests": [
+      {
+        "name": "test_widget_renders",
+        "detail": "expected widget output",
+        "location": "tests/widget_test.rs:42"
+      },
+      {
+        "name": "test_widget_handles_empty_state",
+        "message": "empty state missing",
+        "file": "tests/widget_test.rs"
+      }
+    ]
+  }
+}

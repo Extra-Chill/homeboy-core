@@ -3,8 +3,8 @@ use clap::{Command, CommandFactory, Parser, Subcommand};
 use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
     deps, extension, file, fleet, git, init, issues, lint, logs, project, refactor, release,
-    review, rig, self_cmd, server, ssh, stack, status, test, transfer, triage, undo, upgrade,
-    validate, version,
+    report, review, rig, self_cmd, server, ssh, stack, status, test, transfer, triage, undo,
+    upgrade, validate, version,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -90,6 +90,8 @@ pub enum Commands {
     Changes(changes::ChangesArgs),
     /// Plan release workflows
     Release(release::ReleaseArgs),
+    /// Render reports from Homeboy structured output artifacts
+    Report(report::ReportArgs),
     /// Run scoped audit + lint + test umbrella against PR-style changes
     Review(review::ReviewArgs),
     /// Audit code conventions and detect architectural drift
