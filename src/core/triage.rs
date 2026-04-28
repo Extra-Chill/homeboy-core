@@ -15,7 +15,7 @@ use crate::component;
 use crate::deploy::release_download::{detect_remote_url, parse_github_url, GitHubRepo};
 use crate::error::{Error, Result};
 use crate::git::gh_probe_succeeds;
-use crate::{fleet, project, rig};
+use crate::{defaults, fleet, project, rig};
 
 #[derive(Debug, Clone)]
 pub enum TriageTarget {
@@ -232,6 +232,7 @@ struct ComponentRef {
     local_path: String,
     remote_url: Option<String>,
     triage_remote_url: Option<String>,
+    priority_labels: Option<Vec<String>>,
     sources: BTreeSet<String>,
     usage: BTreeSet<String>,
 }
@@ -251,20 +252,32 @@ impl ComponentRef {
             local_path,
             remote_url,
             triage_remote_url,
+            priority_labels: None,
             sources,
             usage: BTreeSet::new(),
         }
+    }
+
+    fn with_priority_labels(mut self, priority_labels: Option<Vec<String>>) -> Self {
+        self.priority_labels = priority_labels;
+        self
     }
 }
 
 pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput> {
     let refs = resolve_target_components(&target)?;
+    let global_priority_labels = defaults::load_config().triage.priority_labels;
     let mut components = Vec::new();
     let mut unresolved = Vec::new();
 
     for component_ref in refs {
         match resolve_repo(&component_ref) {
-            Ok(repo) => components.push(fetch_component_report(&component_ref, repo, &options)),
+            Ok(repo) => components.push(fetch_component_report(
+                &component_ref,
+                repo,
+                &options,
+                global_priority_labels.as_ref(),
+            )),
             Err(reason) => unresolved.push(TriageUnresolved {
                 component_id: component_ref.component_id,
                 local_path: component_ref.local_path,
@@ -291,13 +304,15 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
     match target {
         TriageTarget::Component(component_id) => {
             let comp = component::load(component_id)?;
+            let priority_labels = comp.priority_labels.clone();
             Ok(vec![ComponentRef::new(
                 comp.id,
                 comp.local_path,
                 comp.remote_url,
                 comp.triage_remote_url,
                 format!("component:{component_id}"),
-            )])
+            )
+            .with_priority_labels(priority_labels)])
         }
         TriageTarget::Project(project_id) => {
             let proj = project::load(project_id)?;
@@ -321,6 +336,7 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
                         triage_remote_url,
                         format!("project:{project_id}"),
                     )
+                    .with_priority_labels(comp.and_then(|c| c.priority_labels))
                 })
                 .collect())
         }
@@ -367,7 +383,8 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
                 remote_url,
                 triage_remote_url,
                 format!("project:{}", proj.id),
-            );
+            )
+            .with_priority_labels(comp.and_then(|c| c.priority_labels));
             component_ref.usage.insert(proj.id.clone());
             merge_component_ref(&mut refs, component_ref);
         }
@@ -389,6 +406,7 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
 
     for comp in component::list()? {
         let source = format!("component:{}", comp.id);
+        let priority_labels = comp.priority_labels.clone();
         merge_component_ref(
             &mut refs,
             ComponentRef::new(
@@ -397,7 +415,8 @@ fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
                 comp.remote_url,
                 comp.triage_remote_url,
                 source,
-            ),
+            )
+            .with_priority_labels(priority_labels),
         );
     }
 
@@ -418,6 +437,9 @@ fn merge_component_ref(refs: &mut BTreeMap<String, ComponentRef>, component_ref:
     }
     if entry.triage_remote_url.is_none() {
         entry.triage_remote_url = component_ref.triage_remote_url;
+    }
+    if entry.priority_labels.is_none() {
+        entry.priority_labels = component_ref.priority_labels;
     }
 }
 
@@ -445,6 +467,9 @@ fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
                 if entry.triage_remote_url.is_none() {
                     entry.triage_remote_url = component_ref.triage_remote_url;
                 }
+                if entry.priority_labels.is_none() {
+                    entry.priority_labels = component_ref.priority_labels;
+                }
             }
             Err(_) => unresolved.push(component_ref),
         }
@@ -458,6 +483,7 @@ fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
 
 fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
     let fl = fleet::load(fleet_id)?;
+    let fleet_priority_labels = fl.priority_labels.clone();
     let mut refs: BTreeMap<String, ComponentRef> = BTreeMap::new();
 
     for project_id in &fl.project_ids {
@@ -468,6 +494,10 @@ fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
             let comp = component::load(&attachment.id).ok();
             let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
             let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
+            let priority_labels = comp
+                .as_ref()
+                .and_then(|c| c.priority_labels.clone())
+                .or_else(|| fleet_priority_labels.clone());
             let entry = refs.entry(attachment.id.clone()).or_insert_with(|| {
                 ComponentRef::new(
                     attachment.id.clone(),
@@ -482,6 +512,7 @@ fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
                     triage_remote_url.clone(),
                     format!("fleet:{fleet_id}"),
                 )
+                .with_priority_labels(priority_labels.clone())
             });
             entry.sources.insert(format!("project:{project_id}"));
             entry.usage.insert(project_id.clone());
@@ -493,6 +524,9 @@ fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
             }
             if entry.local_path.is_empty() && !attachment.local_path.is_empty() {
                 entry.local_path = attachment.local_path;
+            }
+            if entry.priority_labels.is_none() {
+                entry.priority_labels = priority_labels;
             }
         }
     }
@@ -541,6 +575,7 @@ fn fetch_component_report(
     component_ref: &ComponentRef,
     resolved: ResolvedRepo,
     options: &TriageOptions,
+    global_priority_labels: Option<&Vec<String>>,
 ) -> TriageComponentReport {
     let repo = resolved.repo;
     let repo_output = TriageRepo {
@@ -599,7 +634,8 @@ fn fetch_component_report(
         None
     };
 
-    let actions = build_actions(issues.as_ref(), pull_requests.as_ref());
+    let priority_labels = resolve_priority_labels(component_ref, global_priority_labels);
+    let actions = build_actions(issues.as_ref(), pull_requests.as_ref(), &priority_labels);
 
     TriageComponentReport {
         component_id: component_ref.component_id.clone(),
@@ -942,6 +978,7 @@ fn is_stale(updated_at: Option<&str>, stale_cutoff: Option<DateTime<Utc>>) -> bo
 fn build_actions(
     issues: Option<&TriageIssueBucket>,
     pull_requests: Option<&TriagePrBucket>,
+    priority_labels: &[String],
 ) -> Vec<TriageAction> {
     let mut actions = Vec::new();
     if let Some(prs) = pull_requests {
@@ -965,12 +1002,7 @@ fn build_actions(
         let urgent = issues
             .items
             .iter()
-            .filter(|issue| {
-                issue
-                    .labels
-                    .iter()
-                    .any(|label| matches!(label.as_str(), "security" | "P0" | "P1" | "bug"))
-            })
+            .filter(|issue| issue_has_priority_label(issue, priority_labels))
             .count();
         if urgent > 0 {
             actions.push(TriageAction {
@@ -1001,6 +1033,32 @@ fn build_actions(
         }
     }
     actions
+}
+
+const DEFAULT_PRIORITY_LABELS: &[&str] = &["security", "P0", "P1", "bug"];
+
+fn resolve_priority_labels(
+    component_ref: &ComponentRef,
+    global_priority_labels: Option<&Vec<String>>,
+) -> Vec<String> {
+    component_ref
+        .priority_labels
+        .as_ref()
+        .or(global_priority_labels)
+        .cloned()
+        .unwrap_or_else(|| {
+            DEFAULT_PRIORITY_LABELS
+                .iter()
+                .map(|label| label.to_string())
+                .collect()
+        })
+}
+
+fn issue_has_priority_label(issue: &TriageIssueItem, priority_labels: &[String]) -> bool {
+    issue
+        .labels
+        .iter()
+        .any(|label| priority_labels.iter().any(|priority| priority == label))
 }
 
 const PR_ACTION_PRIORITY: &[&str] = &[
@@ -1430,13 +1488,119 @@ mod tests {
             ],
         };
 
-        let actions = build_actions(None, Some(&prs));
+        let priority_labels = default_priority_labels_vec();
+        let actions = build_actions(None, Some(&prs), &priority_labels);
         assert_eq!(actions.len(), 3);
         assert_eq!(actions[0].kind, "checks_failed");
         assert_eq!(actions[0].severity, "high");
         assert_eq!(actions[0].label, "2 PRs have failed checks");
         assert_eq!(actions[1].kind, "review_required");
         assert_eq!(actions[2].kind, "clean_and_ready");
+    }
+
+    #[test]
+    fn priority_actions_use_default_labels_when_unconfigured() {
+        let component_ref = ComponentRef::new(
+            "data-machine".to_string(),
+            "/tmp/data-machine".to_string(),
+            None,
+            Some("https://github.com/Extra-Chill/data-machine.git".to_string()),
+            "component:data-machine".to_string(),
+        );
+        let labels = resolve_priority_labels(&component_ref, None);
+        let issues = issues_with_labels(vec![vec!["bug"], vec!["polish"]]);
+
+        let actions = build_actions(Some(&issues), None, &labels);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, "priority_issues");
+        assert_eq!(actions[0].label, "1 priority issue");
+    }
+
+    #[test]
+    fn component_priority_labels_override_global_labels() {
+        let component_ref = ComponentRef::new(
+            "data-machine".to_string(),
+            "/tmp/data-machine".to_string(),
+            None,
+            Some("https://github.com/Extra-Chill/data-machine.git".to_string()),
+            "component:data-machine".to_string(),
+        )
+        .with_priority_labels(Some(vec!["urgent".to_string()]));
+        let global = vec!["bug".to_string()];
+        let labels = resolve_priority_labels(&component_ref, Some(&global));
+        let issues = issues_with_labels(vec![vec!["bug"], vec!["urgent"]]);
+
+        let actions = build_actions(Some(&issues), None, &labels);
+
+        assert_eq!(labels, vec!["urgent".to_string()]);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].label, "1 priority issue");
+    }
+
+    #[test]
+    fn global_priority_labels_apply_when_component_and_fleet_unset() {
+        let component_ref = ComponentRef::new(
+            "data-machine".to_string(),
+            "/tmp/data-machine".to_string(),
+            None,
+            Some("https://github.com/Extra-Chill/data-machine.git".to_string()),
+            "component:data-machine".to_string(),
+        );
+        let global = vec!["critical".to_string()];
+        let labels = resolve_priority_labels(&component_ref, Some(&global));
+        let issues = issues_with_labels(vec![vec!["bug"], vec!["critical"]]);
+
+        let actions = build_actions(Some(&issues), None, &labels);
+
+        assert_eq!(labels, vec!["critical".to_string()]);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].label, "1 priority issue");
+    }
+
+    #[test]
+    fn fleet_priority_labels_apply_to_fleet_components() {
+        crate::test_support::with_isolated_home(|home| {
+            let component_dir = home.path().join(".config/homeboy/components");
+            let project_dir = home.path().join(".config/homeboy/projects/site");
+            let fleet_dir = home.path().join(".config/homeboy/fleets");
+            std::fs::create_dir_all(&component_dir).unwrap();
+            std::fs::create_dir_all(&project_dir).unwrap();
+            std::fs::create_dir_all(&fleet_dir).unwrap();
+            std::fs::write(
+                component_dir.join("data-machine.json"),
+                r#"{
+                    "local_path": "/tmp/data-machine",
+                    "remote_url": "https://github.com/Extra-Chill/data-machine.git"
+                }"#,
+            )
+            .unwrap();
+            std::fs::write(
+                project_dir.join("site.json"),
+                r#"{
+                    "components": [
+                        {"id": "data-machine", "local_path": "/tmp/data-machine"}
+                    ]
+                }"#,
+            )
+            .unwrap();
+            std::fs::write(
+                fleet_dir.join("growth.json"),
+                r#"{
+                    "project_ids": ["site"],
+                    "priority_labels": ["release-blocker"]
+                }"#,
+            )
+            .unwrap();
+
+            let refs = resolve_target_components(&TriageTarget::Fleet("growth".into())).unwrap();
+
+            assert_eq!(refs.len(), 1);
+            assert_eq!(
+                refs[0].priority_labels,
+                Some(vec!["release-blocker".to_string()])
+            );
+        });
     }
 
     #[test]
@@ -1536,6 +1700,33 @@ mod tests {
         }
     }
 
+    fn default_priority_labels_vec() -> Vec<String> {
+        DEFAULT_PRIORITY_LABELS
+            .iter()
+            .map(|label| label.to_string())
+            .collect()
+    }
+
+    fn issues_with_labels(labels: Vec<Vec<&str>>) -> TriageIssueBucket {
+        TriageIssueBucket {
+            open: labels.len(),
+            items: labels
+                .into_iter()
+                .enumerate()
+                .map(|(index, labels)| TriageIssueItem {
+                    number: index as u64 + 1,
+                    title: format!("Issue {}", index + 1),
+                    url: format!("https://github.com/o/r/issues/{}", index + 1),
+                    state: "OPEN".to_string(),
+                    labels: labels.into_iter().map(str::to_string).collect(),
+                    assignees: vec![],
+                    updated_at: None,
+                    stale: false,
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn resolve_repo_prefers_triage_remote_without_losing_source_repo() {
         let component_ref = ComponentRef::new(
@@ -1595,6 +1786,7 @@ mod tests {
                 include_prs: false,
                 ..Default::default()
             },
+            None,
         );
 
         assert_eq!(report.repo.owner, "WordPress");

@@ -142,6 +142,9 @@ pub struct Component {
     /// Reporting-only GitHub remote override for `homeboy triage`.
     /// Does not affect git, deploy, or release operations.
     pub triage_remote_url: Option<String>,
+    /// Labels treated as priority issues by `homeboy triage` for this component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority_labels: Option<Vec<String>>,
     pub auto_cleanup: bool,
     pub docs_dir: Option<String>,
     pub docs_dirs: Vec<String>,
@@ -202,6 +205,8 @@ struct RawComponent {
     remote_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     triage_remote_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    priority_labels: Option<Vec<String>>,
     #[serde(default)]
     auto_cleanup: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -256,6 +261,7 @@ impl From<RawComponent> for Component {
             git_deploy: raw.git_deploy,
             remote_url: raw.remote_url,
             triage_remote_url: raw.triage_remote_url,
+            priority_labels: raw.priority_labels,
             auto_cleanup: raw.auto_cleanup,
             docs_dir: raw.docs_dir,
             docs_dirs: raw.docs_dirs,
@@ -289,6 +295,7 @@ impl From<Component> for RawComponent {
             git_deploy: c.git_deploy,
             remote_url: c.remote_url,
             triage_remote_url: c.triage_remote_url,
+            priority_labels: c.priority_labels,
             auto_cleanup: c.auto_cleanup,
             docs_dir: c.docs_dir,
             docs_dirs: c.docs_dirs,
@@ -359,6 +366,7 @@ impl Component {
             git_deploy: None,
             remote_url: None,
             triage_remote_url: None,
+            priority_labels: None,
             auto_cleanup: false,
             docs_dir: None,
             docs_dirs: Vec::new(),
@@ -545,6 +553,22 @@ mod tests {
         // Multiple targets per file with different patterns are now allowed
         // (e.g. plugin header Version: + PHP define() constant in same file)
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn component_priority_labels_serialization_roundtrip() {
+        let mut component = Component::new(
+            "data-machine".to_string(),
+            "/tmp/data-machine".to_string(),
+            "wp-content/plugins/data-machine".to_string(),
+            None,
+        );
+        component.priority_labels = Some(vec!["urgent".to_string()]);
+
+        let json = serde_json::to_string(&component).unwrap();
+        let parsed: Component = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.priority_labels, Some(vec!["urgent".to_string()]));
     }
 
     #[test]

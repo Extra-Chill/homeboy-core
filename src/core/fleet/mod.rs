@@ -33,6 +33,10 @@ pub struct Fleet {
     /// override exists. Resolution order: component (repo) → project → fleet.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub component_overrides: HashMap<String, ProjectComponentOverrides>,
+
+    /// Labels treated as priority issues by `homeboy triage` for this fleet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority_labels: Option<Vec<String>>,
 }
 
 impl Fleet {
@@ -42,6 +46,7 @@ impl Fleet {
             project_ids,
             description: None,
             component_overrides: HashMap::new(),
+            priority_labels: None,
         }
     }
 }
@@ -185,5 +190,19 @@ mod tests {
 
         // component_overrides should be omitted when empty (skip_serializing_if)
         assert!(parsed.get("component_overrides").is_none());
+    }
+
+    #[test]
+    fn fleet_priority_labels_serialization_roundtrip() {
+        let mut fleet = Fleet::new("test-fleet".to_string(), vec![]);
+        fleet.priority_labels = Some(vec!["urgent".to_string(), "release-blocker".to_string()]);
+
+        let json = serde_json::to_string(&fleet).unwrap();
+        let parsed: Fleet = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            parsed.priority_labels,
+            Some(vec!["urgent".to_string(), "release-blocker".to_string()])
+        );
     }
 }
