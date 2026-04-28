@@ -1,5 +1,6 @@
 use clap::{Args, Subcommand};
 use homeboy::triage::{self, TriageOptions, TriageOutput, TriageTarget};
+use std::path::PathBuf;
 
 use super::CmdResult;
 
@@ -27,6 +28,14 @@ pub struct TriageArgs {
     /// Restrict to items carrying this label. Repeatable.
     #[arg(long, global = true, value_name = "LABEL")]
     label: Vec<String>,
+
+    /// Fetch this issue number exactly. Repeatable.
+    #[arg(long, global = true, value_name = "NUMBER")]
+    issue: Vec<u64>,
+
+    /// Read issue numbers from a newline-separated file.
+    #[arg(long, global = true, value_name = "PATH")]
+    issues_from_file: Option<PathBuf>,
 
     /// Restrict PRs to review-required items.
     #[arg(long, global = true)]
@@ -64,7 +73,14 @@ enum TriageCommand {
 }
 
 pub fn run(args: TriageArgs, _global: &super::GlobalArgs) -> CmdResult<TriageOutput> {
-    let include_issues = args.issues || !args.prs;
+    let mut issue_numbers = args.issue;
+    if let Some(path) = args.issues_from_file {
+        issue_numbers.extend(triage::parse_issue_numbers_file(&path)?);
+    }
+    issue_numbers.sort_unstable();
+    issue_numbers.dedup();
+
+    let include_issues = args.issues || !args.prs || !issue_numbers.is_empty();
     let include_prs = args.prs || !args.issues;
     let options = TriageOptions {
         include_issues,
@@ -75,6 +91,7 @@ pub fn run(args: TriageArgs, _global: &super::GlobalArgs) -> CmdResult<TriageOut
         needs_review: args.needs_review,
         failing_checks: args.failing_checks,
         drilldown: args.drilldown,
+        issue_numbers,
         stale_days: match args.stale {
             Some(value) => Some(triage::parse_stale_days(&value)?),
             None => None,
