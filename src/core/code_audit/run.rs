@@ -328,12 +328,6 @@ fn build_comparison_output(
                 summary.introduced_findings,
                 summary.contextual_findings
             );
-        } else if !comparison.resolved_fingerprints.is_empty() {
-            eprintln!(
-                "[audit] No introduced findings; {} contextual finding(s) remain in touched scope and {} finding(s) resolved since baseline",
-                summary.contextual_findings,
-                comparison.resolved_fingerprints.len()
-            );
         } else if summary.contextual_findings > 0 {
             eprintln!(
                 "[audit] No introduced findings; {} contextual finding(s) already known in touched scope",
