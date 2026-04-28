@@ -522,6 +522,44 @@ fn cross_rig_run_passes_selector_to_each_rig() {
 }
 
 #[test]
+fn cross_rig_json_summary_omits_full_results_payload() {
+    with_isolated_home(|home| {
+        write_bench_extension(home);
+        let component_a = tempfile::TempDir::new().expect("component a");
+        let component_b = tempfile::TempDir::new().expect("component b");
+        write_rig(home, "rig-a", "studio", component_a.path());
+        write_rig(home, "rig-b", "studio", component_b.path());
+
+        let mut args = run_args(
+            None,
+            vec!["rig-a".to_string(), "rig-b".to_string()],
+            vec!["rig-slow".to_string()],
+        );
+        args.run.json_summary = true;
+
+        let (output, exit_code) =
+            run(args, &GlobalArgs {}).expect("cross-rig selected bench summary should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            BenchOutput::ComparisonSummary(result) => {
+                assert!(result.summary_only);
+                assert_eq!(result.rigs.len(), 2);
+                assert_eq!(result.rigs[0].rig_id, "rig-a");
+                assert_eq!(result.rigs[1].rig_id, "rig-b");
+
+                let value = serde_json::to_value(result).expect("serialize summary");
+                assert!(value.get("diff").is_none());
+                assert!(value["rigs"][0].get("results").is_none());
+                assert!(value["rigs"][0].get("artifacts").is_none());
+                assert!(value["rigs"][0].get("rig_state").is_none());
+            }
+            _ => panic!("expected comparison summary output"),
+        }
+    });
+}
+
+#[test]
 fn cross_rig_reverse_order_flips_reference_and_execution_order() {
     with_isolated_home(|home| {
         write_bench_extension(home);

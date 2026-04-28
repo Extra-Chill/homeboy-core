@@ -120,6 +120,36 @@ pub struct BenchComparisonOutput {
     pub hints: Option<Vec<String>>,
 }
 
+/// Compact cross-rig comparison envelope for operator-facing summary reads.
+///
+/// This intentionally omits the heavy per-rig `results`, `artifacts`, and
+/// `diff` payloads. The full `BenchComparisonOutput` remains the default
+/// machine-readable shape for artifact consumers.
+#[derive(Serialize)]
+pub struct BenchComparisonSummaryOutput {
+    pub comparison: &'static str,
+    pub summary_only: bool,
+    pub passed: bool,
+    pub component: String,
+    pub exit_code: i32,
+    pub iterations: u64,
+    pub rigs: Vec<BenchComparisonRigSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub summary: Vec<BenchScenarioComparisonSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<BenchComparisonFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct BenchComparisonRigSummary {
+    pub rig_id: String,
+    pub passed: bool,
+    pub status: String,
+    pub exit_code: i32,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct BenchComparisonFailure {
     pub rig_id: String,
@@ -146,6 +176,32 @@ pub struct RigBenchEntry {
     pub rig_state: Option<RigStateSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
+}
+
+impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
+    fn from(output: BenchComparisonOutput) -> Self {
+        BenchComparisonSummaryOutput {
+            comparison: output.comparison,
+            summary_only: true,
+            passed: output.passed,
+            component: output.component,
+            exit_code: output.exit_code,
+            iterations: output.iterations,
+            rigs: output
+                .rigs
+                .into_iter()
+                .map(|rig| BenchComparisonRigSummary {
+                    rig_id: rig.rig_id,
+                    passed: rig.passed,
+                    status: rig.status,
+                    exit_code: rig.exit_code,
+                })
+                .collect(),
+            summary: output.summary,
+            failures: output.failures,
+            hints: output.hints,
+        }
+    }
 }
 
 /// A compact, grep-friendly pointer to an artifact emitted by a bench
