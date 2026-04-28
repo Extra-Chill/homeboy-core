@@ -8,6 +8,7 @@ pub mod context;
 pub mod daemon;
 pub mod db;
 pub mod deploy;
+pub mod deps;
 pub mod engine;
 pub mod error;
 pub(crate) mod expand;

@@ -2,8 +2,9 @@ use clap::{Command, CommandFactory, Parser, Subcommand};
 
 use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
-    extension, file, fleet, git, init, issues, lint, logs, project, refactor, release, review, rig,
-    self_cmd, server, ssh, stack, status, test, transfer, triage, undo, upgrade, validate, version,
+    deps, extension, file, fleet, git, init, issues, lint, logs, project, refactor, release,
+    review, rig, self_cmd, server, ssh, stack, status, test, transfer, triage, undo, upgrade,
+    validate, version,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -40,6 +41,9 @@ pub enum Commands {
     Lint(lint::LintArgs),
     /// Database operations
     Db(db::DbArgs),
+    /// Manage component dependencies
+    #[command(visible_alias = "dependencies")]
+    Deps(deps::DepsArgs),
     /// Remote file operations
     File(file::FileArgs),
     /// Manage fleets (groups of projects)
