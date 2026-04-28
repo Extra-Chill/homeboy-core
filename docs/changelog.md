@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.120.0] - 2026-04-28
+
+### Added
+- emit machine-readable review artifact
+
+### Fixed
+- gate fixability computation
+
 ## [0.119.0] - 2026-04-28
 
 ### Added
