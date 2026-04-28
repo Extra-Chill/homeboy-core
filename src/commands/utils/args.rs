@@ -153,6 +153,8 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--shared-state",
                 "--concurrency",
                 "--rig",
+                "--scenario",
+                "--profile",
                 "--setting",
                 "--path",
                 "--json-summary",
@@ -440,6 +442,45 @@ mod normalize_tests {
             "--iterations",
             "1",
             "--ignore-default-baseline",
+        ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    /// Rig-pinned bench commonly omits the positional component because the
+    /// rig declares `bench.default_component`. Scenario/profile selectors in
+    /// that shape must still bind to BenchRunArgs rather than being captured
+    /// as extension passthrough args.
+    #[test]
+    fn bench_rig_selector_flags_without_component_are_not_separated() {
+        let input = argv(&[
+            "homeboy",
+            "bench",
+            "--rig",
+            "studio-agent-sdk",
+            "--scenario",
+            "studio-agent-runtime",
+            "--iterations",
+            "1",
+            "--runs",
+            "1",
+            "--json-summary",
+            "--ignore-default-baseline",
+        ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn bench_rig_profile_flag_without_component_is_not_separated() {
+        let input = argv(&[
+            "homeboy",
+            "bench",
+            "--rig",
+            "studio-agent-sdk",
+            "--profile",
+            "smoke",
+            "--iterations=1",
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);
