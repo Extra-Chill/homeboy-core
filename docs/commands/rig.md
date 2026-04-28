@@ -143,6 +143,7 @@ State is ephemeral — deleting it means `rig up` will re-probe on next invocati
 ## See also
 
 - [rig-spec.md](./rig-spec.md) — full spec schema reference
+- [rig-matrix-axis-composition.md](../architecture/rig-matrix-axis-composition.md) - design for derived rig variants
 - [stack.md](./stack.md) — combined-fixes branch specs that rigs can reference
 - [fleet.md](./fleet.md) — remote multi-project equivalent (rigs are local, fleets are remote)
 - Extra-Chill/homeboy #1461 — design + phased roadmap
