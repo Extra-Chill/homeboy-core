@@ -32,6 +32,7 @@ pub fn build_lint_runner(
     sniffs: Option<&str>,
     exclude_sniffs: Option<&str>,
     category: Option<&str>,
+    step: Option<&str>,
     run_dir: &RunDir,
 ) -> crate::Result<ExtensionRunner> {
     let resolved = resolve_lint_command(component)?;
@@ -46,6 +47,7 @@ pub fn build_lint_runner(
         .env_opt("HOMEBOY_LINT_GLOB", &glob.map(str::to_string))
         .env_if(errors_only, "HOMEBOY_ERRORS_ONLY", "1")
         .env_opt("HOMEBOY_SNIFFS", &sniffs.map(str::to_string))
+        .env_opt("HOMEBOY_STEP", &step.map(str::to_string))
         .env_opt(
             "HOMEBOY_EXCLUDE_SNIFFS",
             &exclude_sniffs.map(str::to_string),

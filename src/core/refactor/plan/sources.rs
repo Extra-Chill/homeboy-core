@@ -894,6 +894,7 @@ fn run_lint_stage(
             options.sniffs.as_deref(),
             options.exclude_sniffs.as_deref(),
             options.category.as_deref(),
+            None,
             run_dir,
         )
     };

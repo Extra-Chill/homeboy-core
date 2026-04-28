@@ -793,6 +793,7 @@ fn validate_code_quality(component: &Component) -> Result<()> {
             None,
             None,
             None,
+            None,
             &release_run_dir,
         )
         .and_then(|runner| runner.run())
