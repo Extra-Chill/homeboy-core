@@ -351,6 +351,7 @@ mod tests {
                     values: metrics,
                     distributions: BTreeMap::new(),
                 },
+                metric_groups: BTreeMap::new(),
                 gates: Vec::new(),
                 gate_results: Vec::new(),
                 passed: true,

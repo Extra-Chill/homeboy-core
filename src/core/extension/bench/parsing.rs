@@ -27,6 +27,12 @@
 //!           "agent_loop_ms": [1000.0, 1200.0, 1400.0]
 //!         }
 //!       },
+//!       "metric_groups": {
+//!         "phases": {
+//!           "resolve_ai_environment_ms": 120.0,
+//!           "first_assistant_message_ms": 800.0
+//!         }
+//!       },
 //!       "memory": { "peak_bytes": 41943040 },
 //!       "artifacts": {
 //!         "transcript": {
@@ -150,6 +156,14 @@ pub struct BenchScenario {
     pub tags: Vec<String>,
     pub iterations: u64,
     pub metrics: BenchMetrics,
+    /// Optional grouped numeric metrics for secondary metric families.
+    ///
+    /// Flat `metrics` remains the primary backwards-compatible contract.
+    /// Runners can opt into grouped metrics when a scenario naturally emits
+    /// related values (for example phase timings or tool-call stats) without
+    /// flattening those groups in the source JSON.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metric_groups: BTreeMap<String, BTreeMap<String, f64>>,
     /// Scenario-level semantic gates. Unlike metric policies, gates are
     /// correctness checks: any failure invalidates the scenario even if
     /// timing metrics improved.
@@ -284,6 +298,8 @@ pub fn evaluate_gates(results: &mut BenchResults) -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BenchRunSnapshot {
     pub metrics: BenchMetrics,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metric_groups: BTreeMap<String, BTreeMap<String, f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<BenchMemory>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -675,6 +691,75 @@ mod tests {
         assert_eq!(
             parsed.metric_policies["requests_per_second"].direction,
             BenchMetricDirection::HigherIsBetter
+        );
+    }
+
+    #[test]
+    fn parses_and_serializes_grouped_numeric_metrics() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 10,
+            "scenarios": [
+                {
+                    "id": "agent_loop",
+                    "iterations": 10,
+                    "metrics": {
+                        "elapsed_ms": 1400.0
+                    },
+                    "metric_groups": {
+                        "phases": {
+                            "resolve_ai_environment_ms": 120.0,
+                            "first_assistant_message_ms": 800.0
+                        },
+                        "tools": {
+                            "max_tool_duration_ms": 250.0
+                        }
+                    }
+                }
+            ]
+        }"#;
+
+        let parsed = parse_bench_results_str(raw).unwrap();
+        let scenario = &parsed.scenarios[0];
+
+        assert_eq!(scenario.metrics.get("elapsed_ms"), Some(1400.0));
+        assert_eq!(
+            scenario.metric_groups["phases"].get("resolve_ai_environment_ms"),
+            Some(&120.0)
+        );
+        assert_eq!(
+            scenario.metric_groups["phases"].get("first_assistant_message_ms"),
+            Some(&800.0)
+        );
+        assert_eq!(
+            scenario.metric_groups["tools"].get("max_tool_duration_ms"),
+            Some(&250.0)
+        );
+
+        let serialized = serde_json::to_string(&parsed).unwrap();
+        assert!(
+            serialized.contains("\"metric_groups\""),
+            "metric_groups must round-trip in JSON output: {}",
+            serialized
+        );
+        assert!(serialized.contains("\"phases\""), "got: {}", serialized);
+        assert!(
+            serialized.contains("\"first_assistant_message_ms\":800.0"),
+            "got: {}",
+            serialized
+        );
+    }
+
+    #[test]
+    fn flat_only_metrics_omit_metric_groups_on_serialize() {
+        let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
+        assert!(parsed.scenarios[0].metric_groups.is_empty());
+
+        let raw = serde_json::to_string(&parsed.scenarios[0]).unwrap();
+        assert!(
+            !raw.contains("metric_groups"),
+            "flat-only scenarios should keep legacy JSON shape: {}",
+            raw
         );
     }
 

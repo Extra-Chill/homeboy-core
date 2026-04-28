@@ -65,9 +65,16 @@ pub fn aggregate_runs(runs: &[BenchResults]) -> Result<BenchResults> {
 
 fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>) -> BenchScenario {
     let mut metric_values: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    let mut grouped_metric_values: BTreeMap<String, BTreeMap<String, Vec<f64>>> = BTreeMap::new();
     for scenario in &scenarios {
         for (name, value) in &scenario.metrics.values {
             metric_values.entry(name.clone()).or_default().push(*value);
+        }
+        for (group, values) in &scenario.metric_groups {
+            let group_values = grouped_metric_values.entry(group.clone()).or_default();
+            for (name, value) in values {
+                group_values.entry(name.clone()).or_default().push(*value);
+            }
         }
     }
 
@@ -84,12 +91,23 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
         values,
         distributions,
     };
+    template.metric_groups = grouped_metric_values
+        .into_iter()
+        .map(|(group, values)| {
+            let aggregated = values
+                .into_iter()
+                .map(|(name, samples)| (name, percentile(&samples, 50.0)))
+                .collect();
+            (group, aggregated)
+        })
+        .collect();
     template.memory = None;
     template.runs = Some(
         scenarios
             .iter()
             .map(|scenario| BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
+                metric_groups: scenario.metric_groups.clone(),
                 memory: scenario.memory.clone(),
                 artifacts: scenario.artifacts.clone(),
             })
