@@ -446,6 +446,7 @@ pub fn run_self_check_test_workflow(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::SelfCheckConfig;
     use crate::extension::test::TestFailure;
 
     #[test]
@@ -509,5 +510,32 @@ mod tests {
             Some("AssertionFailed: expected true")
         );
         assert_eq!(failed_tests[0].location.as_deref(), Some("src/lib.rs:42"));
+    }
+
+    #[test]
+    fn test_run_self_check_test_workflow() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("test.sh"), "printf test-ok\n")
+            .expect("script should be written");
+
+        let mut component = Component::new(
+            "fixture".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            "".to_string(),
+            None,
+        );
+        component.self_checks = Some(SelfCheckConfig {
+            lint: Vec::new(),
+            test: vec!["sh test.sh".to_string()],
+        });
+
+        let result =
+            run_self_check_test_workflow(&component, dir.path(), "fixture".to_string(), true)
+                .expect("test self-check should run");
+
+        assert_eq!(result.status, "passed");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.component, "fixture");
+        assert!(result.summary.is_some());
     }
 }
