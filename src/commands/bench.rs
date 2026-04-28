@@ -6,8 +6,9 @@ use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::{
-    aggregate_comparison, BenchCommandOutput, BenchComparisonOutput, BenchListWorkflowArgs,
-    BenchListWorkflowResult, RigBenchEntry, DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+    aggregate_comparison, BenchCommandOutput, BenchComparisonOutput, BenchComparisonSummaryOutput,
+    BenchListWorkflowArgs, BenchListWorkflowResult, RigBenchEntry,
+    DEFAULT_REGRESSION_THRESHOLD_PERCENT,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, RigSpec};
@@ -248,6 +249,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
 pub enum BenchOutput {
     Single(BenchCommandOutput),
     Comparison(BenchComparisonOutput),
+    ComparisonSummary(BenchComparisonSummaryOutput),
     List(BenchListWorkflowResult),
 }
 
@@ -346,6 +348,9 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
         .unwrap_or_else(|| "<unknown>".to_string());
 
     let (output, exit) = aggregate_comparison(component, run_args.iterations, entries);
+    if run_args.json_summary {
+        return Ok((BenchOutput::ComparisonSummary(output.into()), exit));
+    }
     Ok((BenchOutput::Comparison(output), exit))
 }
 
