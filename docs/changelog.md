@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.118.0] - 2026-04-28
+
+### Added
+- add warmup control
+- include run metadata in results
+
+### Fixed
+- propagate scenario and run options to rig workloads
+
 ## [0.117.0] - 2026-04-27
 
 ### Added
