@@ -442,7 +442,13 @@ pub fn run_main_bench_workflow(
         };
 
     if let Some(results) = parsed.as_mut() {
-        stamp_run_metadata(results, &execution_context, component, &args, &started_at);
+        stamp_run_metadata(
+            results,
+            &execution_context,
+            component,
+            &execution_args,
+            &started_at,
+        );
     }
 
     let gate_failures = parsed
