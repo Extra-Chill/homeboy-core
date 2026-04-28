@@ -9,9 +9,10 @@ use crate::extension::test::{
     parse_test_results_text_with_spec, CoverageOutput, FailedTest, TestScopeOutput,
     TestSummaryOutput,
 };
+use crate::extension::{self, ExtensionCapability};
 use crate::refactor::AppliedRefactor;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct TestRunWorkflowArgs {
@@ -393,6 +394,51 @@ pub fn run_main_test_workflow(
         hints,
         test_scope: changed_scope,
         summary,
+        raw_output,
+    })
+}
+
+pub fn run_self_check_test_workflow(
+    component: &Component,
+    source_path: &Path,
+    component_label: String,
+    json_summary: bool,
+) -> crate::Result<TestRunWorkflowResult> {
+    let output =
+        extension::self_check::run_self_checks(component, ExtensionCapability::Test, source_path)?;
+    let status = if output.success { "passed" } else { "failed" }.to_string();
+    let raw_output = (!output.success).then(|| {
+        let (stdout_tail, stdout_truncated) = tail_lines(&output.stdout, RAW_OUTPUT_TAIL_LINES);
+        let (stderr_tail, stderr_truncated) = tail_lines(&output.stderr, RAW_OUTPUT_TAIL_LINES);
+        RawTestOutput {
+            stdout_tail,
+            stderr_tail,
+            truncated: stdout_truncated || stderr_truncated,
+        }
+    });
+
+    Ok(TestRunWorkflowResult {
+        status,
+        component: component_label,
+        exit_code: output.exit_code,
+        test_counts: None,
+        failed_tests: None,
+        coverage: None,
+        baseline_comparison: None,
+        analysis: None,
+        autofix: None,
+        hints: (!output.success).then(|| {
+            vec![format!(
+                "Fix the failing self-check command declared in {}'s homeboy.json self_checks.test",
+                component.id
+            )]
+        }),
+        test_scope: None,
+        summary: if json_summary {
+            Some(build_test_summary(None, None, output.exit_code))
+        } else {
+            None
+        },
         raw_output,
     })
 }
