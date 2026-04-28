@@ -45,6 +45,7 @@ Internal system architecture and internals:
 - [SSH key management](architecture/ssh-key-management.md) - SSH key handling
 - [Release pipeline system](architecture/release-pipeline.md) - Local release orchestration
 - [Execution context](architecture/execution-context.md) - Runtime context for extensions
+- [Rig matrix axis composition](architecture/rig-matrix-axis-composition.md) - Design for derived rig variants
 - [Embedded docs](architecture/embedded-docs-topic-resolution.md) - Documentation system internals
 
 ## Developer Guide
