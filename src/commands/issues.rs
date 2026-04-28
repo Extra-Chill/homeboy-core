@@ -13,8 +13,9 @@ use std::path::PathBuf;
 
 use homeboy::code_audit::FindingConfidence;
 use homeboy::issues::{
-    apply_plan, build_findings_from_native_output, reconcile, GithubTracker, IssueRenderContext,
-    ReconcileConfig, ReconcileFindingsInput, ReconcilePlan, ReconcileResult, Tracker,
+    apply_plan, build_findings_from_native_output, reconcile_scoped, GithubTracker,
+    IssueRenderContext, ReconcileConfig, ReconcileFindingsInput, ReconcilePlan, ReconcileResult,
+    Tracker,
 };
 
 use super::parse_key_val;
@@ -208,7 +209,7 @@ pub fn run(args: IssuesArgs, _global: &super::GlobalArgs) -> CmdResult<IssuesCom
             let existing = tracker_impl.list_issues(&command_label, list_limit)?;
 
             // Pure decision.
-            let plan = reconcile(&groups, &existing, &config);
+            let plan = reconcile_scoped(&groups, &existing, &config, &command_label, &component_id);
             let plan_lines = render_plan_lines(&plan);
             let plan_summary = summarize_plan(&plan);
 
