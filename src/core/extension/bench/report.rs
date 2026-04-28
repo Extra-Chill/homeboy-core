@@ -340,17 +340,20 @@ impl BenchComparisonDiff {
         for ref_scenario in &ref_results.scenarios {
             let mut metric_table: BTreeMap<String, BTreeMap<String, MetricDelta>> = BTreeMap::new();
 
-            for (metric_name, ref_value) in &ref_scenario.metrics.values {
+            for (metric_name, ref_value) in comparison_metrics(ref_scenario) {
                 let mut per_rig: BTreeMap<String, MetricDelta> = BTreeMap::new();
                 for (other_id, other_results) in others {
                     let Some(other_scenario) = find_scenario(other_results, &ref_scenario.id)
                     else {
                         continue;
                     };
-                    let Some(&current) = other_scenario.metrics.values.get(metric_name) else {
+                    let Some(current) = comparison_metrics(other_scenario)
+                        .get(&metric_name)
+                        .copied()
+                    else {
                         continue;
                     };
-                    let delta_percent = if *ref_value == 0.0 {
+                    let delta_percent = if ref_value == 0.0 {
                         // Avoid divide-by-zero. Treat 0→nonzero as
                         // unbounded (None would be more honest, but the
                         // contract is f64; emit a deterministic +∞ /
@@ -368,7 +371,7 @@ impl BenchComparisonDiff {
                     per_rig.insert(
                         (*other_id).to_string(),
                         MetricDelta {
-                            reference: *ref_value,
+                            reference: ref_value,
                             current,
                             delta_percent,
                         },
@@ -564,6 +567,16 @@ fn find_scenario<'a>(results: &'a BenchResults, id: &str) -> Option<&'a BenchSce
     results.scenarios.iter().find(|s| s.id == id)
 }
 
+fn comparison_metrics(scenario: &BenchScenario) -> BTreeMap<String, f64> {
+    let mut metrics = scenario.metrics.values.clone();
+    for (group, values) in &scenario.metric_groups {
+        for (name, value) in values {
+            metrics.insert(format!("{}.{}", group, name), *value);
+        }
+    }
+    metrics
+}
+
 /// Aggregate N per-rig single-run results into a comparison envelope.
 ///
 /// Caller is responsible for the order: `entries[0]` is treated as the
@@ -687,6 +700,7 @@ mod tests {
                 values,
                 distributions: BTreeMap::new(),
             },
+            metric_groups: BTreeMap::new(),
             gates: Vec::new(),
             gate_results: Vec::new(),
             passed: true,
@@ -695,6 +709,27 @@ mod tests {
             runs: None,
             runs_summary: None,
         }
+    }
+
+    fn scenario_with_metric_groups(
+        id: &str,
+        metrics: &[(&str, f64)],
+        metric_groups: &[(&str, &[(&str, f64)])],
+    ) -> BenchScenario {
+        let mut scenario = scenario(id, metrics);
+        scenario.metric_groups = metric_groups
+            .iter()
+            .map(|(group, values)| {
+                (
+                    (*group).to_string(),
+                    values
+                        .iter()
+                        .map(|(name, value)| ((*name).to_string(), *value))
+                        .collect(),
+                )
+            })
+            .collect();
+        scenario
     }
 
     fn scenario_with_runs_summary(
@@ -886,6 +921,7 @@ mod tests {
         scenario.runs = Some(vec![
             BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
+                metric_groups: BTreeMap::new(),
                 memory: None,
                 artifacts: [(
                     "raw_result".to_string(),
@@ -895,6 +931,7 @@ mod tests {
             },
             BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
+                metric_groups: BTreeMap::new(),
                 memory: None,
                 artifacts: [(
                     "raw_result".to_string(),
@@ -925,6 +962,7 @@ mod tests {
         let mut ref_scenario = scenario("agent-runtime", &[("p95_ms", 100.0)]);
         ref_scenario.runs = Some(vec![BenchRunSnapshot {
             metrics: ref_scenario.metrics.clone(),
+            metric_groups: BTreeMap::new(),
             memory: None,
             artifacts: [(
                 "raw_result".to_string(),
@@ -935,6 +973,7 @@ mod tests {
         let mut candidate_scenario = scenario("agent-runtime", &[("p95_ms", 80.0)]);
         candidate_scenario.runs = Some(vec![BenchRunSnapshot {
             metrics: candidate_scenario.metrics.clone(),
+            metric_groups: BTreeMap::new(),
             memory: None,
             artifacts: [(
                 "raw_result".to_string(),
@@ -975,6 +1014,58 @@ mod tests {
         assert_eq!(d.reference, 30000.0);
         assert_eq!(d.current, 18000.0);
         assert!((d.delta_percent - -40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn diff_flattens_grouped_metrics_for_cross_rig_comparison() {
+        let ref_r = results(vec![scenario_with_metric_groups(
+            "agent",
+            &[("elapsed_ms", 1000.0)],
+            &[
+                (
+                    "phases",
+                    &[
+                        ("resolve_ai_environment_ms", 120.0),
+                        ("first_assistant_message_ms", 800.0),
+                    ],
+                ),
+                ("tools", &[("max_tool_duration_ms", 250.0)]),
+            ],
+        )]);
+        let other = results(vec![scenario_with_metric_groups(
+            "agent",
+            &[("elapsed_ms", 900.0)],
+            &[
+                (
+                    "phases",
+                    &[
+                        ("resolve_ai_environment_ms", 100.0),
+                        ("first_assistant_message_ms", 760.0),
+                    ],
+                ),
+                ("tools", &[("max_tool_duration_ms", 200.0)]),
+            ],
+        )]);
+
+        let diff = BenchComparisonDiff::build(("ref", &ref_r), &[("next", &other)]);
+        let metrics = diff.by_scenario.get("agent").expect("scenario diff");
+
+        assert!(metrics.contains_key("elapsed_ms"));
+        let phase_delta = metrics
+            .get("phases.resolve_ai_environment_ms")
+            .and_then(|m| m.get("next"))
+            .expect("grouped phase metric diff");
+        assert_eq!(phase_delta.reference, 120.0);
+        assert_eq!(phase_delta.current, 100.0);
+        assert!((phase_delta.delta_percent - -16.666666666666664).abs() < 1e-9);
+
+        let tool_delta = metrics
+            .get("tools.max_tool_duration_ms")
+            .and_then(|m| m.get("next"))
+            .expect("grouped tool metric diff");
+        assert_eq!(tool_delta.reference, 250.0);
+        assert_eq!(tool_delta.current, 200.0);
+        assert_eq!(tool_delta.delta_percent, -20.0);
     }
 
     #[test]

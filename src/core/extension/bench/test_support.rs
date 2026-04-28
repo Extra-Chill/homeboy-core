@@ -23,6 +23,7 @@ pub(crate) fn scenario_with_iterations(
             values,
             distributions: BTreeMap::new(),
         },
+        metric_groups: BTreeMap::new(),
         gates: Vec::new(),
         gate_results: Vec::new(),
         passed: true,

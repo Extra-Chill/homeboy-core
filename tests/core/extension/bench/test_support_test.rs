@@ -8,6 +8,7 @@ fn scenario_with_iterations_builds_minimal_bench_scenario() {
     assert_eq!(scenario.iterations, 7);
     assert_eq!(scenario.metrics.get("p95_ms"), Some(12.0));
     assert!(scenario.metrics.distributions.is_empty());
+    assert!(scenario.metric_groups.is_empty());
     assert!(scenario.artifacts.is_empty());
     assert!(scenario.runs.is_none());
     assert!(scenario.runs_summary.is_none());
