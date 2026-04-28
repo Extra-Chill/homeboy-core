@@ -400,6 +400,7 @@ mod tests {
     use super::*;
     use crate::component::{ScopedExtensionConfig, SelfCheckConfig};
     use std::collections::HashMap;
+    use std::process::Command;
 
     fn wordpress_component(root: &str) -> Component {
         let mut component = Component::new(
@@ -438,6 +439,48 @@ mod tests {
         assert_eq!(result.status, "passed");
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.component, "fixture");
+    }
+
+    #[test]
+    fn test_run_main_lint_workflow() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        Command::new("git")
+            .arg("init")
+            .current_dir(dir.path())
+            .output()
+            .expect("git init should run");
+
+        let component = Component::new(
+            "fixture".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            "".to_string(),
+            None,
+        );
+        let args = LintRunWorkflowArgs {
+            component_label: "fixture".to_string(),
+            component_id: "fixture".to_string(),
+            path_override: None,
+            settings: Vec::new(),
+            summary: false,
+            file: None,
+            glob: None,
+            changed_only: true,
+            changed_since: None,
+            errors_only: false,
+            sniffs: None,
+            exclude_sniffs: None,
+            category: None,
+            baseline_flags: BaselineFlags::default(),
+        };
+        let run_dir = RunDir::create().expect("run dir should be created");
+
+        let result = run_main_lint_workflow(&component, &dir.path().to_path_buf(), args, &run_dir)
+            .expect("empty changed-only lint should exit cleanly");
+
+        assert_eq!(result.status, "passed");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.component, "fixture");
+        assert!(result.lint_findings.is_none());
     }
 
     #[test]
