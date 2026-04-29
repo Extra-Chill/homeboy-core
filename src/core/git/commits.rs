@@ -1,4 +1,5 @@
 use regex::Regex;
+use semver::Version;
 use serde::Serialize;
 
 use crate::engine::command;
@@ -271,7 +272,7 @@ pub(crate) fn extract_version_from_tag(tag: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// Get the latest git tag in the repository.
+/// Get the latest exact release tag in the repository.
 /// Returns None if no tags exist.
 ///
 /// When `tag_prefix` is provided (e.g. "wordpress"), only matches tags starting
@@ -284,29 +285,59 @@ pub fn get_latest_tag(path: &str) -> Result<Option<String>> {
 /// Get the latest git tag, optionally filtered by a component prefix.
 ///
 /// With prefix "wordpress", matches tags like `wordpress-v1.0.0`.
-/// Without prefix, matches any tag (backward compatible).
+/// Without prefix, matches exact semver tags like `v1.0.0` or `1.0.0`.
 pub fn get_latest_tag_with_prefix(path: &str, tag_prefix: Option<&str>) -> Result<Option<String>> {
-    match tag_prefix {
-        Some(prefix) => {
-            let match_pattern = format!("{}-v*", prefix);
-            Ok(command::run_in_optional(
-                path,
-                "git",
-                &[
-                    "describe",
-                    "--tags",
-                    "--abbrev=0",
-                    "--match",
-                    &match_pattern,
-                ],
-            ))
-        }
-        None => Ok(command::run_in_optional(
-            path,
-            "git",
-            &["describe", "--tags", "--abbrev=0"],
-        )),
+    let Some(tags) = command::run_in_optional(
+        path,
+        "git",
+        &["tag", "--merged", "HEAD", "--sort=-v:refname", "--list"],
+    ) else {
+        return Ok(None);
+    };
+
+    Ok(tags
+        .lines()
+        .filter_map(|tag| {
+            let tag = tag.trim();
+            exact_release_version_from_tag(tag, tag_prefix)
+                .map(|version| (tag.to_string(), version))
+        })
+        .max_by(|(_, a), (_, b)| a.cmp(b))
+        .map(|(tag, _)| tag))
+}
+
+fn exact_release_version_from_tag(tag: &str, tag_prefix: Option<&str>) -> Option<Version> {
+    let tag = match tag_prefix {
+        Some(prefix) => tag.strip_prefix(&format!("{}-", prefix))?,
+        None => tag,
+    };
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+
+    if !is_exact_semver_core(version) {
+        return None;
     }
+
+    Version::parse(version).ok()
+}
+
+fn is_exact_semver_core(version: &str) -> bool {
+    let mut parts = version.split('.');
+    let Some(major) = parts.next() else {
+        return false;
+    };
+    let Some(minor) = parts.next() else {
+        return false;
+    };
+    let Some(patch) = parts.next() else {
+        return false;
+    };
+    if parts.next().is_some() {
+        return false;
+    }
+
+    [major, minor, patch]
+        .iter()
+        .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Find the most recent commit containing a version number in its message.
@@ -571,6 +602,45 @@ pub fn strip_conventional_prefix(subject: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn git(path: &str, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .expect("git command should run");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_repo() -> (tempfile::TempDir, String) {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().to_string_lossy().to_string();
+        git(&path, &["init", "-q", "-b", "main"]);
+        git(&path, &["config", "user.email", "test@test.com"]);
+        git(&path, &["config", "user.name", "Test"]);
+        commit_file(&dir, &path, "README.md", "initial\n", "chore: initial");
+
+        (dir, path)
+    }
+
+    fn commit_file(
+        dir: &tempfile::TempDir,
+        path: &str,
+        file_name: &str,
+        contents: &str,
+        message: &str,
+    ) {
+        fs::write(dir.path().join(file_name), contents).expect("write fixture file");
+        git(path, &["add", "."]);
+        git(path, &["commit", "-q", "-m", message]);
+    }
 
     #[test]
     fn parse_conventional_commit_feat() {
@@ -941,6 +1011,49 @@ mod tests {
         assert_eq!(
             recommended_bump_from_commits(&commits),
             Some(SemverBump::Patch)
+        );
+    }
+
+    #[test]
+    fn latest_tag_ignores_channel_tag_at_head() {
+        let (dir, path) = init_repo();
+        git(&path, &["tag", "v2.1.1"]);
+        commit_file(&dir, &path, "one.txt", "one\n", "fix: one");
+        commit_file(&dir, &path, "two.txt", "two\n", "fix: two");
+        commit_file(&dir, &path, "three.txt", "three\n", "fix: three");
+        git(&path, &["tag", "v2"]);
+
+        assert_eq!(get_latest_tag(&path).unwrap(), Some("v2.1.1".to_string()));
+    }
+
+    #[test]
+    fn latest_tag_requires_exact_semver_tag() {
+        let (dir, path) = init_repo();
+        git(&path, &["tag", "v2.1.1"]);
+        commit_file(&dir, &path, "fix.txt", "fix\n", "fix: one");
+        git(&path, &["tag", "v2.1.1-1-gabc1234"]);
+
+        assert_eq!(get_latest_tag(&path).unwrap(), Some("v2.1.1".to_string()));
+        assert!(exact_release_version_from_tag("v2.1.1-1-gabc1234", None).is_none());
+    }
+
+    #[test]
+    fn latest_tag_with_prefix_ignores_other_prefixes_and_channel_tags() {
+        let (dir, path) = init_repo();
+        git(&path, &["tag", "wordpress-v1.4.0"]);
+        git(&path, &["tag", "api-v9.9.9"]);
+        commit_file(
+            &dir,
+            &path,
+            "component.txt",
+            "component\n",
+            "fix: component",
+        );
+        git(&path, &["tag", "wordpress-v2"]);
+
+        assert_eq!(
+            get_latest_tag_with_prefix(&path, Some("wordpress")).unwrap(),
+            Some("wordpress-v1.4.0".to_string())
         );
     }
 
