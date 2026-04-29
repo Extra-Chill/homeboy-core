@@ -45,7 +45,7 @@ fn trace_json(status: &str, summary: &str) -> String {
                 "component": "studio",
                 "exit_code": {exit_code},
                 "artifacts": [
-                    {{"label":"main log","path":"artifacts/main.log"}},
+                    {{"label":"main log","path":"artifacts/main.log","content":"raw log body that should never appear"}},
                     {{"label":"process tree","path":"artifacts/process-tree.txt"}}
                 ],
                 "results": {{
@@ -56,7 +56,7 @@ fn trace_json(status: &str, summary: &str) -> String {
                     "timeline": [],
                     "assertions": [],
                     "artifacts": [
-                        {{"label":"main log","path":"artifacts/main.log"}},
+                        {{"label":"main log","path":"artifacts/main.log","content":"raw log body that should never appear"}},
                         {{"label":"process tree","path":"artifacts/process-tree.txt"}}
                     ]
                 }}
@@ -243,12 +243,6 @@ fn renders_trace_fail_status_without_inlining_artifact_content() {
         &dir,
         "trace.json",
         &trace_json("fail", "Window reopened after close."),
-    );
-    fs::create_dir_all(dir.join("artifacts")).expect("artifact dir should exist");
-    write_file(
-        &dir,
-        "artifacts/main.log",
-        "raw log body that should never appear",
     );
 
     let markdown = render(&dir, r#"{"trace":"fail"}"#, false, false);

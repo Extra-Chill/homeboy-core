@@ -219,20 +219,16 @@ fn envelope_parts(value: Option<Value>) -> (Map<String, Value>, Map<String, Valu
     };
 
     if root.contains_key("success") || root.contains_key("data") || root.contains_key("error") {
-        let data = root
-            .remove("data")
-            .and_then(|v| match v {
-                Value::Object(map) => Some(map),
-                _ => None,
-            })
-            .unwrap_or_default();
-        let error = root
-            .remove("error")
-            .and_then(|v| match v {
-                Value::Object(map) => Some(map),
-                _ => None,
-            })
-            .unwrap_or_default();
+        let take_object = |root: &mut Map<String, Value>, key: &str| {
+            root.remove(key)
+                .and_then(|v| match v {
+                    Value::Object(map) => Some(map),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+        let data = take_object(&mut root, "data");
+        let error = take_object(&mut root, "error");
         return (data, error);
     }
 
