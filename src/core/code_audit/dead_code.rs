@@ -43,6 +43,35 @@ fn build_caller_map(
     map
 }
 
+/// Find PHP classes registered as WP-CLI commands.
+///
+/// WP-CLI dispatches public methods on registered command classes by runtime
+/// reflection, so those methods have no normal PHP call sites.
+fn wp_cli_command_classes<'a>(
+    fingerprints: impl Iterator<Item = &'a FileFingerprint>,
+) -> HashSet<String> {
+    static WP_CLI_COMMAND_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"WP_CLI::add_command\s*\([^,]+,\s*([A-Za-z_\\][A-Za-z0-9_\\]*)::class")
+            .unwrap()
+    });
+
+    let mut classes = HashSet::new();
+    for fp in fingerprints {
+        if !matches!(fp.language, super::conventions::Language::Php) {
+            continue;
+        }
+
+        for caps in WP_CLI_COMMAND_RE.captures_iter(&fp.content) {
+            let class_name = caps[1].trim_start_matches('\\');
+            classes.insert(class_name.to_string());
+            if let Some(short_name) = class_name.split('\\').next_back() {
+                classes.insert(short_name.to_string());
+            }
+        }
+    }
+    classes
+}
+
 /// Analyze fingerprints for dead code patterns.
 ///
 /// Performs four checks on `owned` fingerprints:
@@ -77,6 +106,9 @@ pub(crate) fn analyze_dead_code_with_config(
 
     // Build cross-file caller map for parameter analysis (#824).
     let caller_map = build_caller_map(owned, reference);
+
+    let wp_cli_command_classes =
+        wp_cli_command_classes(owned.iter().chain(reference.iter()).copied());
 
     // Only check owned fingerprints for dead code — reference fingerprints
     // just provide call/import data for the cross-reference set.
@@ -138,6 +170,10 @@ pub(crate) fn analyze_dead_code_with_config(
                 // from other source files.
                 // (homeboy#1149 — runtime bootstrap files)
                 if fp.hook_callbacks.contains(export) {
+                    continue;
+                }
+
+                if is_wp_cli_command_method(fp, &wp_cli_command_classes) {
                     continue;
                 }
 
@@ -244,6 +280,17 @@ pub(crate) fn analyze_dead_code_with_config(
     // Sort by file path for deterministic output
     findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.description.cmp(&b.description)));
     findings
+}
+
+fn is_wp_cli_command_method(fp: &FileFingerprint, command_classes: &HashSet<String>) -> bool {
+    if !matches!(fp.language, super::conventions::Language::Php) {
+        return false;
+    }
+
+    fp.type_name
+        .iter()
+        .chain(fp.type_names.iter())
+        .any(|type_name| command_classes.contains(type_name))
 }
 
 /// Check if a function name is a framework entry point that's expected to be
@@ -900,6 +947,98 @@ class EmailCommand extends RuntimeCommand {
         assert!(
             unreferenced.is_empty(),
             "configured runtime-dispatched methods are invoked by the runtime"
+        );
+    }
+
+    #[test]
+    fn wp_cli_registered_command_methods_are_entry_points() {
+        let mut command_fp = make_fingerprint(
+            "inc/Cli/Commands/EmailCommand.php",
+            vec!["test_connection", "list_messages"],
+            vec!["test_connection", "list_messages"],
+            vec![],
+            vec![],
+        );
+        command_fp.language = Language::Php;
+        command_fp.type_name = Some("EmailCommand".to_string());
+        command_fp.type_names = vec!["EmailCommand".to_string()];
+        command_fp.content = r#"<?php
+namespace DataMachine\Cli\Commands;
+
+class EmailCommand extends BaseCommand {
+    /**
+     * Test the IMAP connection.
+     *
+     * @subcommand test-connection
+     */
+    public function test_connection( array $args, array $assoc_args ): void {}
+
+    /**
+     * List messages.
+     */
+    public function list_messages( array $args, array $assoc_args ): void {}
+}
+"#
+        .to_string();
+
+        let mut bootstrap_fp =
+            make_fingerprint("inc/Cli/Bootstrap.php", vec![], vec![], vec![], vec![]);
+        bootstrap_fp.language = Language::Php;
+        bootstrap_fp.content = r#"<?php
+namespace DataMachine\Cli;
+
+use DataMachine\Cli\Commands;
+
+WP_CLI::add_command( 'datamachine email', Commands\EmailCommand::class );
+"#
+        .to_string();
+
+        let findings = analyze_dead_code(&[&command_fp, &bootstrap_fp], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "WP-CLI command methods are invoked by WP-CLI reflection, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|f| &f.description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn wp_cli_docblock_without_registration_still_flags_unreferenced_export() {
+        let mut fp = make_fingerprint(
+            "inc/Cli/Commands/EmailCommand.php",
+            vec!["test_connection"],
+            vec!["test_connection"],
+            vec![],
+            vec![],
+        );
+        fp.language = Language::Php;
+        fp.type_name = Some("EmailCommand".to_string());
+        fp.type_names = vec!["EmailCommand".to_string()];
+        fp.content = r#"<?php
+class EmailCommand {
+    /**
+     * @subcommand test-connection
+     */
+    public function test_connection( array $args, array $assoc_args ): void {}
+}
+"#
+        .to_string();
+
+        let findings = analyze_dead_code(&[&fp], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert_eq!(
+            unreferenced.len(),
+            1,
+            "Docblock markers alone should not suppress unreferenced_export"
         );
     }
 }
