@@ -30,13 +30,12 @@ pub use runtime_helper::RUNNER_STEPS_ENV;
 pub use manifest::{
     ActionConfig, ActionType, AuditCapability, AutofixVerifyConfig, BenchConfig, BuildConfig,
     CliAutoFlag, CliAutoFlagCondition, CliConfig, CliHelpConfig, ComponentEnvConfig,
-    DatabaseCliConfig, DatabaseConfig, DeployCapability, DeployOverride, DeployOwnerHint,
-    DeployVerification, DiscoveryConfig, DocTarget, ExecutableCapability, ExtensionManifest,
-    FeatureContextRule, FileContainsCondition, HttpMethod, InputConfig, LintConfig, OutputConfig,
-    OutputSchema, PlatformCapability, ProvidesConfig, RemotePathInferenceRule, RequirementsConfig,
-    RuntimeConfig, RuntimeRequirementsConfig, ScriptsConfig, SelectOption, SettingConfig,
-    SinceTagConfig, TestConfig, TestDriftConfig, TestMappingConfig, TraceConfig,
-    VersionPatternConfig,
+    DatabaseCliConfig, DatabaseConfig, DeployCapability, DeployOverride, DeployVerification,
+    DiscoveryConfig, DocTarget, ExecutableCapability, ExtensionManifest, FeatureContextRule,
+    FileContainsCondition, HttpMethod, InputConfig, LintConfig, OutputConfig, OutputSchema,
+    PlatformCapability, ProvidesConfig, RemotePathInferenceRule, RequirementsConfig, RuntimeConfig,
+    RuntimeRequirementsConfig, ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig,
+    TestConfig, TestDriftConfig, TestMappingConfig, TraceConfig, VersionPatternConfig,
 };
 
 // Re-export version types

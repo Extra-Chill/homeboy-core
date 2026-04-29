@@ -76,16 +76,17 @@ pub(super) fn execute_component_deploy(
     };
 
     if component.remote_owner.is_none() {
-        if let Some(owner_hint) = component.deploy_owner_hint_for_path(&effective_remote_path) {
+        if let Some(suggested_owner) = component.deploy_owner_hint_for_path(&effective_remote_path)
+        {
             log_status!(
                 "deploy",
                 "⚠ Component '{}' deploys to a path that may need remote_owner='{}'. \
              Files may deploy with the SSH user's ownership. \
              Fix: homeboy component set {} --json '{{\"remote_owner\":\"{}\"}}'",
                 component.id,
-                owner_hint.suggested_owner,
+                suggested_owner,
                 component.id,
-                owner_hint.suggested_owner
+                suggested_owner
             );
         }
     }

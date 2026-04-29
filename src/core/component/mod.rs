@@ -512,12 +512,19 @@ impl Component {
         };
 
         for extension_id in extensions.keys() {
-            let Ok(extension) = crate::extension::load_extension(extension_id) else {
+            let Some(deploy_policy) = extension_deploy_policy(extension_id) else {
                 continue;
             };
 
-            for suffix in extension.deploy_protected_path_suffixes() {
-                suffixes.insert(suffix.clone());
+            let Some(policy_suffixes) = deploy_policy
+                .get("protected_path_suffixes")
+                .and_then(serde_json::Value::as_array)
+            else {
+                continue;
+            };
+
+            for suffix in policy_suffixes.iter().filter_map(serde_json::Value::as_str) {
+                suffixes.insert(suffix.to_string());
             }
         }
 
@@ -526,26 +533,52 @@ impl Component {
         suffixes
     }
 
-    pub fn deploy_owner_hint_for_path(
-        &self,
-        remote_path: &str,
-    ) -> Option<crate::extension::DeployOwnerHint> {
+    pub fn deploy_owner_hint_for_path(&self, remote_path: &str) -> Option<String> {
         let extensions = self.extensions.as_ref()?;
 
         for extension_id in extensions.keys() {
-            let Ok(extension) = crate::extension::load_extension(extension_id) else {
+            let Some(deploy_policy) = extension_deploy_policy(extension_id) else {
                 continue;
             };
 
-            for hint in extension.deploy_owner_hints() {
-                if remote_path.contains(&hint.path_contains) {
-                    return Some(hint.clone());
+            let Some(owner_hints) = deploy_policy
+                .get("owner_hints")
+                .and_then(serde_json::Value::as_array)
+            else {
+                continue;
+            };
+
+            for hint in owner_hints {
+                let Some(path_contains) = hint
+                    .get("path_contains")
+                    .and_then(serde_json::Value::as_str)
+                else {
+                    continue;
+                };
+                let Some(suggested_owner) = hint
+                    .get("suggested_owner")
+                    .and_then(serde_json::Value::as_str)
+                else {
+                    continue;
+                };
+
+                if remote_path.contains(path_contains) {
+                    return Some(suggested_owner.to_string());
                 }
             }
         }
 
         None
     }
+}
+
+fn extension_deploy_policy(
+    extension_id: &str,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let path = crate::paths::extension_manifest(extension_id).ok()?;
+    let raw = std::fs::read_to_string(path).ok()?;
+    let manifest: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    manifest.get("deploy")?.as_object().cloned()
 }
 
 fn render_remote_path_template(template: &str, component_id: &str, dir_name: &str) -> String {
@@ -983,7 +1016,7 @@ mod tests {
             let hint = component
                 .deploy_owner_hint_for_path("shared/plugins/my-plugin")
                 .expect("owner hint");
-            assert_eq!(hint.suggested_owner, "www-data:www-data");
+            assert_eq!(hint, "www-data:www-data");
             assert!(component
                 .deploy_owner_hint_for_path("other/my-plugin")
                 .is_none());
