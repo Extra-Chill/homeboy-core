@@ -181,5 +181,5 @@ In addition to content edits, the engine detects files and directories whose nam
 ## Related
 
 - [component](component.md)
-- [docs audit](docs.md) — documentation-level auditing
+- [docs](docs.md) — embedded documentation topics and codebase maps
 - [JSON output contract](../architecture/output-system.md)

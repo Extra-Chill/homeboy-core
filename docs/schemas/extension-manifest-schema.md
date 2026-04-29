@@ -89,7 +89,7 @@ Scripts that implement extension capabilities. Each script path is relative to t
 
 ## Audit Configuration
 
-Configuration for docs audit, feature detection, and test coverage analysis.
+Configuration for documentation-reference analysis, feature detection, and test coverage analysis.
 
 ```json
 {
@@ -126,7 +126,7 @@ Configuration for docs audit, feature detection, and test coverage analysis.
 
 ### Audit Fields
 
-- **`ignore_claim_patterns`** (array): Glob patterns for paths to ignore during docs audit
+- **`ignore_claim_patterns`** (array): Glob patterns for paths to ignore during documentation-reference analysis
 - **`feature_patterns`** (array): Regex patterns to detect features in source code (must have a capture group for the feature name)
 - **`feature_labels`** (object): Maps pattern substrings to human-readable labels for grouping
 - **`doc_targets`** (object): Maps feature labels to documentation file paths and headings
