@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn deploy_policy_collects_extension_protected_suffixes() {
+    fn test_protected_path_suffixes() {
         with_isolated_home(|_| {
             write_extension_fixture(
                 "example",
@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn deploy_policy_resolves_owner_hint_for_matching_path() {
+    fn test_owner_hint_for_path() {
         with_isolated_home(|_| {
             write_extension_fixture(
                 "example",
