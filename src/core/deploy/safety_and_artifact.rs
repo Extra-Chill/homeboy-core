@@ -20,19 +20,9 @@ use super::types::DeployResult;
 /// these directories, not the directory itself. Deploying directly into a shared
 /// directory would destroy sibling components during the pre-extraction clean step.
 ///
-/// This list covers common package manager and framework conventions. Extensions
-/// can declare additional protected directories via their deploy configuration.
-const DANGEROUS_PATH_SUFFIXES: &[&str] = &[
-    "/plugins",
-    "/themes",
-    "/mu-plugins",
-    "/wp-content",
-    "/wp-content/uploads",
-    "/node_modules",
-    "/vendor",
-    "/packages",
-    "/extensions",
-];
+/// This list covers framework-neutral package manager conventions. Extensions
+/// declare framework-specific protected directories via their deploy policy.
+const DANGEROUS_PATH_SUFFIXES: &[&str] = &["/node_modules", "/vendor", "/packages", "/extensions"];
 
 /// Validate that a deploy target path is safe for destructive operations.
 ///
@@ -48,6 +38,7 @@ pub(super) fn validate_deploy_target(
     install_dir: &str,
     base_path: &str,
     component_id: &str,
+    extension_protected_suffixes: &[String],
 ) -> Result<()> {
     let normalized = install_dir.trim_end_matches('/');
     let base_normalized = base_path.trim_end_matches('/');
@@ -67,8 +58,10 @@ pub(super) fn validate_deploy_target(
     }
 
     // Guard 2: target must not end with a known shared directory
-    for suffix in DANGEROUS_PATH_SUFFIXES {
-        if normalized.ends_with(suffix) {
+    let generic_suffixes = DANGEROUS_PATH_SUFFIXES.iter().copied();
+    let extension_suffixes = extension_protected_suffixes.iter().map(String::as_str);
+    for suffix in generic_suffixes.chain(extension_suffixes) {
+        if normalized.ends_with(suffix.trim_end_matches('/')) {
             return Err(Error::validation_invalid_argument(
                 "remotePath",
                 format!(
@@ -357,4 +350,43 @@ fn render_extract_command(template: &str, vars: &HashMap<String, String>) -> Str
         result = result.replace(&format!("{{{}}}", key), value);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_deploy_target;
+
+    #[test]
+    fn validate_deploy_target_rejects_generic_shared_suffix() {
+        let result = validate_deploy_target("/srv/site/vendor", "/srv/site", "my-component", &[]);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("shared parent"));
+    }
+
+    #[test]
+    fn validate_deploy_target_allows_framework_path_without_extension_policy() {
+        let result = validate_deploy_target(
+            "/srv/site/wp-content/plugins",
+            "/srv/site",
+            "my-plugin",
+            &[],
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_deploy_target_rejects_extension_protected_suffix() {
+        let protected = vec!["/wp-content/plugins".to_string()];
+        let result = validate_deploy_target(
+            "/srv/site/wp-content/plugins",
+            "/srv/site",
+            "my-plugin",
+            &protected,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("my-plugin"));
+    }
 }
