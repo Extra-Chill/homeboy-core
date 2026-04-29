@@ -94,9 +94,7 @@ fn run_trace_workflow_with_context(
     let runner = build_trace_runner(execution_context, component, &args, run_dir, false)?;
     let runner_output = runner.run();
     if !args.keep_overlay {
-        if let Err(cleanup_error) = cleanup_trace_overlays(&applied_overlays) {
-            return Err(cleanup_error);
-        }
+        cleanup_trace_overlays(&applied_overlays)?
     }
     let runner_output = runner_output?;
     let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
