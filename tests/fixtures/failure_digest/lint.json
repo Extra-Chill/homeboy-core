@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "data": {
+    "passed": false,
+    "summary": "3 lint finding(s)",
+    "phpcs_summary": "2 PHPCS error(s)",
+    "phpstan_summary": "1 PHPStan error(s)",
+    "top_violations": [
+      "Squiz.Commenting.FunctionComment.Missing — 2",
+      "PHPStan: Call to undefined method — 1"
+    ]
+  }
+}

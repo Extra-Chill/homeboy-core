@@ -1,0 +1,5 @@
+{
+  "homeboy_cli_version": "0.123.0",
+  "extension_id": "wordpress",
+  "action_repository": "Extra-Chill/homeboy-action"
+}
