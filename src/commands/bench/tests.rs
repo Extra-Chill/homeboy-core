@@ -99,6 +99,64 @@ JSON
     }
 }
 
+fn write_failing_bench_extension(home: &TempDir) {
+    let extension_dir = home
+        .path()
+        .join(".config")
+        .join("homeboy")
+        .join("extensions")
+        .join("nodejs");
+    fs::create_dir_all(&extension_dir).expect("mkdir extension");
+    fs::write(
+        extension_dir.join("nodejs.json"),
+        r#"{
+                "name": "Node.js",
+                "version": "0.0.0",
+                "bench": { "extension_script": "bench-runner.sh" }
+            }"#,
+    )
+    .expect("write extension manifest");
+
+    let script_path = extension_dir.join("bench-runner.sh");
+    fs::write(
+        &script_path,
+        r#"#!/bin/sh
+if [ "$HOMEBOY_BENCH_LIST_ONLY" = "1" ]; then
+  cat > "$HOMEBOY_BENCH_RESULTS_FILE" <<JSON
+{
+  "component_id": "$HOMEBOY_COMPONENT_ID",
+  "iterations": 0,
+  "scenarios": [
+    { "id": "studio-agent-site-build", "iterations": 0, "metrics": {} }
+  ]
+}
+JSON
+  exit 0
+fi
+
+cat > "$HOMEBOY_BENCH_RESULTS_FILE" <<JSON
+{
+  "component_id": "$HOMEBOY_COMPONENT_ID",
+  "iterations": ${HOMEBOY_BENCH_ITERATIONS:-0},
+  "scenarios": []
+}
+JSON
+printf 'WORKLOAD_ERROR: studio-agent-site-build - warmup iteration threw: Studio site-build eval failed\n' >&2
+exit 7
+"#,
+    )
+    .expect("write bench script");
+
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(&script_path)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).expect("chmod script");
+    }
+}
+
 fn write_registered_component(home: &TempDir, component_id: &str, path: &std::path::Path) {
     let component_dir = home
         .path()
@@ -383,6 +441,42 @@ fn run_selects_single_scenario() {
                 let scenarios = result.results.expect("results").scenarios;
                 assert_eq!(scenarios.len(), 1);
                 assert_eq!(scenarios[0].id, "slow");
+            }
+            _ => panic!("expected single output"),
+        }
+    });
+}
+
+#[test]
+fn selected_scenario_workload_failure_preserves_runner_error() {
+    with_isolated_home(|home| {
+        write_failing_bench_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        write_registered_component(home, "studio", component_dir.path());
+
+        let (output, exit_code) = run(
+            run_args(
+                Some("studio"),
+                Vec::new(),
+                vec!["studio-agent-site-build".to_string()],
+            ),
+            &GlobalArgs {},
+        )
+        .expect("runner failure should return structured bench output");
+
+        assert_eq!(exit_code, 7);
+        match output {
+            BenchOutput::Single(result) => {
+                assert_eq!(result.status, "failed");
+                assert_eq!(result.exit_code, 7);
+                assert_eq!(result.results.expect("partial results").scenarios.len(), 0);
+                let failure = result.failure.expect("runner failure metadata");
+                assert_eq!(
+                    failure.scenario_id.as_deref(),
+                    Some("studio-agent-site-build")
+                );
+                assert!(failure.stderr_tail.contains("WORKLOAD_ERROR"));
+                assert!(failure.stderr_tail.contains("warmup iteration threw"));
             }
             _ => panic!("expected single output"),
         }
