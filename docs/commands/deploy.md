@@ -56,31 +56,34 @@ If no component IDs are provided and neither `--all` nor `--outdated` is set, Ho
   "project_id": "<project_id>",
   "all": false,
   "outdated": false,
+  "behind_upstream": false,
   "check": false,
   "dry_run": false,
+  "force": false,
   "results": [
     {
       "id": "<component_id>",
-      "name": "<name>",
       "status": "deployed|failed|skipped|planned|checked",
       "deploy_reason": "explicitly_selected|all_selected|version_mismatch|unknown_local_version|unknown_remote_version",
-      "component_status": "up_to_date|needs_update|behind_remote|unknown",
+      "component_status": "up_to_date|needs_update|behind_remote|behind_upstream|unknown",
       "local_version": "<v>|null",
       "remote_version": "<v>|null",
       "error": "<string>|null",
       "artifact_path": "<path>|null",
       "remote_path": "<path>|null",
-      "build_command": "<cmd>|null",
       "build_exit_code": "<int>|null",
       "deploy_exit_code": "<int>|null",
       "release_state": {
         "commits_since_version": 5,
+        "code_commits": 4,
+        "docs_only_commits": 1,
         "has_uncommitted_changes": false,
         "baseline_ref": "v0.9.15"
-      }
+      },
+      "deployed_ref": "<tag-or-branch>|null"
     }
   ],
-  "summary": { "succeeded": 0, "failed": 0, "skipped": 0 }
+  "summary": { "total": 1, "succeeded": 0, "failed": 0, "skipped": 0 }
 }
 ```
 
@@ -89,6 +92,8 @@ Notes:
 - `deploy_reason` is omitted when not applicable.
 - `component_status` is only present when using `--check` or `--check --dry-run`.
 - `artifact_path` is the component build artifact path as configured; it may be relative but must include a filename.
+- Deploy output does not include `build_command`. Builds are resolved from the linked extension, and deploy records only build/deploy exit codes plus the artifact path used.
+- `deployed_ref` is omitted when no tag or branch ref was deployed.
 
 Note: `build_exit_code`/`deploy_exit_code` are numbers when present (not strings).
 
@@ -99,6 +104,7 @@ When using `--check`, each component result includes a `component_status` field:
 - `up_to_date`: local and remote versions match
 - `needs_update`: local version ahead of remote (needs deployment)
 - `behind_remote`: remote version ahead of local (local is behind)
+- `behind_upstream`: local checkout is behind its upstream branch
 - `unknown`: cannot determine status (missing version information)
 
 ### Release state
@@ -106,8 +112,12 @@ When using `--check`, each component result includes a `component_status` field:
 When using `--check`, each component result includes a `release_state` field that tracks unreleased changes:
 
 - `commits_since_version`: number of commits since the last version tag
+- `code_commits`: number of non-doc commits since the last version tag; omitted when zero
+- `docs_only_commits`: number of docs-only commits since the last version tag; omitted when zero
 - `has_uncommitted_changes`: whether there are uncommitted changes in the working directory
 - `baseline_ref`: the tag or commit hash used as baseline for comparison
+
+`baseline_ref`, `baseline_warning`, `code_commits`, and `docs_only_commits` are omitted when empty.
 
 This helps identify components where `component_status` is `up_to_date` but work has been done since the last version bump (commits_since_version > 0), indicating a version bump may be needed before deployment.
 
@@ -149,20 +159,20 @@ When using `--projects`, the output structure differs:
   "projects": [
     {
       "project_id": "extra-chill",
-      "status": "deployed|failed",
+      "status": "deployed|failed|planned|checked",
       "error": "<string>|null",
       "results": [...],
       "summary": { "total": 1, "succeeded": 1, "skipped": 0, "failed": 0 }
     },
     {
       "project_id": "sarai-chinwag",
-      "status": "deployed|failed",
+      "status": "deployed|failed|planned|checked",
       "error": "<string>|null",
       "results": [...],
       "summary": { "total": 1, "succeeded": 1, "skipped": 0, "failed": 0 }
     }
   ],
-  "summary": { "total_projects": 2, "succeeded": 2, "failed": 0 }
+  "summary": { "total_projects": 2, "succeeded": 2, "failed": 0, "skipped": 0, "planned": 0 }
 }
 ```
 
