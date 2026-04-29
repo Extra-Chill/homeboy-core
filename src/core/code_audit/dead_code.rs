@@ -595,6 +595,101 @@ mod tests {
     }
 
     #[test]
+    fn rust_path_qualified_index_call_suppresses_unreferenced_export() {
+        let exported =
+            make_fingerprint("src/foo.rs", vec!["helper"], vec!["helper"], vec![], vec![]);
+        let main = make_fingerprint(
+            "src/main.rs",
+            vec![],
+            vec![],
+            vec!["helper"], // foo::helper()
+            vec![],
+        );
+
+        let findings = analyze_dead_code(&[&exported], &[&main]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "Path-qualified calls from index files should suppress unreferenced_export, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|f| &f.description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn rust_reexport_facade_call_suppresses_original_export() {
+        let exported = make_fingerprint(
+            "src/foo/bar.rs",
+            vec!["helper"],
+            vec!["helper"],
+            vec![],
+            vec![],
+        );
+        let facade_consumer = make_fingerprint(
+            "src/consumer.rs",
+            vec![],
+            vec![],
+            vec!["helper"], // foo::helper() after `pub use bar::helper` in foo/mod.rs.
+            vec![],
+        );
+        let facade = make_fingerprint("src/foo/mod.rs", vec![], vec![], vec![], vec![]);
+
+        let findings = analyze_dead_code(&[&exported, &facade_consumer], &[&facade]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "Facade calls to re-exported functions should suppress unreferenced_export, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|f| &f.description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn rust_imported_test_prefixed_helper_call_suppresses_unreferenced_export() {
+        let exported = make_fingerprint(
+            "src/core/code_audit/test_mapping.rs",
+            vec!["test_to_source_path"],
+            vec!["test_to_source_path"],
+            vec![],
+            vec![],
+        );
+        let mut caller = make_fingerprint(
+            "src/core/code_audit/test_coverage.rs",
+            vec![],
+            vec![],
+            vec!["test_to_source_path"],
+            vec![],
+        );
+        caller
+            .imports
+            .push("crate::core::code_audit::test_mapping::test_to_source_path".to_string());
+
+        let findings = analyze_dead_code(&[&exported, &caller], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "Imported Rust helpers beginning with test_ are normal production references, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|f| &f.description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn orphaned_private_function_detected() {
         let fp = make_fingerprint(
             "src/foo.rs",

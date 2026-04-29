@@ -81,6 +81,16 @@ pub(crate) fn walk_source_files_snapshot(root: &Path) -> CodebaseSnapshot {
     snapshot
 }
 
+/// Build a snapshot containing every extension-provided source file.
+///
+/// Convention detectors use [`walk_source_files_snapshot`] to skip index files
+/// and later keep only directories with enough siblings. Dead-code analysis uses
+/// this broader view as reference-only data so singleton callers, `main.rs`,
+/// `lib.rs`, and module facades can still prove exports are live.
+pub(crate) fn walk_all_source_files_snapshot(root: &Path) -> CodebaseSnapshot {
+    CodebaseSnapshot::build(root, &source_scan_config())
+}
+
 /// Check if a relative path points to a test file using heuristic patterns.
 ///
 /// Used to separate test files from production code during convention discovery,
