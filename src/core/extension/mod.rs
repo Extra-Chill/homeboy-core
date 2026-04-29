@@ -555,6 +555,13 @@ pub struct FingerprintOutput {
     /// language/framework they support — not just WordPress hooks.
     #[serde(default)]
     pub hook_callbacks: Vec<String>,
+    /// Type/class names registered with a runtime dispatcher.
+    ///
+    /// Framework-specific extension scripts populate this for patterns where a
+    /// type is registered in one file and its public methods are invoked by the
+    /// runtime in another file.
+    #[serde(default)]
+    pub runtime_dispatched_types: Vec<String>,
 }
 
 // ============================================================================

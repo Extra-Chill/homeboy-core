@@ -164,6 +164,7 @@ pub(crate) fn fingerprint_from_git_ref(
         call_sites: output.call_sites,
         public_api: output.public_api,
         hook_callbacks: output.hook_callbacks,
+        runtime_dispatched_types: output.runtime_dispatched_types,
         trait_impl_methods: Vec::new(),
     })
 }

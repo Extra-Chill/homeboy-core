@@ -431,6 +431,9 @@ pub fn fingerprint_from_grammar(
     // --- Hooks (PHP-specific, from grammar) ---
     let hooks = extract_hooks(&symbols);
 
+    // --- Runtime-dispatched types (extension-owned grammar metadata) ---
+    let runtime_dispatched_types = extract_runtime_dispatched_types(&symbols);
+
     Some(FileFingerprint {
         relative_path: relative_path.to_string(),
         language,
@@ -455,6 +458,7 @@ pub fn fingerprint_from_grammar(
         call_sites: Vec::new(), // Core grammar engine doesn't extract call sites yet
         public_api,
         hook_callbacks: Vec::new(), // Core grammar engine doesn't extract hook callbacks yet
+        runtime_dispatched_types,
         trait_impl_methods,
     })
 }
@@ -1120,6 +1124,26 @@ fn extract_registrations(symbols: &[Symbol]) -> Vec<String> {
     }
 
     registrations
+}
+
+/// Extract types registered with runtime dispatchers from grammar symbols.
+fn extract_runtime_dispatched_types(symbols: &[Symbol]) -> Vec<String> {
+    let mut dispatched_types = Vec::new();
+    let mut seen = HashSet::new();
+
+    for s in symbols
+        .iter()
+        .filter(|s| s.concept == "runtime_dispatched_type")
+    {
+        if let Some(name) = s.name() {
+            let normalized = name.trim_start_matches('\\').to_string();
+            if seen.insert(normalized.clone()) {
+                dispatched_types.push(normalized);
+            }
+        }
+    }
+
+    dispatched_types
 }
 
 /// Extract internal function calls from content.

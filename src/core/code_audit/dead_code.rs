@@ -61,17 +61,13 @@ pub(crate) fn analyze_dead_code_with_config(
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    // Build a global set of all internal calls and imports across ALL files
-    // (owned + reference) for cross-file reference checking.
-    let mut all_calls: HashSet<String> = HashSet::new();
-    let mut all_imports: HashSet<String> = HashSet::new();
+    // Build a global set of types registered with runtime dispatchers across
+    // ALL files (owned + reference) for cross-file reference checking.
+    let mut runtime_dispatched_types: HashSet<String> = HashSet::new();
 
     for fp in owned.iter().chain(reference.iter()) {
-        for call in &fp.internal_calls {
-            all_calls.insert(call.clone());
-        }
-        for import in &fp.imports {
-            all_imports.insert(import.clone());
+        for dispatched_type in &fp.runtime_dispatched_types {
+            runtime_dispatched_types.insert(dispatched_type.clone());
         }
     }
 
@@ -138,6 +134,14 @@ pub(crate) fn analyze_dead_code_with_config(
                 // from other source files.
                 // (homeboy#1149 — runtime bootstrap files)
                 if fp.hook_callbacks.contains(export) {
+                    continue;
+                }
+
+                // Skip public methods on types/classes registered with a
+                // runtime dispatcher. The framework-specific detection lives
+                // in extension fingerprint metadata; core only consumes the
+                // normalized type names.
+                if is_runtime_dispatched_type(fp, &runtime_dispatched_types) {
                     continue;
                 }
 
@@ -338,6 +342,36 @@ fn is_runtime_entrypoint_file(fp: &FileFingerprint, audit_config: &AuditConfig) 
             .runtime_entrypoint_markers
             .iter()
             .any(|marker| fp.content.contains(marker))
+}
+
+fn is_runtime_dispatched_type(
+    fp: &FileFingerprint,
+    runtime_dispatched_types: &HashSet<String>,
+) -> bool {
+    let Some(type_name) = fp.type_name.as_deref() else {
+        return false;
+    };
+
+    let qualified_type = fp
+        .namespace
+        .as_deref()
+        .map(|namespace| format!("{}\\{}", namespace, type_name));
+    let type_matches = runtime_dispatched_types.iter().any(|dispatched| {
+        if dispatched.contains('\\') {
+            qualified_type.as_deref() == Some(dispatched.as_str())
+                || qualified_type
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.ends_with(&format!("\\{}", dispatched)))
+        } else {
+            dispatched == type_name
+        }
+    });
+
+    if !type_matches {
+        return false;
+    }
+
+    !fp.public_api.is_empty()
 }
 
 // ============================================================================
@@ -901,5 +935,74 @@ class EmailCommand extends RuntimeCommand {
             unreferenced.is_empty(),
             "configured runtime-dispatched methods are invoked by the runtime"
         );
+    }
+
+    #[test]
+    fn fingerprint_runtime_dispatched_type_suppresses_public_methods() {
+        let mut bootstrap_fp =
+            make_fingerprint("inc/Cli/Bootstrap.php", vec![], vec![], vec![], vec![]);
+        bootstrap_fp.language = Language::Php;
+        bootstrap_fp.runtime_dispatched_types = vec!["Commands\\EmailCommand".to_string()];
+
+        let mut command_fp = make_fingerprint(
+            "inc/Cli/Commands/EmailCommand.php",
+            vec!["test_connection"],
+            vec!["test_connection"],
+            vec![],
+            vec![],
+        );
+        command_fp.language = Language::Php;
+        command_fp.namespace = Some("DataMachine\\Cli\\Commands".to_string());
+        command_fp.type_name = Some("EmailCommand".to_string());
+
+        let findings = analyze_dead_code(&[&bootstrap_fp, &command_fp], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "runtime-dispatched command methods should not be flagged, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|f| &f.description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn docblock_only_subcommand_does_not_suppress_public_method() {
+        let mut command_fp = make_fingerprint(
+            "inc/Cli/Commands/EmailCommand.php",
+            vec!["test_connection"],
+            vec!["test_connection"],
+            vec![],
+            vec![],
+        );
+        command_fp.language = Language::Php;
+        command_fp.type_name = Some("EmailCommand".to_string());
+        command_fp.content = r#"<?php
+class EmailCommand {
+    /**
+     * Test the IMAP connection.
+     *
+     * @subcommand test-connection
+     */
+    public function test_connection( array $args, array $assoc_args ): void {}
+}
+"#
+        .to_string();
+
+        let findings = analyze_dead_code(&[&command_fp], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert_eq!(
+            unreferenced.len(),
+            1,
+            "docblock-only @subcommand must not imply runtime registration"
+        );
+        assert!(unreferenced[0].description.contains("test_connection"));
     }
 }
