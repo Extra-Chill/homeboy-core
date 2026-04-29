@@ -295,17 +295,24 @@ pub struct ServiceSpec {
 }
 
 /// Discovery strategy for an `external` service — how to find a PID the rig
-/// didn't spawn. The single `pattern` field matches against the process
-/// command line (`ps -o args`); `kind = "external"` services pick the
-/// newest matching PID. Multiple matches are not an error — a stale
-/// child + a fresh child is the case we care about, and the fresh one
-/// is what the rig wants to interact with.
+/// didn't spawn. The `pattern` field preserves the original broad substring
+/// match against the process command line (`ps -o args`); optional selectors
+/// narrow that candidate set. `kind = "external"` services pick the newest
+/// matching PID. Multiple matches are not an error — a stale child + a fresh
+/// child is the case we care about, and the fresh one is what the rig wants to
+/// interact with.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoverSpec {
     /// Substring that must appear in the target process's command line.
     /// Matched against `ps -o args= -p <pid>` output, so users can pin
     /// against script paths (`wordpress-server-child.mjs`) or argv tokens.
     pub pattern: String,
+
+    /// Additional argv substrings that must all appear in the target process's
+    /// command line. Use this to keep a broad `pattern` fallback while pinning
+    /// an external service to a more specific script path or flag set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub argv_contains: Vec<String>,
 }
 
 /// Supported service kinds. Extensions will register more in a future phase.

@@ -133,6 +133,7 @@ mod lifecycle {
                     health: None,
                     discover: Some(DiscoverSpec {
                         pattern: "homeboy-test-no-such-external-process-XQZ-1463".to_string(),
+                        argv_contains: Vec::new(),
                     }),
                 },
             );
@@ -149,6 +150,66 @@ mod lifecycle {
                 ServiceStatus::Stopped
             );
         });
+    }
+
+    #[test]
+    fn test_discover_newest_from_ps_requires_all_argv_selectors() {
+        let now = 1_000;
+        let ps_output = r#"
+101  00:00:50  node /Applications/Studio.app/wordpress-server-child.mjs
+202  00:00:40  node /Users/chubes/Developer/studio@bfb-mu-plugin/playground-server-child.mjs wordpress-server-child.mjs
+303  00:00:30  node /Users/chubes/Developer/studio@other/playground-server-child.mjs wordpress-server-child.mjs
+"#;
+        let selectors = vec![
+            "studio@bfb-mu-plugin".to_string(),
+            "playground-server-child.mjs".to_string(),
+        ];
+
+        let found = super::super::platform::discover_newest_from_ps(
+            "wordpress-server-child.mjs",
+            &selectors,
+            now,
+            999,
+            ps_output,
+        )
+        .expect("matching process");
+
+        assert_eq!(found.pid, 202);
+        assert_eq!(found.started_at_epoch, 960);
+    }
+
+    #[test]
+    fn test_discover_newest_from_ps_returns_none_when_argv_selector_misses() {
+        let selectors = vec!["studio@bfb-mu-plugin".to_string()];
+        let found = super::super::platform::discover_newest_from_ps(
+            "wordpress-server-child.mjs",
+            &selectors,
+            1_000,
+            999,
+            "101  00:00:50  node /Applications/Studio.app/wordpress-server-child.mjs",
+        );
+
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn test_discover_newest_for_spec_returns_none_when_no_process_matches() {
+        let discover = DiscoverSpec {
+            pattern: "homeboy-test-no-such-process-XQZ-1750".to_string(),
+            argv_contains: vec!["homeboy-test-no-such-selector-XQZ-1750".to_string()],
+        };
+
+        assert_eq!(service::discover_newest_for_spec(&discover).unwrap(), None);
+    }
+
+    #[test]
+    fn test_discover_external_pid_returns_none_when_no_process_matches() {
+        let discover = DiscoverSpec {
+            pattern: "homeboy-test-no-such-external-process-XQZ-1750".to_string(),
+            argv_contains: Vec::new(),
+        };
+
+        assert_eq!(service::discover_external_pid(&discover).unwrap(), None);
     }
 
     #[test]
