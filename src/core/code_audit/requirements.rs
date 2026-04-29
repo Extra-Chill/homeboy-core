@@ -1,20 +1,24 @@
-//! Plugin requirement + bootstrap parser — collects symbols that are guaranteed
+//! Runtime requirement + bootstrap parser — collects symbols that are guaranteed
 //! to exist at runtime so downstream detectors (e.g. `dead_guard`) can skip
 //! `function_exists` / `class_exists` / `defined` guards on them.
 //!
 //! Sources of "guaranteed available" symbols:
-//! 1. The WordPress plugin header's `Requires at least: X.Y` value, mapped
-//!    against a hard-coded WP-core symbol-availability table.
-//! 2. `composer.json` `require` and `require-dev` entries — when a known
-//!    vendor package is present, its public symbols are considered available.
-//! 3. Unconditional `require` / `require_once` calls from the plugin main
-//!    file — anything pulled in at bootstrap is guaranteed loaded.
+//! 1. Extension-provided header-version rules mapped against symbols.
+//! 2. `composer.json` `require` and `require-dev` entries mapped against
+//!    extension-provided package rules.
+//! 3. Unconditional `require` / `require_once` calls from entry files mapped
+//!    against extension-provided bootstrap-path rules.
 //!
 //! The parser is lenient: every source is optional and a missing / malformed
 //! file yields an empty contribution rather than an error.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+use crate::component::{
+    AuditConfig, KnownSymbolEntry, KnownSymbolHeaderVersionProvider, KnownSymbolKind,
+    KnownSymbolVersionedEntry,
+};
 
 /// Symbols guaranteed to be defined at runtime given the plugin's declared
 /// requirements and its explicit bootstrap wiring.
@@ -42,32 +46,42 @@ impl KnownSymbols {
 }
 
 /// Entry point: inspect a plugin root and return the set of guaranteed symbols.
-pub fn known_available_symbols(root: &Path) -> KnownSymbols {
+pub fn known_available_symbols(root: &Path, audit_config: &AuditConfig) -> KnownSymbols {
     let mut symbols = KnownSymbols::default();
+    let providers = &audit_config.known_symbols;
 
-    let main_file = find_plugin_main_file(root);
-    let wp_baseline = main_file
-        .as_ref()
-        .and_then(|p| parse_wp_requires_at_least(p))
-        .unwrap_or(0);
-
-    seed_wp_core_symbols(&mut symbols, wp_baseline);
-
-    if let Some(ref main) = main_file {
-        let required_paths = parse_bootstrap_requires(main, root);
-        for path in &required_paths {
-            seed_vendor_symbols_from_path(&mut symbols, path);
+    for provider in &providers.header_versions {
+        if let Some(main_file) = find_file_with_marker(root, &provider.file_marker) {
+            seed_header_version_symbols(&mut symbols, &main_file, provider);
         }
     }
 
-    apply_composer_requires(&mut symbols, root);
+    for main in find_bootstrap_files(root, audit_config) {
+        let required_paths = parse_bootstrap_requires(&main, root);
+        for path in &required_paths {
+            seed_symbols_from_bootstrap_path(&mut symbols, path, audit_config);
+        }
+    }
+
+    apply_composer_requires(&mut symbols, root, audit_config);
 
     symbols
 }
 
-/// Locate the plugin main file: a `*.php` file in `root` whose content contains
-/// `Plugin Name:` in the header comment.
-pub fn find_plugin_main_file(root: &Path) -> Option<PathBuf> {
+fn find_bootstrap_files(root: &Path, audit_config: &AuditConfig) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for provider in &audit_config.known_symbols.header_versions {
+        if let Some(path) = find_file_with_marker(root, &provider.file_marker) {
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+/// Locate a root-level PHP entry file whose header contains an extension-owned marker.
+pub fn find_file_with_marker(root: &Path, marker: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(root).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -77,21 +91,17 @@ pub fn find_plugin_main_file(root: &Path) -> Option<PathBuf> {
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
-        // Check first ~50 lines for "Plugin Name:" marker.
-        if content.lines().take(50).any(|l| l.contains("Plugin Name:")) {
+        if content.lines().take(80).any(|l| l.contains(marker)) {
             return Some(path);
         }
     }
     None
 }
 
-/// Parse `Requires at least: X.Y` from the plugin header. Returns the WP core
-/// version encoded as `major * 100 + minor` (e.g. 5.3 → 503) for easy
-/// comparison, or `None` if absent.
-pub fn parse_wp_requires_at_least(main_file: &Path) -> Option<u32> {
+pub fn parse_header_version(main_file: &Path, header: &str) -> Option<u32> {
     let content = std::fs::read_to_string(main_file).ok()?;
     for line in content.lines().take(80) {
-        if let Some(rest) = line.split_once("Requires at least:") {
+        if let Some(rest) = line.split_once(header) {
             let value = rest.1.trim().trim_end_matches('*').trim();
             return parse_version_encoded(value);
         }
@@ -109,58 +119,35 @@ fn parse_version_encoded(v: &str) -> Option<u32> {
     Some(major * 100 + minor)
 }
 
-/// Seed a minimum set of WP-core symbols known to exist when the plugin
-/// declares a floor of WP version `wp_baseline` (encoded as major*100+minor).
-///
-/// The table is intentionally small and conservative — the intent is to catch
-/// guards that are obviously dead given the plugin's declared floor, not to
-/// enumerate every WP symbol.
-fn seed_wp_core_symbols(symbols: &mut KnownSymbols, wp_baseline: u32) {
-    // (symbol_name, introduced_in_encoded_version, kind)
-    // kind: 'f' = function, 'c' = class, 'k' = constant
-    const WP_SYMBOLS: &[(&str, u32, char)] = &[
-        // Functions
-        ("wp_generate_uuid4", 407, 'f'),
-        ("wp_timezone", 503, 'f'),
-        ("wp_timezone_string", 501, 'f'),
-        ("wp_get_environment_type", 505, 'f'),
-        ("wp_date", 503, 'f'),
-        ("wp_json_encode", 404, 'f'),
-        ("get_post_type_object", 300, 'f'),
-        ("register_rest_route", 404, 'f'),
-        ("register_block_type", 500, 'f'),
-        ("has_blocks", 500, 'f'),
-        ("parse_blocks", 500, 'f'),
-        // Classes
-        ("WP_Ability", 609, 'c'),
-        ("WP_REST_Server", 404, 'c'),
-        ("WP_REST_Request", 404, 'c'),
-        ("WP_REST_Response", 404, 'c'),
-        ("WP_Block_Type_Registry", 500, 'c'),
-        ("WP_Block", 501, 'c'),
-        ("WP_HTML_Tag_Processor", 602, 'c'),
-        // Constants
-        ("REST_REQUEST", 404, 'k'),
-    ];
-
-    if wp_baseline == 0 {
+fn seed_header_version_symbols(
+    symbols: &mut KnownSymbols,
+    main_file: &Path,
+    provider: &KnownSymbolHeaderVersionProvider,
+) {
+    let Some(baseline) = parse_header_version(main_file, &provider.version_header) else {
         return;
+    };
+    for entry in &provider.symbols {
+        if versioned_entry_is_available(entry, baseline) {
+            insert_symbol(symbols, &entry.name, &entry.kind);
+        }
     }
+}
 
-    for (name, introduced, kind) in WP_SYMBOLS {
-        if *introduced <= wp_baseline {
-            match kind {
-                'f' => {
-                    symbols.functions.insert((*name).to_string());
-                }
-                'c' => {
-                    symbols.classes.insert((*name).to_string());
-                }
-                'k' => {
-                    symbols.constants.insert((*name).to_string());
-                }
-                _ => {}
-            }
+fn versioned_entry_is_available(entry: &KnownSymbolVersionedEntry, baseline: u32) -> bool {
+    parse_version_encoded(&entry.introduced).is_some_and(|introduced| introduced <= baseline)
+}
+
+fn insert_symbol(symbols: &mut KnownSymbols, name: &str, kind: &KnownSymbolKind) {
+    match kind {
+        KnownSymbolKind::Function => {
+            symbols.functions.insert(name.to_string());
+        }
+        KnownSymbolKind::Class => {
+            symbols.classes.insert(name.to_string());
+        }
+        KnownSymbolKind::Constant => {
+            symbols.constants.insert(name.to_string());
         }
     }
 }
@@ -260,45 +247,23 @@ fn resolve_require_path(raw: &str, main_dir: &Path) -> Option<PathBuf> {
     Some(main_dir.join(cleaned))
 }
 
-/// Inspect a bootstrap `require`d path and seed vendor-specific symbols when
-/// the path matches a known library bootstrap.
-fn seed_vendor_symbols_from_path(symbols: &mut KnownSymbols, path: &Path) {
+fn seed_symbols_from_bootstrap_path(symbols: &mut KnownSymbols, path: &Path, config: &AuditConfig) {
     let p = path.to_string_lossy().replace('\\', "/");
-
-    // Action Scheduler — loaded by `vendor/woocommerce/action-scheduler/action-scheduler.php`.
-    if p.contains("action-scheduler/action-scheduler.php") || p.ends_with("/action-scheduler.php") {
-        seed_action_scheduler_symbols(symbols);
+    for provider in &config.known_symbols.bootstrap_paths {
+        if p.contains(&provider.path_contains) || p.ends_with(&provider.path_contains) {
+            seed_entries(symbols, &provider.symbols);
+        }
     }
 }
 
-fn seed_action_scheduler_symbols(symbols: &mut KnownSymbols) {
-    const AS_FUNCTIONS: &[&str] = &[
-        "as_schedule_single_action",
-        "as_schedule_recurring_action",
-        "as_schedule_cron_action",
-        "as_enqueue_async_action",
-        "as_unschedule_action",
-        "as_unschedule_all_actions",
-        "as_next_scheduled_action",
-        "as_has_scheduled_action",
-        "as_get_scheduled_actions",
-    ];
-    const AS_CLASSES: &[&str] = &[
-        "ActionScheduler",
-        "ActionScheduler_Action",
-        "ActionScheduler_Store",
-        "ActionScheduler_Versions",
-    ];
-    for f in AS_FUNCTIONS {
-        symbols.functions.insert((*f).to_string());
-    }
-    for c in AS_CLASSES {
-        symbols.classes.insert((*c).to_string());
+fn seed_entries(symbols: &mut KnownSymbols, entries: &[KnownSymbolEntry]) {
+    for entry in entries {
+        insert_symbol(symbols, &entry.name, &entry.kind);
     }
 }
 
-/// Inspect `composer.json` and seed symbols for well-known packages.
-fn apply_composer_requires(symbols: &mut KnownSymbols, root: &Path) {
+/// Inspect `composer.json` and seed symbols for extension-provided packages.
+fn apply_composer_requires(symbols: &mut KnownSymbols, root: &Path, config: &AuditConfig) {
     let composer = root.join("composer.json");
     let Ok(content) = std::fs::read_to_string(&composer) else {
         return;
@@ -316,8 +281,10 @@ fn apply_composer_requires(symbols: &mut KnownSymbols, root: &Path) {
         }
     }
 
-    if packages.contains("woocommerce/action-scheduler") {
-        seed_action_scheduler_symbols(symbols);
+    for provider in &config.known_symbols.composer_packages {
+        if packages.contains(&provider.package) {
+            seed_entries(symbols, &provider.symbols);
+        }
     }
 }
 
@@ -326,12 +293,49 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn write_plugin_main(dir: &Path, requires_at_least: Option<&str>, body: &str) -> PathBuf {
+    fn test_config() -> AuditConfig {
+        serde_json::from_value(serde_json::json!({
+            "known_symbols": {
+                "header_versions": [
+                    {
+                        "file_marker": "Runtime Plugin:",
+                        "version_header": "Runtime Requires:",
+                        "symbols": [
+                            {"name": "runtime_uuid", "kind": "function", "introduced": "1.2"},
+                            {"name": "RuntimeCapability", "kind": "class", "introduced": "2.4"},
+                            {"name": "RUNTIME_REQUEST", "kind": "constant", "introduced": "1.0"}
+                        ]
+                    }
+                ],
+                "composer_packages": [
+                    {
+                        "package": "vendor/runtime-queue",
+                        "symbols": [
+                            {"name": "runtime_schedule_once", "kind": "function"},
+                            {"name": "RuntimeScheduler", "kind": "class"}
+                        ]
+                    }
+                ],
+                "bootstrap_paths": [
+                    {
+                        "path_contains": "runtime-queue/runtime-queue.php",
+                        "symbols": [
+                            {"name": "runtime_schedule_once", "kind": "function"},
+                            {"name": "RuntimeScheduler", "kind": "class"}
+                        ]
+                    }
+                ]
+            }
+        }))
+        .unwrap()
+    }
+
+    fn write_runtime_main(dir: &Path, requires_at_least: Option<&str>, body: &str) -> PathBuf {
         let header_line = requires_at_least
-            .map(|v| format!(" * Requires at least: {}\n", v))
+            .map(|v| format!(" * Runtime Requires: {}\n", v))
             .unwrap_or_default();
         let content = format!(
-            "<?php\n/**\n * Plugin Name: Test Plugin\n{} */\n\n{}",
+            "<?php\n/**\n * Runtime Plugin: Test Plugin\n{} */\n\n{}",
             header_line, body
         );
         let path = dir.join("plugin.php");
@@ -342,80 +346,81 @@ mod tests {
     #[test]
     fn parses_requires_at_least() {
         let tmp = tempfile::tempdir().unwrap();
-        let main = write_plugin_main(tmp.path(), Some("6.9"), "");
-        let baseline = parse_wp_requires_at_least(&main).unwrap();
-        assert_eq!(baseline, 609);
+        let main = write_runtime_main(tmp.path(), Some("2.4"), "");
+        let baseline = parse_header_version(&main, "Runtime Requires:").unwrap();
+        assert_eq!(baseline, 204);
     }
 
     #[test]
-    fn seeds_wp_core_symbols_up_to_baseline() {
-        let mut syms = KnownSymbols::default();
-        seed_wp_core_symbols(&mut syms, 609);
-        assert!(syms.has_class("WP_Ability"));
-        assert!(syms.has_function("wp_timezone"));
-        assert!(syms.has_function("wp_generate_uuid4"));
+    fn seeds_header_version_symbols_up_to_baseline() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_runtime_main(tmp.path(), Some("2.4"), "");
+        let syms = known_available_symbols(tmp.path(), &test_config());
+        assert!(syms.has_class("RuntimeCapability"));
+        assert!(syms.has_function("runtime_uuid"));
+        assert!(syms.has_constant("RUNTIME_REQUEST"));
     }
 
     #[test]
     fn does_not_seed_symbols_introduced_later_than_baseline() {
-        let mut syms = KnownSymbols::default();
-        seed_wp_core_symbols(&mut syms, 500);
-        assert!(!syms.has_class("WP_Ability"));
-        assert!(syms.has_function("wp_generate_uuid4"));
+        let tmp = tempfile::tempdir().unwrap();
+        write_runtime_main(tmp.path(), Some("1.2"), "");
+        let syms = known_available_symbols(tmp.path(), &test_config());
+        assert!(!syms.has_class("RuntimeCapability"));
+        assert!(syms.has_function("runtime_uuid"));
     }
 
     #[test]
     fn missing_plugin_main_returns_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        let syms = known_available_symbols(tmp.path());
+        let syms = known_available_symbols(tmp.path(), &test_config());
         assert!(syms.functions.is_empty());
         assert!(syms.classes.is_empty());
     }
 
     #[test]
-    fn detects_action_scheduler_bootstrap_require() {
+    fn detects_configured_bootstrap_require() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join("vendor/woocommerce/action-scheduler")).unwrap();
+        fs::create_dir_all(tmp.path().join("vendor/runtime-queue")).unwrap();
         fs::write(
-            tmp.path()
-                .join("vendor/woocommerce/action-scheduler/action-scheduler.php"),
+            tmp.path().join("vendor/runtime-queue/runtime-queue.php"),
             "<?php\n",
         )
         .unwrap();
 
-        let main = write_plugin_main(
+        let main = write_runtime_main(
             tmp.path(),
-            Some("6.0"),
-            "require_once __DIR__ . '/vendor/woocommerce/action-scheduler/action-scheduler.php';\n",
+            Some("2.0"),
+            "require_once __DIR__ . '/vendor/runtime-queue/runtime-queue.php';\n",
         );
         let requires = parse_bootstrap_requires(&main, tmp.path());
         assert_eq!(requires.len(), 1);
 
-        let syms = known_available_symbols(tmp.path());
-        assert!(syms.has_function("as_schedule_single_action"));
-        assert!(syms.has_function("as_unschedule_action"));
+        let syms = known_available_symbols(tmp.path(), &test_config());
+        assert!(syms.has_function("runtime_schedule_once"));
+        assert!(syms.has_class("RuntimeScheduler"));
     }
 
     #[test]
-    fn composer_require_seeds_action_scheduler() {
+    fn composer_require_seeds_configured_package() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(
             tmp.path().join("composer.json"),
-            r#"{"require":{"woocommerce/action-scheduler":"^3.0"}}"#,
+            r#"{"require":{"vendor/runtime-queue":"^3.0"}}"#,
         )
         .unwrap();
         let mut syms = KnownSymbols::default();
-        apply_composer_requires(&mut syms, tmp.path());
-        assert!(syms.has_function("as_schedule_single_action"));
+        apply_composer_requires(&mut syms, tmp.path(), &test_config());
+        assert!(syms.has_function("runtime_schedule_once"));
     }
 
     #[test]
     fn guarded_require_is_skipped() {
         let tmp = tempfile::tempdir().unwrap();
-        let main = write_plugin_main(
+        let main = write_runtime_main(
             tmp.path(),
-            Some("6.0"),
-            "if ( ! class_exists( 'ActionScheduler' ) ) {\n    require_once __DIR__ . '/vendor/woocommerce/action-scheduler/action-scheduler.php';\n}\n",
+            Some("2.0"),
+            "if ( ! class_exists( 'RuntimeScheduler' ) ) {\n    require_once __DIR__ . '/vendor/runtime-queue/runtime-queue.php';\n}\n",
         );
         let requires = parse_bootstrap_requires(&main, tmp.path());
         assert!(

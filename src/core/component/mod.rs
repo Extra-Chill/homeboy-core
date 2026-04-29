@@ -10,7 +10,10 @@ pub mod resolution;
 pub mod scope;
 pub mod versioning;
 
-pub use audit::AuditConfig;
+pub use audit::{
+    AuditConfig, KnownSymbolEntry, KnownSymbolHeaderVersionProvider, KnownSymbolKind,
+    KnownSymbolVersionedEntry,
+};
 pub use inventory::{
     exists, extension_provides_artifact_pattern, inventory, list, list_ids, load,
     write_standalone_registration,
