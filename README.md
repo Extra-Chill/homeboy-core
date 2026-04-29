@@ -11,7 +11,7 @@ Homeboy turns a repo, project, or fleet into a component-aware automation surfac
 - **Local development rigs** — Materialize reproducible multi-component environments and combined-fixes branches.
 - **Performance benchmarks** — Run benchmark scenarios with baselines, ratchets, regression gates, and rig-scoped comparisons.
 - **Dependency and attention loops** — Surface dependency drift, failing checks, open issues, and structured review artifacts.
-- **Fleet operations** — Deploy components, inspect servers, query databases, read files, tail logs, and transfer artifacts.
+- **Fleet operations** — Deploy components, inspect servers, query databases, read files, tail logs, and copy artifacts.
 - **Agent-ready output** — Write stable JSON artifacts for automation and AI agents without scraping terminal logs.
 
 ## Architecture
@@ -158,8 +158,8 @@ The release family keeps version targets, changelogs, tags, and release artifact
 
 ```bash
 homeboy changes
-homeboy version
-homeboy changelog
+homeboy version show
+homeboy changelog show
 homeboy release
 ```
 
@@ -228,7 +228,7 @@ That model backs ops commands:
 ```bash
 homeboy deploy my-project
 homeboy ssh production
-homeboy logs production
+homeboy logs show production --follow
 homeboy db query production "select 1"
 homeboy file read production /path/to/file
 homeboy file copy production:/path/to/file staging:/path/to/file
@@ -240,7 +240,7 @@ This is a map, not a generated reference. Use `homeboy <command> --help` or [doc
 
 | Area | Commands |
 |------|----------|
-| Code quality / review | `audit`, `lint`, `test`, `review`, `refactor`, `build`, `validate` |
+| Code quality / review | `audit`, `lint`, `test`, `review`, `refactor`, `build` |
 | Release / changelog | `release`, `version`, `changelog`, `changes` |
 | Local dev environments | `rig`, `stack` |
 | Benchmarks | `bench` |
