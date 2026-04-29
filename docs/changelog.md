@@ -4,6 +4,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.124.0] - 2026-04-28
+
+### Added
+- enrich targeted issue reports
+- render failure digests from command outputs
+
+### Changed
+- cover repeatable PR comment banners
+
+### Fixed
+- classify changed-since context findings
+- suppress boundary DTO field-pattern noise
+- close stale reconcile categories
+- route changed WordPress files by runner
+
 ## [0.123.1] - 2026-04-28
 
 ### Fixed
