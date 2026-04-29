@@ -8,6 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -68,6 +69,7 @@ pub struct TriageOptions {
     pub needs_review: bool,
     pub failing_checks: bool,
     pub drilldown: bool,
+    pub issue_numbers: Vec<u64>,
     pub stale_days: Option<i64>,
     pub limit: usize,
 }
@@ -159,6 +161,18 @@ pub struct TriageIssueItem {
     pub updated_at: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub linked_prs: Vec<TriageLinkedPr>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TriageLinkedPr {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -597,10 +611,7 @@ fn fetch_component_report(
     let mut error = None;
     let issues = if options.include_issues {
         match fetch_issues(&repo, options, stale_cutoff) {
-            Ok(items) => Some(TriageIssueBucket {
-                open: items.len(),
-                items,
-            }),
+            Ok(items) => Some(issue_bucket(items)),
             Err(e) => {
                 error = Some(e);
                 Some(TriageIssueBucket {
@@ -650,12 +661,23 @@ fn fetch_component_report(
     }
 }
 
+fn issue_bucket(items: Vec<TriageIssueItem>) -> TriageIssueBucket {
+    TriageIssueBucket {
+        open: items.iter().filter(|item| item.state == "OPEN").count(),
+        items,
+    }
+}
+
 fn fetch_issues(
     repo: &GitHubRepo,
     options: &TriageOptions,
     stale_cutoff: Option<DateTime<Utc>>,
 ) -> std::result::Result<Vec<TriageIssueItem>, String> {
     ensure_gh_ready()?;
+    if !options.issue_numbers.is_empty() {
+        return fetch_targeted_issues(repo, options, stale_cutoff);
+    }
+
     let mut args = vec![
         "issue".to_string(),
         "list".to_string(),
@@ -683,6 +705,30 @@ fn fetch_issues(
 
     let raw = run_gh(&args)?;
     parse_issues(&raw, stale_cutoff)
+}
+
+fn fetch_targeted_issues(
+    repo: &GitHubRepo,
+    options: &TriageOptions,
+    stale_cutoff: Option<DateTime<Utc>>,
+) -> std::result::Result<Vec<TriageIssueItem>, String> {
+    let mut items = Vec::new();
+    for number in &options.issue_numbers {
+        let args = vec![
+            "issue".to_string(),
+            "view".to_string(),
+            number.to_string(),
+            "-R".to_string(),
+            format!("{}/{}", repo.owner, repo.repo),
+            "--json".to_string(),
+            "number,title,url,state,labels,assignees,updatedAt".to_string(),
+        ];
+        let raw = run_gh(&args)?;
+        let mut issue = parse_issue(&raw, stale_cutoff)?;
+        issue.linked_prs = fetch_linked_prs(repo, issue.number)?;
+        items.push(issue);
+    }
+    Ok(items)
 }
 
 fn fetch_prs(
@@ -784,18 +830,75 @@ fn parse_issues(
     let parsed: Vec<RawIssue> = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
     Ok(parsed
         .into_iter()
-        .map(|item| {
-            let stale = is_stale(item.updated_at.as_deref(), stale_cutoff);
-            TriageIssueItem {
-                number: item.number,
-                title: item.title,
-                url: item.url,
-                state: item.state,
-                labels: item.labels.into_iter().filter_map(|l| l.name).collect(),
-                assignees: item.assignees.into_iter().filter_map(|a| a.login).collect(),
-                updated_at: item.updated_at,
-                stale,
-            }
+        .map(|item| raw_issue_to_item(item, stale_cutoff))
+        .collect())
+}
+
+fn parse_issue(
+    raw: &str,
+    stale_cutoff: Option<DateTime<Utc>>,
+) -> std::result::Result<TriageIssueItem, String> {
+    let parsed: RawIssue = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
+    Ok(raw_issue_to_item(parsed, stale_cutoff))
+}
+
+fn raw_issue_to_item(item: RawIssue, stale_cutoff: Option<DateTime<Utc>>) -> TriageIssueItem {
+    let stale = is_stale(item.updated_at.as_deref(), stale_cutoff);
+    TriageIssueItem {
+        number: item.number,
+        title: item.title,
+        url: item.url,
+        state: item.state,
+        labels: item.labels.into_iter().filter_map(|l| l.name).collect(),
+        assignees: item.assignees.into_iter().filter_map(|a| a.login).collect(),
+        updated_at: item.updated_at,
+        stale,
+        linked_prs: Vec::new(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLinkedPr {
+    number: u64,
+    title: String,
+    url: String,
+    state: String,
+    #[serde(default, rename = "mergedAt")]
+    merged_at: Option<String>,
+}
+
+fn fetch_linked_prs(
+    repo: &GitHubRepo,
+    issue_number: u64,
+) -> std::result::Result<Vec<TriageLinkedPr>, String> {
+    let args = vec![
+        "pr".to_string(),
+        "list".to_string(),
+        "-R".to_string(),
+        format!("{}/{}", repo.owner, repo.repo),
+        "--state".to_string(),
+        "all".to_string(),
+        "--search".to_string(),
+        format!("#{issue_number}"),
+        "--limit".to_string(),
+        "30".to_string(),
+        "--json".to_string(),
+        "number,title,url,state,mergedAt".to_string(),
+    ];
+    let raw = run_gh(&args)?;
+    parse_linked_prs(&raw)
+}
+
+fn parse_linked_prs(raw: &str) -> std::result::Result<Vec<TriageLinkedPr>, String> {
+    let parsed: Vec<RawLinkedPr> = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
+    Ok(parsed
+        .into_iter()
+        .map(|item| TriageLinkedPr {
+            number: item.number,
+            title: item.title,
+            url: item.url,
+            state: item.state,
+            merged_at: item.merged_at,
         })
         .collect())
 }
@@ -1002,6 +1105,7 @@ fn build_actions(
         let urgent = issues
             .items
             .iter()
+            .filter(|issue| issue.state == "OPEN")
             .filter(|issue| issue_has_priority_label(issue, priority_labels))
             .count();
         if urgent > 0 {
@@ -1014,6 +1118,7 @@ fn build_actions(
         let untriaged = issues
             .items
             .iter()
+            .filter(|issue| issue.state == "OPEN")
             .filter(|issue| issue.labels.is_empty() && issue.assignees.is_empty())
             .count();
         if untriaged > 0 {
@@ -1023,7 +1128,12 @@ fn build_actions(
                 label: pluralize(untriaged, "untriaged issue", "untriaged issues"),
             });
         }
-        let stale = issues.items.iter().filter(|issue| issue.stale).count();
+        let stale = issues
+            .items
+            .iter()
+            .filter(|issue| issue.state == "OPEN")
+            .filter(|issue| issue.stale)
+            .count();
         if stale > 0 {
             actions.push(TriageAction {
                 kind: "stale_issues".to_string(),
@@ -1121,7 +1231,12 @@ fn summarize(
     for component in components {
         if let Some(issues) = &component.issues {
             summary.open_issues += issues.open;
-            summary.stale += issues.items.iter().filter(|item| item.stale).count();
+            summary.stale += issues
+                .items
+                .iter()
+                .filter(|item| item.state == "OPEN")
+                .filter(|item| item.stale)
+                .count();
         }
         if let Some(prs) = &component.pull_requests {
             summary.open_prs += prs.open;
@@ -1162,6 +1277,52 @@ pub fn parse_stale_days(input: &str) -> Result<i64> {
         ));
     }
     Ok(days)
+}
+
+pub fn parse_issue_numbers_file(path: &Path) -> Result<Vec<u64>> {
+    let content = fs::read_to_string(path).map_err(|e| {
+        Error::validation_invalid_argument(
+            "issues-from-file",
+            format!("Failed to read issue list: {e}"),
+            Some(path.display().to_string()),
+            None,
+        )
+    })?;
+    parse_issue_numbers(&content)
+}
+
+fn parse_issue_numbers(input: &str) -> Result<Vec<u64>> {
+    let mut numbers = Vec::new();
+    for (index, line) in input.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some(value) = parse_issue_number_line(trimmed) else {
+            continue;
+        };
+        let number: u64 = value.parse().map_err(|_| {
+            Error::validation_invalid_argument(
+                "issues-from-file",
+                format!("Expected issue number on line {}", index + 1),
+                Some(trimmed.to_string()),
+                None,
+            )
+        })?;
+        numbers.push(number);
+    }
+    Ok(numbers)
+}
+
+fn parse_issue_number_line(line: &str) -> Option<&str> {
+    if let Some(value) = line.strip_prefix('#') {
+        return value
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            .then_some(value);
+    }
+    Some(line)
 }
 
 #[cfg(test)]
@@ -1271,6 +1432,114 @@ mod tests {
         assert_eq!(items[0].labels, vec!["P1"]);
         assert_eq!(items[0].assignees, vec!["chubes4"]);
         assert!(items[0].stale);
+        assert!(items[0].linked_prs.is_empty());
+    }
+
+    #[test]
+    fn parse_issue_accepts_single_issue_view_payload() {
+        let raw = r#"{
+          "number": 8,
+          "title": "Closed bug",
+          "url": "https://github.com/o/r/issues/8",
+          "state": "CLOSED",
+          "labels": [],
+          "assignees": [],
+          "updatedAt": "2026-04-01T00:00:00Z"
+        }"#;
+
+        let item = parse_issue(raw, None).unwrap();
+
+        assert_eq!(item.number, 8);
+        assert_eq!(item.state, "CLOSED");
+        assert!(item.linked_prs.is_empty());
+    }
+
+    #[test]
+    fn issue_bucket_counts_only_open_targeted_issues() {
+        let bucket = issue_bucket(vec![
+            TriageIssueItem {
+                number: 1,
+                title: "Open".to_string(),
+                url: "https://github.com/o/r/issues/1".to_string(),
+                state: "OPEN".to_string(),
+                labels: vec![],
+                assignees: vec![],
+                updated_at: None,
+                stale: false,
+                linked_prs: Vec::new(),
+            },
+            TriageIssueItem {
+                number: 2,
+                title: "Closed".to_string(),
+                url: "https://github.com/o/r/issues/2".to_string(),
+                state: "CLOSED".to_string(),
+                labels: vec![],
+                assignees: vec![],
+                updated_at: None,
+                stale: false,
+                linked_prs: Vec::new(),
+            },
+        ]);
+
+        assert_eq!(bucket.open, 1);
+        assert_eq!(bucket.items.len(), 2);
+    }
+
+    #[test]
+    fn issue_actions_ignore_closed_targeted_issues() {
+        let issues = TriageIssueBucket {
+            open: 0,
+            items: vec![TriageIssueItem {
+                number: 1,
+                title: "Closed".to_string(),
+                url: "https://github.com/o/r/issues/1".to_string(),
+                state: "CLOSED".to_string(),
+                labels: vec!["P1".to_string()],
+                assignees: vec![],
+                updated_at: None,
+                stale: true,
+                linked_prs: Vec::new(),
+            }],
+        };
+
+        let actions = build_actions(Some(&issues), None, &default_priority_labels_vec());
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn parse_linked_prs_extracts_merge_timestamp() {
+        let raw = r#"[
+            {
+              "number": 12,
+              "title": "Fix auth",
+              "url": "https://github.com/o/r/pull/12",
+              "state": "MERGED",
+              "mergedAt": "2026-04-03T00:00:00Z"
+            },
+            {
+              "number": 13,
+              "title": "Follow-up",
+              "url": "https://github.com/o/r/pull/13",
+              "state": "OPEN",
+              "mergedAt": null
+            }
+        ]"#;
+
+        let items = parse_linked_prs(raw).unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].number, 12);
+        assert_eq!(items[0].merged_at.as_deref(), Some("2026-04-03T00:00:00Z"));
+        assert!(items[1].merged_at.is_none());
+    }
+
+    #[test]
+    fn parse_issue_numbers_allows_hash_prefix_and_comments() {
+        let parsed = parse_issue_numbers("# first comment\n1531\n#1538\n\n1501\n").unwrap();
+
+        assert_eq!(parsed, vec![1531, 1538, 1501]);
+        assert!(parse_issue_numbers("1531\nabc\n").is_err());
     }
 
     #[test]
@@ -1696,6 +1965,7 @@ mod tests {
                         assignees: vec![],
                         updated_at: None,
                         stale: false,
+                        linked_prs: Vec::new(),
                     },
                     TriageIssueItem {
                         number: 3,
@@ -1706,6 +1976,7 @@ mod tests {
                         assignees: vec![],
                         updated_at: None,
                         stale: false,
+                        linked_prs: Vec::new(),
                     },
                 ],
             }),
@@ -1788,6 +2059,7 @@ mod tests {
                     assignees: vec![],
                     updated_at: None,
                     stale: false,
+                    linked_prs: Vec::new(),
                 })
                 .collect(),
         }
