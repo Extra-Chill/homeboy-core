@@ -136,7 +136,7 @@ Extensions can define additional environment variables via `runtime.env` in thei
 
 `homeboy extension run` and `extension.run` pipeline steps share the same execution core (template vars, settings JSON, and env handling). Both paths keep the same CLI output contract while sharing internal execution behavior.
 
-Extension settings validation happens during extension execution and may also be checked by other commands. Use the top-level `homeboy validate [component]` command for component parse/compile validation without running the full test suite.
+Extension settings validation happens during extension execution and may also be checked by other commands.
 
 `homeboy extension run` requires the extension to be installed/linked under the Homeboy extensions directory (discovered by scanning `<config dir>/homeboy/extensions/<extension_id>/<extension_id>.json`). There is no separate "installedModules in global config" requirement.
 

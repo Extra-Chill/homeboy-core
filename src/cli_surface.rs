@@ -4,7 +4,7 @@ use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
     deps, extension, file, fleet, git, init, issues, lint, logs, project, refactor, release,
     report, review, rig, self_cmd, server, ssh, stack, status, test, triage, undo, upgrade,
-    validate, version,
+    version,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -82,8 +82,6 @@ pub enum Commands {
     Version(version::VersionArgs),
     /// Build a component
     Build(build::BuildArgs),
-    /// Validate that code compiles/parses (runs extension scripts.validate)
-    Validate(validate::ValidateArgs),
     /// Show changes since last version tag
     Changes(changes::ChangesArgs),
     /// Plan release workflows

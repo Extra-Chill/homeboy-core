@@ -313,7 +313,6 @@ pub mod triage;
 pub mod undo;
 pub mod upgrade;
 pub mod utils;
-pub mod validate;
 pub mod version;
 
 pub fn run_markdown(
@@ -374,7 +373,6 @@ pub fn run_json(
         crate::cli_surface::Commands::Issues(args) => dispatch!(args, global, issues),
         crate::cli_surface::Commands::Version(args) => dispatch!(args, global, version),
         crate::cli_surface::Commands::Build(args) => dispatch!(args, global, build),
-        crate::cli_surface::Commands::Validate(args) => dispatch!(args, global, validate),
         crate::cli_surface::Commands::Changes(args) => dispatch!(args, global, changes),
         crate::cli_surface::Commands::Release(args) => dispatch!(args, global, release),
         crate::cli_surface::Commands::Report(args) => dispatch!(args, global, report),
