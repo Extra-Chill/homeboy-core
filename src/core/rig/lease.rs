@@ -256,13 +256,10 @@ fn pid_is_live(pid: u32) -> bool {
     }
     #[cfg(unix)]
     {
-        std::process::Command::new("kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+        if pid > i32::MAX as u32 {
+            return false;
+        }
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
     }
     #[cfg(not(unix))]
     {
