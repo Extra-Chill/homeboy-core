@@ -10,8 +10,9 @@ use crate::paths as base_path;
 use crate::project::Project;
 
 use super::planning::{calculate_directory_size, format_bytes};
+use super::policy::{owner_hint_for_path, protected_path_suffixes, validate_deploy_target};
 use super::release_download;
-use super::safety_and_artifact::{deploy_artifact, deploy_via_git, validate_deploy_target};
+use super::safety_and_artifact::{deploy_artifact, deploy_via_git};
 use super::types::{ComponentDeployResult, DeployConfig, DeployResult};
 use super::version_overrides::{
     deploy_with_override, find_deploy_override, find_deploy_verification, is_self_deploy,
@@ -61,10 +62,9 @@ pub(super) fn execute_component_deploy(
         .with_build_exit_code(build_exit_code);
     }
 
-    // Auto-resolve remote_path for WordPress components when not explicitly set.
+    // Auto-resolve remote_path from linked extension deploy policy when not explicitly set.
     // This is a deploy-time safety net; the primary resolution happens in
-    // resolve_project_component (#812). Plugins deploy to wp-content/plugins/{id},
-    // themes to wp-content/themes/{id}.
+    // resolve_project_component (#812).
     let effective_remote_path = if component.remote_path.trim().is_empty() {
         if let Some(resolved) = component.auto_resolve_remote_path() {
             log_status!("deploy", "Auto-resolved remote path: {}", resolved);
@@ -76,48 +76,48 @@ pub(super) fn execute_component_deploy(
         component.remote_path.clone()
     };
 
-    // Warn when deploying to a WordPress path without remote_owner configured.
-    // Files will end up as root:root which breaks WordPress functionality (#602).
-    if component.remote_owner.is_none() && effective_remote_path.contains("wp-content/") {
-        log_status!(
-            "deploy",
-            "⚠ Component '{}' deploys to a WordPress path but has no remote_owner set. \
-             Files may deploy as root:root. \
-             Fix: homeboy component set {} --json '{{\"remote_owner\":\"www-data:www-data\"}}'",
-            component.id,
-            component.id
-        );
+    if component.remote_owner.is_none() {
+        if let Some(suggested_owner) = owner_hint_for_path(component, &effective_remote_path) {
+            log_status!(
+                "deploy",
+                "⚠ Component '{}' deploys to a path that may need remote_owner='{}'. \
+             Files may deploy with the SSH user's ownership. \
+             Fix: homeboy component set {} --json '{{\"remote_owner\":\"{}\"}}'",
+                component.id,
+                suggested_owner,
+                component.id,
+                suggested_owner
+            );
+        }
     }
 
-    // Resolve install directory
-    let install_dir = match base_path::join_remote_path(Some(base_path), &effective_remote_path) {
-        Ok(v) => v,
+    // Resolve and validate install directory before any destructive operation.
+    let install_dir = match base_path::join_remote_path(Some(base_path), &effective_remote_path)
+        .and_then(|install_dir| {
+            validate_deploy_target(
+                &install_dir,
+                base_path,
+                &component.id,
+                &protected_path_suffixes(component),
+            )?;
+            Ok(install_dir)
+        }) {
+        Ok(install_dir) => install_dir,
         Err(err) => {
-            return ComponentDeployResult::failed(
+            return failed_component_deploy_result(
                 component,
                 base_path,
                 local_version,
                 remote_version,
+                build_exit_code,
                 err.to_string(),
-            )
-            .with_build_exit_code(build_exit_code);
+            );
         }
     };
 
-    // Safety check: prevent deploying to shared parent directories (issue #353)
-    if let Err(err) = validate_deploy_target(&install_dir, base_path, &component.id) {
-        return ComponentDeployResult::failed(
-            component,
-            base_path,
-            local_version,
-            remote_version,
-            err.to_string(),
-        )
-        .with_build_exit_code(build_exit_code);
-    }
-
     // Dispatch by deploy strategy
     let strategy = component.deploy_strategy.as_deref().unwrap_or("rsync");
+    let versions = (local_version, remote_version);
 
     if strategy == "git" {
         return execute_git_deploy(
@@ -126,8 +126,8 @@ pub(super) fn execute_component_deploy(
             ctx,
             base_path,
             &install_dir,
-            local_version,
-            remote_version,
+            versions.0,
+            versions.1,
         );
     }
 
@@ -137,8 +137,8 @@ pub(super) fn execute_component_deploy(
             ctx,
             base_path,
             &install_dir,
-            local_version,
-            remote_version,
+            versions.0,
+            versions.1,
         );
     }
 
@@ -149,11 +149,23 @@ pub(super) fn execute_component_deploy(
         base_path,
         project,
         &install_dir,
-        local_version,
-        remote_version,
+        versions.0,
+        versions.1,
         build_exit_code,
         release_artifact.as_ref(),
     )
+}
+
+fn failed_component_deploy_result(
+    component: &Component,
+    base_path: &str,
+    local_version: Option<String>,
+    remote_version: Option<String>,
+    build_exit_code: Option<i32>,
+    error: String,
+) -> ComponentDeployResult {
+    ComponentDeployResult::failed(component, base_path, local_version, remote_version, error)
+        .with_build_exit_code(build_exit_code)
 }
 
 /// Deploy a component via git push strategy.
@@ -635,5 +647,35 @@ fn cleanup_build_dependencies(
             format_bytes(total_bytes_freed)
         );
         Ok(Some(summary))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failed_component_deploy_result;
+    use crate::component::Component;
+
+    #[test]
+    fn test_execute_component_deploy_failure_helper_preserves_build_exit_code() {
+        let component = Component {
+            id: "example".to_string(),
+            ..Component::default()
+        };
+
+        let result = failed_component_deploy_result(
+            &component,
+            "/srv/site",
+            Some("1.0.0".to_string()),
+            Some("0.9.0".to_string()),
+            Some(7),
+            "deploy failed".to_string(),
+        );
+
+        assert_eq!(result.id, "example");
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.local_version.as_deref(), Some("1.0.0"));
+        assert_eq!(result.remote_version.as_deref(), Some("0.9.0"));
+        assert_eq!(result.build_exit_code, Some(7));
+        assert_eq!(result.error.as_deref(), Some("deploy failed"));
     }
 }

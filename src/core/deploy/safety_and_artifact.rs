@@ -13,78 +13,8 @@ use crate::server::SshClient;
 use super::transfer::{upload_directory, upload_file};
 use super::types::DeployResult;
 
-/// Well-known shared directory names that typically contain multiple sibling components.
-///
-/// Deploy targets ending with one of these are almost certainly misconfigured —
-/// the `remote_path` should point to the component's own subdirectory inside
-/// these directories, not the directory itself. Deploying directly into a shared
-/// directory would destroy sibling components during the pre-extraction clean step.
-///
-/// This list covers common package manager and framework conventions. Extensions
-/// can declare additional protected directories via their deploy configuration.
-const DANGEROUS_PATH_SUFFIXES: &[&str] = &[
-    "/plugins",
-    "/themes",
-    "/mu-plugins",
-    "/wp-content",
-    "/wp-content/uploads",
-    "/node_modules",
-    "/vendor",
-    "/packages",
-    "/extensions",
-];
-
-/// Validate that a deploy target path is safe for destructive operations.
-///
-/// Prevents catastrophic data loss (issue #353) by catching cases where
-/// `remote_path` resolves to a shared parent directory instead of the
-/// component's own subdirectory. Two checks:
-///
-/// 1. The resolved path must not end with a known shared directory suffix
-///    (e.g., `/wp-content/plugins`).
-/// 2. The resolved path must not equal the project's `base_path` — deploying
-///    directly to the site root would destroy the entire site.
-pub(super) fn validate_deploy_target(
-    install_dir: &str,
-    base_path: &str,
-    component_id: &str,
-) -> Result<()> {
-    let normalized = install_dir.trim_end_matches('/');
-    let base_normalized = base_path.trim_end_matches('/');
-
-    // Guard 1: target must not be the base_path itself
-    if normalized == base_normalized {
-        return Err(Error::validation_invalid_argument(
-            "remotePath",
-            format!(
-                "Deploy target '{}' resolves to the project base_path — this would destroy the entire project. \
-                 Set remote_path to the component's own subdirectory within the project",
-                install_dir
-            ),
-            Some(install_dir.to_string()),
-            None,
-        ));
-    }
-
-    // Guard 2: target must not end with a known shared directory
-    for suffix in DANGEROUS_PATH_SUFFIXES {
-        if normalized.ends_with(suffix) {
-            return Err(Error::validation_invalid_argument(
-                "remotePath",
-                format!(
-                    "Deploy target '{}' is a shared parent directory — deploying here would delete \
-                     sibling components. Set remote_path to the component's own subdirectory \
-                     (e.g., '{}/{}')",
-                    install_dir, normalized, component_id
-                ),
-                Some(install_dir.to_string()),
-                None,
-            ));
-        }
-    }
-
-    Ok(())
-}
+/// Framework-neutral shared directory names that typically contain sibling components.
+const DANGEROUS_PATH_SUFFIXES: &[&str] = &["/node_modules", "/vendor", "/packages", "/extensions"];
 
 /// Deploy a component via git pull on the remote server.
 pub(super) fn deploy_via_git(
@@ -357,4 +287,28 @@ fn render_extract_command(template: &str, vars: &HashMap<String, String>) -> Str
         result = result.replace(&format!("{{{}}}", key), value);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_extract_command, DANGEROUS_PATH_SUFFIXES};
+
+    #[test]
+    fn test_deploy_artifact_extract_command_template_replaces_vars() {
+        let vars = std::collections::HashMap::from([
+            ("archive".to_string(), "artifact.zip".to_string()),
+            ("target".to_string(), "/srv/site/plugin".to_string()),
+        ]);
+
+        assert_eq!(
+            render_extract_command("unzip {archive} -d {target}", &vars),
+            "unzip artifact.zip -d /srv/site/plugin"
+        );
+    }
+
+    #[test]
+    fn test_deploy_via_git_keeps_framework_safety_policy_external() {
+        assert!(DANGEROUS_PATH_SUFFIXES.contains(&"/vendor"));
+        assert!(!DANGEROUS_PATH_SUFFIXES.contains(&"/wp-content/plugins"));
+    }
 }
