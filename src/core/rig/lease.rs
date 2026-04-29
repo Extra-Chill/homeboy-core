@@ -165,7 +165,7 @@ fn prune_stale_leases() -> Result<()> {
         let Some(lease) = read_lease(&path)? else {
             continue;
         };
-        if !pid_is_live(lease.pid) {
+        if !crate::core::daemon::pid_is_running(lease.pid) {
             fs::remove_file(&path).map_err(|e| {
                 Error::internal_unexpected(format!(
                     "Failed to remove stale rig lease {}: {}",
@@ -182,7 +182,7 @@ fn live_leases() -> Result<Vec<RigRunLease>> {
     let mut leases = Vec::new();
     for path in lease_files()? {
         if let Some(lease) = read_lease(&path)? {
-            if pid_is_live(lease.pid) {
+            if crate::core::daemon::pid_is_running(lease.pid) {
                 leases.push(lease);
             }
         }
@@ -248,23 +248,6 @@ fn sanitize_id(id: &str) -> String {
             }
         })
         .collect()
-}
-
-fn pid_is_live(pid: u32) -> bool {
-    if pid == std::process::id() {
-        return true;
-    }
-    #[cfg(unix)]
-    {
-        if pid > i32::MAX as u32 {
-            return false;
-        }
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
 }
 
 #[cfg(test)]
