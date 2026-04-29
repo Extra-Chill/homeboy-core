@@ -1,51 +1,51 @@
 # Homeboy
 
-Code factory + fleet ops CLI. Audits for slop, lints, tests, refactors, releases, deploys, manages dev rigs, and ratchets performance benchmarks — all with a stable JSON envelope so AI agents and CI scripts can drive it without screen-scraping. If it can be fixed mechanically, Homeboy will find it and fix it without human input.
+Homeboy is a component-aware automation CLI for local development, CI, releases, dev rigs, stacks, benchmarks, dependency maintenance, triage, and ops. It runs the same workflows from your terminal or from GitHub Actions, and it can write stable JSON output so agents and scripts can consume results without scraping logs.
 
-Homeboy ships four pillars from one binary:
+Homeboy is Chris Huber's working automation tool. It is designed to make the repos he maintains easier to develop, review, release, deploy, and operate from one binary.
 
-- **Code Factory** — `audit` / `lint` / `test` / `refactor` / `release` with the autofix loop.
-- **Fleet & Ops** — `deploy`, `ssh`, `file`, `db`, `logs`, `transfer`, `server`, `project`, `component`, `fleet`.
-- **Dev Rig** — `rig` and `stack` for reproducible, code-defined local dev environments and combined-fixes branches.
-- **Bench** — performance benchmarks with baseline ratchet, sibling of `lint` / `test` / `build`.
+## Operating Modes
 
-## How It Works
+Homeboy is not just a CI robot. The same component model drives several workflows:
 
-You push code. Homeboy does the rest.
-
-```
-merge to main
-     |
-     v
-  ┌──────────────────────────────────────────────┐
-  │  cron wakes up (every 15 min)                │
-  │                                              │
-  │  1. releasable commits?  (feat: / fix:)      │
-  │  2. audit    → find slop, autofix, ratchet   │
-  │  3. lint     → format, autofix, commit back  │
-  │  4. test     → run suite, fix what it can    │
-  │  5. version bump   (from commit types)       │
-  │  6. changelog      (from commit messages)    │
-  │  7. tag + push                               │
-  │  8. cross-platform builds (5 targets)        │
-  │  9. publish: GitHub + crates.io + Homebrew   │
-  │ 10. auto-refactor  (post-release cleanup)    │
-  └──────────────────────────────────────────────┘
-     |
-     v
-  humans provide features, code maintains itself
+```text
+                         ┌─────────────────────────────┐
+                         │        homeboy.json          │
+                         │ component id + extensions   │
+                         └──────────────┬──────────────┘
+                                        │
+        ┌───────────────────────────────┼───────────────────────────────┐
+        │                               │                               │
+        v                               v                               v
+┌────────────────┐              ┌────────────────┐              ┌────────────────┐
+│ Local terminal │              │ GitHub Actions │              │ Agent/runtime  │
+│ audit/lint/test│              │ checks/release │              │ JSON artifacts │
+└───────┬────────┘              └───────┬────────┘              └───────┬────────┘
+        │                               │                               │
+        v                               v                               v
+┌────────────────┐              ┌────────────────┐              ┌────────────────┐
+│ Dev substrate  │              │ Release/deploy │              │ Attention loop │
+│ rig/stack/bench│              │ tag/changelog  │              │ triage/report  │
+└────────────────┘              └────────────────┘              └────────────────┘
 ```
 
-No version files to edit. No changelog to write. No release button to click.
+## Product Pillars
 
-- `fix:` commit → **patch** release
-- `feat:` commit → **minor** release
-- `BREAKING CHANGE` → **major** release
-- `chore:` / `ci:` / `docs:` / `test:` → no release
+- **Code quality and review** — `audit`, `lint`, `test`, `review`, and `refactor` find drift, run project checks, produce PR-ready summaries, and apply safe mechanical fixes.
+- **Release and changelog** — `release`, `version`, `changelog`, and `changes` derive version bumps and release notes from conventional commits instead of hand-edited version files.
+- **Local dev environments** — `rig` materializes reproducible multi-component setups, while `stack` manages combined-fixes branches built from a base branch plus declared PRs.
+- **Benchmarks** — `bench` runs extension-provided performance scenarios with baselines, ratchets, regression gates, and rig-scoped comparisons.
+- **Dependencies and attention** — `deps`, `triage`, `status`, `issues`, and `report` surface dependency drift, open work, findings, and structured review artifacts.
+- **Fleet and ops** — `deploy`, `ssh`, `file`, `db`, `logs`, and `transfer` manage servers and deployed projects from the same component/project/fleet model.
+- **Extensions and platforms** — extensions add platform-specific behavior such as `wp` for WordPress and `cargo` for Rust without changing the core command contract.
+
+For exhaustive command docs, see [docs/commands/commands-index.md](docs/commands/commands-index.md) or run `homeboy docs list`.
 
 ## Quick Start
 
-### 1. Add `homeboy.json` to your repo
+### 1. Add `homeboy.json`
+
+Put a portable component config at the repo root:
 
 ```json
 {
@@ -56,10 +56,32 @@ No version files to edit. No changelog to write. No release button to click.
 }
 ```
 
-### 2. Add CI
+Use the extension that matches the repo. For example, Rust projects can use `rust`, and WordPress projects can use `wordpress`.
+
+### 2. Run local quality gates
+
+Start locally before wiring CI:
+
+```bash
+homeboy audit
+homeboy lint
+homeboy test
+homeboy review
+```
+
+The same commands can also target a component explicitly or use a checkout path:
+
+```bash
+homeboy review my-project --changed-since origin/main
+homeboy lint my-project --path /path/to/worktree
+```
+
+### 3. Add CI when the local loop is useful
+
+`Extra-Chill/homeboy-action@v2` installs Homeboy in GitHub Actions, sets up extensions, runs commands, posts PR comments, and can apply safe autofixes.
 
 ```yaml
-name: CI
+name: Homeboy
 on: [pull_request]
 
 jobs:
@@ -70,17 +92,14 @@ jobs:
       - uses: Extra-Chill/homeboy-action@v2
         with:
           extension: rust
-          commands: audit,lint,test
-          autofix: 'true'
+          commands: audit,lint,test,review
 ```
 
-### 3. Add continuous release
+Release automation can be manual, scheduled, or CI-driven. Use the same action when you want release jobs to run in GitHub Actions:
 
 ```yaml
 name: Release
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -97,229 +116,177 @@ jobs:
           commands: release
 ```
 
-That's it. PRs get quality checks with autofix. Main gets continuous releases. See [code-factory.md](docs/code-factory.md) for the full pipeline architecture with quality gates, baseline ratchet, and autofix loops.
+## Core Workflows
 
-## Capabilities
+### Code Quality And Review
 
-### Audit
+`homeboy audit` detects convention drift, duplication, dead code, test coverage gaps, stale docs, and structural risk. Baselines let existing debt stay visible while preventing new regressions.
 
-Discovers conventions from your codebase and flags drift. Unlike traditional linters that enforce external rules, audit **learns your patterns** and catches outliers.
+`homeboy lint` delegates formatting and static analysis to the configured extension. `homeboy test` runs the component's test suite. `homeboy review` is the PR-shaped umbrella that runs scoped audit, lint, and test checks and can render a PR-comment report.
 
-- **Convention compliance** — naming patterns, interface contracts, structural patterns
-- **Duplication** — exact duplicates, near-duplicates, parallel implementations
-- **Dead code** — unreferenced exports, orphaned functions, unused parameters
-- **Test coverage** — missing test files, missing test methods, orphaned tests
-- **Structural health** — god files, high complexity
-- **Documentation** — broken references, stale claims
-
-The baseline ratchet ensures the codebase **never gets worse**. New findings fail CI. Resolved findings auto-ratchet the baseline down. Over time, the baseline trends toward zero.
-
-### Lint
-
-Language-specific formatting and static analysis. Autofix commits formatting changes back to the PR.
-
-### Test
-
-Runs the project's test suite. Supports test drift detection — when source symbols are renamed or deleted, Homeboy identifies affected tests.
-
-### Refactor
-
-Structural improvements with safety tiers:
-
-- **Safe** — deterministic fixes auto-applied with preflight validation (imports, registrations, namespace fixes, visibility changes, doc updates)
-- **PlanOnly** — method stubs, function removals (human review required)
-
-### Rig
-
-Code-defined, reproducible local dev environments. A rig is a JSON spec at `~/.config/homeboy/rigs/<id>.json` that captures everything a dev setup needs — which components, which background services, which symlinks, which pre-flight invariants — and a linear pipeline that materializes it.
-
-- **Service supervision** — `http-static` and `command` service kinds run detached, while `external` services let rigs adopt and stop processes they did not spawn.
-- **Pipeline steps** — `service`, `command`, `symlink`, `shared-path`, `check`, `git`, `build`, and `patch`. Typed primitives reuse Homeboy's existing build/git plumbing instead of shelling out blindly.
-- **Git ops** — `status`, `pull`, `push`, `fetch`, `checkout`, `current-branch`, `rebase`, and `cherry-pick`.
-- **Stack specs** — `stack` materializes combined-fixes branches from a base ref plus a declared PR list, with `status`, `diff`, `rebase`, `sync`, and `push` helpers for keeping the branch current.
-- **Package lifecycle** — `rig install` and `rig update` install git-backed rig packages, including package subpaths, so shared rigs can live in a central repo.
-- **Verbs** — `rig up` materializes the env, `rig check` reports health without fail-fast, `rig down` tears it down, `rig sync` refreshes declared stacks, and `rig status` reports running services and last run timestamps.
-- **Variable expansion** — `${components.<id>.path}`, `${env.<NAME>}`, and `~` work across `cwd`, `command`, `link`, `target`, and check fields.
-
-The use case: cross-repo setups that today live as wiki runbooks (Studio + Playground combined-fixes, WordPress core + Gutenberg dev, sandbox + tunnel, etc).
-
-### Bench
-
-Performance benchmarks as a first-class capability, sibling of `lint` / `test` / `build`. Extensions provide the runner; Homeboy owns regression detection and the baseline ratchet.
-
-- **Baseline storage** — per-scenario snapshots stored in `homeboy.json` under `baselines.bench`. `--baseline` saves, `--ratchet` auto-updates on improvement, `--ignore-baseline` skips comparison.
-- **Regression policy** — runners declare `metric_policies` for arbitrary metrics (latency, throughput, error rate, memory). Direction (`lower_is_better` / `higher_is_better`) and percent/absolute tolerances are per-metric. Legacy fallback compares `p95_ms` with `--regression-threshold` (default 5%).
-- **Rig-pinned baselines** — `--rig <id>` keys the baseline as `bench.rig.<id>` so per-environment runs don't fight each other.
-- **Strict envelope** — runner output schema is locked at the top level; scenario-level extras are tolerated for diagnostics. Regressions exit `1` regardless of the runner's own exit code.
-
-## The Autofix Loop
-
-When a CI stage fails:
-
-1. Run fix commands (`homeboy audit --fix --write`, `homeboy lint --fix`)
-2. Commit changes as `chore(ci): apply homeboy autofixes`
-3. Push using a GitHub App token (re-triggers CI — `GITHUB_TOKEN` pushes don't)
-4. Re-run the full pipeline to verify
-5. Max-commits guard prevents infinite loops
-
-For PRs: fixes commit directly to the PR branch. For releases on protected branches: opens an autofix PR.
-
-## Beyond CI: Fleet Operations
-
-Homeboy also manages the relationship between **components**, **projects**, and **servers**.
-
+```bash
+homeboy audit --changed-since origin/main
+homeboy lint --changed-only
+homeboy test
+homeboy review --changed-since origin/main --report pr-comment
 ```
+
+`homeboy refactor` handles structural mechanical edits such as naming changes. Safe rewrites can be applied automatically; higher-risk plans stay explicit.
+
+### Release And Changelog
+
+Homeboy's release path is driven by conventional commits:
+
+- `fix:` commits produce patch releases.
+- `feat:` commits produce minor releases.
+- `BREAKING CHANGE` produces major releases.
+- `docs:`, `test:`, `ci:`, and `chore:` commits do not require a release by default.
+
+The release family keeps version targets, changelogs, tags, and release artifacts tied to the same plan:
+
+```bash
+homeboy changes
+homeboy version
+homeboy changelog
+homeboy release
+```
+
+### Local Dev Rigs And Stacks
+
+`homeboy rig` manages reproducible local environments: components, background services, symlinks, checks, git operations, builds, and patch steps. A rig can bring up a multi-repo setup, check its health, sync stacks, and tear it down.
+
+```bash
+homeboy rig install https://github.com/chubes4/homeboy-rigs.git//packages/studio
+homeboy rig up studio
+homeboy rig check studio
+homeboy rig sync studio
+homeboy rig down studio
+```
+
+`homeboy stack` manages combined-fixes branches built from a base branch plus declared PRs. It can inspect, apply, rebase, sync, diff, and push the target branch.
+
+```bash
+homeboy stack status studio-combined
+homeboy stack sync studio-combined
+homeboy stack push studio-combined
+```
+
+### Benchmarks
+
+`homeboy bench` makes benchmarks a first-class quality gate. Extensions provide the benchmark runner; Homeboy owns baseline storage, regression policies, ratchets, and rig-scoped comparisons.
+
+```bash
+homeboy bench my-project --baseline
+homeboy bench my-project --ratchet
+homeboy bench my-project --rig studio
+```
+
+### Dependencies And Attention
+
+`homeboy deps` inspects and updates component dependencies. `homeboy triage` gathers read-only attention reports across components, projects, fleets, rigs, or the whole workspace.
+
+```bash
+homeboy deps status my-project
+homeboy deps update vendor/package my-project --to '^1.2'
+homeboy status my-project
+homeboy triage workspace --mine --failing-checks
+```
+
+`homeboy issues` reconciles findings against an issue tracker, and `homeboy report` renders structured output artifacts such as review results.
+
+### Fleet And Ops
+
+Homeboy models deployed work as components attached to projects, projects attached to servers, and projects grouped into fleets.
+
+```text
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  COMPONENT  │────>│   PROJECT   │────>│   SERVER    │
-│  Plugin,    │     │  Site or    │     │  VPS, host, │
-│  theme, CLI │     │  application│     │  cloud...   │
-└─────────────┘     └─────────────┘     └─────────────┘
-                          │
-                    ┌─────┴─────┐
-                    │   FLEET   │
-                    │  Group of │
-                    │  projects │
-                    └───────────┘
+│ component   │────>│ project     │────>│ server      │
+│ plugin/CLI  │     │ site/app    │     │ VPS/host    │
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                           │
+                           v
+                    ┌─────────────┐
+                    │ fleet       │
+                    │ group       │
+                    └─────────────┘
 ```
 
-Deploy components to servers, manage SSH connections, run remote commands, tail logs, query databases, transfer files — all from one CLI with structured JSON output.
+That model backs ops commands:
 
-## Commands
-
-### Code Factory
-
-| Command | What it does |
-|---------|-------------|
-| `audit` | Discover conventions, flag drift, autofix. Baseline ratchet. |
-| `lint` | Format and static analysis with autofix. |
-| `test` | Run tests. Drift detection for renamed/deleted symbols. |
-| `refactor` | Structural renaming, decomposition, and auto-refactor with safety tiers. |
-| `review` | Scoped audit + lint + test umbrella for PR-style changes. |
-| `release` | Automated version bump + changelog + tag + push from conventional commits. |
-| `version` | Semantic version management with configurable file targets. |
-| `changelog` | Add/finalize categorized changelog entries. |
-| `changes` | Show commits and diffs since last version tag. |
-| `build` | Build a component using its configured build command. |
-| `validate` | Run extension parse/compile validation without a full test suite. |
-| `deps` | Manage component dependency updates. |
-| `git` | Component-aware git operations. |
-| `issues` | Reconcile audit findings against an issue tracker. |
-| `report` | Render structured Homeboy output artifacts. |
-| `status` | Repo state overview: uncommitted, needs-bump, ready, docs-only. |
-| `triage` | Read-only attention report across components, projects, fleets, and rigs. |
-
-### Fleet & Ops
-
-| Command | What it does |
-|---------|-------------|
-| `deploy` | Push components to projects. Single, multi-project, fleet, or shared. |
-| `ssh` | Managed SSH connections to configured servers. |
-| `file` | Remote file operations: list, read, write, find, grep. |
-| `db` | Remote database queries, search, and tunneling. |
-| `logs` | Remote log viewing and searching with live tailing. |
-| `transfer` | File transfer between servers or local/remote. |
-| `server` | Manage server connection definitions. |
-| `project` | Manage project definitions and their server bindings. |
-| `component` | Manage component definitions (plugins, themes, CLIs, libraries). |
-| `fleet` | Create and manage named groups of projects. |
-
-### Dev Rig
-
-| Command | What it does |
-|---------|-------------|
-| `rig` | Bring up / tear down / health-check reproducible local dev environments. |
-| `stack` | Manage combined-fixes branches from base refs plus cherry-picked PRs. |
-
-Rig specs are documented as schema/reference topics under `homeboy docs`; they are not a top-level CLI command.
-
-### Bench
-
-| Command | What it does |
-|---------|-------------|
-| `bench` | Run performance benchmarks with baseline ratchet and regression gating. |
-
-### Meta
-
-| Command | What it does |
-|---------|-------------|
-| `auth` | Authenticate with a project's API; credentials stored in OS keychain. |
-| `api` | Direct authenticated calls against a project's API. |
-| `config` | Read and write Homeboy configuration. |
-| `daemon` | Run the local-only HTTP API daemon. |
-| `docs` | Browse embedded documentation. All docs ship in the binary. |
-| `extension` | Install, list, and update extensions. |
-| `list` | Alias for top-level help. |
-| `self` | Inspect the active Homeboy binary and install signals. |
-| `undo` | Roll back the last Homeboy write operation when an undo snapshot exists. |
-| `upgrade` | Self-upgrade the homeboy binary. |
-
-Extensions add platform-specific commands at runtime (e.g., `homeboy wp` for WordPress, `homeboy cargo` for Rust).
-
-## Output Contract
-
-Every command returns structured JSON:
-
-```json
-{
-  "success": true,
-  "data": { ... }
-}
+```bash
+homeboy deploy my-project
+homeboy ssh production
+homeboy logs production
+homeboy db query production "select 1"
+homeboy file read production /path/to/file
+homeboy transfer production staging /path/to/file
 ```
 
-Error codes are stable and namespaced (`config.*`, `ssh.*`, `deploy.*`, `git.*`). Exit codes map to categories. This makes Homeboy reliable for AI agents and automation pipelines.
+## Command Surface Map
+
+This is a map, not a generated reference. Use `homeboy <command> --help` or [docs/commands/commands-index.md](docs/commands/commands-index.md) for exact options.
+
+| Area | Commands |
+|------|----------|
+| Code quality / review | `audit`, `lint`, `test`, `review`, `refactor`, `build`, `validate` |
+| Release / changelog | `release`, `version`, `changelog`, `changes` |
+| Local dev environments | `rig`, `stack` |
+| Benchmarks | `bench` |
+| Dependencies / attention | `deps`, `triage`, `status`, `issues`, `report` |
+| Fleet / ops | `deploy`, `ssh`, `file`, `db`, `logs`, `transfer`, `server`, `project`, `component`, `fleet` |
+| Extensions / platform verbs | `extension`, `wp`, `cargo` |
+| Meta | `config`, `docs`, `daemon`, `self`, `undo`, `auth`, `api`, `upgrade`, `list` |
+
+## JSON Output Contract
+
+Most Homeboy commands can write machine-readable output with `--output <path>` while still printing human output to stdout.
+
+```bash
+homeboy review --changed-since origin/main --output homeboy-ci-results/review.json
+homeboy bench my-project --output homeboy-ci-results/bench.json
+homeboy triage workspace --output homeboy-ci-results/triage.json
+```
+
+The output file contains command-specific JSON only, without log text. That makes Homeboy suitable for CI jobs, scheduled automation, and AI agents that need stable artifacts instead of terminal scraping.
 
 ## Extensions
 
-Extensions add platform-specific behavior. Installed from git repos, stored in `~/.config/homeboy/extensions/`.
+Extensions add platform-specific behavior while keeping the Homeboy command model consistent.
 
 | Extension | What it provides |
-|-----------|-----------------|
-| `rust` | Cargo integration, crates.io publishing, release artifacts |
-| `wordpress` | WP-CLI integration, WordPress-aware build/test/lint |
-| `nodejs` | PM2 process management |
-| `github` | GitHub release publishing |
-| `homebrew` | Homebrew tap publishing |
-| `swift` | Swift testing for macOS/iOS projects |
+|-----------|------------------|
+| `rust` | Cargo integration, Rust build/test/lint/release behavior, and crates.io artifacts. |
+| `wordpress` | WP-CLI integration, WordPress-aware build/test/lint/release behavior. |
+| `nodejs` | Node/PM2 process management. |
+| `github` | GitHub release and issue/PR integration. |
+| `homebrew` | Homebrew tap publishing. |
+| `swift` | Swift testing for macOS/iOS projects. |
 
 ```bash
 homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id rust
+homeboy extension list
 ```
 
-Browse available extensions: [homeboy-extensions](https://github.com/Extra-Chill/homeboy-extensions)
+Installed extensions can expose their own top-level verbs, such as `homeboy wp` and `homeboy cargo`.
 
 ## Configuration
 
-Global config lives in `~/.config/homeboy/`. Per-repo config lives in `homeboy.json` at the repository root.
+Global config lives in `~/.config/homeboy/`. Portable component config lives in `homeboy.json` at the repository root.
 
-```
+```text
 ~/.config/homeboy/
-├── homeboy.json       # Global defaults
-├── components/        # Component definitions
-├── projects/          # Project definitions
-├── servers/           # Server connections
-├── fleets/            # Fleet definitions
-├── extensions/        # Installed extensions
+├── homeboy.json       # global defaults
+├── components/        # registered component definitions
+├── projects/          # project definitions and server bindings
+├── servers/           # server connections
+├── fleets/            # project groups
+├── rigs/              # local dev rig specs
+├── stacks/            # stack specs
+├── extensions/        # installed extensions
 └── keys/              # SSH keys
 ```
 
-The portable `homeboy.json` in your repo is all CI needs — no registered component required.
-
-## Hooks
-
-Components and extensions can declare lifecycle hooks:
-
-| Event | When | Failure mode |
-|-------|------|-------------|
-| `pre:version:bump` | After version files updated, before commit | Fatal |
-| `post:version:bump` | After pre-bump hooks, before commit | Fatal |
-| `post:release` | After release pipeline completes | Non-fatal |
-| `post:deploy` | After deploy completes on remote | Non-fatal |
-
-## GitHub Action
-
-[homeboy-action](https://github.com/Extra-Chill/homeboy-action) runs Homeboy in CI. Installs the binary, sets up extensions, runs commands, posts PR comments with per-command status, and handles the autofix loop.
-
-See [homeboy-action README](https://github.com/Extra-Chill/homeboy-action) for full documentation.
+The portable repo-level `homeboy.json` is enough for local commands and CI. Global component/project/server/fleet config is for reusable local and ops workflows.
 
 ## Installation
 
@@ -338,15 +305,16 @@ cd homeboy && cargo install --path .
 
 ## Documentation
 
-All documentation is embedded in the binary:
+Command reference and deeper docs are checked into this repo and embedded in the binary.
 
 ```bash
-homeboy docs list                           # Browse all topics
-homeboy docs code-factory                   # The Code Factory pipeline
-homeboy docs commands/deploy                # Command reference
-homeboy docs schemas/component-schema       # Config schemas
-homeboy docs architecture/release-pipeline  # System internals
+homeboy docs list
+homeboy docs commands/commands-index
+homeboy docs code-factory
+homeboy docs schemas/component-schema
 ```
+
+Start with [docs/commands/commands-index.md](docs/commands/commands-index.md) for the command index.
 
 ## License
 
