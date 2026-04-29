@@ -278,26 +278,15 @@ fn apply_trace_overlays(
         let patch_path = PathBuf::from(overlay_path);
         let touched_files = match overlay_touched_files(&component_path, &patch_path) {
             Ok(files) => files,
-            Err(error) => {
-                if !keep {
-                    let _ = cleanup_trace_overlays(&applied);
-                }
-                return Err(error);
-            }
+            Err(error) => return cleanup_after_overlay_error(&applied, keep, error),
         };
         if let Err(error) =
             ensure_overlay_targets_clean(&component_path, &patch_path, &touched_files)
         {
-            if !keep {
-                let _ = cleanup_trace_overlays(&applied);
-            }
-            return Err(error);
+            return cleanup_after_overlay_error(&applied, keep, error);
         }
         if let Err(error) = run_git_apply(&component_path, &patch_path, false) {
-            if !keep {
-                let _ = cleanup_trace_overlays(&applied);
-            }
-            return Err(error);
+            return cleanup_after_overlay_error(&applied, keep, error);
         }
         applied.push(AppliedTraceOverlay {
             component_path: component_path.clone(),
@@ -307,6 +296,17 @@ fn apply_trace_overlays(
         });
     }
     Ok(applied)
+}
+
+fn cleanup_after_overlay_error<T>(
+    applied: &[AppliedTraceOverlay],
+    keep: bool,
+    error: Error,
+) -> Result<T> {
+    if !keep {
+        let _ = cleanup_trace_overlays(applied);
+    }
+    Err(error)
 }
 
 fn cleanup_trace_overlays(applied: &[AppliedTraceOverlay]) -> Result<()> {
