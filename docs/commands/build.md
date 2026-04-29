@@ -6,11 +6,14 @@
 homeboy build <component_id>
 homeboy build <component_id> --path /path/to/workspace/clone
 homeboy build --json '<spec>'
+homeboy build <project_id> --all
 ```
 
 ## Description
 
 Resolves a build command from the component's linked extension and runs it in the component's `local_path`.
+
+Builds are extension-owned. A component links to one build-capable extension, and Homeboy asks that extension for the command to run. One-off shell commands that do not belong in a reusable extension should live in a rig `command` step instead.
 
 ## Path Override
 
@@ -27,7 +30,7 @@ This is useful for:
 
 The override is transient — it does not modify the stored component config.
 
-Requires exactly one linked extension with build support. Component-level `build_command` is not supported; for one-off shell builds, define a rig `command` step instead.
+Requires exactly one linked extension with build support. Component-level `build_command` is not supported as configuration; the `build_command` field in command output is the command Homeboy resolved from the linked extension for this run.
 
 Useful remediation paths when a component is not buildable:
 
@@ -62,12 +65,14 @@ Example extension configuration:
 {
   "command": "build.run",
   "component_id": "<component_id>",
-  "build_command": "<command string>",
+  "build_command": "<extension-resolved command string>",
   "stdout": "<stdout>",
   "stderr": "<stderr>",
   "success": true
 }
 ```
+
+`stdout` and `stderr` are omitted when empty. `build_command` is diagnostic output from extension resolution, not a component-level config field.
 
 ### Bulk (`--json`)
 
@@ -77,22 +82,19 @@ Example extension configuration:
   "results": [
     {
       "id": "<component_id>",
-      "result": {
-        "command": "build.run",
-        "component_id": "<component_id>",
-        "build_command": "<command string>",
-        "stdout": "<stdout>",
-        "stderr": "<stderr>",
-        "success": true
-      },
-      "error": null
+      "command": "build.run",
+      "component_id": "<component_id>",
+      "build_command": "<extension-resolved command string>",
+      "stdout": "<stdout>",
+      "stderr": "<stderr>",
+      "success": true
     }
   ],
   "summary": { "total": 1, "succeeded": 1, "failed": 0 }
 }
 ```
 
-Bulk JSON input uses `component_ids`:
+Bulk JSON input accepts either a JSON array or an object with `component_ids`:
 
 ```json
 { "component_ids": ["component-a", "component-b"] }
