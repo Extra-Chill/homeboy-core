@@ -35,6 +35,38 @@ fn render(dir: &Path, results: &str, autofix_enabled: bool, autofix_attempted: b
     .expect("failure digest should render")
 }
 
+fn trace_json(status: &str, summary: &str) -> String {
+    format!(
+        r#"{{
+            "success": {success},
+            "data": {{
+                "passed": {success},
+                "status": "{status}",
+                "component": "studio",
+                "exit_code": {exit_code},
+                "artifacts": [
+                    {{"label":"main log","path":"artifacts/main.log"}},
+                    {{"label":"process tree","path":"artifacts/process-tree.txt"}}
+                ],
+                "results": {{
+                    "component_id": "studio",
+                    "scenario_id": "close-window-running-site",
+                    "status": "{status}",
+                    "summary": "{summary}",
+                    "timeline": [],
+                    "assertions": [],
+                    "artifacts": [
+                        {{"label":"main log","path":"artifacts/main.log"}},
+                        {{"label":"process tree","path":"artifacts/process-tree.txt"}}
+                    ]
+                }}
+            }}
+        }}"#,
+        success = status == "pass",
+        exit_code = if status == "pass" { 0 } else { 1 }
+    )
+}
+
 #[test]
 fn renders_lint_failure_digest_from_fixture() {
     let dir = tmp_dir("lint");
@@ -177,6 +209,88 @@ fn renders_tooling_metadata_from_json_file() {
     assert!(markdown.contains("### Tooling metadata"));
     assert!(markdown.contains("- action_repository: `Extra-Chill/homeboy-action`"));
     assert!(markdown.contains("- extension_id: `wordpress`"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn renders_trace_pass_status_and_artifact_paths() {
+    let dir = tmp_dir("trace-pass");
+    fs::create_dir_all(&dir).expect("temp dir should exist");
+    write_file(
+        &dir,
+        "trace.json",
+        &trace_json("pass", "Window stayed closed."),
+    );
+
+    let markdown = render(&dir, r#"{"trace":"pass"}"#, false, false);
+
+    assert!(markdown.contains("### Trace: studio / close-window-running-site"));
+    assert!(markdown.contains("**Status:** PASS"));
+    assert!(markdown.contains("- Window stayed closed."));
+    assert!(markdown.contains("- main log: artifacts/main.log"));
+    assert!(markdown.contains("- process tree: artifacts/process-tree.txt"));
+    assert!(!markdown.contains("raw log body that should never appear"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn renders_trace_fail_status_without_inlining_artifact_content() {
+    let dir = tmp_dir("trace-fail");
+    fs::create_dir_all(&dir).expect("temp dir should exist");
+    write_file(
+        &dir,
+        "trace.json",
+        &trace_json("fail", "Window reopened after close."),
+    );
+    fs::create_dir_all(dir.join("artifacts")).expect("artifact dir should exist");
+    write_file(
+        &dir,
+        "artifacts/main.log",
+        "raw log body that should never appear",
+    );
+
+    let markdown = render(&dir, r#"{"trace":"fail"}"#, false, false);
+
+    assert!(markdown.contains("**Status:** FAIL"));
+    assert!(markdown.contains("- Window reopened after close."));
+    assert!(markdown.contains("- main log: artifacts/main.log"));
+    assert!(!markdown.contains("raw log body that should never appear"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn renders_trace_error_status_from_failure_envelope() {
+    let dir = tmp_dir("trace-error");
+    fs::create_dir_all(&dir).expect("temp dir should exist");
+    write_file(
+        &dir,
+        "trace.json",
+        r#"{
+            "success": false,
+            "data": {
+                "passed": false,
+                "status": "error",
+                "component": "studio",
+                "exit_code": 2,
+                "failure": {
+                    "component_id": "studio",
+                    "scenario_id": "close-window-running-site",
+                    "exit_code": 2,
+                    "stderr_excerpt": "runner failed before assertions"
+                }
+            }
+        }"#,
+    );
+
+    let markdown = render(&dir, r#"{"trace":"error"}"#, false, false);
+
+    assert!(markdown.contains("### Trace: studio / close-window-running-site"));
+    assert!(markdown.contains("**Status:** ERROR"));
+    assert!(markdown.contains("- runner failed before assertions"));
+    assert!(markdown.contains("- No structured trace artifacts available."));
 
     let _ = fs::remove_dir_all(&dir);
 }
