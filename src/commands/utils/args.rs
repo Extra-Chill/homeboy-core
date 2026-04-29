@@ -132,6 +132,7 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--changed-since",
                 "--setting",
                 "--path",
+                "--extension",
                 "--json-summary",
                 "--json",
                 "--help",
@@ -157,6 +158,7 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--profile",
                 "--setting",
                 "--path",
+                "--extension",
                 "--json-summary",
                 "--json",
                 "--help",
@@ -199,6 +201,7 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--fix",
                 "--setting",
                 "--path",
+                "--extension",
                 "--json",
                 "--help",
                 "-h",
@@ -323,6 +326,17 @@ pub struct PositionalComponentArgs {
 
     #[arg(long)]
     pub path: Option<String>,
+}
+
+// ============================================================================
+// ExtensionOverrideArgs: one-shot extension selection
+// ============================================================================
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ExtensionOverrideArgs {
+    /// One-shot extension override for the current invocation
+    #[arg(long = "extension", value_name = "ID")]
+    pub extensions: Vec<String>,
 }
 
 #[allow(dead_code)]

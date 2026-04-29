@@ -8,13 +8,18 @@ use homeboy::extension::test::{
 };
 use homeboy::extension::ExtensionCapability;
 
-use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
+use super::utils::args::{
+    BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+};
 use super::{CmdResult, GlobalArgs};
 
 #[derive(Args)]
 pub struct TestArgs {
     #[command(flatten)]
     pub comp: PositionalComponentArgs,
+
+    #[command(flatten)]
+    pub extension_override: ExtensionOverrideArgs,
 
     /// Skip linting before running tests
     #[arg(long)]
@@ -98,6 +103,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--changed-since",
         "--setting",
         "--path",
+        "--extension",
     ];
 
     let mut filtered = Vec::new();
@@ -143,9 +149,11 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
         capability: None,
         settings_overrides: args.setting_args.setting.clone(),
         settings_json_overrides: args.setting_args.setting_json.clone(),
+        extension_overrides: args.extension_override.extensions.clone(),
     })?;
 
-    if !args.drift
+    if args.extension_override.extensions.is_empty()
+        && !args.drift
         && source_ctx
             .component
             .has_self_check(ExtensionCapability::Test)
@@ -166,6 +174,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
         capability: Some(ExtensionCapability::Test),
         settings_overrides: args.setting_args.setting.clone(),
         settings_json_overrides: args.setting_args.setting_json.clone(),
+        extension_overrides: args.extension_override.extensions.clone(),
     })?;
     let effective_id = ctx.component_id.clone();
 
@@ -221,9 +230,33 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
     use homeboy::component::Component;
     use homeboy::refactor::plan::{build_test_refactor_request, TestSourceOptions};
     use std::path::PathBuf;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        test: TestArgs,
+    }
+
+    #[test]
+    fn parses_one_shot_extension_override() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "--path",
+            "/tmp/repo",
+            "--extension",
+            "nodejs",
+            "--changed-since",
+            "origin/main",
+        ])
+        .expect("test should parse --extension override");
+
+        assert_eq!(cli.test.extension_override.extensions, vec!["nodejs"]);
+        assert_eq!(cli.test.changed_since.as_deref(), Some("origin/main"));
+    }
 
     #[test]
     fn filter_strips_boolean_flags() {
@@ -262,6 +295,14 @@ mod tests {
         let args = vec![
             "--changed-since".to_string(),
             "origin/main".to_string(),
+            "--filter=SomeTest".to_string(),
+        ];
+        let result = filter_homeboy_flags(&args);
+        assert_eq!(result, vec!["--filter=SomeTest"]);
+
+        let args = vec![
+            "--extension".to_string(),
+            "nodejs".to_string(),
             "--filter=SomeTest".to_string(),
         ];
         let result = filter_homeboy_flags(&args);

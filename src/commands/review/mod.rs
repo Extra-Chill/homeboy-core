@@ -25,7 +25,7 @@ use homeboy::extension::test::TestCommandOutput;
 use homeboy::git;
 
 use super::parse_key_val;
-use super::utils::args::{BaselineArgs, PositionalComponentArgs};
+use super::utils::args::{BaselineArgs, ExtensionOverrideArgs, PositionalComponentArgs};
 use super::{audit, lint, test, CmdResult, GlobalArgs};
 
 mod render;
@@ -34,6 +34,9 @@ mod render;
 pub struct ReviewArgs {
     #[command(flatten)]
     pub comp: PositionalComponentArgs,
+
+    #[command(flatten)]
+    pub extension_override: ExtensionOverrideArgs,
 
     /// Run audit + lint + test only against files changed since this git ref
     /// (branch, tag, or SHA). CI-friendly — mirrors the per-stage flag.
@@ -268,6 +271,7 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         exclude_sniffs: None,
         category: None,
         fix: false,
+        extension_override: args.extension_override.clone(),
         setting_args: Default::default(),
         baseline_args: args.baseline_args.clone(),
         _json: Default::default(),
@@ -295,6 +299,7 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
     // passed --changed-only, test runs the full suite — surface as a hint.
     let test_args = test::TestArgs {
         comp: args.comp.clone(),
+        extension_override: args.extension_override.clone(),
         skip_lint: true, // lint already ran above; avoid double work
         coverage: false,
         coverage_min: None,
@@ -631,6 +636,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_one_shot_extension_override() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "my-comp",
+            "--extension",
+            "nodejs",
+            "--changed-since",
+            "origin/main",
+        ])
+        .expect("review should parse --extension override");
+
+        assert_eq!(cli.review.extension_override.extensions, vec!["nodejs"]);
+        assert_eq!(cli.review.changed_since.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
     fn parses_changed_only() {
         let cli = TestCli::try_parse_from(["test", "--changed-only"]).expect("should parse");
         assert!(cli.review.changed_only);
@@ -850,6 +871,7 @@ mod tests {
                 component: None,
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             changed_since: Some("trunk".to_string()),
             changed_only: false,
             summary: false,
@@ -868,6 +890,7 @@ mod tests {
                 component: None,
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             changed_since: None,
             changed_only: true,
             summary: false,
@@ -888,6 +911,7 @@ mod tests {
                 component: None,
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             changed_since: None,
             changed_only: false,
             summary: false,

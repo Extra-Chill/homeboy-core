@@ -361,16 +361,16 @@ fn run_component_with_rig_context(
         .as_ref()
         .and_then(|spec| rig_component_for_bench(spec, &effective_id));
 
-    let ctx = execution_context::resolve_with_component(
-        &ResolveOptions::with_capability_and_json(
-            &effective_id,
-            path_override.clone(),
-            ExtensionCapability::Bench,
-            args.setting_args.setting.clone(),
-            args.setting_args.setting_json.clone(),
-        ),
-        component_override,
-    )?;
+    let mut resolve_options = ResolveOptions::with_capability_and_json(
+        &effective_id,
+        path_override.clone(),
+        ExtensionCapability::Bench,
+        args.setting_args.setting.clone(),
+        args.setting_args.setting_json.clone(),
+    );
+    resolve_options.extension_overrides = args.extension_override.extensions.clone();
+
+    let ctx = execution_context::resolve_with_component(&resolve_options, component_override)?;
 
     let run_dir = RunDir::create()?;
 
@@ -442,7 +442,7 @@ fn run_component_with_rig_context(
 mod tests {
     use super::*;
     use crate::commands::utils::args::{
-        BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+        BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
     };
     use crate::test_support::with_isolated_home;
     use std::fs;
@@ -505,6 +505,7 @@ mod tests {
                 component: None,
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             iterations: 1,
             warmup: None,
             runs: 1,
