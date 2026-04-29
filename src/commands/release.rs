@@ -85,9 +85,10 @@ pub enum ReleaseCommandOutput {
     Batch(BatchReleaseOutput),
 }
 
+#[cfg(test)]
 impl ReleaseArgs {
     /// Construct ReleaseArgs programmatically for tests and internal callers.
-    pub fn from_parts(
+    fn from_parts(
         components: Vec<String>,
         project: Option<String>,
         outdated: bool,
