@@ -10,8 +10,9 @@ use crate::paths as base_path;
 use crate::project::Project;
 
 use super::planning::{calculate_directory_size, format_bytes};
+use super::policy::{owner_hint_for_path, protected_path_suffixes, validate_deploy_target};
 use super::release_download;
-use super::safety_and_artifact::{deploy_artifact, deploy_via_git, validate_deploy_target};
+use super::safety_and_artifact::{deploy_artifact, deploy_via_git};
 use super::types::{ComponentDeployResult, DeployConfig, DeployResult};
 use super::version_overrides::{
     deploy_with_override, find_deploy_override, find_deploy_verification, is_self_deploy,
@@ -76,8 +77,7 @@ pub(super) fn execute_component_deploy(
     };
 
     if component.remote_owner.is_none() {
-        if let Some(suggested_owner) = component.deploy_owner_hint_for_path(&effective_remote_path)
-        {
+        if let Some(suggested_owner) = owner_hint_for_path(component, &effective_remote_path) {
             log_status!(
                 "deploy",
                 "⚠ Component '{}' deploys to a path that may need remote_owner='{}'. \
@@ -98,7 +98,7 @@ pub(super) fn execute_component_deploy(
                 &install_dir,
                 base_path,
                 &component.id,
-                &component.deploy_protected_path_suffixes(),
+                &protected_path_suffixes(component),
             )?;
             Ok(install_dir)
         }) {
