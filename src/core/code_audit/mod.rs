@@ -793,7 +793,15 @@ fn audit_internal(
     } else {
         Vec::new()
     };
-    let ref_fp_refs: Vec<&fingerprint::FileFingerprint> = ref_fingerprints.iter().collect();
+    let component_ref_fingerprints = if plan.run_dead_code {
+        fingerprint_component_reference_files(root)
+    } else {
+        Vec::new()
+    };
+    let ref_fp_refs: Vec<&fingerprint::FileFingerprint> = ref_fingerprints
+        .iter()
+        .chain(component_ref_fingerprints.iter())
+        .collect();
     let dead_code_findings = if plan.run_dead_code {
         dead_code::analyze_dead_code_with_config(&all_fingerprints, &ref_fp_refs, &audit_config)
     } else {
@@ -1668,6 +1676,25 @@ fn fingerprint_reference_paths(reference_paths: &[String]) -> Vec<fingerprint::F
     ref_fps
 }
 
+/// Fingerprint this component's source files as dead-code references.
+///
+/// Dead-code findings are still emitted only for the owned convention
+/// fingerprints. This reference-only pass keeps calls from singleton files,
+/// index files, and module facades in the graph so exported functions are not
+/// reported just because their consumers live outside a convention group.
+fn fingerprint_component_reference_files(root: &Path) -> Vec<fingerprint::FileFingerprint> {
+    let snapshot = walker::walk_all_source_files_snapshot(root);
+    let mut fingerprints = Vec::new();
+
+    for (path, content) in snapshot.iter() {
+        if let Some(fp) = fingerprint::fingerprint_content(path, root, content) {
+            fingerprints.push(fp);
+        }
+    }
+
+    fingerprints
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -1729,6 +1756,52 @@ mod tests {
         let findings = layer_ownership::run(&dir);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].convention, "layer_ownership");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dead_code_reference_fingerprints_include_rust_singleton_and_index_files() {
+        let dir =
+            std::env::temp_dir().join(format!("homeboy_audit_index_refs_{}", std::process::id()));
+        let src = dir.join("src");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&src).unwrap();
+
+        fs::write(src.join("foo.rs"), "pub fn helper() -> bool { true }\n").unwrap();
+        fs::write(
+            src.join("main.rs"),
+            "mod foo;\nfn main() { let _ = foo::helper(); }\n",
+        )
+        .unwrap();
+
+        let regular_snapshot = walker::walk_source_files_snapshot(&dir);
+        let owned_fingerprints: Vec<_> = regular_snapshot
+            .iter()
+            .filter_map(|(path, content)| fingerprint::fingerprint_content(path, &dir, content))
+            .collect();
+        let component_ref_fingerprints = fingerprint_component_reference_files(&dir);
+
+        let owned_refs: Vec<_> = owned_fingerprints.iter().collect();
+        let component_refs: Vec<_> = component_ref_fingerprints.iter().collect();
+        let findings = dead_code::analyze_dead_code_with_config(
+            &owned_refs,
+            &component_refs,
+            &AuditConfig::default(),
+        );
+        let unreferenced: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding.kind == AuditFinding::UnreferencedExport)
+            .collect();
+
+        assert!(
+            unreferenced.is_empty(),
+            "singleton and index files should contribute reference-only calls for dead-code analysis, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|finding| &finding.description)
+                .collect::<Vec<_>>()
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

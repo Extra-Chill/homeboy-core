@@ -1132,7 +1132,7 @@ fn extract_internal_calls(content: &str, skip_calls: &[&str]) -> Vec<String> {
         std::sync::LazyLock::new(|| regex::Regex::new(r"\b(\w+)\s*\(").unwrap());
     for caps in RE.captures_iter(content) {
         let name = &caps[1];
-        if !skip_set.contains(name) && !name.starts_with("test_") {
+        if !skip_set.contains(name) {
             calls.insert(name.to_string());
         }
     }
@@ -1142,7 +1142,7 @@ fn extract_internal_calls(content: &str, skip_calls: &[&str]) -> Vec<String> {
         std::sync::LazyLock::new(|| regex::Regex::new(r"[.:](\w+)\s*\(").unwrap());
     for caps in METHOD_RE.captures_iter(content) {
         let name = &caps[1];
-        if !skip_set.contains(name) && !name.starts_with("test_") {
+        if !skip_set.contains(name) {
             calls.insert(name.to_string());
         }
     }
@@ -1951,6 +1951,29 @@ fn write(msg: &str) -> bool {
         assert!(
             fp.internal_calls.contains(&"write".to_string()),
             "write should be in internal_calls when the file defines fn write(), got: {:?}",
+            fp.internal_calls
+        );
+    }
+
+    #[test]
+    fn rust_internal_calls_include_test_prefixed_production_helpers() {
+        let grammar = rust_grammar();
+        let content = r#"
+use crate::core::code_audit::test_mapping::test_to_source_path;
+
+pub fn map_source() {
+    let _ = test_to_source_path("tests/core/audit_test.rs", &Default::default());
+}
+"#;
+
+        let fp =
+            fingerprint_from_grammar(content, &grammar, "src/core/code_audit/test_coverage.rs")
+                .unwrap();
+
+        assert!(
+            fp.internal_calls
+                .contains(&"test_to_source_path".to_string()),
+            "test_-prefixed production helpers should be retained as references, got: {:?}",
             fp.internal_calls
         );
     }
