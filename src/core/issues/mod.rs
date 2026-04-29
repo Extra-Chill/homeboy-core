@@ -45,7 +45,7 @@ pub use plan::{
     default_review_only_categories, IssueGroup, ReconcileAction, ReconcileConfig, ReconcilePlan,
     ReconcileSkipReason, TrackedIssue, TrackedIssueState,
 };
-pub use reconcile::reconcile;
+pub use reconcile::{reconcile, reconcile_scoped};
 pub use render::{
     build_findings_from_native_output, IssueRenderContext, ReconcileFindingsInput,
     RenderedIssueGroup,

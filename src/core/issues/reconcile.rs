@@ -26,6 +26,32 @@ pub fn reconcile(
     existing: &[TrackedIssue],
     config: &ReconcileConfig,
 ) -> ReconcilePlan {
+    reconcile_with_scope(groups, existing, config, None)
+}
+
+/// Reconcile within an explicit `(command, component)` scope.
+///
+/// The plain [`reconcile`] function can only act on categories present in the
+/// incoming group list. CI action runs also need to converge stale open issues
+/// whose category disappeared from the latest command output, including the
+/// all-green case where the group list is empty. The explicit scope tells the
+/// reconciler which existing tracker issues belong to the current command run.
+pub fn reconcile_scoped(
+    groups: &[IssueGroup],
+    existing: &[TrackedIssue],
+    config: &ReconcileConfig,
+    command: &str,
+    component_id: &str,
+) -> ReconcilePlan {
+    reconcile_with_scope(groups, existing, config, Some((command, component_id)))
+}
+
+fn reconcile_with_scope(
+    groups: &[IssueGroup],
+    existing: &[TrackedIssue],
+    config: &ReconcileConfig,
+    scope: Option<(&str, &str)>,
+) -> ReconcilePlan {
     // Index existing issues by (command, component, category). New issues carry
     // a stable hidden body key; legacy action-created issues fall back to the
     // title shape `<command>: <label> in <component>`.
@@ -38,6 +64,7 @@ pub fn reconcile(
     }
 
     let mut actions: Vec<ReconcileAction> = Vec::new();
+    let mut seen_keys: Vec<(String, String, String)> = Vec::new();
 
     for group in groups {
         // Phase 1: suppression by config (highest precedence — short-circuits
@@ -60,6 +87,7 @@ pub fn reconcile(
             group.component_id.clone(),
             group.category.clone(),
         );
+        seen_keys.push(key.clone());
         let matches = collect_matches(&by_category, group, &key);
         let review_only = is_review_only(group, config);
 
@@ -210,7 +238,72 @@ pub fn reconcile(
         });
     }
 
+    if let Some((command, component_id)) = scope {
+        close_absent_open_issues(
+            &mut actions,
+            &by_category,
+            &seen_keys,
+            config,
+            command,
+            component_id,
+        );
+    }
+
     ReconcilePlan { actions }
+}
+
+fn close_absent_open_issues(
+    actions: &mut Vec<ReconcileAction>,
+    by_category: &BTreeMap<(String, String, String), Vec<&TrackedIssue>>,
+    seen_keys: &[(String, String, String)],
+    config: &ReconcileConfig,
+    command: &str,
+    component_id: &str,
+) {
+    for ((issue_command, issue_component, category), matches) in by_category {
+        if issue_command != command || issue_component != component_id {
+            continue;
+        }
+        if seen_keys.contains(&(
+            issue_command.clone(),
+            issue_component.clone(),
+            category.clone(),
+        )) {
+            continue;
+        }
+        if config
+            .suppressed_categories
+            .iter()
+            .any(|suppressed| suppressed == category)
+        {
+            continue;
+        }
+
+        let mut open_matches: Vec<_> = matches
+            .iter()
+            .copied()
+            .filter(|issue| issue.state.is_open())
+            .collect();
+        if open_matches.is_empty() {
+            continue;
+        }
+
+        open_matches.sort_by_key(|issue| issue.number);
+        let keep = open_matches[0].number;
+        actions.push(ReconcileAction::Close {
+            number: keep,
+            category: category.clone(),
+            comment: close_resolved_comment(&category.replace('_', " ")),
+        });
+        for dup in &open_matches[1..] {
+            actions.push(ReconcileAction::CloseDuplicate {
+                number: dup.number,
+                keep,
+                category: category.clone(),
+                comment: close_dedupe_comment(keep),
+            });
+        }
+    }
 }
 
 fn collect_matches<'a>(
@@ -891,6 +984,109 @@ mod tests {
         let plan = reconcile(&[], &[], &cfg());
         assert!(plan.actions.is_empty());
         assert!(plan.is_noop());
+    }
+
+    #[test]
+    fn scoped_empty_groups_close_all_open_issues_in_scope() {
+        let existing = vec![
+            issue(10, "dead guard", TrackedIssueState::Open, 4),
+            issue(20, "unreferenced export", TrackedIssueState::Open, 9),
+            issue(30, "closed thing", TrackedIssueState::ClosedCompleted, 0),
+        ];
+
+        let plan = reconcile_scoped(&[], &existing, &cfg(), "audit", "data-machine");
+
+        assert_eq!(plan.actions.len(), 2);
+        assert!(matches!(
+            &plan.actions[0],
+            ReconcileAction::Close {
+                number: 10,
+                category,
+                ..
+            } if category == "dead_guard"
+        ));
+        assert!(matches!(
+            &plan.actions[1],
+            ReconcileAction::Close {
+                number: 20,
+                category,
+                ..
+            } if category == "unreferenced_export"
+        ));
+    }
+
+    #[test]
+    fn scoped_missing_category_closes_stale_open_issue() {
+        let groups = vec![group("dead_guard", 3)];
+        let existing = vec![
+            issue(10, "dead guard", TrackedIssueState::Open, 4),
+            issue(20, "unreferenced export", TrackedIssueState::Open, 9),
+        ];
+
+        let plan = reconcile_scoped(&groups, &existing, &cfg(), "audit", "data-machine");
+
+        assert_eq!(plan.actions.len(), 2);
+        assert!(matches!(
+            &plan.actions[0],
+            ReconcileAction::Update { number: 10, .. }
+        ));
+        assert!(matches!(
+            &plan.actions[1],
+            ReconcileAction::Close {
+                number: 20,
+                category,
+                ..
+            } if category == "unreferenced_export"
+        ));
+    }
+
+    #[test]
+    fn scoped_absent_issue_closes_duplicate_open_issues_deterministically() {
+        let existing = vec![
+            issue(20, "dead guard", TrackedIssueState::Open, 4),
+            issue(10, "dead guard", TrackedIssueState::Open, 4),
+        ];
+
+        let plan = reconcile_scoped(&[], &existing, &cfg(), "audit", "data-machine");
+
+        assert_eq!(plan.actions.len(), 2);
+        assert!(matches!(
+            &plan.actions[0],
+            ReconcileAction::Close { number: 10, .. }
+        ));
+        assert!(matches!(
+            &plan.actions[1],
+            ReconcileAction::CloseDuplicate {
+                number: 20,
+                keep: 10,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn scoped_absent_issue_honors_component_and_suppression_scope() {
+        let mut other_component = issue(10, "dead guard", TrackedIssueState::Open, 4);
+        other_component.title = "audit: dead guard in other-component (4)".into();
+        let existing = vec![
+            other_component,
+            issue(20, "god file", TrackedIssueState::Open, 9),
+            issue(30, "unreferenced export", TrackedIssueState::Open, 2),
+        ];
+        let mut config = cfg();
+        config.suppressed_categories = vec!["god_file".into()];
+
+        let plan = reconcile_scoped(&[], &existing, &config, "audit", "data-machine");
+
+        assert_eq!(plan.actions.len(), 1);
+        assert!(matches!(
+            &plan.actions[0],
+            ReconcileAction::Close {
+                number: 30,
+                category,
+                ..
+            } if category == "unreferenced_export"
+        ));
     }
 
     #[test]
