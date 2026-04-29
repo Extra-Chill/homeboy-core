@@ -150,6 +150,9 @@ fn detect_repeated_field_patterns(root: &Path) -> Vec<Finding> {
 
         let mut sorted_fields = fields.clone();
         sorted_fields.sort_by(|a, b| a.name.cmp(&b.name).then(a.field_type.cmp(&b.field_type)));
+        if is_boundary_dto_group_across_layers(locations) {
+            continue;
+        }
         if is_low_value_generic_group(&sorted_fields, locations) {
             continue;
         }
@@ -496,6 +499,44 @@ fn is_low_value_generic_group(fields: &[FieldSignature], locations: &[(String, S
         })
         .unwrap_or(false);
     !shared_suffix
+}
+
+fn is_boundary_dto_group_across_layers(locations: &[(String, String)]) -> bool {
+    let mut layers = HashSet::new();
+
+    for (file, name) in locations {
+        if !is_boundary_dto_name(name) {
+            return false;
+        }
+        let Some(layer) = boundary_layer(file) else {
+            return false;
+        };
+        layers.insert(layer);
+    }
+
+    layers.len() > 1
+}
+
+fn is_boundary_dto_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Args" | "Options" | "WorkflowArgs" | "WorkflowOptions"
+    ) || name.ends_with("Args")
+        || name.ends_with("Options")
+        || name.ends_with("WorkflowArgs")
+        || name.ends_with("WorkflowOptions")
+}
+
+fn boundary_layer(file: &str) -> Option<&'static str> {
+    if file.starts_with("src/commands/") {
+        Some("command")
+    } else if file.starts_with("src/core/extension/") {
+        Some("workflow")
+    } else if file.starts_with("src/core/refactor/") {
+        Some("refactor")
+    } else {
+        None
+    }
 }
 
 fn strip_rust_cfg_test_modules(content: &str) -> String {
@@ -991,6 +1032,105 @@ struct Foo {
         assert!(findings
             .iter()
             .all(|f| f.kind == AuditFinding::RepeatedFieldPattern));
+    }
+
+    #[test]
+    fn suppresses_boundary_dto_field_overlap_across_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        let commands = dir.path().join("src/commands");
+        let extension = dir.path().join("src/core/extension/lint");
+        let refactor = dir.path().join("src/core/refactor/plan");
+        std::fs::create_dir_all(&commands).unwrap();
+        std::fs::create_dir_all(&extension).unwrap();
+        std::fs::create_dir_all(&refactor).unwrap();
+
+        std::fs::write(
+            commands.join("lint.rs"),
+            r#"
+struct LintArgs {
+    category: Option<String>,
+    errors_only: bool,
+    exclude_sniffs: Option<String>,
+    glob: Option<String>,
+    sniffs: Option<String>,
+    changed_only: bool,
+    summary: bool,
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            extension.join("run.rs"),
+            r#"
+struct LintRunWorkflowArgs {
+    category: Option<String>,
+    errors_only: bool,
+    exclude_sniffs: Option<String>,
+    glob: Option<String>,
+    sniffs: Option<String>,
+    changed_only: bool,
+    summary: bool,
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            refactor.join("sources.rs"),
+            r#"
+struct LintSourceOptions {
+    category: Option<String>,
+    errors_only: bool,
+    exclude_sniffs: Option<String>,
+    glob: Option<String>,
+    sniffs: Option<String>,
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            commands.join("review.rs"),
+            r#"
+struct ReviewArgs {
+    changed_only: bool,
+    summary: bool,
+}
+"#,
+        )
+        .unwrap();
+
+        let findings = detect_repeated_field_patterns(dir.path());
+        assert!(
+            findings.is_empty(),
+            "boundary DTO overlap across command/workflow/refactor layers should not suggest extraction: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn keeps_boundary_dto_signal_inside_one_layer() {
+        let dir = tempfile::tempdir().unwrap();
+        let commands = dir.path().join("src/commands");
+        std::fs::create_dir_all(&commands).unwrap();
+
+        for name in &["AuditArgs", "LintArgs", "TestArgs"] {
+            std::fs::write(
+                commands.join(format!("{}.rs", name.to_lowercase())),
+                format!("struct {name} {{\n    dry_run: bool,\n    output: Option<String>,\n}}\n"),
+            )
+            .unwrap();
+        }
+
+        let descriptions: Vec<String> = detect_repeated_field_patterns(dir.path())
+            .into_iter()
+            .map(|finding| finding.description)
+            .collect();
+        assert!(
+            descriptions
+                .iter()
+                .any(|description| description.contains("[dry_run, output]")),
+            "boundary DTOs inside one layer can still be useful local extraction signals: {:?}",
+            descriptions
+        );
     }
 
     #[test]
