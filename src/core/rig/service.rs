@@ -17,7 +17,7 @@
 //! inside a `#[cfg(unix)]` module; on Windows the public API compiles but
 //! returns `RigServiceFailed` so the crate still builds everywhere.
 
-use super::spec::RigSpec;
+use super::spec::{DiscoverSpec, RigSpec};
 use crate::error::Result;
 
 /// Live status of a service as seen at probe time.
@@ -69,13 +69,18 @@ pub fn log_path(rig_id: &str, service_id: &str) -> Result<std::path::PathBuf> {
 /// fresh pair surfaces the fresh one to consumers (the rig wants to know
 /// "is the live daemon stale?").
 pub fn discover_newest(pattern: &str) -> Result<Option<DiscoveredProcess>> {
-    platform::discover_newest(pattern)
+    platform::discover_newest(pattern, &[])
+}
+
+/// Find the newest process matching a full discovery spec.
+pub fn discover_newest_for_spec(discover: &DiscoverSpec) -> Result<Option<DiscoveredProcess>> {
+    platform::discover_newest(&discover.pattern, &discover.argv_contains)
 }
 
 /// `discover_newest`, but returning the PID only. Convenience used by
 /// `service::stop` for the `external` kind.
-pub fn discover_external_pid(pattern: &str) -> Result<Option<u32>> {
-    Ok(discover_newest(pattern)?.map(|p| p.pid))
+pub fn discover_external_pid(discover: &DiscoverSpec) -> Result<Option<u32>> {
+    Ok(discover_newest_for_spec(discover)?.map(|p| p.pid))
 }
 
 /// Parse `ps -o etime` output into total seconds.
@@ -199,18 +204,14 @@ mod platform {
         // via the configured pattern. No discovery hit ⇒ nothing to stop;
         // that's the desired posture (idempotent: "make sure it's gone").
         let pid = if spec.kind == ServiceKind::External {
-            let pattern = spec
-                .discover
-                .as_ref()
-                .map(|d| d.pattern.clone())
-                .ok_or_else(|| {
-                    Error::rig_service_failed(
-                        &rig.id,
-                        service_id,
-                        "external service requires `discover.pattern`",
-                    )
-                })?;
-            let expanded = expand_vars(rig, &pattern);
+            let discover = spec.discover.as_ref().ok_or_else(|| {
+                Error::rig_service_failed(
+                    &rig.id,
+                    service_id,
+                    "external service requires `discover.pattern`",
+                )
+            })?;
+            let expanded = expand_discover(rig, discover);
             match super::discover_external_pid(&expanded)? {
                 Some(pid) => pid,
                 None => return Ok(()),
@@ -320,6 +321,20 @@ mod platform {
         }
     }
 
+    fn expand_discover(
+        rig: &RigSpec,
+        discover: &super::super::spec::DiscoverSpec,
+    ) -> super::super::spec::DiscoverSpec {
+        super::super::spec::DiscoverSpec {
+            pattern: expand_vars(rig, &discover.pattern),
+            argv_contains: discover
+                .argv_contains
+                .iter()
+                .map(|selector| expand_vars(rig, selector))
+                .collect(),
+        }
+    }
+
     pub(super) fn log_file_path(rig_id: &str, service_id: &str) -> Result<PathBuf> {
         Ok(paths::rig_logs_dir(rig_id)?.join(format!("{}.log", service_id)))
     }
@@ -387,7 +402,10 @@ mod platform {
     /// (macOS) and procps `ps` (Linux). `etimes` (integer seconds) is
     /// procps-only, so the text format is the portable choice. Newest
     /// match = smallest elapsed seconds.
-    pub fn discover_newest(pattern: &str) -> Result<Option<super::DiscoveredProcess>> {
+    pub fn discover_newest(
+        pattern: &str,
+        argv_contains: &[String],
+    ) -> Result<Option<super::DiscoveredProcess>> {
         let output = Command::new("ps")
             .args(["-axo", "pid=,etime=,args="])
             .output()
@@ -408,8 +426,24 @@ mod platform {
         let self_pid = std::process::id();
         let stdout = String::from_utf8_lossy(&output.stdout);
 
+        Ok(discover_newest_from_ps(
+            pattern,
+            argv_contains,
+            now,
+            self_pid,
+            &stdout,
+        ))
+    }
+
+    pub(super) fn discover_newest_from_ps(
+        pattern: &str,
+        argv_contains: &[String],
+        now: u64,
+        self_pid: u32,
+        ps_stdout: &str,
+    ) -> Option<super::DiscoveredProcess> {
         let mut newest: Option<super::DiscoveredProcess> = None;
-        for line in stdout.lines() {
+        for line in ps_stdout.lines() {
             // Format: "  <pid>  <etime>  <args...>"
             let trimmed = line.trim_start();
             let pid_end = match trimmed.find(char::is_whitespace) {
@@ -429,6 +463,12 @@ mod platform {
             let args = after_pid[etime_end..].trim_start();
 
             if !args.contains(pattern) {
+                continue;
+            }
+            if argv_contains
+                .iter()
+                .any(|selector| !args.contains(selector))
+            {
                 continue;
             }
             if pid == self_pid {
@@ -452,7 +492,7 @@ mod platform {
                 _ => {}
             }
         }
-        Ok(newest)
+        newest
     }
 
     /// Parse `ps -o etime` output into total seconds.
@@ -461,7 +501,7 @@ mod platform {
     /// - `MM:SS`
     /// - `HH:MM:SS`
     /// - `DD-HH:MM:SS`
-    /// Anything else returns `None`.
+    ///   Anything else returns `None`.
     pub(super) fn parse_etime_seconds(s: &str) -> Option<u64> {
         let (days, rest) = match s.split_once('-') {
             Some((d, r)) => (d.parse::<u64>().ok()?, r),
@@ -510,7 +550,10 @@ mod platform {
         Err(Error::rig_service_failed(rig_id, service_id, UNSUPPORTED))
     }
 
-    pub fn discover_newest(_pattern: &str) -> Result<Option<super::DiscoveredProcess>> {
+    pub fn discover_newest(
+        _pattern: &str,
+        _argv_contains: &[String],
+    ) -> Result<Option<super::DiscoveredProcess>> {
         Err(Error::internal_unexpected(UNSUPPORTED))
     }
 }

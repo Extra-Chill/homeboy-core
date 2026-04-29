@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::expand::expand_vars;
-use super::service::discover_newest;
+use super::service::discover_newest_for_spec;
 use super::spec::{CheckSpec, NewerThanSpec, RigSpec, TimeSource};
 use crate::error::{Error, Result};
 
@@ -308,8 +308,15 @@ fn resolve_time_source(rig: &RigSpec, src: &TimeSource, side: &str) -> Result<Op
     }
 
     if let Some(disc) = &src.process_start {
-        let pattern = expand_vars(rig, &disc.pattern);
-        let proc = discover_newest(&pattern)?;
+        let expanded = super::spec::DiscoverSpec {
+            pattern: expand_vars(rig, &disc.pattern),
+            argv_contains: disc
+                .argv_contains
+                .iter()
+                .map(|selector| expand_vars(rig, selector))
+                .collect(),
+        };
+        let proc = discover_newest_for_spec(&expanded)?;
         return Ok(proc.map(|p| p.started_at_epoch));
     }
 

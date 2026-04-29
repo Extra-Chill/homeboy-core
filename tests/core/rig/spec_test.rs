@@ -490,7 +490,10 @@ fn test_spec_external_service_kind_with_discover() {
         "services": {
             "studio-daemon": {
                 "kind": "external",
-                "discover": { "pattern": "wordpress-server-child.mjs" }
+                "discover": {
+                    "pattern": "wordpress-server-child.mjs",
+                    "argv_contains": ["studio@bfb-mu-plugin", "playground-server-child.mjs"]
+                }
             }
         }
     }"#;
@@ -500,6 +503,13 @@ fn test_spec_external_service_kind_with_discover() {
     assert_eq!(
         svc.discover.as_ref().unwrap().pattern,
         "wordpress-server-child.mjs"
+    );
+    assert_eq!(
+        svc.discover.as_ref().unwrap().argv_contains,
+        vec![
+            "studio@bfb-mu-plugin".to_string(),
+            "playground-server-child.mjs".to_string()
+        ]
     );
 }
 

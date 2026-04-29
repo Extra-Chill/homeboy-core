@@ -179,6 +179,7 @@ fn test_evaluate_newer_than_missing_left_process_passes() {
                 process_start: Some(DiscoverSpec {
                     // Pattern that cannot match any process — ensures None.
                     pattern: "homeboy-test-marker-no-process-matches-this-XQZ-9999".to_string(),
+                    argv_contains: Vec::new(),
                 }),
                 ..Default::default()
             },
