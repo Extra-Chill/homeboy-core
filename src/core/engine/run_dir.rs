@@ -228,7 +228,7 @@ mod tests {
         assert!(run_dir
             .step_file(files::TRACE_RESULTS)
             .to_string_lossy()
-            .ends_with("trace-results.json"));
+            .ends_with("trace.json"));
         run_dir.cleanup();
     }
 

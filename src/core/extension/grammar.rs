@@ -269,6 +269,13 @@ pub struct LanguageMeta {
 
     /// File extensions this grammar applies to.
     pub extensions: Vec<String>,
+
+    /// Optional import parser implementation to reuse for this grammar.
+    ///
+    /// Example: a framework-specific grammar can set `id = "wordpress"` while
+    /// keeping PHP namespace import semantics via `import_parser = "php"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_parser: Option<String>,
 }
 
 /// How comments work in this language.
@@ -983,6 +990,7 @@ mod tests {
             language: LanguageMeta {
                 id: "rust".to_string(),
                 extensions: vec!["rs".to_string()],
+                import_parser: None,
             },
             comments: CommentSyntax {
                 line: vec!["//".to_string()],
@@ -1056,6 +1064,7 @@ mod tests {
             language: LanguageMeta {
                 id: "php".to_string(),
                 extensions: vec!["php".to_string()],
+                import_parser: None,
             },
             comments: CommentSyntax {
                 line: vec!["//".to_string(), "#".to_string()],

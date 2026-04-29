@@ -601,6 +601,7 @@ mod tests {
             language: LanguageMeta {
                 id: "rust".to_string(),
                 extensions: vec!["rs".to_string()],
+                import_parser: None,
             },
             comments: CommentSyntax {
                 line: vec!["//".to_string()],
