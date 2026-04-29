@@ -32,6 +32,14 @@ pub struct TraceArgs {
     /// Print compact machine-readable summary.
     #[arg(long)]
     pub json_summary: bool,
+
+    /// Apply a patch file for this trace run, then reverse it afterward.
+    #[arg(long = "overlay", value_name = "PATCH_FILE")]
+    pub overlays: Vec<String>,
+
+    /// Leave overlay changes in place after the trace run.
+    #[arg(long)]
+    pub keep_overlay: bool,
 }
 
 pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutput> {
@@ -76,6 +84,8 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
             scenario_id: args.scenario,
             json_summary: args.json_summary,
             rig_id: args.rig,
+            overlays: args.overlays,
+            keep_overlay: args.keep_overlay,
         },
         &run_dir,
         rig_state.clone(),

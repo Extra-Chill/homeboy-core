@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 use super::parsing::{TraceArtifact, TraceList, TraceResults};
-use super::run::TraceRunWorkflowResult;
+use super::run::{TraceOverlay, TraceRunWorkflowResult};
 use crate::rig::RigStateSnapshot;
 
 #[derive(Serialize)]
@@ -28,6 +28,8 @@ pub struct TraceRunOutput {
     pub rig_state: Option<RigStateSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<super::run::TraceRunFailure>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<TraceOverlay>,
 }
 
 #[derive(Serialize)]
@@ -45,6 +47,8 @@ pub struct TraceRunSummaryOutput {
     pub artifact_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rig_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<TraceOverlay>,
 }
 
 #[derive(Serialize)]
@@ -82,6 +86,7 @@ pub fn from_main_workflow(
                 .map(|r| r.artifacts.len())
                 .unwrap_or(0),
             rig_id: rig_state.as_ref().map(|r| r.rig_id.clone()),
+            overlays: result.overlays,
         };
         return (TraceCommandOutput::Summary(output), exit_code);
     }
@@ -101,6 +106,7 @@ pub fn from_main_workflow(
             results: result.results,
             rig_state,
             failure: result.failure,
+            overlays: result.overlays,
         })),
         exit_code,
     )
@@ -173,6 +179,11 @@ mod tests {
                 }],
             }),
             failure: None,
+            overlays: vec![TraceOverlay {
+                path: "/tmp/overlay.patch".to_string(),
+                touched_files: vec!["scenario.txt".to_string()],
+                kept: false,
+            }],
         };
 
         let (output, exit_code) = from_main_workflow(result, None, true);
@@ -183,5 +194,8 @@ mod tests {
         assert_eq!(value["passed"], true);
         assert_eq!(value["scenario_id"], "close-window-running-site");
         assert_eq!(value["artifact_count"], 1);
+        assert_eq!(value["overlays"][0]["path"], "/tmp/overlay.patch");
+        assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
+        assert_eq!(value["overlays"][0]["kept"], false);
     }
 }
