@@ -12,6 +12,7 @@ mod runtime_helper;
 mod scope;
 pub mod self_check;
 pub mod test;
+pub mod trace;
 pub mod update_check;
 pub mod version;
 
@@ -34,7 +35,7 @@ pub use manifest::{
     FileContainsCondition, HttpMethod, InputConfig, LintConfig, OutputConfig, OutputSchema,
     PlatformCapability, ProvidesConfig, RemotePathInferenceRule, RequirementsConfig, RuntimeConfig,
     RuntimeRequirementsConfig, ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig,
-    TestConfig, TestDriftConfig, TestMappingConfig, VersionPatternConfig,
+    TestConfig, TestDriftConfig, TestMappingConfig, TraceConfig, VersionPatternConfig,
 };
 
 // Re-export version types
@@ -126,6 +127,7 @@ pub enum ExtensionCapability {
     Test,
     Build,
     Bench,
+    Trace,
 }
 
 impl ExtensionCapability {
@@ -135,6 +137,7 @@ impl ExtensionCapability {
             ExtensionCapability::Test => "test",
             ExtensionCapability::Build => "build",
             ExtensionCapability::Bench => "bench",
+            ExtensionCapability::Trace => "trace",
         }
     }
 
@@ -144,6 +147,7 @@ impl ExtensionCapability {
             ExtensionCapability::Test => manifest.has_test(),
             ExtensionCapability::Build => manifest.has_build(),
             ExtensionCapability::Bench => manifest.has_bench(),
+            ExtensionCapability::Trace => manifest.has_trace(),
         }
     }
 
@@ -153,6 +157,7 @@ impl ExtensionCapability {
             ExtensionCapability::Test => manifest.test_script(),
             ExtensionCapability::Build => manifest.build_script(),
             ExtensionCapability::Bench => manifest.bench_script(),
+            ExtensionCapability::Trace => manifest.trace_script(),
         }
     }
 
@@ -1117,7 +1122,8 @@ mod tests {
                 }
             },
             "build": { "extension_script": "build.sh" },
-            "bench": { "extension_script": "bench.sh" }
+            "bench": { "extension_script": "bench.sh" },
+            "trace": { "extension_script": "trace.sh" }
         }))
         .unwrap();
 
@@ -1142,6 +1148,7 @@ mod tests {
             (ExtensionCapability::Test, "test", "test.sh", true),
             (ExtensionCapability::Build, "build", "build.sh", false),
             (ExtensionCapability::Bench, "bench", "bench.sh", true),
+            (ExtensionCapability::Trace, "trace", "trace.sh", true),
         ] {
             assert_eq!(capability.label(), label);
             assert!(capability.has_manifest_support(&manifest));

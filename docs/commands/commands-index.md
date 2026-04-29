@@ -35,6 +35,7 @@
 - [stack](stack.md) — combined-fixes branches from base refs plus cherry-picked PRs
 - [status](status.md) — actionable component overview
 - [test](test.md)
+- [trace](trace.md) — black-box behavioral trace and evidence capture
 - [triage](triage.md) — read-only attention report across components, projects, fleets, and rigs
 - [undo](undo.md) — restore or manage write-operation snapshots
 - [upgrade](upgrade.md)

@@ -1,0 +1,186 @@
+//! Trace runner JSON output parsing.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Error, Result};
+use crate::rig::RigStateSnapshot;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TraceStatus {
+    Pass,
+    Fail,
+    Error,
+}
+
+impl TraceStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TraceStatus::Pass => "pass",
+            TraceStatus::Fail => "fail",
+            TraceStatus::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TraceAssertionStatus {
+    Pass,
+    Fail,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceResults {
+    pub component_id: String,
+    pub scenario_id: String,
+    pub status: TraceStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rig: Option<RigStateSnapshot>,
+    #[serde(default)]
+    pub timeline: Vec<TraceEvent>,
+    #[serde(default)]
+    pub assertions: Vec<TraceAssertion>,
+    #[serde(default)]
+    pub artifacts: Vec<TraceArtifact>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceEvent {
+    pub t_ms: u64,
+    pub source: String,
+    pub event: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub data: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceAssertion {
+    pub id: String,
+    pub status: TraceAssertionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceArtifact {
+    pub label: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceList {
+    pub component_id: String,
+    #[serde(default)]
+    pub scenarios: Vec<TraceScenario>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceScenario {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+pub fn parse_trace_results_file(path: &Path) -> Result<TraceResults> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to read trace results file {}: {}",
+                path.display(),
+                e
+            ),
+            Some("trace.parsing.read".to_string()),
+        )
+    })?;
+    parse_trace_results_str(&content)
+}
+
+pub fn parse_trace_results_str(raw: &str) -> Result<TraceResults> {
+    serde_json::from_str(raw).map_err(|e| {
+        Error::internal_json(
+            format!("Failed to parse trace results JSON: {}", e),
+            Some("trace.parsing.deserialize".to_string()),
+        )
+    })
+}
+
+pub fn parse_trace_list_str(raw: &str) -> Result<TraceList> {
+    serde_json::from_str(raw).map_err(|e| {
+        Error::internal_json(
+            format!("Failed to parse trace list JSON: {}", e),
+            Some("trace.parsing.list.deserialize".to_string()),
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_json_parser_accepts_minimal_envelope() {
+        let parsed = parse_trace_results_str(
+            r#"{
+                "component_id":"studio",
+                "scenario_id":"close-window-running-site",
+                "status":"fail",
+                "summary":"Window reopened after close",
+                "timeline":[{"t_ms":0,"source":"desktop","event":"window.closed","data":{"id":1}}],
+                "assertions":[{"id":"no-window-reopen","status":"fail","message":"Window reopened"}],
+                "artifacts":[{"label":"main log","path":"artifacts/main.log"}]
+            }"#,
+        )
+        .expect("minimal trace envelope should parse");
+
+        assert_eq!(parsed.component_id, "studio");
+        assert_eq!(parsed.status, TraceStatus::Fail);
+        assert_eq!(parsed.timeline[0].t_ms, 0);
+        assert_eq!(parsed.assertions[0].id, "no-window-reopen");
+        assert_eq!(parsed.artifacts[0].path, "artifacts/main.log");
+    }
+
+    #[test]
+    fn trace_json_parser_rejects_invalid_status() {
+        let err = parse_trace_results_str(
+            r#"{"component_id":"studio","scenario_id":"x","status":"unknown","timeline":[],"assertions":[],"artifacts":[]}"#,
+        )
+        .unwrap_err();
+
+        assert!(!err.message.is_empty());
+    }
+
+    #[test]
+    fn trace_json_parser_rejects_malformed_timeline_shape() {
+        let err = parse_trace_results_str(
+            r#"{"component_id":"studio","scenario_id":"x","status":"pass","timeline":[{"source":"desktop","event":"x"}],"assertions":[],"artifacts":[]}"#,
+        )
+        .unwrap_err();
+
+        assert!(!err.message.is_empty());
+    }
+
+    #[test]
+    fn trace_list_parser_accepts_compact_scenario_inventory() {
+        let parsed = parse_trace_list_str(
+            r#"{"component_id":"studio","scenarios":[{"id":"close-window","summary":"Close window lifecycle"}]}"#,
+        )
+        .expect("list envelope should parse");
+
+        assert_eq!(parsed.scenarios[0].id, "close-window");
+    }
+}

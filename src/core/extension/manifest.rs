@@ -343,6 +343,8 @@ pub struct ExtensionManifest {
     pub test: Option<TestConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bench: Option<BenchConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace: Option<TraceConfig>,
     /// Post-write verify command used as a safety gate after `refactor --from ...`
     /// autofix writes to disk. If the command exits non-zero, the written files
     /// are reverted and the fixes are reclassified as declined. See #1167.
@@ -403,6 +405,13 @@ impl ExtensionManifest {
             .is_some()
     }
 
+    pub fn has_trace(&self) -> bool {
+        self.trace
+            .as_ref()
+            .and_then(|c| c.extension_script.as_ref())
+            .is_some()
+    }
+
     pub fn lint_script(&self) -> Option<&str> {
         self.lint
             .as_ref()
@@ -423,6 +432,12 @@ impl ExtensionManifest {
 
     pub fn bench_script(&self) -> Option<&str> {
         self.bench
+            .as_ref()
+            .and_then(|c| c.extension_script.as_deref())
+    }
+
+    pub fn trace_script(&self) -> Option<&str> {
+        self.trace
             .as_ref()
             .and_then(|c| c.extension_script.as_deref())
     }
@@ -818,6 +833,12 @@ pub struct RuntimeRequirementsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension_script: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension_script: Option<String>,
 }

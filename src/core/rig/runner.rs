@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::expand::expand_vars;
 use super::lease::acquire_active_run_lease;
@@ -185,7 +185,7 @@ fn service_kind_label(kind: ServiceKind) -> &'static str {
 /// slower" from "I'm comparing against a different commit." Surfaced in
 /// the bench command output alongside the bench result; persisting into
 /// the baseline JSON is a follow-up (see Extra-Chill/homeboy#1466 docs).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ComponentSnapshot {
     /// Resolved filesystem path (after `~` / `${env.X}` / `${components.X}`
     /// expansion). Useful for humans reviewing a snapshot offline.
@@ -202,7 +202,7 @@ pub struct ComponentSnapshot {
 
 /// Snapshot of every component in a rig at a moment in time. Sorted by
 /// component ID for stable output (BTreeMap).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RigStateSnapshot {
     pub rig_id: String,
     pub captured_at: String,

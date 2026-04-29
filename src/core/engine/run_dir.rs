@@ -35,6 +35,7 @@ pub mod files {
     pub const COVERAGE: &str = "coverage.json";
     pub const FIX_RESULTS: &str = "fix-results.json";
     pub const BENCH_RESULTS: &str = "bench-results.json";
+    pub const TRACE_RESULTS: &str = "trace.json";
     pub const ANNOTATIONS_DIR: &str = "annotations";
 }
 
@@ -137,6 +138,12 @@ impl RunDir {
             (
                 "HOMEBOY_BENCH_RESULTS_FILE".to_string(),
                 self.step_file(files::BENCH_RESULTS)
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            (
+                "HOMEBOY_TRACE_RESULTS_FILE".to_string(),
+                self.step_file(files::TRACE_RESULTS)
                     .to_string_lossy()
                     .to_string(),
             ),
