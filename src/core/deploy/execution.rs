@@ -125,6 +125,7 @@ pub(super) fn execute_component_deploy(
 
     // Dispatch by deploy strategy
     let strategy = component.deploy_strategy.as_deref().unwrap_or("rsync");
+    let versions = (local_version, remote_version);
 
     if strategy == "git" {
         return execute_git_deploy(
@@ -133,8 +134,8 @@ pub(super) fn execute_component_deploy(
             ctx,
             base_path,
             &install_dir,
-            local_version,
-            remote_version,
+            versions.0,
+            versions.1,
         );
     }
 
@@ -144,8 +145,8 @@ pub(super) fn execute_component_deploy(
             ctx,
             base_path,
             &install_dir,
-            local_version,
-            remote_version,
+            versions.0,
+            versions.1,
         );
     }
 
@@ -156,8 +157,8 @@ pub(super) fn execute_component_deploy(
         base_path,
         project,
         &install_dir,
-        local_version,
-        remote_version,
+        versions.0,
+        versions.1,
         build_exit_code,
         release_artifact.as_ref(),
     )
@@ -663,7 +664,7 @@ mod tests {
     use crate::component::Component;
 
     #[test]
-    fn failed_component_deploy_result_preserves_build_exit_code() {
+    fn test_execute_component_deploy_failure_helper_preserves_build_exit_code() {
         let component = Component {
             id: "example".to_string(),
             ..Component::default()
