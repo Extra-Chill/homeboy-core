@@ -95,14 +95,14 @@ pub(super) fn execute_component_deploy(
     let install_dir = match base_path::join_remote_path(Some(base_path), &effective_remote_path) {
         Ok(v) => v,
         Err(err) => {
-            return ComponentDeployResult::failed(
+            return failed_component_deploy_result(
                 component,
                 base_path,
                 local_version,
                 remote_version,
+                build_exit_code,
                 err.to_string(),
-            )
-            .with_build_exit_code(build_exit_code);
+            );
         }
     };
 
@@ -113,14 +113,14 @@ pub(super) fn execute_component_deploy(
         &component.id,
         &component.deploy_protected_path_suffixes(),
     ) {
-        return ComponentDeployResult::failed(
+        return failed_component_deploy_result(
             component,
             base_path,
             local_version,
             remote_version,
+            build_exit_code,
             err.to_string(),
-        )
-        .with_build_exit_code(build_exit_code);
+        );
     }
 
     // Dispatch by deploy strategy
@@ -161,6 +161,18 @@ pub(super) fn execute_component_deploy(
         build_exit_code,
         release_artifact.as_ref(),
     )
+}
+
+fn failed_component_deploy_result(
+    component: &Component,
+    base_path: &str,
+    local_version: Option<String>,
+    remote_version: Option<String>,
+    build_exit_code: Option<i32>,
+    error: String,
+) -> ComponentDeployResult {
+    ComponentDeployResult::failed(component, base_path, local_version, remote_version, error)
+        .with_build_exit_code(build_exit_code)
 }
 
 /// Deploy a component via git push strategy.
@@ -642,5 +654,35 @@ fn cleanup_build_dependencies(
             format_bytes(total_bytes_freed)
         );
         Ok(Some(summary))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failed_component_deploy_result;
+    use crate::component::Component;
+
+    #[test]
+    fn failed_component_deploy_result_preserves_build_exit_code() {
+        let component = Component {
+            id: "example".to_string(),
+            ..Component::default()
+        };
+
+        let result = failed_component_deploy_result(
+            &component,
+            "/srv/site",
+            Some("1.0.0".to_string()),
+            Some("0.9.0".to_string()),
+            Some(7),
+            "deploy failed".to_string(),
+        );
+
+        assert_eq!(result.id, "example");
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.local_version.as_deref(), Some("1.0.0"));
+        assert_eq!(result.remote_version.as_deref(), Some("0.9.0"));
+        assert_eq!(result.build_exit_code, Some(7));
+        assert_eq!(result.error.as_deref(), Some("deploy failed"));
     }
 }
