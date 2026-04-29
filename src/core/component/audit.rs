@@ -21,6 +21,9 @@ pub struct AuditConfig {
     /// floor, package, or bootstrap file is present.
     #[serde(default, skip_serializing_if = "KnownSymbolsConfig::is_empty")]
     pub known_symbols: KnownSymbolsConfig,
+    /// Extension-owned text detector rules that emit audit findings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_detectors: Vec<RequestedDetectorRule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -96,6 +99,69 @@ impl KnownSymbolsConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RequestedDetectorRule {
+    /// Human-readable detector label used for logging/debugging.
+    pub id: String,
+    /// Audit finding kind in snake_case, e.g. `json_like_exact_match`.
+    pub kind: String,
+    /// `warning` or `info`. Defaults to `warning`.
+    #[serde(default = "default_requested_detector_severity")]
+    pub severity: String,
+    /// Report convention label. Defaults to `requested_detectors`.
+    #[serde(default = "default_requested_detector_convention")]
+    pub convention: String,
+    /// Optional language filter using Homeboy's lowercase language names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Optional path-extension filter, without leading dots.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_extensions: Vec<String>,
+    /// Path substrings that opt files out of this detector.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_path_contains: Vec<String>,
+    /// Detector body. Core owns the execution primitives; extensions own the rules.
+    #[serde(flatten)]
+    pub rule: RequestedDetectorRuleBody,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RequestedDetectorRuleBody {
+    /// Emit one finding for each regex match in a file.
+    Regex {
+        pattern: String,
+        description: String,
+        suggestion: String,
+    },
+    /// Emit regex findings only when extracted comments match a trigger pattern.
+    CommentRegex {
+        comment_pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        comment_exclude_pattern: Option<String>,
+        pattern: String,
+        description: String,
+        suggestion: String,
+    },
+    /// Collect values with one regex, then flag matching literals in other files.
+    DerivedLiteral {
+        source_pattern: String,
+        value_capture: String,
+        label: String,
+        literal_pattern: String,
+        description: String,
+        suggestion: String,
+    },
+}
+
+fn default_requested_detector_severity() -> String {
+    "warning".to_string()
+}
+
+fn default_requested_detector_convention() -> String {
+    "requested_detectors".to_string()
+}
+
 impl AuditConfig {
     pub fn is_empty(&self) -> bool {
         self.runtime_entrypoint_extends.is_empty()
@@ -104,6 +170,7 @@ impl AuditConfig {
             && self.utility_suffixes.is_empty()
             && self.convention_exception_globs.is_empty()
             && self.known_symbols.is_empty()
+            && self.requested_detectors.is_empty()
     }
 
     pub fn merge(&mut self, other: &AuditConfig) {
@@ -122,6 +189,15 @@ impl AuditConfig {
             &other.convention_exception_globs,
         );
         self.known_symbols.merge(&other.known_symbols);
+        for rule in &other.requested_detectors {
+            if !self
+                .requested_detectors
+                .iter()
+                .any(|existing| existing.id == rule.id)
+            {
+                self.requested_detectors.push(rule.clone());
+            }
+        }
     }
 }
 

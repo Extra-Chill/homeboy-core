@@ -1048,16 +1048,16 @@ fn audit_internal(
         all_findings.extend(dead_guard_findings);
     }
 
-    // Phase 4t: Requested drift detectors for common WordPress/PHP hazards.
+    // Phase 4t: Extension-owned requested detector rule packs.
     let requested_findings = if plan.run_requested_detectors {
-        requested_detectors::run(&all_fingerprints)
+        requested_detectors::run(&all_fingerprints, &audit_config)
     } else {
         Vec::new()
     };
     if !requested_findings.is_empty() {
         log_status!(
             "audit",
-            "Requested detectors: {} finding(s) (JSON LIKE, slug literal, option-scope drift)",
+            "Requested detectors: {} finding(s) (extension rule packs)",
             requested_findings.len()
         );
         all_findings.extend(requested_findings);
