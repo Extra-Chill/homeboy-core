@@ -135,6 +135,45 @@ fn reconcile_with_scope(
         }
 
         // count > 0 from here.
+        if let Some(closed) =
+            preferred_closed.filter(|issue| issue.state == TrackedIssueState::ClosedNotPlanned)
+        {
+            // A human closing the category as not_planned is stronger than any
+            // open duplicate left behind by an older action run. Keep the
+            // closed issue as the canonical record and fold open dupes into it.
+            let suppressed_by_label = has_suppression_label(closed, config);
+            if !suppressed_by_label && config.refresh_closed_not_planned {
+                actions.push(ReconcileAction::UpdateClosed {
+                    number: closed.number,
+                    body: body_with_issue_key(group),
+                    category: group.category.clone(),
+                    count: group.count,
+                });
+            }
+            for dup in &open_matches {
+                actions.push(ReconcileAction::CloseDuplicate {
+                    number: dup.number,
+                    keep: closed.number,
+                    category: group.category.clone(),
+                    comment: close_dedupe_comment(closed.number),
+                });
+            }
+            if suppressed_by_label {
+                actions.push(ReconcileAction::Skip {
+                    category: group.category.clone(),
+                    component_id: group.component_id.clone(),
+                    reason: ReconcileSkipReason::SuppressedByLabel,
+                });
+            } else if !config.refresh_closed_not_planned {
+                actions.push(ReconcileAction::Skip {
+                    category: group.category.clone(),
+                    component_id: group.component_id.clone(),
+                    reason: ReconcileSkipReason::ClosedNotPlannedNoRefresh,
+                });
+            }
+            continue;
+        }
+
         if !open_matches.is_empty() {
             // Update the lowest-numbered open match.
             let keep = open_matches[0].number;
@@ -161,11 +200,8 @@ fn reconcile_with_scope(
         if let Some(closed) = preferred_closed {
             match closed.state {
                 TrackedIssueState::ClosedNotPlanned => {
-                    let has_suppression_label = closed
-                        .labels
-                        .iter()
-                        .any(|l| config.suppression_labels.iter().any(|s| s == l));
-                    if has_suppression_label {
+                    let suppressed_by_label = has_suppression_label(closed, config);
+                    if suppressed_by_label {
                         // Phase 3 suppression — a label on a closed-not_planned
                         // issue mutes re-filing.
                         actions.push(ReconcileAction::Skip {
@@ -345,6 +381,15 @@ fn is_review_only(group: &IssueGroup, config: &ReconcileConfig) -> bool {
         .iter()
         .any(|category| category == &group.category)
         || matches!(group.confidence, Some(FindingConfidence::Heuristic))
+}
+
+fn has_suppression_label(issue: &TrackedIssue, config: &ReconcileConfig) -> bool {
+    issue.labels.iter().any(|label| {
+        config
+            .suppression_labels
+            .iter()
+            .any(|suppressed| suppressed == label)
+    })
 }
 
 fn pick_preferred_closed<'a>(closed: &[&'a TrackedIssue]) -> Option<&'a TrackedIssue> {
@@ -854,6 +899,72 @@ mod tests {
             ReconcileAction::UpdateClosed { number, .. } => assert_eq!(*number, 20),
             other => panic!("expected UpdateClosed on #20, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn closed_not_planned_beats_later_open_duplicate() {
+        let groups = vec![group("dead_guard", 23)];
+        let existing = vec![
+            issue(1364, "dead guard", TrackedIssueState::ClosedNotPlanned, 23),
+            issue(1377, "dead guard", TrackedIssueState::Open, 23),
+        ];
+
+        let plan = reconcile(&groups, &existing, &cfg());
+
+        assert_eq!(plan.actions.len(), 2);
+        assert!(matches!(
+            &plan.actions[0],
+            ReconcileAction::UpdateClosed {
+                number: 1364,
+                category,
+                count: 23,
+                ..
+            } if category == "dead_guard"
+        ));
+        assert!(matches!(
+            &plan.actions[1],
+            ReconcileAction::CloseDuplicate {
+                number: 1377,
+                keep: 1364,
+                category,
+                ..
+            } if category == "dead_guard"
+        ));
+    }
+
+    #[test]
+    fn closed_not_planned_with_suppression_label_closes_later_open_duplicate() {
+        let groups = vec![group("unreferenced_export", 1)];
+        let existing = vec![
+            issue_with_labels(
+                1366,
+                "unreferenced export",
+                TrackedIssueState::ClosedNotPlanned,
+                1,
+                &["audit", "wontfix"],
+            ),
+            issue(1400, "unreferenced export", TrackedIssueState::Open, 1),
+        ];
+
+        let plan = reconcile(&groups, &existing, &cfg());
+
+        assert_eq!(plan.actions.len(), 2);
+        assert!(matches!(
+            &plan.actions[0],
+            ReconcileAction::CloseDuplicate {
+                number: 1400,
+                keep: 1366,
+                category,
+                ..
+            } if category == "unreferenced_export"
+        ));
+        assert!(matches!(
+            &plan.actions[1],
+            ReconcileAction::Skip {
+                reason: ReconcileSkipReason::SuppressedByLabel,
+                ..
+            }
+        ));
     }
 
     #[test]
