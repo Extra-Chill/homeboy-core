@@ -80,6 +80,13 @@ pub struct FileFingerprint {
     /// hook-registered in the same file IS live code — invoked by the
     /// framework runtime rather than direct calls from other files.
     pub hook_callbacks: Vec<String>,
+    /// Type/class names registered with a runtime dispatcher from any file.
+    ///
+    /// This covers cross-file dispatch where one bootstrap file registers a
+    /// type and the runtime later invokes that type's public methods by
+    /// convention. Core consumes the generic metadata; extensions own the
+    /// framework-specific registration parsing.
+    pub runtime_dispatched_types: Vec<String>,
     /// Method names that are trait implementations (called via trait dispatch).
     pub trait_impl_methods: Vec<String>,
 }
@@ -165,6 +172,7 @@ fn fingerprint_via_extension(
         call_sites: output.call_sites,
         public_api: output.public_api,
         hook_callbacks: output.hook_callbacks,
+        runtime_dispatched_types: output.runtime_dispatched_types,
         trait_impl_methods: Vec::new(), // Extension scripts don't track this
     })
 }
