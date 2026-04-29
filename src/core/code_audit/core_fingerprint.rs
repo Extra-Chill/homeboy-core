@@ -46,207 +46,6 @@ use super::conventions::Language;
 use super::fingerprint::FileFingerprint;
 
 // ============================================================================
-// Configuration
-// ============================================================================
-
-/// Keywords preserved during structural normalization (not replaced with ID_N).
-/// These are language-specific; we detect the language from the grammar ID.
-const RUST_KEYWORDS: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
-    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
-    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
-    "unsafe", "use", "where", "while", "yield",
-    // Common types kept as structural markers
-    "Some", "None", "Ok", "Err", "Result", "Option", "Vec", "String", "Box", "Arc", "Rc", "HashMap",
-    "HashSet", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
-    "i128", "isize", "f32", "f64", "str", "char",
-];
-
-const PHP_KEYWORDS: &[&str] = &[
-    "abstract",
-    "and",
-    "array",
-    "as",
-    "break",
-    "callable",
-    "case",
-    "catch",
-    "class",
-    "clone",
-    "const",
-    "continue",
-    "declare",
-    "default",
-    "do",
-    "echo",
-    "else",
-    "elseif",
-    "empty",
-    "enddeclare",
-    "endfor",
-    "endforeach",
-    "endif",
-    "endswitch",
-    "endwhile",
-    "eval",
-    "exit",
-    "extends",
-    "final",
-    "finally",
-    "fn",
-    "for",
-    "foreach",
-    "function",
-    "global",
-    "goto",
-    "if",
-    "implements",
-    "include",
-    "include_once",
-    "instanceof",
-    "insteadof",
-    "interface",
-    "isset",
-    "list",
-    "match",
-    "namespace",
-    "new",
-    "or",
-    "print",
-    "private",
-    "protected",
-    "public",
-    "readonly",
-    "require",
-    "require_once",
-    "return",
-    "static",
-    "switch",
-    "throw",
-    "trait",
-    "try",
-    "unset",
-    "use",
-    "var",
-    "while",
-    "xor",
-    "yield",
-    "null",
-    "true",
-    "false",
-    "self",
-    "parent",
-    // Common types
-    "int",
-    "float",
-    "string",
-    "bool",
-    "void",
-    "mixed",
-    "object",
-    "iterable",
-    "never",
-];
-
-/// Generic names too common to flag as near-duplicates.
-/// These are the same as in duplication.rs — kept here for internal_calls filtering.
-const SKIP_CALLS_RUST: &[&str] = &[
-    "if",
-    "while",
-    "for",
-    "match",
-    "loop",
-    "return",
-    "Some",
-    "None",
-    "Ok",
-    "Err",
-    "Box",
-    "Vec",
-    "Arc",
-    "Rc",
-    "String",
-    "println",
-    "eprintln",
-    "format",
-    "write",
-    "writeln",
-    "panic",
-    "assert",
-    "assert_eq",
-    "assert_ne",
-    "todo",
-    "unimplemented",
-    "unreachable",
-    "dbg",
-    "cfg",
-    "include",
-    "include_str",
-    "concat",
-    "env",
-    "compile_error",
-    "stringify",
-    "vec",
-    "hashmap",
-    "bail",
-    "ensure",
-    "anyhow",
-    "matches",
-    "debug_assert",
-    "debug_assert_eq",
-    "allow",
-    "deny",
-    "warn",
-    "derive",
-    "serde",
-    "test",
-    "inline",
-    "must_use",
-    "doc",
-    "feature",
-    "pub",
-    "crate",
-    "super",
-];
-
-const SKIP_CALLS_PHP: &[&str] = &[
-    "if",
-    "while",
-    "for",
-    "foreach",
-    "switch",
-    "match",
-    "catch",
-    "return",
-    "echo",
-    "print",
-    "isset",
-    "unset",
-    "empty",
-    "list",
-    "array",
-    "function",
-    "class",
-    "interface",
-    "trait",
-    "new",
-    "require",
-    "require_once",
-    "include",
-    "include_once",
-    "define",
-    "defined",
-    "die",
-    "exit",
-    "eval",
-    "compact",
-    "extract",
-    "var_dump",
-    "print_r",
-    "var_export",
-];
-
-// ============================================================================
 // Public API
 // ============================================================================
 
@@ -335,11 +134,7 @@ pub fn fingerprint_from_grammar(
     }
 
     // --- Method hashes and structural hashes ---
-    let keywords = match lang_id {
-        "rust" => RUST_KEYWORDS,
-        "php" => PHP_KEYWORDS,
-        _ => RUST_KEYWORDS, // fallback
-    };
+    let keywords = &grammar.fingerprint.keywords;
 
     let mut method_hashes = HashMap::new();
     let mut structural_hashes = HashMap::new();
@@ -383,23 +178,20 @@ pub fn fingerprint_from_grammar(
     let imports = extract_imports(&symbols);
 
     // --- Registrations ---
-    let registrations = extract_registrations(&symbols);
+    let registrations = extract_registrations(&symbols, grammar);
 
     // --- Internal calls ---
-    let skip_calls: &[&str] = match lang_id {
-        "rust" => SKIP_CALLS_RUST,
-        "php" => SKIP_CALLS_PHP,
-        _ => SKIP_CALLS_RUST,
-    };
     // Build the effective skip list: exclude names that are also defined as
-    // functions in this file. E.g. "write" is in SKIP_CALLS (for the write!
-    // macro) but if this file defines `fn write(...)`, we need to track calls
-    // to it in internal_calls.
+    // functions in this file. E.g. a grammar may skip "write" for a language
+    // macro, but if this file defines `fn write(...)`, calls to it should
+    // still appear in internal_calls.
     let defined_names: HashSet<&str> = functions.iter().map(|f| f.name.as_str()).collect();
-    let effective_skip: Vec<&str> = skip_calls
+    let effective_skip: Vec<&str> = grammar
+        .fingerprint
+        .skip_calls
         .iter()
+        .map(|name| name.as_str())
         .filter(|name| !defined_names.contains(*name))
-        .copied()
         .collect();
     let internal_calls = extract_internal_calls(content, &effective_skip);
 
@@ -420,7 +212,7 @@ pub fn fingerprint_from_grammar(
         .collect();
 
     // --- Unused parameters ---
-    let unused_parameters = detect_unused_params(&functions, lang_id);
+    let unused_parameters = detect_unused_params(&functions, grammar);
 
     // --- Dead code markers ---
     let dead_code_markers = extract_dead_code_markers(&symbols, &lines);
@@ -429,7 +221,7 @@ pub fn fingerprint_from_grammar(
     let properties = extract_properties(&symbols);
 
     // --- Hooks (PHP-specific, from grammar) ---
-    let hooks = extract_hooks(&symbols);
+    let hooks = extract_hooks(&symbols, grammar);
 
     // --- Runtime-dispatched types (extension-owned grammar metadata) ---
     let runtime_dispatched_types = extract_runtime_dispatched_types(&symbols);
@@ -744,7 +536,7 @@ fn exact_hash(body: &str) -> String {
 }
 
 /// Compute structural hash: replace identifiers/literals with positional tokens.
-fn structural_hash(body: &str, keywords: &[&str], is_php: bool) -> String {
+fn structural_hash(body: &str, keywords: &[String], is_php: bool) -> String {
     let normalized = structural_normalize(body, keywords, is_php);
     sha256_hex16(&normalized)
 }
@@ -775,7 +567,7 @@ fn sha256_hex16(input: &str) -> String {
 
 /// Structural normalization: strip to body, replace strings/numbers/identifiers
 /// with positional tokens, preserving language keywords as structural markers.
-fn structural_normalize(body: &str, keywords: &[&str], is_php: bool) -> String {
+fn structural_normalize(body: &str, keywords: &[String], is_php: bool) -> String {
     // Strip to body (from first opening brace)
     let text = if let Some(pos) = body.find('{') {
         &body[pos..]
@@ -783,7 +575,7 @@ fn structural_normalize(body: &str, keywords: &[&str], is_php: bool) -> String {
         body
     };
 
-    let keyword_set: HashSet<&str> = keywords.iter().copied().collect();
+    let keyword_set: HashSet<&str> = keywords.iter().map(|keyword| keyword.as_str()).collect();
 
     // Working string — we'll do sequential replacements
     let mut result = text.to_string();
@@ -1029,92 +821,33 @@ fn extract_imports(symbols: &[Symbol]) -> Vec<String> {
 
 /// Extract registrations from grammar symbols.
 ///
-/// Matches registration-like concepts: register_post_type, add_action,
-/// macro invocations, etc.
-fn extract_registrations(symbols: &[Symbol]) -> Vec<String> {
-    let registration_concepts = [
-        "register_post_type",
-        "register_taxonomy",
-        "register_rest_route",
-        "register_block_type",
-        "add_action",
-        "add_filter",
-        "add_shortcode",
-        "wp_cli_command",
-        "wp_register_ability",
-        "macro_invocation",
-    ];
-
-    let skip_macros: HashSet<&str> = [
-        "println",
-        "eprintln",
-        "format",
-        "vec",
-        "assert",
-        "assert_eq",
-        "assert_ne",
-        "panic",
-        "todo",
-        "unimplemented",
-        "cfg",
-        "derive",
-        "include",
-        "include_str",
-        "include_bytes",
-        "concat",
-        "stringify",
-        "env",
-        "option_env",
-        "compile_error",
-        "write",
-        "writeln",
-        "matches",
-        "dbg",
-        "debug_assert",
-        "debug_assert_eq",
-        "debug_assert_ne",
-        "unreachable",
-        "cfg_if",
-        "lazy_static",
-        "thread_local",
-        "once_cell",
-        "macro_rules",
-        "serde_json",
-        "if_chain",
-        "bail",
-        "anyhow",
-        "ensure",
-        "Ok",
-        "Err",
-        "Some",
-        "None",
-        "Box",
-        "Arc",
-        "Rc",
-        "RefCell",
-        "Mutex",
-        "map",
-        "hashmap",
-        "btreemap",
-        "hashset",
-    ]
-    .iter()
-    .copied()
-    .collect();
-
+/// Matches registration-like concepts supplied by grammar fingerprint metadata.
+fn extract_registrations(symbols: &[Symbol], grammar: &Grammar) -> Vec<String> {
+    let registration_concepts: HashSet<&str> = grammar
+        .fingerprint
+        .registration_concepts
+        .iter()
+        .map(|concept| concept.as_str())
+        .collect();
+    let skip_names: HashSet<&str> = grammar
+        .fingerprint
+        .registration_skip_names
+        .iter()
+        .map(|name| name.as_str())
+        .collect();
+    let skip_prefixes = &grammar.fingerprint.registration_skip_prefixes;
     let mut registrations = Vec::new();
     let mut seen = HashSet::new();
 
     for s in symbols
         .iter()
-        .filter(|s| registration_concepts.contains(&s.concept.as_str()))
+        .filter(|s| registration_concepts.contains(s.concept.as_str()))
     {
         if let Some(name) = s.name() {
-            // Skip common macros for Rust
-            if s.concept == "macro_invocation" && skip_macros.contains(name) {
+            if skip_names.contains(name) {
                 continue;
             }
-            if s.concept == "macro_invocation" && name.starts_with("test") {
+            if skip_prefixes.iter().any(|prefix| name.starts_with(prefix)) {
                 continue;
             }
             if seen.insert(name.to_string()) {
@@ -1190,7 +923,7 @@ fn is_public_visibility(vis: &str) -> bool {
 // ============================================================================
 
 /// Detect function parameters that are declared but never used in the body.
-fn detect_unused_params(functions: &[FunctionInfo], _lang_id: &str) -> Vec<UnusedParam> {
+fn detect_unused_params(functions: &[FunctionInfo], grammar: &Grammar) -> Vec<UnusedParam> {
     let mut unused = Vec::new();
 
     for f in functions {
@@ -1199,10 +932,9 @@ fn detect_unused_params(functions: &[FunctionInfo], _lang_id: &str) -> Vec<Unuse
         }
 
         // Skip contract methods entirely. These have a fixed signature imposed
-        // by a framework/interface (WordPress abilities, REST callbacks,
-        // common PHP magic methods) and the parameters cannot be removed
-        // even when unused. Flagging them produces churny CI noise (#1136).
-        if is_contract_method_by_name(&f.name) {
+        // by a framework/interface and the parameters cannot be removed even
+        // when unused. Flagging them produces churny CI noise (#1136).
+        if is_contract_method_by_name(&f.name, grammar) {
             continue;
         }
 
@@ -1224,12 +956,11 @@ fn detect_unused_params(functions: &[FunctionInfo], _lang_id: &str) -> Vec<Unuse
                 continue;
             }
 
-            // Skip params whose type hint is a known framework contract type.
-            // e.g. \WP_REST_Request, WP_REST_Request, WP_Post, WP_User, etc.
-            // The parameter exists to satisfy the framework callback signature,
-            // not because the function must use it (#1136).
+            // Skip params whose type hint is a grammar-declared framework
+            // contract type. The parameter exists to satisfy a callback
+            // signature, not because the function must use it (#1136).
             if let Some(type_hint) = &p.type_hint {
-                if is_contract_type_hint(type_hint) {
+                if is_contract_type_hint(type_hint, grammar) {
                     continue;
                 }
             }
@@ -1256,7 +987,7 @@ fn detect_unused_params(functions: &[FunctionInfo], _lang_id: &str) -> Vec<Unuse
 struct Param {
     name: String,
     /// Type hint as it appeared in source, if any. For PHP, leading backslashes
-    /// and nullable markers are preserved (e.g. `\WP_REST_Request`, `?WP_Post`).
+    /// and nullable markers are preserved.
     /// For Rust, this is the type after the colon (e.g. `&str`).
     type_hint: Option<String>,
 }
@@ -1367,43 +1098,17 @@ fn parse_param_names(params: &str) -> Vec<String> {
 /// Whether a method name corresponds to a framework/contract callback where
 /// the parameter list is imposed by the contract and cannot be adjusted.
 ///
-/// Covers:
-/// - WordPress Abilities API: `execute`, `checkPermission`
-/// - REST controller callbacks: `register_routes`, `permission_callback_*`
-/// - PHP magic methods: `__construct`, `__get`, `__call`, etc.
-///
-/// This is intentionally a small, conservative list — we only match on
-/// names that are almost universally contract-driven. Specific type-hint
-/// checks (see `is_contract_type_hint`) handle the long tail.
-fn is_contract_method_by_name(name: &str) -> bool {
-    matches!(
-        name,
-        // WordPress Abilities API (WP_Ability contract)
-        "execute"
-        | "checkPermission"
-        | "check_permission"
-        // PHP magic methods — signatures are fixed by PHP itself
-        | "__construct"
-        | "__destruct"
-        | "__get"
-        | "__set"
-        | "__isset"
-        | "__unset"
-        | "__call"
-        | "__callStatic"
-        | "__toString"
-        | "__invoke"
-        | "__clone"
-        | "__sleep"
-        | "__wakeup"
-        | "__serialize"
-        | "__unserialize"
-        | "__set_state"
-        | "__debugInfo"
-    )
+/// The concrete list is owned by grammar fingerprint metadata so framework
+/// contracts stay outside Homeboy core.
+fn is_contract_method_by_name(name: &str, grammar: &Grammar) -> bool {
+    grammar
+        .fingerprint
+        .contract_method_names
+        .iter()
+        .any(|contract_name| contract_name == name)
 }
 
-/// Whether a PHP type hint names a framework contract type whose presence
+/// Whether a type hint names a framework contract type whose presence
 /// in a parameter list indicates the signature is callback-shaped.
 ///
 /// When a parameter's type hint matches one of these, the parameter exists
@@ -1411,9 +1116,8 @@ fn is_contract_method_by_name(name: &str) -> bool {
 /// REST route callback) and cannot be removed even when unused.
 ///
 /// Handles leading `\` and nullable `?` markers. Matches on the *terminal*
-/// class name only so namespaced references like `\MyPlugin\WP_REST_Request`
-/// are still caught.
-fn is_contract_type_hint(type_hint: &str) -> bool {
+/// class name only so namespaced references are still caught.
+fn is_contract_type_hint(type_hint: &str, grammar: &Grammar) -> bool {
     // Strip nullable marker and leading backslashes
     let hint = type_hint.trim_start_matches('?').trim_start_matches('\\');
     // Split on union/intersection markers and check each alternative
@@ -1421,41 +1125,16 @@ fn is_contract_type_hint(type_hint: &str) -> bool {
         let alt = alt.trim().trim_start_matches('\\');
         // Extract terminal class name (last backslash-separated segment)
         let terminal = alt.rsplit('\\').next().unwrap_or(alt);
-        if is_contract_class_name(terminal) {
+        if grammar
+            .fingerprint
+            .contract_type_hints
+            .iter()
+            .any(|contract_name| contract_name == terminal)
+        {
             return true;
         }
     }
     false
-}
-
-/// Whether a bare class name refers to a WordPress/PHP framework type that
-/// commonly appears in callback signatures.
-fn is_contract_class_name(name: &str) -> bool {
-    matches!(
-        name,
-        // REST API
-        "WP_REST_Request"
-        | "WP_REST_Response"
-        | "WP_REST_Server"
-        // Core models
-        | "WP_Post"
-        | "WP_User"
-        | "WP_Term"
-        | "WP_Comment"
-        | "WP_Site"
-        | "WP_Network"
-        | "WP_Query"
-        | "WP_Block"
-        | "WP_Block_Type"
-        // Errors
-        | "WP_Error"
-        // HTTP
-        | "WP_Http_Response"
-        | "WP_HTTP_Requests_Response"
-        // CLI / admin
-        | "WP_CLI_Command"
-        | "WP_List_Table"
-    )
 }
 
 // ============================================================================
@@ -1528,16 +1207,14 @@ fn extract_properties(symbols: &[Symbol]) -> Vec<String> {
     properties
 }
 
-/// Extract PHP hooks (do_action, apply_filters) from grammar symbols.
-fn extract_hooks(symbols: &[Symbol]) -> Vec<HookRef> {
+/// Extract hook/event references from grammar symbols.
+fn extract_hooks(symbols: &[Symbol], grammar: &Grammar) -> Vec<HookRef> {
     let mut hooks = Vec::new();
     let mut seen = HashSet::new();
 
     for s in symbols {
-        let hook_type = match s.concept.as_str() {
-            "do_action" => "action",
-            "apply_filters" => "filter",
-            _ => continue,
+        let Some(hook_type) = grammar.fingerprint.hook_concepts.get(&s.concept) else {
+            continue;
         };
         if let Some(name) = s.name() {
             if seen.insert((hook_type.to_string(), name.to_string())) {
@@ -1583,6 +1260,14 @@ mod tests {
                 [blocks]
                 open = "{"
                 close = "}"
+                [fingerprint]
+                keywords = ["fn", "let", "if", "for", "return", "true", "false", "pub", "struct", "impl", "trait", "Self", "Result", "String", "bool", "i32", "usize"]
+                skip_calls = ["if", "for", "return", "println", "write", "assert"]
+                contract_method_names = []
+                contract_type_hints = []
+                registration_concepts = ["macro_invocation"]
+                registration_skip_names = ["println", "assert", "write"]
+                registration_skip_prefixes = ["test"]
                 [patterns.function]
                 regex = '^\s*(pub(?:\(crate\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?fn\s+(\w+)\s*\(([^)]*)\)'
                 context = "any"
@@ -1618,6 +1303,10 @@ mod tests {
             )
             .expect("Failed to parse minimal grammar")
         }
+    }
+
+    fn rust_keywords() -> Vec<String> {
+        rust_grammar().fingerprint.keywords
     }
 
     #[test]
@@ -1672,8 +1361,8 @@ pub fn undo() -> Result<()> {
         let a = "{ let foo = bar(); baz(foo); }";
         let b = "{ let qux = quux(); corge(qux); }";
         assert_eq!(
-            structural_hash(a, RUST_KEYWORDS, false),
-            structural_hash(b, RUST_KEYWORDS, false),
+            structural_hash(a, &rust_keywords(), false),
+            structural_hash(b, &rust_keywords(), false),
         );
     }
 
@@ -1682,8 +1371,8 @@ pub fn undo() -> Result<()> {
         let a = "{ let x = 1; if x > 0 { return true; } }";
         let b = "{ let x = 1; for i in 0..x { print(i); } }";
         assert_ne!(
-            structural_hash(a, RUST_KEYWORDS, false),
-            structural_hash(b, RUST_KEYWORDS, false),
+            structural_hash(a, &rust_keywords(), false),
+            structural_hash(b, &rust_keywords(), false),
         );
     }
 
@@ -1956,7 +1645,7 @@ impl Store for MemStore {
     #[test]
     fn skip_list_does_not_suppress_defined_function_calls() {
         let grammar = rust_grammar();
-        // "write" is in SKIP_CALLS_RUST (for the write! macro), but this
+        // The grammar suppresses "write" (for a macro-like call), but this
         // file defines fn write(...) and calls it — so it should appear
         // in internal_calls.
         let content = r#"
@@ -2000,6 +1689,131 @@ pub fn map_source() {
             "test_-prefixed production helpers should be retained as references, got: {:?}",
             fp.internal_calls
         );
+    }
+
+    #[test]
+    fn grammar_skip_calls_drive_internal_call_extraction() {
+        let grammar = rust_grammar();
+        let content = r#"
+fn run() {
+    guard();
+    helper();
+}
+
+fn helper() {}
+"#;
+
+        let mut grammar = grammar;
+        grammar.fingerprint.skip_calls = vec!["guard".to_string()];
+
+        let fp = fingerprint_from_grammar(content, &grammar, "src/file.rs").unwrap();
+
+        assert!(fp.internal_calls.contains(&"helper".to_string()));
+        assert!(
+            !fp.internal_calls.contains(&"guard".to_string()),
+            "grammar skip_calls should suppress guard(), got: {:?}",
+            fp.internal_calls
+        );
+    }
+
+    fn php_metadata_grammar() -> Grammar {
+        toml::from_str(
+            r##"
+            [language]
+            id = "php"
+            extensions = ["php"]
+            [comments]
+            line = ["//", "#"]
+            block = [["/*", "*/"]]
+            [strings]
+            quotes = ['"', "'"]
+            escape = "\\"
+            [blocks]
+            open = "{"
+            close = "}"
+            [fingerprint]
+            keywords = ["class", "function", "public", "return", "int", "string", "bool", "true", "false"]
+            skip_calls = ["if", "return"]
+            contract_method_names = ["contractExecute"]
+            contract_type_hints = ["FrameworkRequest"]
+            registration_concepts = []
+            [fingerprint.hook_concepts]
+            emit_event = "action"
+            transform_value = "filter"
+            [patterns.method]
+            regex = '((?:(?:public|protected|private|static|abstract|final)\s+)*)function\s+(\w+)\s*\(([^)]*)\)'
+            context = "any"
+            [patterns.method.captures]
+            modifiers = 1
+            name = 2
+            params = 3
+            [patterns.class]
+            regex = '^\s*(?:class|trait|interface)\s+(\w+)'
+            context = "top_level"
+            [patterns.class.captures]
+            name = 1
+            [patterns.emit_event]
+            regex = "emit_event\\s*\\(\\s*['\"]([^'\"]+)['\"]"
+            context = "any"
+            skip_strings = false
+            [patterns.emit_event.captures]
+            name = 1
+            [patterns.transform_value]
+            regex = "transform_value\\s*\\(\\s*['\"]([^'\"]+)['\"]"
+            context = "any"
+            skip_strings = false
+            [patterns.transform_value.captures]
+            name = 1
+            "##,
+        )
+        .expect("metadata grammar should parse")
+    }
+
+    #[test]
+    fn grammar_contract_metadata_suppresses_framework_unused_params() {
+        let grammar = php_metadata_grammar();
+        let content = "<?php\nclass Sample {\n    public function contractExecute( string $input ): bool {\n        return true;\n    }\n    public function route( FrameworkRequest $request ): bool {\n        return true;\n    }\n    public function helper( int $left, int $right ): int {\n        return $left * 2;\n    }\n}\n";
+
+        let fp = fingerprint_from_grammar(content, &grammar, "src/Sample.php").unwrap();
+
+        assert!(
+            !fp.unused_parameters
+                .iter()
+                .any(|p| p.function == "contractExecute"),
+            "grammar contract_method_names should suppress contractExecute params: {:?}",
+            fp.unused_parameters
+        );
+        assert!(
+            !fp.unused_parameters
+                .iter()
+                .any(|p| p.function == "route" && p.param == "request"),
+            "grammar contract_type_hints should suppress FrameworkRequest param: {:?}",
+            fp.unused_parameters
+        );
+        assert!(
+            fp.unused_parameters
+                .iter()
+                .any(|p| p.function == "helper" && p.param == "right"),
+            "normal helper params should still be flagged: {:?}",
+            fp.unused_parameters
+        );
+    }
+
+    #[test]
+    fn grammar_hook_concepts_drive_hook_extraction() {
+        let grammar = php_metadata_grammar();
+        let content = "<?php\nclass Sample {\n    public function fire() {\n        emit_event( 'sample_event' );\n        transform_value( 'sample_value', 'x' );\n    }\n}\n";
+
+        let fp = fingerprint_from_grammar(content, &grammar, "src/Sample.php").unwrap();
+
+        assert!(fp
+            .hooks
+            .iter()
+            .any(|hook| hook.hook_type == "action" && hook.name == "sample_event"));
+        assert!(fp
+            .hooks
+            .iter()
+            .any(|hook| hook.hook_type == "filter" && hook.name == "sample_value"));
     }
 
     #[test]
