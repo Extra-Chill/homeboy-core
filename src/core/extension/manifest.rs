@@ -52,6 +52,10 @@ pub struct DeployCapability {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_path_inference: Vec<RemotePathInferenceRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protected_path_suffixes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owner_hints: Vec<DeployOwnerHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub version_patterns: Vec<VersionPatternConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since_tag: Option<SinceTagConfig>,
@@ -495,6 +499,22 @@ impl ExtensionManifest {
             .unwrap_or(&[])
     }
 
+    /// Convenience: get deploy-protected path suffixes (empty if no deploy capability).
+    pub fn deploy_protected_path_suffixes(&self) -> &[String] {
+        self.deploy
+            .as_ref()
+            .map(|d| d.protected_path_suffixes.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Convenience: get remote owner hints (empty if no deploy capability).
+    pub fn deploy_owner_hints(&self) -> &[DeployOwnerHint] {
+        self.deploy
+            .as_ref()
+            .map(|d| d.owner_hints.as_slice())
+            .unwrap_or(&[])
+    }
+
     /// Convenience: get version patterns (empty if no deploy capability).
     pub fn version_patterns(&self) -> &[VersionPatternConfig] {
         self.deploy
@@ -760,6 +780,12 @@ pub struct DeployOverride {
 pub struct RemotePathInferenceRule {
     pub when_file_contains: FileContainsCondition,
     pub remote_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeployOwnerHint {
+    pub path_contains: String,
+    pub suggested_owner: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

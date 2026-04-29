@@ -504,6 +504,48 @@ impl Component {
             }
         }
     }
+
+    pub fn deploy_protected_path_suffixes(&self) -> Vec<String> {
+        let mut suffixes = HashSet::new();
+        let Some(extensions) = self.extensions.as_ref() else {
+            return Vec::new();
+        };
+
+        for extension_id in extensions.keys() {
+            let Ok(extension) = crate::extension::load_extension(extension_id) else {
+                continue;
+            };
+
+            for suffix in extension.deploy_protected_path_suffixes() {
+                suffixes.insert(suffix.clone());
+            }
+        }
+
+        let mut suffixes: Vec<String> = suffixes.into_iter().collect();
+        suffixes.sort();
+        suffixes
+    }
+
+    pub fn deploy_owner_hint_for_path(
+        &self,
+        remote_path: &str,
+    ) -> Option<crate::extension::DeployOwnerHint> {
+        let extensions = self.extensions.as_ref()?;
+
+        for extension_id in extensions.keys() {
+            let Ok(extension) = crate::extension::load_extension(extension_id) else {
+                continue;
+            };
+
+            for hint in extension.deploy_owner_hints() {
+                if remote_path.contains(&hint.path_contains) {
+                    return Some(hint.clone());
+                }
+            }
+        }
+
+        None
+    }
 }
 
 fn render_remote_path_template(template: &str, component_id: &str, dir_name: &str) -> String {
@@ -887,6 +929,65 @@ mod tests {
 
         component.resolve_remote_path();
         assert_eq!(component.remote_path, "custom/deploy/path");
+    }
+
+    #[test]
+    fn deploy_policy_collects_extension_protected_suffixes() {
+        with_isolated_home(|home| {
+            write_extension_fixture(
+                home,
+                "example",
+                r#"{
+    "protected_path_suffixes": ["/shared/plugins", "/shared/uploads"]
+  }"#,
+            );
+
+            let component = Component {
+                id: "my-plugin".to_string(),
+                extensions: Some(HashMap::from([(
+                    "example".to_string(),
+                    ScopedExtensionConfig::default(),
+                )])),
+                ..Component::default()
+            };
+
+            assert_eq!(
+                component.deploy_protected_path_suffixes(),
+                vec!["/shared/plugins", "/shared/uploads"]
+            );
+        });
+    }
+
+    #[test]
+    fn deploy_policy_resolves_owner_hint_for_matching_path() {
+        with_isolated_home(|home| {
+            write_extension_fixture(
+                home,
+                "example",
+                r#"{
+    "owner_hints": [
+      { "path_contains": "shared/plugins/", "suggested_owner": "www-data:www-data" }
+    ]
+  }"#,
+            );
+
+            let component = Component {
+                id: "my-plugin".to_string(),
+                extensions: Some(HashMap::from([(
+                    "example".to_string(),
+                    ScopedExtensionConfig::default(),
+                )])),
+                ..Component::default()
+            };
+
+            let hint = component
+                .deploy_owner_hint_for_path("shared/plugins/my-plugin")
+                .expect("owner hint");
+            assert_eq!(hint.suggested_owner, "www-data:www-data");
+            assert!(component
+                .deploy_owner_hint_for_path("other/my-plugin")
+                .is_none());
+        });
     }
 
     // ========================================================================

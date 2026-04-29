@@ -61,10 +61,9 @@ pub(super) fn execute_component_deploy(
         .with_build_exit_code(build_exit_code);
     }
 
-    // Auto-resolve remote_path for WordPress components when not explicitly set.
+    // Auto-resolve remote_path from linked extension deploy policy when not explicitly set.
     // This is a deploy-time safety net; the primary resolution happens in
-    // resolve_project_component (#812). Plugins deploy to wp-content/plugins/{id},
-    // themes to wp-content/themes/{id}.
+    // resolve_project_component (#812).
     let effective_remote_path = if component.remote_path.trim().is_empty() {
         if let Some(resolved) = component.auto_resolve_remote_path() {
             log_status!("deploy", "Auto-resolved remote path: {}", resolved);
@@ -76,17 +75,19 @@ pub(super) fn execute_component_deploy(
         component.remote_path.clone()
     };
 
-    // Warn when deploying to a WordPress path without remote_owner configured.
-    // Files will end up as root:root which breaks WordPress functionality (#602).
-    if component.remote_owner.is_none() && effective_remote_path.contains("wp-content/") {
-        log_status!(
-            "deploy",
-            "⚠ Component '{}' deploys to a WordPress path but has no remote_owner set. \
-             Files may deploy as root:root. \
-             Fix: homeboy component set {} --json '{{\"remote_owner\":\"www-data:www-data\"}}'",
-            component.id,
-            component.id
-        );
+    if component.remote_owner.is_none() {
+        if let Some(owner_hint) = component.deploy_owner_hint_for_path(&effective_remote_path) {
+            log_status!(
+                "deploy",
+                "⚠ Component '{}' deploys to a path that may need remote_owner='{}'. \
+             Files may deploy with the SSH user's ownership. \
+             Fix: homeboy component set {} --json '{{\"remote_owner\":\"{}\"}}'",
+                component.id,
+                owner_hint.suggested_owner,
+                component.id,
+                owner_hint.suggested_owner
+            );
+        }
     }
 
     // Resolve install directory
@@ -105,7 +106,12 @@ pub(super) fn execute_component_deploy(
     };
 
     // Safety check: prevent deploying to shared parent directories (issue #353)
-    if let Err(err) = validate_deploy_target(&install_dir, base_path, &component.id) {
+    if let Err(err) = validate_deploy_target(
+        &install_dir,
+        base_path,
+        &component.id,
+        &component.deploy_protected_path_suffixes(),
+    ) {
         return ComponentDeployResult::failed(
             component,
             base_path,
