@@ -137,6 +137,22 @@ struct TransferArgs {
     /// Copy directories recursively
     #[arg(short, long)]
     recursive: bool,
+    #[command(flatten)]
+    flags: TransferFlags,
+}
+
+#[derive(Args)]
+struct SyncArgs {
+    /// Source: local path or server_id:/path
+    source: String,
+    /// Destination: local path or server_id:/path
+    destination: String,
+    #[command(flatten)]
+    flags: TransferFlags,
+}
+
+#[derive(Args)]
+struct TransferFlags {
     /// Compress data during transfer
     #[arg(short, long)]
     compress: bool,
@@ -148,21 +164,32 @@ struct TransferArgs {
     exclude: Vec<String>,
 }
 
-#[derive(Args)]
-struct SyncArgs {
-    /// Source: local path or server_id:/path
+impl TransferArgs {
+    fn into_config(self) -> TransferConfig {
+        transfer_config(self.source, self.destination, self.recursive, self.flags)
+    }
+}
+
+impl SyncArgs {
+    fn into_config(self) -> TransferConfig {
+        transfer_config(self.source, self.destination, true, self.flags)
+    }
+}
+
+fn transfer_config(
     source: String,
-    /// Destination: local path or server_id:/path
     destination: String,
-    /// Compress data during transfer
-    #[arg(short, long)]
-    compress: bool,
-    /// Show what would be synced without doing it
-    #[arg(long)]
-    dry_run: bool,
-    /// Exclude patterns for recursive server-to-server syncs
-    #[arg(long)]
-    exclude: Vec<String>,
+    recursive: bool,
+    flags: TransferFlags,
+) -> TransferConfig {
+    TransferConfig {
+        source,
+        destination,
+        recursive,
+        compress: flags.compress,
+        dry_run: flags.dry_run,
+        exclude: flags.exclude,
+    }
 }
 
 #[derive(Args)]
@@ -410,39 +437,16 @@ pub fn run(args: FileArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<F
             remote_path,
             compress,
             dry_run,
-        } => {
-            let (out, code) = run_transfer(TransferConfig {
-                source: local_path,
-                destination: format!("{}:{}", server, remote_path),
-                recursive: false,
-                compress,
-                dry_run,
-                exclude: Vec::new(),
-            })?;
-            Ok((FileCommandOutput::Transfer(out), code))
-        }
-        FileCommand::Copy(args) => {
-            let (out, code) = run_transfer(TransferConfig {
-                source: args.source,
-                destination: args.destination,
-                recursive: args.recursive,
-                compress: args.compress,
-                dry_run: args.dry_run,
-                exclude: args.exclude,
-            })?;
-            Ok((FileCommandOutput::Transfer(out), code))
-        }
-        FileCommand::Sync(args) => {
-            let (out, code) = run_transfer(TransferConfig {
-                source: args.source,
-                destination: args.destination,
-                recursive: true,
-                compress: args.compress,
-                dry_run: args.dry_run,
-                exclude: args.exclude,
-            })?;
-            Ok((FileCommandOutput::Transfer(out), code))
-        }
+        } => transfer_command(TransferConfig {
+            source: local_path,
+            destination: format!("{}:{}", server, remote_path),
+            recursive: false,
+            compress,
+            dry_run,
+            exclude: Vec::new(),
+        }),
+        FileCommand::Copy(args) => transfer_command(args.into_config()),
+        FileCommand::Sync(args) => transfer_command(args.into_config()),
         FileCommand::Edit(args) => {
             let (out, code) = edit(args)?;
             Ok((FileCommandOutput::Edit(out), code))
@@ -452,6 +456,11 @@ pub fn run(args: FileArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<F
 
 fn run_transfer(config: TransferConfig) -> CmdResult<TransferOutput> {
     transfer::transfer(&config)
+}
+
+fn transfer_command(config: TransferConfig) -> CmdResult<FileCommandOutput> {
+    let (out, code) = run_transfer(config)?;
+    Ok((FileCommandOutput::Transfer(out), code))
 }
 
 fn list(project_id: &str, path: &str) -> CmdResult<FileOutput> {

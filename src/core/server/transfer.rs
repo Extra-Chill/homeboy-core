@@ -32,6 +32,27 @@ pub struct TransferOutput {
     pub dry_run: bool,
 }
 
+fn transfer_output(
+    config: &TransferConfig,
+    method: impl Into<String>,
+    direction: impl Into<String>,
+    success: bool,
+    error: Option<String>,
+    dry_run: bool,
+) -> TransferOutput {
+    TransferOutput {
+        source: config.source.clone(),
+        destination: config.destination.clone(),
+        method: method.into(),
+        direction: direction.into(),
+        recursive: config.recursive,
+        compress: config.compress,
+        success,
+        error,
+        dry_run,
+    }
+}
+
 /// A parsed transfer target: either local or remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferTarget {
@@ -173,20 +194,7 @@ fn run_push(
             server_id,
             remote_path
         );
-        return Ok((
-            TransferOutput {
-                source: config.source.clone(),
-                destination: config.destination.clone(),
-                method: "scp".to_string(),
-                direction: "push".to_string(),
-                recursive: config.recursive,
-                compress: config.compress,
-                success: true,
-                error: None,
-                dry_run: true,
-            },
-            0,
-        ));
+        return Ok((transfer_output(config, "scp", "push", true, None, true), 0));
     }
 
     // Validate local path exists
@@ -243,20 +251,7 @@ fn run_pull(
             remote_path,
             local_path
         );
-        return Ok((
-            TransferOutput {
-                source: config.source.clone(),
-                destination: config.destination.clone(),
-                method: "scp".to_string(),
-                direction: "pull".to_string(),
-                recursive: config.recursive,
-                compress: config.compress,
-                success: true,
-                error: None,
-                dry_run: true,
-            },
-            0,
-        ));
+        return Ok((transfer_output(config, "scp", "pull", true, None, true), 0));
     }
 
     // Ensure parent directory exists for local destination
@@ -325,17 +320,7 @@ fn run_server_to_server(
         );
         log_status!("dry-run", "Method: {}", method);
         return Ok((
-            TransferOutput {
-                source: config.source.clone(),
-                destination: config.destination.clone(),
-                method: method.to_string(),
-                direction: "server-to-server".to_string(),
-                recursive: config.recursive,
-                compress: config.compress,
-                success: true,
-                error: None,
-                dry_run: true,
-            },
+            transfer_output(config, method, "server-to-server", true, None, true),
             0,
         ));
     }
@@ -399,32 +384,26 @@ fn run_server_to_server(
             }
 
             Ok((
-                TransferOutput {
-                    source: config.source.clone(),
-                    destination: config.destination.clone(),
+                transfer_output(
+                    config,
                     method,
-                    direction: "server-to-server".to_string(),
-                    recursive: config.recursive,
-                    compress: config.compress,
+                    "server-to-server",
                     success,
-                    error: if success { None } else { Some(stderr) },
-                    dry_run: false,
-                },
+                    if success { None } else { Some(stderr) },
+                    false,
+                ),
                 if success { 0 } else { 1 },
             ))
         }
         Err(e) => Ok((
-            TransferOutput {
-                source: config.source.clone(),
-                destination: config.destination.clone(),
+            transfer_output(
+                config,
                 method,
-                direction: "server-to-server".to_string(),
-                recursive: config.recursive,
-                compress: config.compress,
-                success: false,
-                error: Some(format!("Failed to execute transfer: {}", e)),
-                dry_run: false,
-            },
+                "server-to-server",
+                false,
+                Some(format!("Failed to execute transfer: {}", e)),
+                false,
+            ),
             1,
         )),
     }
@@ -452,37 +431,122 @@ fn execute_scp(
             }
 
             Ok((
-                TransferOutput {
-                    source: config.source.clone(),
-                    destination: config.destination.clone(),
-                    method: "scp".to_string(),
-                    direction: if config.source.contains(':') {
-                        "pull".to_string()
+                transfer_output(
+                    config,
+                    "scp",
+                    if config.source.contains(':') {
+                        "pull"
                     } else {
-                        "push".to_string()
+                        "push"
                     },
-                    recursive: config.recursive,
-                    compress: config.compress,
                     success,
-                    error: if success { None } else { Some(stderr) },
-                    dry_run: false,
-                },
+                    if success { None } else { Some(stderr) },
+                    false,
+                ),
                 if success { 0 } else { 1 },
             ))
         }
         Err(e) => Ok((
-            TransferOutput {
-                source: config.source.clone(),
-                destination: config.destination.clone(),
-                method: "scp".to_string(),
-                direction: "unknown".to_string(),
-                recursive: config.recursive,
-                compress: config.compress,
-                success: false,
-                error: Some(format!("Failed to execute scp: {}", e)),
-                dry_run: false,
-            },
+            transfer_output(
+                config,
+                "scp",
+                "unknown",
+                false,
+                Some(format!("Failed to execute scp: {}", e)),
+                false,
+            ),
             1,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::server::{self, Server};
+    use crate::test_support::with_isolated_home;
+
+    use super::{parse_target, transfer, TransferConfig, TransferTarget};
+
+    fn save_server(id: &str) {
+        server::save(&Server {
+            id: id.to_string(),
+            aliases: Vec::new(),
+            host: "example.test".to_string(),
+            user: "deploy".to_string(),
+            port: 22,
+            identity_file: None,
+            env: HashMap::new(),
+        })
+        .expect("save server");
+    }
+
+    #[test]
+    fn test_parse_target() {
+        assert_eq!(
+            parse_target("prod:/var/www"),
+            TransferTarget::Remote {
+                server_id: "prod".to_string(),
+                path: "/var/www".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_target("./artifact.zip"),
+            TransferTarget::Local("./artifact.zip".to_string())
+        );
+        assert_eq!(
+            parse_target("relative/artifact.zip"),
+            TransferTarget::Local("relative/artifact.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transfer() {
+        with_isolated_home(|_| {
+            save_server("prod");
+
+            let (out, code) = transfer(&TransferConfig {
+                source: "./missing-artifact.zip".to_string(),
+                destination: "prod:/tmp/artifact.zip".to_string(),
+                recursive: false,
+                compress: true,
+                dry_run: true,
+                exclude: Vec::new(),
+            })
+            .expect("dry run transfer");
+
+            assert_eq!(code, 0);
+            assert_eq!(out.direction, "push");
+            assert_eq!(out.method, "scp");
+            assert!(out.compress);
+            assert!(out.dry_run);
+            assert!(out.success);
+        });
+    }
+
+    #[test]
+    fn dry_run_remote_to_remote_preserves_recursive_options() {
+        with_isolated_home(|_| {
+            save_server("old");
+            save_server("new");
+
+            let (out, code) = transfer(&TransferConfig {
+                source: "old:/var/www/uploads".to_string(),
+                destination: "new:/var/www/uploads".to_string(),
+                recursive: true,
+                compress: true,
+                dry_run: true,
+                exclude: vec!["cache".to_string()],
+            })
+            .expect("dry run server transfer");
+
+            assert_eq!(code, 0);
+            assert_eq!(out.direction, "server-to-server");
+            assert_eq!(out.method, "tar-pipe");
+            assert!(out.recursive);
+            assert!(out.compress);
+            assert!(out.dry_run);
+        });
     }
 }
