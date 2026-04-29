@@ -140,6 +140,9 @@ pub fn render_failure_digest(context: &FailureDigestContext) -> String {
     if command_failed(&context.results, "audit") {
         render_audit_section(&mut out, &context.output_dir, &context.run_url);
     }
+    if command_reported(&context.results, "trace") {
+        render_trace_section(&mut out, &context.output_dir, &context.run_url);
+    }
 
     render_autofix_section(&mut out, context);
     render_tooling_section(&mut out, &context.tooling);
@@ -177,6 +180,10 @@ fn command_failed(results: &Map<String, Value>, command: &str) -> bool {
         .is_some_and(|status| status == "fail")
 }
 
+fn command_reported(results: &Map<String, Value>, command: &str) -> bool {
+    results.contains_key(command)
+}
+
 fn command_names_from_csv(raw: &str) -> BTreeSet<String> {
     raw.split(',')
         .filter_map(|part| part.trim().split(' ').next())
@@ -212,20 +219,16 @@ fn envelope_parts(value: Option<Value>) -> (Map<String, Value>, Map<String, Valu
     };
 
     if root.contains_key("success") || root.contains_key("data") || root.contains_key("error") {
-        let data = root
-            .remove("data")
-            .and_then(|v| match v {
-                Value::Object(map) => Some(map),
-                _ => None,
-            })
-            .unwrap_or_default();
-        let error = root
-            .remove("error")
-            .and_then(|v| match v {
-                Value::Object(map) => Some(map),
-                _ => None,
-            })
-            .unwrap_or_default();
+        let take_object = |root: &mut Map<String, Value>, key: &str| {
+            root.remove(key)
+                .and_then(|v| match v {
+                    Value::Object(map) => Some(map),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+        let data = take_object(&mut root, "data");
+        let error = take_object(&mut root, "error");
         return (data, error);
     }
 
@@ -375,6 +378,68 @@ fn render_audit_section(out: &mut String, output_dir: &Path, run_url: &str) {
     }
 
     render_full_log(out, "audit", run_url);
+    out.push('\n');
+}
+
+fn render_trace_section(out: &mut String, output_dir: &Path, run_url: &str) {
+    let (data, error) = envelope_parts(read_command_json(output_dir, "trace"));
+    let results = object_value(&data, "results");
+    let failure = object_value(&data, "failure");
+
+    let component = string_value(&data, "component")
+        .or_else(|| string_value(&results, "component_id"))
+        .or_else(|| string_value(&failure, "component_id"))
+        .unwrap_or_else(|| "unknown".to_string());
+    let scenario_id = string_value(&data, "scenario_id")
+        .or_else(|| string_value(&results, "scenario_id"))
+        .or_else(|| string_value(&failure, "scenario_id"));
+    let status = string_value(&data, "status")
+        .or_else(|| string_value(&results, "status"))
+        .or_else(|| string_value(&error, "code"))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let title = scenario_id
+        .as_ref()
+        .map(|scenario| format!("{} / {}", component, scenario))
+        .unwrap_or(component);
+    let _ = writeln!(out, "### Trace: {}", title);
+    let _ = writeln!(out, "**Status:** {}\n", status.to_uppercase());
+
+    let mut summary_lines = Vec::new();
+    if let Some(summary) =
+        string_value(&data, "summary").or_else(|| string_value(&results, "summary"))
+    {
+        summary_lines.push(summary);
+    }
+    if let Some(failure_message) = string_value(&results, "failure") {
+        summary_lines.push(failure_message);
+    }
+    if let Some(stderr_excerpt) = string_value(&failure, "stderr_excerpt") {
+        summary_lines.push(stderr_excerpt);
+    }
+    if let Some(message) = string_value(&error, "message") {
+        summary_lines.push(message);
+    }
+
+    if !summary_lines.is_empty() {
+        out.push_str("**Summary**\n");
+        for line in summary_lines {
+            let _ = writeln!(out, "- {}", line);
+        }
+        out.push('\n');
+    }
+
+    let artifacts = collect_trace_artifacts(&data, &results);
+    if !artifacts.is_empty() {
+        out.push_str("**Artifacts**\n");
+        for (label, path) in artifacts {
+            let _ = writeln!(out, "- {}: {}", label, path);
+        }
+    } else {
+        out.push_str("**Artifacts**\n- No structured trace artifacts available.\n");
+    }
+
+    render_full_log(out, "trace", run_url);
     out.push('\n');
 }
 
@@ -568,6 +633,29 @@ fn array_from_object(map: &Map<String, Value>, key: &str) -> Vec<Value> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn collect_trace_artifacts(
+    data: &Map<String, Value>,
+    results: &Map<String, Value>,
+) -> Vec<(String, String)> {
+    let mut seen = BTreeSet::new();
+    [
+        array_value(data, "artifacts"),
+        array_value(results, "artifacts"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|artifact| {
+        let obj = artifact.as_object()?;
+        let label = string_value(obj, "label").or_else(|| string_value(obj, "name"))?;
+        let path = string_value(obj, "path")?;
+        if !seen.insert((label.clone(), path.clone())) {
+            return None;
+        }
+        Some((label, path))
+    })
+    .collect()
 }
 
 fn string_array(map: &Map<String, Value>, key: &str) -> Vec<String> {
