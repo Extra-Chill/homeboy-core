@@ -91,9 +91,18 @@ pub(super) fn execute_component_deploy(
         }
     }
 
-    // Resolve install directory
-    let install_dir = match base_path::join_remote_path(Some(base_path), &effective_remote_path) {
-        Ok(v) => v,
+    // Resolve and validate install directory before any destructive operation.
+    let install_dir = match base_path::join_remote_path(Some(base_path), &effective_remote_path)
+        .and_then(|install_dir| {
+            validate_deploy_target(
+                &install_dir,
+                base_path,
+                &component.id,
+                &component.deploy_protected_path_suffixes(),
+            )?;
+            Ok(install_dir)
+        }) {
+        Ok(install_dir) => install_dir,
         Err(err) => {
             return failed_component_deploy_result(
                 component,
@@ -105,23 +114,6 @@ pub(super) fn execute_component_deploy(
             );
         }
     };
-
-    // Safety check: prevent deploying to shared parent directories (issue #353)
-    if let Err(err) = validate_deploy_target(
-        &install_dir,
-        base_path,
-        &component.id,
-        &component.deploy_protected_path_suffixes(),
-    ) {
-        return failed_component_deploy_result(
-            component,
-            base_path,
-            local_version,
-            remote_version,
-            build_exit_code,
-            err.to_string(),
-        );
-    }
 
     // Dispatch by deploy strategy
     let strategy = component.deploy_strategy.as_deref().unwrap_or("rsync");

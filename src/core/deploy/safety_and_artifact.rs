@@ -354,7 +354,7 @@ fn render_extract_command(template: &str, vars: &HashMap<String, String>) -> Str
 
 #[cfg(test)]
 mod tests {
-    use super::validate_deploy_target;
+    use super::{render_extract_command, validate_deploy_target};
 
     #[test]
     fn validate_deploy_target_rejects_generic_shared_suffix() {
@@ -388,5 +388,24 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("my-plugin"));
+    }
+
+    #[test]
+    fn test_deploy_artifact_extract_command_template_replaces_vars() {
+        let vars = std::collections::HashMap::from([
+            ("archive".to_string(), "artifact.zip".to_string()),
+            ("target".to_string(), "/srv/site/plugin".to_string()),
+        ]);
+
+        assert_eq!(
+            render_extract_command("unzip {archive} -d {target}", &vars),
+            "unzip artifact.zip -d /srv/site/plugin"
+        );
+    }
+
+    #[test]
+    fn test_deploy_via_git_uses_generic_safety_policy_only() {
+        assert!(validate_deploy_target("/srv/site/vendor", "/srv/site", "repo", &[]).is_err());
+        assert!(validate_deploy_target("/srv/site/plugins", "/srv/site", "repo", &[]).is_ok());
     }
 }
