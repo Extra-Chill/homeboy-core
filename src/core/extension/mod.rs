@@ -59,6 +59,13 @@ pub use lifecycle::{
     UpdateAvailable, UpdateResult,
 };
 
+pub(crate) fn stderr_tail(stderr: &str) -> String {
+    const MAX_LINES: usize = 20;
+    let lines: Vec<&str> = stderr.lines().collect();
+    let start = lines.len().saturating_sub(MAX_LINES);
+    lines[start..].join("\n")
+}
+
 // Re-export aggregate query types
 // (ActionSummary, ExtensionSummary, UpdateAllResult, UpdateEntry defined below in this file)
 

@@ -191,7 +191,6 @@ mod tests {
     fn create_run_dir() {
         let run_dir = RunDir::create().expect("should create run dir");
         assert!(run_dir.path().is_dir());
-        assert!(run_dir.annotations_dir().is_dir());
 
         // Well-known paths
         assert!(run_dir
@@ -203,14 +202,59 @@ mod tests {
             .to_string_lossy()
             .ends_with("test-results.json"));
 
-        // Legacy env vars
+        // Cleanup
+        let path = run_dir.path().to_path_buf();
+        run_dir.cleanup();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_path() {
+        let run_dir = RunDir::create().expect("should create run dir");
+        assert!(run_dir.path().is_dir());
+        run_dir.cleanup();
+    }
+
+    #[test]
+    fn test_annotations_dir() {
+        let run_dir = RunDir::create().expect("should create run dir");
+        assert!(run_dir.annotations_dir().is_dir());
+        run_dir.cleanup();
+    }
+
+    #[test]
+    fn test_step_file() {
+        let run_dir = RunDir::create().expect("should create run dir");
+        assert!(run_dir
+            .step_file(files::TRACE_RESULTS)
+            .to_string_lossy()
+            .ends_with("trace-results.json"));
+        run_dir.cleanup();
+    }
+
+    #[test]
+    fn test_legacy_env_vars() {
+        let run_dir = RunDir::create().expect("should create run dir");
         let env_vars = run_dir.legacy_env_vars();
         assert!(env_vars.iter().any(|(k, _)| k == "HOMEBOY_RUN_DIR"));
         assert!(env_vars
             .iter()
-            .any(|(k, _)| k == "HOMEBOY_LINT_FINDINGS_FILE"));
+            .any(|(k, _)| k == "HOMEBOY_TRACE_RESULTS_FILE"));
+        run_dir.cleanup();
+    }
 
-        // Cleanup
+    #[test]
+    fn test_from_existing() {
+        let run_dir = RunDir::create().expect("should create run dir");
+        let path = run_dir.path().to_path_buf();
+        let existing = RunDir::from_existing(path.clone()).expect("existing run dir should load");
+        assert_eq!(existing.path(), path.as_path());
+        existing.cleanup();
+    }
+
+    #[test]
+    fn test_cleanup() {
+        let run_dir = RunDir::create().expect("should create run dir");
         let path = run_dir.path().to_path_buf();
         run_dir.cleanup();
         assert!(!path.exists());

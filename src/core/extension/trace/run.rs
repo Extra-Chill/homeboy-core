@@ -5,7 +5,9 @@ use serde::Serialize;
 use crate::component::Component;
 use crate::engine::run_dir::{self, RunDir};
 use crate::error::{Error, Result};
-use crate::extension::{resolve_execution_context, ExtensionCapability, ExtensionExecutionContext};
+use crate::extension::{
+    resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
+};
 use crate::extension::{ExtensionRunner, RunnerOutput};
 use crate::rig::RigStateSnapshot;
 
@@ -48,10 +50,10 @@ pub struct TraceRunWorkflowResult {
 pub struct TraceRunFailure {
     pub component_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub component_path: Option<String>,
+    pub path_override: Option<String>,
     pub scenario_id: String,
     pub exit_code: i32,
-    pub stderr_tail: String,
+    pub stderr_excerpt: String,
 }
 
 pub fn run_trace_workflow(
@@ -206,18 +208,11 @@ pub(crate) fn build_trace_runner(
 fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> TraceRunFailure {
     TraceRunFailure {
         component_id: args.component_id.clone(),
-        component_path: args.path_override.clone(),
+        path_override: args.path_override.clone(),
         scenario_id: args.scenario_id.clone(),
         exit_code: output.exit_code,
-        stderr_tail: stderr_tail(&output.stderr),
+        stderr_excerpt: stderr_tail(&output.stderr),
     }
-}
-
-fn stderr_tail(stderr: &str) -> String {
-    const MAX_LINES: usize = 20;
-    let lines: Vec<&str> = stderr.lines().collect();
-    let start = lines.len().saturating_sub(MAX_LINES);
-    lines[start..].join("\n")
 }
 
 #[cfg(test)]
@@ -231,7 +226,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trace_runner_invokes_extension_script_with_expected_env_vars() {
+    fn test_build_trace_runner() {
         let temp = tempfile::tempdir().unwrap();
         let extension_dir = temp.path().join("extension");
         let component_dir = temp.path().join("component");
@@ -298,7 +293,7 @@ JSON
     }
 
     #[test]
-    fn trace_list_mode_sets_list_env_var() {
+    fn test_run_trace_list_workflow() {
         let temp = tempfile::tempdir().unwrap();
         let extension_dir = temp.path().join("extension");
         let component_dir = temp.path().join("component");
@@ -349,6 +344,37 @@ JSON
             "1"
         );
         run_dir.cleanup();
+    }
+
+    #[test]
+    fn test_run_trace_workflow() {
+        let args = TraceRunWorkflowArgs {
+            component_label: "example".to_string(),
+            component_id: "example".to_string(),
+            path_override: Some("/tmp/example".to_string()),
+            settings: Vec::new(),
+            settings_json: Vec::new(),
+            scenario_id: "close-window".to_string(),
+            json_summary: false,
+            rig_id: None,
+        };
+        let output = RunnerOutput {
+            success: false,
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: (0..25)
+                .map(|i| format!("line {i}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+
+        let failure = failure_from_output(&args, &output);
+
+        assert_eq!(failure.component_id, "example");
+        assert_eq!(failure.scenario_id, "close-window");
+        assert_eq!(failure.exit_code, 2);
+        assert!(failure.stderr_excerpt.contains("line 24"));
+        assert!(!failure.stderr_excerpt.contains("line 0"));
     }
 
     fn component_with_extension(id: &str, path: &std::path::Path) -> Component {

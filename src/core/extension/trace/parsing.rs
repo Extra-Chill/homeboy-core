@@ -122,7 +122,7 @@ pub fn parse_trace_results_file(path: &Path) -> Result<TraceResults> {
     parse_trace_results_str(&content)
 }
 
-pub fn parse_trace_results_str(raw: &str) -> Result<TraceResults> {
+fn parse_trace_results_str(raw: &str) -> Result<TraceResults> {
     serde_json::from_str(raw).map_err(|e| {
         Error::internal_json(
             format!("Failed to parse trace results JSON: {}", e),
@@ -145,7 +145,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trace_json_parser_accepts_minimal_envelope() {
+    fn test_parse_trace_results_str() {
         let parsed = parse_trace_results_str(
             r#"{
                 "component_id":"studio",
@@ -164,6 +164,21 @@ mod tests {
         assert_eq!(parsed.timeline[0].t_ms, 0);
         assert_eq!(parsed.assertions[0].id, "no-window-reopen");
         assert_eq!(parsed.artifacts[0].path, "artifacts/main.log");
+    }
+
+    #[test]
+    fn test_parse_trace_results_file() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let path = temp.path().join("trace-results.json");
+        std::fs::write(
+            &path,
+            r#"{"component_id":"studio","scenario_id":"x","status":"pass","timeline":[],"assertions":[],"artifacts":[]}"#,
+        )
+        .expect("trace results should be written");
+
+        let parsed = parse_trace_results_file(&path).expect("trace results file should parse");
+        assert_eq!(parsed.component_id, "studio");
+        assert_eq!(parsed.status, TraceStatus::Pass);
     }
 
     #[test]
@@ -187,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn trace_list_parser_accepts_compact_scenario_inventory() {
+    fn test_parse_trace_list_str() {
         let parsed = parse_trace_list_str(
             r#"{"component_id":"studio","scenarios":[{"id":"close-window","summary":"Close window lifecycle"}]}"#,
         )

@@ -13,7 +13,7 @@ pub mod run;
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext};
 
-pub use parsing::{parse_trace_list_str, parse_trace_results_file, parse_trace_results_str};
+pub use parsing::{parse_trace_list_str, parse_trace_results_file};
 pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,
 };

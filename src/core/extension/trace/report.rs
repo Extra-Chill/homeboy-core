@@ -119,3 +119,69 @@ pub fn from_list_workflow(component: String, list: TraceList) -> (TraceCommandOu
         0,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extension::trace::parsing::{TraceScenario, TraceStatus};
+
+    #[test]
+    fn test_from_list_workflow() {
+        let list = TraceList {
+            component_id: "studio".to_string(),
+            scenario_id: None,
+            status: None,
+            scenarios: vec![TraceScenario {
+                id: "close-window-running-site".to_string(),
+                source: Some("fixtures/close-window.trace.js".to_string()),
+                summary: Some("Close window while a site is running".to_string()),
+            }],
+            timeline: Vec::new(),
+            assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        let (output, exit_code) = from_list_workflow("Studio".to_string(), list);
+        let value = serde_json::to_value(output).expect("list output should serialize");
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(value["command"], "trace.list");
+        assert_eq!(value["component"], "Studio");
+        assert_eq!(value["component_id"], "studio");
+        assert_eq!(value["count"], 1);
+        assert_eq!(value["scenarios"][0]["id"], "close-window-running-site");
+    }
+
+    #[test]
+    fn test_from_main_workflow() {
+        let result = TraceRunWorkflowResult {
+            status: "pass".to_string(),
+            component: "Studio".to_string(),
+            exit_code: 0,
+            results: Some(TraceResults {
+                component_id: "studio".to_string(),
+                scenario_id: "close-window-running-site".to_string(),
+                status: TraceStatus::Pass,
+                summary: Some("No window reopened".to_string()),
+                failure: None,
+                rig: None,
+                timeline: Vec::new(),
+                assertions: Vec::new(),
+                artifacts: vec![TraceArtifact {
+                    label: "main log".to_string(),
+                    path: "artifacts/main.log".to_string(),
+                }],
+            }),
+            failure: None,
+        };
+
+        let (output, exit_code) = from_main_workflow(result, None, true);
+        let value = serde_json::to_value(output).expect("summary output should serialize");
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(value["summary_only"], true);
+        assert_eq!(value["passed"], true);
+        assert_eq!(value["scenario_id"], "close-window-running-site");
+        assert_eq!(value["artifact_count"], 1);
+    }
+}

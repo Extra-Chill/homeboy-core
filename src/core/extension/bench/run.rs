@@ -20,7 +20,8 @@ use crate::extension::bench::parsing::{
     BenchWorkloadMetadata,
 };
 use crate::extension::{
-    resolve_execution_context, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner,
+    resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
+    ExtensionRunner,
 };
 
 #[derive(Debug, Clone)]
@@ -580,13 +581,6 @@ pub fn run_main_bench_workflow(
         hints,
         failure,
     })
-}
-
-fn stderr_tail(stderr: &str) -> String {
-    const MAX_LINES: usize = 20;
-    let lines: Vec<&str> = stderr.lines().collect();
-    let start = lines.len().saturating_sub(MAX_LINES);
-    lines[start..].join("\n")
 }
 
 fn stamp_run_metadata(
