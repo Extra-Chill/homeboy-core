@@ -3,7 +3,7 @@ use clap::{Command, CommandFactory, Parser, Subcommand};
 use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
     deps, extension, file, fleet, git, issues, lint, logs, project, refactor, release, report,
-    review, rig, self_cmd, server, ssh, stack, status, test, triage, undo, upgrade, version,
+    review, rig, self_cmd, server, ssh, stack, status, test, trace, triage, undo, upgrade, version,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,6 +36,8 @@ pub enum Commands {
     Test(test::TestArgs),
     /// Run performance benchmarks for a component
     Bench(bench::BenchArgs),
+    /// Capture black-box behavioral traces for a component
+    Trace(trace::TraceArgs),
     /// Lint a component
     Lint(lint::LintArgs),
     /// Database operations

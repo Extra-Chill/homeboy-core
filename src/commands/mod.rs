@@ -308,6 +308,7 @@ pub mod ssh;
 pub mod stack;
 pub mod status;
 pub mod test;
+pub mod trace;
 pub mod triage;
 pub mod undo;
 pub mod upgrade;
@@ -350,6 +351,7 @@ pub fn run_json(
         crate::cli_surface::Commands::Status(args) => dispatch!(args, global, status),
         crate::cli_surface::Commands::Test(args) => dispatch!(args, global, test),
         crate::cli_surface::Commands::Bench(args) => dispatch!(args, global, bench),
+        crate::cli_surface::Commands::Trace(args) => dispatch!(args, global, trace),
         crate::cli_surface::Commands::Lint(args) => dispatch!(args, global, lint),
         crate::cli_surface::Commands::Project(args) => dispatch!(args, global, project),
         crate::cli_surface::Commands::Ssh(args) => dispatch!(args, global, ssh),
