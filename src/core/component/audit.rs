@@ -17,6 +17,83 @@ pub struct AuditConfig {
     /// Files exempt from convention outlier checks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub convention_exception_globs: Vec<String>,
+    /// Symbols that are known to exist when component metadata proves a runtime
+    /// floor, package, or bootstrap file is present.
+    #[serde(default, skip_serializing_if = "KnownSymbolsConfig::is_empty")]
+    pub known_symbols: KnownSymbolsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct KnownSymbolsConfig {
+    /// Header-version providers keyed by an extension-owned marker and header.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub header_versions: Vec<KnownSymbolHeaderVersionProvider>,
+    /// Composer package providers keyed by package name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub composer_packages: Vec<KnownSymbolPackageProvider>,
+    /// Bootstrap path providers keyed by a normalized path substring or suffix.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bootstrap_paths: Vec<KnownSymbolBootstrapPathProvider>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnownSymbolHeaderVersionProvider {
+    /// Marker used to locate the component entry file.
+    pub file_marker: String,
+    /// Header key whose value contains the runtime version floor.
+    pub version_header: String,
+    /// Symbols introduced by runtime version.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<KnownSymbolVersionedEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnownSymbolPackageProvider {
+    pub package: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<KnownSymbolEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnownSymbolBootstrapPathProvider {
+    pub path_contains: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<KnownSymbolEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnownSymbolVersionedEntry {
+    pub name: String,
+    pub kind: KnownSymbolKind,
+    pub introduced: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnownSymbolEntry {
+    pub name: String,
+    pub kind: KnownSymbolKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum KnownSymbolKind {
+    Function,
+    Class,
+    Constant,
+}
+
+impl KnownSymbolsConfig {
+    pub fn is_empty(&self) -> bool {
+        self.header_versions.is_empty()
+            && self.composer_packages.is_empty()
+            && self.bootstrap_paths.is_empty()
+    }
+
+    fn merge(&mut self, other: &KnownSymbolsConfig) {
+        extend_unique(&mut self.header_versions, &other.header_versions);
+        extend_unique(&mut self.composer_packages, &other.composer_packages);
+        extend_unique(&mut self.bootstrap_paths, &other.bootstrap_paths);
+    }
 }
 
 impl AuditConfig {
@@ -26,6 +103,7 @@ impl AuditConfig {
             && self.lifecycle_path_globs.is_empty()
             && self.utility_suffixes.is_empty()
             && self.convention_exception_globs.is_empty()
+            && self.known_symbols.is_empty()
     }
 
     pub fn merge(&mut self, other: &AuditConfig) {
@@ -43,10 +121,11 @@ impl AuditConfig {
             &mut self.convention_exception_globs,
             &other.convention_exception_globs,
         );
+        self.known_symbols.merge(&other.known_symbols);
     }
 }
 
-fn extend_unique(target: &mut Vec<String>, source: &[String]) {
+fn extend_unique<T: Clone + PartialEq>(target: &mut Vec<T>, source: &[T]) {
     for value in source {
         if !target.contains(value) {
             target.push(value.clone());

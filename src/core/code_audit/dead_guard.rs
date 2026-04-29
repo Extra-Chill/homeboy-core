@@ -4,7 +4,7 @@
 //! and `defined('CONST')` guards (and their negations) and emits a finding
 //! when the checked symbol is guaranteed to exist given:
 //!
-//! 1. The plugin's declared requirements (`Requires at least:`).
+//! 1. Extension-provided runtime requirement metadata.
 //! 2. Unconditional `require` calls from the plugin main file.
 //! 3. Known vendor packages declared in `composer.json`.
 //!
@@ -50,7 +50,7 @@ pub(super) fn run_with_config(
     root: &Path,
     audit_config: &AuditConfig,
 ) -> Vec<Finding> {
-    let known = known_available_symbols(root);
+    let known = known_available_symbols(root, audit_config);
     if known.functions.is_empty() && known.classes.is_empty() && known.constants.is_empty() {
         return Vec::new();
     }
@@ -149,7 +149,7 @@ fn camel_to_kebab(symbol: &str) -> String {
 ///
 /// Examples matched:
 /// - `function_exists('foo_bar')`
-/// - `! class_exists( "WP_Ability" )`
+/// - `! class_exists( "RuntimeCapability" )`
 /// - `defined('RUNTIME_REQUEST')`
 ///
 /// Group 1: guard name. Group 2 or 3: quoted symbol (without quotes).
@@ -217,19 +217,46 @@ mod tests {
         }
     }
 
+    fn test_config() -> AuditConfig {
+        serde_json::from_value(serde_json::json!({
+            "known_symbols": {
+                "header_versions": [
+                    {
+                        "file_marker": "Runtime Plugin:",
+                        "version_header": "Runtime Requires:",
+                        "symbols": [
+                            {"name": "RuntimeCapability", "kind": "class", "introduced": "2.4"},
+                            {"name": "runtime_json_encode", "kind": "function", "introduced": "1.0"},
+                            {"name": "runtime_unschedule_all", "kind": "function", "introduced": "1.0"}
+                        ]
+                    }
+                ],
+                "bootstrap_paths": [
+                    {
+                        "path_contains": "runtime-queue/runtime-queue.php",
+                        "symbols": [
+                            {"name": "runtime_schedule_once", "kind": "function"}
+                        ]
+                    }
+                ]
+            }
+        }))
+        .unwrap()
+    }
+
     fn write_plugin_main(root: &Path, requires_at_least: Option<&str>, body: &str) {
         let header = requires_at_least
-            .map(|v| format!(" * Requires at least: {}\n", v))
+            .map(|v| format!(" * Runtime Requires: {}\n", v))
             .unwrap_or_default();
         let content = format!(
-            "<?php\n/**\n * Plugin Name: Demo\n{} */\n\n{}",
+            "<?php\n/**\n * Runtime Plugin: Demo\n{} */\n\n{}",
             header, body
         );
         fs::write(root.join("plugin.php"), content).unwrap();
     }
 
     fn run(fingerprints: &[&FileFingerprint], root: &Path) -> Vec<Finding> {
-        run_with_config(fingerprints, root, &AuditConfig::default())
+        run_with_config(fingerprints, root, &test_config())
     }
 
     #[test]
@@ -250,14 +277,14 @@ if ( defined("RUNTIME_REQUEST") ) {}
     }
 
     #[test]
-    fn flags_dead_class_exists_for_wp_ability() {
+    fn flags_dead_class_exists_for_known_runtime_symbol() {
         let tmp = tempfile::tempdir().unwrap();
-        write_plugin_main(tmp.path(), Some("6.9"), "");
+        write_plugin_main(tmp.path(), Some("2.4"), "");
 
         let fp = make_fp(
             "inc/Abilities/Register.php",
             r#"<?php
-if ( ! class_exists( 'WP_Ability' ) ) {
+if ( ! class_exists( 'RuntimeCapability' ) ) {
     return;
 }
 
@@ -269,7 +296,7 @@ class Register {}
         assert_eq!(findings.len(), 1, "expected one dead-guard finding");
         assert_eq!(findings[0].kind, AuditFinding::DeadGuard);
         assert_eq!(findings[0].severity, Severity::Warning);
-        assert!(findings[0].description.contains("WP_Ability"));
+        assert!(findings[0].description.contains("RuntimeCapability"));
         assert!(findings[0].description.contains("class_exists"));
     }
 
@@ -296,47 +323,44 @@ if ( ! function_exists('my_plugin_helper') ) {
     }
 
     #[test]
-    fn action_scheduler_guard_becomes_dead_when_bootstrap_requires_it() {
+    fn configured_bootstrap_provider_guard_becomes_dead_when_required() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join("vendor/woocommerce/action-scheduler")).unwrap();
+        fs::create_dir_all(tmp.path().join("vendor/runtime-queue")).unwrap();
         fs::write(
-            tmp.path()
-                .join("vendor/woocommerce/action-scheduler/action-scheduler.php"),
+            tmp.path().join("vendor/runtime-queue/runtime-queue.php"),
             "<?php\n",
         )
         .unwrap();
 
         write_plugin_main(
             tmp.path(),
-            Some("6.0"),
-            "require_once __DIR__ . '/vendor/woocommerce/action-scheduler/action-scheduler.php';\n",
+            Some("2.0"),
+            "require_once __DIR__ . '/vendor/runtime-queue/runtime-queue.php';\n",
         );
 
         let fp = make_fp(
             "inc/Scheduler.php",
             r#"<?php
-if ( function_exists('as_schedule_single_action') ) {
-    as_schedule_single_action( time(), 'my_hook' );
+if ( function_exists('runtime_schedule_once') ) {
+    runtime_schedule_once( time(), 'my_hook' );
 }
 "#,
         );
 
         let findings = run(&[&fp], tmp.path());
         assert_eq!(findings.len(), 1);
-        assert!(findings[0]
-            .description
-            .contains("as_schedule_single_action"));
+        assert!(findings[0].description.contains("runtime_schedule_once"));
     }
 
     #[test]
     fn non_php_files_are_ignored() {
         let tmp = tempfile::tempdir().unwrap();
-        write_plugin_main(tmp.path(), Some("6.9"), "");
+        write_plugin_main(tmp.path(), Some("2.4"), "");
 
         let fp = FileFingerprint {
             relative_path: "src/lib.rs".to_string(),
             language: Language::Rust,
-            content: "function_exists('WP_Ability')".to_string(),
+            content: "function_exists('RuntimeCapability')".to_string(),
             ..Default::default()
         };
 
@@ -381,6 +405,7 @@ if ( function_exists('runtime_unschedule_all') ) {
 
         let config = AuditConfig {
             lifecycle_path_globs: vec!["lifecycle/*.php".to_string()],
+            known_symbols: test_config().known_symbols,
             ..Default::default()
         };
         let guard = extract_guards(&fp.content).remove(0);
@@ -401,7 +426,7 @@ if ( function_exists('runtime_unschedule_all') ) {
         // No plugin main, no composer.json → known is empty.
         let fp = make_fp(
             "inc/X.php",
-            r#"<?php if ( class_exists('WP_Ability') ) {} "#,
+            r#"<?php if ( class_exists('RuntimeCapability') ) {} "#,
         );
 
         let findings = run(&[&fp], tmp.path());
