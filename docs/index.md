@@ -60,7 +60,7 @@ Guides for contributing to Homeboy:
 
 Homeboy provides tooling for AI-assisted documentation generation and maintenance:
 
-- `homeboy docs audit <component>` - Validate documentation links, detect stale references and gaps
+- `homeboy docs <topic>` - Display embedded documentation topics
 - `homeboy docs map <component>` - Generate machine-optimized codebase map for AI context
 - `homeboy docs documentation/index` - Documentation philosophy and principles
 - `homeboy docs documentation/alignment` - Instructions for maintaining existing docs

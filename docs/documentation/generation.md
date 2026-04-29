@@ -41,7 +41,7 @@ Find actual usage workflows in existing code, tests, and examples. Document real
 Create subdirectories in `/docs` that directly correspond to actual code extensions and components.
 
 ### 6. Create Documentation Files
-Use `homeboy docs audit <component>` to identify gaps, then create files manually following the structure standards in `homeboy docs documentation/structure`. Use `homeboy docs map <component>` to generate a codebase map for AI-assisted documentation.
+Use `homeboy docs map <component>` to generate a codebase map for AI-assisted documentation, then create files manually following the structure standards in `homeboy docs documentation/structure`.
 
 ### 7. Write Content
 For each file:
@@ -52,11 +52,11 @@ For each file:
 ### 8. Coverage Validation
 Verify ALL discovered components have been documented before completion.
 
-### 9. Run Audit
+### 9. Validate References
 ```sh
-homeboy docs audit <component>
+homeboy audit <component>
 ```
-Verify all generated documentation references valid code paths. Fix any `broken` tasks before marking generation complete.
+Run focused source checks and repository quality gates that cover the changed docs. If `homeboy audit` reports documentation-reference findings, fix them before marking generation complete.
 
 ## Forbidden Content
 

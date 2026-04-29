@@ -26,20 +26,21 @@ Only update what needs correction. Preserve accurate existing content. Do not re
 
 ## Workflow
 
-### 1. Run Audit
+### 1. Build Source Context
 ```sh
-homeboy docs audit <component>
+homeboy docs map <component>
 ```
 
-This extracts claims from documentation (file paths, directory paths, code examples) and verifies them against the codebase.
+Use the map output plus targeted source reads to understand the current code shape before editing documentation.
 
-### 2. Review Priority Docs
-If the output includes `changes_context.priority_docs`, these docs reference recently changed files and should be reviewed first.
+### 2. Find Current-Workflow References
+Search the relevant documentation for command names, file paths, configuration keys, and workflow steps that may have drifted from the current implementation.
 
-### 3. Execute Broken Tasks
-For each task with `status: "broken"`:
-- The `action` field tells you exactly what to do
-- Usually: file/directory was moved or deleted, update the reference
+### 3. Fix Broken References
+For each stale reference:
+- Read the current source or CLI help that owns the behavior
+- Update or remove the reference without inventing replacement workflows
+- Preserve historical changelog entries unless they are presented as current workflow
 
 ### 4. Verify Code Examples
 For tasks with `status: "needs_verification"`:
@@ -47,11 +48,11 @@ For tasks with `status: "needs_verification"`:
 - Verify the example matches current implementation
 - Update if the API has changed
 
-### 5. Re-run Audit
+### 5. Verify Changes
 ```sh
-homeboy docs audit <component>
+homeboy audit <component>
 ```
-Confirm `broken` count is 0. Some `needs_verification` items are acceptable if code examples haven't changed.
+Run focused grep/source checks and repository quality gates that cover the changed docs. If `homeboy audit` reports documentation-reference findings, fix them before completion.
 
 ## Forbidden Content
 
