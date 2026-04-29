@@ -275,6 +275,33 @@ fn filter_extra_workloads_by_scenario_ids(
         .collect()
 }
 
+fn parse_execution_results_file(
+    results_file: &Path,
+    scenario_ids: &[String],
+    runner_success: bool,
+) -> Result<Option<BenchResults>> {
+    if !results_file.exists() {
+        return Ok(None);
+    }
+
+    if runner_success {
+        return Ok(Some(apply_scenario_filter(
+            parsing::parse_bench_results_file(results_file)?,
+            scenario_ids,
+        )?));
+    }
+
+    Ok(parsing::parse_bench_results_file(results_file).ok())
+}
+
+fn failure_scenario_id(scenario_ids: &[String]) -> Option<String> {
+    if scenario_ids.len() == 1 {
+        Some(scenario_ids[0].clone())
+    } else {
+        None
+    }
+}
+
 fn discover_bench_scenarios(
     execution_context: &ExtensionExecutionContext,
     component: &Component,
@@ -418,14 +445,11 @@ pub fn run_main_bench_workflow(
                 None,
             )?
             .run()?;
-            let parsed = if results_file.exists() {
-                parsing::parse_bench_results_file(&results_file)
-                    .ok()
-                    .map(|results| apply_scenario_filter(results, &execution_args.scenario_ids))
-                    .transpose()?
-            } else {
-                None
-            };
+            let parsed = parse_execution_results_file(
+                &results_file,
+                &execution_args.scenario_ids,
+                runner_output.success,
+            )?;
             let failure_stderr_tail = if !runner_output.success {
                 Some(stderr_tail(&runner_output.stderr))
             } else {
@@ -530,14 +554,14 @@ pub fn run_main_bench_workflow(
     } else {
         baseline_exit_override.unwrap_or(0)
     };
-    let failure = if parsed.is_none() && !runner_success {
+    let failure = if !runner_success {
         failure_stderr_tail.map(|stderr_tail| BenchRunFailure {
             component_id: args.component_id.clone(),
             component_path: args
                 .path_override
                 .clone()
                 .or_else(|| Some(component.local_path.clone())),
-            scenario_id: None,
+            scenario_id: failure_scenario_id(&execution_args.scenario_ids),
             exit_code: runner_exit_code,
             stderr_tail,
         })
@@ -793,14 +817,8 @@ fn run_single_dispatcher(
     }
 
     let runner_output = build_runner(execution_context, component, args, run_dir, None)?.run()?;
-    let parsed = if results_file.exists() {
-        Some(apply_scenario_filter(
-            parsing::parse_bench_results_file(&results_file)?,
-            &args.scenario_ids,
-        )?)
-    } else {
-        None
-    };
+    let parsed =
+        parse_execution_results_file(&results_file, &args.scenario_ids, runner_output.success)?;
     let failure_stderr_tail = if !runner_output.success {
         Some(stderr_tail(&runner_output.stderr))
     } else {
