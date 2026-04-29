@@ -240,6 +240,11 @@ mod tests {
             "pub fn run() {}\npub fn execute() {}\n",
         )
         .unwrap();
+        fs::write(
+            root.join("commands/good_three.rs"),
+            "pub fn run() {}\npub fn execute() {}\n",
+        )
+        .unwrap();
         fs::write(root.join("commands/bad.rs"), "pub fn run() {}\n").unwrap();
 
         let args = AuditArgs {

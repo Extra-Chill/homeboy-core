@@ -85,7 +85,7 @@ fn commit_package(package: &Path, message: &str) {
 }
 
 fn create_bare_source(package: &Path) -> tempfile::TempDir {
-    run_git(package, &["init"]);
+    run_git(package, &["init", "-b", "main"]);
     commit_package(package, "initial rigs");
 
     let bare = tempfile::tempdir().expect("bare parent");
