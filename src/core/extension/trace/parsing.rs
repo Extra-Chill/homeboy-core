@@ -80,18 +80,30 @@ pub struct TraceArtifact {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TraceList {
     pub component_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<TraceStatus>,
     #[serde(default)]
     pub scenarios: Vec<TraceScenario>,
+    #[serde(default)]
+    pub timeline: Vec<TraceEvent>,
+    #[serde(default)]
+    pub assertions: Vec<TraceAssertion>,
+    #[serde(default)]
+    pub artifacts: Vec<TraceArtifact>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct TraceScenario {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 }
@@ -182,5 +194,30 @@ mod tests {
         .expect("list envelope should parse");
 
         assert_eq!(parsed.scenarios[0].id, "close-window");
+    }
+
+    #[test]
+    fn trace_list_parser_accepts_trace_shaped_inventory_envelope() {
+        let parsed = parse_trace_list_str(
+            r#"{
+                "component_id":"studio",
+                "scenario_id":"__list__",
+                "status":"pass",
+                "scenarios":[{"id":"close-window-running-site","source":"fixtures/close-window.trace.js"}],
+                "timeline":[],
+                "assertions":[],
+                "artifacts":[]
+            }"#,
+        )
+        .expect("trace-shaped list envelope should parse");
+
+        assert_eq!(parsed.component_id, "studio");
+        assert_eq!(parsed.scenario_id.as_deref(), Some("__list__"));
+        assert_eq!(parsed.status, Some(TraceStatus::Pass));
+        assert_eq!(parsed.scenarios[0].id, "close-window-running-site");
+        assert_eq!(
+            parsed.scenarios[0].source.as_deref(),
+            Some("fixtures/close-window.trace.js")
+        );
     }
 }
