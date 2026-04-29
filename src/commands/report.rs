@@ -143,6 +143,9 @@ pub fn render_failure_digest(context: &FailureDigestContext) -> String {
     if command_reported(&context.results, "trace") {
         render_trace_section(&mut out, &context.output_dir, &context.run_url);
     }
+    if command_reported(&context.results, "bench") {
+        render_bench_section(&mut out, &context.output_dir, &context.run_url);
+    }
 
     render_autofix_section(&mut out, context);
     render_tooling_section(&mut out, &context.tooling);
@@ -443,6 +446,38 @@ fn render_trace_section(out: &mut String, output_dir: &Path, run_url: &str) {
     out.push('\n');
 }
 
+fn render_bench_section(out: &mut String, output_dir: &Path, run_url: &str) {
+    let (data, error) = envelope_parts(read_command_json(output_dir, "bench"));
+
+    let component = string_value(&data, "component")
+        .or_else(|| string_value(&object_value(&data, "results"), "component_id"))
+        .unwrap_or_else(|| "unknown".to_string());
+    let status = string_value(&data, "status")
+        .or_else(|| string_value(&error, "code"))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let _ = writeln!(out, "### Bench: {}", component);
+    let _ = writeln!(out, "**Status:** {}\n", status.to_uppercase());
+
+    if let Some(message) = string_value(&error, "message") {
+        out.push_str("**Summary**\n");
+        let _ = writeln!(out, "- {}\n", message);
+    }
+
+    let artifacts = collect_bench_artifacts(&data);
+    if !artifacts.is_empty() {
+        out.push_str("**Artifacts**\n");
+        for artifact in artifacts {
+            let _ = writeln!(out, "- {}", artifact);
+        }
+    } else {
+        out.push_str("**Artifacts**\n- No structured bench artifacts available.\n");
+    }
+
+    render_full_log(out, "bench", run_url);
+    out.push('\n');
+}
+
 fn render_error_details(out: &mut String, error: &Map<String, Value>) {
     if let Some(code) = string_value(error, "code") {
         let _ = writeln!(out, "- Error code: `{}`", code);
@@ -656,6 +691,74 @@ fn collect_trace_artifacts(
         Some((label, path))
     })
     .collect()
+}
+
+fn collect_bench_artifacts(data: &Map<String, Value>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut rendered = Vec::new();
+
+    for artifact in array_value(data, "artifacts") {
+        push_bench_artifact(&mut seen, &mut rendered, None, artifact);
+    }
+
+    for rig in array_value(data, "rigs") {
+        let Some(rig_obj) = rig.as_object() else {
+            continue;
+        };
+        let rig_id = string_value(rig_obj, "rig_id");
+        for artifact in array_value(rig_obj, "artifacts") {
+            push_bench_artifact(&mut seen, &mut rendered, rig_id.as_deref(), artifact);
+        }
+    }
+
+    rendered
+}
+
+fn push_bench_artifact(
+    seen: &mut BTreeSet<(Option<String>, String)>,
+    rendered: &mut Vec<String>,
+    rig_id: Option<&str>,
+    artifact: &Value,
+) {
+    let Some(obj) = artifact.as_object() else {
+        return;
+    };
+    let Some(path) = string_value(obj, "path") else {
+        return;
+    };
+    let key = (rig_id.map(str::to_string), path.clone());
+    if !seen.insert(key) {
+        return;
+    }
+
+    let label = string_value(obj, "label")
+        .or_else(|| string_value(obj, "name"))
+        .unwrap_or_else(|| "artifact".to_string());
+    let scenario = string_value(obj, "scenario_id");
+    let run_index = string_value(obj, "run_index");
+    let kind = string_value(obj, "kind");
+
+    let mut prefix = Vec::new();
+    if let Some(rig) = rig_id {
+        prefix.push(format!("rig `{}`", rig));
+    }
+    if let Some(scenario) = scenario {
+        prefix.push(format!("scenario `{}`", scenario));
+    }
+    if let Some(run_index) = run_index {
+        prefix.push(format!("run {}", run_index));
+    }
+
+    let mut line = if prefix.is_empty() {
+        label
+    } else {
+        format!("{} — {}", prefix.join(" / "), label)
+    };
+    if let Some(kind) = kind {
+        let _ = write!(line, " ({})", kind);
+    }
+    let _ = write!(line, ": {}", path);
+    rendered.push(line);
 }
 
 fn string_array(map: &Map<String, Value>, key: &str) -> Vec<String> {

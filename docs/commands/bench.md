@@ -430,6 +430,26 @@ The extension's bench script must:
   `label` metadata. Homeboy preserves and indexes these pointers but does
   not upload, retain, or diff artifact contents.
 
+### Artifact kind conventions
+
+`kind` is an open string, not a closed enum. Homeboy preserves unknown kinds
+so extensions can add new evidence types without requiring a core release.
+Use these conventional values when they fit:
+
+- `json` — structured machine-readable data, summaries, or transcripts.
+- `directory` — a directory containing multiple related files.
+- `playwright-trace` — Playwright trace archive, usually a `.zip` file.
+- `screenshot` — browser or UI screenshot evidence.
+- `network-log` — captured request/response metadata such as HAR or JSONL.
+- `console-log` — browser console output or page-level JavaScript logs.
+
+For browser benchmarks, prefer specific labels such as `Playwright trace`,
+`Final screenshot`, `Network log`, or `Console log`. The JSON result keeps
+the full artifact map under each scenario, and Homeboy also promotes artifact
+pointers into the top-level `artifacts` index. Markdown reports render those
+labels and paths so users can find trace and screenshot files without opening
+the raw JSON payload.
+
 ### Environment variables injected
 
 Bench scripts receive the standard runner contract plus bench-specific
