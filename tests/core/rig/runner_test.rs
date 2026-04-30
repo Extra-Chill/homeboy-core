@@ -18,10 +18,11 @@ use std::collections::HashMap;
 use crate::rig::pipeline::PipelineOutcome;
 use crate::rig::runner::{
     run_check, run_down, run_status, run_up, snapshot_state, CheckReport, RigStatusReport,
-    ServiceStatusReport, UpReport,
+    ServiceStatusReport, SymlinkStatusState, UpReport,
 };
 use crate::rig::spec::{
     ComponentSpec, PipelineStep, RigSpec, ServiceKind, ServiceSpec, SharedPathOp, SharedPathSpec,
+    SymlinkSpec,
 };
 use crate::test_support::with_isolated_home;
 
@@ -85,6 +86,7 @@ fn test_status_report_empty_services_serializes() {
         rig_id: "test".to_string(),
         description: "empty rig".to_string(),
         services: Vec::new(),
+        symlinks: Vec::new(),
         last_up: None,
         last_check: None,
         last_check_result: None,
@@ -285,6 +287,99 @@ fn test_run_status() {
             "unexpected log path: {}",
             service.log_path
         );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_run_status_reports_declared_symlink_states() {
+    with_isolated_home(|_dir| {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let expected = tmp.path().join("expected-target");
+        let other = tmp.path().join("other-target");
+        let ok = tmp.path().join("ok-link");
+        let missing = tmp.path().join("missing-link");
+        let drifted = tmp.path().join("drifted-link");
+        let blocked = tmp.path().join("blocked-link");
+
+        std::fs::create_dir(&expected).expect("expected target");
+        std::fs::create_dir(&other).expect("other target");
+        std::os::unix::fs::symlink(&expected, &ok).expect("ok symlink");
+        std::os::unix::fs::symlink(&other, &drifted).expect("drifted symlink");
+        std::fs::write(&blocked, "not a symlink").expect("blocked file");
+
+        let mut rig = minimal_spec("run-status-symlink-fixture");
+        rig.symlinks = vec![
+            SymlinkSpec {
+                link: ok.to_string_lossy().into_owned(),
+                target: expected.to_string_lossy().into_owned(),
+            },
+            SymlinkSpec {
+                link: missing.to_string_lossy().into_owned(),
+                target: expected.to_string_lossy().into_owned(),
+            },
+            SymlinkSpec {
+                link: drifted.to_string_lossy().into_owned(),
+                target: expected.to_string_lossy().into_owned(),
+            },
+            SymlinkSpec {
+                link: blocked.to_string_lossy().into_owned(),
+                target: expected.to_string_lossy().into_owned(),
+            },
+        ];
+
+        let status = run_status(&rig).expect("run_status with symlinks");
+        assert_eq!(status.symlinks.len(), 4);
+
+        let by_link = status
+            .symlinks
+            .iter()
+            .map(|entry| (entry.link.as_str(), entry))
+            .collect::<HashMap<_, _>>();
+
+        let ok_report = by_link
+            .get(ok.to_string_lossy().as_ref())
+            .expect("ok report");
+        assert_eq!(ok_report.state, SymlinkStatusState::Ok);
+        assert_eq!(
+            ok_report.actual_target.as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            ok_report.expected_target,
+            expected.to_string_lossy().as_ref()
+        );
+
+        let missing_report = by_link
+            .get(missing.to_string_lossy().as_ref())
+            .expect("missing report");
+        assert_eq!(missing_report.state, SymlinkStatusState::Missing);
+        assert!(missing_report.actual_target.is_none());
+
+        let drifted_report = by_link
+            .get(drifted.to_string_lossy().as_ref())
+            .expect("drifted report");
+        assert_eq!(drifted_report.state, SymlinkStatusState::Drifted);
+        assert_eq!(
+            drifted_report.actual_target.as_deref(),
+            Some(other.to_string_lossy().as_ref())
+        );
+
+        let blocked_report = by_link
+            .get(blocked.to_string_lossy().as_ref())
+            .expect("blocked report");
+        assert_eq!(
+            blocked_report.state,
+            SymlinkStatusState::BlockedByNonSymlink
+        );
+        assert!(blocked_report.actual_target.is_none());
+
+        let json = serde_json::to_string(&status).expect("serialize status");
+        assert!(json.contains("\"symlinks\""));
+        assert!(json.contains("\"state\":\"ok\""));
+        assert!(json.contains("\"state\":\"missing\""));
+        assert!(json.contains("\"state\":\"drifted\""));
+        assert!(json.contains("\"state\":\"blocked_by_non_symlink\""));
     });
 }
 
