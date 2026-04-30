@@ -11,7 +11,7 @@ use homeboy::extension::bench::{
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, BenchSpec, RigSpec, RigStateSnapshot};
 
-use super::{bench_workloads_for_extension, BenchRunArgs, CmdResult};
+use super::{BenchRunArgs, CmdResult};
 
 struct RigBenchContext {
     id: String,
@@ -378,8 +378,9 @@ fn run_component_with_rig_context(
         .as_ref()
         .and_then(|spec| {
             ctx.extension_id.as_deref().map(|id| {
-                bench_workloads_for_extension(
+                rig::workloads_for_extension(
                     spec,
+                    rig::RigWorkloadKind::Bench,
                     rig_context.and_then(|context| context.package_root.as_deref()),
                     id,
                 )

@@ -67,6 +67,16 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub bench_workloads: HashMap<String, Vec<String>>,
 
+    /// Out-of-tree trace workloads keyed by extension id.
+    ///
+    /// These are private, rig-owned workloads that should run alongside the
+    /// component's in-tree trace discovery when `homeboy trace --rig <id>` is
+    /// invoked. Values support the same `~`, `${env.NAME}`, and
+    /// `${components.<id>.path}` expansion as other rig path fields, plus
+    /// `${package.root}` for rigs installed from a package source.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_workloads: HashMap<String, Vec<String>>,
+
     /// Named bench scenario suites keyed by profile name.
     ///
     /// `homeboy bench --rig <id> --profile <name>` resolves the profile to

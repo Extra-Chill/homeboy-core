@@ -106,6 +106,39 @@ fn test_rig_spec_deserializes_bench_workloads_by_extension() {
 }
 
 #[test]
+fn test_rig_spec_deserializes_trace_workloads_by_extension() {
+    let spec: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "studio",
+            "trace_workloads": {
+                "nodejs": [
+                    "${package.root}/bench/studio-app-create-site.trace.mjs",
+                    "~/traces/window-close.trace.mjs"
+                ],
+                "wordpress": ["/private/traces/wp-admin-load.trace.php"]
+            }
+        }"#,
+    )
+    .expect("parse RigSpec");
+
+    assert_eq!(
+        spec.trace_workloads
+            .get("nodejs")
+            .expect("nodejs workloads"),
+        &vec![
+            "${package.root}/bench/studio-app-create-site.trace.mjs".to_string(),
+            "~/traces/window-close.trace.mjs".to_string(),
+        ]
+    );
+    assert_eq!(
+        spec.trace_workloads
+            .get("wordpress")
+            .expect("wordpress workloads"),
+        &vec!["/private/traces/wp-admin-load.trace.php".to_string()]
+    );
+}
+
+#[test]
 fn test_rig_component_deserializes_extension_config() {
     let spec: RigSpec = serde_json::from_str(
         r#"{
@@ -206,6 +239,7 @@ fn test_rig_spec_without_bench_block_back_compat() {
     let spec: RigSpec = serde_json::from_str(json).expect("parse");
     assert!(spec.bench.is_none());
     assert!(spec.bench_workloads.is_empty());
+    assert!(spec.trace_workloads.is_empty());
 }
 
 #[test]

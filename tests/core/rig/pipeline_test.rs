@@ -108,6 +108,7 @@ mod dag {
             bench: None,
             app_launcher: None,
             bench_workloads: Default::default(),
+            trace_workloads: Default::default(),
             bench_profiles: Default::default(),
         }
     }
@@ -375,6 +376,7 @@ mod extension_lifecycle {
             bench: None,
             app_launcher: None,
             bench_workloads: Default::default(),
+            trace_workloads: Default::default(),
             bench_profiles: Default::default(),
         }
     }
@@ -495,6 +497,7 @@ mod command_env {
             pipeline,
             bench: None,
             bench_workloads: Default::default(),
+            trace_workloads: Default::default(),
             bench_profiles: Default::default(),
             app_launcher: None,
         }
@@ -595,6 +598,7 @@ mod patch {
             pipeline,
             bench: None,
             bench_workloads: Default::default(),
+            trace_workloads: Default::default(),
             bench_profiles: Default::default(),
             app_launcher: None,
         }
@@ -806,6 +810,7 @@ mod shared_path {
             pipeline,
             bench: None,
             bench_workloads: Default::default(),
+            trace_workloads: Default::default(),
             bench_profiles: Default::default(),
             app_launcher: None,
         }

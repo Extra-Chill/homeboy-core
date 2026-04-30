@@ -30,6 +30,7 @@ pub mod spec;
 pub mod stack;
 pub mod state;
 pub mod toolchain;
+pub mod workloads;
 
 pub use app::{AppLauncherAction, AppLauncherOptions, AppLauncherReport};
 pub use install::{
@@ -61,6 +62,7 @@ pub use stack::{
     RigStackSyncReport,
 };
 pub use state::{RigState, ServiceState};
+pub use workloads::{extension_ids_for_workloads, workloads_for_extension, RigWorkloadKind};
 
 use crate::error::{Error, Result};
 use crate::paths;

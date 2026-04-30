@@ -27,6 +27,7 @@ pub struct TraceRunWorkflowArgs {
     pub rig_id: Option<String>,
     pub overlays: Vec<String>,
     pub keep_overlay: bool,
+    pub extra_workloads: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ pub struct TraceListWorkflowArgs {
     pub settings: Vec<(String, String)>,
     pub settings_json: Vec<(String, serde_json::Value)>,
     pub rig_id: Option<String>,
+    pub extra_workloads: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +165,7 @@ pub fn run_trace_list_workflow(
         rig_id: args.rig_id,
         overlays: Vec::new(),
         keep_overlay: false,
+        extra_workloads: args.extra_workloads,
     };
     let output =
         build_trace_runner(&execution_context, component, &runner_args, run_dir, true)?.run()?;
@@ -243,8 +246,27 @@ pub(crate) fn build_trace_runner(
     if let Some(path) = &args.path_override {
         runner = runner.env("HOMEBOY_TRACE_COMPONENT_PATH", path);
     }
+    if !args.extra_workloads.is_empty() {
+        runner = runner.env(
+            "HOMEBOY_TRACE_EXTRA_WORKLOADS",
+            &extra_workloads_env_value(&args.extra_workloads)?,
+        );
+    }
 
     Ok(runner)
+}
+
+fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
+    std::env::join_paths(paths)
+        .map_err(|e| {
+            Error::validation_invalid_argument(
+                "trace_workloads",
+                format!("trace workload path cannot be exported: {}", e),
+                None,
+                None,
+            )
+        })
+        .map(|joined| joined.to_string_lossy().to_string())
 }
 
 fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> TraceRunFailure {
@@ -467,6 +489,7 @@ set -euo pipefail
   printf 'run=%s\n' "$HOMEBOY_RUN_DIR"
   printf 'rig=%s\n' "${HOMEBOY_TRACE_RIG_ID:-}"
   printf 'component_path=%s\n' "${HOMEBOY_TRACE_COMPONENT_PATH:-}"
+  printf 'extra_workloads=%s\n' "${HOMEBOY_TRACE_EXTRA_WORKLOADS:-}"
 } > "$HOMEBOY_TRACE_ARTIFACT_DIR/env.txt"
 cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
 {"component_id":"example","scenario_id":"close-window","status":"pass","timeline":[],"assertions":[],"artifacts":[{"label":"env","path":"artifacts/env.txt"}]}
@@ -496,6 +519,7 @@ JSON
             rig_id: Some("studio".to_string()),
             overlays: Vec::new(),
             keep_overlay: false,
+            extra_workloads: vec![component_dir.join("trace-fixture.trace.mjs")],
         };
 
         let output = build_trace_runner(&context, &component, &args, &run_dir, false)
@@ -509,6 +533,7 @@ JSON
         assert!(env_dump.contains("list=0"));
         assert!(env_dump.contains("rig=studio"));
         assert!(env_dump.contains(&format!("component_path={}", component_dir.display())));
+        assert!(env_dump.contains("trace-fixture.trace.mjs"));
         assert!(env_dump.contains("results="));
         assert!(env_dump.contains("artifact="));
         assert!(env_dump.contains("run="));
@@ -557,6 +582,7 @@ JSON
             rig_id: None,
             overlays: Vec::new(),
             keep_overlay: false,
+            extra_workloads: Vec::new(),
         };
 
         let output = build_trace_runner(&context, &component, &args, &run_dir, true)
@@ -584,6 +610,7 @@ JSON
             rig_id: None,
             overlays: Vec::new(),
             keep_overlay: false,
+            extra_workloads: Vec::new(),
         };
         let output = RunnerOutput {
             success: false,
@@ -716,6 +743,7 @@ JSON
             rig_id: None,
             overlays: vec![patch_path.to_string_lossy().to_string()],
             keep_overlay,
+            extra_workloads: Vec::new(),
         };
         OverlayFixture {
             _temp: temp,
