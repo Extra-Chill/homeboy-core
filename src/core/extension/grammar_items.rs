@@ -592,7 +592,8 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::extension::grammar::{
-        BlockSyntax, CommentSyntax, ConceptPattern, Grammar, LanguageMeta, StringSyntax,
+        BlockSyntax, CommentSyntax, ConceptPattern, FingerprintGrammar, Grammar, LanguageMeta,
+        StringSyntax,
     };
 
     /// Build a full Rust grammar with all item-relevant patterns.
@@ -614,6 +615,7 @@ mod tests {
             },
             blocks: BlockSyntax::default(),
             contract: None,
+            fingerprint: FingerprintGrammar::default(),
             patterns: {
                 let mut p = HashMap::new();
                 p.insert(
