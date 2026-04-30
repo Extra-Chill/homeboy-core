@@ -588,3 +588,149 @@ fn sqlite_error(context: impl Into<String>) -> impl FnOnce(rusqlite::Error) -> E
 #[cfg(test)]
 #[path = "../../../tests/core/observation/store_test.rs"]
 mod store_test;
+
+#[cfg(test)]
+mod api_coverage_tests {
+    use super::*;
+    use crate::test_support::with_isolated_home;
+
+    struct XdgGuard(Option<String>);
+
+    impl XdgGuard {
+        fn unset() -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::remove_var("XDG_DATA_HOME");
+            Self(prior)
+        }
+    }
+
+    impl Drop for XdgGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
+
+    fn new_run(kind: &str) -> NewRunRecord {
+        NewRunRecord {
+            kind: kind.to_string(),
+            component_id: Some("homeboy".to_string()),
+            command: Some(format!("homeboy {kind}")),
+            cwd: Some("/tmp/homeboy".to_string()),
+            homeboy_version: Some("test".to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some("studio".to_string()),
+            metadata_json: serde_json::json!({ "source": "inline" }),
+        }
+    }
+
+    #[test]
+    fn test_status() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let status = status().expect("status");
+            assert!(!status.exists);
+        });
+    }
+
+    #[test]
+    fn test_database_path() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            assert_eq!(
+                database_path().expect("path"),
+                home.path().join(".local/share/homeboy/homeboy.sqlite")
+            );
+        });
+    }
+
+    #[test]
+    fn test_open_initialized() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            assert_eq!(
+                store.status().expect("status").schema_version,
+                CURRENT_SCHEMA_VERSION
+            );
+        });
+    }
+
+    #[test]
+    fn test_start_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            assert_eq!(run.status, "running");
+            assert_eq!(run.kind, "bench");
+        });
+    }
+
+    #[test]
+    fn test_finish_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            let finished = store
+                .finish_run(
+                    &run.id,
+                    RunStatus::Pass,
+                    Some(serde_json::json!({ "done": true })),
+                )
+                .expect("finish");
+            assert_eq!(finished.status, "pass");
+            assert_eq!(finished.metadata_json["done"], true);
+        });
+    }
+
+    #[test]
+    fn test_list_runs() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+            let runs = store
+                .list_runs(RunListFilter {
+                    kind: Some("trace".to_string()),
+                    ..RunListFilter::default()
+                })
+                .expect("list");
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].id, run.id);
+        });
+    }
+
+    #[test]
+    fn test_record_artifact() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+            let path = home.path().join("artifact.json");
+            fs::write(&path, b"{}").expect("write artifact");
+            let artifact = store
+                .record_artifact(&run.id, "json", &path)
+                .expect("artifact");
+            assert_eq!(artifact.size_bytes, Some(2));
+        });
+    }
+
+    #[test]
+    fn test_list_artifacts() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+            let path = home.path().join("artifact.log");
+            fs::write(&path, b"log").expect("write artifact");
+            let artifact = store
+                .record_artifact(&run.id, "log", &path)
+                .expect("artifact");
+            assert_eq!(store.list_artifacts(&run.id).expect("list"), vec![artifact]);
+        });
+    }
+}

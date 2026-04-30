@@ -69,3 +69,17 @@ pub struct ArtifactRecord {
     pub mime: Option<String>,
     pub created_at: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_run_status_as_str() {
+        assert_eq!(RunStatus::Running.as_str(), "running");
+        assert_eq!(RunStatus::Pass.as_str(), "pass");
+        assert_eq!(RunStatus::Fail.as_str(), "fail");
+        assert_eq!(RunStatus::Error.as_str(), "error");
+        assert_eq!(RunStatus::Skipped.as_str(), "skipped");
+    }
+}
