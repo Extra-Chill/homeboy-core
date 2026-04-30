@@ -5,6 +5,7 @@
 //! homeboy versions.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -50,6 +51,7 @@ pub struct RigStatusReport {
     pub rig_id: String,
     pub description: String,
     pub services: Vec<ServiceStatusReport>,
+    pub symlinks: Vec<SymlinkStatusReport>,
     pub last_up: Option<String>,
     pub last_check: Option<String>,
     pub last_check_result: Option<String>,
@@ -68,6 +70,24 @@ pub struct ServiceStatusReport {
     pub log_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SymlinkStatusReport {
+    pub link: String,
+    pub expected_target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_target: Option<String>,
+    pub state: SymlinkStatusState,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SymlinkStatusState {
+    Ok,
+    Missing,
+    Drifted,
+    BlockedByNonSymlink,
 }
 
 /// Materialize a rig: run the `up` pipeline, stash timestamp in state.
@@ -174,15 +194,59 @@ pub fn run_status(rig: &RigSpec) -> Result<RigStatusReport> {
     }
     services.sort_by(|a, b| a.id.cmp(&b.id));
 
+    let mut symlinks = rig
+        .symlinks
+        .iter()
+        .map(|link| symlink_status(rig, link))
+        .collect::<Vec<_>>();
+    symlinks.sort_by(|a, b| a.link.cmp(&b.link));
+
     Ok(RigStatusReport {
         rig_id: rig.id.clone(),
         description: rig.description.clone(),
         services,
+        symlinks,
         last_up: state.last_up,
         last_check: state.last_check,
         last_check_result: state.last_check_result,
         materialized: state.materialized,
     })
+}
+
+fn symlink_status(rig: &RigSpec, link: &super::spec::SymlinkSpec) -> SymlinkStatusReport {
+    let link_path = PathBuf::from(expand_vars(rig, &link.link));
+    let target_path = PathBuf::from(expand_vars(rig, &link.target));
+    let link_display = link_path.to_string_lossy().into_owned();
+    let expected_target = target_path.to_string_lossy().into_owned();
+
+    match std::fs::symlink_metadata(&link_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let actual = std::fs::read_link(&link_path).ok();
+            let state = if actual.as_ref() == Some(&target_path) {
+                SymlinkStatusState::Ok
+            } else {
+                SymlinkStatusState::Drifted
+            };
+            SymlinkStatusReport {
+                link: link_display,
+                expected_target,
+                actual_target: actual.map(|path| path.to_string_lossy().into_owned()),
+                state,
+            }
+        }
+        Ok(_) => SymlinkStatusReport {
+            link: link_display,
+            expected_target,
+            actual_target: None,
+            state: SymlinkStatusState::BlockedByNonSymlink,
+        },
+        Err(_) => SymlinkStatusReport {
+            link: link_display,
+            expected_target,
+            actual_target: None,
+            state: SymlinkStatusState::Missing,
+        },
+    }
 }
 
 fn service_kind_label(kind: ServiceKind) -> &'static str {
