@@ -33,6 +33,7 @@ fn rig_with_launcher(install_dir: &str) -> RigSpec {
         pipeline: Default::default(),
         bench: None,
         bench_workloads: Default::default(),
+        trace_workloads: Default::default(),
         bench_profiles: Default::default(),
         app_launcher: Some(AppLauncherSpec {
             platform: AppLauncherPlatform::Macos,

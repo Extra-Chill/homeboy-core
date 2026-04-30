@@ -42,6 +42,7 @@ mod lifecycle {
             bench: None,
             app_launcher: None,
             bench_workloads: HashMap::new(),
+            trace_workloads: HashMap::new(),
             bench_profiles: HashMap::new(),
         }
     }
@@ -61,6 +62,7 @@ mod lifecycle {
             bench: None,
             app_launcher: None,
             bench_workloads: HashMap::new(),
+            trace_workloads: HashMap::new(),
             bench_profiles: HashMap::new(),
         }
     }

@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
@@ -418,8 +418,9 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
         .as_ref()
         .and_then(|spec| {
             ctx.extension_id.as_deref().map(|id| {
-                bench_workloads_for_extension(
+                rig::workloads_for_extension(
                     spec,
+                    rig::RigWorkloadKind::Bench,
                     rig_context
                         .as_ref()
                         .and_then(|context| context.package_root.as_deref()),
@@ -571,33 +572,6 @@ fn maybe_expand_default_baseline(args: &BenchRunArgs) -> homeboy::Result<Option<
     }
 
     Ok(Some(vec![baseline_rig_id, candidate.clone()]))
-}
-
-fn expand_bench_workload_path(
-    rig_spec: &RigSpec,
-    package_root: Option<&Path>,
-    path: &str,
-) -> PathBuf {
-    let expanded = rig::expand::expand_vars(rig_spec, path);
-    let expanded = match package_root {
-        Some(root) => expanded.replace("${package.root}", &root.to_string_lossy()),
-        None => expanded,
-    };
-    PathBuf::from(expanded)
-}
-
-fn bench_workloads_for_extension(
-    rig_spec: &RigSpec,
-    package_root: Option<&Path>,
-    extension_id: &str,
-) -> Vec<PathBuf> {
-    rig_spec
-        .bench_workloads
-        .get(extension_id)
-        .into_iter()
-        .flat_map(|paths| paths.iter())
-        .map(|path| expand_bench_workload_path(rig_spec, package_root, path))
-        .collect()
 }
 
 #[cfg(test)]

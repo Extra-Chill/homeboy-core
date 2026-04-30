@@ -1,6 +1,7 @@
 use clap::Args;
+use std::path::PathBuf;
 
-use homeboy::component::Component;
+use homeboy::component::{Component, ScopedExtensionConfig};
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
@@ -73,6 +74,19 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
         .as_ref()
         .map(|context| rig::snapshot_state(&context.spec));
     let run_dir = RunDir::create()?;
+    let extra_workloads = rig_context
+        .as_ref()
+        .and_then(|context| {
+            ctx.extension_id.as_deref().map(|id| {
+                rig::workloads_for_extension(
+                    &context.spec,
+                    rig::RigWorkloadKind::Trace,
+                    context.package_root.as_deref(),
+                    id,
+                )
+            })
+        })
+        .unwrap_or_default();
     let workflow = extension_trace::run_trace_workflow(
         &ctx.component,
         TraceRunWorkflowArgs {
@@ -86,6 +100,7 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
             rig_id: args.rig,
             overlays: args.overlays,
             keep_overlay: args.keep_overlay,
+            extra_workloads,
         },
         &run_dir,
         rig_state.clone(),
@@ -122,6 +137,19 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     )?;
 
     let run_dir = RunDir::create()?;
+    let extra_workloads = rig_context
+        .as_ref()
+        .and_then(|context| {
+            ctx.extension_id.as_deref().map(|id| {
+                rig::workloads_for_extension(
+                    &context.spec,
+                    rig::RigWorkloadKind::Trace,
+                    context.package_root.as_deref(),
+                    id,
+                )
+            })
+        })
+        .unwrap_or_default();
     let list = extension_trace::run_trace_list_workflow(
         &ctx.component,
         TraceListWorkflowArgs {
@@ -131,6 +159,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             settings: settings_as_strings(&ctx.settings),
             settings_json: settings_as_json(&ctx.settings),
             rig_id: args.rig,
+            extra_workloads,
         },
         &run_dir,
     )?;
@@ -140,6 +169,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
 
 struct TraceRigContext {
     spec: RigSpec,
+    package_root: Option<PathBuf>,
 }
 
 fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigContext>> {
@@ -159,7 +189,9 @@ fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigCont
             None,
         ));
     }
-    Ok(Some(TraceRigContext { spec }))
+    let package_root =
+        rig::read_source_metadata(&spec.id).map(|metadata| PathBuf::from(metadata.package_path));
+    Ok(Some(TraceRigContext { spec, package_root }))
 }
 
 fn resolve_component_id(
@@ -193,13 +225,23 @@ fn rig_component_path(spec: &RigSpec, component_id: &str) -> Option<String> {
 
 fn rig_component_for_trace(spec: &RigSpec, component_id: &str) -> Option<Component> {
     let component = spec.components.get(component_id)?;
+    let mut extensions = component.extensions.clone().unwrap_or_default();
+    for extension_id in rig::extension_ids_for_workloads(spec, rig::RigWorkloadKind::Trace) {
+        extensions
+            .entry(extension_id)
+            .or_insert_with(ScopedExtensionConfig::default);
+    }
     Some(Component {
         id: component_id.to_string(),
         local_path: rig_component_path(spec, component_id)
             .unwrap_or_else(|| component.path.clone()),
         remote_url: component.remote_url.clone(),
         triage_remote_url: component.triage_remote_url.clone(),
-        extensions: component.extensions.clone(),
+        extensions: if extensions.is_empty() {
+            None
+        } else {
+            Some(extensions)
+        },
         ..Default::default()
     })
 }
@@ -227,6 +269,9 @@ fn settings_as_json(settings: &[(String, serde_json::Value)]) -> Vec<(String, se
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::fs;
+
+    use crate::test_support::with_isolated_home;
 
     use homeboy::component::ScopedExtensionConfig;
     use homeboy::rig::ComponentSpec;
@@ -264,5 +309,218 @@ mod tests {
         assert_eq!(component.id, "studio");
         assert_eq!(component.local_path, path);
         assert!(component.extensions.is_some());
+    }
+
+    #[test]
+    fn rig_component_for_trace_synthesizes_trace_workload_extensions() {
+        let rig_spec: RigSpec = serde_json::from_str(
+            r#"{
+                "id": "studio",
+                "components": {
+                    "studio": { "path": "/tmp/studio" }
+                },
+                "trace_workloads": {
+                    "nodejs": ["/tmp/create-site.trace.mjs"]
+                }
+            }"#,
+        )
+        .expect("parse rig spec");
+
+        let component = rig_component_for_trace(&rig_spec, "studio").expect("component");
+
+        assert!(component
+            .extensions
+            .as_ref()
+            .expect("extensions")
+            .contains_key("nodejs"));
+    }
+
+    #[test]
+    fn rig_trace_list_uses_rig_default_component_and_workloads() {
+        with_isolated_home(|home| {
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (output, exit_code) = run_list(TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: None,
+                    path: None,
+                },
+                scenario: "list".to_string(),
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                overlays: Vec::new(),
+                keep_overlay: false,
+            })
+            .expect("rig trace list should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                TraceCommandOutput::List(result) => {
+                    assert_eq!(result.component, "studio");
+                    assert_eq!(result.component_id, "studio");
+                    assert_eq!(result.count, 2);
+                    assert_eq!(result.scenarios[0].id, "studio-app-create-site");
+                    let expected_source = format!(
+                        "{}/studio-app-create-site.trace.mjs",
+                        component_dir.path().display()
+                    );
+                    assert_eq!(
+                        result.scenarios[0].source.as_deref(),
+                        Some(expected_source.as_str())
+                    );
+                }
+                _ => panic!("expected list output"),
+            }
+        });
+    }
+
+    #[test]
+    fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
+        with_isolated_home(|home| {
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (output, exit_code) = run(
+                TraceArgs {
+                    comp: PositionalComponentArgs {
+                        component: Some("studio".to_string()),
+                        path: None,
+                    },
+                    scenario: "studio-app-create-site".to_string(),
+                    rig: Some("studio-rig".to_string()),
+                    setting_args: SettingArgs::default(),
+                    _json: HiddenJsonArgs::default(),
+                    json_summary: false,
+                    overlays: Vec::new(),
+                    keep_overlay: false,
+                },
+                &GlobalArgs {},
+            )
+            .expect("rig trace run should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                TraceCommandOutput::Run(result) => {
+                    assert!(result.passed);
+                    assert_eq!(result.component, "studio");
+                    assert_eq!(
+                        result.results.expect("results").scenario_id,
+                        "studio-app-create-site"
+                    );
+                }
+                _ => panic!("expected run output"),
+            }
+        });
+    }
+
+    fn write_trace_extension(home: &tempfile::TempDir) {
+        let extension_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("extensions")
+            .join("nodejs");
+        fs::create_dir_all(&extension_dir).expect("mkdir extension");
+        fs::write(
+            extension_dir.join("nodejs.json"),
+            r#"{
+                "name": "Node.js",
+                "version": "0.0.0",
+                "trace": { "extension_script": "trace-runner.sh" }
+            }"#,
+        )
+        .expect("write extension manifest");
+
+        let script_path = extension_dir.join("trace-runner.sh");
+        fs::write(
+            &script_path,
+            r#"#!/bin/sh
+set -eu
+scenario_ids=""
+old_ifs="$IFS"
+IFS=":"
+for workload in ${HOMEBOY_TRACE_EXTRA_WORKLOADS:-}; do
+  name="$(basename "$workload")"
+  name="${name%%.trace.*}"
+  name="${name%.*}"
+  if [ -n "$scenario_ids" ]; then
+    scenario_ids="$scenario_ids $name"
+  else
+    scenario_ids="$name"
+  fi
+done
+IFS="$old_ifs"
+
+if [ "$HOMEBOY_TRACE_LIST_ONLY" = "1" ]; then
+  cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
+{"component_id":"$HOMEBOY_COMPONENT_ID","scenarios":[
+JSON
+  comma=""
+  old_ifs="$IFS"
+  IFS=":"
+  for workload in ${HOMEBOY_TRACE_EXTRA_WORKLOADS:-}; do
+    name="$(basename "$workload")"
+    name="${name%%.trace.*}"
+    name="${name%.*}"
+    printf '%s{"id":"%s","source":"%s"}' "$comma" "$name" "$workload" >> "$HOMEBOY_TRACE_RESULTS_FILE"
+    comma=","
+  done
+  IFS="$old_ifs"
+  printf ']}' >> "$HOMEBOY_TRACE_RESULTS_FILE"
+  exit 0
+fi
+
+case " $scenario_ids " in
+  *" $HOMEBOY_TRACE_SCENARIO "*) ;;
+  *) printf 'unknown scenario %s\n' "$HOMEBOY_TRACE_SCENARIO" >&2; exit 3 ;;
+esac
+
+cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
+{"component_id":"$HOMEBOY_COMPONENT_ID","scenario_id":"$HOMEBOY_TRACE_SCENARIO","status":"pass","timeline":[],"assertions":[],"artifacts":[]}
+JSON
+"#,
+        )
+        .expect("write trace script");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&script_path)
+                .expect("script metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&script_path, permissions).expect("chmod script");
+        }
+    }
+
+    fn write_trace_rig(
+        home: &tempfile::TempDir,
+        rig_id: &str,
+        component_id: &str,
+        path: &std::path::Path,
+    ) {
+        let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+        fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+        fs::write(
+            rig_dir.join(format!("{}.json", rig_id)),
+            format!(
+                r#"{{
+                    "components": {{
+                        "{component_id}": {{ "path": "{}" }}
+                    }},
+                    "trace_workloads": {{ "nodejs": [
+                        "${{components.{component_id}.path}}/studio-app-create-site.trace.mjs",
+                        "${{components.{component_id}.path}}/studio-list-sites.trace.mjs"
+                    ] }}
+                }}"#,
+                path.display()
+            ),
+        )
+        .expect("write rig");
     }
 }
