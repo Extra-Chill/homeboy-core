@@ -921,7 +921,9 @@ fn sanitize_tag_for_filename(tag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_gh_command, publish_step_result, run_git_push, sanitize_tag_for_filename};
+    use super::{
+        fallback_gh_command, publish_step_result, run_git_push, sanitize_tag_for_filename,
+    };
     use crate::component::Component;
     use crate::release::ReleaseStepStatus;
     use std::process::Command;
