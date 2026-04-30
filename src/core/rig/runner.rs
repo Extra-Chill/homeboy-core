@@ -224,12 +224,6 @@ fn symlink_status(rig: &RigSpec, link: &super::spec::SymlinkSpec) -> SymlinkStat
             actual_target: None,
             state: SymlinkStatusState::BlockedByNonSymlink,
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => SymlinkStatusReport {
-            link: link_display,
-            expected_target,
-            actual_target: None,
-            state: SymlinkStatusState::Missing,
-        },
         Err(_) => SymlinkStatusReport {
             link: link_display,
             expected_target,
