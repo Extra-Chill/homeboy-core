@@ -482,6 +482,18 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         None
     };
 
+    if let (Some(ref info), Some(ref next_version)) = (&version_info, &new_version) {
+        if let Some(message) = validate_release_version_floor(
+            semver_recommendation
+                .as_ref()
+                .and_then(|rec| rec.latest_tag.as_deref()),
+            &info.version,
+            next_version,
+        ) {
+            v.push("version", &message, None);
+        }
+    }
+
     // === Stage 3: Working tree check ===
     if let Some(ref info) = version_info {
         let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
@@ -714,6 +726,34 @@ fn build_semver_recommendation(
         is_underbump,
         reasons,
     }))
+}
+
+fn validate_release_version_floor(
+    latest_tag: Option<&str>,
+    current_version: &str,
+    next_version: &str,
+) -> Option<String> {
+    let latest_tag = latest_tag?;
+    let tag_version = git::extract_version_from_tag(latest_tag)?;
+    let tag_version = semver::Version::parse(&tag_version).ok()?;
+    let current_version = semver::Version::parse(current_version).ok()?;
+    let next_version = semver::Version::parse(next_version).ok()?;
+
+    if tag_version > current_version {
+        return Some(format!(
+            "Latest release tag {} is ahead of source version {}. Refusing to release {} because this usually means a bad or misplaced tag needs cleanup.",
+            latest_tag, current_version, next_version
+        ));
+    }
+
+    if next_version <= tag_version {
+        return Some(format!(
+            "Next release version {} is not greater than latest release tag {}. Refusing to create a non-advancing release.",
+            next_version, latest_tag
+        ));
+    }
+
+    None
 }
 
 /// Resolve the latest tag and commits since that tag for a component.
@@ -1577,6 +1617,7 @@ mod tests {
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
         get_unexpected_uncommitted_files, is_homeboy_managed_path,
         is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
+        validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
@@ -1676,6 +1717,30 @@ mod tests {
             code_quality_failure_message("Tests", &output),
             "Tests runner infrastructure failure (exit code 1)"
         );
+    }
+
+    #[test]
+    fn release_version_floor_blocks_tag_ahead_of_source_version() {
+        let message = validate_release_version_floor(Some("v0.125.0"), "0.124.9", "0.124.10")
+            .expect("ahead tag should block release");
+
+        assert!(message.contains("Latest release tag v0.125.0 is ahead of source version 0.124.9"));
+        assert!(message.contains("bad or misplaced tag"));
+    }
+
+    #[test]
+    fn release_version_floor_blocks_non_advancing_next_version() {
+        let message = validate_release_version_floor(Some("v0.125.0"), "0.125.0", "0.125.0")
+            .expect("same version should block release");
+
+        assert!(message.contains(
+            "Next release version 0.125.0 is not greater than latest release tag v0.125.0"
+        ));
+    }
+
+    #[test]
+    fn release_version_floor_allows_advancing_release() {
+        assert!(validate_release_version_floor(Some("v0.124.9"), "0.124.9", "0.124.10").is_none());
     }
 
     // ---- homeboy-managed scratch path filtering (issue #1162) ----
