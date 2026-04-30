@@ -12,6 +12,7 @@
 
 use super::spec::{RigResourcesSpec, RigSpec};
 use crate::expand;
+use std::collections::BTreeSet;
 
 /// Expand variables + tilde in a string.
 pub fn expand_vars(rig: &RigSpec, input: &str) -> String {
@@ -21,12 +22,57 @@ pub fn expand_vars(rig: &RigSpec, input: &str) -> String {
 /// Return a copy of the rig resource declarations with path entries expanded.
 pub fn expand_resources(rig: &RigSpec) -> RigResourcesSpec {
     let mut resources = rig.resources.clone();
-    resources.paths = resources
-        .paths
-        .iter()
-        .map(|path| expand_vars(rig, path))
-        .collect();
+    let derived_paths = rig.symlinks.iter().map(|symlink| symlink.link.as_str());
+    resources.paths = merge_expanded_strings(
+        rig,
+        resources.paths.iter().map(String::as_str),
+        derived_paths,
+    );
+
+    let derived_ports = rig.services.values().filter_map(|service| service.port);
+    resources.ports = merge_values(resources.ports.iter().copied(), derived_ports);
+
+    let derived_process_patterns = rig
+        .services
+        .values()
+        .filter_map(|service| service.discover.as_ref())
+        .map(|discover| discover.pattern.as_str());
+    resources.process_patterns = merge_strings(
+        resources.process_patterns.iter().map(String::as_str),
+        derived_process_patterns,
+    );
     resources
+}
+
+fn merge_expanded_strings<'a>(
+    rig: &RigSpec,
+    explicit: impl Iterator<Item = &'a str>,
+    derived: impl Iterator<Item = &'a str>,
+) -> Vec<String> {
+    merge_strings(
+        explicit.map(|value| expand_vars(rig, value)),
+        derived.map(|value| expand_vars(rig, value)),
+    )
+}
+
+fn merge_strings(
+    explicit: impl Iterator<Item = impl Into<String>>,
+    derived: impl Iterator<Item = impl Into<String>>,
+) -> Vec<String> {
+    merge_values(explicit.map(Into::into), derived.map(Into::into))
+}
+
+fn merge_values<T: Clone + Eq + Ord>(
+    explicit: impl Iterator<Item = T>,
+    derived: impl Iterator<Item = T>,
+) -> Vec<T> {
+    let mut values: Vec<T> = explicit.collect();
+    for value in derived.collect::<BTreeSet<_>>() {
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    values
 }
 
 fn resolve_token(rig: &RigSpec, token: &str) -> Option<String> {

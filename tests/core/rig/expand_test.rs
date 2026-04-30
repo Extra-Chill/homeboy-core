@@ -4,7 +4,9 @@
 //! public function of the module; additional cases cover edge conditions.
 
 use crate::rig::expand::{expand_resources, expand_vars};
-use crate::rig::spec::{ComponentSpec, RigSpec};
+use crate::rig::spec::{
+    ComponentSpec, DiscoverSpec, RigSpec, ServiceKind, ServiceSpec, SymlinkSpec,
+};
 use crate::test_support::with_isolated_home;
 use std::collections::HashMap;
 
@@ -124,5 +126,130 @@ fn test_expand_resources_expands_path_entries_only() {
             vec!["wordpress-server-child.mjs"]
         );
         assert_eq!(resources.paths, expected_paths);
+    });
+}
+
+#[test]
+fn test_expand_resources_derives_paths_ports_and_process_patterns() {
+    with_isolated_home(|home| {
+        let mut rig = rig_with("derived", HashMap::new());
+        rig.symlinks = vec![
+            SymlinkSpec {
+                link: "~/bin/studio".to_string(),
+                target: "/tmp/studio".to_string(),
+            },
+            SymlinkSpec {
+                link: "~/bin/playground".to_string(),
+                target: "/tmp/playground".to_string(),
+            },
+        ];
+        rig.services.insert(
+            "tarballs".to_string(),
+            ServiceSpec {
+                kind: ServiceKind::HttpStatic,
+                cwd: None,
+                port: Some(9724),
+                command: None,
+                env: HashMap::new(),
+                health: None,
+                discover: None,
+            },
+        );
+        rig.services.insert(
+            "daemon".to_string(),
+            ServiceSpec {
+                kind: ServiceKind::External,
+                cwd: None,
+                port: None,
+                command: None,
+                env: HashMap::new(),
+                health: None,
+                discover: Some(DiscoverSpec {
+                    pattern: "wordpress-server-child.mjs".to_string(),
+                    argv_contains: Vec::new(),
+                }),
+            },
+        );
+
+        let resources = expand_resources(&rig);
+
+        assert_eq!(
+            resources.paths,
+            vec![
+                home.path()
+                    .join("bin/playground")
+                    .to_string_lossy()
+                    .to_string(),
+                home.path().join("bin/studio").to_string_lossy().to_string(),
+            ]
+        );
+        assert_eq!(resources.ports, vec![9724]);
+        assert_eq!(
+            resources.process_patterns,
+            vec!["wordpress-server-child.mjs"]
+        );
+    });
+}
+
+#[test]
+fn test_expand_resources_merges_explicit_resources_and_deduplicates() {
+    with_isolated_home(|home| {
+        let mut rig = rig_with("dedupe", HashMap::new());
+        rig.resources.paths = vec!["~/bin/studio".to_string(), "~/Developer/manual".to_string()];
+        rig.resources.ports = vec![9724, 3000];
+        rig.resources.process_patterns = vec![
+            "wordpress-server-child.mjs".to_string(),
+            "manual-process".to_string(),
+        ];
+        rig.symlinks = vec![SymlinkSpec {
+            link: "~/bin/studio".to_string(),
+            target: "/tmp/studio".to_string(),
+        }];
+        rig.services.insert(
+            "tarballs".to_string(),
+            ServiceSpec {
+                kind: ServiceKind::HttpStatic,
+                cwd: None,
+                port: Some(9724),
+                command: None,
+                env: HashMap::new(),
+                health: None,
+                discover: None,
+            },
+        );
+        rig.services.insert(
+            "daemon".to_string(),
+            ServiceSpec {
+                kind: ServiceKind::External,
+                cwd: None,
+                port: None,
+                command: None,
+                env: HashMap::new(),
+                health: None,
+                discover: Some(DiscoverSpec {
+                    pattern: "wordpress-server-child.mjs".to_string(),
+                    argv_contains: Vec::new(),
+                }),
+            },
+        );
+
+        let resources = expand_resources(&rig);
+
+        assert_eq!(resources.exclusive, Vec::<String>::new());
+        assert_eq!(
+            resources.paths,
+            vec![
+                home.path().join("bin/studio").to_string_lossy().to_string(),
+                home.path()
+                    .join("Developer/manual")
+                    .to_string_lossy()
+                    .to_string(),
+            ]
+        );
+        assert_eq!(resources.ports, vec![9724, 3000]);
+        assert_eq!(
+            resources.process_patterns,
+            vec!["wordpress-server-child.mjs", "manual-process"]
+        );
     });
 }
