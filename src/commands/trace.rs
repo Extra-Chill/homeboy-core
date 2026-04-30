@@ -280,6 +280,7 @@ mod tests {
 
     #[test]
     fn rig_component_path_and_trace_env_are_threaded() {
+        let component_dir = tempfile::TempDir::new().expect("component dir");
         let mut components = HashMap::new();
         let mut extensions = HashMap::new();
         extensions.insert(
@@ -289,7 +290,7 @@ mod tests {
         components.insert(
             "studio".to_string(),
             ComponentSpec {
-                path: "~/Developer/studio".to_string(),
+                path: component_dir.path().to_string_lossy().to_string(),
                 remote_url: Some("https://github.com/Automattic/studio".to_string()),
                 triage_remote_url: None,
                 stack: None,
@@ -304,7 +305,7 @@ mod tests {
         };
 
         let path = rig_component_path(&spec, "studio").expect("path resolves");
-        assert!(path.contains("/Developer/studio"));
+        assert_eq!(path, component_dir.path().to_string_lossy());
         let component = rig_component_for_trace(&spec, "studio").expect("component resolves");
         assert_eq!(component.id, "studio");
         assert_eq!(component.local_path, path);
