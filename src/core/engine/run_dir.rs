@@ -36,6 +36,7 @@ pub mod files {
     pub const FIX_RESULTS: &str = "fix-results.json";
     pub const BENCH_RESULTS: &str = "bench-results.json";
     pub const TRACE_RESULTS: &str = "trace.json";
+    pub const RESOURCE_SUMMARY: &str = "resource-summary.json";
     pub const ANNOTATIONS_DIR: &str = "annotations";
 }
 

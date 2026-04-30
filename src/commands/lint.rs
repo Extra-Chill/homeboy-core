@@ -135,6 +135,10 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
     }
 
     let run_dir = RunDir::create()?;
+    let resource_run = homeboy::engine::resource::ResourceSummaryRun::start(Some(format!(
+        "lint {}",
+        effective_id
+    )));
 
     let workflow = run_main_lint_workflow(
         &ctx.component,
@@ -160,7 +164,9 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
             },
         },
         &run_dir,
-    )?;
+    );
+    resource_run.write_to_run_dir(&run_dir)?;
+    let workflow = workflow?;
 
     Ok(report::from_main_workflow(workflow))
 }
