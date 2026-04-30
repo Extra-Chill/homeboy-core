@@ -282,6 +282,30 @@ pub(crate) fn run_git_push(component: &Component, component_id: &str) -> Result<
     )?;
     let data = serde_json::to_value(output)
         .map_err(|e| Error::internal_json(e.to_string(), Some("git push output".to_string())))?;
+
+    let success = data
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if !success {
+        let error = data
+            .get("stderr")
+            .and_then(serde_json::Value::as_str)
+            .filter(|stderr| !stderr.trim().is_empty())
+            .or_else(|| data.get("stdout").and_then(serde_json::Value::as_str))
+            .unwrap_or("git push failed")
+            .trim()
+            .to_string();
+
+        return Ok(step_failed(
+            "git.push",
+            "git.push",
+            Some(data),
+            Some(error),
+            Vec::new(),
+        ));
+    }
+
     Ok(step_success("git.push", "git.push", Some(data), Vec::new()))
 }
 
@@ -897,8 +921,12 @@ fn sanitize_tag_for_filename(tag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_gh_command, publish_step_result, sanitize_tag_for_filename};
+    use super::{
+        fallback_gh_command, publish_step_result, run_git_push, sanitize_tag_for_filename,
+    };
+    use crate::component::Component;
     use crate::release::ReleaseStepStatus;
+    use std::process::Command;
 
     #[test]
     fn sanitize_tag_for_filename_preserves_safe_chars() {
@@ -921,6 +949,34 @@ mod tests {
         assert!(cmd.contains("gh release create v1.2.3"));
         assert!(cmd.contains("--title v1.2.3"));
         assert!(cmd.contains("--notes-file"));
+    }
+
+    #[test]
+    fn git_push_step_fails_when_git_push_fails() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let init = Command::new("git")
+            .arg("init")
+            .current_dir(temp.path())
+            .output()
+            .expect("git init");
+        assert!(init.status.success());
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: temp.path().to_string_lossy().to_string(),
+            ..Component::default()
+        };
+
+        let result = run_git_push(&component, "fixture").expect("push step should return result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Failed);
+        assert!(result.error.unwrap().contains("fatal:"));
+        assert_eq!(
+            result
+                .data
+                .and_then(|data| data.get("success").and_then(serde_json::Value::as_bool)),
+            Some(false)
+        );
     }
 
     #[test]
