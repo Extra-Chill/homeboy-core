@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.125.0] - 2026-04-30
+
+### Added
+- support rig-owned trace workloads
+
+### Fixed
+- avoid HOME-dependent test path
+- allow path-only extension resolution
+
 ## [0.124.11] - 2026-04-30
 
 ### Fixed
