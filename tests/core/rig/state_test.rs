@@ -4,7 +4,8 @@
 //! touching real user state), so this module exercises serde round-tripping
 //! which is the meaningful invariant.
 
-use crate::rig::state::{RigState, ServiceState, SharedPathState};
+use crate::rig::spec::RigResourcesSpec;
+use crate::rig::state::{MaterializedRigState, RigState, ServiceState, SharedPathState};
 
 #[test]
 fn test_state_round_trips_empty() {
@@ -24,6 +25,7 @@ fn test_state_round_trips_with_service() {
         last_check_result: None,
         services: Default::default(),
         shared_paths: Default::default(),
+        materialized: None,
     };
     state.services.insert(
         "tarball".to_string(),
@@ -62,6 +64,34 @@ fn test_state_round_trips_with_shared_path() {
     let entry = parsed.shared_paths.get("/worktree/node_modules").unwrap();
     assert_eq!(entry.target, "/primary/node_modules");
     assert_eq!(entry.created_at, "2026-04-26T13:00:00Z");
+}
+
+#[test]
+fn test_state_round_trips_with_materialized_ownership() {
+    let state = RigState {
+        materialized: Some(MaterializedRigState {
+            rig_id: "studio".to_string(),
+            materialized_at: "2026-04-30T13:00:00Z".to_string(),
+            resources: RigResourcesSpec {
+                exclusive: vec!["studio-dev".to_string()],
+                paths: vec!["/tmp/studio".to_string()],
+                ports: vec![9724],
+                process_patterns: vec!["wordpress-server-child".to_string()],
+            },
+            components: Default::default(),
+        }),
+        ..RigState::default()
+    };
+
+    let json = serde_json::to_string(&state).expect("serialize");
+    let parsed: RigState = serde_json::from_str(&json).expect("parse");
+    let materialized = parsed.materialized.expect("materialized ownership");
+    assert_eq!(materialized.rig_id, "studio");
+    assert_eq!(materialized.resources.ports, vec![9724]);
+    assert_eq!(
+        materialized.resources.process_patterns,
+        vec!["wordpress-server-child"]
+    );
 }
 
 #[test]

@@ -41,9 +41,8 @@ pub use install::{
 pub use lease::{acquire_active_run_lease, ActiveRigRunLease, RigRunLease};
 pub use pipeline::{PipelineOutcome, PipelineStepOutcome};
 pub use runner::{
-    run_check, run_down, run_status, run_up, snapshot_state, CheckReport, ComponentSnapshot,
-    DownReport, RigStateSnapshot, RigStatusReport, SymlinkStatusReport, SymlinkStatusState,
-    UpReport,
+    run_check, run_down, run_status, run_up, snapshot_state, CheckReport, DownReport,
+    RigStatusReport, SymlinkStatusReport, SymlinkStatusState, UpReport,
 };
 pub use service::{DiscoveredProcess, ServiceStatus};
 pub use source::{
@@ -62,7 +61,9 @@ pub use stack::{
     plan_stack_sync, run_component_sync, run_sync, RigStackPlanEntry, RigStackSyncEntry,
     RigStackSyncReport,
 };
-pub use state::{RigState, ServiceState};
+pub use state::{
+    ComponentSnapshot, MaterializedRigState, RigState, RigStateSnapshot, ServiceState,
+};
 pub use workloads::{extension_ids_for_workloads, workloads_for_extension, RigWorkloadKind};
 
 use crate::error::{Error, Result};

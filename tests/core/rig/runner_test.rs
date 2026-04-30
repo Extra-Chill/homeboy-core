@@ -21,9 +21,10 @@ use crate::rig::runner::{
     ServiceStatusReport, SymlinkStatusState, UpReport,
 };
 use crate::rig::spec::{
-    ComponentSpec, PipelineStep, RigSpec, ServiceKind, ServiceSpec, SharedPathOp, SharedPathSpec,
-    SymlinkSpec,
+    ComponentSpec, PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathOp,
+    SharedPathSpec, SymlinkSpec,
 };
+use crate::rig::state::RigState;
 use crate::test_support::with_isolated_home;
 
 fn empty_pipeline(name: &str) -> PipelineOutcome {
@@ -90,6 +91,7 @@ fn test_status_report_empty_services_serializes() {
         last_up: None,
         last_check: None,
         last_check_result: None,
+        materialized: None,
     };
     let json = serde_json::to_string(&report).expect("serialize");
     assert!(json.contains("\"services\":[]"));
@@ -139,12 +141,57 @@ fn test_service_status_report_emits_pid_when_running() {
 #[test]
 fn test_run_up() {
     with_isolated_home(|_dir| {
-        let rig = minimal_spec("run-up-fixture");
+        let mut rig = minimal_spec("run-up-fixture");
+        rig.resources = RigResourcesSpec {
+            exclusive: vec!["run-up-exclusive".to_string()],
+            paths: vec!["/tmp/run-up-path".to_string()],
+            ports: vec![9981],
+            process_patterns: vec!["run-up-process".to_string()],
+        };
         let report = run_up(&rig).expect("run_up succeeds with empty pipeline");
         assert_eq!(report.rig_id, "run-up-fixture");
         assert!(report.success, "empty pipeline should report success");
         assert_eq!(report.pipeline.passed, 0);
         assert_eq!(report.pipeline.failed, 0);
+
+        let state = RigState::load(&rig.id).expect("state loads");
+        let materialized = state.materialized.expect("materialized ownership");
+        assert_eq!(materialized.rig_id, "run-up-fixture");
+        assert_eq!(materialized.resources.exclusive, vec!["run-up-exclusive"]);
+        assert_eq!(materialized.resources.ports, vec![9981]);
+        assert!(
+            materialized.components.is_empty(),
+            "minimal spec has no component snapshot entries"
+        );
+    });
+}
+
+#[test]
+fn test_failed_run_up_does_not_write_materialized_ownership() {
+    with_isolated_home(|_dir| {
+        let mut rig = minimal_spec("run-up-failure-fixture");
+        let mut pipeline = HashMap::new();
+        pipeline.insert(
+            "up".to_string(),
+            vec![PipelineStep::Command {
+                step_id: None,
+                depends_on: Vec::new(),
+                cmd: "false".to_string(),
+                cwd: None,
+                env: HashMap::new(),
+                label: Some("intentional failure".to_string()),
+            }],
+        );
+        rig.pipeline = pipeline;
+
+        let report = run_up(&rig).expect("run_up returns a failed report");
+        assert!(!report.success, "failing step should fail up");
+
+        let state = RigState::load(&rig.id).expect("state loads");
+        assert!(
+            state.materialized.is_none(),
+            "failed up must not persist materialized ownership"
+        );
     });
 }
 
@@ -168,6 +215,15 @@ fn test_run_check() {
 fn test_run_down() {
     with_isolated_home(|_dir| {
         let rig = minimal_spec("run-down-fixture");
+        run_up(&rig).expect("seed materialized ownership");
+        assert!(
+            RigState::load(&rig.id)
+                .expect("state loads")
+                .materialized
+                .is_some(),
+            "precondition: up writes ownership"
+        );
+
         let report = run_down(&rig).expect("run_down succeeds with no services");
         assert_eq!(report.rig_id, "run-down-fixture");
         assert!(
@@ -179,6 +235,13 @@ fn test_run_down() {
             "no `down` pipeline declared, so no outcome reported"
         );
         assert!(report.success, "empty teardown is trivially successful");
+        assert!(
+            RigState::load(&rig.id)
+                .expect("state loads")
+                .materialized
+                .is_none(),
+            "down clears materialized ownership"
+        );
     });
 }
 
@@ -243,6 +306,13 @@ fn test_run_status() {
         );
         assert!(status.last_check.is_none());
         assert!(status.last_check_result.is_none());
+        assert!(status.materialized.is_none());
+
+        run_up(&rig).expect("seed materialized ownership");
+        let status = run_status(&rig).expect("run_status reports materialized state");
+        let materialized = status.materialized.expect("materialized ownership");
+        assert_eq!(materialized.rig_id, "run-status-fixture");
+        assert!(!materialized.materialized_at.is_empty());
 
         let mut services = HashMap::new();
         services.insert(
