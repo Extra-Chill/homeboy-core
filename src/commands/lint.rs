@@ -7,7 +7,8 @@ use homeboy::extension::lint::{
     LintRunWorkflowArgs,
 };
 use homeboy::extension::ExtensionCapability;
-use homeboy::refactor::plan::{run_lint_refactor, LintSourceOptions};
+use homeboy::git;
+use homeboy::refactor::plan::{collect_refactor_sources, lint_refactor_request, LintSourceOptions};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
@@ -172,8 +173,19 @@ fn run_fix(
     component_label: String,
     settings: Vec<(String, String)>,
 ) -> CmdResult<LintCommandOutput> {
+    let selected_files = if args.changed_only {
+        let changes = git::get_uncommitted_changes(&ctx.component.local_path)?;
+        let mut files = Vec::new();
+        files.extend(changes.staged);
+        files.extend(changes.unstaged);
+        files.extend(changes.untracked);
+        Some(files)
+    } else {
+        None
+    };
+
     let lint_options = LintSourceOptions {
-        selected_files: None,
+        selected_files,
         file: args.file.clone(),
         glob: args.glob.clone(),
         errors_only: args.errors_only,
@@ -182,13 +194,16 @@ fn run_fix(
         category: args.category.clone(),
     };
 
-    let run = run_lint_refactor(
+    let mut request = lint_refactor_request(
         ctx.component.clone(),
         ctx.source_path.clone(),
         settings,
         lint_options,
         true,
-    )?;
+    );
+    request.changed_since = args.changed_since.clone();
+
+    let run = collect_refactor_sources(request)?;
 
     Ok(report::from_lint_fix(component_label, run))
 }

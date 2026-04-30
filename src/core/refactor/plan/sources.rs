@@ -862,19 +862,32 @@ fn run_lint_stage(
     let fix_sidecars = auto::AutofixSidecarFiles::for_run_dir(run_dir);
 
     let selected_files = options.selected_files.as_deref().or(changed_files);
+    if selected_files.is_some_and(|files| files.is_empty()) {
+        return Ok(PlannedStage {
+            source: "lint".to_string(),
+            summary: SourceStageSummary {
+                stage: "lint".to_string(),
+                collected: true,
+                applied: false,
+                edit_count: 0,
+                files_modified: 0,
+                detected_findings: Some(0),
+                changed_files: Vec::new(),
+                fix_summary: None,
+                warnings: Vec::new(),
+            },
+            fix_results: Vec::new(),
+        });
+    }
     let effective_glob = if let Some(changed_files) = selected_files {
-        if changed_files.is_empty() {
-            None
+        let abs_files: Vec<String> = changed_files
+            .iter()
+            .map(|f| format!("{}/{}", root_str, f))
+            .collect();
+        if abs_files.len() == 1 {
+            Some(abs_files[0].clone())
         } else {
-            let abs_files: Vec<String> = changed_files
-                .iter()
-                .map(|f| format!("{}/{}", root_str, f))
-                .collect();
-            if abs_files.len() == 1 {
-                Some(abs_files[0].clone())
-            } else {
-                Some(format!("{{{}}}", abs_files.join(",")))
-            }
+            Some(format!("{{{}}}", abs_files.join(",")))
         }
     } else {
         options.glob.clone()
@@ -1490,6 +1503,35 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.starts_with("audit refactor: ")));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lint_stage_empty_selected_files_does_not_fall_back_to_broad_lint() {
+        let root = tmp_dir("lint-empty-selected-files");
+        fs::create_dir_all(&root).unwrap();
+        let run_dir = RunDir::create().unwrap();
+        let component = test_component(&root);
+
+        let stage = run_lint_stage(
+            &component,
+            &root,
+            &[],
+            &LintSourceOptions {
+                selected_files: Some(Vec::new()),
+                ..Default::default()
+            },
+            None,
+            true,
+            &run_dir,
+        )
+        .expect("empty selected files should be a clean no-op");
+
+        assert_eq!(stage.summary.stage, "lint");
+        assert_eq!(stage.summary.detected_findings, Some(0));
+        assert_eq!(stage.summary.files_modified, 0);
+        assert!(stage.fix_results.is_empty());
 
         let _ = fs::remove_dir_all(root);
     }
