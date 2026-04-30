@@ -231,10 +231,11 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
 
     let extension_id = result?;
 
-    // Write source revision so it survives even when .git is discarded.
+    // Write source metadata so it survives even when .git is discarded.
     if let Some(ref rev) = source_revision {
         let _ = std::fs::write(extension_dir.join(".source-revision"), rev);
     }
+    let _ = std::fs::write(extension_dir.join(".source-url"), url);
 
     // Auto-run setup if extension defines a setup_command
     // Setup is best-effort: install succeeds even if setup fails
@@ -495,29 +496,107 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         ));
     }
 
+    let source_url = resolve_source_url(extension_id)?;
+
+    if extension_dir.join(".git").exists() {
+        git::pull_repo(&extension_dir)?;
+
+        // Update source metadata after pull so it stays current.
+        write_source_metadata(
+            &extension_dir,
+            &source_url,
+            get_short_head_revision(&extension_dir),
+        );
+
+        run_setup_if_configured(extension_id);
+
+        return Ok(UpdateResult {
+            extension_id: extension_id.to_string(),
+            url: source_url,
+            path: extension_dir,
+        });
+    }
+
+    update_extracted_extension(extension_id, &extension_dir, &source_url)?;
+
+    run_setup_if_configured(extension_id);
+
+    Ok(UpdateResult {
+        extension_id: extension_id.to_string(),
+        url: source_url,
+        path: extension_dir,
+    })
+}
+
+fn resolve_source_url(extension_id: &str) -> Result<String> {
     let extension = load_extension(extension_id)?;
 
-    let source_url = extension.source_url.ok_or_else(|| {
+    extension.source_url.or_else(|| read_source_url(extension_id)).ok_or_else(|| {
         Error::validation_invalid_argument(
             "extension_id",
             format!(
-                "Extension '{}' has no sourceUrl. Reinstall with 'homeboy extension install <url>'.",
+                "Extension '{}' has no sourceUrl or .source-url metadata. Reinstall with 'homeboy extension install <url>'.",
                 extension_id
             ),
             Some(extension_id.to_string()),
             None,
         )
-    })?;
+    })
+}
 
-    git::pull_repo(&extension_dir)?;
+fn update_extracted_extension(
+    extension_id: &str,
+    extension_dir: &Path,
+    source_url: &str,
+) -> Result<()> {
+    let extensions_dir = paths::extensions()?;
+    let clone_dir = extensions_dir.join(format!(".update-clone-tmp-{}", extension_id));
+    let staged_dir = extensions_dir.join(format!(".update-stage-tmp-{}", extension_id));
+    let backup_dir = extensions_dir.join(format!(".update-backup-tmp-{}", extension_id));
 
-    // Update .source-revision after pull so it stays current
-    if let Some(rev) = get_short_head_revision(&extension_dir) {
-        let _ = std::fs::write(extension_dir.join(".source-revision"), &rev);
+    for stale in [&clone_dir, &staged_dir, &backup_dir] {
+        if stale.exists() {
+            std::fs::remove_dir_all(stale).map_err(|e| {
+                Error::internal_io(
+                    e.to_string(),
+                    Some("clean stale extension update dir".to_string()),
+                )
+            })?;
+        }
     }
 
-    // Auto-run setup if extension defines a setup_command
-    // Setup is best-effort: update succeeds even if setup fails
+    git::clone_repo(source_url, &clone_dir)?;
+    let source_revision = get_short_head_revision(&clone_dir);
+
+    let result = resolve_cloned_extension(&clone_dir, extension_id, &staged_dir, source_url);
+    if clone_dir.exists() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+    }
+    result?;
+
+    write_source_metadata(&staged_dir, source_url, source_revision);
+
+    rename_dir(extension_dir, &backup_dir)?;
+    if let Err(err) = rename_dir(&staged_dir, extension_dir) {
+        let _ = rename_dir(&backup_dir, extension_dir);
+        return Err(err);
+    }
+
+    if backup_dir.exists() {
+        let _ = std::fs::remove_dir_all(&backup_dir);
+    }
+
+    Ok(())
+}
+
+fn write_source_metadata(extension_dir: &Path, source_url: &str, source_revision: Option<String>) {
+    if let Some(rev) = source_revision {
+        let _ = std::fs::write(extension_dir.join(".source-revision"), rev);
+    }
+    let _ = std::fs::write(extension_dir.join(".source-url"), source_url);
+}
+
+fn run_setup_if_configured(extension_id: &str) {
     if let Ok(extension) = load_extension(extension_id) {
         if extension
             .runtime()
@@ -526,12 +605,6 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
             let _ = run_setup(extension_id);
         }
     }
-
-    Ok(UpdateResult {
-        extension_id: extension_id.to_string(),
-        url: source_url,
-        path: extension_dir,
-    })
 }
 
 /// Update a linked extension by pulling the source repository.
@@ -772,10 +845,27 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn read_source_url(extension_id: &str) -> Option<String> {
+    let extension_dir = paths::extension(extension_id).ok()?;
+    if !extension_dir.exists() {
+        return None;
+    }
+
+    let url_file = extension_dir.join(".source-url");
+    std::fs::read_to_string(&url_file)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{install, install_for_component, is_workdir_clean, read_source_revision, update};
+    use super::{
+        install, install_for_component, is_workdir_clean, load_extension, read_source_revision,
+        update,
+    };
     use crate::component;
+    use crate::extension::update_all;
     use crate::test_support::with_isolated_home;
     use std::fs;
     use std::path::Path;
@@ -783,6 +873,10 @@ mod tests {
     use tempfile::TempDir;
 
     fn write_extension_fixture(root: &Path, id: &str) {
+        write_extension_fixture_with_version(root, id, "1.0.0");
+    }
+
+    fn write_extension_fixture_with_version(root: &Path, id: &str, version: &str) {
         let dir = root.join(id);
         fs::create_dir_all(&dir).expect("extension dir");
         fs::write(
@@ -790,9 +884,9 @@ mod tests {
             format!(
                 r#"{{
   "name": "{} extension",
-  "version": "1.0.0"
+  "version": "{}"
 }}"#,
-                id
+                id, version
             ),
         )
         .expect("extension manifest");
@@ -1018,9 +1112,107 @@ mod tests {
 
             assert!(result.path.join(".source-revision").exists());
             assert_eq!(
+                fs::read_to_string(result.path.join(".source-url"))
+                    .expect("source url marker")
+                    .trim(),
+                remote_url.to_string_lossy()
+            );
+            assert_eq!(
                 read_source_revision("wordpress"),
                 result.source_revision,
                 "monorepo installs keep the stored source revision after .git is discarded"
+            );
+        });
+    }
+
+    #[test]
+    fn update_all_updates_linked_extensions_through_single_update_path() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let _remote = match prepare_git_extension_repo(&source, "wordpress") {
+                Some(remote) => remote,
+                None => return,
+            };
+
+            install(
+                &source.join("wordpress").to_string_lossy(),
+                Some("wordpress"),
+            )
+            .expect("install linked extension");
+
+            let result = update_all(false);
+
+            assert_eq!(result.updated.len(), 1);
+            assert_eq!(result.updated[0].extension_id, "wordpress");
+            assert!(
+                result.skipped.is_empty(),
+                "linked extensions should not be pre-skipped by update_all"
+            );
+        });
+    }
+
+    #[test]
+    fn extracted_monorepo_update_reclones_from_stored_source_url() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let remote = match prepare_git_extension_repo(&source, "wordpress") {
+                Some(remote) => remote,
+                None => return,
+            };
+            let remote_url = remote.path().join("extension.git");
+
+            let result = install(&remote_url.to_string_lossy(), Some("wordpress"))
+                .expect("install extracted extension");
+            assert!(!result.path.join(".git").exists());
+
+            write_extension_fixture_with_version(&source, "wordpress", "2.0.0");
+            assert!(commit_all(&source, "update extension"));
+            assert!(run_git(&source, &["push", "origin", "HEAD"]));
+
+            update("wordpress", false).expect("update extracted extension");
+
+            let updated = load_extension("wordpress").expect("updated extension");
+            assert_eq!(updated.version, "2.0.0");
+            assert_eq!(
+                fs::read_to_string(result.path.join(".source-url"))
+                    .expect("source url marker")
+                    .trim(),
+                remote_url.to_string_lossy()
+            );
+        });
+    }
+
+    #[test]
+    fn extracted_monorepo_update_keeps_existing_install_when_validation_fails() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let remote = match prepare_git_extension_repo(&source, "wordpress") {
+                Some(remote) => remote,
+                None => return,
+            };
+            let remote_url = remote.path().join("extension.git");
+
+            let result = install(&remote_url.to_string_lossy(), Some("wordpress"))
+                .expect("install extracted extension");
+
+            fs::write(source.join("wordpress/wordpress.json"), "not json")
+                .expect("write invalid manifest");
+            assert!(commit_all(&source, "break extension manifest"));
+            assert!(run_git(&source, &["push", "origin", "HEAD"]));
+
+            assert!(update("wordpress", false).is_err());
+
+            let current = load_extension("wordpress").expect("previous extension remains loadable");
+            assert_eq!(current.version, "1.0.0");
+            assert!(
+                result.path.join("wordpress.json").exists(),
+                "failed update must leave the prior install in place"
             );
         });
     }
