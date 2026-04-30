@@ -9,6 +9,10 @@ homeboy trace <component> <scenario>
 homeboy trace <component> list
 homeboy trace <component> <scenario> --rig <rig-id>
 homeboy trace <component> <scenario> --json-summary
+homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
+homeboy trace <component> <scenario> --report=markdown
+homeboy trace <component> <scenario> --baseline
+homeboy trace <component> <scenario> --ratchet
 ```
 
 ## Extension Manifest
@@ -42,6 +46,9 @@ homeboy trace <component> <scenario> --json-summary
   "timeline": [
     { "t_ms": 0, "source": "desktop", "event": "window.closed", "data": { "id": 1 } }
   ],
+  "span_definitions": [
+    { "id": "close_to_assertion", "from": "desktop.window.closed", "to": "assertion.checked" }
+  ],
   "assertions": [
     { "id": "no-window-reopen", "status": "fail", "message": "Window reopened" }
   ],
@@ -52,3 +59,42 @@ homeboy trace <component> <scenario> --json-summary
 ```
 
 V1 statuses are `pass`, `fail`, and `error`.
+
+## Spans
+
+Spans are generic intervals over timeline keys. A timeline key is `source.event`, using the event's `source` and `event` fields.
+
+Runners can emit `span_definitions`, or callers can pass repeatable `--span id:from:to` flags. Homeboy writes computed results back into the command output as `span_results`:
+
+```json
+{
+  "span_results": [
+    {
+      "id": "submit_to_cli",
+      "from": "ui.create_site.submit_clicked",
+      "to": "cli.validating_site_configuration",
+      "status": "ok",
+      "duration_ms": 1065,
+      "from_t_ms": 120,
+      "to_t_ms": 1185
+    }
+  ]
+}
+```
+
+If an endpoint is missing, Homeboy emits a skipped result with `missing` keys instead of panicking.
+
+## Markdown Reports
+
+Use `--report=markdown` to render a skim-friendly report from the same trace run. The report includes status, span table, assertions, artifacts, and timeline events.
+
+## Span Baselines
+
+Trace spans can use the same lifecycle flags as other baseline-aware commands:
+
+- `--baseline` stores the current span durations in `homeboy.json` under `baselines.trace`.
+- `--ratchet` updates the stored baseline when spans improve.
+- `--ignore-baseline` skips comparison.
+- `--regression-threshold=<PCT>` controls the allowed duration slowdown. Default is `5`.
+
+Rig-pinned traces store separate baselines under `trace.rig.<rig-id>` so bare and rig-owned traces do not collide.

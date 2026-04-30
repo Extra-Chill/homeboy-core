@@ -18,7 +18,7 @@ enum RawOutputMode {
 
 use homeboy::commands;
 use homeboy::commands::utils::{args, entity_suggest, response as output, tty};
-use homeboy::commands::{changelog, cli, file, logs, report, review};
+use homeboy::commands::{changelog, cli, file, logs, report, review, trace};
 use homeboy::extension::load_all_extensions;
 
 fn response_mode(command: &Commands) -> ResponseMode {
@@ -38,6 +38,9 @@ fn response_mode(command: &Commands) -> ResponseMode {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Review(args) if review::is_markdown_mode(args) => {
+            ResponseMode::Raw(RawOutputMode::Markdown)
+        }
+        Commands::Trace(args) if trace::is_markdown_mode(args) => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Report(args) if report::is_markdown_mode(args) => {

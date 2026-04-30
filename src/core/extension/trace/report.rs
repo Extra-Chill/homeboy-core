@@ -2,7 +2,10 @@
 
 use serde::Serialize;
 
-use super::parsing::{TraceArtifact, TraceList, TraceResults};
+use super::baseline::TraceBaselineComparison;
+use super::parsing::{
+    TraceArtifact, TraceAssertionStatus, TraceList, TraceResults, TraceSpanStatus,
+};
 use super::run::{TraceOverlay, TraceRunWorkflowResult};
 use crate::rig::RigStateSnapshot;
 
@@ -30,6 +33,10 @@ pub struct TraceRunOutput {
     pub failure: Option<super::run::TraceRunFailure>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<TraceOverlay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_comparison: Option<TraceBaselineComparison>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +56,11 @@ pub struct TraceRunSummaryOutput {
     pub rig_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<TraceOverlay>,
+    pub span_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_comparison: Option<TraceBaselineComparison>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -87,6 +99,13 @@ pub fn from_main_workflow(
                 .unwrap_or(0),
             rig_id: rig_state.as_ref().map(|r| r.rig_id.clone()),
             overlays: result.overlays,
+            span_count: result
+                .results
+                .as_ref()
+                .map(|r| r.span_results.len())
+                .unwrap_or(0),
+            baseline_comparison: result.baseline_comparison,
+            hints: result.hints,
         };
         return (TraceCommandOutput::Summary(output), exit_code);
     }
@@ -107,9 +126,84 @@ pub fn from_main_workflow(
             rig_state,
             failure: result.failure,
             overlays: result.overlays,
+            baseline_comparison: result.baseline_comparison,
+            hints: result.hints,
         })),
         exit_code,
     )
+}
+
+pub fn render_markdown(results: &TraceResults) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# Trace: `{}`\n\n", results.scenario_id));
+    out.push_str(&format!("- **Component:** `{}`\n", results.component_id));
+    out.push_str(&format!("- **Status:** `{}`\n", results.status.as_str()));
+    if let Some(summary) = &results.summary {
+        out.push_str(&format!("- **Summary:** {}\n", summary));
+    }
+    if let Some(failure) = &results.failure {
+        out.push_str(&format!("- **Failure:** {}\n", failure));
+    }
+
+    if !results.span_results.is_empty() {
+        out.push_str("\n## Spans\n\n");
+        out.push_str("| Span | From | To | Duration | Status |\n");
+        out.push_str("|---|---|---|---:|---|\n");
+        for span in &results.span_results {
+            let duration = span
+                .duration_ms
+                .map(|ms| format!("{}ms", ms))
+                .unwrap_or_else(|| "-".to_string());
+            let status = match span.status {
+                TraceSpanStatus::Ok => "ok".to_string(),
+                TraceSpanStatus::Skipped => span
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "skipped".to_string()),
+            };
+            out.push_str(&format!(
+                "| `{}` | `{}` | `{}` | {} | {} |\n",
+                span.id, span.from, span.to, duration, status
+            ));
+        }
+    }
+
+    if !results.assertions.is_empty() {
+        out.push_str("\n## Assertions\n\n");
+        for assertion in &results.assertions {
+            let status = match assertion.status {
+                TraceAssertionStatus::Pass => "pass",
+                TraceAssertionStatus::Fail => "fail",
+                TraceAssertionStatus::Error => "error",
+            };
+            match &assertion.message {
+                Some(message) => out.push_str(&format!(
+                    "- `{}`: **{}** - {}\n",
+                    assertion.id, status, message
+                )),
+                None => out.push_str(&format!("- `{}`: **{}**\n", assertion.id, status)),
+            }
+        }
+    }
+
+    if !results.artifacts.is_empty() {
+        out.push_str("\n## Artifacts\n\n");
+        for artifact in &results.artifacts {
+            out.push_str(&format!("- **{}:** `{}`\n", artifact.label, artifact.path));
+        }
+    }
+
+    if !results.timeline.is_empty() {
+        out.push_str("\n## Timeline\n\n");
+        for event in &results.timeline {
+            out.push_str(&format!(
+                "- `{}ms` `{}.{}`\n",
+                event.t_ms, event.source, event.event
+            ));
+        }
+    }
+
+    out
 }
 
 pub fn from_list_workflow(component: String, list: TraceList) -> (TraceCommandOutput, i32) {
@@ -172,6 +266,8 @@ mod tests {
                 failure: None,
                 rig: None,
                 timeline: Vec::new(),
+                span_definitions: Vec::new(),
+                span_results: Vec::new(),
                 assertions: Vec::new(),
                 artifacts: vec![TraceArtifact {
                     label: "main log".to_string(),
@@ -184,6 +280,8 @@ mod tests {
                 touched_files: vec!["scenario.txt".to_string()],
                 kept: false,
             }],
+            baseline_comparison: None,
+            hints: None,
         };
 
         let (output, exit_code) = from_main_workflow(result, None, true);
@@ -194,8 +292,41 @@ mod tests {
         assert_eq!(value["passed"], true);
         assert_eq!(value["scenario_id"], "close-window-running-site");
         assert_eq!(value["artifact_count"], 1);
+        assert_eq!(value["span_count"], 0);
         assert_eq!(value["overlays"][0]["path"], "/tmp/overlay.patch");
         assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
         assert_eq!(value["overlays"][0]["kept"], false);
+    }
+
+    #[test]
+    fn renders_markdown_report_with_spans() {
+        let results = TraceResults {
+            component_id: "studio".to_string(),
+            scenario_id: "create-site".to_string(),
+            status: TraceStatus::Pass,
+            summary: Some("Created a site".to_string()),
+            failure: None,
+            rig: None,
+            timeline: Vec::new(),
+            span_definitions: Vec::new(),
+            span_results: vec![crate::extension::trace::parsing::TraceSpanResult {
+                id: "submit_to_cli".to_string(),
+                from: "ui.submit".to_string(),
+                to: "cli.start".to_string(),
+                status: crate::extension::trace::parsing::TraceSpanStatus::Ok,
+                duration_ms: Some(42),
+                from_t_ms: Some(10),
+                to_t_ms: Some(52),
+                missing: Vec::new(),
+                message: None,
+            }],
+            assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        let markdown = render_markdown(&results);
+
+        assert!(markdown.contains("# Trace: `create-site`"));
+        assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
     }
 }
