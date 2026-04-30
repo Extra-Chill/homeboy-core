@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.130.0] - 2026-04-30
+
+### Added
+- attribute extension child resources
+- add span reports and baselines
+
 ## [0.129.0] - 2026-04-30
 
 ### Added
