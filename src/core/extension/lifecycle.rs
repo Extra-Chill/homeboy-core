@@ -530,8 +530,13 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
 
 fn resolve_source_url(extension_id: &str) -> Result<String> {
     let extension = load_extension(extension_id)?;
+    let metadata_url = paths::extension(extension_id)
+        .ok()
+        .and_then(|extension_dir| std::fs::read_to_string(extension_dir.join(".source-url")).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
-    extension.source_url.or_else(|| read_source_url(extension_id)).ok_or_else(|| {
+    extension.source_url.or(metadata_url).ok_or_else(|| {
         Error::validation_invalid_argument(
             "extension_id",
             format!(
@@ -840,19 +845,6 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
     // Fall back to .source-revision file (monorepo installs)
     let rev_file = extension_dir.join(".source-revision");
     std::fs::read_to_string(&rev_file)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn read_source_url(extension_id: &str) -> Option<String> {
-    let extension_dir = paths::extension(extension_id).ok()?;
-    if !extension_dir.exists() {
-        return None;
-    }
-
-    let url_file = extension_dir.join(".source-url");
-    std::fs::read_to_string(&url_file)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
