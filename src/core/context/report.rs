@@ -27,7 +27,7 @@ pub struct ContextReportStatus {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ready_to_deploy: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub needs_version_bump: Vec<String>,
+    pub needs_release: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub docs_only: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -398,7 +398,7 @@ fn compute_status(
 
     ContextReportStatus {
         ready_to_deploy: release_buckets.ready_to_deploy.clone(),
-        needs_version_bump: release_buckets.needs_bump.clone(),
+        needs_release: release_buckets.needs_release.clone(),
         docs_only: release_buckets.docs_only.clone(),
         has_uncommitted: release_buckets.has_uncommitted.clone(),
         config_gaps,
@@ -513,12 +513,12 @@ fn build_actionable_next_steps(
         }
     }
 
-    if !status.needs_version_bump.is_empty() {
-        let count = status.needs_version_bump.len();
+    if !status.needs_release.is_empty() {
+        let count = status.needs_release.len();
         if count == 1 {
             next_steps.push(format!(
                 "1 component has unreleased commits: `{}`. Release with `homeboy release {}`.",
-                status.needs_version_bump[0], status.needs_version_bump[0]
+                status.needs_release[0], status.needs_release[0]
             ));
         } else {
             next_steps.push(format!(

@@ -119,7 +119,7 @@ When using `--check`, each component result includes a `release_state` field tha
 
 `baseline_ref`, `baseline_warning`, `code_commits`, and `docs_only_commits` are omitted when empty.
 
-This helps identify components where `component_status` is `up_to_date` but work has been done since the last version bump (commits_since_version > 0), indicating a version bump may be needed before deployment.
+This helps identify components where `component_status` is `up_to_date` but work has been done since the current version baseline (`commits_since_version > 0`), indicating a release may be needed before deployment.
 
 Exit code is `0` when `summary.failed == 0`, otherwise `1`.
 

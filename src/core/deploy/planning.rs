@@ -281,7 +281,9 @@ where
             ReleaseStateStatus::Uncommitted => {
                 buckets.has_uncommitted.push(component_id.to_string())
             }
-            ReleaseStateStatus::NeedsBump => buckets.needs_bump.push(component_id.to_string()),
+            ReleaseStateStatus::NeedsRelease => {
+                buckets.needs_release.push(component_id.to_string())
+            }
             ReleaseStateStatus::DocsOnly => buckets.docs_only.push(component_id.to_string()),
             ReleaseStateStatus::Clean => buckets.ready_to_deploy.push(component_id.to_string()),
             ReleaseStateStatus::Unknown => buckets.unknown.push(component_id.to_string()),

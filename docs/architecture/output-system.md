@@ -54,7 +54,7 @@ The `status` object surfaces what needs attention:
 {
   "status": {
     "ready_to_deploy": ["component-a", "component-b"],
-    "needs_version_bump": ["component-c"],
+    "needs_release": ["component-c"],
     "has_uncommitted": ["component-d"],
     "config_gaps": 5
   }
@@ -63,7 +63,7 @@ The `status` object surfaces what needs attention:
 
 Fields (all arrays/counts skip serialization when empty/zero):
 - `ready_to_deploy`: Components with no uncommitted changes and no commits since version
-- `needs_version_bump`: Components with commits since last version bump
+- `needs_release`: Components with releasable code commits since the current version baseline
 - `has_uncommitted`: Components with uncommitted changes in working directory
 - `config_gaps`: Total count of configuration gaps across all components
 
@@ -76,7 +76,7 @@ The `summary` object provides counts for quick overview:
   "summary": {
     "total_components": 24,
     "by_module": { "wordpress": 21, "rust": 2, "swift": 1 },
-    "by_status": { "clean": 5, "uncommitted": 8, "needs_bump": 11 }
+    "by_status": { "clean": 5, "uncommitted": 8, "needs_release": 11 }
   }
 }
 ```
@@ -92,7 +92,7 @@ Components are returned in compact `ComponentSummary` format:
       "id": "extra-chill-blog",
       "path": "extrachill-plugins/extrachill-blog",
       "extension": "wordpress",
-      "status": "needs_bump",
+      "status": "needs_release",
       "commits_since_version": 2
     }
   ]

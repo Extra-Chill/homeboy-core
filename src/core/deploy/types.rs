@@ -117,7 +117,7 @@ pub struct ReleaseState {
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseStateStatus {
     Uncommitted,
-    NeedsBump,
+    NeedsRelease,
     DocsOnly,
     Clean,
     Unknown,
@@ -128,7 +128,7 @@ impl ReleaseState {
         if self.has_uncommitted_changes {
             ReleaseStateStatus::Uncommitted
         } else if self.code_commits > 0 {
-            ReleaseStateStatus::NeedsBump
+            ReleaseStateStatus::NeedsRelease
         } else if self.docs_only_commits > 0 {
             ReleaseStateStatus::DocsOnly
         } else {
@@ -141,7 +141,7 @@ impl ReleaseStateStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             ReleaseStateStatus::Uncommitted => "uncommitted",
-            ReleaseStateStatus::NeedsBump => "needs_bump",
+            ReleaseStateStatus::NeedsRelease => "needs_release",
             ReleaseStateStatus::DocsOnly => "docs_only",
             ReleaseStateStatus::Clean => "clean",
             ReleaseStateStatus::Unknown => "unknown",
@@ -152,7 +152,7 @@ impl ReleaseStateStatus {
 #[derive(Debug, Clone, Default)]
 pub struct ReleaseStateBuckets {
     pub ready_to_deploy: Vec<String>,
-    pub needs_bump: Vec<String>,
+    pub needs_release: Vec<String>,
     pub docs_only: Vec<String>,
     pub has_uncommitted: Vec<String>,
     pub unknown: Vec<String>,
@@ -259,6 +259,166 @@ impl ComponentDeployResult {
     pub(super) fn with_deployed_ref(mut self, git_ref: String) -> Self {
         self.deployed_ref = Some(git_ref);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        parse_bulk_component_ids, ComponentDeployResult, ComponentStatus, DeployResult,
+        ReleaseState, ReleaseStateStatus,
+    };
+    use crate::component::Component;
+
+    fn component() -> Component {
+        Component::new(
+            "fixture".to_string(),
+            "/tmp/fixture".to_string(),
+            "wp-content/plugins/fixture".to_string(),
+            None,
+        )
+    }
+
+    fn deploy_result() -> ComponentDeployResult {
+        ComponentDeployResult::new(&component(), "/var/www/example")
+    }
+
+    fn release_state() -> ReleaseState {
+        ReleaseState {
+            commits_since_version: 1,
+            code_commits: 1,
+            docs_only_commits: 0,
+            has_uncommitted_changes: false,
+            baseline_ref: Some("v1.0.0".to_string()),
+            baseline_warning: None,
+        }
+    }
+
+    #[test]
+    fn test_parse_bulk_component_ids() {
+        let parsed = parse_bulk_component_ids(r#"["api","web"]"#).expect("parse ids");
+
+        assert_eq!(parsed, vec!["api", "web"]);
+    }
+
+    #[test]
+    fn test_success() {
+        let result = DeployResult::success(0);
+
+        assert!(result.success);
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.error, None);
+    }
+
+    #[test]
+    fn test_failure() {
+        let result = DeployResult::failure(2, "boom".to_string());
+
+        assert!(!result.success);
+        assert_eq!(result.exit_code, 2);
+        assert_eq!(result.error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn test_failed() {
+        let result = ComponentDeployResult::failed(
+            &component(),
+            "/var/www/example",
+            Some("1.0.0".to_string()),
+            Some("0.9.0".to_string()),
+            "deploy failed".to_string(),
+        );
+
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.local_version.as_deref(), Some("1.0.0"));
+        assert_eq!(result.remote_version.as_deref(), Some("0.9.0"));
+        assert_eq!(result.error.as_deref(), Some("deploy failed"));
+    }
+
+    #[test]
+    fn test_with_status() {
+        let result = deploy_result().with_status("skipped");
+
+        assert_eq!(result.status, "skipped");
+    }
+
+    #[test]
+    fn test_with_versions() {
+        let result = deploy_result().with_versions(Some("1.0.0".into()), Some("0.9.0".into()));
+
+        assert_eq!(result.local_version.as_deref(), Some("1.0.0"));
+        assert_eq!(result.remote_version.as_deref(), Some("0.9.0"));
+    }
+
+    #[test]
+    fn test_with_error() {
+        let result = deploy_result().with_error("broken".to_string());
+
+        assert_eq!(result.error.as_deref(), Some("broken"));
+    }
+
+    #[test]
+    fn test_with_build_exit_code() {
+        let result = deploy_result().with_build_exit_code(Some(7));
+
+        assert_eq!(result.build_exit_code, Some(7));
+    }
+
+    #[test]
+    fn test_with_deploy_exit_code() {
+        let result = deploy_result().with_deploy_exit_code(Some(8));
+
+        assert_eq!(result.deploy_exit_code, Some(8));
+    }
+
+    #[test]
+    fn test_with_component_status() {
+        let result = deploy_result().with_component_status(ComponentStatus::NeedsUpdate);
+
+        assert!(matches!(
+            result.component_status,
+            Some(ComponentStatus::NeedsUpdate)
+        ));
+    }
+
+    #[test]
+    fn test_with_remote_path() {
+        let result =
+            deploy_result().with_remote_path("/srv/wp-content/plugins/fixture".to_string());
+
+        assert_eq!(
+            result.remote_path.as_deref(),
+            Some("/srv/wp-content/plugins/fixture")
+        );
+    }
+
+    #[test]
+    fn test_with_release_state() {
+        let result = deploy_result().with_release_state(release_state());
+
+        assert_eq!(
+            result.release_state.as_ref().map(ReleaseState::status),
+            Some(ReleaseStateStatus::NeedsRelease)
+        );
+    }
+
+    #[test]
+    fn test_with_deployed_ref() {
+        let result = deploy_result().with_deployed_ref("v1.2.3".to_string());
+
+        assert_eq!(result.deployed_ref.as_deref(), Some("v1.2.3"));
+    }
+
+    #[test]
+    fn release_state_status_uses_needs_release_public_name() {
+        let state = release_state();
+
+        assert_eq!(state.status(), ReleaseStateStatus::NeedsRelease);
+        assert_eq!(state.status().as_str(), "needs_release");
+        assert_eq!(
+            serde_json::to_value(state.status()).expect("serialize status"),
+            serde_json::json!("needs_release")
+        );
     }
 }
 
