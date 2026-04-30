@@ -4,6 +4,13 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.124.8] - 2026-04-30
+
+### Fixed
+- persist release checkout credentials
+- clear release-blocking duplication drift
+- fail git push step on push errors
+
 ## [0.124.7] - 2026-04-30
 
 ### Fixed
