@@ -18,6 +18,7 @@ pub enum RigCommandOutput {
     Up(RigUpOutput),
     Check(RigCheckOutput),
     Down(RigDownOutput),
+    Repair(RigRepairOutput),
     Sync(RigSyncOutput),
     Status(RigStatusOutput),
     Install(RigInstallOutput),
@@ -82,6 +83,13 @@ pub struct RigDownOutput {
     pub command: &'static str,
     #[serde(flatten)]
     pub report: rig::DownReport,
+}
+
+#[derive(Serialize)]
+pub struct RigRepairOutput {
+    pub command: &'static str,
+    #[serde(flatten)]
+    pub report: rig::RepairReport,
 }
 
 #[derive(Serialize)]

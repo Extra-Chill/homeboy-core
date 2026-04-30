@@ -17,8 +17,8 @@ use std::collections::HashMap;
 
 use crate::rig::pipeline::PipelineOutcome;
 use crate::rig::runner::{
-    run_check, run_down, run_status, run_up, snapshot_state, CheckReport, RigStatusReport,
-    ServiceStatusReport, SymlinkStatusState, UpReport,
+    run_check, run_down, run_repair, run_status, run_up, snapshot_state, CheckReport,
+    RigStatusReport, ServiceStatusReport, SymlinkStatusState, UpReport,
 };
 use crate::rig::spec::{
     ComponentSpec, PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathOp,
@@ -52,6 +52,18 @@ fn minimal_spec(id: &str) -> RigSpec {
         bench_profiles: HashMap::new(),
         app_launcher: None,
     }
+}
+
+fn symlink_spec(id: &str, link: String, target: String) -> RigSpec {
+    RigSpec {
+        symlinks: vec![SymlinkSpec { link, target }],
+        ..minimal_spec(id)
+    }
+}
+
+#[cfg(unix)]
+fn unix_symlink(target: &std::path::Path, link: &std::path::Path) {
+    std::os::unix::fs::symlink(target, link).expect("create symlink");
 }
 
 // ------------------------------------------------------------------
@@ -241,6 +253,169 @@ fn test_run_down() {
                 .materialized
                 .is_none(),
             "down clears materialized ownership"
+        );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_run_repair_repairs_drifted_symlink() {
+    with_isolated_home(|_dir| {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let old_target = tmp.path().join("old-target");
+        let expected_target = tmp.path().join("expected-target");
+        let link = tmp.path().join("tool");
+        std::fs::write(&old_target, "old").expect("old target");
+        std::fs::write(&expected_target, "expected").expect("expected target");
+        unix_symlink(&old_target, &link);
+
+        let rig = symlink_spec(
+            "repair-drifted-symlink-fixture",
+            link.to_string_lossy().into_owned(),
+            expected_target.to_string_lossy().into_owned(),
+        );
+
+        let report = run_repair(&rig).expect("repair succeeds");
+        assert!(report.success);
+        assert_eq!(report.repaired, 1);
+        assert_eq!(report.unchanged, 0);
+        assert_eq!(report.blocked, 0);
+        assert_eq!(report.resources[0].status, "repaired");
+        assert_eq!(
+            report.resources[0].previous_target.as_deref(),
+            Some(old_target.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            std::fs::read_link(&link).expect("read link"),
+            expected_target
+        );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_run_repair_creates_missing_symlink() {
+    with_isolated_home(|_dir| {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let expected_target = tmp.path().join("expected-target");
+        let link = tmp.path().join("nested").join("tool");
+        std::fs::write(&expected_target, "expected").expect("expected target");
+
+        let rig = symlink_spec(
+            "repair-missing-symlink-fixture",
+            link.to_string_lossy().into_owned(),
+            expected_target.to_string_lossy().into_owned(),
+        );
+
+        let report = run_repair(&rig).expect("repair succeeds");
+        assert!(report.success);
+        assert_eq!(report.repaired, 1);
+        assert_eq!(report.resources[0].status, "repaired");
+        assert_eq!(report.resources[0].previous_target, None);
+        assert_eq!(
+            std::fs::read_link(&link).expect("read link"),
+            expected_target
+        );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_run_repair_noops_ok_symlink() {
+    with_isolated_home(|_dir| {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let expected_target = tmp.path().join("expected-target");
+        let link = tmp.path().join("tool");
+        std::fs::write(&expected_target, "expected").expect("expected target");
+        unix_symlink(&expected_target, &link);
+
+        let rig = symlink_spec(
+            "repair-ok-symlink-fixture",
+            link.to_string_lossy().into_owned(),
+            expected_target.to_string_lossy().into_owned(),
+        );
+
+        let report = run_repair(&rig).expect("repair succeeds");
+        assert!(report.success);
+        assert_eq!(report.repaired, 0);
+        assert_eq!(report.unchanged, 1);
+        assert_eq!(report.blocked, 0);
+        assert_eq!(report.resources[0].status, "unchanged");
+        assert_eq!(
+            std::fs::read_link(&link).expect("read link"),
+            expected_target
+        );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_run_repair_blocks_non_symlink() {
+    with_isolated_home(|_dir| {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let expected_target = tmp.path().join("expected-target");
+        let link = tmp.path().join("tool");
+        std::fs::write(&expected_target, "expected").expect("expected target");
+        std::fs::write(&link, "real file").expect("real file at link path");
+
+        let rig = symlink_spec(
+            "repair-blocked-symlink-fixture",
+            link.to_string_lossy().into_owned(),
+            expected_target.to_string_lossy().into_owned(),
+        );
+
+        let report = run_repair(&rig).expect("repair reports blocked resource");
+        assert!(!report.success);
+        assert_eq!(report.repaired, 0);
+        assert_eq!(report.unchanged, 0);
+        assert_eq!(report.blocked, 1);
+        assert_eq!(report.resources[0].status, "blocked");
+        assert!(report.resources[0]
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not a symlink"));
+        assert_eq!(
+            std::fs::read_to_string(&link).expect("read file"),
+            "real file"
+        );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_run_repair_does_not_run_pipeline_commands() {
+    with_isolated_home(|_dir| {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let expected_target = tmp.path().join("expected-target");
+        let link = tmp.path().join("tool");
+        let command_marker = tmp.path().join("command-ran");
+        std::fs::write(&expected_target, "expected").expect("expected target");
+
+        let mut rig = symlink_spec(
+            "repair-skip-pipeline-fixture",
+            link.to_string_lossy().into_owned(),
+            expected_target.to_string_lossy().into_owned(),
+        );
+        rig.pipeline.insert(
+            "up".to_string(),
+            vec![PipelineStep::Command {
+                step_id: None,
+                depends_on: Vec::new(),
+                cmd: format!("printf ran > {}", command_marker.to_string_lossy()),
+                cwd: None,
+                env: HashMap::new(),
+                label: Some("must-not-run".to_string()),
+            }],
+        );
+
+        let report = run_repair(&rig).expect("repair succeeds");
+        assert!(report.success);
+        assert_eq!(report.repaired, 1);
+        assert!(link.is_symlink(), "repair still handled declared symlink");
+        assert!(
+            !command_marker.exists(),
+            "repair must not run heavy or arbitrary pipeline commands"
         );
     });
 }
