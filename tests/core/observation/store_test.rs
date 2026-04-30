@@ -3,7 +3,9 @@
 //! These isolate `HOME` / `XDG_DATA_HOME` so the developer's real local DB is
 //! never read or written.
 
-use crate::observation::store::{self, ObservationStore, CURRENT_SCHEMA_VERSION};
+use crate::observation::store::{
+    self, NewRunRecord, ObservationStore, RunListFilter, RunStatus, CURRENT_SCHEMA_VERSION,
+};
 use crate::test_support::with_isolated_home;
 
 struct XdgGuard {
@@ -96,5 +98,149 @@ fn initialization_is_idempotent() {
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(status.migration_count, 1);
         assert_eq!(status.table_count, 3);
+    });
+}
+
+fn sample_run(kind: &str, component_id: &str) -> NewRunRecord {
+    NewRunRecord {
+        kind: kind.to_string(),
+        component_id: Some(component_id.to_string()),
+        command: Some(format!("homeboy {kind} {component_id}")),
+        cwd: Some("/tmp/homeboy-fixture".to_string()),
+        homeboy_version: Some("test-version".to_string()),
+        git_sha: Some("abc123".to_string()),
+        rig_id: Some("studio".to_string()),
+        metadata_json: serde_json::json!({
+            "scenario": "fixture",
+            "attempt": 1,
+        }),
+    }
+}
+
+#[test]
+fn run_lifecycle_round_trips_metadata_and_finish_status() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+
+        let started = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start run");
+
+        assert_eq!(started.kind, "bench");
+        assert_eq!(started.component_id.as_deref(), Some("homeboy"));
+        assert_eq!(started.status, "running");
+        assert!(started.finished_at.is_none());
+        assert_eq!(started.metadata_json["scenario"], "fixture");
+
+        let finished = store
+            .finish_run(
+                &started.id,
+                RunStatus::Pass,
+                Some(serde_json::json!({ "scenario": "fixture", "ok": true })),
+            )
+            .expect("finish run");
+        let fetched = store
+            .get_run(&started.id)
+            .expect("get run")
+            .expect("run exists");
+
+        assert_eq!(finished.status, "pass");
+        assert!(finished.finished_at.is_some());
+        assert_eq!(finished.metadata_json["ok"], true);
+        assert_eq!(fetched, finished);
+    });
+}
+
+#[test]
+fn list_runs_filters_by_kind_component_status_and_rig() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+
+        let bench = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start bench");
+        store
+            .finish_run(&bench.id, RunStatus::Pass, None)
+            .expect("finish bench");
+
+        let mut trace = sample_run("trace", "homeboy");
+        trace.rig_id = Some("other-rig".to_string());
+        let trace = store.start_run(trace).expect("start trace");
+        store
+            .finish_run(&trace.id, RunStatus::Fail, None)
+            .expect("finish trace");
+
+        let filtered = store
+            .list_runs(RunListFilter {
+                kind: Some("bench".to_string()),
+                component_id: Some("homeboy".to_string()),
+                status: Some("pass".to_string()),
+                rig_id: Some("studio".to_string()),
+                limit: Some(10),
+            })
+            .expect("list filtered");
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, bench.id);
+        assert_eq!(filtered[0].status, "pass");
+
+        let missing = store
+            .list_runs(RunListFilter {
+                status: Some("error".to_string()),
+                ..RunListFilter::default()
+            })
+            .expect("list missing");
+        assert!(missing.is_empty());
+    });
+}
+
+#[test]
+fn artifact_records_capture_path_hash_size_and_mime() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("trace", "homeboy"))
+            .expect("start run");
+        let artifact_path = home.path().join("trace-results.json");
+        std::fs::write(&artifact_path, br#"{"status":"pass"}"#).expect("write artifact");
+
+        let artifact = store
+            .record_artifact(&run.id, "trace-results", &artifact_path)
+            .expect("record artifact");
+        let artifacts = store.list_artifacts(&run.id).expect("list artifacts");
+
+        assert_eq!(artifacts, vec![artifact.clone()]);
+        assert_eq!(artifact.run_id, run.id);
+        assert_eq!(artifact.kind, "trace-results");
+        assert_eq!(artifact.path, artifact_path.to_string_lossy());
+        assert_eq!(artifact.size_bytes, Some(17));
+        assert_eq!(artifact.mime.as_deref(), Some("application/json"));
+        assert_eq!(
+            artifact.sha256.as_deref(),
+            Some("117367705c6e7ef5d779dd71de15a95ee62339e1ef635f08246f8e1ec99167e2")
+        );
+    });
+}
+
+#[test]
+fn missing_artifact_file_returns_clear_error() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start run");
+        let missing = home.path().join("missing.json");
+
+        let err = store
+            .record_artifact(&run.id, "missing", &missing)
+            .expect_err("missing artifact should fail");
+
+        assert_eq!(err.code.as_str(), "validation.invalid_argument");
+        assert!(err.message.contains("artifact file not found"));
+        assert!(err.details.to_string().contains("missing.json"));
     });
 }

@@ -5,3 +5,8 @@
 //! generated artifacts. This module only provides the storage substrate.
 
 pub mod store;
+
+pub use store::{
+    ArtifactRecord, NewRunRecord, ObservationDbStatus, ObservationStore, RunListFilter, RunRecord,
+    RunStatus, CURRENT_SCHEMA_VERSION,
+};
