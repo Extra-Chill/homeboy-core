@@ -6,11 +6,12 @@
 //!
 //! See: https://github.com/Extra-Chill/homeboy/issues/664
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::component::{self, Component};
+use crate::component::{self, Component, ScopedExtensionConfig};
 use crate::error::Result;
 use crate::extension::{self, ExtensionCapability};
 
@@ -74,6 +75,13 @@ pub struct ResolveOptions {
     /// conflict. Required for object-shaped settings whose dispatcher
     /// consumers expect a JSON object, not a string-coerced JSON literal.
     pub settings_json_overrides: Vec<(String, serde_json::Value)>,
+
+    /// One-shot extension override for this invocation.
+    ///
+    /// When set, this replaces the component's configured extension list in
+    /// memory only. It is not written back to `homeboy.json` or the global
+    /// component registry.
+    pub extension_overrides: Vec<String>,
 }
 
 impl ResolveOptions {
@@ -90,6 +98,7 @@ impl ResolveOptions {
             capability: Some(capability),
             settings_overrides: settings,
             settings_json_overrides: Vec::new(),
+            extension_overrides: Vec::new(),
         }
     }
 
@@ -109,6 +118,7 @@ impl ResolveOptions {
             capability: Some(capability),
             settings_overrides: settings,
             settings_json_overrides: settings_json,
+            extension_overrides: Vec::new(),
         }
     }
 
@@ -120,8 +130,30 @@ impl ResolveOptions {
             capability: None,
             settings_overrides: Vec::new(),
             settings_json_overrides: Vec::new(),
+            extension_overrides: Vec::new(),
         }
     }
+}
+
+fn apply_extension_overrides(component: &mut Component, extension_overrides: &[String]) {
+    if extension_overrides.is_empty() {
+        return;
+    }
+
+    let existing = component.extensions.clone().unwrap_or_default();
+    let mut extensions = HashMap::new();
+
+    for extension_id in extension_overrides {
+        extensions.insert(
+            extension_id.clone(),
+            existing
+                .get(extension_id)
+                .cloned()
+                .unwrap_or_else(ScopedExtensionConfig::default),
+        );
+    }
+
+    component.extensions = Some(extensions);
 }
 
 /// Resolve a unified execution context.
@@ -151,7 +183,7 @@ pub fn resolve_with_component(
     component_override: Option<Component>,
 ) -> Result<ExecutionContext> {
     // 1. Resolve component
-    let component = if let Some(mut component) = component_override {
+    let mut component = if let Some(mut component) = component_override {
         if let Some(path) = options.path_override.as_deref() {
             component.local_path = path.to_string();
         }
@@ -163,6 +195,8 @@ pub fn resolve_with_component(
             None,
         )?
     };
+
+    apply_extension_overrides(&mut component, &options.extension_overrides);
 
     // 2. Resolve source path
     let source_path = if let Some(ref path) = options.path_override {
@@ -301,9 +335,32 @@ fn detect_git_root(dir: &std::path::Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::with_isolated_home;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
+
+    fn write_extension(home: &TempDir, extension_id: &str, capabilities: &str) {
+        let extension_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("extensions")
+            .join(extension_id);
+        fs::create_dir_all(&extension_dir).expect("create extension dir");
+        fs::write(
+            extension_dir.join(format!("{}.json", extension_id)),
+            format!(
+                r#"{{
+                    "name": "{}",
+                    "version": "0.0.0",
+                    {}
+                }}"#,
+                extension_id, capabilities
+            ),
+        )
+        .expect("write extension manifest");
+    }
 
     #[test]
     fn detect_git_root_finds_repo() {
@@ -401,6 +458,7 @@ mod tests {
             capability: Some(ExtensionCapability::Lint),
             settings_overrides: Vec::new(),
             settings_json_overrides: Vec::new(),
+            extension_overrides: Vec::new(),
         };
 
         let err = resolve(&options).expect_err("raw path without lint extension should fail");
@@ -414,6 +472,118 @@ mod tests {
             !message.contains("component.not_found"),
             "raw path should not be treated as a component id: {message}"
         );
+    }
+
+    #[test]
+    fn extension_override_resolves_unconfigured_component_without_persisting() {
+        with_isolated_home(|home| {
+            write_extension(
+                home,
+                "nodejs",
+                r#""lint": { "extension_script": "lint.sh" }"#,
+            );
+            let dir = TempDir::new().expect("component dir");
+            let component = Component {
+                id: "adhoc".to_string(),
+                local_path: dir.path().to_string_lossy().to_string(),
+                extensions: None,
+                ..Component::default()
+            };
+
+            let mut options = ResolveOptions::with_capability(
+                "adhoc",
+                Some(dir.path().to_string_lossy().to_string()),
+                ExtensionCapability::Lint,
+                Vec::new(),
+            );
+            options.extension_overrides = vec!["nodejs".to_string()];
+
+            let ctx = resolve_with_component(&options, Some(component.clone()))
+                .expect("one-shot extension should resolve");
+
+            assert_eq!(ctx.extension_id.as_deref(), Some("nodejs"));
+            assert!(
+                component.extensions.is_none(),
+                "source component is unchanged"
+            );
+            assert!(ctx
+                .component
+                .extensions
+                .as_ref()
+                .is_some_and(|extensions| extensions.contains_key("nodejs")));
+        });
+    }
+
+    #[test]
+    fn extension_override_replaces_configured_extension_list_for_run() {
+        with_isolated_home(|home| {
+            write_extension(
+                home,
+                "wordpress",
+                r#""lint": { "extension_script": "lint.sh" }"#,
+            );
+            write_extension(
+                home,
+                "nodejs",
+                r#""lint": { "extension_script": "lint.sh" }"#,
+            );
+            let dir = TempDir::new().expect("component dir");
+            let mut configured = HashMap::new();
+            configured.insert(
+                "wordpress".to_string(),
+                ScopedExtensionConfig {
+                    settings: HashMap::from([(
+                        "package_manager".to_string(),
+                        serde_json::json!("composer"),
+                    )]),
+                    ..ScopedExtensionConfig::default()
+                },
+            );
+            configured.insert(
+                "nodejs".to_string(),
+                ScopedExtensionConfig {
+                    settings: HashMap::from([(
+                        "package_manager".to_string(),
+                        serde_json::json!("pnpm"),
+                    )]),
+                    ..ScopedExtensionConfig::default()
+                },
+            );
+            let component = Component {
+                id: "configured".to_string(),
+                local_path: dir.path().to_string_lossy().to_string(),
+                extensions: Some(configured),
+                ..Component::default()
+            };
+
+            let mut options = ResolveOptions::with_capability(
+                "configured",
+                Some(dir.path().to_string_lossy().to_string()),
+                ExtensionCapability::Lint,
+                Vec::new(),
+            );
+            options.extension_overrides = vec!["nodejs".to_string()];
+
+            let ctx = resolve_with_component(&options, Some(component.clone()))
+                .expect("override should select nodejs only");
+            let runtime_extensions = ctx
+                .component
+                .extensions
+                .as_ref()
+                .expect("runtime extensions");
+
+            assert_eq!(ctx.extension_id.as_deref(), Some("nodejs"));
+            assert!(runtime_extensions.contains_key("nodejs"));
+            assert!(!runtime_extensions.contains_key("wordpress"));
+            assert!(ctx
+                .settings
+                .iter()
+                .any(|(key, value)| key == "package_manager" && value == "pnpm"));
+            assert!(component
+                .extensions
+                .as_ref()
+                .is_some_and(|extensions| extensions.contains_key("wordpress")));
+        });
     }
 
     #[test]
@@ -433,6 +603,7 @@ mod tests {
             vec![("strict".to_string(), "true".to_string())]
         );
         assert!(options.settings_json_overrides.is_empty());
+        assert!(options.extension_overrides.is_empty());
     }
 
     #[test]
@@ -456,6 +627,7 @@ mod tests {
             options.settings_json_overrides,
             vec![("threshold".to_string(), serde_json::json!(0.95))]
         );
+        assert!(options.extension_overrides.is_empty());
     }
 
     #[test]
@@ -501,6 +673,7 @@ mod tests {
                 ("lang".to_string(), "rust".to_string()),
             ],
             settings_json_overrides: Vec::new(),
+            extension_overrides: Vec::new(),
         };
 
         let ctx = resolve(&options).expect("resolve should succeed");

@@ -1,7 +1,7 @@
 use homeboy::commands::lint::{run as run_lint, LintArgs};
 use homeboy::commands::test::{run as run_test, TestArgs};
 use homeboy::commands::utils::args::{
-    BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+    BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
 };
 use homeboy::commands::GlobalArgs;
 use std::fs;
@@ -37,6 +37,7 @@ fn component_args(root: &Path) -> PositionalComponentArgs {
 fn lint_args(root: &Path) -> LintArgs {
     LintArgs {
         comp: component_args(root),
+        extension_override: ExtensionOverrideArgs::default(),
         summary: false,
         file: None,
         glob: None,
@@ -56,6 +57,7 @@ fn lint_args(root: &Path) -> LintArgs {
 fn test_args(root: &Path) -> TestArgs {
     TestArgs {
         comp: component_args(root),
+        extension_override: ExtensionOverrideArgs::default(),
         skip_lint: false,
         coverage: false,
         coverage_min: None,

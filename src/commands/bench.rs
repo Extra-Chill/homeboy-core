@@ -14,7 +14,9 @@ use homeboy::extension::bench::{
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, RigSpec};
 
-use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
+use super::utils::args::{
+    BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+};
 use super::{CmdResult, GlobalArgs};
 
 mod matrix;
@@ -39,6 +41,9 @@ struct BenchListArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
 
+    #[command(flatten)]
+    extension_override: ExtensionOverrideArgs,
+
     /// Discover scenarios using a rig's component path, extension config,
     /// and rig-declared bench workloads.
     #[arg(long, value_name = "RIG_ID", value_delimiter = ',')]
@@ -60,6 +65,9 @@ struct BenchListArgs {
 pub struct BenchRunArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
+
+    #[command(flatten)]
+    extension_override: ExtensionOverrideArgs,
 
     /// Iterations per scenario (default 10). Forwarded to the runner via
     /// HOMEBOY_BENCH_ITERATIONS. Individual extensions may clamp.
@@ -200,6 +208,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--rig",
         "--setting",
         "--path",
+        "--extension",
     ];
 
     let mut filtered = Vec::new();
@@ -394,16 +403,16 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
         .as_ref()
         .and_then(|spec| matrix::rig_component_for_bench(spec, &effective_id));
 
-    let ctx = execution_context::resolve_with_component(
-        &ResolveOptions::with_capability_and_json(
-            &effective_id,
-            path_override.clone(),
-            ExtensionCapability::Bench,
-            args.setting_args.setting.clone(),
-            args.setting_args.setting_json.clone(),
-        ),
-        component_override,
-    )?;
+    let mut resolve_options = ResolveOptions::with_capability_and_json(
+        &effective_id,
+        path_override.clone(),
+        ExtensionCapability::Bench,
+        args.setting_args.setting.clone(),
+        args.setting_args.setting_json.clone(),
+    );
+    resolve_options.extension_overrides = args.extension_override.extensions.clone();
+
+    let ctx = execution_context::resolve_with_component(&resolve_options, component_override)?;
 
     let extra_workloads = rig_spec
         .as_ref()

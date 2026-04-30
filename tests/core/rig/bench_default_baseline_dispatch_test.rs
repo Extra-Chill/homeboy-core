@@ -11,7 +11,7 @@
 
 use super::{maybe_expand_default_baseline, BenchArgs, BenchRunArgs};
 use crate::commands::utils::args::{
-    BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+    BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
 };
 use crate::test_support::with_isolated_home;
 
@@ -39,6 +39,7 @@ fn make_args(
                 component: None,
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             iterations: 1,
             warmup: None,
             runs: 1,
