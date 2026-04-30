@@ -11,8 +11,8 @@ use homeboy::rig;
 
 use self::output::{
     RigAppOutput, RigCheckOutput, RigDownOutput, RigInstallOutput, RigInstalledStackSummary,
-    RigInstalledSummary, RigListOutput, RigShowOutput, RigSourceSummary, RigStatusOutput,
-    RigSummary, RigSyncOutput, RigUpOutput, RigUpdateOutput,
+    RigInstalledSummary, RigListOutput, RigRepairOutput, RigShowOutput, RigSourceSummary,
+    RigStatusOutput, RigSummary, RigSyncOutput, RigUpOutput, RigUpdateOutput,
 };
 use super::CmdResult;
 
@@ -43,6 +43,11 @@ enum RigCommand {
     },
     /// Tear down a rig: stop services and run its `down` pipeline
     Down {
+        /// Rig ID
+        rig_id: String,
+    },
+    /// Repair safe declared drift without running the full `up` pipeline
+    Repair {
         /// Rig ID
         rig_id: String,
     },
@@ -125,6 +130,7 @@ pub fn run(args: RigArgs, _global: &super::GlobalArgs) -> CmdResult<RigCommandOu
         RigCommand::Up { rig_id } => up(&rig_id),
         RigCommand::Check { rig_id } => check(&rig_id),
         RigCommand::Down { rig_id } => down(&rig_id),
+        RigCommand::Repair { rig_id } => repair(&rig_id),
         RigCommand::Sync { rig_id, dry_run } => sync(&rig_id, dry_run),
         RigCommand::Status { rig_id } => status(&rig_id),
         RigCommand::Install { source, id, all } => install(&source, id.as_deref(), all),
@@ -281,6 +287,19 @@ fn down(rig_id: &str) -> CmdResult<RigCommandOutput> {
     Ok((
         RigCommandOutput::Down(RigDownOutput {
             command: "rig.down",
+            report,
+        }),
+        exit_code,
+    ))
+}
+
+fn repair(rig_id: &str) -> CmdResult<RigCommandOutput> {
+    let rig = rig::load(rig_id)?;
+    let report = rig::run_repair(&rig)?;
+    let exit_code = if report.success { 0 } else { 1 };
+    Ok((
+        RigCommandOutput::Repair(RigRepairOutput {
+            command: "rig.repair",
             report,
         }),
         exit_code,
