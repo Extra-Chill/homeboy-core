@@ -14,10 +14,10 @@ pub struct LoadAverage {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ResourceSnapshot {
-    pub load_average: Option<LoadAverage>,
-    pub homeboy_rss_bytes: Option<u64>,
-    pub warnings: Vec<String>,
+struct ResourceSnapshot {
+    load_average: Option<LoadAverage>,
+    homeboy_rss_bytes: Option<u64>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -35,12 +35,12 @@ pub struct RunResourceSummary {
     pub warnings: Vec<String>,
 }
 
-pub trait ResourceProbe {
+trait ResourceProbe {
     fn snapshot(&self) -> ResourceSnapshot;
 }
 
 #[derive(Debug, Default)]
-pub struct SystemResourceProbe;
+struct SystemResourceProbe;
 
 impl ResourceProbe for SystemResourceProbe {
     fn snapshot(&self) -> ResourceSnapshot {
@@ -71,7 +71,7 @@ impl ResourceSummaryRun {
         Self::start_with_probe(label, &SystemResourceProbe)
     }
 
-    pub fn start_with_probe(label: Option<String>, probe: &impl ResourceProbe) -> Self {
+    fn start_with_probe(label: Option<String>, probe: &impl ResourceProbe) -> Self {
         Self {
             label,
             pid: std::process::id(),
@@ -86,7 +86,7 @@ impl ResourceSummaryRun {
         self.finish_with_probe(&SystemResourceProbe)
     }
 
-    pub fn finish_with_probe(&self, probe: &impl ResourceProbe) -> RunResourceSummary {
+    fn finish_with_probe(&self, probe: &impl ResourceProbe) -> RunResourceSummary {
         let after = probe.snapshot();
         RunResourceSummary::from_snapshots(
             self.label.clone(),
@@ -109,7 +109,7 @@ impl ResourceSummaryRun {
 
 impl RunResourceSummary {
     #[allow(clippy::too_many_arguments)]
-    pub fn from_snapshots(
+    fn from_snapshots(
         label: Option<String>,
         pid: u32,
         started_at: String,
@@ -140,7 +140,7 @@ impl RunResourceSummary {
     }
 }
 
-pub fn write_summary(run_dir: &RunDir, summary: &RunResourceSummary) -> Result<()> {
+fn write_summary(run_dir: &RunDir, summary: &RunResourceSummary) -> Result<()> {
     let path = run_dir.step_file(run_dir::files::RESOURCE_SUMMARY);
     let json = serde_json::to_string_pretty(summary).map_err(|e| {
         Error::internal_io(e.to_string(), Some("serialize resource summary".into()))
@@ -313,6 +313,27 @@ mod tests {
         assert_eq!(output["label"], "lint");
         assert_eq!(output["pid"], 7);
         assert_eq!(output["warnings"].as_array().unwrap().len(), 2);
+
+        run_dir.cleanup();
+    }
+
+    #[test]
+    fn test_write_to_run_dir() {
+        let run_dir = RunDir::create().expect("run dir");
+        let resource_run = ResourceSummaryRun::start(Some("lint homeboy".to_string()));
+
+        let summary = resource_run
+            .write_to_run_dir(&run_dir)
+            .expect("write resource summary");
+        let output = run_dir
+            .read_step_output(run_dir::files::RESOURCE_SUMMARY)
+            .expect("resource summary json");
+
+        assert_eq!(summary.label.as_deref(), Some("lint homeboy"));
+        assert_eq!(output["label"], "lint homeboy");
+        assert_eq!(output["pid"], std::process::id());
+        assert!(output["duration_ms"].as_u64().is_some());
+        assert_eq!(output["platform"], std::env::consts::OS);
 
         run_dir.cleanup();
     }
