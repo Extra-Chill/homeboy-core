@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.129.0] - 2026-04-30
+
+### Added
+- add resource diagnostics
+- write lint resource summaries
+
+### Fixed
+- expose json summary output
+
 ## [0.128.1] - 2026-04-30
 
 ### Fixed
