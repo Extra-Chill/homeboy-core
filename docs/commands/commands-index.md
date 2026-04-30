@@ -14,6 +14,7 @@
 - [db](db.md)
 - [deploy](deploy.md)
 - [deps](deps.md) — component dependency inspection and updates
+- [doctor](doctor.md) — local diagnostics for runtime and resource health
 - [docs](docs.md) — embedded topic display and codebase map generation
 - [extension](extension.md)
 - [file](file.md) — remote file operations, downloads, uploads, copies, and syncs
