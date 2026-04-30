@@ -11,7 +11,7 @@ use crate::server::{self, Server};
 
 pub mod report;
 
-pub use report::build_report;
+pub use report::{build_report, build_report_for_component};
 
 // === Local Context Detection (homeboy context command) ===
 
