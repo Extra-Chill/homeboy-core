@@ -22,14 +22,6 @@ struct RigBenchContext {
 
 fn prepare_rig_bench_context(rig_id: &str) -> homeboy::Result<RigBenchContext> {
     let spec = rig::load(rig_id)?;
-    let check_report = rig::run_check(&spec)?;
-    if !check_report.success {
-        return Err(homeboy::Error::rig_pipeline_failed(
-            &spec.id,
-            "check",
-            "rig check failed; refusing to run bench against an unhealthy rig",
-        ));
-    }
     let snapshot = rig::snapshot_state(&spec);
     let package_root =
         rig::read_source_metadata(&spec.id).map(|metadata| PathBuf::from(metadata.package_path));
@@ -372,6 +364,10 @@ fn run_component_with_rig_context(
 
     let ctx = execution_context::resolve_with_component(&resolve_options, component_override)?;
 
+    if let Some(spec) = rig_spec {
+        run_rig_workload_preflight(spec, ctx.extension_id.as_deref())?;
+    }
+
     let run_dir = RunDir::create()?;
 
     let extra_workloads = rig_spec
@@ -437,6 +433,24 @@ fn run_component_with_rig_context(
         workflow,
         rig_snapshot,
     ))
+}
+
+fn run_rig_workload_preflight(spec: &RigSpec, extension_id: Option<&str>) -> homeboy::Result<()> {
+    let groups = extension_id.and_then(|id| {
+        rig::check_groups_for_extension_workloads(spec, rig::RigWorkloadKind::Bench, id)
+    });
+    let check = match groups {
+        Some(groups) => rig::run_check_groups(spec, &groups)?,
+        None => rig::run_check(spec)?,
+    };
+    if !check.success {
+        return Err(homeboy::Error::rig_pipeline_failed(
+            &spec.id,
+            "check",
+            "rig check failed; refusing to run bench against an unhealthy rig",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -11,7 +11,9 @@ use serde::Serialize;
 
 use super::expand::{expand_resources, expand_vars};
 use super::lease::acquire_active_run_lease;
-use super::pipeline::{cleanup_shared_paths, run_pipeline, PipelineOutcome};
+use super::pipeline::{
+    cleanup_shared_paths, run_pipeline, run_pipeline_check_groups, PipelineOutcome,
+};
 use super::service::{self, ServiceStatus};
 use super::spec::{RigSpec, ServiceKind, SymlinkSpec};
 use super::state::{
@@ -149,6 +151,20 @@ pub fn run_check(rig: &RigSpec) -> Result<CheckReport> {
     state.last_check = Some(now_rfc3339());
     state.last_check_result = Some(if outcome.is_success() { "pass" } else { "fail" }.to_string());
     state.save(&rig.id)?;
+
+    Ok(CheckReport {
+        rig_id: rig.id.clone(),
+        success: outcome.is_success(),
+        pipeline: outcome,
+    })
+}
+
+/// Run only the grouped check-pipeline steps required by a workload command.
+///
+/// This intentionally does not update `last_check`: the report is a scoped
+/// command preflight, not proof that the whole rig passed `homeboy rig check`.
+pub fn run_check_groups(rig: &RigSpec, groups: &[String]) -> Result<CheckReport> {
+    let outcome = run_pipeline_check_groups(rig, groups, false)?;
 
     Ok(CheckReport {
         rig_id: rig.id.clone(),

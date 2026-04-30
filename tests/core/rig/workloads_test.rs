@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use crate::rig::spec::RigSpec;
-use crate::rig::{extension_ids_for_workloads, workloads_for_extension, RigWorkloadKind};
+use crate::rig::{
+    check_groups_for_extension_workloads, extension_ids_for_workloads, workloads_for_extension,
+    RigWorkloadKind,
+};
 
 #[test]
 fn test_bench_workloads_for_extension_filters_and_expands_paths() {
@@ -119,6 +122,83 @@ fn test_extension_workloads_leave_package_root_unexpanded_without_metadata() {
     assert_eq!(
         workloads_for_extension(&rig_spec, RigWorkloadKind::Trace, None, "nodejs"),
         vec![PathBuf::from("${package.root}/bench/manual.trace.mjs")]
+    );
+}
+
+#[test]
+fn test_check_groups_for_extension_workloads() {
+    let rig_spec: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "studio",
+            "components": {
+                "studio": { "path": "/tmp/studio" }
+            },
+            "trace_workloads": {
+                "nodejs": [
+                    {
+                        "path": "${components.studio.path}/bench/create-site.trace.mjs",
+                        "check_groups": ["desktop-app", "nodejs-trace"]
+                    },
+                    {
+                        "path": "/tmp/other.trace.mjs",
+                        "check_groups": ["desktop-app"]
+                    }
+                ]
+            }
+        }"#,
+    )
+    .expect("parse rig spec");
+
+    assert_eq!(
+        workloads_for_extension(&rig_spec, RigWorkloadKind::Trace, None, "nodejs"),
+        vec![
+            PathBuf::from("/tmp/studio/bench/create-site.trace.mjs"),
+            PathBuf::from("/tmp/other.trace.mjs"),
+        ]
+    );
+    assert_eq!(
+        check_groups_for_extension_workloads(&rig_spec, RigWorkloadKind::Trace, "nodejs")
+            .expect("scoped groups"),
+        vec!["desktop-app".to_string(), "nodejs-trace".to_string()]
+    );
+}
+
+#[test]
+fn test_string_workloads_keep_full_check_contract() {
+    let rig_spec: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "studio",
+            "trace_workloads": {
+                "nodejs": ["/tmp/create-site.trace.mjs"]
+            }
+        }"#,
+    )
+    .expect("parse rig spec");
+
+    assert_eq!(
+        check_groups_for_extension_workloads(&rig_spec, RigWorkloadKind::Trace, "nodejs"),
+        None
+    );
+}
+
+#[test]
+fn test_mixed_workload_declarations_keep_full_check_contract() {
+    let rig_spec: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "studio",
+            "bench_workloads": {
+                "nodejs": [
+                    { "path": "/tmp/scoped.bench.mjs", "check_groups": ["desktop-app"] },
+                    "/tmp/legacy.bench.mjs"
+                ]
+            }
+        }"#,
+    )
+    .expect("parse rig spec");
+
+    assert_eq!(
+        check_groups_for_extension_workloads(&rig_spec, RigWorkloadKind::Bench, "nodejs"),
+        None
     );
 }
 

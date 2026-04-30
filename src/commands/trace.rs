@@ -69,6 +69,13 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
         ),
         component_override,
     )?;
+    if let Some(context) = rig_context.as_ref() {
+        run_rig_workload_preflight(
+            &context.spec,
+            ctx.extension_id.as_deref(),
+            rig::RigWorkloadKind::Trace,
+        )?;
+    }
 
     let rig_state = rig_context
         .as_ref()
@@ -135,6 +142,13 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         ),
         component_override,
     )?;
+    if let Some(context) = rig_context.as_ref() {
+        run_rig_workload_preflight(
+            &context.spec,
+            ctx.extension_id.as_deref(),
+            rig::RigWorkloadKind::Trace,
+        )?;
+    }
 
     let run_dir = RunDir::create()?;
     let extra_workloads = rig_context
@@ -177,21 +191,34 @@ fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigCont
         return Ok(None);
     };
     let spec = rig::load(rig_id)?;
-    let check = rig::run_check(&spec)?;
+    let package_root =
+        rig::read_source_metadata(&spec.id).map(|metadata| PathBuf::from(metadata.package_path));
+    Ok(Some(TraceRigContext { spec, package_root }))
+}
+
+fn run_rig_workload_preflight(
+    spec: &RigSpec,
+    extension_id: Option<&str>,
+    kind: rig::RigWorkloadKind,
+) -> homeboy::Result<()> {
+    let groups =
+        extension_id.and_then(|id| rig::check_groups_for_extension_workloads(spec, kind, id));
+    let check = match groups {
+        Some(groups) => rig::run_check_groups(spec, &groups)?,
+        None => rig::run_check(spec)?,
+    };
     if !check.success {
         return Err(homeboy::Error::validation_invalid_argument(
             "--rig",
             format!(
                 "rig '{}' check failed; fix the rig before running trace",
-                rig_id
+                spec.id
             ),
             None,
             None,
         ));
     }
-    let package_root =
-        rig::read_source_metadata(&spec.id).map(|metadata| PathBuf::from(metadata.package_path));
-    Ok(Some(TraceRigContext { spec, package_root }))
+    Ok(())
 }
 
 fn resolve_component_id(
@@ -373,6 +400,74 @@ mod tests {
                         result.scenarios[0].source.as_deref(),
                         Some(expected_source.as_str())
                     );
+                }
+                _ => panic!("expected list output"),
+            }
+        });
+    }
+
+    #[test]
+    fn rig_trace_list_uses_scoped_workload_preflight() {
+        with_isolated_home(|home| {
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+            fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+            fs::write(
+                rig_dir.join("studio-rig.json"),
+                format!(
+                    r#"{{
+                        "components": {{
+                            "studio": {{ "path": "{}" }}
+                        }},
+                        "pipeline": {{
+                            "check": [
+                                {{
+                                    "kind": "check",
+                                    "label": "desktop app packaged",
+                                    "groups": ["desktop-app"],
+                                    "command": "true"
+                                }},
+                                {{
+                                    "kind": "check",
+                                    "label": "unrelated cli symlink",
+                                    "groups": ["cli-dev-copy"],
+                                    "command": "false"
+                                }}
+                            ]
+                        }},
+                        "trace_workloads": {{ "nodejs": [
+                            {{
+                                "path": "${{components.studio.path}}/studio-app-create-site.trace.mjs",
+                                "check_groups": ["desktop-app"]
+                            }}
+                        ] }}
+                    }}"#,
+                    component_dir.path().display()
+                ),
+            )
+            .expect("write rig");
+
+            let (output, exit_code) = run_list(TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: None,
+                    path: None,
+                },
+                scenario: "list".to_string(),
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                overlays: Vec::new(),
+                keep_overlay: false,
+            })
+            .expect("scoped rig trace list should bypass unrelated failed check");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                TraceCommandOutput::List(result) => {
+                    assert_eq!(result.count, 1);
+                    assert_eq!(result.scenarios[0].id, "studio-app-create-site");
                 }
                 _ => panic!("expected list output"),
             }

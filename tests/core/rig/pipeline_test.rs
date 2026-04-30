@@ -4,7 +4,8 @@
 //! and are covered by the manual smoke documented in #1468. Scope here is
 //! the public outcome types — shape, serialization, `is_success` contract.
 
-use crate::rig::pipeline::{PipelineOutcome, PipelineStepOutcome};
+use crate::rig::pipeline::{run_pipeline_check_groups, PipelineOutcome, PipelineStepOutcome};
+use crate::rig::spec::RigSpec;
 
 fn step(status: &str) -> PipelineStepOutcome {
     PipelineStepOutcome {
@@ -54,6 +55,39 @@ fn test_pipeline_step_outcome_omits_error_when_absent() {
     let outcome = step("pass");
     let json = serde_json::to_string(&outcome).expect("serialize");
     assert!(!json.contains("\"error\""));
+}
+
+#[test]
+fn test_run_pipeline_check_groups() {
+    let rig: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "scoped-pipeline",
+            "pipeline": {
+                "check": [
+                    {
+                        "kind": "check",
+                        "label": "selected",
+                        "groups": ["desktop-app"],
+                        "command": "true"
+                    },
+                    {
+                        "kind": "check",
+                        "label": "unselected",
+                        "groups": ["cli"],
+                        "command": "false"
+                    }
+                ]
+            }
+        }"#,
+    )
+    .expect("parse rig");
+
+    let outcome = run_pipeline_check_groups(&rig, &["desktop-app".to_string()], false)
+        .expect("scoped pipeline runs");
+
+    assert!(outcome.is_success());
+    assert_eq!(outcome.steps.len(), 1);
+    assert_eq!(outcome.steps[0].label, "selected");
 }
 
 // ---- Dependency-aware ordering ---------------------------------------------
