@@ -839,21 +839,13 @@ pub struct UpdateEntry {
     pub new_version: String,
 }
 
-/// Update all installed extensions, skipping linked ones.
-///
-/// Linked extensions are managed externally (symlinks to dev directories)
-/// and should not be updated via git pull.
+/// Update all installed extensions through the same path used by single-extension updates.
 pub fn update_all(force: bool) -> UpdateAllResult {
     let extension_ids = available_extension_ids();
     let mut updated = Vec::new();
     let mut skipped = Vec::new();
 
     for id in &extension_ids {
-        if is_extension_linked(id) {
-            skipped.push(id.clone());
-            continue;
-        }
-
         let old_version = load_extension(id).ok().map(|m| m.version.clone());
 
         match update(id, force) {
