@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn write_to_run_dir_aggregates_recorded_extension_children() {
+    fn test_record_extension_child_resource() {
         let run_dir = RunDir::create().expect("run dir");
         let child = ExtensionChildResourceSummary {
             root_pid: 123,
