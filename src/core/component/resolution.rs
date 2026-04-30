@@ -114,6 +114,35 @@ fn prefer_cwd_for_component(component_id: &str) -> Option<Component> {
     None
 }
 
+fn synthetic_component_for_path(path: &str) -> Component {
+    let path_ref = Path::new(path);
+    let id_source = path_ref
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(path));
+
+    let id = id_source
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    Component {
+        id,
+        local_path: path.to_string(),
+        ..Component::default()
+    }
+}
+
+fn resolve_path_override(path: &str) -> Component {
+    if let Some(mut discovered) = discover_from_portable(Path::new(path)) {
+        discovered.local_path = path.to_string();
+        discovered.resolve_remote_path();
+        return discovered;
+    }
+
+    synthetic_component_for_path(path)
+}
+
 /// Find the git root directory for a given path.
 pub(crate) fn detect_git_root(dir: &Path) -> Option<PathBuf> {
     let output = std::process::Command::new("git")
@@ -237,11 +266,11 @@ pub fn resolve_effective(
             load(id)
         }
     } else {
-        let mut component = resolve(None)?;
         if let Some(path) = path_override {
-            component.local_path = path.to_string();
+            return Ok(resolve_path_override(path));
         }
-        Ok(component)
+
+        resolve(None)
     }
 }
 
@@ -367,5 +396,41 @@ mod tests {
 
         assert_eq!(component.id, "registered-id");
         assert_eq!(component.local_path, repo.to_string_lossy());
+    }
+
+    #[test]
+    fn resolve_effective_accepts_path_override_without_component_id() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = dir.path().join("external-repo");
+        std::fs::create_dir_all(&repo).expect("create repo dir");
+
+        let component = resolve_effective(None, repo.to_str(), None)
+            .expect("path-only override should resolve");
+
+        assert_eq!(component.id, "external-repo");
+        assert_eq!(component.local_path, repo.to_string_lossy());
+    }
+
+    #[test]
+    fn resolve_effective_path_override_reads_portable_config_without_component_id() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = dir.path().join("portable-repo");
+        std::fs::create_dir_all(&repo).expect("create repo dir");
+        std::fs::write(
+            repo.join("homeboy.json"),
+            r#"{"id":"portable-id","extensions":{"nodejs":{}}}"#,
+        )
+        .expect("write portable config");
+
+        let component = resolve_effective(None, repo.to_str(), None)
+            .expect("path-only portable config should resolve");
+
+        assert_eq!(component.id, "portable-id");
+        assert_eq!(component.local_path, repo.to_string_lossy());
+        assert!(component
+            .extensions
+            .as_ref()
+            .expect("extensions")
+            .contains_key("nodejs"));
     }
 }
