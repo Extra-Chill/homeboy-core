@@ -35,8 +35,8 @@ pub enum FleetComponentDrift {
     BehindRemote,
     /// Local checkout is behind its upstream branch
     BehindUpstream,
-    /// Has unreleased code commits (needs version bump)
-    NeedsBump,
+    /// Has releasable code commits since the current version baseline
+    NeedsRelease,
     /// Only docs changes since last tag
     DocsOnly,
     /// Cannot determine
@@ -74,7 +74,7 @@ pub struct FleetComponentSummary {
     pub total: u32,
     pub current: u32,
     pub needs_update: u32,
-    pub needs_bump: u32,
+    pub needs_release: u32,
     pub docs_only: u32,
     pub unknown: u32,
 }
@@ -294,7 +294,7 @@ fn collect_project_component_statuses(
                     FleetComponentDrift::NeedsUpdate
                     | FleetComponentDrift::BehindRemote
                     | FleetComponentDrift::BehindUpstream => component_summary.needs_update += 1,
-                    FleetComponentDrift::NeedsBump => component_summary.needs_bump += 1,
+                    FleetComponentDrift::NeedsRelease => component_summary.needs_release += 1,
                     FleetComponentDrift::DocsOnly => component_summary.docs_only += 1,
                     FleetComponentDrift::Unknown => component_summary.unknown += 1,
                 }
@@ -352,16 +352,16 @@ fn resolve_component_drift(
 
     if let Some((release_status, unreleased)) = release_info {
         match release_status {
-            ReleaseStateStatus::NeedsBump => {
-                return (FleetComponentDrift::NeedsBump, unreleased);
+            ReleaseStateStatus::NeedsRelease => {
+                return (FleetComponentDrift::NeedsRelease, unreleased);
             }
             ReleaseStateStatus::DocsOnly => {
                 return (FleetComponentDrift::DocsOnly, unreleased);
             }
             ReleaseStateStatus::Uncommitted => {
                 // Uncommitted changes — still check deploy status
-                // but flag as needs_bump since there's local work
-                return (FleetComponentDrift::NeedsBump, unreleased);
+                // but flag as needs_release since there's local work
+                return (FleetComponentDrift::NeedsRelease, unreleased);
             }
             _ => {}
         }

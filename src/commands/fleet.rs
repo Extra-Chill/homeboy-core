@@ -388,10 +388,10 @@ fn log_fleet_dashboard(result: &FleetStatusResult) {
         );
     }
     eprintln!(
-        "│ Components: {} current, {} outdated, {} need bump, {} unknown",
+        "│ Components: {} current, {} outdated, {} need release, {} unknown",
         summary.components.current,
         summary.components.needs_update,
-        summary.components.needs_bump,
+        summary.components.needs_release,
         summary.components.unknown,
     );
     eprintln!("└────────────────────────────────────────────────────┘");
@@ -433,7 +433,7 @@ fn log_fleet_dashboard(result: &FleetStatusResult) {
                 FleetComponentDrift::NeedsUpdate => "⚠️  outdated",
                 FleetComponentDrift::BehindRemote => "🔙 behind",
                 FleetComponentDrift::BehindUpstream => "⬇️  behind upstream",
-                FleetComponentDrift::NeedsBump => "🔶 needs bump",
+                FleetComponentDrift::NeedsRelease => "🔶 needs release",
                 FleetComponentDrift::DocsOnly => "📝 docs only",
                 FleetComponentDrift::Unknown => "❓ unknown",
             };

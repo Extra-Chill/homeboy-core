@@ -22,9 +22,9 @@ pub struct StatusArgs {
     #[arg(long)]
     pub uncommitted: bool,
 
-    /// Show only components that need a version bump
+    /// Show only components that need a release
     #[arg(long)]
-    pub needs_bump: bool,
+    pub needs_release: bool,
 
     /// Show only components ready to deploy
     #[arg(long)]
@@ -70,7 +70,7 @@ pub struct StatusOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub uncommitted: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub needs_bump: Vec<String>,
+    pub needs_release: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ready_to_deploy: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -108,8 +108,8 @@ pub enum ProjectComponentDashboardStatus {
     Current,
     /// Local version differs from remote (needs deploy)
     Outdated,
-    /// Unreleased commits since last tag (needs version bump)
-    NeedsBump,
+    /// Releasable code commits since the current version baseline
+    NeedsRelease,
     /// Only docs changes since last tag
     DocsOnly,
     /// Uncommitted changes in working directory
@@ -135,7 +135,7 @@ pub struct ProjectDashboardOutput {
 pub struct ProjectDashboardSummary {
     pub current: usize,
     pub outdated: usize,
-    pub needs_bump: usize,
+    pub needs_release: usize,
     pub docs_only: usize,
     pub uncommitted: usize,
     pub behind_upstream: usize,
@@ -198,7 +198,7 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
     let total = components.len();
 
     let mut uncommitted = Vec::new();
-    let mut needs_bump = Vec::new();
+    let mut needs_release = Vec::new();
     let mut ready_to_deploy = Vec::new();
     let mut docs_only = Vec::new();
     let mut behind_upstream = Vec::new();
@@ -222,7 +222,7 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
 
         match status {
             ReleaseStateStatus::Uncommitted => uncommitted.push(comp.id.clone()),
-            ReleaseStateStatus::NeedsBump => needs_bump.push(comp.id.clone()),
+            ReleaseStateStatus::NeedsRelease => needs_release.push(comp.id.clone()),
             ReleaseStateStatus::DocsOnly => docs_only.push(comp.id.clone()),
             ReleaseStateStatus::Clean => ready_to_deploy.push(comp.id.clone()),
             ReleaseStateStatus::Unknown => clean += 1,
@@ -230,14 +230,14 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
     }
 
     // Apply filters if any are set
-    let has_filter = args.uncommitted || args.needs_bump || args.ready || args.docs_only;
+    let has_filter = args.uncommitted || args.needs_release || args.ready || args.docs_only;
 
     if has_filter {
         if !args.uncommitted {
             uncommitted.clear();
         }
-        if !args.needs_bump {
-            needs_bump.clear();
+        if !args.needs_release {
+            needs_release.clear();
         }
         if !args.ready {
             ready_to_deploy.clear();
@@ -252,7 +252,7 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
             command: "status",
             total,
             uncommitted,
-            needs_bump,
+            needs_release,
             ready_to_deploy,
             docs_only,
             behind_upstream,
@@ -302,7 +302,7 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
     let mut summary = ProjectDashboardSummary {
         current: 0,
         outdated: 0,
-        needs_bump: 0,
+        needs_release: 0,
         docs_only: 0,
         uncommitted: 0,
         behind_upstream: 0,
@@ -326,10 +326,10 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
             .unwrap_or(0);
 
         // Determine dashboard status.
-        // Priority: uncommitted > needs_bump > docs_only > behind_upstream > outdated > current > unknown
+        // Priority: uncommitted > needs_release > docs_only > behind_upstream > outdated > current > unknown
         let dashboard_status = match release_status {
             ReleaseStateStatus::Uncommitted => ProjectComponentDashboardStatus::Uncommitted,
-            ReleaseStateStatus::NeedsBump => ProjectComponentDashboardStatus::NeedsBump,
+            ReleaseStateStatus::NeedsRelease => ProjectComponentDashboardStatus::NeedsRelease,
             ReleaseStateStatus::DocsOnly => ProjectComponentDashboardStatus::DocsOnly,
             ReleaseStateStatus::Clean => {
                 // Check upstream drift first
@@ -363,7 +363,7 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
         match &dashboard_status {
             ProjectComponentDashboardStatus::Current => summary.current += 1,
             ProjectComponentDashboardStatus::Outdated => summary.outdated += 1,
-            ProjectComponentDashboardStatus::NeedsBump => summary.needs_bump += 1,
+            ProjectComponentDashboardStatus::NeedsRelease => summary.needs_release += 1,
             ProjectComponentDashboardStatus::DocsOnly => summary.docs_only += 1,
             ProjectComponentDashboardStatus::Uncommitted => summary.uncommitted += 1,
             ProjectComponentDashboardStatus::BehindUpstream => summary.behind_upstream += 1,
@@ -386,8 +386,8 @@ fn run_project_dashboard(project_id: &str, args: &StatusArgs) -> CmdResult<Statu
     if args.outdated {
         rows.retain(|r| matches!(r.status, ProjectComponentDashboardStatus::Outdated));
     }
-    if args.needs_bump {
-        rows.retain(|r| matches!(r.status, ProjectComponentDashboardStatus::NeedsBump));
+    if args.needs_release {
+        rows.retain(|r| matches!(r.status, ProjectComponentDashboardStatus::NeedsRelease));
     }
     if args.uncommitted {
         rows.retain(|r| matches!(r.status, ProjectComponentDashboardStatus::Uncommitted));
@@ -570,7 +570,7 @@ fn log_dashboard_table(rows: &[ProjectStatusRow]) {
         let status_icon = match &row.status {
             ProjectComponentDashboardStatus::Current => "✅ current",
             ProjectComponentDashboardStatus::Outdated => "⚠️  outdated",
-            ProjectComponentDashboardStatus::NeedsBump => "🔶 needs bump",
+            ProjectComponentDashboardStatus::NeedsRelease => "🔶 needs release",
             ProjectComponentDashboardStatus::DocsOnly => "📝 docs only",
             ProjectComponentDashboardStatus::Uncommitted => "🔴 uncommitted",
             ProjectComponentDashboardStatus::BehindUpstream => "⬇️  behind upstream",

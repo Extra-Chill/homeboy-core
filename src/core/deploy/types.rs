@@ -117,7 +117,7 @@ pub struct ReleaseState {
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseStateStatus {
     Uncommitted,
-    NeedsBump,
+    NeedsRelease,
     DocsOnly,
     Clean,
     Unknown,
@@ -128,7 +128,7 @@ impl ReleaseState {
         if self.has_uncommitted_changes {
             ReleaseStateStatus::Uncommitted
         } else if self.code_commits > 0 {
-            ReleaseStateStatus::NeedsBump
+            ReleaseStateStatus::NeedsRelease
         } else if self.docs_only_commits > 0 {
             ReleaseStateStatus::DocsOnly
         } else {
@@ -141,7 +141,7 @@ impl ReleaseStateStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             ReleaseStateStatus::Uncommitted => "uncommitted",
-            ReleaseStateStatus::NeedsBump => "needs_bump",
+            ReleaseStateStatus::NeedsRelease => "needs_release",
             ReleaseStateStatus::DocsOnly => "docs_only",
             ReleaseStateStatus::Clean => "clean",
             ReleaseStateStatus::Unknown => "unknown",
@@ -152,7 +152,7 @@ impl ReleaseStateStatus {
 #[derive(Debug, Clone, Default)]
 pub struct ReleaseStateBuckets {
     pub ready_to_deploy: Vec<String>,
-    pub needs_bump: Vec<String>,
+    pub needs_release: Vec<String>,
     pub docs_only: Vec<String>,
     pub has_uncommitted: Vec<String>,
     pub unknown: Vec<String>,
@@ -259,6 +259,30 @@ impl ComponentDeployResult {
     pub(super) fn with_deployed_ref(mut self, git_ref: String) -> Self {
         self.deployed_ref = Some(git_ref);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReleaseState, ReleaseStateStatus};
+
+    #[test]
+    fn release_state_status_uses_needs_release_public_name() {
+        let state = ReleaseState {
+            commits_since_version: 1,
+            code_commits: 1,
+            docs_only_commits: 0,
+            has_uncommitted_changes: false,
+            baseline_ref: Some("v1.0.0".to_string()),
+            baseline_warning: None,
+        };
+
+        assert_eq!(state.status(), ReleaseStateStatus::NeedsRelease);
+        assert_eq!(state.status().as_str(), "needs_release");
+        assert_eq!(
+            serde_json::to_value(state.status()).expect("serialize status"),
+            serde_json::json!("needs_release")
+        );
     }
 }
 

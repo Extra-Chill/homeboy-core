@@ -14,7 +14,7 @@ pub struct ReleaseArgs {
     /// Component ID(s) to release
     pub components: Vec<String>,
 
-    /// Release all components in a project that need a version bump
+    /// Release all components in a project that need a release
     #[arg(long, short = 'p')]
     pub project: Option<String>,
 
@@ -199,7 +199,7 @@ pub fn run(
 ///
 /// Priority:
 /// 1. `--project <id>` + `--outdated` — components with unreleased code commits
-/// 2. `--project <id>` — all components in the project that need a bump
+/// 2. `--project <id>` — all components in the project that need a release
 /// 3. Positional component IDs
 fn resolve_component_ids(
     args: &ReleaseArgs,
@@ -230,12 +230,12 @@ fn resolve_component_ids(
 
                 if args.outdated {
                     // --outdated: only components with unreleased code commits
-                    matches!(status, ReleaseStateStatus::NeedsBump)
+                    matches!(status, ReleaseStateStatus::NeedsRelease)
                 } else {
                     // Without --outdated: anything that's not clean
                     matches!(
                         status,
-                        ReleaseStateStatus::NeedsBump | ReleaseStateStatus::DocsOnly
+                        ReleaseStateStatus::NeedsRelease | ReleaseStateStatus::DocsOnly
                     )
                 }
             })
@@ -246,7 +246,7 @@ fn resolve_component_ids(
             let filter_desc = if args.outdated {
                 "with unreleased code commits"
             } else {
-                "that need a version bump"
+                "that need a release"
             };
             return Err(homeboy::Error::validation_invalid_argument(
                 "project",

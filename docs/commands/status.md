@@ -12,7 +12,7 @@ homeboy status [PROJECT]
 
 - `--full` — show the full workspace/context report
 - `--uncommitted` — show only components with uncommitted changes
-- `--needs-bump` — show only components that need a version bump
+- `--needs-release` — show only components that need a release
 - `--ready` — show only components ready to deploy
 - `--docs-only` — show only components with docs-only changes
 - `--all` — show all components regardless of current directory context
