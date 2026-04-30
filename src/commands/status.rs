@@ -14,6 +14,10 @@ pub struct StatusArgs {
     /// Project ID — show version dashboard for a project's components
     pub project: Option<String>,
 
+    /// Inspect this checkout path instead of the registered component path
+    #[arg(long, value_name = "PATH")]
+    pub path: Option<String>,
+
     /// Show the full workspace/context report (the old init behavior)
     #[arg(long)]
     pub full: bool,
@@ -162,6 +166,10 @@ impl serde::Serialize for StatusResult {
 }
 
 pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusResult> {
+    if args.path.is_some() {
+        return run_path_status(&args);
+    }
+
     // Project dashboard mode: `homeboy status <project-id>`
     if let Some(ref project_id) = args.project {
         return run_project_dashboard(project_id, &args);
@@ -195,6 +203,13 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
             .collect()
     };
 
+    summarize_components(components, &args)
+}
+
+fn summarize_components(
+    components: Vec<component::Component>,
+    args: &StatusArgs,
+) -> CmdResult<StatusResult> {
     let total = components.len();
 
     let mut uncommitted = Vec::new();
@@ -261,6 +276,20 @@ pub fn run(args: StatusArgs, _global: &super::GlobalArgs) -> CmdResult<StatusRes
         }),
         0,
     ))
+}
+
+/// Path override mode: inspect one checkout without requiring registry membership.
+fn run_path_status(args: &StatusArgs) -> CmdResult<StatusResult> {
+    let path = args.path.as_deref();
+    let component = component::resolve_effective(args.project.as_deref(), path, None)?;
+
+    if args.full {
+        let mut report = context::build_report_for_component(args.all, "status", component, path)?;
+        report.command = "status".to_string();
+        return Ok((StatusResult::Full(report), 0));
+    }
+
+    summarize_components(vec![component], args)
 }
 
 /// Project dashboard: show version drift across all components in a project.
@@ -604,5 +633,119 @@ fn format_upstream(ahead: &Option<u32>, behind: &Option<u32>) -> String {
         (Some(a), None) if *a > 0 => format!("↑{}", a),
         (Some(0), Some(0)) | (None, Some(0)) | (Some(0), None) => "=".to_string(),
         _ => "-".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli_surface::{Cli, Commands};
+    use crate::commands::GlobalArgs;
+    use clap::Parser;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn status_args(project: Option<String>, path: String, full: bool) -> StatusArgs {
+        StatusArgs {
+            project,
+            path: Some(path),
+            full,
+            uncommitted: false,
+            needs_release: false,
+            ready: false,
+            docs_only: false,
+            all: false,
+            outdated: false,
+        }
+    }
+
+    fn make_git_repo(name: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().expect("tempdir");
+        let repo = dir.path().join(name);
+        fs::create_dir_all(&repo).expect("repo dir");
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .expect("git init");
+        (dir, repo)
+    }
+
+    #[test]
+    fn parser_accepts_status_path_only() {
+        let cli = Cli::try_parse_from(["homeboy", "status", "--path", "/tmp/example", "--full"])
+            .expect("status --path parses");
+
+        match cli.command {
+            Commands::Status(args) => {
+                assert_eq!(args.project, None);
+                assert_eq!(args.path.as_deref(), Some("/tmp/example"));
+                assert!(args.full);
+            }
+            _ => panic!("expected status command"),
+        }
+    }
+
+    #[test]
+    fn parser_accepts_status_id_with_path() {
+        let cli = Cli::try_parse_from([
+            "homeboy",
+            "status",
+            "wordpress-playground",
+            "--path",
+            "/tmp/wp-playground",
+            "--full",
+        ])
+        .expect("status <id> --path parses");
+
+        match cli.command {
+            Commands::Status(args) => {
+                assert_eq!(args.project.as_deref(), Some("wordpress-playground"));
+                assert_eq!(args.path.as_deref(), Some("/tmp/wp-playground"));
+                assert!(args.full);
+            }
+            _ => panic!("expected status command"),
+        }
+    }
+
+    #[test]
+    fn status_path_only_inspects_one_synthetic_component() {
+        let (_dir, repo) = make_git_repo("external-repo");
+        let args = status_args(None, repo.to_string_lossy().to_string(), false);
+
+        let (result, code) = run(args, &GlobalArgs {}).expect("status --path succeeds");
+
+        assert_eq!(code, 0);
+        match result {
+            StatusResult::Summary(output) => {
+                assert_eq!(output.total, 1);
+                assert!(output.upstream_drift.is_empty());
+            }
+            _ => panic!("expected summary output"),
+        }
+    }
+
+    #[test]
+    fn status_id_with_path_full_uses_explicit_component_id() {
+        let (_dir, repo) = make_git_repo("wp-playground-checkout");
+        let args = status_args(
+            Some("wordpress-playground".to_string()),
+            repo.to_string_lossy().to_string(),
+            true,
+        );
+
+        let (result, code) = run(args, &GlobalArgs {}).expect("status <id> --path --full succeeds");
+
+        assert_eq!(code, 0);
+        match result {
+            StatusResult::Full(report) => {
+                assert_eq!(report.context.cwd, repo.to_string_lossy());
+                assert_eq!(report.components.len(), 1);
+                assert_eq!(report.components[0].id, "wordpress-playground");
+                assert_eq!(report.components[0].path, ".");
+            }
+            _ => panic!("expected full output"),
+        }
     }
 }

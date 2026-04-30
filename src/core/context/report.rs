@@ -180,7 +180,25 @@ pub struct ComponentWithState {
 }
 
 pub fn build_report(show_all_flag: bool, command: &str) -> Result<ContextReport> {
-    let (context_output, _) = super::run(None)?;
+    build_report_at(show_all_flag, command, None, None)
+}
+
+pub fn build_report_for_component(
+    show_all_flag: bool,
+    command: &str,
+    component: Component,
+    path: Option<&str>,
+) -> Result<ContextReport> {
+    build_report_at(show_all_flag, command, path, Some(component))
+}
+
+fn build_report_at(
+    show_all_flag: bool,
+    command: &str,
+    path: Option<&str>,
+    focused_component: Option<Component>,
+) -> Result<ContextReport> {
+    let (context_output, _) = super::run(path)?;
 
     let relevant_ids: HashSet<String> = context_output
         .matched_components
@@ -195,10 +213,23 @@ pub fn build_report(show_all_flag: bool, command: &str) -> Result<ContextReport>
     let all_extensions = load_all_extensions().unwrap_or_default();
 
     let show_all = show_all_flag || relevant_ids.is_empty();
-    let filtered_components =
-        collect_focused_components(show_all, &relevant_ids, all_components, &all_projects);
+    let filtered_components = if let Some(component) = focused_component {
+        if show_all_flag {
+            let mut components = all_components;
+            if !components.iter().any(|c| c.id == component.id) {
+                components.push(component);
+            }
+            components
+        } else {
+            vec![component]
+        }
+    } else {
+        collect_focused_components(show_all, &relevant_ids, all_components, &all_projects)
+    };
 
-    let cwd = std::env::current_dir().ok();
+    let cwd = path
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok());
     let components_with_state: Vec<ComponentWithState> = filtered_components
         .into_iter()
         .map(|component| {
