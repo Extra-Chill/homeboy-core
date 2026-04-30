@@ -6,14 +6,16 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use super::expand::expand_vars;
+use super::expand::{expand_resources, expand_vars};
 use super::lease::acquire_active_run_lease;
 use super::pipeline::{cleanup_shared_paths, run_pipeline, PipelineOutcome};
 use super::service::{self, ServiceStatus};
 use super::spec::{RigSpec, ServiceKind};
-use super::state::{now_rfc3339, RigState};
+use super::state::{
+    now_rfc3339, ComponentSnapshot, MaterializedRigState, RigState, RigStateSnapshot,
+};
 use crate::engine::command::run_in_optional;
 use crate::error::Result;
 
@@ -51,6 +53,7 @@ pub struct RigStatusReport {
     pub last_up: Option<String>,
     pub last_check: Option<String>,
     pub last_check_result: Option<String>,
+    pub materialized: Option<MaterializedRigState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,7 +77,15 @@ pub fn run_up(rig: &RigSpec) -> Result<UpReport> {
 
     if outcome.is_success() {
         let mut state = RigState::load(&rig.id)?;
-        state.last_up = Some(now_rfc3339());
+        let materialized_at = now_rfc3339();
+        let snapshot = snapshot_state(rig);
+        state.last_up = Some(materialized_at.clone());
+        state.materialized = Some(MaterializedRigState {
+            rig_id: rig.id.clone(),
+            materialized_at,
+            resources: expand_resources(rig),
+            components: snapshot.components,
+        });
         state.save(&rig.id)?;
     }
 
@@ -123,6 +134,10 @@ pub fn run_down(rig: &RigSpec) -> Result<DownReport> {
     stopped.sort();
 
     let success = pipeline.as_ref().is_none_or(|p| p.is_success());
+    let mut state = RigState::load(&rig.id)?;
+    state.materialized = None;
+    state.save(&rig.id)?;
+
     Ok(DownReport {
         rig_id: rig.id.clone(),
         stopped,
@@ -166,6 +181,7 @@ pub fn run_status(rig: &RigSpec) -> Result<RigStatusReport> {
         last_up: state.last_up,
         last_check: state.last_check,
         last_check_result: state.last_check_result,
+        materialized: state.materialized,
     })
 }
 
@@ -175,38 +191,6 @@ fn service_kind_label(kind: ServiceKind) -> &'static str {
         ServiceKind::Command => "command",
         ServiceKind::External => "external",
     }
-}
-
-/// Captured component state for one entry in a rig's components map.
-///
-/// Captured at the start of every `homeboy rig bench` run so bench results
-/// can be tagged with the exact code state they were measured against.
-/// Without this, bench-to-bench comparisons can't distinguish "the code got
-/// slower" from "I'm comparing against a different commit." Surfaced in
-/// the bench command output alongside the bench result; persisting into
-/// the baseline JSON is a follow-up (see Extra-Chill/homeboy#1466 docs).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ComponentSnapshot {
-    /// Resolved filesystem path (after `~` / `${env.X}` / `${components.X}`
-    /// expansion). Useful for humans reviewing a snapshot offline.
-    pub path: String,
-    /// `git rev-parse HEAD` for the path's repo. `None` if the path is not
-    /// a git repo or the command fails.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sha: Option<String>,
-    /// `git rev-parse --abbrev-ref HEAD` — current branch name, or `HEAD`
-    /// for detached. `None` if the path is not a git repo.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-}
-
-/// Snapshot of every component in a rig at a moment in time. Sorted by
-/// component ID for stable output (BTreeMap).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RigStateSnapshot {
-    pub rig_id: String,
-    pub captured_at: String,
-    pub components: BTreeMap<String, ComponentSnapshot>,
 }
 
 /// Capture the current state of every component in a rig.

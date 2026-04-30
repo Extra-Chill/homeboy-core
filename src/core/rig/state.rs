@@ -4,11 +4,13 @@
 //! next invocation. Never source-of-truth for the rig spec.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 use crate::error::{Error, Result};
 use crate::paths;
+
+use super::spec::RigResourcesSpec;
 
 /// Snapshot of a rig's running state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -33,6 +35,50 @@ pub struct RigState {
     /// cleanup. Keyed by expanded link path.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub shared_paths: HashMap<String, SharedPathState>,
+
+    /// Long-lived ownership materialized by the last successful `rig up`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub materialized: Option<MaterializedRigState>,
+}
+
+/// Persistent record of what a successful `rig up` materialized.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MaterializedRigState {
+    /// Rig identifier that wrote this ownership record.
+    pub rig_id: String,
+
+    /// Timestamp when ownership was materialized, RFC3339.
+    pub materialized_at: String,
+
+    /// Expanded rig resources captured at materialization time.
+    pub resources: RigResourcesSpec,
+
+    /// Component state captured at materialization time.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub components: BTreeMap<String, ComponentSnapshot>,
+}
+
+/// Captured component state for one entry in a rig's components map.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ComponentSnapshot {
+    /// Resolved filesystem path after variable and tilde expansion.
+    pub path: String,
+
+    /// `git rev-parse HEAD` for the path's repo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
+
+    /// `git rev-parse --abbrev-ref HEAD`, or `HEAD` when detached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+/// Snapshot of every component in a rig at a moment in time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RigStateSnapshot {
+    pub rig_id: String,
+    pub captured_at: String,
+    pub components: BTreeMap<String, ComponentSnapshot>,
 }
 
 /// Per-service state: PID, start time, health.
