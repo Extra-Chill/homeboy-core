@@ -58,8 +58,6 @@ pub struct TraceRunSummaryOutput {
     pub overlays: Vec<TraceOverlay>,
     pub span_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub baseline_comparison: Option<TraceBaselineComparison>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
 }
 
@@ -104,7 +102,6 @@ pub fn from_main_workflow(
                 .as_ref()
                 .map(|r| r.span_results.len())
                 .unwrap_or(0),
-            baseline_comparison: result.baseline_comparison,
             hints: result.hints,
         };
         return (TraceCommandOutput::Summary(output), exit_code);
@@ -299,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_markdown_report_with_spans() {
+    fn test_render_markdown() {
         let results = TraceResults {
             component_id: "studio".to_string(),
             scenario_id: "create-site".to_string(),

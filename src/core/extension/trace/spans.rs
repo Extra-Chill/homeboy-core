@@ -6,7 +6,7 @@ use super::parsing::{
     TraceEvent, TraceResults, TraceSpanDefinition, TraceSpanResult, TraceSpanStatus,
 };
 
-pub fn parse_span_definition(raw: &str) -> Result<TraceSpanDefinition, String> {
+pub(crate) fn parse_span_definition(raw: &str) -> Result<TraceSpanDefinition, String> {
     let parts: Vec<&str> = raw.split(':').collect();
     if parts.len() != 3 {
         return Err("expected id:from:to".to_string());
@@ -22,7 +22,10 @@ pub fn parse_span_definition(raw: &str) -> Result<TraceSpanDefinition, String> {
     Ok(definition)
 }
 
-pub fn apply_span_definitions(results: &mut TraceResults, cli_definitions: &[TraceSpanDefinition]) {
+pub(crate) fn apply_span_definitions(
+    results: &mut TraceResults,
+    cli_definitions: &[TraceSpanDefinition],
+) {
     let definitions = merge_definitions(&results.span_definitions, cli_definitions);
     if definitions.is_empty() {
         return;
@@ -31,7 +34,7 @@ pub fn apply_span_definitions(results: &mut TraceResults, cli_definitions: &[Tra
     results.span_results = summarize_spans(&results.timeline, &definitions);
 }
 
-pub fn summarize_spans(
+pub(crate) fn summarize_spans(
     timeline: &[TraceEvent],
     definitions: &[TraceSpanDefinition],
 ) -> Vec<TraceSpanResult> {
@@ -142,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_span_definition_triplet() {
+    fn test_parse_span_definition() {
         let definition = parse_span_definition("submit:ui.clicked:cli.started").unwrap();
 
         assert_eq!(definition.id, "submit");
@@ -151,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_spans_from_source_event_keys() {
+    fn test_summarize_spans() {
         let results = summarize_spans(
             &[event(10, "ui", "clicked"), event(75, "cli", "started")],
             &[TraceSpanDefinition {
@@ -179,5 +182,33 @@ mod tests {
         assert_eq!(results[0].status, TraceSpanStatus::Skipped);
         assert_eq!(results[0].duration_ms, None);
         assert_eq!(results[0].missing, vec!["cli.started"]);
+    }
+
+    #[test]
+    fn test_apply_span_definitions() {
+        let mut results = TraceResults {
+            component_id: "studio".to_string(),
+            scenario_id: "create-site".to_string(),
+            status: crate::extension::trace::parsing::TraceStatus::Pass,
+            summary: None,
+            failure: None,
+            rig: None,
+            timeline: vec![event(10, "ui", "clicked"), event(30, "cli", "started")],
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
+            assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        apply_span_definitions(
+            &mut results,
+            &[TraceSpanDefinition {
+                id: "submit_to_cli".to_string(),
+                from: "ui.clicked".to_string(),
+                to: "cli.started".to_string(),
+            }],
+        );
+
+        assert_eq!(results.span_results[0].duration_ms, Some(20));
     }
 }

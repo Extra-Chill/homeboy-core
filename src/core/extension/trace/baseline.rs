@@ -14,10 +14,7 @@ const BASELINE_KEY: &str = "trace";
 pub const DEFAULT_REGRESSION_THRESHOLD_PERCENT: f64 = 5.0;
 
 fn baseline_key_for(rig_id: Option<&str>) -> String {
-    match rig_id {
-        None => BASELINE_KEY.to_string(),
-        Some(id) => format!("{}.rig.{}", BASELINE_KEY, id),
-    }
+    rig_id.map_or_else(|| BASELINE_KEY.to_string(), |id| format!("trace.rig.{id}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -28,7 +25,7 @@ pub struct TraceSpanSnapshot {
 
 impl generic::Fingerprintable for TraceSpanSnapshot {
     fn fingerprint(&self) -> String {
-        self.id.clone()
+        format!("trace-span:{}", self.id)
     }
 
     fn description(&self) -> String {
@@ -36,7 +33,7 @@ impl generic::Fingerprintable for TraceSpanSnapshot {
     }
 
     fn context_label(&self) -> String {
-        self.id.clone()
+        format!("trace span {}", self.id)
     }
 }
 
@@ -89,9 +86,7 @@ pub fn save_baseline(
 pub fn load_baseline(source_path: &Path, rig_id: Option<&str>) -> Option<TraceBaseline> {
     let key = baseline_key_for(rig_id);
     let config = BaselineConfig::new(source_path, key);
-    generic::load::<TraceBaselineMetadata>(&config)
-        .ok()
-        .flatten()
+    generic::load::<TraceBaselineMetadata>(&config).unwrap_or_default()
 }
 
 pub fn compare(
@@ -217,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn compares_span_duration_regressions() {
+    fn test_compare() {
         let baseline = TraceBaseline {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             context_id: "studio".to_string(),
@@ -236,5 +231,22 @@ mod tests {
         assert!(comparison.regression);
         assert_eq!(comparison.spans[0].delta_ms, 30);
         assert_eq!(comparison.spans[0].delta_pct, Some(30.0));
+    }
+
+    #[test]
+    fn test_save_baseline() {
+        let temp = tempfile::tempdir().unwrap();
+        save_baseline(temp.path(), "studio", &results(100), None).unwrap();
+
+        let loaded = load_baseline(temp.path(), None).expect("baseline loads");
+        assert_eq!(loaded.metadata.spans[0].id, "submit_to_cli");
+        assert_eq!(loaded.known_fingerprints[0], "trace-span:submit_to_cli");
+    }
+
+    #[test]
+    fn test_load_baseline() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert!(load_baseline(temp.path(), Some("studio-rig")).is_none());
     }
 }
