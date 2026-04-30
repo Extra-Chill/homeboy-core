@@ -88,21 +88,25 @@ fn test_rig_spec_deserializes_bench_workloads_by_extension() {
     )
     .expect("parse RigSpec");
 
+    let wordpress: Vec<&str> = spec
+        .bench_workloads
+        .get("wordpress")
+        .expect("wordpress workloads")
+        .iter()
+        .map(|workload| workload.path())
+        .collect();
     assert_eq!(
-        spec.bench_workloads
-            .get("wordpress")
-            .expect("wordpress workloads"),
-        &vec![
-            "/private/benches/cold-boot.php".to_string(),
-            "~/benches/wc-loaded.php".to_string(),
-        ]
+        wordpress,
+        vec!["/private/benches/cold-boot.php", "~/benches/wc-loaded.php"]
     );
-    assert_eq!(
-        spec.bench_workloads
-            .get("nodejs")
-            .expect("nodejs workloads"),
-        &vec!["/private/benches/electron-startup.bench.ts".to_string()]
-    );
+    let nodejs: Vec<&str> = spec
+        .bench_workloads
+        .get("nodejs")
+        .expect("nodejs workloads")
+        .iter()
+        .map(|workload| workload.path())
+        .collect();
+    assert_eq!(nodejs, vec!["/private/benches/electron-startup.bench.ts"]);
 }
 
 #[test]
@@ -121,21 +125,28 @@ fn test_rig_spec_deserializes_trace_workloads_by_extension() {
     )
     .expect("parse RigSpec");
 
+    let nodejs: Vec<&str> = spec
+        .trace_workloads
+        .get("nodejs")
+        .expect("nodejs workloads")
+        .iter()
+        .map(|workload| workload.path())
+        .collect();
     assert_eq!(
-        spec.trace_workloads
-            .get("nodejs")
-            .expect("nodejs workloads"),
-        &vec![
-            "${package.root}/bench/studio-app-create-site.trace.mjs".to_string(),
-            "~/traces/window-close.trace.mjs".to_string(),
+        nodejs,
+        vec![
+            "${package.root}/bench/studio-app-create-site.trace.mjs",
+            "~/traces/window-close.trace.mjs",
         ]
     );
-    assert_eq!(
-        spec.trace_workloads
-            .get("wordpress")
-            .expect("wordpress workloads"),
-        &vec!["/private/traces/wp-admin-load.trace.php".to_string()]
-    );
+    let wordpress: Vec<&str> = spec
+        .trace_workloads
+        .get("wordpress")
+        .expect("wordpress workloads")
+        .iter()
+        .map(|workload| workload.path())
+        .collect();
+    assert_eq!(wordpress, vec!["/private/traces/wp-admin-load.trace.php"]);
 }
 
 #[test]

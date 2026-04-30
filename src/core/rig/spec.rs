@@ -65,7 +65,7 @@ pub struct RigSpec {
     /// `${components.<id>.path}` expansion as other rig path fields, plus
     /// `${package.root}` for rigs installed from a package source.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub bench_workloads: HashMap<String, Vec<String>>,
+    pub bench_workloads: HashMap<String, Vec<WorkloadSpec>>,
 
     /// Out-of-tree trace workloads keyed by extension id.
     ///
@@ -75,7 +75,7 @@ pub struct RigSpec {
     /// `${components.<id>.path}` expansion as other rig path fields, plus
     /// `${package.root}` for rigs installed from a package source.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub trace_workloads: HashMap<String, Vec<String>>,
+    pub trace_workloads: HashMap<String, Vec<WorkloadSpec>>,
 
     /// Named bench scenario suites keyed by profile name.
     ///
@@ -225,6 +225,41 @@ pub struct BenchSpec {
     /// can emit supplemental pairwise diffs grouped by the non-varying axes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub axes: BTreeMap<String, String>,
+}
+
+/// Rig-owned extension workload declaration.
+///
+/// The string shorthand keeps existing rig specs valid. Object form lets a
+/// workload opt into scoped rig preflights by naming the check groups it needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WorkloadSpec {
+    Path(String),
+    Detailed(WorkloadEntry),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadEntry {
+    pub path: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_groups: Option<Vec<String>>,
+}
+
+impl WorkloadSpec {
+    pub fn path(&self) -> &str {
+        match self {
+            WorkloadSpec::Path(path) => path,
+            WorkloadSpec::Detailed(entry) => &entry.path,
+        }
+    }
+
+    pub fn check_groups(&self) -> Option<&[String]> {
+        match self {
+            WorkloadSpec::Path(_) => None,
+            WorkloadSpec::Detailed(entry) => entry.check_groups.as_deref(),
+        }
+    }
 }
 
 /// Component reference inside a rig spec. Decoupled from the global component
@@ -584,6 +619,11 @@ pub enum PipelineStep {
         /// Step IDs that must run before this step.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         depends_on: Vec<String>,
+        /// Named preflight groups this check belongs to. Workload commands can
+        /// run only the groups required by a rig-owned workload while full
+        /// `rig check` continues to evaluate every check-pipeline step.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<String>,
         /// Human-readable label.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,

@@ -38,7 +38,8 @@ For git sources, `repo.git//subpath` clones the repository root but discovers sp
 | `resources` | object | No | Resource declarations used by active-run leases. |
 | `pipeline` | object | No | Map of pipeline name to `PipelineStep[]`. |
 | `bench` | object | No | Rig-pinned benchmark component/default-baseline settings. |
-| `bench_workloads` | object | No | Rig-owned out-of-tree benchmark workload paths keyed by extension ID. |
+| `bench_workloads` | object | No | Rig-owned out-of-tree benchmark workloads keyed by extension ID. |
+| `trace_workloads` | object | No | Rig-owned out-of-tree trace workloads keyed by extension ID. |
 | `bench_profiles` | object | No | Named benchmark scenario profiles keyed by profile name. |
 | `app_launcher` | object | No | Optional desktop launcher wrapper config. |
 
@@ -275,12 +276,13 @@ Operates on every top-level `shared_paths` entry.
 {
   "kind": "check",
   "label": "docker daemon running",
+  "groups": ["desktop-app"],
   "command": "docker info",
   "expect_exit": 0
 }
 ```
 
-Embeds a `CheckSpec`. `up` pipelines fail fast on step failures; `check` pipelines run all steps and report every failure.
+Embeds a `CheckSpec`. `up` pipelines fail fast on step failures; `check` pipelines run all steps and report every failure. Optional `groups` names let rig-owned workloads run only the check-pipeline steps they require; `homeboy rig check <id>` still runs the full pipeline.
 
 ## `CheckSpec`
 
@@ -334,10 +336,13 @@ Rig specs can pin benchmark dispatch for `homeboy bench --rig <id>`.
 | `bench.components` | array | Components to benchmark as a rig-pinned matrix. |
 | `bench.default_baseline_rig` | string | Implicit baseline rig for branch-vs-main comparisons. |
 | `bench.warmup_iterations` | integer | Warmup iterations forwarded to bench runners. |
-| `bench_workloads` | object | Out-of-tree workload paths keyed by extension ID. |
+| `bench_workloads` | object | Out-of-tree workloads keyed by extension ID. |
+| `trace_workloads` | object | Out-of-tree trace workloads keyed by extension ID. |
 | `bench_profiles` | object | Named scenario lists used by `homeboy bench --profile <name>`. |
 
-`bench_workloads` paths support `~`, `${env.NAME}`, `${components.<id>.path}`, and `${package.root}` for package-installed rigs.
+`bench_workloads` and `trace_workloads` entries support either string paths or object form. String paths preserve historical behaviour: workload commands run the full rig check. Object entries use `path` plus optional `check_groups`; when every workload for the selected extension declares `check_groups`, workload commands run only those grouped check-pipeline steps.
+
+Workload paths support `~`, `${env.NAME}`, `${components.<id>.path}`, and `${package.root}` for package-installed rigs.
 
 ```jsonc
 {
@@ -347,7 +352,21 @@ Rig specs can pin benchmark dispatch for `homeboy bench --rig <id>`.
     "warmup_iterations": 2
   },
   "bench_workloads": {
-    "wordpress": ["${package.root}/bench/workloads/studio-cold-start"]
+    "wordpress": ["${package.root}/bench/workloads/studio-cold-start"],
+    "nodejs": [
+      {
+        "path": "${package.root}/bench/workloads/studio-app.bench.mjs",
+        "check_groups": ["desktop-app"]
+      }
+    ]
+  },
+  "trace_workloads": {
+    "nodejs": [
+      {
+        "path": "${package.root}/bench/studio-app-create-site.trace.mjs",
+        "check_groups": ["desktop-app", "nodejs-trace"]
+      }
+    ]
   },
   "bench_profiles": {
     "cold-start": ["admin-first-load", "site-editor-first-load"]

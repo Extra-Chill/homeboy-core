@@ -6,7 +6,7 @@
 //! Every step emits a `PipelineStepOutcome`. The runner aggregates them into
 //! a `PipelineOutcome` with overall success/failure.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -56,6 +56,34 @@ impl PipelineOutcome {
 pub fn run_pipeline(rig: &RigSpec, name: &str, fail_fast: bool) -> Result<PipelineOutcome> {
     let steps = rig.pipeline.get(name).cloned().unwrap_or_default();
     let ordered_indices = order_pipeline_steps(rig, name, &steps)?;
+    run_ordered_steps(rig, name, &steps, ordered_indices, fail_fast)
+}
+
+pub fn run_pipeline_check_groups(
+    rig: &RigSpec,
+    groups: &[String],
+    fail_fast: bool,
+) -> Result<PipelineOutcome> {
+    let wanted: BTreeSet<&str> = groups.iter().map(String::as_str).collect();
+    let steps = rig
+        .pipeline
+        .get("check")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|step| step_matches_groups(step, &wanted))
+        .collect::<Vec<_>>();
+    let ordered_indices = order_pipeline_steps(rig, "check", &steps)?;
+    run_ordered_steps(rig, "check", &steps, ordered_indices, fail_fast)
+}
+
+fn run_ordered_steps(
+    rig: &RigSpec,
+    name: &str,
+    steps: &[PipelineStep],
+    ordered_indices: Vec<usize>,
+    fail_fast: bool,
+) -> Result<PipelineOutcome> {
     let mut outcomes = Vec::with_capacity(ordered_indices.len());
     let mut failed = 0;
     let mut passed = 0;
@@ -112,6 +140,15 @@ pub fn run_pipeline(rig: &RigSpec, name: &str, fail_fast: bool) -> Result<Pipeli
         passed,
         failed,
     })
+}
+
+fn step_matches_groups(step: &PipelineStep, wanted: &BTreeSet<&str>) -> bool {
+    match step {
+        PipelineStep::Check { groups, .. } => {
+            groups.iter().any(|group| wanted.contains(group.as_str()))
+        }
+        _ => false,
+    }
 }
 
 fn run_step(rig: &RigSpec, step: &PipelineStep) -> Result<()> {

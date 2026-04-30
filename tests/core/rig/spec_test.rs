@@ -3,6 +3,7 @@
 
 use crate::rig::{
     PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathSpec, SymlinkSpec,
+    WorkloadEntry, WorkloadSpec,
 };
 
 /// Canonical fixture matching the studio-playground-dev shape used as the
@@ -210,6 +211,51 @@ fn test_spec_check_step_with_command_probe() {
         }
         other => panic!("expected Check, got {:?}", other),
     }
+}
+
+#[test]
+fn test_spec_check_step_parses_groups() {
+    let json = r#"{
+        "id": "r",
+        "pipeline": {
+            "check": [
+                {
+                    "kind": "check",
+                    "label": "desktop app packaged",
+                    "groups": ["desktop-app", "trace"],
+                    "command": "test -d apps/studio/out"
+                }
+            ]
+        }
+    }"#;
+    let spec: RigSpec = serde_json::from_str(json).expect("parse");
+    let steps = spec.pipeline.get("check").unwrap();
+    match &steps[0] {
+        PipelineStep::Check { groups, .. } => {
+            assert_eq!(
+                groups,
+                &vec!["desktop-app".to_string(), "trace".to_string()]
+            );
+        }
+        other => panic!("expected Check, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_check_groups() {
+    let legacy = WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string());
+    assert_eq!(legacy.path(), "/tmp/legacy.trace.mjs");
+    assert!(legacy.check_groups().is_none());
+
+    let detailed = WorkloadSpec::Detailed(WorkloadEntry {
+        path: "/tmp/scoped.trace.mjs".to_string(),
+        check_groups: Some(vec!["desktop-app".to_string()]),
+    });
+    assert_eq!(detailed.path(), "/tmp/scoped.trace.mjs");
+    assert_eq!(
+        detailed.check_groups(),
+        Some(&["desktop-app".to_string()][..])
+    );
 }
 
 #[test]

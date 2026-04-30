@@ -17,8 +17,8 @@ use std::collections::HashMap;
 
 use crate::rig::pipeline::PipelineOutcome;
 use crate::rig::runner::{
-    run_check, run_down, run_status, run_up, snapshot_state, CheckReport, RigStatusReport,
-    ServiceStatusReport, SymlinkStatusState, UpReport,
+    run_check, run_check_groups, run_down, run_status, run_up, snapshot_state, CheckReport,
+    RigStatusReport, ServiceStatusReport, SymlinkStatusState, UpReport,
 };
 use crate::rig::spec::{
     ComponentSpec, PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathOp,
@@ -208,6 +208,51 @@ fn test_run_check() {
         let status = run_status(&rig).expect("run_status reads back state");
         assert_eq!(status.last_check_result.as_deref(), Some("pass"));
         assert!(status.last_check.is_some(), "last_check timestamp recorded");
+    });
+}
+
+#[test]
+fn test_run_check_groups_runs_only_matching_check_steps() {
+    with_isolated_home(|_dir| {
+        let rig: RigSpec = serde_json::from_str(
+            r#"{
+                "id": "scoped-check-fixture",
+                "pipeline": {
+                    "check": [
+                        {
+                            "kind": "check",
+                            "label": "desktop app exists",
+                            "groups": ["desktop-app"],
+                            "command": "true"
+                        },
+                        {
+                            "kind": "check",
+                            "label": "unrelated cli symlink",
+                            "groups": ["cli-dev-copy"],
+                            "command": "false"
+                        },
+                        {
+                            "kind": "symlink",
+                            "op": "verify"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("parse rig");
+
+        let report =
+            run_check_groups(&rig, &["desktop-app".to_string()]).expect("scoped check runs");
+
+        assert!(report.success, "unselected failing checks are skipped");
+        assert_eq!(report.pipeline.steps.len(), 1);
+        assert_eq!(report.pipeline.steps[0].label, "desktop app exists");
+        assert_eq!(report.pipeline.passed, 1);
+        assert_eq!(report.pipeline.failed, 0);
+
+        let full = run_check(&rig).expect("full check returns failed report");
+        assert!(!full.success, "full rig check remains strict");
+        assert!(full.pipeline.failed >= 1);
     });
 }
 

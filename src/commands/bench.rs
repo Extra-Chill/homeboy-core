@@ -413,6 +413,9 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
     resolve_options.extension_overrides = args.extension_override.extensions.clone();
 
     let ctx = execution_context::resolve_with_component(&resolve_options, component_override)?;
+    if let Some(spec) = rig_spec {
+        run_rig_workload_preflight(spec, ctx.extension_id.as_deref())?;
+    }
 
     let extra_workloads = rig_spec
         .as_ref()
@@ -515,6 +518,24 @@ fn resolve_list_component_id(
     }
 
     args.comp.resolve_id()
+}
+
+fn run_rig_workload_preflight(spec: &RigSpec, extension_id: Option<&str>) -> homeboy::Result<()> {
+    let groups = extension_id.and_then(|id| {
+        rig::check_groups_for_extension_workloads(spec, rig::RigWorkloadKind::Bench, id)
+    });
+    let check = match groups {
+        Some(groups) => rig::run_check_groups(spec, &groups)?,
+        None => rig::run_check(spec)?,
+    };
+    if !check.success {
+        return Err(homeboy::Error::rig_pipeline_failed(
+            &spec.id,
+            "check",
+            "rig check failed; refusing to list bench workloads for an unhealthy rig",
+        ));
+    }
+    Ok(())
 }
 
 /// Resolve the candidate rig's `bench.default_baseline_rig` and, when
