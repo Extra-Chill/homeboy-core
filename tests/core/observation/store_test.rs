@@ -3,9 +3,8 @@
 //! These isolate `HOME` / `XDG_DATA_HOME` so the developer's real local DB is
 //! never read or written.
 
-use crate::observation::store::{
-    self, NewRunRecord, ObservationStore, RunListFilter, RunStatus, CURRENT_SCHEMA_VERSION,
-};
+use crate::observation::store::{self, ObservationStore, CURRENT_SCHEMA_VERSION};
+use crate::observation::{NewRunRecord, RunListFilter, RunStatus};
 use crate::test_support::with_isolated_home;
 
 struct XdgGuard {
@@ -36,7 +35,7 @@ impl Drop for XdgGuard {
 }
 
 #[test]
-fn status_reports_missing_database_without_initializing() {
+fn test_status() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::unset();
 
@@ -60,7 +59,7 @@ fn status_reports_missing_database_without_initializing() {
 }
 
 #[test]
-fn xdg_data_home_overrides_default_database_path() {
+fn test_database_path() {
     with_isolated_home(|home| {
         let data_home = home.path().join("xdg-data");
         let _xdg = XdgGuard::set(&data_home);
@@ -72,7 +71,7 @@ fn xdg_data_home_overrides_default_database_path() {
 }
 
 #[test]
-fn initialization_creates_schema_and_status_reports_version() {
+fn test_open_initialized() {
     with_isolated_home(|_home| {
         let _xdg = XdgGuard::unset();
 
@@ -118,7 +117,7 @@ fn sample_run(kind: &str, component_id: &str) -> NewRunRecord {
 }
 
 #[test]
-fn run_lifecycle_round_trips_metadata_and_finish_status() {
+fn test_start_run() {
     with_isolated_home(|_home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("init store");
@@ -132,6 +131,24 @@ fn run_lifecycle_round_trips_metadata_and_finish_status() {
         assert_eq!(started.status, "running");
         assert!(started.finished_at.is_none());
         assert_eq!(started.metadata_json["scenario"], "fixture");
+
+        let fetched = store
+            .get_run(&started.id)
+            .expect("get run")
+            .expect("run exists");
+
+        assert_eq!(fetched, started);
+    });
+}
+
+#[test]
+fn test_finish_run() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let started = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start run");
 
         let finished = store
             .finish_run(
@@ -153,7 +170,7 @@ fn run_lifecycle_round_trips_metadata_and_finish_status() {
 }
 
 #[test]
-fn list_runs_filters_by_kind_component_status_and_rig() {
+fn test_list_runs() {
     with_isolated_home(|_home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("init store");
@@ -197,7 +214,7 @@ fn list_runs_filters_by_kind_component_status_and_rig() {
 }
 
 #[test]
-fn artifact_records_capture_path_hash_size_and_mime() {
+fn test_record_artifact() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("init store");
@@ -222,6 +239,33 @@ fn artifact_records_capture_path_hash_size_and_mime() {
             artifact.sha256.as_deref(),
             Some("117367705c6e7ef5d779dd71de15a95ee62339e1ef635f08246f8e1ec99167e2")
         );
+    });
+}
+
+#[test]
+fn test_list_artifacts() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("trace", "homeboy"))
+            .expect("start run");
+        let first_path = home.path().join("first.json");
+        let second_path = home.path().join("second.log");
+        std::fs::write(&first_path, b"first").expect("write first");
+        std::fs::write(&second_path, b"second").expect("write second");
+
+        let first = store
+            .record_artifact(&run.id, "first", &first_path)
+            .expect("record first");
+        let second = store
+            .record_artifact(&run.id, "second", &second_path)
+            .expect("record second");
+
+        let artifacts = store.list_artifacts(&run.id).expect("list artifacts");
+        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts[0].id, first.id);
+        assert_eq!(artifacts[1].id, second.id);
     });
 }
 

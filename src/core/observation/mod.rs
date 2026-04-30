@@ -4,9 +4,8 @@
 //! stack specs, baselines). SQLite stores observed state from command runs and
 //! generated artifacts. This module only provides the storage substrate.
 
+pub mod records;
 pub mod store;
 
-pub use store::{
-    ArtifactRecord, NewRunRecord, ObservationDbStatus, ObservationStore, RunListFilter, RunRecord,
-    RunStatus, CURRENT_SCHEMA_VERSION,
-};
+pub use records::{ArtifactRecord, NewRunRecord, RunListFilter, RunRecord, RunStatus};
+pub use store::{ObservationDbStatus, ObservationStore, CURRENT_SCHEMA_VERSION};
