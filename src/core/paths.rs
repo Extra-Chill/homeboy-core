@@ -30,6 +30,48 @@ pub fn homeboy_json() -> Result<PathBuf> {
     Ok(homeboy()?.join("homeboy.json"))
 }
 
+/// Base Homeboy data directory for local observed state.
+///
+/// Config/spec files remain under `homeboy()` (`~/.config/homeboy`). This
+/// directory is for machine-local observations such as the SQLite store.
+pub fn homeboy_data() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let base = env::var("LOCALAPPDATA")
+            .or_else(|_| env::var("APPDATA"))
+            .map_err(|_| {
+                Error::internal_unexpected(
+                    "LOCALAPPDATA or APPDATA environment variable not set on Windows".to_string(),
+                )
+            })?;
+        Ok(PathBuf::from(base).join("homeboy"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(xdg_data_home) = env::var("XDG_DATA_HOME") {
+            if !xdg_data_home.trim().is_empty() {
+                return Ok(PathBuf::from(xdg_data_home).join("homeboy"));
+            }
+        }
+
+        let home = env::var("HOME").map_err(|_| {
+            Error::internal_unexpected(
+                "HOME environment variable not set on Unix-like system".to_string(),
+            )
+        })?;
+        Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("homeboy"))
+    }
+}
+
+/// Local SQLite observation-store path.
+pub fn observation_db() -> Result<PathBuf> {
+    Ok(homeboy_data()?.join("homeboy.sqlite"))
+}
+
 /// Projects directory
 pub fn projects() -> Result<PathBuf> {
     Ok(homeboy()?.join("projects"))

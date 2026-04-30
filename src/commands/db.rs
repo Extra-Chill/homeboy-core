@@ -3,6 +3,7 @@ use serde::Serialize;
 
 use homeboy::db::{self, DbResult, DbTunnelResult};
 use homeboy::engine::text;
+use homeboy::observation::store::{self, ObservationDbStatus};
 use homeboy::project;
 
 use super::CmdResult;
@@ -15,6 +16,8 @@ pub struct DbArgs {
 
 #[derive(Subcommand)]
 enum DbCommand {
+    /// Show local Homeboy observation-store status
+    Status,
     /// List database tables
     Tables {
         /// Project ID
@@ -98,12 +101,14 @@ pub struct DbOutput {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum DbResultVariant {
+    Status(ObservationDbStatus),
     Query(DbResult),
     Tunnel(DbTunnelResult),
 }
 
 pub fn run(args: DbArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<DbOutput> {
     match args.command {
+        DbCommand::Status => status(),
         DbCommand::Tables { project_id, args } => tables(&project_id, &args),
         DbCommand::Describe { project_id, args } => describe(&project_id, &args),
         DbCommand::Query { project_id, args } => query(&project_id, &args),
@@ -131,6 +136,16 @@ pub fn run(args: DbArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<DbO
             local_port,
         } => tunnel(&project_id, local_port),
     }
+}
+
+fn status() -> CmdResult<DbOutput> {
+    Ok((
+        DbOutput {
+            command: "db.status".to_string(),
+            result: DbResultVariant::Status(store::status()?),
+        },
+        0,
+    ))
 }
 
 fn parse_subtarget(
