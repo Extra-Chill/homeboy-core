@@ -246,6 +246,10 @@ mod platform {
             thread::sleep(Duration::from_millis(200));
         }
 
+        if managed_process_group {
+            reap_child(pid);
+        }
+
         state.services.remove(service_id);
         state.save(&rig.id)?;
         Ok(())
@@ -393,6 +397,16 @@ mod platform {
         };
         unsafe {
             libc::kill(target, sig);
+        }
+    }
+
+    fn reap_child(pid: u32) {
+        if pid > i32::MAX as u32 {
+            return;
+        }
+        let mut status = 0;
+        unsafe {
+            libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG);
         }
     }
 

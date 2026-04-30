@@ -7,6 +7,7 @@
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
+use crate::engine::shell;
 use crate::extension::lint::baseline::{self as lint_baseline, LintFinding};
 use crate::extension::lint::build_lint_runner;
 use crate::extension::{self, ExtensionCapability, LintChangedFileRoute};
@@ -134,10 +135,7 @@ pub fn run_main_lint_workflow(
     // listed first; the canonical `homeboy refactor --from lint --write`
     // invocation follows for users who want the longer form.
     if !lint_clean {
-        hints.push(format!(
-            "Auto-fix: homeboy lint {} --fix (or homeboy refactor {} --from lint --write)",
-            args.component_label, args.component_label
-        ));
+        hints.push(build_autofix_hint(&args));
         hints.push("Some issues may require manual fixes".to_string());
     }
 
@@ -175,6 +173,77 @@ pub fn run_main_lint_workflow(
         baseline_comparison,
         lint_findings: Some(lint_findings),
     })
+}
+
+fn build_autofix_hint(args: &LintRunWorkflowArgs) -> String {
+    let lint_command = lint_autofix_command(args);
+
+    if refactor_can_preserve_scope(args) {
+        let refactor_command = refactor_autofix_command(args);
+        format!("Auto-fix: {lint_command} (or {refactor_command})")
+    } else {
+        format!("Auto-fix: {lint_command}")
+    }
+}
+
+fn lint_autofix_command(args: &LintRunWorkflowArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "lint".to_string(),
+        args.component_label.clone(),
+    ];
+
+    append_common_scope_args(&mut parts, args);
+    parts.push("--fix".to_string());
+
+    shell::quote_args(&parts)
+}
+
+fn refactor_autofix_command(args: &LintRunWorkflowArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "refactor".to_string(),
+        args.component_label.clone(),
+    ];
+
+    append_path_and_changed_since_args(&mut parts, args);
+    parts.extend([
+        "--from".to_string(),
+        "lint".to_string(),
+        "--write".to_string(),
+    ]);
+
+    shell::quote_args(&parts)
+}
+
+fn refactor_can_preserve_scope(args: &LintRunWorkflowArgs) -> bool {
+    args.file.is_none() && args.glob.is_none() && !args.changed_only
+}
+
+fn append_common_scope_args(parts: &mut Vec<String>, args: &LintRunWorkflowArgs) {
+    append_path_and_changed_since_args(parts, args);
+    if let Some(file) = &args.file {
+        parts.push("--file".to_string());
+        parts.push(file.clone());
+    }
+    if let Some(glob) = &args.glob {
+        parts.push("--glob".to_string());
+        parts.push(glob.clone());
+    }
+    if args.changed_only {
+        parts.push("--changed-only".to_string());
+    }
+}
+
+fn append_path_and_changed_since_args(parts: &mut Vec<String>, args: &LintRunWorkflowArgs) {
+    if let Some(path) = &args.path_override {
+        parts.push("--path".to_string());
+        parts.push(path.clone());
+    }
+    if let Some(changed_since) = &args.changed_since {
+        parts.push("--changed-since".to_string());
+        parts.push(changed_since.clone());
+    }
 }
 
 fn run_scoped_lint_runs(
@@ -416,6 +485,7 @@ fn process_baseline(
 mod tests {
     use super::*;
     use crate::component::SelfCheckConfig;
+    use crate::engine::baseline::BaselineFlags;
 
     fn component(root: &str) -> Component {
         Component::new(
@@ -444,6 +514,53 @@ mod tests {
                 step: "eslint".to_string(),
             },
         ]
+    }
+
+    fn lint_args() -> LintRunWorkflowArgs {
+        LintRunWorkflowArgs {
+            component_label: "demo".to_string(),
+            component_id: "demo".to_string(),
+            path_override: None,
+            settings: Vec::new(),
+            summary: false,
+            file: None,
+            glob: None,
+            changed_only: false,
+            changed_since: None,
+            errors_only: false,
+            sniffs: None,
+            exclude_sniffs: None,
+            category: None,
+            baseline_flags: BaselineFlags::default(),
+        }
+    }
+
+    #[test]
+    fn autofix_hint_preserves_changed_since_scope() {
+        let mut args = lint_args();
+        args.path_override = Some("/tmp/pr checkout".to_string());
+        args.changed_since = Some("origin/main".to_string());
+
+        let hint = build_autofix_hint(&args);
+
+        assert!(hint.contains(
+            "homeboy lint demo --path '/tmp/pr checkout' --changed-since origin/main --fix"
+        ));
+        assert!(hint.contains(
+            "homeboy refactor demo --path '/tmp/pr checkout' --changed-since origin/main --from lint --write"
+        ));
+    }
+
+    #[test]
+    fn autofix_hint_preserves_changed_only_and_file_scope() {
+        let mut args = lint_args();
+        args.file = Some("src/lib.rs".to_string());
+        args.changed_only = true;
+
+        let hint = build_autofix_hint(&args);
+
+        assert!(hint.contains("homeboy lint demo --file src/lib.rs --changed-only --fix"));
+        assert!(!hint.contains("homeboy refactor"));
     }
 
     #[test]

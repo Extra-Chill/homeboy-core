@@ -2,6 +2,7 @@ mod execution;
 mod orchestration;
 pub(crate) mod permissions;
 mod planning;
+mod policy;
 pub(crate) mod provenance;
 pub mod release_download;
 mod safety_and_artifact;

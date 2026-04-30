@@ -67,6 +67,42 @@ fn trace_json(status: &str, summary: &str) -> String {
     )
 }
 
+fn bench_json() -> &'static str {
+    r#"{
+        "success": true,
+        "data": {
+            "passed": true,
+            "status": "passed",
+            "component": "studio",
+            "exit_code": 0,
+            "iterations": 5,
+            "artifacts": [
+                {
+                    "scenario_id": "wp-admin-load",
+                    "run_index": 0,
+                    "name": "trace",
+                    "path": "bench-artifacts/wp-admin-load/trace.zip",
+                    "kind": "playwright-trace",
+                    "label": "Playwright trace",
+                    "content": "trace bytes should never appear"
+                },
+                {
+                    "scenario_id": "wp-admin-load",
+                    "name": "screenshot",
+                    "path": "bench-artifacts/wp-admin-load/final.png",
+                    "kind": "screenshot",
+                    "label": "Final screenshot"
+                }
+            ],
+            "results": {
+                "component_id": "studio",
+                "iterations": 5,
+                "scenarios": []
+            }
+        }
+    }"#
+}
+
 #[test]
 fn renders_lint_failure_digest_from_fixture() {
     let dir = tmp_dir("lint");
@@ -231,6 +267,27 @@ fn renders_trace_pass_status_and_artifact_paths() {
     assert!(markdown.contains("- main log: artifacts/main.log"));
     assert!(markdown.contains("- process tree: artifacts/process-tree.txt"));
     assert!(!markdown.contains("raw log body that should never appear"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn renders_bench_status_and_artifact_paths() {
+    let dir = tmp_dir("bench-pass");
+    fs::create_dir_all(&dir).expect("temp dir should exist");
+    write_file(&dir, "bench.json", bench_json());
+
+    let markdown = render(&dir, r#"{"bench":"pass"}"#, false, false);
+
+    assert!(markdown.contains("### Bench: studio"));
+    assert!(markdown.contains("**Status:** PASSED"));
+    assert!(markdown.contains(
+        "- scenario `wp-admin-load` / run 0 — Playwright trace (playwright-trace): bench-artifacts/wp-admin-load/trace.zip"
+    ));
+    assert!(markdown.contains(
+        "- scenario `wp-admin-load` — Final screenshot (screenshot): bench-artifacts/wp-admin-load/final.png"
+    ));
+    assert!(!markdown.contains("trace bytes should never appear"));
 
     let _ = fs::remove_dir_all(&dir);
 }
