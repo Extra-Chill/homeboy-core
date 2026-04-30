@@ -840,21 +840,7 @@ fn run_lint_stage(
 
     // If clean, nothing to fix — skip entirely.
     if let Some(CachedLintResult::Clean) = cached {
-        return Ok(PlannedStage {
-            source: "lint".to_string(),
-            summary: SourceStageSummary {
-                stage: "lint".to_string(),
-                collected: true,
-                applied: false,
-                edit_count: 0,
-                files_modified: 0,
-                detected_findings: Some(0),
-                changed_files: Vec::new(),
-                fix_summary: None,
-                warnings: Vec::new(),
-            },
-            fix_results: Vec::new(),
-        });
+        return Ok(empty_lint_stage());
     }
 
     let root_str = root.to_string_lossy().to_string();
@@ -863,21 +849,7 @@ fn run_lint_stage(
 
     let selected_files = options.selected_files.as_deref().or(changed_files);
     if selected_files.is_some_and(|files| files.is_empty()) {
-        return Ok(PlannedStage {
-            source: "lint".to_string(),
-            summary: SourceStageSummary {
-                stage: "lint".to_string(),
-                collected: true,
-                applied: false,
-                edit_count: 0,
-                files_modified: 0,
-                detected_findings: Some(0),
-                changed_files: Vec::new(),
-                fix_summary: None,
-                warnings: Vec::new(),
-            },
-            fix_results: Vec::new(),
-        });
+        return Ok(empty_lint_stage());
     }
     let effective_glob = if let Some(changed_files) = selected_files {
         let abs_files: Vec<String> = changed_files
@@ -1000,6 +972,24 @@ fn run_lint_stage(
         },
         fix_results,
     })
+}
+
+fn empty_lint_stage() -> PlannedStage {
+    PlannedStage {
+        source: "lint".to_string(),
+        summary: SourceStageSummary {
+            stage: "lint".to_string(),
+            collected: true,
+            applied: false,
+            edit_count: 0,
+            files_modified: 0,
+            detected_findings: Some(0),
+            changed_files: Vec::new(),
+            fix_summary: None,
+            warnings: Vec::new(),
+        },
+        fix_results: Vec::new(),
+    }
 }
 
 fn run_test_stage(
