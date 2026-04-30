@@ -138,4 +138,37 @@ mod tests {
             "onetwo"
         );
     }
+
+    #[test]
+    fn test_run_self_checks_with_passthrough() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("lint.sh"),
+            "printf self-check-stdout\nprintf self-check-stderr >&2\n",
+        )
+        .expect("script should be written");
+
+        let mut component = Component::new(
+            "fixture".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            "".to_string(),
+            None,
+        );
+        component.self_checks = Some(SelfCheckConfig {
+            lint: vec!["sh lint.sh".to_string()],
+            test: Vec::new(),
+        });
+
+        let output = run_self_checks_with_passthrough(
+            &component,
+            ExtensionCapability::Lint,
+            dir.path(),
+            false,
+        )
+        .expect("self-checks should run without terminal passthrough");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "self-check-stdout");
+        assert_eq!(output.stderr, "self-check-stderr");
+    }
 }
