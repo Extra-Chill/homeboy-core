@@ -295,7 +295,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Rust toolchain needed so run-release.sh can regenerate Cargo.lock
@@ -642,5 +642,4 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-
 
