@@ -231,3 +231,42 @@ impl ExtensionRunner {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::Component;
+    use crate::engine::run_dir::RunDir;
+    use crate::extension::ExtensionCapability;
+
+    fn context() -> ExtensionExecutionContext {
+        ExtensionExecutionContext {
+            component: Component::new(
+                "fixture".to_string(),
+                "/tmp/fixture".to_string(),
+                "fixture-extension".to_string(),
+                None,
+            ),
+            capability: ExtensionCapability::Lint,
+            extension_id: "fixture-extension".to_string(),
+            extension_path: PathBuf::from("/tmp/fixture-extension"),
+            script_path: "lint.sh".to_string(),
+            settings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn with_run_dir_tracks_resource_artifact_path() {
+        let run_dir = RunDir::create().expect("run dir");
+        let runner = ExtensionRunner::for_context(context()).with_run_dir(&run_dir);
+
+        assert_eq!(runner.run_dir_path.as_deref(), Some(run_dir.path()));
+        assert!(runner
+            .env_vars
+            .iter()
+            .any(|(key, value)| key == "HOMEBOY_RUN_DIR"
+                && value == &run_dir.path().to_string_lossy()));
+
+        run_dir.cleanup();
+    }
+}

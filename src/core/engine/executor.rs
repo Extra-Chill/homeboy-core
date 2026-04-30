@@ -303,3 +303,19 @@ fn build_shell_command(
 
     Ok(template)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_shell_execution_templates() {
+        assert!(requires_shell_execution(
+            "cd {{sitePath}} && {{cliPath}} {{args}}"
+        ));
+        assert!(requires_shell_execution(
+            "{{cliPath}} {{args}} | tee output.log"
+        ));
+        assert!(!requires_shell_execution("{{cliPath}} {{args}}"));
+    }
+}

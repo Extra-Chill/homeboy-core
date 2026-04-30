@@ -736,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    fn local_command_captures_direct_child_resource_summary() {
+    fn test_execute_local_command_in_dir() {
         let output = execute_local_command_in_dir("sleep 0.2", None, None);
 
         assert!(output.success);
