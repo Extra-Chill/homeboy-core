@@ -5,15 +5,19 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::component::Component;
+use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
 use crate::error::{Error, Result};
+use crate::extension::trace::baseline::TraceBaselineComparison;
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
 };
 use crate::extension::{ExtensionRunner, RunnerOutput};
 use crate::rig::RigStateSnapshot;
 
-use super::parsing::{parse_trace_list_str, parse_trace_results_file, TraceList, TraceResults};
+use super::parsing::{
+    parse_trace_list_str, parse_trace_results_file, TraceList, TraceResults, TraceSpanDefinition,
+};
 
 #[derive(Debug, Clone)]
 pub struct TraceRunWorkflowArgs {
@@ -28,6 +32,9 @@ pub struct TraceRunWorkflowArgs {
     pub overlays: Vec<String>,
     pub keep_overlay: bool,
     pub extra_workloads: Vec<PathBuf>,
+    pub span_definitions: Vec<TraceSpanDefinition>,
+    pub baseline_flags: BaselineFlags,
+    pub regression_threshold_percent: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +59,10 @@ pub struct TraceRunWorkflowResult {
     pub failure: Option<TraceRunFailure>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<TraceOverlay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_comparison: Option<TraceBaselineComparison>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -100,7 +111,7 @@ fn run_trace_workflow_with_context(
     }
     let runner_output = runner_output?;
     let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
-    let results = if results_path.exists() {
+    let mut results = if results_path.exists() {
         let mut parsed = parse_trace_results_file(&results_path)?;
         if parsed.rig.is_none() {
             parsed.rig = rig_state;
@@ -130,6 +141,74 @@ fn run_trace_workflow_with_context(
         runner_output.exit_code
     };
     let failure = (!runner_output.success).then(|| failure_from_output(&args, &runner_output));
+    if let Some(parsed) = results.as_mut() {
+        super::spans::apply_span_definitions(parsed, &args.span_definitions);
+    }
+
+    let rig_id = args.rig_id.as_deref();
+    let source_path = Path::new(component_path);
+    let mut baseline_comparison = None;
+    let mut baseline_exit_override = None;
+    let mut hints = Vec::new();
+    let has_span_results = results
+        .as_ref()
+        .is_some_and(|parsed| !parsed.span_results.is_empty());
+
+    if args.baseline_flags.baseline && status == "pass" && has_span_results {
+        if let Some(ref parsed) = results {
+            let _ =
+                super::baseline::save_baseline(source_path, &args.component_id, parsed, rig_id)?;
+        }
+    }
+    if has_span_results && !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
+        if let Some(ref parsed) = results {
+            if let Some(existing) = super::baseline::load_baseline(source_path, rig_id) {
+                let comparison =
+                    super::baseline::compare(parsed, &existing, args.regression_threshold_percent);
+                if comparison.regression {
+                    baseline_exit_override = Some(1);
+                } else if comparison.has_improvements && args.baseline_flags.ratchet {
+                    let _ = super::baseline::save_baseline(
+                        source_path,
+                        &args.component_id,
+                        parsed,
+                        rig_id,
+                    );
+                }
+                baseline_comparison = Some(comparison);
+            }
+        }
+    }
+
+    let trace_invocation = match rig_id {
+        Some(id) => format!(
+            "homeboy trace {} {} --rig {}",
+            args.component_id, args.scenario_id, id
+        ),
+        None => format!("homeboy trace {} {}", args.component_id, args.scenario_id),
+    };
+    if has_span_results && !args.baseline_flags.baseline && baseline_comparison.is_none() {
+        hints.push(format!(
+            "Save trace span baseline: {} --baseline",
+            trace_invocation
+        ));
+    }
+    if baseline_comparison.is_some() && !args.baseline_flags.ratchet {
+        hints.push(format!(
+            "Auto-update trace span baseline on improvement: {} --ratchet",
+            trace_invocation
+        ));
+    }
+    if let Some(ref cmp) = baseline_comparison {
+        if cmp.regression {
+            hints.push(format!(
+                "Trace span regression threshold: {}%. Raise it with --regression-threshold=<PCT> if expected.",
+                cmp.threshold_percent
+            ));
+        }
+    }
+
+    let exit_code = baseline_exit_override.unwrap_or(exit_code);
 
     Ok(TraceRunWorkflowResult {
         status,
@@ -145,6 +224,8 @@ fn run_trace_workflow_with_context(
                 kept: overlay.keep,
             })
             .collect(),
+        baseline_comparison,
+        hints: if hints.is_empty() { None } else { Some(hints) },
     })
 }
 
@@ -166,6 +247,13 @@ pub fn run_trace_list_workflow(
         overlays: Vec::new(),
         keep_overlay: false,
         extra_workloads: args.extra_workloads,
+        span_definitions: Vec::new(),
+        baseline_flags: BaselineFlags {
+            baseline: false,
+            ignore_baseline: true,
+            ratchet: false,
+        },
+        regression_threshold_percent: super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
     };
     let output =
         build_trace_runner(&execution_context, component, &runner_args, run_dir, true)?.run()?;
@@ -520,6 +608,14 @@ JSON
             overlays: Vec::new(),
             keep_overlay: false,
             extra_workloads: vec![component_dir.join("trace-fixture.trace.mjs")],
+            span_definitions: Vec::new(),
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
         };
 
         let output = build_trace_runner(&context, &component, &args, &run_dir, false)
@@ -583,6 +679,14 @@ JSON
             overlays: Vec::new(),
             keep_overlay: false,
             extra_workloads: Vec::new(),
+            span_definitions: Vec::new(),
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
         };
 
         let output = build_trace_runner(&context, &component, &args, &run_dir, true)
@@ -611,6 +715,14 @@ JSON
             overlays: Vec::new(),
             keep_overlay: false,
             extra_workloads: Vec::new(),
+            span_definitions: Vec::new(),
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
         };
         let output = RunnerOutput {
             success: false,
@@ -744,6 +856,14 @@ JSON
             overlays: vec![patch_path.to_string_lossy().to_string()],
             keep_overlay,
             extra_workloads: Vec::new(),
+            span_definitions: Vec::new(),
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
         };
         OverlayFixture {
             _temp: temp,

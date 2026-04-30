@@ -2,14 +2,17 @@ use clap::Args;
 use std::path::PathBuf;
 
 use homeboy::component::{Component, ScopedExtensionConfig};
+use homeboy::engine::baseline::BaselineFlags;
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
-use homeboy::extension::trace::{TraceCommandOutput, TraceListWorkflowArgs, TraceRunWorkflowArgs};
+use homeboy::extension::trace::{
+    TraceCommandOutput, TraceListWorkflowArgs, TraceRunWorkflowArgs, TraceSpanDefinition,
+};
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, RigSpec};
 
-use super::utils::args::{HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
+use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
 
 #[derive(Args)]
@@ -34,6 +37,21 @@ pub struct TraceArgs {
     #[arg(long)]
     pub json_summary: bool,
 
+    /// Render a Markdown trace report instead of the JSON envelope.
+    #[arg(long, value_parser = ["markdown"])]
+    pub report: Option<String>,
+
+    /// Add a span definition as `id:source.event:source.event`.
+    #[arg(long = "span", value_name = "ID:FROM:TO", value_parser = extension_trace::spans::parse_span_definition)]
+    pub spans: Vec<TraceSpanDefinition>,
+
+    #[command(flatten)]
+    pub baseline_args: BaselineArgs,
+
+    /// Span regression tolerance as a percentage.
+    #[arg(long, value_name = "PERCENT", default_value_t = extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT)]
+    pub regression_threshold: f64,
+
     /// Apply a patch file for this trace run, then reverse it afterward.
     #[arg(long = "overlay", value_name = "PATCH_FILE")]
     pub overlays: Vec<String>,
@@ -41,6 +59,40 @@ pub struct TraceArgs {
     /// Leave overlay changes in place after the trace run.
     #[arg(long)]
     pub keep_overlay: bool,
+}
+
+pub fn is_markdown_mode(args: &TraceArgs) -> bool {
+    args.report.as_deref() == Some("markdown")
+}
+
+pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
+    let (output, exit_code) = run(args, global)?;
+    match output {
+        TraceCommandOutput::Run(run_output) => {
+            let Some(results) = run_output.results else {
+                return Ok(("# Trace\n\nNo trace results were produced.\n".to_string(), exit_code));
+            };
+            Ok((extension_trace::render_markdown(&results), exit_code))
+        }
+        TraceCommandOutput::Summary(summary) => Ok((
+            format!(
+                "# Trace Summary\n\n- **Component:** `{}`\n- **Status:** `{}`\n- **Exit code:** `{}`\n",
+                summary.component, summary.status, summary.exit_code
+            ),
+            exit_code,
+        )),
+        TraceCommandOutput::List(list) => {
+            let mut markdown = format!("# Trace Scenarios: `{}`\n\n", list.component_id);
+            for scenario in list.scenarios {
+                markdown.push_str(&format!("- `{}`", scenario.id));
+                if let Some(summary) = scenario.summary {
+                    markdown.push_str(&format!(": {}", summary));
+                }
+                markdown.push('\n');
+            }
+            Ok((markdown, exit_code))
+        }
+    }
 }
 
 pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutput> {
@@ -108,6 +160,13 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
             overlays: args.overlays,
             keep_overlay: args.keep_overlay,
             extra_workloads,
+            span_definitions: args.spans,
+            baseline_flags: BaselineFlags {
+                baseline: args.baseline_args.baseline,
+                ignore_baseline: args.baseline_args.ignore_baseline,
+                ratchet: args.baseline_args.ratchet,
+            },
+            regression_threshold_percent: args.regression_threshold,
         },
         &run_dir,
         rig_state.clone(),
@@ -380,6 +439,11 @@ mod tests {
                 setting_args: SettingArgs::default(),
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
+                report: None,
+                spans: Vec::new(),
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 overlays: Vec::new(),
                 keep_overlay: false,
             })
@@ -458,6 +522,11 @@ mod tests {
                 setting_args: SettingArgs::default(),
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
+                report: None,
+                spans: Vec::new(),
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 overlays: Vec::new(),
                 keep_overlay: false,
             })
@@ -492,6 +561,11 @@ mod tests {
                     setting_args: SettingArgs::default(),
                     _json: HiddenJsonArgs::default(),
                     json_summary: false,
+                    report: None,
+                    spans: Vec::new(),
+                    baseline_args: BaselineArgs::default(),
+                    regression_threshold:
+                        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                     overlays: Vec::new(),
                     keep_overlay: false,
                 },

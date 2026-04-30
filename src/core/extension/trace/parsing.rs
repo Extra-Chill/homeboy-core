@@ -48,10 +48,54 @@ pub struct TraceResults {
     pub rig: Option<RigStateSnapshot>,
     #[serde(default)]
     pub timeline: Vec<TraceEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub span_definitions: Vec<TraceSpanDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub span_results: Vec<TraceSpanResult>,
     #[serde(default)]
     pub assertions: Vec<TraceAssertion>,
     #[serde(default)]
     pub artifacts: Vec<TraceArtifact>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceSpanDefinition {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceSpanStatus {
+    Ok,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceSpanResult {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+    pub status: TraceSpanStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_t_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_t_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl TraceSpanResult {
+    pub fn is_ok(&self) -> bool {
+        self.status == TraceSpanStatus::Ok
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -153,6 +197,7 @@ mod tests {
                 "status":"fail",
                 "summary":"Window reopened after close",
                 "timeline":[{"t_ms":0,"source":"desktop","event":"window.closed","data":{"id":1}}],
+                "span_definitions":[{"id":"close_to_assertion","from":"desktop.window.closed","to":"assertion.checked"}],
                 "assertions":[{"id":"no-window-reopen","status":"fail","message":"Window reopened"}],
                 "artifacts":[{"label":"main log","path":"artifacts/main.log"}]
             }"#,
@@ -162,6 +207,7 @@ mod tests {
         assert_eq!(parsed.component_id, "studio");
         assert_eq!(parsed.status, TraceStatus::Fail);
         assert_eq!(parsed.timeline[0].t_ms, 0);
+        assert_eq!(parsed.span_definitions[0].id, "close_to_assertion");
         assert_eq!(parsed.assertions[0].id, "no-window-reopen");
         assert_eq!(parsed.artifacts[0].path, "artifacts/main.log");
     }
@@ -172,7 +218,7 @@ mod tests {
         let path = temp.path().join("trace-results.json");
         std::fs::write(
             &path,
-            r#"{"component_id":"studio","scenario_id":"x","status":"pass","timeline":[],"assertions":[],"artifacts":[]}"#,
+            r#"{"component_id":"studio","scenario_id":"x","status":"pass","timeline":[],"span_results":[],"assertions":[],"artifacts":[]}"#,
         )
         .expect("trace results should be written");
 
