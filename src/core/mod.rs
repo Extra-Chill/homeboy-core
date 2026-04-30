@@ -17,6 +17,7 @@ pub mod fleet;
 pub mod git;
 pub mod http_api;
 pub mod issues;
+pub mod observation;
 pub mod output;
 pub mod project;
 pub mod refactor;
