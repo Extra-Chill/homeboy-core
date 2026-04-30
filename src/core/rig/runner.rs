@@ -251,12 +251,8 @@ fn repair_symlink(rig: &RigSpec, link: &SymlinkSpec) -> Result<RepairResourceRep
             let previous_target = current.to_string_lossy().into_owned();
             if current == target_path {
                 return Ok(RepairResourceReport {
-                    kind: "symlink".to_string(),
-                    path,
-                    expected_target: Some(expected_target),
-                    previous_target: Some(previous_target),
                     status: "unchanged".to_string(),
-                    error: None,
+                    ..symlink_resource(path, expected_target, Some(previous_target), None)
                 });
             }
 
@@ -267,55 +263,26 @@ fn repair_symlink(rig: &RigSpec, link: &SymlinkSpec) -> Result<RepairResourceRep
                     format!("remove drifted symlink {}: {}", link_path.display(), e),
                 )
             })?;
-            create_symlink(&target_path, &link_path).map_err(|e| {
-                Error::rig_pipeline_failed(
-                    &rig.id,
-                    "repair",
-                    format!(
-                        "create {} → {}: {}",
-                        link_path.display(),
-                        target_path.display(),
-                        e
-                    ),
-                )
-            })?;
+            create_repair_symlink(rig, &target_path, &link_path)?;
             Ok(RepairResourceReport {
-                kind: "symlink".to_string(),
-                path,
-                expected_target: Some(expected_target),
-                previous_target: Some(previous_target),
                 status: "repaired".to_string(),
-                error: None,
+                ..symlink_resource(path, expected_target, Some(previous_target), None)
             })
         }
         Ok(_) => Ok(RepairResourceReport {
-            kind: "symlink".to_string(),
-            path,
-            expected_target: Some(expected_target),
-            previous_target: None,
             status: "blocked".to_string(),
-            error: Some("path exists and is not a symlink; repair will not remove it".to_string()),
+            ..symlink_resource(
+                path,
+                expected_target,
+                None,
+                Some("path exists and is not a symlink; repair will not remove it".to_string()),
+            )
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            create_symlink(&target_path, &link_path).map_err(|e| {
-                Error::rig_pipeline_failed(
-                    &rig.id,
-                    "repair",
-                    format!(
-                        "create {} → {}: {}",
-                        link_path.display(),
-                        target_path.display(),
-                        e
-                    ),
-                )
-            })?;
+            create_repair_symlink(rig, &target_path, &link_path)?;
             Ok(RepairResourceReport {
-                kind: "symlink".to_string(),
-                path,
-                expected_target: Some(expected_target),
-                previous_target: None,
                 status: "repaired".to_string(),
-                error: None,
+                ..symlink_resource(path, expected_target, None, None)
             })
         }
         Err(e) => Err(Error::rig_pipeline_failed(
@@ -324,6 +291,37 @@ fn repair_symlink(rig: &RigSpec, link: &SymlinkSpec) -> Result<RepairResourceRep
             format!("inspect {}: {}", link_path.display(), e),
         )),
     }
+}
+
+fn symlink_resource(
+    path: String,
+    expected_target: String,
+    previous_target: Option<String>,
+    error: Option<String>,
+) -> RepairResourceReport {
+    RepairResourceReport {
+        kind: "symlink".to_string(),
+        path,
+        expected_target: Some(expected_target),
+        previous_target,
+        status: String::new(),
+        error,
+    }
+}
+
+fn create_repair_symlink(rig: &RigSpec, target_path: &Path, link_path: &Path) -> Result<()> {
+    create_symlink(target_path, link_path).map_err(|e| {
+        Error::rig_pipeline_failed(
+            &rig.id,
+            "repair",
+            format!(
+                "create {} → {}: {}",
+                link_path.display(),
+                target_path.display(),
+                e
+            ),
+        )
+    })
 }
 
 #[cfg(unix)]
