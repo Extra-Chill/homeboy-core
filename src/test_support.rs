@@ -10,12 +10,17 @@ pub(crate) struct HomeGuard {
 
 pub(crate) struct AuditGuard {
     _guard: MutexGuard<'static, ()>,
+    _home_guard: MutexGuard<'static, ()>,
 }
 
 impl AuditGuard {
     pub(crate) fn new() -> Self {
+        let home_guard = home_lock().lock().unwrap_or_else(|e| e.into_inner());
         let guard = audit_lock().lock().unwrap_or_else(|e| e.into_inner());
-        Self { _guard: guard }
+        Self {
+            _guard: guard,
+            _home_guard: home_guard,
+        }
     }
 }
 
