@@ -62,6 +62,63 @@ pub struct Grammar {
     /// Optional: extensions that don't provide this get no contract extraction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<ContractGrammar>,
+
+    /// Fingerprint extraction metadata used by the core fingerprint engine.
+    ///
+    /// Structural parsing stays generic; language/framework policy such as
+    /// keyword preservation, ignored call names, framework contract signatures,
+    /// and hook concepts is supplied by the grammar owner.
+    #[serde(default, skip_serializing_if = "FingerprintGrammar::is_empty")]
+    pub fingerprint: FingerprintGrammar,
+}
+
+/// Grammar-owned metadata for fingerprint extraction.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FingerprintGrammar {
+    /// Identifiers preserved during structural normalization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+
+    /// Function/method-like names ignored when extracting internal call edges.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skip_calls: Vec<String>,
+
+    /// Method names whose parameters are fixed by a framework/language contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contract_method_names: Vec<String>,
+
+    /// Type hints whose parameters are fixed by a framework callback contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contract_type_hints: Vec<String>,
+
+    /// Symbol concept → hook kind mapping, e.g. `do_action = "action"`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub hook_concepts: HashMap<String, String>,
+
+    /// Symbol concepts treated as registrations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub registration_concepts: Vec<String>,
+
+    /// Registration names to suppress, e.g. ubiquitous language macros.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub registration_skip_names: Vec<String>,
+
+    /// Registration name prefixes to suppress.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub registration_skip_prefixes: Vec<String>,
+}
+
+impl FingerprintGrammar {
+    pub fn is_empty(&self) -> bool {
+        self.keywords.is_empty()
+            && self.skip_calls.is_empty()
+            && self.contract_method_names.is_empty()
+            && self.contract_type_hints.is_empty()
+            && self.hook_concepts.is_empty()
+            && self.registration_concepts.is_empty()
+            && self.registration_skip_names.is_empty()
+            && self.registration_skip_prefixes.is_empty()
+    }
 }
 
 /// Grammar section for function contract extraction.
@@ -269,6 +326,13 @@ pub struct LanguageMeta {
 
     /// File extensions this grammar applies to.
     pub extensions: Vec<String>,
+
+    /// Optional import parser implementation to reuse for this grammar.
+    ///
+    /// Example: a framework-specific grammar can set `id = "wordpress"` while
+    /// keeping PHP namespace import semantics via `import_parser = "php"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_parser: Option<String>,
 }
 
 /// How comments work in this language.
@@ -983,6 +1047,7 @@ mod tests {
             language: LanguageMeta {
                 id: "rust".to_string(),
                 extensions: vec!["rs".to_string()],
+                import_parser: None,
             },
             comments: CommentSyntax {
                 line: vec!["//".to_string()],
@@ -996,6 +1061,7 @@ mod tests {
             },
             blocks: BlockSyntax::default(),
             contract: None,
+            fingerprint: FingerprintGrammar::default(),
             patterns: {
                 let mut p = HashMap::new();
                 p.insert(
@@ -1056,6 +1122,7 @@ mod tests {
             language: LanguageMeta {
                 id: "php".to_string(),
                 extensions: vec!["php".to_string()],
+                import_parser: None,
             },
             comments: CommentSyntax {
                 line: vec!["//".to_string(), "#".to_string()],
@@ -1069,6 +1136,7 @@ mod tests {
             },
             blocks: BlockSyntax::default(),
             contract: None,
+            fingerprint: FingerprintGrammar::default(),
             patterns: {
                 let mut p = HashMap::new();
                 p.insert(

@@ -107,7 +107,11 @@ pub fn module_path_from_file(file_path: &str) -> String {
 pub fn parse_imports(content: &str, grammar: &Grammar, relative_path: &str) -> Vec<ImportRef> {
     let symbols = grammar::extract(content, grammar);
     let lines: Vec<&str> = content.lines().collect();
-    let language_id = grammar.language.id.as_str();
+    let import_parser = grammar
+        .language
+        .import_parser
+        .as_deref()
+        .unwrap_or(grammar.language.id.as_str());
 
     symbols
         .iter()
@@ -116,9 +120,9 @@ pub fn parse_imports(content: &str, grammar: &Grammar, relative_path: &str) -> V
             let raw_path = s.get("path")?;
             let line_text = lines.get(s.line.saturating_sub(1)).unwrap_or(&"");
 
-            let (module_path, imported_names) = match language_id {
+            let (module_path, imported_names) = match import_parser {
                 "rust" => parse_rust_import_path(raw_path),
-                "php" | "wordpress" => parse_php_import_path(raw_path),
+                "php" => parse_php_import_path(raw_path),
                 _ => (raw_path.to_string(), vec![]),
             };
 
@@ -566,6 +570,34 @@ mod tests {
         let (module, names) = parse_php_import_path("App\\Models\\User");
         assert_eq!(module, "App\\Models");
         assert_eq!(names, vec!["User"]);
+    }
+
+    #[test]
+    fn parse_imports_uses_manifest_import_parser_alias() {
+        let grammar: Grammar = serde_json::from_value(serde_json::json!({
+            "language": {
+                "id": "framework-php",
+                "extensions": ["php"],
+                "import_parser": "php"
+            },
+            "comments": { "line": ["//"], "block": [["/*", "*/"]], "doc": [] },
+            "strings": { "quotes": ["\"", "'"], "escape": "\\", "multiline": [] },
+            "blocks": { "open": "{", "close": "}" },
+            "patterns": {
+                "import": {
+                    "regex": "^\\s*use\\s+([\\w\\\\]+)\\s*;",
+                    "captures": { "path": 1 },
+                    "context": "top_level"
+                }
+            }
+        }))
+        .expect("grammar should deserialize");
+
+        let imports = parse_imports("<?php\nuse App\\Models\\User;\n", &grammar, "src/User.php");
+
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].module_path, "App\\Models");
+        assert_eq!(imports[0].imported_names, vec!["User"]);
     }
 
     #[test]

@@ -810,6 +810,27 @@ pub struct BuildConfig {
 pub struct LintConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension_script: Option<String>,
+
+    /// Changed-file routing rules for split lint runners.
+    ///
+    /// When present, changed-file lint scopes files to the matching runner step
+    /// selectors instead of passing every changed file through one invocation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_file_routes: Vec<LintChangedFileRoute>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LintChangedFileRoute {
+    /// File extensions matched without leading dots (e.g. `php`, `tsx`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
+
+    /// Glob patterns matched against component-relative file paths.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub globs: Vec<String>,
+
+    /// Extension runner step selector, e.g. `phpcs,phpstan` or `eslint`.
+    pub step: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

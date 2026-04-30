@@ -7,9 +7,10 @@
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
+use crate::engine::shell;
 use crate::extension::lint::baseline::{self as lint_baseline, LintFinding};
 use crate::extension::lint::build_lint_runner;
-use crate::extension::{self, ExtensionCapability};
+use crate::extension::{self, ExtensionCapability, LintChangedFileRoute};
 use crate::git;
 use crate::refactor::AppliedRefactor;
 use serde::Serialize;
@@ -49,7 +50,7 @@ pub struct LintRunWorkflowResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ScopedLintRun {
     glob: String,
-    step: Option<&'static str>,
+    step: Option<String>,
 }
 
 /// Run the main lint workflow.
@@ -134,10 +135,7 @@ pub fn run_main_lint_workflow(
     // listed first; the canonical `homeboy refactor --from lint --write`
     // invocation follows for users who want the longer form.
     if !lint_clean {
-        hints.push(format!(
-            "Auto-fix: homeboy lint {} --fix (or homeboy refactor {} --from lint --write)",
-            args.component_label, args.component_label
-        ));
+        hints.push(build_autofix_hint(&args));
         hints.push("Some issues may require manual fixes".to_string());
     }
 
@@ -177,6 +175,77 @@ pub fn run_main_lint_workflow(
     })
 }
 
+fn build_autofix_hint(args: &LintRunWorkflowArgs) -> String {
+    let lint_command = lint_autofix_command(args);
+
+    if refactor_can_preserve_scope(args) {
+        let refactor_command = refactor_autofix_command(args);
+        format!("Auto-fix: {lint_command} (or {refactor_command})")
+    } else {
+        format!("Auto-fix: {lint_command}")
+    }
+}
+
+fn lint_autofix_command(args: &LintRunWorkflowArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "lint".to_string(),
+        args.component_label.clone(),
+    ];
+
+    append_common_scope_args(&mut parts, args);
+    parts.push("--fix".to_string());
+
+    shell::quote_args(&parts)
+}
+
+fn refactor_autofix_command(args: &LintRunWorkflowArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "refactor".to_string(),
+        args.component_label.clone(),
+    ];
+
+    append_path_and_changed_since_args(&mut parts, args);
+    parts.extend([
+        "--from".to_string(),
+        "lint".to_string(),
+        "--write".to_string(),
+    ]);
+
+    shell::quote_args(&parts)
+}
+
+fn refactor_can_preserve_scope(args: &LintRunWorkflowArgs) -> bool {
+    args.file.is_none() && args.glob.is_none() && !args.changed_only
+}
+
+fn append_common_scope_args(parts: &mut Vec<String>, args: &LintRunWorkflowArgs) {
+    append_path_and_changed_since_args(parts, args);
+    if let Some(file) = &args.file {
+        parts.push("--file".to_string());
+        parts.push(file.clone());
+    }
+    if let Some(glob) = &args.glob {
+        parts.push("--glob".to_string());
+        parts.push(glob.clone());
+    }
+    if args.changed_only {
+        parts.push("--changed-only".to_string());
+    }
+}
+
+fn append_path_and_changed_since_args(parts: &mut Vec<String>, args: &LintRunWorkflowArgs) {
+    if let Some(path) = &args.path_override {
+        parts.push("--path".to_string());
+        parts.push(path.clone());
+    }
+    if let Some(changed_since) = &args.changed_since {
+        parts.push("--changed-since".to_string());
+        parts.push(changed_since.clone());
+    }
+}
+
 fn run_scoped_lint_runs(
     component: &Component,
     args: &LintRunWorkflowArgs,
@@ -206,7 +275,7 @@ fn run_scoped_lint_runs(
             args.sniffs.as_deref(),
             args.exclude_sniffs.as_deref(),
             args.category.as_deref(),
-            run.step,
+            run.step.as_deref(),
             active_run_dir,
         )?
         .run()?;
@@ -290,52 +359,69 @@ fn resolve_scoped_lint_runs(
 }
 
 fn build_changed_lint_runs(component: &Component, changed_files: &[String]) -> Vec<ScopedLintRun> {
-    if !component_uses_extension(component, "wordpress") {
+    let routes = changed_file_routes_for_component(component);
+    build_changed_lint_runs_with_routes(component, changed_files, &routes)
+}
+
+fn build_changed_lint_runs_with_routes(
+    component: &Component,
+    changed_files: &[String],
+    routes: &[LintChangedFileRoute],
+) -> Vec<ScopedLintRun> {
+    if routes.is_empty() {
         return vec![ScopedLintRun {
             glob: glob_for_files(&component.local_path, changed_files),
             step: None,
         }];
     }
 
-    let php_files: Vec<String> = changed_files
-        .iter()
-        .filter(|file| has_extension(file, &["php"]))
-        .cloned()
-        .collect();
-    let js_files: Vec<String> = changed_files
-        .iter()
-        .filter(|file| has_extension(file, &["js", "jsx", "ts", "tsx"]))
-        .cloned()
-        .collect();
-
     let mut runs = Vec::new();
-    if !php_files.is_empty() {
-        runs.push(ScopedLintRun {
-            glob: glob_for_files(&component.local_path, &php_files),
-            step: Some("phpcs,phpstan"),
-        });
-    }
-    if !js_files.is_empty() {
-        runs.push(ScopedLintRun {
-            glob: glob_for_files(&component.local_path, &js_files),
-            step: Some("eslint"),
-        });
+    for route in routes {
+        let matched_files: Vec<String> = changed_files
+            .iter()
+            .filter(|file| route_matches_file(route, file))
+            .cloned()
+            .collect();
+
+        if !matched_files.is_empty() {
+            runs.push(ScopedLintRun {
+                glob: glob_for_files(&component.local_path, &matched_files),
+                step: Some(route.step.clone()),
+            });
+        }
     }
     runs
 }
 
-fn component_uses_extension(component: &Component, extension_id: &str) -> bool {
-    component
-        .extensions
-        .as_ref()
-        .is_some_and(|extensions| extensions.contains_key(extension_id))
+fn changed_file_routes_for_component(component: &Component) -> Vec<LintChangedFileRoute> {
+    let Some(extensions) = component.extensions.as_ref() else {
+        return Vec::new();
+    };
+
+    extensions
+        .keys()
+        .filter_map(|extension_id| extension::load_extension(extension_id).ok())
+        .filter_map(|manifest| manifest.lint)
+        .flat_map(|lint| lint.changed_file_routes)
+        .collect()
 }
 
-fn has_extension(file: &str, extensions: &[&str]) -> bool {
+fn route_matches_file(route: &LintChangedFileRoute, file: &str) -> bool {
+    if !route.extensions.is_empty() && has_extension(file, &route.extensions) {
+        return true;
+    }
+
+    route
+        .globs
+        .iter()
+        .any(|pattern| glob_match::glob_match(pattern, file))
+}
+
+fn has_extension(file: &str, extensions: &[String]) -> bool {
     Path::new(file)
         .extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extensions.contains(&extension))
+        .is_some_and(|extension| extensions.iter().any(|expected| expected == extension))
 }
 
 fn glob_for_files(root: &str, files: &[String]) -> String {
@@ -398,21 +484,83 @@ fn process_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::{ScopedExtensionConfig, SelfCheckConfig};
-    use std::collections::HashMap;
+    use crate::component::SelfCheckConfig;
+    use crate::engine::baseline::BaselineFlags;
 
-    fn wordpress_component(root: &str) -> Component {
-        let mut component = Component::new(
+    fn component(root: &str) -> Component {
+        Component::new(
             "fixture".to_string(),
             root.to_string(),
             "".to_string(),
             None,
-        );
-        component.extensions = Some(HashMap::from([(
-            "wordpress".to_string(),
-            ScopedExtensionConfig::default(),
-        )]));
-        component
+        )
+    }
+
+    fn split_lint_routes() -> Vec<LintChangedFileRoute> {
+        vec![
+            LintChangedFileRoute {
+                extensions: vec!["php".to_string()],
+                globs: Vec::new(),
+                step: "phpcs,phpstan".to_string(),
+            },
+            LintChangedFileRoute {
+                extensions: vec![
+                    "js".to_string(),
+                    "jsx".to_string(),
+                    "ts".to_string(),
+                    "tsx".to_string(),
+                ],
+                globs: Vec::new(),
+                step: "eslint".to_string(),
+            },
+        ]
+    }
+
+    fn lint_args() -> LintRunWorkflowArgs {
+        LintRunWorkflowArgs {
+            component_label: "demo".to_string(),
+            component_id: "demo".to_string(),
+            path_override: None,
+            settings: Vec::new(),
+            summary: false,
+            file: None,
+            glob: None,
+            changed_only: false,
+            changed_since: None,
+            errors_only: false,
+            sniffs: None,
+            exclude_sniffs: None,
+            category: None,
+            baseline_flags: BaselineFlags::default(),
+        }
+    }
+
+    #[test]
+    fn autofix_hint_preserves_changed_since_scope() {
+        let mut args = lint_args();
+        args.path_override = Some("/tmp/pr checkout".to_string());
+        args.changed_since = Some("origin/main".to_string());
+
+        let hint = build_autofix_hint(&args);
+
+        assert!(hint.contains(
+            "homeboy lint demo --path '/tmp/pr checkout' --changed-since origin/main --fix"
+        ));
+        assert!(hint.contains(
+            "homeboy refactor demo --path '/tmp/pr checkout' --changed-since origin/main --from lint --write"
+        ));
+    }
+
+    #[test]
+    fn autofix_hint_preserves_changed_only_and_file_scope() {
+        let mut args = lint_args();
+        args.file = Some("src/lib.rs".to_string());
+        args.changed_only = true;
+
+        let hint = build_autofix_hint(&args);
+
+        assert!(hint.contains("homeboy lint demo --file src/lib.rs --changed-only --fix"));
+        assert!(!hint.contains("homeboy refactor"));
     }
 
     #[test]
@@ -441,40 +589,42 @@ mod tests {
     }
 
     #[test]
-    fn wordpress_changed_php_files_route_to_php_steps_only() {
-        let component = wordpress_component("/repo");
-        let runs = build_changed_lint_runs(
+    fn manifest_changed_php_files_route_to_php_steps_only() {
+        let component = component("/repo");
+        let runs = build_changed_lint_runs_with_routes(
             &component,
             &["data-machine.php".to_string(), "inc/Foo.php".to_string()],
+            &split_lint_routes(),
         );
 
         assert_eq!(
             runs,
             vec![ScopedLintRun {
                 glob: "{/repo/data-machine.php,/repo/inc/Foo.php}".to_string(),
-                step: Some("phpcs,phpstan"),
+                step: Some("phpcs,phpstan".to_string()),
             }]
         );
     }
 
     #[test]
-    fn wordpress_changed_markdown_files_do_not_route_to_eslint() {
-        let component = wordpress_component("/repo");
-        let runs = build_changed_lint_runs(
+    fn manifest_changed_markdown_files_do_not_route_to_eslint() {
+        let component = component("/repo");
+        let runs = build_changed_lint_runs_with_routes(
             &component,
             &[
                 "docs/core-system/agent-bundles.md".to_string(),
                 "README.md".to_string(),
             ],
+            &split_lint_routes(),
         );
 
         assert!(runs.is_empty());
     }
 
     #[test]
-    fn wordpress_changed_mixed_php_and_js_files_split_by_runner() {
-        let component = wordpress_component("/repo");
-        let runs = build_changed_lint_runs(
+    fn manifest_changed_mixed_php_and_js_files_split_by_runner() {
+        let component = component("/repo");
+        let runs = build_changed_lint_runs_with_routes(
             &component,
             &[
                 "inc/Foo.php".to_string(),
@@ -482,6 +632,7 @@ mod tests {
                 "assets/app.js".to_string(),
                 "assets/view.tsx".to_string(),
             ],
+            &split_lint_routes(),
         );
 
         assert_eq!(
@@ -489,14 +640,57 @@ mod tests {
             vec![
                 ScopedLintRun {
                     glob: "/repo/inc/Foo.php".to_string(),
-                    step: Some("phpcs,phpstan"),
+                    step: Some("phpcs,phpstan".to_string()),
                 },
                 ScopedLintRun {
                     glob: "{/repo/assets/app.js,/repo/assets/view.tsx}".to_string(),
-                    step: Some("eslint"),
+                    step: Some("eslint".to_string()),
                 },
             ]
         );
+    }
+
+    #[test]
+    fn manifest_changed_files_can_route_by_glob() {
+        let component = component("/repo");
+        let routes = vec![LintChangedFileRoute {
+            extensions: Vec::new(),
+            globs: vec!["assets/**/*.css".to_string()],
+            step: "stylelint".to_string(),
+        }];
+        let runs = build_changed_lint_runs_with_routes(
+            &component,
+            &["assets/css/admin.css".to_string(), "README.md".to_string()],
+            &routes,
+        );
+
+        assert_eq!(
+            runs,
+            vec![ScopedLintRun {
+                glob: "/repo/assets/css/admin.css".to_string(),
+                step: Some("stylelint".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn lint_config_deserializes_changed_file_routes() {
+        let config: crate::extension::LintConfig = serde_json::from_str(
+            r#"{
+                "extension_script": "scripts/lint.sh",
+                "changed_file_routes": [
+                    { "extensions": ["php"], "step": "phpcs,phpstan" },
+                    { "globs": ["assets/**/*.css"], "step": "stylelint" }
+                ]
+            }"#,
+        )
+        .expect("parse lint config");
+
+        assert_eq!(config.changed_file_routes.len(), 2);
+        assert_eq!(config.changed_file_routes[0].extensions, vec!["php"]);
+        assert_eq!(config.changed_file_routes[0].step, "phpcs,phpstan");
+        assert_eq!(config.changed_file_routes[1].globs, vec!["assets/**/*.css"]);
+        assert_eq!(config.changed_file_routes[1].step, "stylelint");
     }
 
     #[test]
