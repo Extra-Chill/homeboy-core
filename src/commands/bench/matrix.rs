@@ -369,6 +369,10 @@ fn run_component_with_rig_context(
     }
 
     let run_dir = RunDir::create()?;
+    let resource_run = homeboy::engine::resource::ResourceSummaryRun::start(Some(format!(
+        "bench {}",
+        effective_id
+    )));
 
     let extra_workloads = rig_spec
         .as_ref()
@@ -427,7 +431,9 @@ fn run_component_with_rig_context(
             extra_workloads,
         },
         &run_dir,
-    )?;
+    );
+    resource_run.write_to_run_dir(&run_dir)?;
+    let workflow = workflow?;
 
     Ok(extension_bench::from_main_workflow_with_rig(
         workflow,

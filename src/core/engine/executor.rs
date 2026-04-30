@@ -156,12 +156,14 @@ fn try_execute_direct(
             stderr: String::from_utf8_lossy(&out.stderr).to_string(),
             success: out.status.success(),
             exit_code: out.status.code().unwrap_or(-1),
+            child_resource: None,
         }),
         Err(e) => Ok(CommandOutput {
             stdout: String::new(),
             stderr: format!("Command error: {}", e),
             success: false,
             exit_code: -1,
+            child_resource: None,
         }),
     }
 }

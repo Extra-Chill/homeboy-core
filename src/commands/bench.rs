@@ -434,6 +434,10 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
         .unwrap_or_default();
 
     let run_dir = RunDir::create()?;
+    let resource_run = homeboy::engine::resource::ResourceSummaryRun::start(Some(format!(
+        "bench list {}",
+        effective_id
+    )));
     let output = extension_bench::run_bench_list_workflow(
         &ctx.component,
         BenchListWorkflowArgs {
@@ -461,7 +465,9 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
             extra_workloads,
         },
         &run_dir,
-    )?;
+    );
+    resource_run.write_to_run_dir(&run_dir)?;
+    let output = output?;
 
     Ok((BenchOutput::List(output), 0))
 }
