@@ -1,7 +1,7 @@
 //! Tests for active rig run leases.
 
 use crate::error::ErrorCode;
-use crate::rig::lease::acquire_active_run_lease;
+use crate::rig::lease::{acquire_active_run_lease, active_run_leases};
 use crate::rig::spec::{RigResourcesSpec, RigSpec};
 use crate::rig::{run_up, RigRunLease};
 use crate::test_support::with_isolated_home;
@@ -52,6 +52,28 @@ fn test_acquire_active_run_lease_blocks_overlapping_resources_until_drop() {
         assert!(acquire_active_run_lease(&studio_bfb, "up")
             .expect("lease after drop")
             .is_some());
+    });
+}
+
+#[test]
+fn test_active_run_leases_lists_live_leases_without_mutating_them() {
+    with_isolated_home(|_| {
+        let studio = rig("studio", resources());
+
+        let lease = acquire_active_run_lease(&studio, "up")
+            .expect("first lease")
+            .expect("resourceful rig leases");
+        let leases = active_run_leases().expect("list active leases");
+
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].rig_id, "studio");
+        assert_eq!(leases[0].command, "up");
+        assert_eq!(leases[0].pid, std::process::id());
+
+        drop(lease);
+        assert!(active_run_leases()
+            .expect("list active leases after drop")
+            .is_empty());
     });
 }
 

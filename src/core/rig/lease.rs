@@ -190,6 +190,11 @@ fn live_leases() -> Result<Vec<RigRunLease>> {
     Ok(leases)
 }
 
+/// List active rig run leases without acquiring or mutating leases.
+pub fn active_run_leases() -> Result<Vec<RigRunLease>> {
+    live_leases()
+}
+
 fn lease_files() -> Result<Vec<PathBuf>> {
     let dir = paths::rig_leases_dir()?;
     if !dir.exists() {

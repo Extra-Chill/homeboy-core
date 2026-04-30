@@ -2,8 +2,9 @@ use clap::{Command, CommandFactory, Parser, Subcommand};
 
 use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
-    deps, extension, file, fleet, git, issues, lint, logs, project, refactor, release, report,
-    review, rig, self_cmd, server, ssh, stack, status, test, trace, triage, undo, upgrade, version,
+    deps, doctor, extension, file, fleet, git, issues, lint, logs, project, refactor, release,
+    report, review, rig, self_cmd, server, ssh, stack, status, test, trace, triage, undo, upgrade,
+    version,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -45,6 +46,8 @@ pub enum Commands {
     /// Manage component dependencies
     #[command(visible_alias = "dependencies")]
     Deps(deps::DepsArgs),
+    /// Read-only local diagnostics for Homeboy-adjacent work
+    Doctor(doctor::DoctorArgs),
     /// Remote file operations
     File(file::FileArgs),
     /// Manage fleets (groups of projects)
@@ -188,6 +191,7 @@ mod tests {
 
         assert!(surface.contains_path(&["self"]));
         assert!(surface.contains_path(&["self", "status"]));
+        assert!(surface.contains_path(&["doctor", "resources"]));
     }
 
     #[test]
@@ -196,6 +200,7 @@ mod tests {
 
         assert!(surface.contains_path(&["self"]));
         assert!(surface.contains_path(&["self", "status"]));
+        assert!(surface.contains_path(&["doctor", "resources"]));
     }
 
     #[test]
