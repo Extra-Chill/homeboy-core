@@ -51,6 +51,7 @@ fn lint_args(root: &Path) -> LintArgs {
         setting_args: SettingArgs::default(),
         baseline_args: BaselineArgs::default(),
         _json: HiddenJsonArgs::default(),
+        json_summary: false,
     }
 }
 

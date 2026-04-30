@@ -275,6 +275,7 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         setting_args: Default::default(),
         baseline_args: args.baseline_args.clone(),
         _json: Default::default(),
+        json_summary: args.summary,
     };
     let (lint_output, lint_exit) = lint::run(lint_args, global)?;
     let lint_passed = lint_exit == 0;

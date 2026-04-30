@@ -36,6 +36,8 @@ pub struct ExtensionRunner {
     /// Override the command string instead of constructing from extension_path + script_path.
     /// Used by Build when `command_template` produces a pre-resolved command.
     command_override: Option<String>,
+    /// Tee runner stdout/stderr to the terminal while capturing it.
+    passthrough: bool,
 }
 
 impl ExtensionRunner {
@@ -60,6 +62,7 @@ impl ExtensionRunner {
             pre_loaded_component: None,
             working_dir: None,
             command_override: None,
+            passthrough: true,
         }
     }
 
@@ -140,6 +143,12 @@ impl ExtensionRunner {
         self
     }
 
+    /// Control whether runner output is streamed to the terminal while captured.
+    pub(crate) fn passthrough(mut self, passthrough: bool) -> Self {
+        self.passthrough = passthrough;
+        self
+    }
+
     /// Execute the extension runner script.
     ///
     /// Performs the full orchestration:
@@ -208,6 +217,7 @@ impl ExtensionRunner {
             env_vars,
             self.working_dir.as_deref(),
             self.command_override.as_deref(),
+            self.passthrough,
         )
     }
 }
