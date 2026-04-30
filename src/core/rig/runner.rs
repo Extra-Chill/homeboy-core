@@ -1,11 +1,11 @@
-//! Top-level rig operations: `up`, `check`, `down`, `status`, `snapshot`.
+//! Top-level rig operations: `up`, `check`, `down`, `repair`, `status`, `snapshot`.
 //!
 //! Each function returns a report struct that the CLI layer serializes to
 //! JSON. Reports are the contract — they should be stable across minor
 //! homeboy versions.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -15,12 +15,12 @@ use super::pipeline::{
     cleanup_shared_paths, run_pipeline, run_pipeline_check_groups, PipelineOutcome,
 };
 use super::service::{self, ServiceStatus};
-use super::spec::{RigSpec, ServiceKind};
+use super::spec::{RigSpec, ServiceKind, SymlinkSpec};
 use super::state::{
     now_rfc3339, ComponentSnapshot, MaterializedRigState, RigState, RigStateSnapshot,
 };
 use crate::engine::command::run_in_optional;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// Report from `rig up`.
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +45,30 @@ pub struct DownReport {
     pub stopped: Vec<String>,
     pub pipeline: Option<PipelineOutcome>,
     pub success: bool,
+}
+
+/// Report from `rig repair`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RepairReport {
+    pub rig_id: String,
+    pub resources: Vec<RepairResourceReport>,
+    pub repaired: usize,
+    pub unchanged: usize,
+    pub blocked: usize,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RepairResourceReport {
+    pub kind: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_target: Option<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Report from `rig status`.
@@ -180,6 +204,153 @@ pub fn run_down(rig: &RigSpec) -> Result<DownReport> {
         pipeline,
         success,
     })
+}
+
+/// Repair safe declared drift without running the heavy `up` pipeline.
+///
+/// v1 intentionally repairs only declared symlinks. It will create missing
+/// symlinks and replace drifted symlinks, but refuses to remove real
+/// files/directories at the link path.
+pub fn run_repair(rig: &RigSpec) -> Result<RepairReport> {
+    let _lease = acquire_active_run_lease(rig, "repair")?;
+    let mut resources = Vec::new();
+    let mut repaired = 0;
+    let mut unchanged = 0;
+    let mut blocked = 0;
+
+    for link in &rig.symlinks {
+        let resource = repair_symlink(rig, link)?;
+        match resource.status.as_str() {
+            "repaired" => repaired += 1,
+            "unchanged" => unchanged += 1,
+            "blocked" => blocked += 1,
+            _ => {}
+        }
+        resources.push(resource);
+    }
+
+    Ok(RepairReport {
+        rig_id: rig.id.clone(),
+        success: blocked == 0,
+        resources,
+        repaired,
+        unchanged,
+        blocked,
+    })
+}
+
+fn repair_symlink(rig: &RigSpec, link: &SymlinkSpec) -> Result<RepairResourceReport> {
+    let link_path = PathBuf::from(expand_vars(rig, &link.link));
+    let target_path = PathBuf::from(expand_vars(rig, &link.target));
+    let path = link_path.to_string_lossy().into_owned();
+    let expected_target = target_path.to_string_lossy().into_owned();
+
+    if let Some(parent) = link_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Error::rig_pipeline_failed(
+                &rig.id,
+                "repair",
+                format!("create parent of {}: {}", link_path.display(), e),
+            )
+        })?;
+    }
+
+    match std::fs::symlink_metadata(&link_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let current = std::fs::read_link(&link_path).map_err(|e| {
+                Error::rig_pipeline_failed(
+                    &rig.id,
+                    "repair",
+                    format!("read {}: {}", link_path.display(), e),
+                )
+            })?;
+            let previous_target = current.to_string_lossy().into_owned();
+            if current == target_path {
+                return Ok(RepairResourceReport {
+                    status: "unchanged".to_string(),
+                    ..symlink_resource(path, expected_target, Some(previous_target), None)
+                });
+            }
+
+            std::fs::remove_file(&link_path).map_err(|e| {
+                Error::rig_pipeline_failed(
+                    &rig.id,
+                    "repair",
+                    format!("remove drifted symlink {}: {}", link_path.display(), e),
+                )
+            })?;
+            create_repair_symlink(rig, &target_path, &link_path)?;
+            Ok(RepairResourceReport {
+                status: "repaired".to_string(),
+                ..symlink_resource(path, expected_target, Some(previous_target), None)
+            })
+        }
+        Ok(_) => Ok(RepairResourceReport {
+            status: "blocked".to_string(),
+            ..symlink_resource(
+                path,
+                expected_target,
+                None,
+                Some("path exists and is not a symlink; repair will not remove it".to_string()),
+            )
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            create_repair_symlink(rig, &target_path, &link_path)?;
+            Ok(RepairResourceReport {
+                status: "repaired".to_string(),
+                ..symlink_resource(path, expected_target, None, None)
+            })
+        }
+        Err(e) => Err(Error::rig_pipeline_failed(
+            &rig.id,
+            "repair",
+            format!("inspect {}: {}", link_path.display(), e),
+        )),
+    }
+}
+
+fn symlink_resource(
+    path: String,
+    expected_target: String,
+    previous_target: Option<String>,
+    error: Option<String>,
+) -> RepairResourceReport {
+    RepairResourceReport {
+        kind: "symlink".to_string(),
+        path,
+        expected_target: Some(expected_target),
+        previous_target,
+        status: String::new(),
+        error,
+    }
+}
+
+fn create_repair_symlink(rig: &RigSpec, target_path: &Path, link_path: &Path) -> Result<()> {
+    create_symlink(target_path, link_path).map_err(|e| {
+        Error::rig_pipeline_failed(
+            &rig.id,
+            "repair",
+            format!(
+                "create {} → {}: {}",
+                link_path.display(),
+                target_path.display(),
+                e
+            ),
+        )
+    })
+}
+
+#[cfg(unix)]
+fn create_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(unix))]
+fn create_symlink(_target: &Path, _link: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "rig symlink repair is not supported on this platform (Unix only)",
+    ))
 }
 
 /// Summarize current rig state (no mutations).
