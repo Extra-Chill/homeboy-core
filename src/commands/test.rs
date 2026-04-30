@@ -187,6 +187,10 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
 
     // Main test workflow — delegate to core
     let run_dir = RunDir::create()?;
+    let resource_run = homeboy::engine::resource::ResourceSummaryRun::start(Some(format!(
+        "test {}",
+        effective_id
+    )));
     let passthrough_args = filter_homeboy_flags(&args.args);
     let workflow = extension_test::run_main_test_workflow(
         &ctx.component,
@@ -222,7 +226,9 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
             passthrough_args: passthrough_args.clone(),
         },
         &run_dir,
-    )?;
+    );
+    resource_run.write_to_run_dir(&run_dir)?;
+    let workflow = workflow?;
 
     Ok(report::from_main_workflow(workflow))
 }

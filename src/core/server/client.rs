@@ -1,7 +1,14 @@
 use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant};
 
+use crate::engine::resource::ExtensionChildResourceSummary;
 use crate::engine::shell;
 use crate::error::{Error, Result};
+use chrono::Utc;
 
 use super::Server;
 use std::process::{Command, Stdio};
@@ -24,6 +31,7 @@ pub struct CommandOutput {
     pub stderr: String,
     pub success: bool,
     pub exit_code: i32,
+    pub child_resource: Option<ExtensionChildResourceSummary>,
 }
 
 impl SshClient {
@@ -159,6 +167,7 @@ impl SshClient {
             stderr: "SSH retry exhausted".to_string(),
             success: false,
             exit_code: -1,
+            child_resource: None,
         }
     }
 
@@ -189,6 +198,7 @@ impl SshClient {
                         stderr: format!("Failed to open stdin file: {}", err),
                         success: false,
                         exit_code: -1,
+                        child_resource: None,
                     };
                 }
             }
@@ -202,12 +212,14 @@ impl SshClient {
                 stderr: String::from_utf8_lossy(&out.stderr).to_string(),
                 success: out.status.success(),
                 exit_code: out.status.code().unwrap_or(-1),
+                child_resource: None,
             },
             Err(e) => CommandOutput {
                 stdout: String::new(),
                 stderr: format!("SSH error: {}", e),
                 success: false,
                 exit_code: -1,
+                child_resource: None,
             },
         }
     }
@@ -274,18 +286,37 @@ pub fn execute_local_command_in_dir(
         cmd.envs(env_pairs.iter().copied());
     }
 
-    match cmd.output() {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            return CommandOutput {
+                stdout: String::new(),
+                stderr: format!("Command error: {}", e),
+                success: false,
+                exit_code: -1,
+                child_resource: None,
+            };
+        }
+    };
+    let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
+
+    match child.wait_with_output() {
         Ok(out) => CommandOutput {
             stdout: String::from_utf8_lossy(&out.stdout).to_string(),
             stderr: String::from_utf8_lossy(&out.stderr).to_string(),
             success: out.status.success(),
             exit_code: out.status.code().unwrap_or(-1),
+            child_resource: Some(monitor.finish()),
         },
         Err(e) => CommandOutput {
             stdout: String::new(),
             stderr: format!("Command error: {}", e),
             success: false,
             exit_code: -1,
+            child_resource: Some(monitor.finish()),
         },
     }
 }
@@ -378,9 +409,11 @@ pub fn execute_local_command_passthrough(
                 stderr: format!("Command error: {}", e),
                 success: false,
                 exit_code: -1,
+                child_resource: None,
             };
         }
     };
+    let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
 
     // Tee each stream: copy every chunk to the parent's stdout/stderr as it
     // arrives (preserving the live-progress UX) while buffering it for the
@@ -430,14 +463,127 @@ pub fn execute_local_command_passthrough(
             stderr,
             success: status.success(),
             exit_code: status.code().unwrap_or(-1),
+            child_resource: Some(monitor.finish()),
         },
         Err(e) => CommandOutput {
             stdout,
             stderr: format!("{stderr}\nCommand error: {}", e),
             success: false,
             exit_code: -1,
+            child_resource: Some(monitor.finish()),
         },
     }
+}
+
+struct ChildResourceMonitor {
+    root_pid: u32,
+    command_label: String,
+    started_at: String,
+    started_instant: Instant,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<ChildProbeState>>,
+}
+
+#[derive(Default)]
+struct ChildProbeState {
+    peak_rss_bytes: Option<u64>,
+    peak_cpu_percent: Option<f64>,
+    warnings: Vec<String>,
+}
+
+impl ChildResourceMonitor {
+    fn start(root_pid: u32, command_label: String) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_for_thread = Arc::clone(&stop);
+        let handle =
+            std::thread::spawn(move || sample_child_until_stopped(root_pid, stop_for_thread));
+
+        Self {
+            root_pid,
+            command_label,
+            started_at: Utc::now().to_rfc3339(),
+            started_instant: Instant::now(),
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn finish(mut self) -> ExtensionChildResourceSummary {
+        self.stop.store(true, Ordering::Relaxed);
+        let mut state = self
+            .handle
+            .take()
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default();
+        state.warnings.sort();
+        state.warnings.dedup();
+
+        ExtensionChildResourceSummary {
+            root_pid: self.root_pid,
+            command_label: self.command_label,
+            started_at: self.started_at,
+            finished_at: Utc::now().to_rfc3339(),
+            duration_ms: self.started_instant.elapsed().as_millis(),
+            sampled_peak_rss_bytes: state.peak_rss_bytes,
+            sampled_peak_cpu_percent: state.peak_cpu_percent,
+            warnings: state.warnings,
+        }
+    }
+}
+
+fn sample_child_until_stopped(root_pid: u32, stop: Arc<AtomicBool>) -> ChildProbeState {
+    let mut state = ChildProbeState::default();
+
+    loop {
+        match probe_child_resources(root_pid) {
+            Ok(Some((rss_bytes, cpu_percent))) => {
+                state.peak_rss_bytes = Some(
+                    state
+                        .peak_rss_bytes
+                        .map_or(rss_bytes, |peak| peak.max(rss_bytes)),
+                );
+                state.peak_cpu_percent = Some(
+                    state
+                        .peak_cpu_percent
+                        .map_or(cpu_percent, |peak| peak.max(cpu_percent)),
+                );
+            }
+            Ok(None) => {}
+            Err(warning) => state.warnings.push(warning),
+        }
+
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    state
+}
+
+fn probe_child_resources(root_pid: u32) -> std::result::Result<Option<(u64, f64)>, String> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-o", "%cpu=", "-p", &root_pid.to_string()])
+        .output()
+        .map_err(|_| "extension_child_probe_unsupported".to_string())?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let Some(line) = stdout.lines().find(|line| !line.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let mut parts = line.split_whitespace();
+    let Some(rss_kb) = parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+        return Err("extension_child_rss_probe_unsupported".to_string());
+    };
+    let Some(cpu_percent) = parts.next().and_then(|value| value.parse::<f64>().ok()) else {
+        return Err("extension_child_cpu_probe_unsupported".to_string());
+    };
+
+    Ok(Some((rss_kb.saturating_mul(1024), cpu_percent)))
 }
 
 /// Check if a host address refers to the local machine.
@@ -587,5 +733,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_execute_local_command_in_dir() {
+        let output = execute_local_command_in_dir("sleep 0.2", None, None);
+
+        assert!(output.success);
+        let child = output.child_resource.expect("child resource summary");
+        assert!(child.root_pid > 0);
+        assert_eq!(child.command_label, "sleep 0.2");
+        assert!(child.duration_ms > 0);
+        assert!(
+            child.sampled_peak_rss_bytes.is_some() || !child.warnings.is_empty(),
+            "resource probes should either sample RSS or explain why they could not"
+        );
     }
 }

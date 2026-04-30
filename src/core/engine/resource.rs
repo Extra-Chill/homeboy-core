@@ -4,6 +4,7 @@ use crate::engine::run_dir::{self, RunDir};
 use crate::error::{Error, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,6 +33,20 @@ pub struct RunResourceSummary {
     pub load_average_after: Option<LoadAverage>,
     pub homeboy_rss_bytes_before: Option<u64>,
     pub homeboy_rss_bytes_after: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extension_children: Vec<ExtensionChildResourceSummary>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtensionChildResourceSummary {
+    pub root_pid: u32,
+    pub command_label: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub duration_ms: u128,
+    pub sampled_peak_rss_bytes: Option<u64>,
+    pub sampled_peak_cpu_percent: Option<f64>,
     pub warnings: Vec<String>,
 }
 
@@ -97,11 +112,13 @@ impl ResourceSummaryRun {
             self.platform.clone(),
             self.before.clone(),
             after,
+            Vec::new(),
         )
     }
 
     pub fn write_to_run_dir(&self, run_dir: &RunDir) -> Result<RunResourceSummary> {
-        let summary = self.finish();
+        let mut summary = self.finish();
+        summary.extension_children = read_extension_child_resources(run_dir);
         write_summary(run_dir, &summary)?;
         Ok(summary)
     }
@@ -118,6 +135,7 @@ impl RunResourceSummary {
         platform: String,
         before: ResourceSnapshot,
         after: ResourceSnapshot,
+        extension_children: Vec<ExtensionChildResourceSummary>,
     ) -> Self {
         let mut warnings = before.warnings;
         warnings.extend(after.warnings);
@@ -135,9 +153,68 @@ impl RunResourceSummary {
             load_average_after: after.load_average,
             homeboy_rss_bytes_before: before.homeboy_rss_bytes,
             homeboy_rss_bytes_after: after.homeboy_rss_bytes,
+            extension_children,
             warnings,
         }
     }
+}
+
+pub fn record_extension_child_resource(
+    run_dir_path: &Path,
+    summary: &ExtensionChildResourceSummary,
+) -> Result<()> {
+    let dir = run_dir_path.join(run_dir::files::EXTENSION_CHILDREN_DIR);
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some("create extension child resource dir".into()),
+        )
+    })?;
+
+    let filename = format!(
+        "{}-{}.json",
+        summary.root_pid,
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
+    let path = dir.join(filename);
+    let json = serde_json::to_string_pretty(summary).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some("serialize extension child resource".into()),
+        )
+    })?;
+    std::fs::write(&path, json).map_err(|e| {
+        Error::internal_io(e.to_string(), Some("write extension child resource".into()))
+    })
+}
+
+fn read_extension_child_resources(run_dir: &RunDir) -> Vec<ExtensionChildResourceSummary> {
+    let dir = run_dir.step_file(run_dir::files::EXTENSION_CHILDREN_DIR);
+    let mut summaries = Vec::new();
+
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return summaries;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(summary) = serde_json::from_str::<ExtensionChildResourceSummary>(&content) {
+            summaries.push(summary);
+        }
+    }
+
+    summaries.sort_by(|a, b| {
+        a.started_at
+            .cmp(&b.started_at)
+            .then(a.root_pid.cmp(&b.root_pid))
+    });
+    summaries
 }
 
 fn write_summary(run_dir: &RunDir, summary: &RunResourceSummary) -> Result<()> {
@@ -243,6 +320,7 @@ mod tests {
             "test-os".to_string(),
             snapshot(1.0, 100, Some("same_warning")),
             snapshot(2.0, 150, Some("same_warning")),
+            Vec::new(),
         );
 
         assert_eq!(summary.label.as_deref(), Some("lint homeboy"));
@@ -303,6 +381,16 @@ mod tests {
                 homeboy_rss_bytes: None,
                 warnings: vec!["homeboy_rss_unsupported".to_string()],
             },
+            vec![ExtensionChildResourceSummary {
+                root_pid: 99,
+                command_label: "runner".to_string(),
+                started_at: Utc::now().to_rfc3339(),
+                finished_at: Utc::now().to_rfc3339(),
+                duration_ms: 10,
+                sampled_peak_rss_bytes: Some(2048),
+                sampled_peak_cpu_percent: Some(12.5),
+                warnings: Vec::new(),
+            }],
         );
 
         write_summary(&run_dir, &summary).expect("write summary");
@@ -313,6 +401,7 @@ mod tests {
         assert_eq!(output["label"], "lint");
         assert_eq!(output["pid"], 7);
         assert_eq!(output["warnings"].as_array().unwrap().len(), 2);
+        assert_eq!(output["extension_children"][0]["root_pid"], 99);
 
         run_dir.cleanup();
     }
@@ -334,6 +423,42 @@ mod tests {
         assert_eq!(output["pid"], std::process::id());
         assert!(output["duration_ms"].as_u64().is_some());
         assert_eq!(output["platform"], std::env::consts::OS);
+
+        run_dir.cleanup();
+    }
+
+    #[test]
+    fn test_record_extension_child_resource() {
+        let run_dir = RunDir::create().expect("run dir");
+        let child = ExtensionChildResourceSummary {
+            root_pid: 123,
+            command_label: "extension-runner".to_string(),
+            started_at: "2026-04-30T00:00:00+00:00".to_string(),
+            finished_at: "2026-04-30T00:00:00.100+00:00".to_string(),
+            duration_ms: 100,
+            sampled_peak_rss_bytes: Some(4096),
+            sampled_peak_cpu_percent: Some(1.5),
+            warnings: vec!["probe_warning".to_string()],
+        };
+
+        record_extension_child_resource(run_dir.path(), &child).expect("record child resource");
+        let resource_run = ResourceSummaryRun::start(Some("test fixture".to_string()));
+        let summary = resource_run
+            .write_to_run_dir(&run_dir)
+            .expect("write resource summary");
+
+        assert_eq!(summary.extension_children, vec![child]);
+        let output = run_dir
+            .read_step_output(run_dir::files::RESOURCE_SUMMARY)
+            .expect("resource summary json");
+        assert_eq!(
+            output["extension_children"][0]["command_label"],
+            "extension-runner"
+        );
+        assert_eq!(
+            output["extension_children"][0]["sampled_peak_rss_bytes"],
+            4096
+        );
 
         run_dir.cleanup();
     }

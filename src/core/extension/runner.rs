@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::component::Component;
+use crate::engine::resource;
 use crate::error::Result;
 use crate::server::CommandOutput;
 
@@ -38,6 +39,8 @@ pub struct ExtensionRunner {
     command_override: Option<String>,
     /// Tee runner stdout/stderr to the terminal while capturing it.
     passthrough: bool,
+    /// Run directory path for recording machine-local child process evidence.
+    run_dir_path: Option<PathBuf>,
 }
 
 impl ExtensionRunner {
@@ -63,6 +66,7 @@ impl ExtensionRunner {
             working_dir: None,
             command_override: None,
             passthrough: true,
+            run_dir_path: None,
         }
     }
 
@@ -116,6 +120,7 @@ impl ExtensionRunner {
     /// per-file env vars so extension scripts work with either pattern.
     pub fn with_run_dir(mut self, run_dir: &crate::engine::run_dir::RunDir) -> Self {
         self.env_vars.extend(run_dir.legacy_env_vars());
+        self.run_dir_path = Some(run_dir.path().to_path_buf());
         self
     }
 
@@ -179,6 +184,11 @@ impl ExtensionRunner {
         );
 
         let output = self.execute_script(&prepared.execution.extension_path, &env_vars)?;
+        if let (Some(run_dir_path), Some(child_resource)) =
+            (&self.run_dir_path, output.child_resource.as_ref())
+        {
+            let _ = resource::record_extension_child_resource(run_dir_path, child_resource);
+        }
 
         Ok(RunnerOutput {
             exit_code: output.exit_code,
@@ -219,5 +229,44 @@ impl ExtensionRunner {
             self.command_override.as_deref(),
             self.passthrough,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::Component;
+    use crate::engine::run_dir::RunDir;
+    use crate::extension::ExtensionCapability;
+
+    fn context() -> ExtensionExecutionContext {
+        ExtensionExecutionContext {
+            component: Component::new(
+                "fixture".to_string(),
+                "/tmp/fixture".to_string(),
+                "fixture-extension".to_string(),
+                None,
+            ),
+            capability: ExtensionCapability::Lint,
+            extension_id: "fixture-extension".to_string(),
+            extension_path: PathBuf::from("/tmp/fixture-extension"),
+            script_path: "lint.sh".to_string(),
+            settings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn with_run_dir_tracks_resource_artifact_path() {
+        let run_dir = RunDir::create().expect("run dir");
+        let runner = ExtensionRunner::for_context(context()).with_run_dir(&run_dir);
+
+        assert_eq!(runner.run_dir_path.as_deref(), Some(run_dir.path()));
+        assert!(runner
+            .env_vars
+            .iter()
+            .any(|(key, value)| key == "HOMEBOY_RUN_DIR"
+                && value == &run_dir.path().to_string_lossy()));
+
+        run_dir.cleanup();
     }
 }

@@ -156,12 +156,14 @@ fn try_execute_direct(
             stderr: String::from_utf8_lossy(&out.stderr).to_string(),
             success: out.status.success(),
             exit_code: out.status.code().unwrap_or(-1),
+            child_resource: None,
         }),
         Err(e) => Ok(CommandOutput {
             stdout: String::new(),
             stderr: format!("Command error: {}", e),
             success: false,
             exit_code: -1,
+            child_resource: None,
         }),
     }
 }
@@ -300,4 +302,20 @@ fn build_shell_command(
     template = template.replace("{{args}}", &quoted_args);
 
     Ok(template)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_shell_execution_templates() {
+        assert!(requires_shell_execution(
+            "cd {{sitePath}} && {{cliPath}} {{args}}"
+        ));
+        assert!(requires_shell_execution(
+            "{{cliPath}} {{args}} | tee output.log"
+        ));
+        assert!(!requires_shell_execution("{{cliPath}} {{args}}"));
+    }
 }
