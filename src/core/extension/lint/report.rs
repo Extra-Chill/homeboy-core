@@ -12,7 +12,7 @@ use crate::refactor::plan::RefactorSourceRun;
 use crate::refactor::AppliedRefactor;
 use serde::Serialize;
 
-use super::run::LintRunWorkflowResult;
+use super::run::{LintRunWorkflowResult, LintSummaryOutput};
 
 /// Unified output envelope for the lint command.
 ///
@@ -35,6 +35,8 @@ pub struct LintCommandOutput {
     pub baseline_comparison: Option<BaselineComparison>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lint_findings: Option<Vec<LintFinding>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<LintSummaryOutput>,
 }
 
 /// Build output from a main lint workflow result.
@@ -52,6 +54,7 @@ pub fn from_main_workflow(result: LintRunWorkflowResult) -> (LintCommandOutput, 
         .as_ref()
         .map(|findings| findings.len())
         .unwrap_or(0);
+    let json_summary = result.summary.is_some();
     let phase = lint_phase_report(exit_code, &result.status, finding_count);
     let failure = if exit_code == 0 {
         None
@@ -70,7 +73,12 @@ pub fn from_main_workflow(result: LintRunWorkflowResult) -> (LintCommandOutput, 
             autofix: result.autofix,
             hints: result.hints,
             baseline_comparison: result.baseline_comparison,
-            lint_findings: result.lint_findings,
+            lint_findings: if json_summary {
+                None
+            } else {
+                result.lint_findings
+            },
+            summary: result.summary,
         },
         exit_code,
     )
@@ -152,6 +160,7 @@ pub fn from_lint_fix(component_label: String, run: RefactorSourceRun) -> (LintCo
             hints,
             baseline_comparison: None,
             lint_findings: None,
+            summary: None,
         },
         exit_code,
     )

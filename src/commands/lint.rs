@@ -75,6 +75,10 @@ pub struct LintArgs {
 
     #[command(flatten)]
     pub _json: HiddenJsonArgs,
+
+    /// Print compact machine-readable summary (for CI wrappers)
+    #[arg(long)]
+    pub json_summary: bool,
 }
 
 pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput> {
@@ -97,6 +101,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
             &source_ctx.component,
             &source_ctx.source_path,
             source_ctx.component_id.clone(),
+            args.json_summary,
         )?;
 
         return Ok(report::from_main_workflow(workflow));
@@ -158,6 +163,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
                 ignore_baseline: args.baseline_args.ignore_baseline,
                 ratchet: args.baseline_args.ratchet,
             },
+            json_summary: args.json_summary,
         },
         &run_dir,
     )?;
@@ -250,6 +256,14 @@ mod tests {
 
         assert_eq!(cli.lint.extension_override.extensions, vec!["nodejs"]);
         assert_eq!(cli.lint.changed_since.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
+    fn parses_json_summary_flag() {
+        let cli = TestCli::try_parse_from(["lint", "homeboy", "--json-summary"])
+            .expect("lint should parse --json-summary");
+
+        assert!(cli.lint.json_summary);
     }
 
     #[test]

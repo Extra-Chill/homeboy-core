@@ -506,6 +506,7 @@ pub(crate) fn execute_capability_script(
     env_vars: &[(String, String)],
     working_dir: Option<&str>,
     command_override: Option<&str>,
+    passthrough: bool,
 ) -> Result<CommandOutput> {
     let command = if let Some(cmd) = command_override {
         cmd.to_string()
@@ -532,8 +533,10 @@ pub(crate) fn execute_capability_script(
 
     if let Some(dir) = working_dir {
         Ok(execute_local_command_in_dir(&command, Some(dir), env_opt))
-    } else {
+    } else if passthrough {
         Ok(execute_local_command_passthrough(&command, None, env_opt))
+    } else {
+        Ok(execute_local_command_in_dir(&command, None, env_opt))
     }
 }
 

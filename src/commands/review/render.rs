@@ -440,6 +440,7 @@ mod tests {
             hints: None,
             baseline_comparison: None,
             lint_findings: Some(findings),
+            summary: None,
         }
     }
 

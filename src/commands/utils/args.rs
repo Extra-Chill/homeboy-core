@@ -202,6 +202,7 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--setting",
                 "--path",
                 "--extension",
+                "--json-summary",
                 "--json",
                 "--help",
                 "-h",
@@ -496,6 +497,13 @@ mod normalize_tests {
             "smoke",
             "--iterations=1",
         ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn lint_json_summary_after_component_is_not_separated() {
+        let input = argv(&["homeboy", "lint", "my-comp", "--json-summary"]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);
     }

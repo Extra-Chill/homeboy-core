@@ -14,6 +14,7 @@ use crate::extension::{self, ExtensionCapability, LintChangedFileRoute};
 use crate::git;
 use crate::refactor::AppliedRefactor;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Arguments for the main lint workflow — populated by the command layer from CLI flags.
@@ -33,6 +34,7 @@ pub struct LintRunWorkflowArgs {
     pub exclude_sniffs: Option<String>,
     pub category: Option<String>,
     pub baseline_flags: BaselineFlags,
+    pub json_summary: bool,
 }
 
 /// Result of the main lint workflow — ready for report assembly.
@@ -45,6 +47,18 @@ pub struct LintRunWorkflowResult {
     pub hints: Option<Vec<String>>,
     pub baseline_comparison: Option<lint_baseline::BaselineComparison>,
     pub lint_findings: Option<Vec<LintFinding>>,
+    pub summary: Option<LintSummaryOutput>,
+}
+
+/// Compact lint summary for automation consumers.
+#[derive(Debug, Clone, Serialize)]
+pub struct LintSummaryOutput {
+    pub total_findings: usize,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub categories: BTreeMap<String, usize>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub top_findings: Vec<LintFinding>,
+    pub exit_code: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +90,11 @@ pub fn run_main_lint_workflow(
                 hints: None,
                 baseline_comparison: None,
                 lint_findings: None,
+                summary: if args.json_summary {
+                    Some(build_lint_summary(&[], 0))
+                } else {
+                    None
+                },
             });
         }
     }
@@ -88,7 +107,7 @@ pub fn run_main_lint_workflow(
             component,
             args.path_override.clone(),
             &args.settings,
-            args.summary,
+            args.summary || args.json_summary,
             args.file.as_deref(),
             args.glob.as_deref(),
             args.errors_only,
@@ -98,6 +117,7 @@ pub fn run_main_lint_workflow(
             None,
             run_dir,
         )?
+        .passthrough(!args.json_summary)
         .run()?
     };
 
@@ -171,8 +191,27 @@ pub fn run_main_lint_workflow(
         autofix: None,
         hints,
         baseline_comparison,
+        summary: if args.json_summary {
+            Some(build_lint_summary(&lint_findings, exit_code))
+        } else {
+            None
+        },
         lint_findings: Some(lint_findings),
     })
+}
+
+fn build_lint_summary(findings: &[LintFinding], exit_code: i32) -> LintSummaryOutput {
+    let mut categories = BTreeMap::new();
+    for finding in findings {
+        *categories.entry(finding.category.clone()).or_insert(0) += 1;
+    }
+
+    LintSummaryOutput {
+        total_findings: findings.len(),
+        categories,
+        top_findings: findings.iter().take(20).cloned().collect(),
+        exit_code,
+    }
 }
 
 fn build_autofix_hint(args: &LintRunWorkflowArgs) -> String {
@@ -268,7 +307,7 @@ fn run_scoped_lint_runs(
             component,
             args.path_override.clone(),
             &args.settings,
-            args.summary,
+            args.summary || args.json_summary,
             args.file.as_deref(),
             Some(run.glob.as_str()),
             args.errors_only,
@@ -278,6 +317,7 @@ fn run_scoped_lint_runs(
             run.step.as_deref(),
             active_run_dir,
         )?
+        .passthrough(!args.json_summary)
         .run()?;
 
         if !output.success {
@@ -300,9 +340,14 @@ pub fn run_self_check_lint_workflow(
     component: &Component,
     source_path: &Path,
     component_label: String,
+    json_summary: bool,
 ) -> crate::Result<LintRunWorkflowResult> {
-    let output =
-        extension::self_check::run_self_checks(component, ExtensionCapability::Lint, source_path)?;
+    let output = extension::self_check::run_self_checks_with_passthrough(
+        component,
+        ExtensionCapability::Lint,
+        source_path,
+        !json_summary,
+    )?;
     let status = if output.success { "passed" } else { "failed" }.to_string();
     let hints = (!output.success).then(|| {
         vec![format!(
@@ -319,6 +364,11 @@ pub fn run_self_check_lint_workflow(
         hints,
         baseline_comparison: None,
         lint_findings: Some(Vec::new()),
+        summary: if json_summary {
+            Some(build_lint_summary(&[], output.exit_code))
+        } else {
+            None
+        },
     })
 }
 
@@ -532,6 +582,7 @@ mod tests {
             exclude_sniffs: None,
             category: None,
             baseline_flags: BaselineFlags::default(),
+            json_summary: false,
         }
     }
 
@@ -580,12 +631,36 @@ mod tests {
             test: Vec::new(),
         });
 
-        let result = run_self_check_lint_workflow(&component, dir.path(), "fixture".to_string())
-            .expect("lint self-check should run");
+        let result =
+            run_self_check_lint_workflow(&component, dir.path(), "fixture".to_string(), false)
+                .expect("lint self-check should run");
 
         assert_eq!(result.status, "passed");
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.component, "fixture");
+    }
+
+    #[test]
+    fn lint_summary_counts_categories_and_caps_top_findings() {
+        let findings = (0..25)
+            .map(|index| LintFinding {
+                id: format!("src/file-{index}.rs::rule"),
+                message: "message".to_string(),
+                category: if index % 2 == 0 {
+                    "style".to_string()
+                } else {
+                    "correctness".to_string()
+                },
+            })
+            .collect::<Vec<_>>();
+
+        let summary = build_lint_summary(&findings, 1);
+
+        assert_eq!(summary.total_findings, 25);
+        assert_eq!(summary.categories.get("style"), Some(&13));
+        assert_eq!(summary.categories.get("correctness"), Some(&12));
+        assert_eq!(summary.top_findings.len(), 20);
+        assert_eq!(summary.exit_code, 1);
     }
 
     #[test]
