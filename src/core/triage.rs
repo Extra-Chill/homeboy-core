@@ -141,7 +141,7 @@ pub struct TriageRepoRef {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct TriageIssueBucket {
     pub open: usize,
     pub items: Vec<TriageIssueItem>,
@@ -175,7 +175,7 @@ pub struct TriageLinkedPr {
     pub merged_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct TriagePrBucket {
     pub open: usize,
     pub items: Vec<TriagePrItem>,
@@ -609,17 +609,22 @@ fn fetch_component_report(
         .map(|days| Utc::now() - Duration::days(days));
 
     let mut error = None;
+    macro_rules! record_fetch_error {
+        ($next_error:expr) => {
+            error = Some(match error.take() {
+                Some(existing) => format!("{existing}; {}", $next_error),
+                None => $next_error,
+            });
+        };
+    }
     let issues = if options.include_issues {
-        match fetch_issues(&repo, options, stale_cutoff) {
-            Ok(items) => Some(issue_bucket(items)),
-            Err(e) => {
-                error = Some(e);
-                Some(TriageIssueBucket {
-                    open: 0,
-                    items: Vec::new(),
-                })
-            }
-        }
+        fetch_issues(&repo, options, stale_cutoff)
+            .map(issue_bucket)
+            .map(Some)
+            .unwrap_or_else(|e| {
+                record_fetch_error!(e);
+                Some(TriageIssueBucket::default())
+            })
     } else {
         None
     };
@@ -631,14 +636,8 @@ fn fetch_component_report(
                 items,
             }),
             Err(e) => {
-                error = Some(match error {
-                    Some(existing) => format!("{existing}; {e}"),
-                    None => e,
-                });
-                Some(TriagePrBucket {
-                    open: 0,
-                    items: Vec::new(),
-                })
+                record_fetch_error!(e);
+                Some(TriagePrBucket::default())
             }
         }
     } else {

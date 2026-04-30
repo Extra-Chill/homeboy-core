@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 use crate::defaults;
 use crate::engine::shell;
@@ -54,11 +54,7 @@ fn rsync_directory(
 
         let output = Command::new("rsync").args(&rsync_args).output();
         return match output {
-            Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
-            Ok(output) => Ok(DeployResult::failure(
-                output.status.code().unwrap_or(1),
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            )),
+            Ok(output) => Ok(process_output_result(output)),
             Err(err) => Ok(DeployResult::failure(1, format!("rsync failed: {}", err))),
         };
     }
@@ -100,11 +96,7 @@ fn rsync_directory(
 
     let output = Command::new("rsync").args(&rsync_args).output();
     match output {
-        Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
-        Ok(output) => Ok(DeployResult::failure(
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        )),
+        Ok(output) => Ok(process_output_result(output)),
         Err(err) => Ok(DeployResult::failure(1, format!("rsync failed: {}", err))),
     }
 }
@@ -149,11 +141,7 @@ fn scp_transfer(
 
         let output = Command::new("cp").args(&cp_args).output();
         return match output {
-            Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
-            Ok(output) => Ok(DeployResult::failure(
-                output.status.code().unwrap_or(1),
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            )),
+            Ok(output) => Ok(process_output_result(output)),
             Err(err) => Ok(DeployResult::failure(1, err.to_string())),
         };
     }
@@ -193,13 +181,20 @@ fn scp_transfer(
 
     let output = Command::new("scp").args(&scp_args).output();
     match output {
-        Ok(output) if output.status.success() => Ok(DeployResult::success(0)),
-        Ok(output) => Ok(DeployResult::failure(
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        )),
+        Ok(output) => Ok(process_output_result(output)),
         Err(err) => Ok(DeployResult::failure(1, err.to_string())),
     }
+}
+
+fn process_output_result(output: Output) -> DeployResult {
+    if output.status.success() {
+        return DeployResult::success(0);
+    }
+
+    DeployResult::failure(
+        output.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
 }
 
 pub(super) fn scp_file(
@@ -259,4 +254,105 @@ fn scp_file_atomic(
     }
 
     Ok(DeployResult::success(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{process_output_result, scp_file, upload_directory, upload_file};
+    use crate::server::SshClient;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::process::Command;
+
+    fn local_client() -> SshClient {
+        SshClient {
+            host: "localhost".to_string(),
+            user: "test".to_string(),
+            port: 22,
+            identity_file: None,
+            is_local: true,
+            env: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_upload_directory() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        fs::create_dir_all(&source).expect("create source dir");
+        fs::create_dir_all(&target).expect("create target dir");
+        fs::write(source.join("file.txt"), "hello").expect("write source file");
+
+        let result = upload_directory(&local_client(), &source, target.to_str().unwrap())
+            .expect("upload directory");
+
+        assert!(result.success);
+        assert_eq!(
+            fs::read_to_string(target.join("file.txt")).expect("read copied file"),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn test_upload_file() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "hello").expect("write source file");
+
+        let result =
+            upload_file(&local_client(), &source, target.to_str().unwrap()).expect("upload file");
+
+        assert!(result.success);
+        assert_eq!(
+            fs::read_to_string(&target).expect("read copied file"),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn test_scp_file() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "hello").expect("write source file");
+
+        let result =
+            scp_file(&local_client(), &source, target.to_str().unwrap()).expect("scp file");
+
+        assert!(result.success);
+        assert_eq!(
+            fs::read_to_string(&target).expect("read copied file"),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn process_output_result_returns_success_for_zero_exit() {
+        let output = Command::new("sh")
+            .args(["-c", "exit 0"])
+            .output()
+            .expect("run success fixture");
+
+        let result = process_output_result(output);
+
+        assert!(result.success);
+        assert_eq!(result.exit_code, 0);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn process_output_result_captures_stderr_for_failed_exit() {
+        let output = Command::new("sh")
+            .args(["-c", "printf 'copy failed' >&2; exit 7"])
+            .output()
+            .expect("run failure fixture");
+
+        let result = process_output_result(output);
+
+        assert!(!result.success);
+        assert_eq!(result.exit_code, 7);
+        assert_eq!(result.error.as_deref(), Some("copy failed"));
+    }
 }
