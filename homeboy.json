@@ -3,8 +3,8 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-04-30T00:36:44Z",
-      "item_count": 686,
+      "created_at": "2026-04-30T00:53:31Z",
+      "item_count": 690,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
         "Rust test discovery::tests/commands/test_scope_test.rs::UnwiredNestedRustTest",
@@ -110,6 +110,9 @@
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/transfer.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/transfer.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/cli_tool.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/codebase_scan.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/edit_op_apply.rs::IntraMethodDuplicate",
@@ -135,6 +138,7 @@
         "intra-method-duplication::src/core/server/client.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/server/connection.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/stack/sync.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/triage.rs::IntraMethodDuplicate",
         "near-duplication::src/core/extension/update_check.rs::NearDuplicate",
         "near-duplication::src/core/extension/update_check.rs::NearDuplicate",
         "near-duplication::src/core/extension/update_check.rs::NearDuplicate",
