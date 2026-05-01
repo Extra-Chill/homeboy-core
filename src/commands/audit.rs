@@ -5,6 +5,8 @@ use homeboy::code_audit::{
     self, report, run_main_audit_workflow, AuditCommandOutput, AuditRunWorkflowArgs,
 };
 use homeboy::engine::execution_context::{self, ResolveOptions};
+use homeboy::git::short_head_revision_at;
+use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
 
 use super::utils::args::{BaselineArgs, PositionalComponentArgs};
 use super::{CmdResult, GlobalArgs};
@@ -97,9 +99,10 @@ pub fn run(args: AuditArgs, _global: &GlobalArgs) -> CmdResult<AuditCommandOutpu
         (component.id, source_path)
     };
 
+    let observation = start_audit_observation(&resolved_id, &resolved_path, &args);
     let workflow = run_main_audit_workflow(AuditRunWorkflowArgs {
-        component_id: resolved_id,
-        source_path: resolved_path,
+        component_id: resolved_id.clone(),
+        source_path: resolved_path.clone(),
         conventions: args.conventions,
         only_kinds,
         exclude_kinds,
@@ -113,9 +116,219 @@ pub fn run(args: AuditArgs, _global: &GlobalArgs) -> CmdResult<AuditCommandOutpu
         changed_since: args.changed_since,
         json_summary: args.json_summary,
         include_fixability: args.fixability,
-    })?;
+    });
+
+    let workflow = match workflow {
+        Ok(workflow) => {
+            finish_audit_observation(observation, &workflow);
+            workflow
+        }
+        Err(error) => {
+            finish_audit_observation_error(observation, &error);
+            return Err(error);
+        }
+    };
 
     Ok(report::from_main_workflow(workflow))
+}
+
+struct AuditObservation {
+    store: ObservationStore,
+    audit_run: RunRecord,
+    audit_metadata: serde_json::Value,
+}
+
+fn start_audit_observation(
+    component_id: &str,
+    source_path: &str,
+    args: &AuditArgs,
+) -> Option<AuditObservation> {
+    let store = ObservationStore::open_initialized().ok()?;
+    let path = Path::new(source_path);
+    let metadata = audit_observation_initial_metadata(source_path, args);
+    let run = store
+        .start_run(NewRunRecord {
+            kind: "audit".to_string(),
+            component_id: Some(component_id.to_string()),
+            command: Some(audit_observation_command(component_id, args)),
+            cwd: Some(source_path.to_string()),
+            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            git_sha: short_head_revision_at(path),
+            rig_id: None,
+            metadata_json: metadata.clone(),
+        })
+        .ok()?;
+
+    Some(AuditObservation {
+        store,
+        audit_run: run,
+        audit_metadata: metadata,
+    })
+}
+
+fn finish_audit_observation(
+    observation: Option<AuditObservation>,
+    workflow: &code_audit::AuditRunWorkflowResult,
+) {
+    let Some(observation) = observation else {
+        return;
+    };
+
+    let metadata = merge_audit_observation_metadata(
+        observation.audit_metadata,
+        serde_json::json!({
+            "observation_status": if workflow.exit_code == 0 { "pass" } else { "fail" },
+            "exit_code": workflow.exit_code,
+            "summary": audit_observation_summary(&workflow.output),
+        }),
+    );
+    let status = if workflow.exit_code == 0 {
+        RunStatus::Pass
+    } else {
+        RunStatus::Fail
+    };
+    let _ = observation
+        .store
+        .finish_run(&observation.audit_run.id, status, Some(metadata));
+}
+
+fn finish_audit_observation_error(observation: Option<AuditObservation>, error: &homeboy::Error) {
+    let Some(observation) = observation else {
+        return;
+    };
+
+    let metadata = merge_audit_observation_metadata(
+        observation.audit_metadata,
+        serde_json::json!({
+            "observation_status": "error",
+            "error": error.to_string(),
+        }),
+    );
+    let _ =
+        observation
+            .store
+            .finish_run(&observation.audit_run.id, RunStatus::Error, Some(metadata));
+}
+
+fn audit_observation_command(component_id: &str, args: &AuditArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "audit".to_string(),
+        component_id.to_string(),
+    ];
+    if args.conventions {
+        parts.push("--conventions".to_string());
+    }
+    for kind in &args.only {
+        parts.push(format!("--only={kind}"));
+    }
+    for kind in &args.exclude {
+        parts.push(format!("--exclude={kind}"));
+    }
+    if let Some(changed_since) = &args.changed_since {
+        parts.push(format!("--changed-since={changed_since}"));
+    }
+    if args.json_summary {
+        parts.push("--json-summary".to_string());
+    }
+    if args.fixability {
+        parts.push("--fixability".to_string());
+    }
+    parts.join(" ")
+}
+
+fn audit_observation_initial_metadata(source_path: &str, args: &AuditArgs) -> serde_json::Value {
+    serde_json::json!({
+        "source_path": source_path,
+        "mode": if args.conventions { "conventions" } else { "audit" },
+        "only": args.only,
+        "exclude": args.exclude,
+        "baseline": {
+            "baseline": args.baseline_args.baseline,
+            "ignore_baseline": args.baseline_args.ignore_baseline,
+            "ratchet": args.baseline_args.ratchet,
+        },
+        "changed_since": args.changed_since,
+        "json_summary": args.json_summary,
+        "fixability": args.fixability,
+    })
+}
+
+fn audit_observation_summary(output: &AuditCommandOutput) -> serde_json::Value {
+    match output {
+        AuditCommandOutput::Full { passed, result, .. } => {
+            code_audit_result_observation_summary(*passed, result, None)
+        }
+        AuditCommandOutput::Conventions {
+            component_id,
+            conventions,
+            directory_conventions,
+        } => serde_json::json!({
+            "component_id": component_id,
+            "conventions": conventions.len(),
+            "directory_conventions": directory_conventions.len(),
+        }),
+        AuditCommandOutput::BaselineSaved {
+            component_id,
+            path,
+            findings_count,
+            outliers_count,
+            alignment_score,
+        } => serde_json::json!({
+            "component_id": component_id,
+            "baseline_path": path,
+            "findings": findings_count,
+            "outliers_found": outliers_count,
+            "alignment_score": alignment_score,
+        }),
+        AuditCommandOutput::Compared {
+            passed,
+            result,
+            changed_since,
+            ..
+        } => code_audit_result_observation_summary(*passed, result, changed_since.as_ref()),
+        AuditCommandOutput::Summary(summary) => serde_json::json!({
+            "findings": summary.total_findings,
+            "warnings": summary.warnings,
+            "info": summary.info,
+            "alignment_score": summary.alignment_score,
+            "exit_code": summary.exit_code,
+        }),
+    }
+}
+
+fn code_audit_result_observation_summary(
+    passed: bool,
+    result: &code_audit::CodeAuditResult,
+    changed_since: Option<&report::AuditChangedSinceSummary>,
+) -> serde_json::Value {
+    let mut summary = serde_json::json!({
+        "passed": passed,
+        "component_id": result.component_id,
+        "files_scanned": result.summary.files_scanned,
+        "conventions_detected": result.summary.conventions_detected,
+        "findings": result.findings.len(),
+        "outliers_found": result.summary.outliers_found,
+        "alignment_score": result.summary.alignment_score,
+    });
+
+    if let Some(changed_since) = changed_since {
+        summary["changed_since"] = serde_json::json!(changed_since);
+    }
+
+    summary
+}
+
+fn merge_audit_observation_metadata(
+    mut initial: serde_json::Value,
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    if let (Some(initial), Some(extra)) = (initial.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            initial.insert(key.clone(), value.clone());
+        }
+    }
+    initial
 }
 
 /// Run the extension's audit reference setup script if configured.
@@ -210,9 +423,37 @@ fn run_audit_reference_setup(component_id_or_path: &str) {
 mod tests {
     use super::*;
     use crate::commands::utils::args::BaselineArgs;
+    use crate::test_support::with_isolated_home;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct XdgGuard {
+        prior: Option<String>,
+    }
+
+    impl XdgGuard {
+        fn unset() -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::remove_var("XDG_DATA_HOME");
+            Self { prior }
+        }
+
+        fn set(value: &std::path::Path) -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::set_var("XDG_DATA_HOME", value);
+            Self { prior }
+        }
+    }
+
+    impl Drop for XdgGuard {
+        fn drop(&mut self) {
+            match &self.prior {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
 
     fn tmp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -220,6 +461,75 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("homeboy-audit-command-{name}-{nanos}"))
+    }
+
+    fn sample_args() -> AuditArgs {
+        AuditArgs {
+            comp: PositionalComponentArgs {
+                component: Some("homeboy".to_string()),
+                path: None,
+            },
+            conventions: false,
+            only: vec![],
+            exclude: vec![],
+            baseline_args: BaselineArgs {
+                baseline: false,
+                ignore_baseline: false,
+                ratchet: false,
+            },
+            changed_since: Some("origin/main".to_string()),
+            json_summary: true,
+            fixability: false,
+        }
+    }
+
+    #[test]
+    fn audit_observation_start_persists_run_record() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let args = sample_args();
+
+            let observation =
+                start_audit_observation("homeboy", &home.path().to_string_lossy(), &args)
+                    .expect("observation should start");
+            let run_id = observation.audit_run.id.clone();
+
+            finish_audit_observation_error(
+                Some(observation),
+                &homeboy::Error::validation_invalid_argument(
+                    "fixture",
+                    "simulated audit error",
+                    None,
+                    None,
+                ),
+            );
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .get_run(&run_id)
+                .expect("read run")
+                .expect("run exists");
+
+            assert_eq!(run.kind, "audit");
+            assert_eq!(run.status, "error");
+            assert_eq!(run.component_id.as_deref(), Some("homeboy"));
+            assert_eq!(run.metadata_json["changed_since"], "origin/main");
+            assert_eq!(run.metadata_json["observation_status"], "error");
+        });
+    }
+
+    #[test]
+    fn audit_observation_start_is_best_effort_when_store_unavailable() {
+        with_isolated_home(|home| {
+            let bad_data_home = home.path().join("not-a-dir");
+            fs::write(&bad_data_home, "file blocks observation dir").expect("write marker");
+            let _xdg = XdgGuard::set(&bad_data_home);
+
+            let observation =
+                start_audit_observation("homeboy", &home.path().to_string_lossy(), &sample_args());
+
+            assert!(observation.is_none());
+        });
     }
 
     /// End-to-end test of the audit command's read-only mode.
@@ -268,14 +578,12 @@ mod tests {
         let (output, code) = run(args, &crate::commands::GlobalArgs {}).expect("audit should run");
 
         // Audit should detect the outlier and return findings
-        match output {
-            AuditCommandOutput::Full { result, .. } => {
-                assert!(
-                    !result.findings.is_empty(),
-                    "expected findings for the outlier file"
-                );
-            }
-            _ => {} // Summary or other modes are also valid
+        // Summary or other modes are also valid.
+        if let AuditCommandOutput::Full { result, .. } = output {
+            assert!(
+                !result.findings.is_empty(),
+                "expected findings for the outlier file"
+            );
         }
 
         // Non-zero exit expected when outliers are found
