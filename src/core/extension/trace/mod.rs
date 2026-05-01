@@ -25,7 +25,8 @@ pub use parsing::{TraceAssertionStatus, TraceResults, TraceSpanDefinition, Trace
 pub use report::render_markdown;
 pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
-    TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceCommandOutput,
+    TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceCommandOutput, TraceCompareOutput,
+    TraceCompareSpanOutput,
 };
 pub use run::{run_trace_list_workflow, run_trace_workflow, TraceListWorkflowArgs};
 pub use run::{TraceRunWorkflowArgs, TraceRunWorkflowResult};

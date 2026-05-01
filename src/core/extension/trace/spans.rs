@@ -26,7 +26,7 @@ pub(crate) fn parse_span_definition(raw: &str) -> Result<TraceSpanDefinition, St
     Ok(definition)
 }
 
-pub fn parse_phase_milestone(raw: &str) -> Result<TracePhaseMilestone, String> {
+pub(crate) fn parse_phase_milestone(raw: &str) -> Result<TracePhaseMilestone, String> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Err("phase milestone must be non-empty".to_string());
