@@ -3,8 +3,8 @@ use clap::{Command, CommandFactory, Parser, Subcommand};
 use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
     deps, doctor, extension, file, fleet, git, issues, lint, logs, project, refactor, release,
-    report, review, rig, self_cmd, server, ssh, stack, status, test, trace, triage, undo, upgrade,
-    version,
+    report, review, rig, runs, self_cmd, server, ssh, stack, status, test, trace, triage, undo,
+    upgrade, version,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -98,6 +98,8 @@ pub enum Commands {
     /// Manage local dev rigs (reproducible multi-component environments)
     #[command(visible_alias = "rigs")]
     Rig(rig::RigArgs),
+    /// Inspect persisted observation runs and artifacts
+    Runs(runs::RunsArgs),
     /// Inspect the active Homeboy binary and install signals
     #[command(name = "self")]
     SelfCmd(self_cmd::SelfArgs),

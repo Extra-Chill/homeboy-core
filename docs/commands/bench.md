@@ -8,6 +8,8 @@ deltas against a stored baseline.
 ```bash
 homeboy bench <component> [options] [-- <runner-args>]
 homeboy bench list <component> [options] [-- <runner-args>]
+homeboy bench history <component> [--scenario <id>] [--rig <id>] [--limit 20]
+homeboy bench compare --from-run <run-id> --to-run <run-id>
 ```
 
 ## Description
@@ -69,6 +71,12 @@ the other capabilities.
 
 Arguments after `--` are passed verbatim to the extension's bench runner
 script.
+
+## Observation History
+
+`homeboy bench history <component>` lists persisted benchmark runs from the local observation store. `--scenario` filters to runs whose stored metadata includes the scenario, and `--rig` narrows to rig-pinned runs.
+
+`homeboy bench compare --from-run <run-id> --to-run <run-id>` compares numeric metrics recorded in two persisted benchmark runs. It matches scenario + metric rows, reports absolute deltas and percent changes, and lists metrics that exist in only one run. The command is read-only and exits successfully for a valid comparison even when the numbers regress.
 
 ## Scenario Discovery
 

@@ -303,6 +303,7 @@ pub mod release;
 pub mod report;
 pub mod review;
 pub mod rig;
+pub mod runs;
 pub mod self_cmd;
 pub mod server;
 pub mod ssh;
@@ -383,6 +384,7 @@ pub fn run_json(
         crate::cli_surface::Commands::Audit(args) => dispatch!(args, global, audit),
         crate::cli_surface::Commands::Refactor(args) => dispatch!(args, global, refactor),
         crate::cli_surface::Commands::Rig(args) => dispatch!(args, global, rig),
+        crate::cli_surface::Commands::Runs(args) => dispatch!(args, global, runs),
         crate::cli_surface::Commands::SelfCmd(args) => dispatch!(args, global, self_cmd),
         crate::cli_surface::Commands::Stack(args) => dispatch!(args, global, stack),
         crate::cli_surface::Commands::Undo(args) => dispatch!(args, global, undo),

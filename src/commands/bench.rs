@@ -17,7 +17,7 @@ use homeboy::rig::{self, RigSpec};
 use super::utils::args::{
     BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
 };
-use super::{CmdResult, GlobalArgs};
+use super::{runs, CmdResult, GlobalArgs};
 
 mod matrix;
 mod observation;
@@ -35,6 +35,35 @@ pub struct BenchArgs {
 enum BenchCommand {
     /// List declared benchmark scenarios without executing them
     List(BenchListArgs),
+    /// List persisted benchmark runs for a component
+    History(BenchHistoryArgs),
+    /// Compare two persisted benchmark runs
+    Compare(BenchCompareArgs),
+}
+
+#[derive(Args)]
+struct BenchHistoryArgs {
+    /// Component ID
+    component: String,
+    /// Scenario ID
+    #[arg(long = "scenario")]
+    scenario_id: Option<String>,
+    /// Rig ID
+    #[arg(long)]
+    rig: Option<String>,
+    /// Maximum runs to return
+    #[arg(long, default_value_t = 20)]
+    limit: i64,
+}
+
+#[derive(Args)]
+struct BenchCompareArgs {
+    /// Earlier run ID
+    #[arg(long = "from-run")]
+    from_run: String,
+    /// Later run ID
+    #[arg(long = "to-run")]
+    to_run: String,
 }
 
 #[derive(Args)]
@@ -262,12 +291,27 @@ pub enum BenchOutput {
     Comparison(BenchComparisonOutput),
     ComparisonSummary(BenchComparisonSummaryOutput),
     List(BenchListWorkflowResult),
+    Observation(runs::RunsOutput),
 }
 
 pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     if let Some(command) = &args.command {
         return match command {
             BenchCommand::List(list_args) => run_list(list_args),
+            BenchCommand::History(history_args) => {
+                let (output, exit_code) = runs::bench_history(
+                    &history_args.component,
+                    history_args.scenario_id.as_deref(),
+                    history_args.rig.as_deref(),
+                    history_args.limit,
+                )?;
+                Ok((BenchOutput::Observation(output), exit_code))
+            }
+            BenchCommand::Compare(compare_args) => {
+                let (output, exit_code) =
+                    runs::bench_compare(&compare_args.from_run, &compare_args.to_run)?;
+                Ok((BenchOutput::Observation(output), exit_code))
+            }
         };
     }
 

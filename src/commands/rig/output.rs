@@ -5,6 +5,7 @@
 
 use serde::Serialize;
 
+use crate::commands::runs::RunsOutput;
 use homeboy::rig::{self, RigResourcesSpec, RigSpec};
 
 /// Tagged union of every rig command's output. `untagged` so each variant
@@ -25,6 +26,7 @@ pub enum RigCommandOutput {
     Update(RigUpdateOutput),
     Sources(RigSourcesOutput),
     App(RigAppOutput),
+    Runs(RunsOutput),
 }
 
 #[derive(Serialize)]

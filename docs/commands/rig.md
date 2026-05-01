@@ -38,6 +38,7 @@ rig package / local spec
 | `down <id>` | Run the rig's `down` pipeline and stop managed services. |
 | `sync <id>` | Sync every stack declared by the rig's components. |
 | `status <id>` | Show running services and last `up` / `check` state. |
+| `runs <id>` | List persisted observation runs for the rig. |
 | `install <source>` | Install rigs from a local package path or git URL. |
 | `update [id]` | Pull and refresh git-backed installed rig packages. |
 | `sources ...` | Inspect or remove installed rig source packages. |

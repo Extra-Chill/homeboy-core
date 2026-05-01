@@ -1,0 +1,656 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use clap::{Args, Subcommand};
+use serde::Serialize;
+use serde_json::Value;
+
+use homeboy::observation::{ArtifactRecord, ObservationStore, RunListFilter, RunRecord};
+use homeboy::Error;
+
+use super::{CmdResult, GlobalArgs};
+
+const DEFAULT_LIMIT: i64 = 20;
+
+#[derive(Args)]
+pub struct RunsArgs {
+    #[command(subcommand)]
+    command: RunsCommand,
+}
+
+#[derive(Subcommand)]
+enum RunsCommand {
+    /// List persisted observation runs
+    List(RunsListArgs),
+    /// Show one persisted observation run
+    Show { run_id: String },
+    /// List artifacts recorded for one run
+    Artifacts { run_id: String },
+}
+
+#[derive(Args, Clone, Default)]
+pub struct RunsListArgs {
+    /// Run kind: bench, rig, trace, etc.
+    #[arg(long)]
+    pub kind: Option<String>,
+    /// Component ID
+    #[arg(long = "component")]
+    pub component_id: Option<String>,
+    /// Rig ID
+    #[arg(long)]
+    pub rig: Option<String>,
+    /// Run status
+    #[arg(long)]
+    pub status: Option<String>,
+    /// Maximum runs to return
+    #[arg(long, default_value_t = DEFAULT_LIMIT)]
+    pub limit: i64,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum RunsOutput {
+    List(RunsListOutput),
+    Show(RunsShowOutput),
+    Artifacts(RunsArtifactsOutput),
+    BenchHistory(BenchHistoryOutput),
+    BenchCompare(BenchCompareOutput),
+}
+
+#[derive(Serialize)]
+pub struct RunsListOutput {
+    pub command: &'static str,
+    pub runs: Vec<RunSummary>,
+}
+
+#[derive(Serialize)]
+pub struct RunsShowOutput {
+    pub command: &'static str,
+    pub run: RunDetail,
+}
+
+#[derive(Serialize)]
+pub struct RunsArtifactsOutput {
+    pub command: &'static str,
+    pub run_id: String,
+    pub artifacts: Vec<ArtifactRecord>,
+}
+
+#[derive(Serialize)]
+pub struct BenchHistoryOutput {
+    pub command: &'static str,
+    pub component_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rig_id: Option<String>,
+    pub runs: Vec<RunDetail>,
+}
+
+#[derive(Serialize)]
+pub struct BenchCompareOutput {
+    pub command: &'static str,
+    pub from_run: RunSummary,
+    pub to_run: RunSummary,
+    pub comparisons: Vec<BenchMetricComparison>,
+    pub missing: Vec<BenchMissingMetric>,
+}
+
+#[derive(Serialize)]
+pub struct RunSummary {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub component_id: Option<String>,
+    pub rig_id: Option<String>,
+    pub git_sha: Option<String>,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RunDetail {
+    #[serde(flatten)]
+    pub summary: RunSummary,
+    pub homeboy_version: Option<String>,
+    pub metadata: Value,
+    pub artifacts: Vec<ArtifactRecord>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct BenchMetricComparison {
+    pub scenario_id: String,
+    pub metric: String,
+    pub from_value: f64,
+    pub to_value: f64,
+    pub delta: f64,
+    pub percent_change: Option<f64>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct BenchMissingMetric {
+    pub scenario_id: String,
+    pub metric: String,
+    pub missing_from: String,
+}
+
+pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
+    match args.command {
+        RunsCommand::List(args) => list_runs(args, "runs.list"),
+        RunsCommand::Show { run_id } => show_run(&run_id),
+        RunsCommand::Artifacts { run_id } => artifacts(&run_id),
+    }
+}
+
+pub fn list_runs(args: RunsListArgs, command: &'static str) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    let runs = store
+        .list_runs(RunListFilter {
+            kind: args.kind,
+            component_id: args.component_id,
+            status: args.status,
+            rig_id: args.rig,
+            limit: Some(args.limit),
+        })?
+        .into_iter()
+        .map(run_summary)
+        .collect();
+
+    Ok((RunsOutput::List(RunsListOutput { command, runs }), 0))
+}
+
+fn show_run(run_id: &str) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    let run = require_run(&store, run_id)?;
+    Ok((
+        RunsOutput::Show(RunsShowOutput {
+            command: "runs.show",
+            run: run_detail(&store, run)?,
+        }),
+        0,
+    ))
+}
+
+pub fn artifacts(run_id: &str) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    require_run(&store, run_id)?;
+    Ok((
+        RunsOutput::Artifacts(RunsArtifactsOutput {
+            command: "runs.artifacts",
+            run_id: run_id.to_string(),
+            artifacts: store.list_artifacts(run_id)?,
+        }),
+        0,
+    ))
+}
+
+pub fn bench_history(
+    component_id: &str,
+    scenario_id: Option<&str>,
+    rig_id: Option<&str>,
+    limit: i64,
+) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    let runs = store
+        .list_runs(RunListFilter {
+            kind: Some("bench".to_string()),
+            component_id: Some(component_id.to_string()),
+            rig_id: rig_id.map(str::to_string),
+            limit: Some(limit.clamp(1, 1000)),
+            ..RunListFilter::default()
+        })?
+        .into_iter()
+        .filter(|run| scenario_id.is_none_or(|scenario| run_contains_scenario(run, scenario)))
+        .take(limit.max(1) as usize)
+        .map(|run| run_detail(&store, run))
+        .collect::<homeboy::Result<Vec<_>>>()?;
+
+    Ok((
+        RunsOutput::BenchHistory(BenchHistoryOutput {
+            command: "bench.history",
+            component_id: component_id.to_string(),
+            scenario_id: scenario_id.map(str::to_string),
+            rig_id: rig_id.map(str::to_string),
+            runs,
+        }),
+        0,
+    ))
+}
+
+pub fn bench_compare(from_run_id: &str, to_run_id: &str) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    let from_run = require_run(&store, from_run_id)?;
+    let to_run = require_run(&store, to_run_id)?;
+    require_kind(&from_run, "bench")?;
+    require_kind(&to_run, "bench")?;
+
+    let from_summary = run_summary(from_run.clone());
+    let to_summary = run_summary(to_run.clone());
+    let from_metrics = bench_numeric_metrics(&from_run.metadata_json);
+    let to_metrics = bench_numeric_metrics(&to_run.metadata_json);
+    let mut keys = BTreeSet::new();
+    keys.extend(from_metrics.keys().cloned());
+    keys.extend(to_metrics.keys().cloned());
+
+    let mut comparisons = Vec::new();
+    let mut missing = Vec::new();
+    for key in keys {
+        match (from_metrics.get(&key), to_metrics.get(&key)) {
+            (Some(from), Some(to)) => comparisons.push(BenchMetricComparison {
+                scenario_id: key.0,
+                metric: key.1,
+                from_value: *from,
+                to_value: *to,
+                delta: to - from,
+                percent_change: if *from == 0.0 {
+                    None
+                } else {
+                    Some(((to - from) / from) * 100.0)
+                },
+            }),
+            (Some(_), None) => missing.push(BenchMissingMetric {
+                scenario_id: key.0,
+                metric: key.1,
+                missing_from: "to_run".to_string(),
+            }),
+            (None, Some(_)) => missing.push(BenchMissingMetric {
+                scenario_id: key.0,
+                metric: key.1,
+                missing_from: "from_run".to_string(),
+            }),
+            (None, None) => {}
+        }
+    }
+
+    Ok((
+        RunsOutput::BenchCompare(BenchCompareOutput {
+            command: "bench.compare",
+            from_run: from_summary,
+            to_run: to_summary,
+            comparisons,
+            missing,
+        }),
+        0,
+    ))
+}
+
+fn require_run(store: &ObservationStore, run_id: &str) -> homeboy::Result<RunRecord> {
+    store.get_run(run_id)?.ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "run_id",
+            format!("run record not found: {run_id}"),
+            Some(run_id.to_string()),
+            None,
+        )
+    })
+}
+
+fn require_kind(run: &RunRecord, expected: &str) -> homeboy::Result<()> {
+    if run.kind == expected {
+        return Ok(());
+    }
+    Err(Error::validation_invalid_argument(
+        "run_id",
+        format!(
+            "run {} is kind '{}', expected '{expected}'",
+            run.id, run.kind
+        ),
+        Some(run.id.clone()),
+        None,
+    ))
+}
+
+fn run_detail(store: &ObservationStore, run: RunRecord) -> homeboy::Result<RunDetail> {
+    let artifacts = store.list_artifacts(&run.id)?;
+    Ok(RunDetail {
+        summary: run_summary(run.clone()),
+        homeboy_version: run.homeboy_version,
+        metadata: run.metadata_json,
+        artifacts,
+    })
+}
+
+fn run_summary(run: RunRecord) -> RunSummary {
+    RunSummary {
+        id: run.id,
+        kind: run.kind,
+        status: run.status,
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        component_id: run.component_id,
+        rig_id: run.rig_id,
+        git_sha: run.git_sha,
+        command: run.command,
+        cwd: run.cwd,
+    }
+}
+
+fn run_contains_scenario(run: &RunRecord, scenario_id: &str) -> bool {
+    if run.metadata_json["selected_scenarios"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(scenario_id)))
+    {
+        return true;
+    }
+    bench_numeric_metrics(&run.metadata_json)
+        .keys()
+        .any(|(scenario, _)| scenario == scenario_id)
+}
+
+fn bench_numeric_metrics(metadata: &Value) -> BTreeMap<(String, String), f64> {
+    let mut metrics = BTreeMap::new();
+    if let Some(scenarios) = metadata["scenario_metrics"].as_array() {
+        for scenario in scenarios {
+            collect_scenario_metrics(scenario, &mut metrics);
+        }
+    }
+    if metrics.is_empty() {
+        if let Some(scenarios) = metadata["results"]["scenarios"].as_array() {
+            for scenario in scenarios {
+                collect_scenario_metrics(scenario, &mut metrics);
+            }
+        }
+    }
+    metrics
+}
+
+fn collect_scenario_metrics(scenario: &Value, metrics: &mut BTreeMap<(String, String), f64>) {
+    let Some(scenario_id) = scenario["scenario_id"]
+        .as_str()
+        .or_else(|| scenario["id"].as_str())
+    else {
+        return;
+    };
+
+    collect_numeric_object(scenario_id, None, &scenario["metrics"], metrics);
+    if let Some(groups) = scenario["metric_groups"].as_object() {
+        for (group, values) in groups {
+            collect_numeric_object(scenario_id, Some(group), values, metrics);
+        }
+    }
+}
+
+fn collect_numeric_object(
+    scenario_id: &str,
+    prefix: Option<&str>,
+    value: &Value,
+    metrics: &mut BTreeMap<(String, String), f64>,
+) {
+    let Some(object) = value.as_object() else {
+        return;
+    };
+    for (name, value) in object {
+        let Some(number) = value.as_f64() else {
+            continue;
+        };
+        let metric = match prefix {
+            Some(prefix) => format!("{prefix}.{name}"),
+            None => name.clone(),
+        };
+        metrics.insert((scenario_id.to_string(), metric), number);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use homeboy::observation::{NewRunRecord, RunStatus};
+    use homeboy::test_support::with_isolated_home;
+
+    struct XdgGuard(Option<String>);
+
+    impl XdgGuard {
+        fn unset() -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::remove_var("XDG_DATA_HOME");
+            Self(prior)
+        }
+    }
+
+    impl Drop for XdgGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
+
+    fn sample_run(kind: &str, component_id: &str, rig_id: &str, metadata: Value) -> NewRunRecord {
+        NewRunRecord {
+            kind: kind.to_string(),
+            component_id: Some(component_id.to_string()),
+            command: Some(format!("homeboy {kind} {component_id}")),
+            cwd: Some("/tmp/homeboy-fixture".to_string()),
+            homeboy_version: Some("test-version".to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some(rig_id.to_string()),
+            metadata_json: metadata,
+        }
+    }
+
+    #[test]
+    fn run_list_filters_kind_component_rig_and_status() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let bench = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("bench");
+            store
+                .finish_run(&bench.id, RunStatus::Pass, None)
+                .expect("finish bench");
+            let trace = store
+                .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                .expect("trace");
+            store
+                .finish_run(&trace.id, RunStatus::Fail, None)
+                .expect("finish trace");
+
+            let (output, _) = list_runs(
+                RunsListArgs {
+                    kind: Some("bench".to_string()),
+                    component_id: Some("homeboy".to_string()),
+                    rig: Some("studio".to_string()),
+                    status: Some("pass".to_string()),
+                    limit: 20,
+                },
+                "runs.list",
+            )
+            .expect("list");
+
+            let RunsOutput::List(output) = output else {
+                panic!("expected list output");
+            };
+            assert_eq!(output.runs.len(), 1);
+            assert_eq!(output.runs[0].id, bench.id);
+        });
+    }
+
+    #[test]
+    fn run_show_includes_metadata_and_artifacts() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run(
+                    "bench",
+                    "homeboy",
+                    "studio",
+                    serde_json::json!({ "scenario_metrics": [] }),
+                ))
+                .expect("run");
+            let artifact_path = home.path().join("bench-results.json");
+            std::fs::write(&artifact_path, b"{}").expect("artifact");
+            store
+                .record_artifact(&run.id, "bench_results", &artifact_path)
+                .expect("record artifact");
+
+            let (output, _) = show_run(&run.id).expect("show");
+            let RunsOutput::Show(output) = output else {
+                panic!("expected show output");
+            };
+            assert_eq!(output.run.summary.id, run.id);
+            assert_eq!(
+                output.run.metadata["scenario_metrics"],
+                serde_json::json!([])
+            );
+            assert_eq!(output.run.artifacts.len(), 1);
+            assert_eq!(output.run.artifacts[0].kind, "bench_results");
+        });
+    }
+
+    #[test]
+    fn artifacts_command_reports_paths() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let artifact_path = home.path().join("trace-results.json");
+            std::fs::write(&artifact_path, b"{}").expect("artifact");
+            store
+                .record_artifact(&run.id, "trace_results", &artifact_path)
+                .expect("record artifact");
+
+            let (output, _) = artifacts(&run.id).expect("artifacts");
+            let RunsOutput::Artifacts(output) = output else {
+                panic!("expected artifacts output");
+            };
+            assert_eq!(output.artifacts.len(), 1);
+            assert_eq!(output.artifacts[0].path, artifact_path.to_string_lossy());
+        });
+    }
+
+    #[test]
+    fn bench_history_orders_and_filters_by_scenario() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let old = store
+                .start_run(sample_run(
+                    "bench",
+                    "homeboy",
+                    "studio",
+                    serde_json::json!({
+                        "scenario_metrics": [{
+                            "scenario_id": "cold",
+                            "metrics": { "p95_ms": 10.0 }
+                        }]
+                    }),
+                ))
+                .expect("old");
+            store
+                .finish_run(&old.id, RunStatus::Pass, None)
+                .expect("finish old");
+            let new = store
+                .start_run(sample_run(
+                    "bench",
+                    "homeboy",
+                    "studio",
+                    serde_json::json!({
+                        "scenario_metrics": [{
+                            "scenario_id": "cold",
+                            "metrics": { "p95_ms": 12.0 }
+                        }]
+                    }),
+                ))
+                .expect("new");
+            store
+                .finish_run(&new.id, RunStatus::Pass, None)
+                .expect("finish new");
+
+            let (output, _) =
+                bench_history("homeboy", Some("cold"), Some("studio"), 20).expect("history");
+            let RunsOutput::BenchHistory(output) = output else {
+                panic!("expected history output");
+            };
+            assert_eq!(output.runs.len(), 2);
+            assert_eq!(output.runs[0].summary.id, new.id);
+            assert_eq!(output.runs[1].summary.id, old.id);
+        });
+    }
+
+    #[test]
+    fn bench_compare_reports_deltas_and_missing_metrics() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let from = store
+                .start_run(sample_run(
+                    "bench",
+                    "homeboy",
+                    "studio",
+                    serde_json::json!({
+                        "scenario_metrics": [{
+                            "scenario_id": "cold",
+                            "metrics": { "p95_ms": 100.0, "only_from": 1.0 },
+                            "metric_groups": { "warm": { "mean_ms": 50.0 } }
+                        }]
+                    }),
+                ))
+                .expect("from");
+            let to = store
+                .start_run(sample_run(
+                    "bench",
+                    "homeboy",
+                    "studio",
+                    serde_json::json!({
+                        "scenario_metrics": [{
+                            "scenario_id": "cold",
+                            "metrics": { "p95_ms": 125.0, "only_to": 2.0 },
+                            "metric_groups": { "warm": { "mean_ms": 40.0 } }
+                        }]
+                    }),
+                ))
+                .expect("to");
+
+            let (output, _) = bench_compare(&from.id, &to.id).expect("compare");
+            let RunsOutput::BenchCompare(output) = output else {
+                panic!("expected compare output");
+            };
+            let p95 = output
+                .comparisons
+                .iter()
+                .find(|row| row.metric == "p95_ms")
+                .expect("p95 row");
+            assert_eq!(p95.delta, 25.0);
+            assert_eq!(p95.percent_change, Some(25.0));
+            assert!(output
+                .comparisons
+                .iter()
+                .any(|row| row.metric == "warm.mean_ms" && row.delta == -10.0));
+            assert!(output
+                .missing
+                .iter()
+                .any(|row| row.metric == "only_from" && row.missing_from == "to_run"));
+            assert!(output
+                .missing
+                .iter()
+                .any(|row| row.metric == "only_to" && row.missing_from == "from_run"));
+        });
+    }
+
+    #[test]
+    fn missing_and_mismatched_run_ids_return_clear_errors() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let trace = store
+                .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                .expect("trace");
+
+            let missing = show_run("missing-run").err().expect("missing should fail");
+            assert_eq!(missing.code.as_str(), "validation.invalid_argument");
+            assert!(missing.message.contains("run record not found"));
+
+            let mismatch = bench_compare(&trace.id, &trace.id)
+                .err()
+                .expect("kind mismatch should fail");
+            assert_eq!(mismatch.code.as_str(), "validation.invalid_argument");
+            assert!(mismatch.message.contains("expected 'bench'"));
+        });
+    }
+}
