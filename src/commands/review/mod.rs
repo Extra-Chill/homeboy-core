@@ -28,6 +28,7 @@ use super::parse_key_val;
 use super::utils::args::{BaselineArgs, ExtensionOverrideArgs, PositionalComponentArgs};
 use super::{audit, lint, test, CmdResult, GlobalArgs};
 
+mod observation;
 mod render;
 
 #[derive(Args, Debug, Clone)]
@@ -210,8 +211,8 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
             summary: ReviewSummary {
                 passed: true,
                 status: "passed".to_string(),
-                component: component_label,
-                scope,
+                component: component_label.clone(),
+                scope: scope.clone(),
                 changed_since: args.changed_since.clone(),
                 total_findings: 0,
                 changed_file_count: Some(0),
@@ -221,8 +222,29 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
             lint: stage_skipped("lint", "no files changed"),
             test: stage_skipped("test", "no files changed"),
         };
+        observation::finish_success(
+            observation::start(observation::ReviewObservationStart {
+                component_id: &component.id,
+                component_label: &component_label,
+                source_path: Path::new(&source_path),
+                args: &args,
+                scope: &scope,
+                changed_file_count: Some(0),
+            }),
+            &output,
+            0,
+        );
         return Ok((output, 0));
     }
+
+    let review_observation = observation::start(observation::ReviewObservationStart {
+        component_id: &component.id,
+        component_label: &component_label,
+        source_path: Path::new(&source_path),
+        args: &args,
+        scope: &scope,
+        changed_file_count,
+    });
 
     // ── Stage 1: audit ──────────────────────────────────────────────────────
     // Audit scopes via --changed-since only (no --changed-only support today).
@@ -240,7 +262,13 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         json_summary: args.summary,
         fixability: false,
     };
-    let (audit_output, audit_exit) = audit::run(audit_args, global)?;
+    let (audit_output, audit_exit) = match audit::run(audit_args, global) {
+        Ok(result) => result,
+        Err(error) => {
+            observation::finish_error(review_observation, &error);
+            return Err(error);
+        }
+    };
     let audit_passed = audit_exit == 0;
     let audit_findings = audit_finding_count(&audit_output);
     let audit_stage = ReviewStage {
@@ -277,7 +305,13 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         _json: Default::default(),
         json_summary: args.summary,
     };
-    let (lint_output, lint_exit) = lint::run(lint_args, global)?;
+    let (lint_output, lint_exit) = match lint::run(lint_args, global) {
+        Ok(result) => result,
+        Err(error) => {
+            observation::finish_error(review_observation, &error);
+            return Err(error);
+        }
+    };
     let lint_passed = lint_exit == 0;
     let lint_findings = lint_finding_count(&lint_output);
     let lint_stage = ReviewStage {
@@ -315,7 +349,13 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         _json: Default::default(),
         json_summary: args.summary,
     };
-    let (test_output, test_exit) = test::run(test_args, global)?;
+    let (test_output, test_exit) = match test::run(test_args, global) {
+        Ok(result) => result,
+        Err(error) => {
+            observation::finish_error(review_observation, &error);
+            return Err(error);
+        }
+    };
     let test_passed = test_exit == 0;
     let test_findings = test_finding_count(&test_output);
     let test_stage = ReviewStage {
@@ -382,6 +422,8 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
     };
 
     print_human_summary(&output);
+
+    observation::finish_success(review_observation, &output, overall_exit);
 
     Ok((output, overall_exit))
 }
