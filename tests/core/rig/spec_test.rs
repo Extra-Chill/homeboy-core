@@ -250,6 +250,8 @@ fn test_check_groups() {
     let detailed = WorkloadSpec::Detailed(WorkloadEntry {
         path: "/tmp/scoped.trace.mjs".to_string(),
         check_groups: Some(vec!["desktop-app".to_string()]),
+        trace_phase_presets: std::collections::HashMap::new(),
+        trace_default_phase_preset: None,
     });
     assert_eq!(detailed.path(), "/tmp/scoped.trace.mjs");
     assert_eq!(

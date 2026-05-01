@@ -11,6 +11,7 @@ homeboy trace <component> <scenario> --rig <rig-id>
 homeboy trace <component> <scenario> --json-summary
 homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
 homeboy trace <component> <scenario> --phase submit:ui.submit --phase cli:cli.start --phase ready:server.ready
+homeboy trace <component> <scenario> --rig <rig-id> --phase-preset create-site
 homeboy trace <component> <scenario> --repeat 5 --aggregate spans
 homeboy trace compare before.json after.json
 homeboy trace <component> <scenario> --report=markdown
@@ -104,6 +105,30 @@ homeboy trace studio create-site \
 The example above produces span rows for `phase.submit_to_cli`, `phase.cli_to_ready`, and `phase.total`. Existing `--span` definitions still work and can be mixed with phase milestones.
 
 Phase spans keep the same ordering semantics as normal spans: a phase interval is only `ok` when the later milestone occurs at or after the previous milestone. If both phase milestones exist but the later milestone was first observed before the previous milestone, Homeboy reports the span as skipped with a non-monotonic phase-chain diagnostic instead of treating the out-of-order interval as successful. Markdown reports include that diagnostic in the span status column so asynchronous readiness events are easier to distinguish from missing events.
+
+Rigs and rig-owned trace workloads can declare reusable phase presets. Use `--phase-preset <name>` to expand a named preset from the selected rig/workload into the same adjacent phase spans:
+
+```jsonc
+{
+  "trace_workloads": {
+    "nodejs": [
+      {
+        "path": "${package.root}/trace/create-site.trace.mjs",
+        "trace_default_phase_preset": "create-site",
+        "trace_phase_presets": {
+          "create-site": [
+            "submit:ui.create_site.submit_clicked",
+            "cli:studio_server_child.run_cli.before",
+            "ready:playground.run_cli.ready"
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+When `--repeat <N> --aggregate spans` is used with `--rig` and no explicit `--phase`, `--phase-preset`, or `--span` flags, Homeboy applies the workload's `trace_default_phase_preset`. A preset named `default` is also recognized when no explicit default pointer is present.
 
 ## Repeat And Aggregate
 

@@ -78,6 +78,10 @@ pub struct TraceArgs {
     #[arg(long = "phase", value_name = "[LABEL:]SOURCE.EVENT", value_parser = extension_trace::spans::parse_phase_milestone)]
     pub phases: Vec<extension_trace::spans::TracePhaseMilestone>,
 
+    /// Use a named phase preset declared by the selected rig/workload.
+    #[arg(long = "phase-preset", value_name = "NAME")]
+    pub phase_preset: Option<String>,
+
     #[command(flatten)]
     pub baseline_args: BaselineArgs,
 
@@ -222,7 +226,6 @@ struct TraceRunExecution {
 }
 
 fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
-    let span_definitions = span_definitions_for_args(&args)?;
     let rig_context = load_rig_context(args.rig.as_deref())?;
     let effective_id = resolve_component_id(&args.comp, rig_context.as_ref().map(|c| &c.rig_spec))?;
     let path_override = args.comp.path.clone().or_else(|| {
@@ -251,6 +254,15 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             rig::RigWorkloadKind::Trace,
         )?;
     }
+    let span_definitions = span_definitions_for_args(
+        &args,
+        rig_context.as_ref(),
+        ctx.extension_id.as_deref(),
+        args.aggregate.as_deref() == Some("spans")
+            && args.phase_preset.is_none()
+            && args.phases.is_empty()
+            && args.spans.is_empty(),
+    )?;
 
     let rig_state = rig_context
         .as_ref()
@@ -281,6 +293,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
                     "component_path": component_path_for_observation,
                     "requested_overlays": requested_overlays,
                     "span_definitions": span_definitions.clone(),
+                    "phase_preset": args.phase_preset.clone(),
                     "phase_milestones": args.phases.clone().into_iter().map(|phase| {
                         serde_json::json!({ "label": phase.label, "key": phase.key })
                     }).collect::<Vec<_>>(),
@@ -366,7 +379,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let mut runs = Vec::new();
     let mut span_samples: BTreeMap<String, Vec<TraceAggregateSpanSample>> = BTreeMap::new();
     let mut span_failures: BTreeMap<String, usize> = BTreeMap::new();
-    let mut all_span_ids: BTreeSet<String> = span_definitions_for_args(&args)?
+    let mut all_span_ids: BTreeSet<String> = cli_span_definitions_for_args(&args)?
         .into_iter()
         .map(|span| span.id)
         .collect();
@@ -377,7 +390,6 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     for index in 1..=repeat {
         let mut run_args = args.clone();
         run_args.repeat = 1;
-        run_args.aggregate = None;
         match execute_trace_run(run_args) {
             Ok(execution) => {
                 if rig_state.is_none() {
@@ -499,7 +511,9 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     Ok((TraceCommandOutput::Aggregate(output), exit_code))
 }
 
-fn span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanDefinition>> {
+const DEFAULT_TRACE_PHASE_PRESET: &str = "default";
+
+fn cli_span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanDefinition>> {
     let mut definitions = args.spans.clone();
     let phase_definitions =
         extension_trace::spans::phase_span_definitions(&args.phases).map_err(|message| {
@@ -507,6 +521,126 @@ fn span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanD
         })?;
     definitions.extend(phase_definitions);
     Ok(definitions)
+}
+
+fn span_definitions_for_args(
+    args: &TraceArgs,
+    rig_context: Option<&TraceRigContext>,
+    extension_id: Option<&str>,
+    use_default_preset: bool,
+) -> homeboy::Result<Vec<TraceSpanDefinition>> {
+    let mut definitions = cli_span_definitions_for_args(args)?;
+    let Some(preset_name) = args.phase_preset.as_deref().or_else(|| {
+        if use_default_preset {
+            default_trace_phase_preset_for_args(args, rig_context, extension_id)
+        } else {
+            None
+        }
+    }) else {
+        return Ok(definitions);
+    };
+
+    let preset_phases = trace_phase_preset_for_args(args, rig_context, extension_id, preset_name)?;
+    let phase_definitions = extension_trace::spans::phase_span_definitions(&preset_phases)
+        .map_err(|message| {
+            homeboy::Error::validation_invalid_argument("--phase-preset", message, None, None)
+        })?;
+    definitions.extend(phase_definitions);
+    Ok(definitions)
+}
+
+fn default_trace_phase_preset_for_args<'a>(
+    args: &TraceArgs,
+    rig_context: Option<&'a TraceRigContext>,
+    extension_id: Option<&str>,
+) -> Option<&'a str> {
+    let context = rig_context?;
+    let extension_id = extension_id?;
+    let workload = context
+        .rig_spec
+        .trace_workloads
+        .get(extension_id)
+        .and_then(|workloads| {
+            workloads
+                .iter()
+                .find(|workload| trace_workload_scenario_id(workload.path()) == args.scenario)
+        })?;
+    workload.trace_default_phase_preset().or_else(|| {
+        workload
+            .trace_phase_preset(DEFAULT_TRACE_PHASE_PRESET)
+            .map(|_| DEFAULT_TRACE_PHASE_PRESET)
+    })
+}
+
+fn trace_phase_preset_for_args(
+    args: &TraceArgs,
+    rig_context: Option<&TraceRigContext>,
+    extension_id: Option<&str>,
+    preset_name: &str,
+) -> homeboy::Result<Vec<extension_trace::spans::TracePhaseMilestone>> {
+    let context = rig_context.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "--phase-preset",
+            "phase presets require --rig so Homeboy can read rig/workload metadata",
+            None,
+            None,
+        )
+    })?;
+    let extension_id = extension_id.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "--phase-preset",
+            "phase presets require a resolved trace extension",
+            None,
+            None,
+        )
+    })?;
+
+    let workloads = context
+        .rig_spec
+        .trace_workloads
+        .get(extension_id)
+        .map(|workloads| workloads.as_slice())
+        .unwrap_or(&[]);
+    let workload = workloads
+        .iter()
+        .find(|workload| trace_workload_scenario_id(workload.path()) == args.scenario);
+    let phases = workload
+        .and_then(|workload| workload.trace_phase_preset(preset_name))
+        .ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "--phase-preset",
+                format!(
+                    "trace phase preset '{}' is not declared for scenario '{}'",
+                    preset_name, args.scenario
+                ),
+                None,
+                None,
+            )
+        })?;
+
+    phases
+        .iter()
+        .map(|phase| {
+            extension_trace::spans::parse_phase_milestone(phase).map_err(|message| {
+                homeboy::Error::validation_invalid_argument("--phase-preset", message, None, None)
+            })
+        })
+        .collect()
+}
+
+fn trace_workload_scenario_id(path: &str) -> String {
+    let file_name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path);
+    if let Some((stem, _)) = file_name.split_once(".trace.") {
+        return stem.to_string();
+    }
+    Path::new(file_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(file_name)
+        .to_string()
 }
 
 fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
