@@ -1291,4 +1291,27 @@ mod tests {
             .any(|(k, v)| k == "HOMEBOY_STEP" && v == "lint,test"));
         assert!(env.iter().any(|(k, v)| k == "HOMEBOY_SKIP" && v == "lint"));
     }
+
+    #[test]
+    fn test_execute_capability_script_supports_stderr_only_passthrough() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = execute_capability_script(
+            dir.path(),
+            "unused.sh",
+            &[],
+            &[],
+            None,
+            Some("printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2"),
+            CapabilityScriptOptions {
+                passthrough: false,
+                stderr_passthrough: true,
+                cleanup_process_group: false,
+            },
+        )
+        .expect("script should run");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "{\"ok\":true}\n");
+        assert_eq!(output.stderr, "progress turn=1\n");
+    }
 }
