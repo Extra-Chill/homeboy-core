@@ -2,6 +2,7 @@ use std::path::Path;
 
 use homeboy::git::short_head_revision_at;
 use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
+use homeboy::ObservationOutputMetadata;
 
 use super::{artifact_command, ReviewArgs, ReviewCommandOutput, ReviewStage};
 
@@ -9,6 +10,12 @@ pub(super) struct ReviewObservation {
     store: ObservationStore,
     run: RunRecord,
     initial_metadata: serde_json::Value,
+}
+
+impl ReviewObservation {
+    pub(super) fn output_metadata(&self) -> ObservationOutputMetadata {
+        ObservationOutputMetadata::for_run(&self.run.kind, &self.run.id)
+    }
 }
 
 pub(super) struct ReviewObservationStart<'a> {
@@ -274,6 +281,7 @@ mod tests {
         );
         let output = ReviewCommandOutput {
             command: "review".to_string(),
+            observation: None,
             artifact,
             summary: super::super::ReviewSummary {
                 passed: false,

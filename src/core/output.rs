@@ -7,6 +7,128 @@
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
+// Observation-backed Outputs
+// ============================================================================
+
+/// Compact pointer from a command result to its persisted observation record.
+///
+/// Command outputs keep their existing fields for compatibility. Observation-
+/// backed commands can add this metadata when the best-effort observation store
+/// is available, giving wrappers a stable run ID and exact drill-down commands
+/// without forcing every `--output` artifact to duplicate the full evidence set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservationOutputMetadata {
+    pub schema: String,
+    pub run_id: String,
+    pub kind: String,
+    pub details: ObservationOutputDetails,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservationOutputDetails {
+    pub query: String,
+    pub artifacts: String,
+    pub export_bundle: String,
+}
+
+impl ObservationOutputMetadata {
+    pub fn for_run(kind: impl Into<String>, run_id: impl Into<String>) -> Self {
+        let kind = kind.into();
+        let run_id = run_id.into();
+        Self {
+            schema: "homeboy/observation-pointer/v1".to_string(),
+            run_id: run_id.clone(),
+            kind,
+            details: ObservationOutputDetails {
+                query: format!("homeboy runs show {run_id}"),
+                artifacts: format!("homeboy runs artifacts {run_id}"),
+                export_bundle: format!(
+                    "homeboy runs export --run {run_id} --output homeboy-observations"
+                ),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_for_run() {
+        let metadata = ObservationOutputMetadata::for_run("review", "run-123");
+        let json = serde_json::to_value(metadata).expect("serialize observation metadata");
+
+        assert_eq!(json["schema"], "homeboy/observation-pointer/v1");
+        assert_eq!(json["run_id"], "run-123");
+        assert_eq!(json["kind"], "review");
+        assert_eq!(json["details"]["query"], "homeboy runs show run-123");
+        assert_eq!(
+            json["details"]["artifacts"],
+            "homeboy runs artifacts run-123"
+        );
+        assert_eq!(
+            json["details"]["export_bundle"],
+            "homeboy runs export --run run-123 --output homeboy-observations"
+        );
+    }
+
+    #[test]
+    fn test_exit_code() {
+        let clean = BatchResult::new();
+        assert_eq!(clean.exit_code(), 0);
+
+        let mut failed = BatchResult::new();
+        failed.record_error("item".to_string(), "failed".to_string());
+        assert_eq!(failed.exit_code(), 1);
+    }
+
+    #[test]
+    fn test_record_created() {
+        let mut result = BatchResult::new();
+        result.record_created("alpha".to_string());
+
+        assert_eq!(result.created, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "created");
+        assert_eq!(result.items[0].error, None);
+    }
+
+    #[test]
+    fn test_record_updated() {
+        let mut result = BatchResult::new();
+        result.record_updated("alpha".to_string());
+
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "updated");
+        assert_eq!(result.items[0].error, None);
+    }
+
+    #[test]
+    fn test_record_skipped() {
+        let mut result = BatchResult::new();
+        result.record_skipped("alpha".to_string());
+
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "skipped");
+        assert_eq!(result.items[0].error, None);
+    }
+
+    #[test]
+    fn test_record_error() {
+        let mut result = BatchResult::new();
+        result.record_error("alpha".to_string(), "boom".to_string());
+
+        assert_eq!(result.errors, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "error");
+        assert_eq!(result.items[0].error.as_deref(), Some("boom"));
+    }
+}
+
+// ============================================================================
 // Create Operations
 // ============================================================================
 
