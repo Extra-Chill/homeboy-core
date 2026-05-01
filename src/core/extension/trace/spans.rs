@@ -107,7 +107,72 @@ pub(crate) fn apply_span_definitions(
         return;
     }
     results.span_definitions = definitions.clone();
-    results.span_results = summarize_spans(&results.timeline, &definitions);
+    let reporting_timeline = reporting_timeline(&results.timeline);
+    results.span_results = summarize_spans(&reporting_timeline, &definitions);
+}
+
+fn reporting_timeline(timeline: &[TraceEvent]) -> Vec<TraceEvent> {
+    let mut events = Vec::new();
+    for event in timeline {
+        push_reporting_event(&mut events, event.clone());
+    }
+    events.sort_by_key(|event| event.t_ms);
+    events
+}
+
+fn push_reporting_event(events: &mut Vec<TraceEvent>, event: TraceEvent) {
+    let nested = nested_detail_events(&event);
+    events.push(event);
+    for nested_event in nested {
+        push_reporting_event(events, nested_event);
+    }
+}
+
+fn nested_detail_events(event: &TraceEvent) -> Vec<TraceEvent> {
+    let Some(serde_json::Value::Array(items)) = event.data.get("events") else {
+        return Vec::new();
+    };
+
+    items
+        .iter()
+        .filter_map(|item| nested_detail_event(event.t_ms, item))
+        .collect()
+}
+
+fn nested_detail_event(parent_t_ms: u64, item: &serde_json::Value) -> Option<TraceEvent> {
+    let source = item.get("source")?.as_str()?.to_string();
+    let event = item.get("event")?.as_str()?.to_string();
+    let relative_t_ms = json_millis(item.get("t")?)?;
+    let data = item
+        .get("data")
+        .and_then(|value| match value {
+            serde_json::Value::Object(map) => Some(
+                map.iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    Some(TraceEvent {
+        t_ms: parent_t_ms.saturating_add(relative_t_ms),
+        source,
+        event,
+        data,
+    })
+}
+
+fn json_millis(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().or_else(|| {
+            number
+                .as_f64()
+                .filter(|value| value.is_finite() && *value >= 0.0)
+                .map(|value| value.round() as u64)
+        }),
+        _ => None,
+    }
 }
 
 pub(crate) fn summarize_spans(
@@ -258,6 +323,24 @@ mod tests {
             source: source.to_string(),
             event: event.to_string(),
             data: Default::default(),
+        }
+    }
+
+    fn event_with_data(
+        t_ms: u64,
+        source: &str,
+        event: &str,
+        data: serde_json::Value,
+    ) -> TraceEvent {
+        let serde_json::Value::Object(data) = data else {
+            panic!("test data must be a JSON object");
+        };
+
+        TraceEvent {
+            t_ms,
+            source: source.to_string(),
+            event: event.to_string(),
+            data: data.into_iter().collect(),
         }
     }
 
@@ -451,5 +534,110 @@ mod tests {
         );
 
         assert_eq!(results.span_results[0].duration_ms, Some(20));
+    }
+
+    #[test]
+    fn apply_span_definitions_uses_normalized_nested_detail_events() {
+        let mut results = TraceResults {
+            component_id: "generic".to_string(),
+            scenario_id: "nested-detail-events".to_string(),
+            status: crate::extension::trace::parsing::TraceStatus::Pass,
+            summary: None,
+            failure: None,
+            rig: None,
+            timeline: vec![event_with_data(
+                100,
+                "runner",
+                "details",
+                serde_json::json!({
+                    "events": [
+                        {
+                            "source": "nested",
+                            "event": "request.start",
+                            "t": 7,
+                            "data": {"url": "/example"}
+                        },
+                        {
+                            "source": "nested",
+                            "event": "request.ready",
+                            "t": 42,
+                            "data": {"status": 200}
+                        }
+                    ]
+                }),
+            )],
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
+            assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        apply_span_definitions(
+            &mut results,
+            &[TraceSpanDefinition {
+                id: "nested_request".to_string(),
+                from: "nested.request.start".to_string(),
+                to: "nested.request.ready".to_string(),
+            }],
+        );
+
+        assert_eq!(results.timeline.len(), 1);
+        assert_eq!(results.span_results[0].status, TraceSpanStatus::Ok);
+        assert_eq!(results.span_results[0].from_t_ms, Some(107));
+        assert_eq!(results.span_results[0].to_t_ms, Some(142));
+        assert_eq!(results.span_results[0].duration_ms, Some(35));
+    }
+
+    #[test]
+    fn phase_span_definitions_can_select_nested_detail_events() {
+        let mut results = TraceResults {
+            component_id: "generic".to_string(),
+            scenario_id: "nested-detail-events".to_string(),
+            status: crate::extension::trace::parsing::TraceStatus::Pass,
+            summary: None,
+            failure: None,
+            rig: None,
+            timeline: vec![event_with_data(
+                50,
+                "runner",
+                "details",
+                serde_json::json!({
+                    "events": [
+                        {"source": "phase_source", "event": "first", "t": 1, "data": {}},
+                        {"source": "phase_source", "event": "second", "t": 6, "data": {}},
+                        {"source": "phase_source", "event": "third", "t": 20, "data": {}}
+                    ]
+                }),
+            )],
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
+            assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+        let phases = phase_span_definitions(&[
+            TracePhaseMilestone {
+                label: "first".to_string(),
+                key: "phase_source.first".to_string(),
+            },
+            TracePhaseMilestone {
+                label: "second".to_string(),
+                key: "phase_source.second".to_string(),
+            },
+            TracePhaseMilestone {
+                label: "third".to_string(),
+                key: "phase_source.third".to_string(),
+            },
+        ])
+        .unwrap();
+
+        apply_span_definitions(&mut results, &phases);
+
+        assert_eq!(results.span_results.len(), 3);
+        assert_eq!(results.span_results[0].id, "phase.first_to_second");
+        assert_eq!(results.span_results[0].duration_ms, Some(5));
+        assert_eq!(results.span_results[1].id, "phase.second_to_third");
+        assert_eq!(results.span_results[1].duration_ms, Some(14));
+        assert_eq!(results.span_results[2].id, "phase.total");
+        assert_eq!(results.span_results[2].duration_ms, Some(19));
     }
 }
