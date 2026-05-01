@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.139.0] - 2026-05-01
+
+### Added
+- add observation pointers to review output
+- feat(obs-store): persist lint findings
+
+### Changed
+- cover output helper methods
+
+### Fixed
+- fix(obs-store): satisfy lint findings audit
+
 ## [0.138.0] - 2026-05-01
 
 ### Added
