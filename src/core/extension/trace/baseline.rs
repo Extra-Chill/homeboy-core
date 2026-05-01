@@ -12,6 +12,7 @@ use super::parsing::TraceResults;
 
 const BASELINE_KEY: &str = "trace";
 pub const DEFAULT_REGRESSION_THRESHOLD_PERCENT: f64 = 5.0;
+pub const DEFAULT_REGRESSION_MIN_DELTA_MS: u64 = 50;
 
 fn baseline_key_for(rig_id: Option<&str>) -> String {
     rig_id.map_or_else(|| BASELINE_KEY.to_string(), |id| format!("trace.rig.{id}"))
@@ -59,6 +60,7 @@ pub struct TraceSpanDelta {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct TraceBaselineComparison {
     pub threshold_percent: f64,
+    pub min_delta_ms: u64,
     pub spans: Vec<TraceSpanDelta>,
     pub new_span_ids: Vec<String>,
     pub removed_span_ids: Vec<String>,
@@ -93,6 +95,7 @@ pub fn compare(
     current: &TraceResults,
     baseline: &TraceBaseline,
     threshold_percent: f64,
+    min_delta_ms: u64,
 ) -> TraceBaselineComparison {
     let current_snapshots = snapshots_from_results(current);
     let baseline_by_id: HashMap<&str, &TraceSpanSnapshot> = baseline
@@ -123,7 +126,8 @@ pub fn compare(
         } else {
             Some((delta_ms as f64 / prior.duration_ms as f64) * 100.0)
         };
-        let span_regression = delta_pct.is_some_and(|pct| pct > threshold_percent);
+        let span_regression =
+            delta_ms > min_delta_ms as i64 && delta_pct.is_some_and(|pct| pct > threshold_percent);
         let span_improvement = delta_ms < 0;
         if span_regression {
             regression = true;
@@ -158,6 +162,7 @@ pub fn compare(
 
     TraceBaselineComparison {
         threshold_percent,
+        min_delta_ms,
         spans,
         new_span_ids,
         removed_span_ids,
@@ -226,11 +231,45 @@ mod tests {
             },
         };
 
-        let comparison = compare(&results(130), &baseline, 5.0);
+        let comparison = compare(
+            &results(180),
+            &baseline,
+            5.0,
+            DEFAULT_REGRESSION_MIN_DELTA_MS,
+        );
 
         assert!(comparison.regression);
-        assert_eq!(comparison.spans[0].delta_ms, 30);
-        assert_eq!(comparison.spans[0].delta_pct, Some(30.0));
+        assert_eq!(comparison.spans[0].delta_ms, 80);
+        assert_eq!(comparison.spans[0].delta_pct, Some(80.0));
+    }
+
+    #[test]
+    fn test_compare_requires_min_delta_for_regression() {
+        let baseline = TraceBaseline {
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            context_id: "studio".to_string(),
+            item_count: 1,
+            known_fingerprints: vec!["submit_to_cli".to_string()],
+            metadata: TraceBaselineMetadata {
+                spans: vec![TraceSpanSnapshot {
+                    id: "submit_to_cli".to_string(),
+                    duration_ms: 9,
+                }],
+            },
+        };
+
+        let comparison = compare(
+            &results(15),
+            &baseline,
+            5.0,
+            DEFAULT_REGRESSION_MIN_DELTA_MS,
+        );
+
+        assert!(!comparison.regression);
+        assert_eq!(comparison.min_delta_ms, DEFAULT_REGRESSION_MIN_DELTA_MS);
+        assert_eq!(comparison.spans[0].delta_ms, 6);
+        assert_eq!(comparison.spans[0].delta_pct, Some(66.66666666666666));
+        assert!(!comparison.spans[0].regression);
     }
 
     #[test]

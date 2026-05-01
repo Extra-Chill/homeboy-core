@@ -55,6 +55,10 @@ pub struct TraceArgs {
     #[arg(long, value_name = "PERCENT", default_value_t = extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT)]
     pub regression_threshold: f64,
 
+    /// Minimum span slowdown in milliseconds before a regression can fail.
+    #[arg(long, value_name = "MS", default_value_t = extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS)]
+    pub regression_min_delta_ms: u64,
+
     /// Apply a patch file for this trace run, then reverse it afterward.
     #[arg(long = "overlay", value_name = "PATCH_FILE")]
     pub overlays: Vec<String>,
@@ -165,7 +169,8 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
                         "baseline": args.baseline_args.baseline,
                         "ignore_baseline": args.baseline_args.ignore_baseline,
                         "ratchet": args.baseline_args.ratchet,
-                        "regression_threshold_percent": args.regression_threshold
+                        "regression_threshold_percent": args.regression_threshold,
+                        "regression_min_delta_ms": args.regression_min_delta_ms
                     }
                 }),
             })
@@ -212,6 +217,7 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
                 ratchet: args.baseline_args.ratchet,
             },
             regression_threshold_percent: args.regression_threshold,
+            regression_min_delta_ms: args.regression_min_delta_ms,
         },
         &run_dir,
         rig_state.clone(),
@@ -661,6 +667,7 @@ mod tests {
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 keep_overlay: false,
             })
@@ -744,6 +751,7 @@ mod tests {
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 keep_overlay: false,
             })
@@ -784,6 +792,8 @@ mod tests {
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                     overlays: Vec::new(),
                     keep_overlay: false,
                 },
@@ -830,6 +840,8 @@ mod tests {
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                     overlays: Vec::new(),
                     keep_overlay: false,
                 },
@@ -899,6 +911,8 @@ mod tests {
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                     overlays: Vec::new(),
                     keep_overlay: false,
                 },

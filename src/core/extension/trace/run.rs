@@ -35,6 +35,7 @@ pub struct TraceRunWorkflowArgs {
     pub span_definitions: Vec<TraceSpanDefinition>,
     pub baseline_flags: BaselineFlags,
     pub regression_threshold_percent: f64,
+    pub regression_min_delta_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -163,8 +164,12 @@ fn run_trace_workflow_with_context(
     if has_span_results && !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
         if let Some(ref parsed) = results {
             if let Some(existing) = super::baseline::load_baseline(source_path, rig_id) {
-                let comparison =
-                    super::baseline::compare(parsed, &existing, args.regression_threshold_percent);
+                let comparison = super::baseline::compare(
+                    parsed,
+                    &existing,
+                    args.regression_threshold_percent,
+                    args.regression_min_delta_ms,
+                );
                 if comparison.regression {
                     baseline_exit_override = Some(1);
                 } else if comparison.has_improvements && args.baseline_flags.ratchet {
@@ -202,8 +207,8 @@ fn run_trace_workflow_with_context(
     if let Some(ref cmp) = baseline_comparison {
         if cmp.regression {
             hints.push(format!(
-                "Trace span regression threshold: {}%. Raise it with --regression-threshold=<PCT> if expected.",
-                cmp.threshold_percent
+                "Trace span regression threshold: {}% and {}ms. Raise them with --regression-threshold=<PCT> or --regression-min-delta-ms=<MS> if expected.",
+                cmp.threshold_percent, cmp.min_delta_ms
             ));
         }
     }
@@ -254,6 +259,7 @@ pub fn run_trace_list_workflow(
             ratchet: false,
         },
         regression_threshold_percent: super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+        regression_min_delta_ms: super::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
     };
     let output =
         build_trace_runner(&execution_context, component, &runner_args, run_dir, true)?.run()?;
@@ -617,6 +623,8 @@ JSON
             },
             regression_threshold_percent:
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
 
         let output = build_trace_runner(&context, &component, &args, &run_dir, false)
@@ -688,6 +696,8 @@ JSON
             },
             regression_threshold_percent:
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
 
         let output = build_trace_runner(&context, &component, &args, &run_dir, true)
@@ -724,6 +734,8 @@ JSON
             },
             regression_threshold_percent:
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
         let output = RunnerOutput {
             success: false,
@@ -869,6 +881,8 @@ JSON
             },
             regression_threshold_percent:
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
         OverlayFixture {
             _temp: temp,
