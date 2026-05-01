@@ -307,6 +307,7 @@ fn parses_bench_list_rig_flag() {
 
     match cli.bench.command.expect("list command") {
         BenchCommand::List(args) => assert_eq!(args.rig, vec!["studio-bfb".to_string()]),
+        _ => panic!("expected bench list command"),
     }
 }
 

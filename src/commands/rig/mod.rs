@@ -64,6 +64,14 @@ enum RigCommand {
         /// Rig ID
         rig_id: String,
     },
+    /// List persisted observation runs for this rig
+    Runs {
+        /// Rig ID
+        rig_id: String,
+        /// Maximum runs to return
+        #[arg(long, default_value_t = 20)]
+        limit: i64,
+    },
     /// Install rigs from a local package path or git URL
     Install {
         /// Git URL or local path containing rig.json or rigs/<id>/rig.json
@@ -133,11 +141,24 @@ pub fn run(args: RigArgs, _global: &super::GlobalArgs) -> CmdResult<RigCommandOu
         RigCommand::Repair { rig_id } => repair(&rig_id),
         RigCommand::Sync { rig_id, dry_run } => sync(&rig_id, dry_run),
         RigCommand::Status { rig_id } => status(&rig_id),
+        RigCommand::Runs { rig_id, limit } => runs(&rig_id, limit),
         RigCommand::Install { source, id, all } => install(&source, id.as_deref(), all),
         RigCommand::Update { rig_id, all } => update(rig_id.as_deref(), all),
         RigCommand::Sources { command } => sources::run(command),
         RigCommand::App { command } => app(command),
     }
+}
+
+fn runs(rig_id: &str, limit: i64) -> CmdResult<RigCommandOutput> {
+    let (output, exit_code) = super::runs::list_runs(
+        super::runs::RunsListArgs {
+            rig: Some(rig_id.to_string()),
+            limit,
+            ..Default::default()
+        },
+        "rig.runs",
+    )?;
+    Ok((RigCommandOutput::Runs(output), exit_code))
 }
 
 fn list() -> CmdResult<RigCommandOutput> {
