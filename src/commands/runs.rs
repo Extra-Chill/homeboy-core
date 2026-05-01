@@ -1,3 +1,5 @@
+mod bundle;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use clap::{Args, Subcommand};
@@ -8,6 +10,10 @@ use homeboy::observation::{ArtifactRecord, ObservationStore, RunListFilter, RunR
 use homeboy::Error;
 
 use super::{CmdResult, GlobalArgs};
+use bundle::{
+    export_runs, import_runs, ObservationBundleImportSummary, ObservationBundleManifest,
+    RunsExportArgs, RunsImportArgs,
+};
 
 const DEFAULT_LIMIT: i64 = 20;
 
@@ -25,6 +31,10 @@ enum RunsCommand {
     Show { run_id: String },
     /// List artifacts recorded for one run
     Artifacts { run_id: String },
+    /// Export observation records as an inspectable directory bundle
+    Export(RunsExportArgs),
+    /// Import an observation bundle into the local observation store
+    Import(RunsImportArgs),
 }
 
 #[derive(Args, Clone, Default)]
@@ -54,6 +64,8 @@ pub enum RunsOutput {
     Artifacts(RunsArtifactsOutput),
     BenchHistory(BenchHistoryOutput),
     BenchCompare(BenchCompareOutput),
+    Export(RunsExportOutput),
+    Import(RunsImportOutput),
 }
 
 #[derive(Serialize)]
@@ -93,6 +105,23 @@ pub struct BenchCompareOutput {
     pub to_run: RunSummary,
     pub comparisons: Vec<BenchMetricComparison>,
     pub missing: Vec<BenchMissingMetric>,
+}
+
+#[derive(Serialize)]
+pub struct RunsExportOutput {
+    pub command: &'static str,
+    pub output: String,
+    pub manifest: ObservationBundleManifest,
+    pub run_count: usize,
+    pub artifact_count: usize,
+    pub trace_span_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct RunsImportOutput {
+    pub command: &'static str,
+    pub input: String,
+    pub imported: ObservationBundleImportSummary,
 }
 
 #[derive(Serialize)]
@@ -140,6 +169,8 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
+        RunsCommand::Export(args) => export_runs(args),
+        RunsCommand::Import(args) => import_runs(args),
     }
 }
 
@@ -395,8 +426,11 @@ fn collect_numeric_object(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use homeboy::observation::{NewRunRecord, RunStatus};
+    use std::path::Path;
+
+    use homeboy::observation::{NewRunRecord, NewTraceSpanRecord, RunStatus, TraceSpanRecord};
     use homeboy::test_support::with_isolated_home;
+    use serde::Deserialize;
 
     struct XdgGuard(Option<String>);
 
@@ -652,5 +686,240 @@ mod tests {
             assert_eq!(mismatch.code.as_str(), "validation.invalid_argument");
             assert!(mismatch.message.contains("expected 'bench'"));
         });
+    }
+
+    #[test]
+    fn export_one_run_writes_directory_bundle() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("run");
+            store
+                .finish_run(&run.id, RunStatus::Pass, None)
+                .expect("finish");
+            let output = home.path().join("bundle");
+
+            let (result, _) = export_runs(RunsExportArgs {
+                run: Some(run.id.clone()),
+                since: None,
+                output: output.clone(),
+            })
+            .expect("export");
+
+            let RunsOutput::Export(result) = result else {
+                panic!("expected export output");
+            };
+            assert_eq!(result.run_count, 1);
+            assert!(output.join("manifest.json").exists());
+            assert!(output.join("runs.json").exists());
+            assert!(output.join("artifacts.json").exists());
+            assert!(output.join("trace_spans.json").exists());
+            let runs: Vec<RunRecord> = read_bundle_test_json(&output.join("runs.json"));
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].id, run.id);
+        });
+    }
+
+    #[test]
+    fn export_since_writes_multiple_runs() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let first = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("first");
+            let second = store
+                .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                .expect("second");
+            let output = home.path().join("recent-bundle");
+
+            export_runs(RunsExportArgs {
+                run: None,
+                since: Some("1d".to_string()),
+                output: output.clone(),
+            })
+            .expect("export recent");
+
+            let runs: Vec<RunRecord> = read_bundle_test_json(&output.join("runs.json"));
+            let ids = runs
+                .iter()
+                .map(|run| run.id.clone())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(ids, BTreeSet::from([first.id, second.id]));
+        });
+    }
+
+    #[test]
+    fn export_artifacts_is_metadata_only() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let artifact_path = home.path().join("bench-results.json");
+            std::fs::write(&artifact_path, br#"{"ok":true}"#).expect("artifact");
+            let artifact = store
+                .record_artifact(&run.id, "bench_results", &artifact_path)
+                .expect("record artifact");
+            let output = home.path().join("artifact-bundle");
+
+            export_runs(RunsExportArgs {
+                run: Some(run.id),
+                since: None,
+                output: output.clone(),
+            })
+            .expect("export");
+
+            let artifacts: Vec<ArtifactRecord> =
+                read_bundle_test_json(&output.join("artifacts.json"));
+            assert_eq!(artifacts, vec![artifact]);
+            assert!(!output.join("files").exists());
+        });
+    }
+
+    #[test]
+    fn export_trace_spans_when_present() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let span = store
+                .record_trace_span(NewTraceSpanRecord {
+                    run_id: run.id.clone(),
+                    span_id: "boot".to_string(),
+                    status: "ok".to_string(),
+                    duration_ms: Some(12.5),
+                    from_event: Some("start".to_string()),
+                    to_event: Some("ready".to_string()),
+                    metadata_json: serde_json::json!({ "phase": "cold" }),
+                })
+                .expect("span");
+            let output = home.path().join("trace-bundle");
+
+            export_runs(RunsExportArgs {
+                run: Some(run.id),
+                since: None,
+                output: output.clone(),
+            })
+            .expect("export");
+
+            let spans: Vec<TraceSpanRecord> =
+                read_bundle_test_json(&output.join("trace_spans.json"));
+            assert_eq!(spans, vec![span]);
+        });
+    }
+
+    #[test]
+    fn import_into_empty_db_and_reimport_is_idempotent() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let bundle = home.path().join("portable-bundle");
+            let run_id = {
+                let store = ObservationStore::open_initialized().expect("store");
+                let run = store
+                    .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                    .expect("run");
+                let artifact_path = home.path().join("trace.json");
+                std::fs::write(&artifact_path, b"{}").expect("artifact");
+                store
+                    .record_artifact(&run.id, "trace_results", &artifact_path)
+                    .expect("artifact record");
+                store
+                    .record_trace_span(NewTraceSpanRecord {
+                        run_id: run.id.clone(),
+                        span_id: "first".to_string(),
+                        status: "ok".to_string(),
+                        duration_ms: Some(1.0),
+                        from_event: None,
+                        to_event: Some("done".to_string()),
+                        metadata_json: serde_json::json!({}),
+                    })
+                    .expect("span");
+                export_runs(RunsExportArgs {
+                    run: Some(run.id.clone()),
+                    since: None,
+                    output: bundle.clone(),
+                })
+                .expect("export");
+                run.id
+            };
+            std::fs::remove_file(home.path().join(".local/share/homeboy/homeboy.sqlite"))
+                .expect("remove db");
+
+            import_runs(RunsImportArgs {
+                input: bundle.clone(),
+            })
+            .expect("import");
+            import_runs(RunsImportArgs {
+                input: bundle.clone(),
+            })
+            .expect("second import is idempotent");
+
+            let store = ObservationStore::open_initialized().expect("store");
+            assert!(store.get_run(&run_id).expect("get").is_some());
+            assert_eq!(store.list_artifacts(&run_id).expect("artifacts").len(), 1);
+            assert_eq!(store.list_trace_spans(&run_id).expect("spans").len(), 1);
+        });
+    }
+
+    #[test]
+    fn malformed_bundle_validation_fails_clearly() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let bundle = home.path().join("bad-bundle");
+            std::fs::create_dir_all(&bundle).expect("bundle dir");
+            std::fs::write(bundle.join("manifest.json"), "not json").expect("manifest");
+
+            let err = match import_runs(RunsImportArgs { input: bundle }) {
+                Ok(_) => panic!("malformed bundle should fail"),
+                Err(err) => err,
+            };
+
+            assert_eq!(err.code.as_str(), "validation.invalid_json");
+        });
+    }
+
+    #[test]
+    fn conflicting_existing_rows_fail_clearly() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let bundle = home.path().join("conflict-bundle");
+            export_runs(RunsExportArgs {
+                run: Some(run.id.clone()),
+                since: None,
+                output: bundle.clone(),
+            })
+            .expect("export");
+            let mut runs: Vec<RunRecord> = read_bundle_test_json(&bundle.join("runs.json"));
+            runs[0].status = "pass".to_string();
+            std::fs::write(
+                bundle.join("runs.json"),
+                serde_json::to_string_pretty(&runs).expect("json"),
+            )
+            .expect("rewrite runs");
+
+            let err = match import_runs(RunsImportArgs { input: bundle }) {
+                Ok(_) => panic!("conflicting import should fail"),
+                Err(err) => err,
+            };
+
+            assert_eq!(err.code.as_str(), "validation.invalid_argument");
+            assert!(err
+                .message
+                .contains("conflicts with imported bundle record"));
+        });
+    }
+
+    fn read_bundle_test_json<T: for<'de> Deserialize<'de>>(path: &Path) -> T {
+        serde_json::from_str(&std::fs::read_to_string(path).expect("read json")).expect("json")
     }
 }

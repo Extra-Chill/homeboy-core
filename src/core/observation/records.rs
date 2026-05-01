@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum RunStatus {
@@ -33,7 +33,7 @@ pub struct NewRunRecord {
     pub metadata_json: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunRecord {
     pub id: String,
     pub kind: String,
@@ -58,7 +58,7 @@ pub struct RunListFilter {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ArtifactRecord {
     pub id: String,
     pub run_id: String,
@@ -103,7 +103,7 @@ pub struct NewTraceSpanRecord {
     pub metadata_json: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TraceSpanRecord {
     pub id: String,
     pub run_id: String,
