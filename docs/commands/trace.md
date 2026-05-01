@@ -10,7 +10,9 @@ homeboy trace <component> list
 homeboy trace <component> <scenario> --rig <rig-id>
 homeboy trace <component> <scenario> --json-summary
 homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
+homeboy trace <component> <scenario> --phase submit:ui.submit --phase cli:cli.start --phase ready:server.ready
 homeboy trace <component> <scenario> --repeat 5 --aggregate spans
+homeboy trace compare before.json after.json
 homeboy trace <component> <scenario> --report=markdown
 homeboy trace <component> <scenario> --baseline
 homeboy trace <component> <scenario> --ratchet
@@ -87,15 +89,38 @@ If an endpoint is missing, Homeboy emits a skipped result with `missing` keys in
 
 When a timeline contains repeated events with the same key, Homeboy resolves the span to the nearest valid `from`/`to` pair where the `to` event occurs at or after the `from` event. This keeps simple `source.event` span definitions stable for common lifecycle events that naturally repeat.
 
+## Phases
+
+Use repeatable `--phase [label:]source.event` flags to provide an ordered milestone chain. Homeboy expands the chain into adjacent span results plus a `phase.total` span from the first milestone to the last milestone:
+
+```sh
+homeboy trace studio create-site \
+  --phase submit:ui.create_site.submit_clicked \
+  --phase cli:studio_server_child.run_cli.before \
+  --phase ready:playground.run_cli.ready \
+  --report=markdown
+```
+
+The example above produces span rows for `phase.submit_to_cli`, `phase.cli_to_ready`, and `phase.total`. Existing `--span` definitions still work and can be mixed with phase milestones.
+
 ## Repeat And Aggregate
 
-Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, `max_ms`, and `failures` counts.
+Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, percentile fields (`p75_ms`, `p90_ms`, `p95_ms`) when enough samples are available, `max_ms`, and `failures` counts.
 
 ```sh
 homeboy trace studio studio-app-create-site --repeat 5 --aggregate spans
 ```
 
 Each repeat uses a fresh Homeboy run directory, so completed run data is preserved even when a later repeat fails.
+
+## Compare Aggregates
+
+Use `trace compare` to compare two aggregate span JSON outputs. The comparison reports each span's before/after median and average, absolute deltas, and percentage deltas. Spans that only exist in one file are included with unavailable deltas.
+
+```sh
+homeboy trace compare before.json after.json
+homeboy trace compare before.json after.json --report=markdown
+```
 
 ## Markdown Reports
 

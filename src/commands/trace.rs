@@ -2,6 +2,8 @@ use clap::Args;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
+
 use homeboy::component::{Component, ScopedExtensionConfig};
 use homeboy::engine::baseline::BaselineFlags;
 use homeboy::engine::execution_context::{self, ResolveOptions};
@@ -26,6 +28,10 @@ pub struct TraceArgs {
 
     /// Scenario ID to run, or `list` to discover available scenarios.
     pub scenario: String,
+
+    /// After aggregate JSON when running `homeboy trace compare before.json after.json`.
+    #[arg(value_name = "AFTER_JSON")]
+    pub compare_after: Option<PathBuf>,
 
     /// Run trace against a rig-pinned component path after `rig check` passes.
     #[arg(long, value_name = "RIG_ID")]
@@ -56,6 +62,10 @@ pub struct TraceArgs {
     /// Add a span definition as `id:source.event:source.event`.
     #[arg(long = "span", value_name = "ID:FROM:TO", value_parser = extension_trace::spans::parse_span_definition)]
     pub spans: Vec<TraceSpanDefinition>,
+
+    /// Add an ordered phase milestone as `[label:]source.event`.
+    #[arg(long = "phase", value_name = "[LABEL:]SOURCE.EVENT", value_parser = extension_trace::spans::parse_phase_milestone)]
+    pub phases: Vec<extension_trace::spans::TracePhaseMilestone>,
 
     #[command(flatten)]
     pub baseline_args: BaselineArgs,
@@ -100,6 +110,7 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
         TraceCommandOutput::Aggregate(aggregate) => {
             Ok((render_aggregate_markdown(&aggregate), exit_code))
         }
+        TraceCommandOutput::Compare(compare) => Ok((render_compare_markdown(&compare), exit_code)),
         TraceCommandOutput::List(list) => {
             let mut markdown = format!("# Trace Scenarios: `{}`\n\n", list.component_id);
             for scenario in list.scenarios {
@@ -149,6 +160,20 @@ pub fn run_json_with_output_artifact(
 }
 
 fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCommandOutput>)> {
+    if args.comp.component.as_deref() == Some("compare") {
+        let (output, exit_code) = run_compare(args)?;
+        return Ok(((output, None), exit_code));
+    }
+
+    if args.compare_after.is_some() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "AFTER_JSON",
+            "extra positional argument is only supported by `homeboy trace compare before.json after.json`",
+            None,
+            None,
+        ));
+    }
+
     if args.repeat == 0 {
         return Err(homeboy::Error::validation_invalid_argument(
             "--repeat",
@@ -186,6 +211,7 @@ struct TraceRunExecution {
 }
 
 fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
+    let span_definitions = span_definitions_for_args(&args)?;
     let rig_context = load_rig_context(args.rig.as_deref())?;
     let effective_id = resolve_component_id(&args.comp, rig_context.as_ref().map(|c| &c.spec))?;
     let path_override = args.comp.path.clone().or_else(|| {
@@ -243,7 +269,10 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
                     "scenario_id": scenario_id,
                     "component_path": component_path_for_observation,
                     "requested_overlays": requested_overlays,
-                    "span_definitions": args.spans.clone(),
+                    "span_definitions": span_definitions.clone(),
+                    "phase_milestones": args.phases.clone().into_iter().map(|phase| {
+                        serde_json::json!({ "label": phase.label, "key": phase.key })
+                    }).collect::<Vec<_>>(),
                     "baseline": {
                         "baseline": args.baseline_args.baseline,
                         "ignore_baseline": args.baseline_args.ignore_baseline,
@@ -289,7 +318,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             overlays: args.overlays,
             keep_overlay: args.keep_overlay,
             extra_workloads,
-            span_definitions: args.spans,
+            span_definitions,
             baseline_flags: BaselineFlags {
                 baseline: args.baseline_args.baseline,
                 ignore_baseline: args.baseline_args.ignore_baseline,
@@ -324,10 +353,12 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let repeat = args.repeat;
     let scenario_id = args.scenario.clone();
     let mut runs = Vec::new();
-    let mut span_samples: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+    let mut span_samples: BTreeMap<String, Vec<TraceAggregateSpanSample>> = BTreeMap::new();
     let mut span_failures: BTreeMap<String, usize> = BTreeMap::new();
-    let mut all_span_ids: BTreeSet<String> =
-        args.spans.iter().map(|span| span.id.clone()).collect();
+    let mut all_span_ids: BTreeSet<String> = span_definitions_for_args(&args)?
+        .into_iter()
+        .map(|span| span.id)
+        .collect();
     let mut rig_state = None;
     let mut component = None;
     let mut failure_count = 0;
@@ -361,10 +392,13 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
                         seen_span_ids.insert(span.id.clone());
                         if span.status == extension_trace::parsing::TraceSpanStatus::Ok {
                             if let Some(duration) = span.duration_ms {
-                                span_samples
-                                    .entry(span.id.clone())
-                                    .or_default()
-                                    .push(duration);
+                                span_samples.entry(span.id.clone()).or_default().push(
+                                    TraceAggregateSpanSample {
+                                        duration_ms: duration,
+                                        run_index: index,
+                                        artifact_path: artifact_path.clone(),
+                                    },
+                                );
                                 continue;
                             }
                         }
@@ -454,11 +488,166 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     Ok((TraceCommandOutput::Aggregate(output), exit_code))
 }
 
+fn span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanDefinition>> {
+    let mut definitions = args.spans.clone();
+    let phase_definitions =
+        extension_trace::spans::phase_span_definitions(&args.phases).map_err(|message| {
+            homeboy::Error::validation_invalid_argument("--phase", message, None, None)
+        })?;
+    definitions.extend(phase_definitions);
+    Ok(definitions)
+}
+
+#[derive(Deserialize)]
+struct TraceAggregateInput {
+    component: Option<String>,
+    scenario_id: Option<String>,
+    spans: Vec<TraceAggregateSpanInput>,
+}
+
+#[derive(Deserialize)]
+struct TraceAggregateSpanInput {
+    id: String,
+    n: usize,
+    median_ms: Option<u64>,
+    avg_ms: Option<f64>,
+    failures: usize,
+}
+
+fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
+    let before_path = PathBuf::from(&args.scenario);
+    let Some(after_path) = args.compare_after else {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "AFTER_JSON",
+            "trace compare requires before and after aggregate JSON files",
+            None,
+            None,
+        ));
+    };
+
+    let before = read_trace_aggregate(&before_path)?;
+    let after = read_trace_aggregate(&after_path)?;
+    let output = compare_trace_aggregates(&before_path, before, &after_path, after);
+    Ok((TraceCommandOutput::Compare(output), 0))
+}
+
+fn read_trace_aggregate(path: &Path) -> homeboy::Result<TraceAggregateInput> {
+    let content = std::fs::read_to_string(path).map_err(|err| {
+        homeboy::Error::internal_io(
+            format!("Failed to read trace aggregate {}: {}", path.display(), err),
+            Some("trace.compare.read".to_string()),
+        )
+    })?;
+    serde_json::from_str(&content).map_err(|err| {
+        homeboy::Error::internal_json(
+            err.to_string(),
+            Some(format!("parse trace aggregate {}", path.display())),
+        )
+    })
+}
+
+fn compare_trace_aggregates(
+    before_path: &Path,
+    before: TraceAggregateInput,
+    after_path: &Path,
+    after: TraceAggregateInput,
+) -> extension_trace::TraceCompareOutput {
+    let before_spans = before
+        .spans
+        .into_iter()
+        .map(|span| (span.id.clone(), span))
+        .collect::<BTreeMap<_, _>>();
+    let after_spans = after
+        .spans
+        .into_iter()
+        .map(|span| (span.id.clone(), span))
+        .collect::<BTreeMap<_, _>>();
+    let span_ids = before_spans
+        .keys()
+        .chain(after_spans.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    let spans = span_ids
+        .into_iter()
+        .map(|id| {
+            let before_span = before_spans.get(&id);
+            let after_span = after_spans.get(&id);
+            let before_median = before_span.and_then(|span| span.median_ms);
+            let after_median = after_span.and_then(|span| span.median_ms);
+            let before_avg = before_span.and_then(|span| span.avg_ms);
+            let after_avg = after_span.and_then(|span| span.avg_ms);
+
+            extension_trace::TraceCompareSpanOutput {
+                id,
+                before_n: before_span.map(|span| span.n),
+                after_n: after_span.map(|span| span.n),
+                before_median_ms: before_median,
+                after_median_ms: after_median,
+                median_delta_ms: option_delta_i64(before_median, after_median),
+                median_delta_percent: option_percent_delta(
+                    before_median.map(|value| value as f64),
+                    after_median.map(|value| value as f64),
+                ),
+                before_avg_ms: before_avg,
+                after_avg_ms: after_avg,
+                avg_delta_ms: option_delta_f64(before_avg, after_avg),
+                avg_delta_percent: option_percent_delta(before_avg, after_avg),
+                before_failures: before_span.map(|span| span.failures),
+                after_failures: after_span.map(|span| span.failures),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    extension_trace::TraceCompareOutput {
+        command: "trace.compare.spans",
+        before_path: before_path.display().to_string(),
+        after_path: after_path.display().to_string(),
+        before_component: before.component,
+        after_component: after.component,
+        before_scenario_id: before.scenario_id,
+        after_scenario_id: after.scenario_id,
+        span_count: spans.len(),
+        spans,
+    }
+}
+
+fn option_delta_i64(before: Option<u64>, after: Option<u64>) -> Option<i64> {
+    Some(after? as i64 - before? as i64)
+}
+
+fn option_delta_f64(before: Option<f64>, after: Option<f64>) -> Option<f64> {
+    Some(after? - before?)
+}
+
+fn option_percent_delta(before: Option<f64>, after: Option<f64>) -> Option<f64> {
+    let before = before?;
+    let after = after?;
+    if before.abs() < f64::EPSILON {
+        if after.abs() < f64::EPSILON {
+            Some(0.0)
+        } else {
+            None
+        }
+    } else {
+        Some(((after - before) / before) * 100.0)
+    }
+}
+
 fn aggregate_span(
     id: String,
-    mut durations: Vec<u64>,
+    samples: Vec<TraceAggregateSpanSample>,
     failures: usize,
 ) -> extension_trace::TraceAggregateSpanOutput {
+    let max_sample: Option<TraceAggregateSpanSample> =
+        samples.iter().fold(None, |max, sample| match max {
+            Some(current) if current.duration_ms >= sample.duration_ms => Some(current),
+            _ => Some(sample.clone()),
+        });
+    let mut durations = samples
+        .into_iter()
+        .map(|sample| sample.duration_ms)
+        .collect::<Vec<_>>();
     durations.sort_unstable();
     let n = durations.len();
     let avg_ms = if n == 0 {
@@ -472,9 +661,21 @@ fn aggregate_span(
         min_ms: durations.first().copied(),
         median_ms: median(&durations),
         avg_ms,
+        p75_ms: percentile(&durations, 75, 4),
+        p90_ms: percentile(&durations, 90, 10),
+        p95_ms: percentile(&durations, 95, 20),
         max_ms: durations.last().copied(),
+        max_run_index: max_sample.as_ref().map(|sample| sample.run_index),
+        max_artifact_path: max_sample.map(|sample| sample.artifact_path),
         failures,
     }
+}
+
+#[derive(Clone)]
+struct TraceAggregateSpanSample {
+    duration_ms: u64,
+    run_index: usize,
+    artifact_path: String,
 }
 
 fn median(values: &[u64]) -> Option<u64> {
@@ -487,6 +688,14 @@ fn median(values: &[u64]) -> Option<u64> {
     } else {
         Some((values[midpoint - 1] + values[midpoint]) / 2)
     }
+}
+
+fn percentile(values: &[u64], percentile: usize, min_samples: usize) -> Option<u64> {
+    if values.len() < min_samples {
+        return None;
+    }
+    let index = (values.len() * percentile).div_ceil(100).saturating_sub(1);
+    values.get(index).copied()
 }
 
 fn render_aggregate_markdown(aggregate: &extension_trace::TraceAggregateOutput) -> String {
@@ -502,11 +711,11 @@ fn render_aggregate_markdown(aggregate: &extension_trace::TraceAggregateOutput) 
 
     if !aggregate.spans.is_empty() {
         out.push_str("\n## Spans\n\n");
-        out.push_str("| Span | n | min | median | avg | max | failures |\n");
-        out.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+        out.push_str("| Span | n | min | median | avg | p75 | p90 | p95 | max | failures |\n");
+        out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for span in &aggregate.spans {
             out.push_str(&format!(
-                "| `{}` | {} | {} | {} | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
                 span.id,
                 span.n,
                 fmt_ms(span.min_ms),
@@ -514,9 +723,30 @@ fn render_aggregate_markdown(aggregate: &extension_trace::TraceAggregateOutput) 
                 span.avg_ms
                     .map(|value| format!("{:.1}ms", value))
                     .unwrap_or_else(|| "-".to_string()),
+                fmt_ms(span.p75_ms),
+                fmt_ms(span.p90_ms),
+                fmt_ms(span.p95_ms),
                 fmt_ms(span.max_ms),
                 span.failures
             ));
+        }
+
+        let outliers = aggregate
+            .spans
+            .iter()
+            .filter(|span| span.max_ms.is_some() && span.max_run_index.is_some())
+            .collect::<Vec<_>>();
+        if !outliers.is_empty() {
+            out.push_str("\n## Outliers\n\n");
+            for span in outliers {
+                out.push_str(&format!(
+                    "- `{}`: run {}, max={}, artifact=`{}`\n",
+                    span.id,
+                    span.max_run_index.unwrap_or_default(),
+                    fmt_ms(span.max_ms),
+                    span.max_artifact_path.as_deref().unwrap_or("")
+                ));
+            }
         }
     }
 
@@ -530,9 +760,65 @@ fn render_aggregate_markdown(aggregate: &extension_trace::TraceAggregateOutput) 
     out
 }
 
+fn render_compare_markdown(compare: &extension_trace::TraceCompareOutput) -> String {
+    let mut out = String::new();
+    out.push_str("# Trace Compare\n\n");
+    out.push_str(&format!("- **Before:** `{}`\n", compare.before_path));
+    out.push_str(&format!("- **After:** `{}`\n", compare.after_path));
+    if let (Some(before), Some(after)) = (&compare.before_scenario_id, &compare.after_scenario_id) {
+        out.push_str(&format!("- **Scenario:** `{}` -> `{}`\n", before, after));
+    }
+
+    if !compare.spans.is_empty() {
+        out.push_str("\n## Spans\n\n");
+        out.push_str("| Span | before median | after median | median delta | median % | before avg | after avg | avg delta | avg % |\n");
+        out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        for span in &compare.spans {
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+                span.id,
+                fmt_ms(span.before_median_ms),
+                fmt_ms(span.after_median_ms),
+                fmt_delta_ms(span.median_delta_ms),
+                fmt_percent(span.median_delta_percent),
+                fmt_avg_ms(span.before_avg_ms),
+                fmt_avg_ms(span.after_avg_ms),
+                fmt_delta_avg_ms(span.avg_delta_ms),
+                fmt_percent(span.avg_delta_percent),
+            ));
+        }
+    }
+
+    out
+}
+
 fn fmt_ms(value: Option<u64>) -> String {
     value
         .map(|value| format!("{}ms", value))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_avg_ms(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{:.1}ms", value))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_delta_ms(value: Option<i64>) -> String {
+    value
+        .map(|value| format!("{:+}ms", value))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_delta_avg_ms(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{:+.1}ms", value))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_percent(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{:+.1}%", value))
         .unwrap_or_else(|| "-".to_string())
 }
 
@@ -882,6 +1168,18 @@ mod tests {
 
     use super::*;
 
+    fn aggregate_samples(durations: &[u64]) -> Vec<TraceAggregateSpanSample> {
+        durations
+            .iter()
+            .enumerate()
+            .map(|(index, duration_ms)| TraceAggregateSpanSample {
+                duration_ms: *duration_ms,
+                run_index: index + 1,
+                artifact_path: format!("/tmp/trace-run-{}.json", index + 1),
+            })
+            .collect()
+    }
+
     #[test]
     fn rig_component_path_and_trace_env_are_threaded() {
         let component_dir = tempfile::TempDir::new().expect("component dir");
@@ -953,6 +1251,7 @@ mod tests {
                     path: None,
                 },
                 scenario: "list".to_string(),
+                compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
                 _json: HiddenJsonArgs::default(),
@@ -961,6 +1260,7 @@ mod tests {
                 repeat: 1,
                 aggregate: None,
                 spans: Vec::new(),
+                phases: Vec::new(),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1039,6 +1339,7 @@ mod tests {
                     path: None,
                 },
                 scenario: "list".to_string(),
+                compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
                 _json: HiddenJsonArgs::default(),
@@ -1047,6 +1348,7 @@ mod tests {
                 repeat: 1,
                 aggregate: None,
                 spans: Vec::new(),
+                phases: Vec::new(),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1082,6 +1384,7 @@ mod tests {
                         path: None,
                     },
                     scenario: "studio-app-create-site".to_string(),
+                    compare_after: None,
                     rig: Some("studio-rig".to_string()),
                     setting_args: SettingArgs::default(),
                     _json: HiddenJsonArgs::default(),
@@ -1090,6 +1393,7 @@ mod tests {
                     repeat: 1,
                     aggregate: None,
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1132,6 +1436,7 @@ mod tests {
                         path: None,
                     },
                     scenario: "studio-app-create-site".to_string(),
+                    compare_after: None,
                     rig: Some("studio-rig".to_string()),
                     setting_args: SettingArgs::default(),
                     _json: HiddenJsonArgs::default(),
@@ -1140,6 +1445,7 @@ mod tests {
                     repeat: 1,
                     aggregate: None,
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1205,6 +1511,7 @@ mod tests {
                         path: None,
                     },
                     scenario: "studio-app-create-site".to_string(),
+                    compare_after: None,
                     rig: Some("studio-rig".to_string()),
                     setting_args: SettingArgs::default(),
                     _json: HiddenJsonArgs::default(),
@@ -1213,6 +1520,7 @@ mod tests {
                     repeat: 3,
                     aggregate: Some("spans".to_string()),
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1238,7 +1546,15 @@ mod tests {
                     assert_eq!(span.min_ms, Some(125));
                     assert_eq!(span.median_ms, Some(125));
                     assert_eq!(span.avg_ms, Some(125.0));
+                    assert_eq!(span.p75_ms, None);
+                    assert_eq!(span.p90_ms, None);
+                    assert_eq!(span.p95_ms, None);
                     assert_eq!(span.max_ms, Some(125));
+                    assert!(matches!(span.max_run_index, Some(1..=3)));
+                    assert!(span
+                        .max_artifact_path
+                        .as_ref()
+                        .is_some_and(|path| std::path::Path::new(path).is_file()));
                     assert_eq!(span.failures, 0);
                     assert!(aggregate
                         .runs
@@ -1248,6 +1564,277 @@ mod tests {
                 _ => panic!("expected aggregate output"),
             }
         });
+    }
+
+    #[test]
+    fn trace_compare_reports_median_and_average_deltas() {
+        let before = TraceAggregateInput {
+            component: Some("studio".to_string()),
+            scenario_id: Some("create-site".to_string()),
+            spans: vec![
+                TraceAggregateSpanInput {
+                    id: "boot_to_ready".to_string(),
+                    n: 5,
+                    median_ms: Some(100),
+                    avg_ms: Some(110.0),
+                    failures: 0,
+                },
+                TraceAggregateSpanInput {
+                    id: "before_only".to_string(),
+                    n: 5,
+                    median_ms: Some(25),
+                    avg_ms: Some(25.0),
+                    failures: 1,
+                },
+            ],
+        };
+        let after = TraceAggregateInput {
+            component: Some("studio".to_string()),
+            scenario_id: Some("create-site".to_string()),
+            spans: vec![
+                TraceAggregateSpanInput {
+                    id: "boot_to_ready".to_string(),
+                    n: 5,
+                    median_ms: Some(125),
+                    avg_ms: Some(121.0),
+                    failures: 0,
+                },
+                TraceAggregateSpanInput {
+                    id: "after_only".to_string(),
+                    n: 3,
+                    median_ms: Some(75),
+                    avg_ms: Some(80.0),
+                    failures: 0,
+                },
+            ],
+        };
+
+        let compare = compare_trace_aggregates(
+            Path::new("before.json"),
+            before,
+            Path::new("after.json"),
+            after,
+        );
+
+        assert_eq!(compare.command, "trace.compare.spans");
+        assert_eq!(compare.span_count, 3);
+        let changed = compare
+            .spans
+            .iter()
+            .find(|span| span.id == "boot_to_ready")
+            .expect("changed span");
+        assert_eq!(changed.before_median_ms, Some(100));
+        assert_eq!(changed.after_median_ms, Some(125));
+        assert_eq!(changed.median_delta_ms, Some(25));
+        assert_eq!(changed.median_delta_percent, Some(25.0));
+        assert_eq!(changed.avg_delta_ms, Some(11.0));
+        assert_eq!(changed.avg_delta_percent, Some(10.0));
+
+        let before_only = compare
+            .spans
+            .iter()
+            .find(|span| span.id == "before_only")
+            .expect("before-only span");
+        assert_eq!(before_only.after_n, None);
+        assert_eq!(before_only.median_delta_ms, None);
+    }
+
+    #[test]
+    fn trace_compare_markdown_renders_span_table() {
+        let compare = extension_trace::TraceCompareOutput {
+            command: "trace.compare.spans",
+            before_path: "before.json".to_string(),
+            after_path: "after.json".to_string(),
+            before_component: Some("studio".to_string()),
+            after_component: Some("studio".to_string()),
+            before_scenario_id: Some("create-site".to_string()),
+            after_scenario_id: Some("create-site".to_string()),
+            span_count: 1,
+            spans: vec![extension_trace::TraceCompareSpanOutput {
+                id: "boot_to_ready".to_string(),
+                before_n: Some(5),
+                after_n: Some(5),
+                before_median_ms: Some(100),
+                after_median_ms: Some(125),
+                median_delta_ms: Some(25),
+                median_delta_percent: Some(25.0),
+                before_avg_ms: Some(110.0),
+                after_avg_ms: Some(121.0),
+                avg_delta_ms: Some(11.0),
+                avg_delta_percent: Some(10.0),
+                before_failures: Some(0),
+                after_failures: Some(0),
+            }],
+        };
+
+        let markdown = render_compare_markdown(&compare);
+
+        assert!(markdown.contains("# Trace Compare"));
+        assert!(markdown.contains("| Span | before median | after median | median delta | median % | before avg | after avg | avg delta | avg % |"));
+        assert!(markdown.contains(
+            "| `boot_to_ready` | 100ms | 125ms | +25ms | +25.0% | 110.0ms | 121.0ms | +11.0ms | +10.0% |"
+        ));
+    }
+
+    #[test]
+    fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (output, exit_code) = run(
+                TraceArgs {
+                    comp: PositionalComponentArgs {
+                        component: Some("studio".to_string()),
+                        path: None,
+                    },
+                    scenario: "studio-app-create-site".to_string(),
+                    compare_after: None,
+                    rig: Some("studio-rig".to_string()),
+                    setting_args: SettingArgs::default(),
+                    _json: HiddenJsonArgs::default(),
+                    json_summary: false,
+                    report: None,
+                    repeat: 1,
+                    aggregate: None,
+                    spans: Vec::new(),
+                    phases: vec![
+                        extension_trace::spans::TracePhaseMilestone {
+                            label: "boot".to_string(),
+                            key: "runner.boot".to_string(),
+                        },
+                        extension_trace::spans::TracePhaseMilestone {
+                            label: "ready".to_string(),
+                            key: "runner.ready".to_string(),
+                        },
+                    ],
+                    baseline_args: BaselineArgs::default(),
+                    regression_threshold:
+                        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                    overlays: Vec::new(),
+                    keep_overlay: false,
+                },
+                &GlobalArgs {},
+            )
+            .expect("phase trace should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                TraceCommandOutput::Run(result) => {
+                    let results = result.results.expect("results");
+                    let span_ids = results
+                        .span_results
+                        .iter()
+                        .map(|span| (span.id.as_str(), span.duration_ms))
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        span_ids,
+                        vec![
+                            ("phase.boot_to_ready", Some(125)),
+                            ("phase.total", Some(125))
+                        ]
+                    );
+                }
+                _ => panic!("expected run output"),
+            }
+        });
+    }
+
+    #[test]
+    fn aggregate_span_reports_percentiles_when_sample_size_is_sufficient() {
+        let span = aggregate_span(
+            "boot_to_ready".to_string(),
+            aggregate_samples(&[
+                200, 10, 190, 20, 180, 30, 170, 40, 160, 50, 150, 60, 140, 70, 130, 80, 120, 90,
+                110, 100,
+            ]),
+            2,
+        );
+
+        assert_eq!(span.n, 20);
+        assert_eq!(span.min_ms, Some(10));
+        assert_eq!(span.median_ms, Some(105));
+        assert_eq!(span.avg_ms, Some(105.0));
+        assert_eq!(span.p75_ms, Some(150));
+        assert_eq!(span.p90_ms, Some(180));
+        assert_eq!(span.p95_ms, Some(190));
+        assert_eq!(span.max_ms, Some(200));
+        assert_eq!(span.max_run_index, Some(1));
+        assert_eq!(
+            span.max_artifact_path.as_deref(),
+            Some("/tmp/trace-run-1.json")
+        );
+        assert_eq!(span.failures, 2);
+    }
+
+    #[test]
+    fn aggregate_span_reports_run_and_artifact_for_max_sample() {
+        let span = aggregate_span(
+            "submit_to_running".to_string(),
+            aggregate_samples(&[340, 11_757, 410]),
+            0,
+        );
+
+        assert_eq!(span.max_ms, Some(11_757));
+        assert_eq!(span.max_run_index, Some(2));
+        assert_eq!(
+            span.max_artifact_path.as_deref(),
+            Some("/tmp/trace-run-2.json")
+        );
+    }
+
+    #[test]
+    fn aggregate_span_omits_percentiles_for_small_sample_sizes() {
+        let single = aggregate_span("single".to_string(), aggregate_samples(&[42]), 0);
+        assert_eq!(single.min_ms, Some(42));
+        assert_eq!(single.median_ms, Some(42));
+        assert_eq!(single.avg_ms, Some(42.0));
+        assert_eq!(single.p75_ms, None);
+        assert_eq!(single.p90_ms, None);
+        assert_eq!(single.p95_ms, None);
+        assert_eq!(single.max_ms, Some(42));
+
+        let four_samples =
+            aggregate_span("four".to_string(), aggregate_samples(&[10, 20, 30, 40]), 0);
+        assert_eq!(four_samples.p75_ms, Some(30));
+        assert_eq!(four_samples.p90_ms, None);
+        assert_eq!(four_samples.p95_ms, None);
+    }
+
+    #[test]
+    fn aggregate_markdown_includes_percentile_columns() {
+        let aggregate = extension_trace::TraceAggregateOutput {
+            command: "trace.aggregate.spans",
+            passed: true,
+            status: "pass".to_string(),
+            component: "studio".to_string(),
+            scenario_id: "create-site".to_string(),
+            repeat: 20,
+            run_count: 20,
+            failure_count: 0,
+            exit_code: 0,
+            rig_state: None,
+            runs: Vec::new(),
+            spans: vec![aggregate_span(
+                "boot_to_ready".to_string(),
+                aggregate_samples(&((1..=20).map(|value| value * 10).collect::<Vec<_>>())),
+                0,
+            )],
+        };
+
+        let markdown = render_aggregate_markdown(&aggregate);
+
+        assert!(markdown
+            .contains("| Span | n | min | median | avg | p75 | p90 | p95 | max | failures |"));
+        assert!(markdown.contains(
+            "| `boot_to_ready` | 20 | 10ms | 105ms | 105.0ms | 150ms | 180ms | 190ms | 200ms | 0 |"
+        ));
+        assert!(markdown
+            .contains("- `boot_to_ready`: run 20, max=200ms, artifact=`/tmp/trace-run-20.json`"));
     }
 
     #[test]
@@ -1265,6 +1852,7 @@ mod tests {
                         path: None,
                     },
                     scenario: "missing-scenario".to_string(),
+                    compare_after: None,
                     rig: Some("studio-rig".to_string()),
                     setting_args: SettingArgs::default(),
                     _json: HiddenJsonArgs::default(),
@@ -1273,6 +1861,7 @@ mod tests {
                     repeat: 1,
                     aggregate: None,
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
