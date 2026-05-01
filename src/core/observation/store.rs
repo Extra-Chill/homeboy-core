@@ -471,7 +471,7 @@ impl ObservationStore {
         collect_rows(rows, "collect artifact records")
     }
 
-    pub fn get_artifact(&self, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
+    fn get_artifact(&self, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
         validate_required("artifact_id", artifact_id)?;
         self.connection
             .query_row(
@@ -627,7 +627,7 @@ impl ObservationStore {
         collect_rows(rows, "collect trace span records")
     }
 
-    pub fn get_trace_span(&self, trace_span_id: &str) -> Result<Option<TraceSpanRecord>> {
+    fn get_trace_span(&self, trace_span_id: &str) -> Result<Option<TraceSpanRecord>> {
         validate_required("trace_span_id", trace_span_id)?;
         self.connection
             .query_row(
@@ -1095,6 +1095,33 @@ mod api_coverage_tests {
     }
 
     #[test]
+    fn test_list_runs_started_since() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            let recent = store
+                .list_runs_started_since("1970-01-01T00:00:00Z")
+                .expect("recent");
+            assert_eq!(recent.len(), 1);
+            assert_eq!(recent[0].id, run.id);
+        });
+    }
+
+    #[test]
+    fn test_import_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            let imported = ObservationStore::open_initialized().expect("second handle");
+
+            imported.import_run(&run).expect("idempotent import");
+            assert_eq!(imported.get_run(&run.id).expect("get"), Some(run));
+        });
+    }
+
+    #[test]
     fn test_record_artifact() {
         with_isolated_home(|home| {
             let _xdg = XdgGuard::unset();
@@ -1121,6 +1148,29 @@ mod api_coverage_tests {
                 .record_artifact(&run.id, "log", &path)
                 .expect("artifact");
             assert_eq!(store.list_artifacts(&run.id).expect("list"), vec![artifact]);
+        });
+    }
+
+    #[test]
+    fn test_import_artifact() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let source = ObservationStore::open_initialized().expect("source");
+            let run = source.start_run(new_run("trace")).expect("run");
+            let path = home.path().join("artifact.json");
+            fs::write(&path, b"{}").expect("write artifact");
+            let artifact = source
+                .record_artifact(&run.id, "json", &path)
+                .expect("artifact");
+
+            let target = ObservationStore::open_initialized().expect("target");
+            target
+                .import_artifact(&artifact)
+                .expect("idempotent import");
+            assert_eq!(
+                target.list_artifacts(&run.id).expect("list"),
+                vec![artifact]
+            );
         });
     }
 
@@ -1172,6 +1222,30 @@ mod api_coverage_tests {
             let spans = store.list_trace_spans(&run.id).expect("spans");
             assert_eq!(spans, vec![span]);
             assert_eq!(spans[0].duration_ms, Some(125.0));
+        });
+    }
+
+    #[test]
+    fn test_import_trace_span() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let source = ObservationStore::open_initialized().expect("source");
+            let run = source.start_run(new_run("trace")).expect("run");
+            let span = source
+                .record_trace_span(NewTraceSpanRecord {
+                    run_id: run.id.clone(),
+                    span_id: "boot".to_string(),
+                    status: "ok".to_string(),
+                    duration_ms: Some(42.0),
+                    from_event: Some("start".to_string()),
+                    to_event: Some("ready".to_string()),
+                    metadata_json: serde_json::json!({ "source": "import-test" }),
+                })
+                .expect("span");
+
+            let target = ObservationStore::open_initialized().expect("target");
+            target.import_trace_span(&span).expect("idempotent import");
+            assert_eq!(target.list_trace_spans(&run.id).expect("spans"), vec![span]);
         });
     }
 
