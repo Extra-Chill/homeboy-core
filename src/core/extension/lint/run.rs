@@ -651,6 +651,7 @@ mod tests {
                 } else {
                     "correctness".to_string()
                 },
+                ..LintFinding::default()
             })
             .collect::<Vec<_>>();
 

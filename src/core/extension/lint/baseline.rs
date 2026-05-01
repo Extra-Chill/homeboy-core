@@ -11,11 +11,23 @@ use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
 const BASELINE_KEY: &str = "lint";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LintFinding {
     pub id: String,
     pub message: String,
     pub category: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixable: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +117,7 @@ mod tests {
             id: "id-1".to_string(),
             message: "message".to_string(),
             category: "security".to_string(),
+            ..LintFinding::default()
         };
         let fp = LintFingerprint(&finding);
         assert_eq!(fp.fingerprint(), "id-1");
@@ -116,6 +129,7 @@ mod tests {
             id: "id-1".to_string(),
             message: "message".to_string(),
             category: "security".to_string(),
+            ..LintFinding::default()
         };
         let fp = LintFingerprint(&finding);
         assert_eq!(fp.description(), "message");
@@ -127,6 +141,7 @@ mod tests {
             id: "id-1".to_string(),
             message: "message".to_string(),
             category: "security".to_string(),
+            ..LintFinding::default()
         };
         let fp = LintFingerprint(&finding);
         assert_eq!(fp.context_label(), "lint:security");

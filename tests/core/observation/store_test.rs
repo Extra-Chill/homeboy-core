@@ -4,7 +4,9 @@
 //! never read or written.
 
 use crate::observation::store::{self, ObservationStore, CURRENT_SCHEMA_VERSION};
-use crate::observation::{NewRunRecord, RunListFilter, RunStatus};
+use crate::observation::{
+    FindingListFilter, NewFindingRecord, NewRunRecord, RunListFilter, RunStatus,
+};
 use crate::test_support::with_isolated_home;
 
 struct XdgGuard {
@@ -80,8 +82,8 @@ fn test_open_initialized() {
 
         assert!(status.exists);
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 2);
-        assert_eq!(status.table_count, 5);
+        assert_eq!(status.migration_count, 3);
+        assert_eq!(status.table_count, 6);
     });
 }
 
@@ -95,8 +97,73 @@ fn initialization_is_idempotent() {
         let status = second.status().expect("status");
 
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 2);
-        assert_eq!(status.table_count, 5);
+        assert_eq!(status.migration_count, 3);
+        assert_eq!(status.table_count, 6);
+    });
+}
+
+#[test]
+fn test_record_and_list_findings() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("lint", "homeboy"))
+            .expect("start run");
+
+        let records = store
+            .record_findings(&[
+                NewFindingRecord {
+                    run_id: run.id.clone(),
+                    tool: "lint".to_string(),
+                    rule: Some("security".to_string()),
+                    file: Some("src/foo.php".to_string()),
+                    line: Some(12),
+                    severity: Some("error".to_string()),
+                    fingerprint: Some("src/foo.php::security".to_string()),
+                    message: "Missing escaping".to_string(),
+                    fixable: Some(true),
+                    metadata_json: serde_json::json!({ "category": "security" }),
+                },
+                NewFindingRecord {
+                    run_id: run.id.clone(),
+                    tool: "lint".to_string(),
+                    rule: Some("i18n".to_string()),
+                    file: Some("src/bar.php".to_string()),
+                    line: None,
+                    severity: Some("warning".to_string()),
+                    fingerprint: Some("src/bar.php::i18n".to_string()),
+                    message: "Untranslated string".to_string(),
+                    fixable: Some(false),
+                    metadata_json: serde_json::json!({ "category": "i18n" }),
+                },
+            ])
+            .expect("record findings");
+
+        let all = store
+            .list_findings(FindingListFilter {
+                run_id: Some(run.id.clone()),
+                tool: Some("lint".to_string()),
+                ..FindingListFilter::default()
+            })
+            .expect("list findings");
+        let filtered = store
+            .list_findings(FindingListFilter {
+                run_id: Some(run.id),
+                file: Some("src/foo.php".to_string()),
+                ..FindingListFilter::default()
+            })
+            .expect("list file findings");
+        let fetched = store
+            .get_finding(&records[0].id)
+            .expect("get finding")
+            .expect("finding exists");
+
+        assert_eq!(all.len(), 2);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, records[0].id);
+        assert_eq!(fetched.message, "Missing escaping");
+        assert_eq!(fetched.fixable, Some(true));
     });
 }
 

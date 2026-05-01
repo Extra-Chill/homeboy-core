@@ -7,12 +7,13 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::records::{
-    ArtifactRecord, NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord,
-    RunStatus, TraceRunRecord, TraceSpanRecord,
+    ArtifactRecord, FindingListFilter, FindingRecord, NewFindingRecord, NewRunRecord,
+    NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord, RunStatus, TraceRunRecord,
+    TraceSpanRecord,
 };
 use crate::{paths, Error, Result};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 struct Migration {
     version: i64,
@@ -88,6 +89,33 @@ const MIGRATIONS: &[Migration] = &[
             ON trace_runs(rig_id);
         CREATE INDEX IF NOT EXISTS idx_trace_spans_run
             ON trace_spans(run_id);
+    "#,
+    },
+    Migration {
+        version: 3,
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS findings (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            rule TEXT,
+            file TEXT,
+            line INTEGER,
+            severity TEXT,
+            fingerprint TEXT,
+            message TEXT NOT NULL,
+            fixable INTEGER,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES runs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_findings_run
+            ON findings(run_id);
+        CREATE INDEX IF NOT EXISTS idx_findings_tool_file
+            ON findings(tool, file);
+        CREATE INDEX IF NOT EXISTS idx_findings_fingerprint
+            ON findings(fingerprint);
     "#,
     },
 ];
@@ -469,6 +497,115 @@ impl ObservationStore {
             .map_err(sqlite_error("list artifact records"))?;
 
         collect_rows(rows, "collect artifact records")
+    }
+
+    pub fn record_findings(&self, findings: &[NewFindingRecord]) -> Result<Vec<FindingRecord>> {
+        let mut records = Vec::with_capacity(findings.len());
+        for finding in findings {
+            records.push(self.record_finding(finding)?);
+        }
+        Ok(records)
+    }
+
+    pub fn record_finding(&self, finding: &NewFindingRecord) -> Result<FindingRecord> {
+        validate_required("finding.run_id", &finding.run_id)?;
+        validate_required("finding.tool", &finding.tool)?;
+        validate_required("finding.message", &finding.message)?;
+        if self.get_run(&finding.run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "finding.run_id",
+                format!("referenced run record not found: {}", finding.run_id),
+                Some(finding.run_id.clone()),
+                None,
+            ));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let metadata_json = serialize_metadata(&finding.metadata_json)?;
+        let fixable = finding
+            .fixable
+            .map(|value| if value { 1_i64 } else { 0_i64 });
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO findings(
+                    id, run_id, tool, rule, file, line, severity, fingerprint, message,
+                    fixable, metadata_json, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                "#,
+                params![
+                    id,
+                    finding.run_id,
+                    finding.tool,
+                    finding.rule,
+                    finding.file,
+                    finding.line,
+                    finding.severity,
+                    finding.fingerprint,
+                    finding.message,
+                    fixable,
+                    metadata_json,
+                    created_at,
+                ],
+            )
+            .map_err(sqlite_error("insert finding record"))?;
+
+        self.get_finding(&id)?.ok_or_else(|| {
+            Error::internal_unexpected(format!(
+                "Inserted finding record {id} but could not read it back"
+            ))
+        })
+    }
+
+    pub fn get_finding(&self, finding_id: &str) -> Result<Option<FindingRecord>> {
+        validate_required("finding_id", finding_id)?;
+        self.connection
+            .query_row(
+                r#"
+                SELECT id, run_id, tool, rule, file, line, severity, fingerprint, message,
+                       fixable, metadata_json, created_at
+                FROM findings
+                WHERE id = ?1
+                "#,
+                [finding_id],
+                row_to_finding_record,
+            )
+            .optional()
+            .map_err(sqlite_error("read finding record"))
+    }
+
+    pub fn list_findings(&self, filter: FindingListFilter) -> Result<Vec<FindingRecord>> {
+        let limit = filter.limit.unwrap_or(100).clamp(1, 1000);
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, run_id, tool, rule, file, line, severity, fingerprint, message,
+                       fixable, metadata_json, created_at
+                FROM findings
+                WHERE (?1 IS NULL OR run_id = ?1)
+                  AND (?2 IS NULL OR tool = ?2)
+                  AND (?3 IS NULL OR file = ?3)
+                ORDER BY created_at ASC, rowid ASC
+                LIMIT ?4
+                "#,
+            )
+            .map_err(sqlite_error("prepare list finding records"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    filter.run_id.as_deref(),
+                    filter.tool.as_deref(),
+                    filter.file.as_deref(),
+                    limit,
+                ],
+                row_to_finding_record,
+            )
+            .map_err(sqlite_error("list finding records"))?;
+
+        collect_rows(rows, "collect finding records")
     }
 
     fn get_artifact(&self, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
@@ -897,6 +1034,24 @@ fn row_to_artifact_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactR
         size_bytes: row.get(5)?,
         mime: row.get(6)?,
         created_at: row.get(7)?,
+    })
+}
+
+fn row_to_finding_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingRecord> {
+    let fixable: Option<i64> = row.get(9)?;
+    Ok(FindingRecord {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        tool: row.get(2)?,
+        rule: row.get(3)?,
+        file: row.get(4)?,
+        line: row.get(5)?,
+        severity: row.get(6)?,
+        fingerprint: row.get(7)?,
+        message: row.get(8)?,
+        fixable: fixable.map(|value| value != 0),
+        metadata_json: parse_metadata(row.get(10)?)?,
+        created_at: row.get(11)?,
     })
 }
 
