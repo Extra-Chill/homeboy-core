@@ -21,6 +21,7 @@ use super::state::{
 };
 use crate::engine::command::run_in_optional;
 use crate::error::{Error, Result};
+use crate::observation::{NewRunRecord, ObservationStore, RunStatus};
 
 /// Report from `rig up`.
 #[derive(Debug, Clone, Serialize)]
@@ -119,44 +120,69 @@ pub enum SymlinkStatusState {
 /// Materialize a rig: run the `up` pipeline, stash timestamp in state.
 pub fn run_up(rig: &RigSpec) -> Result<UpReport> {
     let _lease = acquire_active_run_lease(rig, "up")?;
-    let outcome = run_pipeline(rig, "up", true)?;
+    let observer = RigRunObserver::start(rig, "up");
 
-    if outcome.is_success() {
-        let mut state = RigState::load(&rig.id)?;
-        let materialized_at = now_rfc3339();
-        let snapshot = snapshot_state(rig);
-        state.last_up = Some(materialized_at.clone());
-        state.materialized = Some(MaterializedRigState {
+    let result = (|| {
+        let outcome = run_pipeline(rig, "up", true)?;
+
+        if outcome.is_success() {
+            let mut state = RigState::load(&rig.id)?;
+            let materialized_at = now_rfc3339();
+            let snapshot = snapshot_state(rig);
+            state.last_up = Some(materialized_at.clone());
+            state.materialized = Some(MaterializedRigState {
+                rig_id: rig.id.clone(),
+                materialized_at,
+                resources: expand_resources(rig),
+                components: snapshot.components,
+            });
+            state.save(&rig.id)?;
+        }
+
+        Ok(UpReport {
             rig_id: rig.id.clone(),
-            materialized_at,
-            resources: expand_resources(rig),
-            components: snapshot.components,
-        });
-        state.save(&rig.id)?;
-    }
+            success: outcome.is_success(),
+            pipeline: outcome,
+        })
+    })();
 
-    Ok(UpReport {
-        rig_id: rig.id.clone(),
-        success: outcome.is_success(),
-        pipeline: outcome,
-    })
+    RigRunObserver::finish(
+        observer.as_ref(),
+        rig,
+        result.as_ref().ok().map(|report| &report.pipeline),
+        &result,
+    );
+    result
 }
 
 /// Run the `check` pipeline. Unlike `up`, does NOT fail-fast — reports every
 /// failing check so the user can fix them all in one pass.
 pub fn run_check(rig: &RigSpec) -> Result<CheckReport> {
-    let outcome = run_pipeline(rig, "check", false)?;
+    let observer = RigRunObserver::start(rig, "check");
 
-    let mut state = RigState::load(&rig.id)?;
-    state.last_check = Some(now_rfc3339());
-    state.last_check_result = Some(if outcome.is_success() { "pass" } else { "fail" }.to_string());
-    state.save(&rig.id)?;
+    let result = (|| {
+        let outcome = run_pipeline(rig, "check", false)?;
 
-    Ok(CheckReport {
-        rig_id: rig.id.clone(),
-        success: outcome.is_success(),
-        pipeline: outcome,
-    })
+        let mut state = RigState::load(&rig.id)?;
+        state.last_check = Some(now_rfc3339());
+        state.last_check_result =
+            Some(if outcome.is_success() { "pass" } else { "fail" }.to_string());
+        state.save(&rig.id)?;
+
+        Ok(CheckReport {
+            rig_id: rig.id.clone(),
+            success: outcome.is_success(),
+            pipeline: outcome,
+        })
+    })();
+
+    RigRunObserver::finish(
+        observer.as_ref(),
+        rig,
+        result.as_ref().ok().map(|report| &report.pipeline),
+        &result,
+    );
+    result
 }
 
 /// Run only the grouped check-pipeline steps required by a workload command.
@@ -478,6 +504,86 @@ pub fn snapshot_state(rig: &RigSpec) -> RigStateSnapshot {
     }
 }
 
+struct RigRunObserver {
+    store: ObservationStore,
+    run_id: String,
+    command: String,
+}
+
+impl RigRunObserver {
+    fn start(rig: &RigSpec, command: &str) -> Option<Self> {
+        let store = ObservationStore::open_initialized().ok()?;
+        let run = store
+            .start_run(NewRunRecord {
+                kind: "rig".to_string(),
+                component_id: None,
+                command: Some(format!("rig.{command}")),
+                cwd: std::env::current_dir()
+                    .ok()
+                    .map(|path| path.to_string_lossy().to_string()),
+                homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                git_sha: None,
+                rig_id: Some(rig.id.clone()),
+                metadata_json: rig_observation_metadata(rig, command, None, None, None),
+            })
+            .ok()?;
+
+        Some(Self {
+            store,
+            run_id: run.id,
+            command: command.to_string(),
+        })
+    }
+
+    fn finish<T>(
+        observer: Option<&Self>,
+        rig: &RigSpec,
+        pipeline: Option<&PipelineOutcome>,
+        result: &Result<T>,
+    ) {
+        let Some(observer) = observer else {
+            return;
+        };
+        let status = match result {
+            Ok(_) if pipeline.is_some_and(PipelineOutcome::is_success) => RunStatus::Pass,
+            Ok(_) => RunStatus::Fail,
+            Err(_) => RunStatus::Error,
+        };
+        let error = result.as_ref().err().map(ToString::to_string);
+        let state = RigState::load(&rig.id).ok();
+        let metadata =
+            rig_observation_metadata(rig, &observer.command, state, pipeline, error.as_deref());
+        let _ = observer
+            .store
+            .finish_run(&observer.run_id, status, Some(metadata));
+    }
+}
+
+fn rig_observation_metadata(
+    rig: &RigSpec,
+    command: &str,
+    state: Option<RigState>,
+    pipeline: Option<&PipelineOutcome>,
+    error: Option<&str>,
+) -> serde_json::Value {
+    let source = super::install::read_source_metadata(&rig.id);
+    serde_json::json!({
+        "rig_id": rig.id,
+        "command": command,
+        "rig_source": source.as_ref().map(|source| &source.source),
+        "rig_revision": source.as_ref().and_then(|source| source.source_revision.as_deref()),
+        "source": source,
+        "state": state,
+        "component_snapshot": snapshot_state(rig),
+        "pipeline": pipeline,
+        "error": error,
+    })
+}
+
 #[cfg(test)]
 #[path = "../../../tests/core/rig/runner_test.rs"]
 mod runner_test;
+
+#[cfg(test)]
+#[path = "../../../tests/core/rig/runner_observation_test.rs"]
+mod runner_observation_test;
