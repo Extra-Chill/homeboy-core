@@ -1179,6 +1179,8 @@ mod tests {
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                     overlays: Vec::new(),
                     keep_overlay: false,
                 },

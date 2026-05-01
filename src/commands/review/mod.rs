@@ -23,6 +23,7 @@ use homeboy::code_audit::AuditCommandOutput;
 use homeboy::extension::lint::LintCommandOutput;
 use homeboy::extension::test::TestCommandOutput;
 use homeboy::git;
+use homeboy::ObservationOutputMetadata;
 
 use super::parse_key_val;
 use super::utils::args::{BaselineArgs, ExtensionOverrideArgs, PositionalComponentArgs};
@@ -129,6 +130,8 @@ pub struct ReviewSummary {
 #[derive(Serialize)]
 pub struct ReviewCommandOutput {
     pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation: Option<ObservationOutputMetadata>,
     pub artifact: ReviewArtifact,
     pub summary: ReviewSummary,
     pub audit: ReviewStage<AuditCommandOutput>,
@@ -145,6 +148,8 @@ pub struct ReviewArtifact {
     pub generated_at: String,
     pub base_ref: String,
     pub head_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation: Option<ObservationOutputMetadata>,
     pub commands: Vec<ReviewArtifactCommand>,
 }
 
@@ -193,21 +198,36 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         let message = format!("No files changed {} — skipping review", scope_label);
         println!("{}", message);
 
+        let review_observation = observation::start(observation::ReviewObservationStart {
+            component_id: &component.id,
+            component_label: &component_label,
+            source_path: Path::new(&source_path),
+            args: &args,
+            scope: &scope,
+            changed_file_count: Some(0),
+        });
+        let observation_metadata = review_observation.as_ref().map(|o| o.output_metadata());
+
+        let mut artifact = ReviewArtifact {
+            schema: "homeboy/review/v1".to_string(),
+            component: component_label.clone(),
+            status: "skipped".to_string(),
+            generated_at: generated_at_now(),
+            base_ref: args.changed_since.clone().unwrap_or_default(),
+            head_ref: git_ref(&source_path, "HEAD").unwrap_or_default(),
+            observation: None,
+            commands: vec![
+                artifact_command(&stage_skipped::<Value>("audit", "no files changed")),
+                artifact_command(&stage_skipped::<Value>("lint", "no files changed")),
+                artifact_command(&stage_skipped::<Value>("test", "no files changed")),
+            ],
+        };
+        artifact.observation = observation_metadata.clone();
+
         let output = ReviewCommandOutput {
             command: "review".to_string(),
-            artifact: ReviewArtifact {
-                schema: "homeboy/review/v1".to_string(),
-                component: component_label.clone(),
-                status: "skipped".to_string(),
-                generated_at: generated_at_now(),
-                base_ref: args.changed_since.clone().unwrap_or_default(),
-                head_ref: git_ref(&source_path, "HEAD").unwrap_or_default(),
-                commands: vec![
-                    artifact_command(&stage_skipped::<Value>("audit", "no files changed")),
-                    artifact_command(&stage_skipped::<Value>("lint", "no files changed")),
-                    artifact_command(&stage_skipped::<Value>("test", "no files changed")),
-                ],
-            },
+            observation: observation_metadata,
+            artifact,
             summary: ReviewSummary {
                 passed: true,
                 status: "passed".to_string(),
@@ -222,18 +242,7 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
             lint: stage_skipped("lint", "no files changed"),
             test: stage_skipped("test", "no files changed"),
         };
-        observation::finish_success(
-            observation::start(observation::ReviewObservationStart {
-                component_id: &component.id,
-                component_label: &component_label,
-                source_path: Path::new(&source_path),
-                args: &args,
-                scope: &scope,
-                changed_file_count: Some(0),
-            }),
-            &output,
-            0,
-        );
+        observation::finish_success(review_observation, &output, 0);
         return Ok((output, 0));
     }
 
@@ -401,7 +410,7 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         hints: top_hints,
     };
 
-    let artifact = build_artifact(
+    let mut artifact = build_artifact(
         &component_label,
         args.changed_since.as_deref().unwrap_or(""),
         git_ref(&source_path, "HEAD").unwrap_or_default().as_str(),
@@ -411,9 +420,12 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
             artifact_command(&test_stage),
         ],
     );
+    let observation_metadata = review_observation.as_ref().map(|o| o.output_metadata());
+    artifact.observation = observation_metadata.clone();
 
     let output = ReviewCommandOutput {
         command: "review".to_string(),
+        observation: observation_metadata,
         artifact,
         summary,
         audit: audit_stage,
@@ -525,6 +537,7 @@ fn build_artifact(
         generated_at: generated_at_now(),
         base_ref: base_ref.to_string(),
         head_ref: head_ref.to_string(),
+        observation: None,
         commands,
     }
 }
@@ -904,6 +917,63 @@ mod tests {
         assert!(
             json.get("success").is_none(),
             "artifact is not CLI envelope"
+        );
+    }
+
+    #[test]
+    fn write_artifact_to_file_preserves_observation_pointer_when_available() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("review.json");
+        let result = Ok(serde_json::json!({
+            "command": "review",
+            "observation": {
+                "schema": "homeboy/observation-pointer/v1",
+                "run_id": "run-123",
+                "kind": "review",
+                "details": {
+                    "query": "homeboy runs show run-123",
+                    "artifacts": "homeboy runs artifacts run-123",
+                    "export_bundle": "homeboy runs export --run run-123 --output homeboy-observations"
+                }
+            },
+            "artifact": {
+                "schema": "homeboy/review/v1",
+                "component": "homeboy",
+                "status": "passed",
+                "generated_at": "2026-04-28T00:00:00Z",
+                "base_ref": "origin/main",
+                "head_ref": "abc123",
+                "observation": {
+                    "schema": "homeboy/observation-pointer/v1",
+                    "run_id": "run-123",
+                    "kind": "review",
+                    "details": {
+                        "query": "homeboy runs show run-123",
+                        "artifacts": "homeboy runs artifacts run-123",
+                        "export_bundle": "homeboy runs export --run run-123 --output homeboy-observations"
+                    }
+                },
+                "commands": []
+            }
+        }));
+
+        assert!(write_artifact_to_file(
+            &result,
+            path.to_str().expect("utf8 path"),
+            0
+        ));
+
+        let written = std::fs::read_to_string(path).expect("artifact written");
+        let json: serde_json::Value = serde_json::from_str(&written).expect("valid json");
+        assert_eq!(json["schema"], "homeboy/review/v1");
+        assert_eq!(json["observation"]["run_id"], "run-123");
+        assert_eq!(
+            json["observation"]["details"]["query"],
+            "homeboy runs show run-123"
+        );
+        assert!(
+            json.get("success").is_none(),
+            "artifact remains the direct review artifact, not the CLI envelope"
         );
     }
 

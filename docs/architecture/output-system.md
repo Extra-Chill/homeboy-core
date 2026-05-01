@@ -142,6 +142,39 @@ The `next_steps` array contains context-aware actionable guidance based on the c
 
 On success, `data` is the command-specific output struct (varies by command).
 
+## Observation-backed payloads
+
+`--output` remains the per-invocation command-result artifact. It must continue
+to work for CI wrappers, scripts, and environments where the local observation
+SQLite database is unavailable.
+
+Observation-backed commands may add an optional `observation` field using the
+`homeboy/observation-pointer/v1` shape:
+
+```json
+{
+  "observation": {
+    "schema": "homeboy/observation-pointer/v1",
+    "run_id": "abc123",
+    "kind": "review",
+    "details": {
+      "query": "homeboy runs show abc123",
+      "artifacts": "homeboy runs artifacts abc123",
+      "export_bundle": "homeboy runs export --run abc123 --output homeboy-observations"
+    }
+  }
+}
+```
+
+Rules:
+
+- The field is additive and optional; absence means the best-effort observation
+  write was unavailable or the command is not observation-backed.
+- Existing command payload fields stay intact for backward compatibility.
+- Heavy evidence should live in observation records when available; command
+  output should keep summary/counts/status and include exact drill-down commands.
+- Observation store failures must not fail an otherwise successful command.
+
 ## Command payload conventions
 
 Many command outputs include a `command` string field:

@@ -51,5 +51,6 @@ pub use server::auth;
 pub use error::{Error, ErrorCode, Result};
 pub use output::{
     BatchResult, BatchResultItem, BulkResult, BulkSummary, CreateOutput, CreateResult,
-    EntityCrudOutput, ItemOutcome, MergeOutput, MergeResult, NoExtra, RemoveResult,
+    EntityCrudOutput, ItemOutcome, MergeOutput, MergeResult, NoExtra, ObservationOutputDetails,
+    ObservationOutputMetadata, RemoveResult,
 };
