@@ -352,6 +352,7 @@ mod tests {
             report: Vec::new(),
             rig: Vec::new(),
             rig_order: BenchRigOrder::Input,
+            rig_concurrency: 1,
             scenario_ids: Vec::new(),
             profile: None,
             ignore_default_baseline: false,

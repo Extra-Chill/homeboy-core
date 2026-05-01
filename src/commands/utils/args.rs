@@ -153,6 +153,7 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
                 "--regression-threshold",
                 "--shared-state",
                 "--concurrency",
+                "--rig-concurrency",
                 "--rig",
                 "--scenario",
                 "--profile",
@@ -519,6 +520,8 @@ mod normalize_tests {
             "--shared-state",
             "/tmp/homeboy-bench",
             "--concurrency=4",
+            "--rig-concurrency",
+            "2",
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);
