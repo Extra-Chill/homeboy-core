@@ -59,9 +59,26 @@ pub enum BenchProviderFailureSource {
 pub fn classify_text(text: &str) -> Option<(BenchProviderFailureClass, &'static str)> {
     let normalized = text.to_ascii_lowercase();
 
-    if contains_any(
-        &normalized,
-        &[
+    for pattern in FAILURE_PATTERNS {
+        if contains_any(&normalized, pattern.needles) {
+            return Some((pattern.class, pattern.reason));
+        }
+    }
+
+    None
+}
+
+struct FailurePattern {
+    class: BenchProviderFailureClass,
+    reason: &'static str,
+    needles: &'static [&'static str],
+}
+
+const FAILURE_PATTERNS: &[FailurePattern] = &[
+    FailurePattern {
+        class: BenchProviderFailureClass::MissingApiKey,
+        reason: "missing API key",
+        needles: &[
             "no api key available",
             "missing api key",
             "api key is missing",
@@ -71,28 +88,21 @@ pub fn classify_text(text: &str) -> Option<(BenchProviderFailureClass, &'static 
             "google_api_key is not set",
             "gemini_api_key is not set",
         ],
-    ) {
-        return Some((BenchProviderFailureClass::MissingApiKey, "missing API key"));
-    }
-
-    if contains_any(
-        &normalized,
-        &[
+    },
+    FailurePattern {
+        class: BenchProviderFailureClass::ConcurrencyLimit,
+        reason: "provider concurrency limit",
+        needles: &[
             "concurrency limit",
             "concurrent request limit",
             "too many concurrent requests",
             "too many simultaneous requests",
         ],
-    ) {
-        return Some((
-            BenchProviderFailureClass::ConcurrencyLimit,
-            "provider concurrency limit",
-        ));
-    }
-
-    if contains_any(
-        &normalized,
-        &[
+    },
+    FailurePattern {
+        class: BenchProviderFailureClass::RateLimit,
+        reason: "provider rate limit",
+        needles: &[
             "rate limit",
             "rate_limit",
             "too many requests",
@@ -100,13 +110,11 @@ pub fn classify_text(text: &str) -> Option<(BenchProviderFailureClass, &'static 
             "status 429",
             "429 too many requests",
         ],
-    ) {
-        return Some((BenchProviderFailureClass::RateLimit, "provider rate limit"));
-    }
-
-    if contains_any(
-        &normalized,
-        &[
+    },
+    FailurePattern {
+        class: BenchProviderFailureClass::GatewayTimeout,
+        reason: "provider gateway timeout",
+        needles: &[
             "gateway timeout",
             "504 gateway",
             "http 504",
@@ -114,44 +122,30 @@ pub fn classify_text(text: &str) -> Option<(BenchProviderFailureClass, &'static 
             "upstream request timeout",
             "upstream timed out",
         ],
-    ) {
-        return Some((
-            BenchProviderFailureClass::GatewayTimeout,
-            "provider gateway timeout",
-        ));
-    }
-
-    if contains_any(
-        &normalized,
-        &[
+    },
+    FailurePattern {
+        class: BenchProviderFailureClass::StreamTruncation,
+        reason: "provider stream truncation",
+        needles: &[
             "stream truncated",
             "truncated stream",
             "response stream ended early",
             "stream ended unexpectedly",
             "premature close",
         ],
-    ) {
-        return Some((
-            BenchProviderFailureClass::StreamTruncation,
-            "provider stream truncation",
-        ));
-    }
-
-    if contains_any(
-        &normalized,
-        &[
+    },
+    FailurePattern {
+        class: BenchProviderFailureClass::Auth,
+        reason: "provider auth failure",
+        needles: &[
             "auth error",
             "authentication failed",
             "invalid api key",
             "unauthorized api key",
             "401 unauthorized",
         ],
-    ) {
-        return Some((BenchProviderFailureClass::Auth, "provider auth failure"));
-    }
-
-    None
-}
+    },
+];
 
 pub fn collect_provider_failures(
     results: Option<&BenchResults>,
@@ -274,7 +268,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn classifies_representative_provider_failures() {
+    fn test_classify_text() {
         let cases = [
             (
                 "Auth error: No API key available",
@@ -321,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn scans_stderr_and_artifact_contents() {
+    fn test_collect_provider_failures() {
         let run_dir = tempfile::TempDir::new().expect("run dir");
         let artifact_dir = run_dir.path().join("bench-artifacts/agent");
         std::fs::create_dir_all(&artifact_dir).expect("artifact dir");
