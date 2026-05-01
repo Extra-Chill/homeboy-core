@@ -175,16 +175,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
             args.json_summary,
         );
 
-        let workflow = match workflow {
-            Ok(workflow) => {
-                finish_test_observation(observation, &workflow);
-                workflow
-            }
-            Err(error) => {
-                finish_test_observation_error(observation, &error);
-                return Err(error);
-            }
-        };
+        let workflow = finish_test_workflow_observation(observation, workflow)?;
 
         return Ok(report::from_main_workflow(workflow));
     }
@@ -268,24 +259,15 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
         &run_dir,
     );
     resource_run.write_to_run_dir(&run_dir)?;
-    let workflow = match workflow {
-        Ok(workflow) => {
-            finish_test_observation(observation, &workflow);
-            workflow
-        }
-        Err(error) => {
-            finish_test_observation_error(observation, &error);
-            return Err(error);
-        }
-    };
+    let workflow = finish_test_workflow_observation(observation, workflow)?;
 
     Ok(report::from_main_workflow(workflow))
 }
 
 struct TestObservation {
     store: ObservationStore,
-    run: RunRecord,
-    initial_metadata: serde_json::Value,
+    test_run: RunRecord,
+    test_metadata: serde_json::Value,
 }
 
 fn start_test_observation(
@@ -312,9 +294,25 @@ fn start_test_observation(
 
     Some(TestObservation {
         store,
-        run,
-        initial_metadata: metadata,
+        test_run: run,
+        test_metadata: metadata,
     })
+}
+
+fn finish_test_workflow_observation(
+    observation: Option<TestObservation>,
+    workflow: homeboy::Result<extension_test::TestRunWorkflowResult>,
+) -> homeboy::Result<extension_test::TestRunWorkflowResult> {
+    match workflow {
+        Ok(workflow) => {
+            finish_test_observation(observation, &workflow);
+            Ok(workflow)
+        }
+        Err(error) => {
+            finish_test_observation_error(observation, &error);
+            Err(error)
+        }
+    }
 }
 
 fn finish_test_observation(
@@ -326,7 +324,7 @@ fn finish_test_observation(
     };
 
     let metadata = merge_test_observation_metadata(
-        observation.initial_metadata,
+        observation.test_metadata,
         serde_json::json!({
             "observation_status": workflow.status,
             "exit_code": workflow.exit_code,
@@ -346,7 +344,7 @@ fn finish_test_observation(
     };
     let _ = observation
         .store
-        .finish_run(&observation.run.id, status, Some(metadata));
+        .finish_run(&observation.test_run.id, status, Some(metadata));
 }
 
 fn finish_test_drift_observation(
@@ -358,7 +356,7 @@ fn finish_test_drift_observation(
     };
 
     let metadata = merge_test_observation_metadata(
-        observation.initial_metadata,
+        observation.test_metadata,
         serde_json::json!({
             "observation_status": if workflow.exit_code == 0 { "pass" } else { "fail" },
             "exit_code": workflow.exit_code,
@@ -372,7 +370,7 @@ fn finish_test_drift_observation(
     };
     let _ = observation
         .store
-        .finish_run(&observation.run.id, status, Some(metadata));
+        .finish_run(&observation.test_run.id, status, Some(metadata));
 }
 
 fn finish_test_observation_error(observation: Option<TestObservation>, error: &homeboy::Error) {
@@ -381,15 +379,16 @@ fn finish_test_observation_error(observation: Option<TestObservation>, error: &h
     };
 
     let metadata = merge_test_observation_metadata(
-        observation.initial_metadata,
+        observation.test_metadata,
         serde_json::json!({
             "observation_status": "error",
             "error": error.to_string(),
         }),
     );
-    let _ = observation
-        .store
-        .finish_run(&observation.run.id, RunStatus::Error, Some(metadata));
+    let _ =
+        observation
+            .store
+            .finish_run(&observation.test_run.id, RunStatus::Error, Some(metadata));
 }
 
 fn test_observation_command(component_id: &str, args: &TestArgs) -> String {
@@ -533,7 +532,7 @@ mod tests {
 
             let observation = start_test_observation("homeboy", home.path(), &args, "test", None)
                 .expect("observation should start");
-            let run_id = observation.run.id.clone();
+            let run_id = observation.test_run.id.clone();
 
             finish_test_observation_error(
                 Some(observation),

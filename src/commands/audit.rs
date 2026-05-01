@@ -134,8 +134,8 @@ pub fn run(args: AuditArgs, _global: &GlobalArgs) -> CmdResult<AuditCommandOutpu
 
 struct AuditObservation {
     store: ObservationStore,
-    run: RunRecord,
-    initial_metadata: serde_json::Value,
+    audit_run: RunRecord,
+    audit_metadata: serde_json::Value,
 }
 
 fn start_audit_observation(
@@ -161,8 +161,8 @@ fn start_audit_observation(
 
     Some(AuditObservation {
         store,
-        run,
-        initial_metadata: metadata,
+        audit_run: run,
+        audit_metadata: metadata,
     })
 }
 
@@ -175,7 +175,7 @@ fn finish_audit_observation(
     };
 
     let metadata = merge_audit_observation_metadata(
-        observation.initial_metadata,
+        observation.audit_metadata,
         serde_json::json!({
             "observation_status": if workflow.exit_code == 0 { "pass" } else { "fail" },
             "exit_code": workflow.exit_code,
@@ -189,7 +189,7 @@ fn finish_audit_observation(
     };
     let _ = observation
         .store
-        .finish_run(&observation.run.id, status, Some(metadata));
+        .finish_run(&observation.audit_run.id, status, Some(metadata));
 }
 
 fn finish_audit_observation_error(observation: Option<AuditObservation>, error: &homeboy::Error) {
@@ -198,15 +198,16 @@ fn finish_audit_observation_error(observation: Option<AuditObservation>, error: 
     };
 
     let metadata = merge_audit_observation_metadata(
-        observation.initial_metadata,
+        observation.audit_metadata,
         serde_json::json!({
             "observation_status": "error",
             "error": error.to_string(),
         }),
     );
-    let _ = observation
-        .store
-        .finish_run(&observation.run.id, RunStatus::Error, Some(metadata));
+    let _ =
+        observation
+            .store
+            .finish_run(&observation.audit_run.id, RunStatus::Error, Some(metadata));
 }
 
 fn audit_observation_command(component_id: &str, args: &AuditArgs) -> String {
@@ -255,15 +256,9 @@ fn audit_observation_initial_metadata(source_path: &str, args: &AuditArgs) -> se
 
 fn audit_observation_summary(output: &AuditCommandOutput) -> serde_json::Value {
     match output {
-        AuditCommandOutput::Full { passed, result, .. } => serde_json::json!({
-            "passed": passed,
-            "component_id": result.component_id,
-            "files_scanned": result.summary.files_scanned,
-            "conventions_detected": result.summary.conventions_detected,
-            "findings": result.findings.len(),
-            "outliers_found": result.summary.outliers_found,
-            "alignment_score": result.summary.alignment_score,
-        }),
+        AuditCommandOutput::Full { passed, result, .. } => {
+            code_audit_result_observation_summary(*passed, result, None)
+        }
         AuditCommandOutput::Conventions {
             component_id,
             conventions,
@@ -291,16 +286,7 @@ fn audit_observation_summary(output: &AuditCommandOutput) -> serde_json::Value {
             result,
             changed_since,
             ..
-        } => serde_json::json!({
-            "passed": passed,
-            "component_id": result.component_id,
-            "files_scanned": result.summary.files_scanned,
-            "conventions_detected": result.summary.conventions_detected,
-            "findings": result.findings.len(),
-            "outliers_found": result.summary.outliers_found,
-            "alignment_score": result.summary.alignment_score,
-            "changed_since": changed_since,
-        }),
+        } => code_audit_result_observation_summary(*passed, result, changed_since.as_ref()),
         AuditCommandOutput::Summary(summary) => serde_json::json!({
             "findings": summary.total_findings,
             "warnings": summary.warnings,
@@ -309,6 +295,28 @@ fn audit_observation_summary(output: &AuditCommandOutput) -> serde_json::Value {
             "exit_code": summary.exit_code,
         }),
     }
+}
+
+fn code_audit_result_observation_summary(
+    passed: bool,
+    result: &code_audit::CodeAuditResult,
+    changed_since: Option<&report::AuditChangedSinceSummary>,
+) -> serde_json::Value {
+    let mut summary = serde_json::json!({
+        "passed": passed,
+        "component_id": result.component_id,
+        "files_scanned": result.summary.files_scanned,
+        "conventions_detected": result.summary.conventions_detected,
+        "findings": result.findings.len(),
+        "outliers_found": result.summary.outliers_found,
+        "alignment_score": result.summary.alignment_score,
+    });
+
+    if let Some(changed_since) = changed_since {
+        summary["changed_since"] = serde_json::json!(changed_since);
+    }
+
+    summary
 }
 
 fn merge_audit_observation_metadata(
@@ -484,7 +492,7 @@ mod tests {
             let observation =
                 start_audit_observation("homeboy", &home.path().to_string_lossy(), &args)
                     .expect("observation should start");
-            let run_id = observation.run.id.clone();
+            let run_id = observation.audit_run.id.clone();
 
             finish_audit_observation_error(
                 Some(observation),
