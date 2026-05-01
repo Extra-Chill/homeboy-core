@@ -184,6 +184,58 @@ Recommended manifest:
 The manifest is action-owned metadata. `review.json`, `audit.json`, `lint.json`,
 and `test.json` stay Homeboy-owned payloads.
 
+## Observation bundle artifacts
+
+Observation bundles are the reserved CI artifact shape for persisted run history:
+bench, rig, trace, and their recorded artifacts. They are separate from
+`homeboy-ci-results`, which is the command-result artifact consumed by PR review
+agents.
+
+Reserved artifact name:
+
+```text
+homeboy-observations
+```
+
+Reserved artifact layout:
+
+```text
+homeboy-observations/
+  manifest.json
+  runs.json
+  artifacts.json
+  bench_metrics.json
+  rig_steps.json
+  trace_spans.json
+  files/
+    ...
+```
+
+The observation-bundle schema is owned by `homeboy runs export/import`. Until
+that command surface lands, CI workflows should not add a production upload step
+for this artifact. The intended workflow shape is:
+
+```sh
+homeboy bench studio --rig studio-dev --scenario admin-first-load
+# Wave 4A dependency: homeboy runs export --since 1h --output homeboy-observations
+```
+
+Once `homeboy runs export` exists, CI wrappers should upload the generated
+directory or zip as a GitHub Actions artifact named `homeboy-observations`.
+Consumers should treat `manifest.json` as the schema/version entry point and
+ignore unknown additive fields in every bundle file.
+
+Artifact boundaries:
+
+- `homeboy-ci-results`: command output JSON for immediate CI/review decisions.
+- `homeboy-observations`: persisted observation-store history for later import,
+  benchmark comparison, and external analysis.
+- `homeboy-binary`: workflow-internal compiled binary handoff between jobs.
+
+The Homeboy Action follow-up should be action-level wiring only: run the export
+command after observation-producing commands, upload the reserved artifact name,
+and leave the bundle schema to Homeboy core.
+
 ## Consumer rules
 
 PR review agents should:
@@ -205,3 +257,4 @@ PR review agents should:
 - [lint](../commands/lint.md)
 - [test](../commands/test.md)
 - Issue [#1825](https://github.com/Extra-Chill/homeboy/issues/1825)
+- Issue [#2022](https://github.com/Extra-Chill/homeboy/issues/2022)
