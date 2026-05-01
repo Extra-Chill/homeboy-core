@@ -4,6 +4,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.142.0] - 2026-05-01
+
+### Added
+- add trace phase milestones
+- unify finding sidecar mapping
+- compare trace aggregate spans
+
+### Changed
+- avoid trace test helper duplication
+- split trace command helpers
+
+### Fixed
+- accept trace summary envelopes in compare
+
 ## [0.141.2] - 2026-05-01
 
 ### Fixed
