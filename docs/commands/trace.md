@@ -96,5 +96,8 @@ Trace spans can use the same lifecycle flags as other baseline-aware commands:
 - `--ratchet` updates the stored baseline when spans improve.
 - `--ignore-baseline` skips comparison.
 - `--regression-threshold=<PCT>` controls the allowed duration slowdown. Default is `5`.
+- `--regression-min-delta-ms=<MS>` controls the minimum absolute slowdown before a regression can fail. Default is `50`.
+
+Both regression thresholds must trip before Homeboy fails the run. For example, `9ms -> 15ms` exceeds the default percentage threshold but stays below the default `50ms` minimum delta, so it does not fail as a trace baseline regression.
 
 Rig-pinned traces store separate baselines under `trace.rig.<rig-id>` so bare and rig-owned traces do not collide.
