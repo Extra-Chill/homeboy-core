@@ -15,7 +15,7 @@ use super::records::{
 };
 use crate::{paths, Error, Result};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 struct Migration {
     version: i64,
@@ -118,6 +118,13 @@ const MIGRATIONS: &[Migration] = &[
             ON findings(tool, file);
         CREATE INDEX IF NOT EXISTS idx_findings_fingerprint
             ON findings(fingerprint);
+    "#,
+    },
+    Migration {
+        version: 4,
+        sql: r#"
+        ALTER TABLE artifacts
+            ADD COLUMN artifact_type TEXT NOT NULL DEFAULT 'file';
     "#,
     },
 ];
@@ -386,13 +393,14 @@ impl ObservationStore {
         self.connection
             .execute(
                 r#"
-                INSERT INTO artifacts(id, run_id, kind, path, sha256, size_bytes, mime, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                INSERT INTO artifacts(id, run_id, kind, artifact_type, path, sha256, size_bytes, mime, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 "#,
                 params![
                     artifact.id,
                     artifact.run_id,
                     artifact.kind,
+                    artifact.artifact_type,
                     artifact.path,
                     artifact.sha256,
                     artifact.size_bytes,
@@ -455,13 +463,14 @@ impl ObservationStore {
         self.connection
             .execute(
                 r#"
-                INSERT INTO artifacts(id, run_id, kind, path, sha256, size_bytes, mime, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                INSERT INTO artifacts(id, run_id, kind, artifact_type, path, sha256, size_bytes, mime, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 "#,
                 params![
                     id,
                     run_id,
                     kind,
+                    "file",
                     path_string,
                     sha256,
                     size_bytes,
@@ -481,13 +490,64 @@ impl ObservationStore {
             })
     }
 
+    pub fn record_url_artifact(
+        &self,
+        run_id: &str,
+        kind: &str,
+        url: &str,
+    ) -> Result<ArtifactRecord> {
+        validate_required("run_id", run_id)?;
+        validate_required("kind", kind)?;
+        validate_required("url", url)?;
+        if self.get_run(run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "run_id",
+                format!("run record not found: {run_id}"),
+                Some(run_id.to_string()),
+                None,
+            ));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO artifacts(id, run_id, kind, artifact_type, path, sha256, size_bytes, mime, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+                params![
+                    id,
+                    run_id,
+                    kind,
+                    "url",
+                    url,
+                    Option::<String>::None,
+                    Option::<i64>::None,
+                    Option::<String>::None,
+                    created_at,
+                ],
+            )
+            .map_err(sqlite_error("insert URL artifact record"))?;
+
+        self.list_artifacts(run_id)?
+            .into_iter()
+            .find(|artifact| artifact.id == id)
+            .ok_or_else(|| {
+                Error::internal_unexpected(format!(
+                    "Inserted artifact record {id} but could not read it back"
+                ))
+            })
+    }
+
     pub fn list_artifacts(&self, run_id: &str) -> Result<Vec<ArtifactRecord>> {
         validate_required("run_id", run_id)?;
         let mut statement = self
             .connection
             .prepare(
                 r#"
-                SELECT id, run_id, kind, path, sha256, size_bytes, mime, created_at
+                SELECT id, run_id, kind, artifact_type, path, sha256, size_bytes, mime, created_at
                 FROM artifacts
                 WHERE run_id = ?1
                 ORDER BY created_at ASC
@@ -506,7 +566,7 @@ impl ObservationStore {
         self.connection
             .query_row(
                 r#"
-                SELECT id, run_id, kind, path, sha256, size_bytes, mime, created_at
+                SELECT id, run_id, kind, artifact_type, path, sha256, size_bytes, mime, created_at
                 FROM artifacts
                 WHERE id = ?1
                 "#,
@@ -939,11 +999,17 @@ fn row_to_artifact_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactR
         id: row.get(0)?,
         run_id: row.get(1)?,
         kind: row.get(2)?,
-        path: row.get(3)?,
-        sha256: row.get(4)?,
-        size_bytes: row.get(5)?,
-        mime: row.get(6)?,
-        created_at: row.get(7)?,
+        artifact_type: row.get(3)?,
+        path: row.get(4)?,
+        url: if row.get_ref(3)?.as_str()? == "url" {
+            Some(row.get(4)?)
+        } else {
+            None
+        },
+        sha256: row.get(5)?,
+        size_bytes: row.get(6)?,
+        mime: row.get(7)?,
+        created_at: row.get(8)?,
     })
 }
 

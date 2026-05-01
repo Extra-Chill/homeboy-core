@@ -65,11 +65,19 @@ pub struct ArtifactRecord {
     pub id: String,
     pub run_id: String,
     pub kind: String,
+    #[serde(rename = "type", default = "default_artifact_type")]
+    pub artifact_type: String,
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub sha256: Option<String>,
     pub size_bytes: Option<i64>,
     pub mime: Option<String>,
     pub created_at: String,
+}
+
+fn default_artifact_type() -> String {
+    "file".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

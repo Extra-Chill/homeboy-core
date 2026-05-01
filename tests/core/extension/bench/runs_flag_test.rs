@@ -151,8 +151,9 @@ mod cases {
         first.artifacts.insert(
             "transcript".to_string(),
             BenchArtifact {
-                path: "artifacts/run-1/transcript.json".to_string(),
+                path: Some("artifacts/run-1/transcript.json".to_string()),
                 url: None,
+                artifact_type: None,
                 kind: Some("json".to_string()),
                 label: Some("Run 1 transcript".to_string()),
             },
@@ -161,8 +162,9 @@ mod cases {
         second.artifacts.insert(
             "transcript".to_string(),
             BenchArtifact {
-                path: "artifacts/run-2/transcript.json".to_string(),
+                path: Some("artifacts/run-2/transcript.json".to_string()),
                 url: None,
+                artifact_type: None,
                 kind: Some("json".to_string()),
                 label: Some("Run 2 transcript".to_string()),
             },
@@ -173,12 +175,12 @@ mod cases {
 
         assert_eq!(runs.len(), 2);
         assert_eq!(
-            runs[0].artifacts["transcript"].path,
-            "artifacts/run-1/transcript.json"
+            runs[0].artifacts["transcript"].path.as_deref(),
+            Some("artifacts/run-1/transcript.json")
         );
         assert_eq!(
-            runs[1].artifacts["transcript"].path,
-            "artifacts/run-2/transcript.json"
+            runs[1].artifacts["transcript"].path.as_deref(),
+            Some("artifacts/run-2/transcript.json")
         );
     }
 }

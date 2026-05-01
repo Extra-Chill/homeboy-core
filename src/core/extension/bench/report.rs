@@ -301,9 +301,12 @@ pub struct BenchArtifactRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_index: Option<usize>,
     pub name: String,
-    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub artifact_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -342,6 +345,7 @@ fn artifact_ref(
         name: name.to_string(),
         path: artifact.path.clone(),
         url: artifact.url.clone(),
+        artifact_type: artifact.artifact_type.clone(),
         kind: artifact.kind.clone(),
         label: artifact.label.clone(),
     }
@@ -1124,8 +1128,9 @@ mod tests {
 
     fn artifact(path: &str, kind: Option<&str>, label: Option<&str>) -> BenchArtifact {
         BenchArtifact {
-            path: path.to_string(),
+            path: Some(path.to_string()),
             url: None,
+            artifact_type: None,
             kind: kind.map(str::to_string),
             label: label.map(str::to_string),
         }
@@ -1138,8 +1143,9 @@ mod tests {
         label: Option<&str>,
     ) -> BenchArtifact {
         BenchArtifact {
-            path: path.to_string(),
+            path: Some(path.to_string()),
             url: Some(url.to_string()),
+            artifact_type: None,
             kind: kind.map(str::to_string),
             label: label.map(str::to_string),
         }
@@ -1421,14 +1427,38 @@ mod tests {
         assert_eq!(indexed[0].scenario_id, "agent-runtime");
         assert_eq!(indexed[0].run_index, None);
         assert_eq!(indexed[0].name, "summary");
-        assert_eq!(indexed[0].path, "artifacts/summary.json");
+        assert_eq!(indexed[0].path.as_deref(), Some("artifacts/summary.json"));
         assert_eq!(indexed[0].kind.as_deref(), Some("json"));
         assert_eq!(indexed[0].label.as_deref(), Some("Summary"));
         assert_eq!(indexed[1].run_index, Some(0));
         assert_eq!(indexed[1].name, "raw_result");
-        assert_eq!(indexed[1].path, "artifacts/run-0/raw.json");
+        assert_eq!(indexed[1].path.as_deref(), Some("artifacts/run-0/raw.json"));
         assert_eq!(indexed[2].run_index, Some(1));
-        assert_eq!(indexed[2].path, "artifacts/run-1/raw.json");
+        assert_eq!(indexed[2].path.as_deref(), Some("artifacts/run-1/raw.json"));
+    }
+
+    #[test]
+    fn test_collect_url_artifacts() {
+        let mut scenario = scenario("site-build", &[("p95_ms", 100.0)]);
+        scenario.artifacts.insert(
+            "frontend".to_string(),
+            BenchArtifact {
+                path: None,
+                url: Some("https://example.test/".to_string()),
+                artifact_type: Some("url".to_string()),
+                kind: Some("frontend_url".to_string()),
+                label: Some("Frontend".to_string()),
+            },
+        );
+
+        let indexed = collect_artifacts(&results(vec![scenario]));
+
+        assert_eq!(indexed.len(), 1);
+        assert_eq!(indexed[0].name, "frontend");
+        assert_eq!(indexed[0].path, None);
+        assert_eq!(indexed[0].url.as_deref(), Some("https://example.test/"));
+        assert_eq!(indexed[0].artifact_type.as_deref(), Some("url"));
+        assert_eq!(indexed[0].kind.as_deref(), Some("frontend_url"));
     }
 
     #[test]
@@ -1498,7 +1528,8 @@ mod tests {
         );
         candidate_scenario.artifacts.insert(
             "site".to_string(),
-            artifact(
+            artifact_with_url(
+                "sites/candidate",
                 "https://candidate.example.test",
                 Some("site"),
                 Some("Candidate site"),
