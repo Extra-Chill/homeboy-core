@@ -124,6 +124,8 @@ pub struct BenchComparisonOutput {
     pub failures: Vec<BenchComparisonFailure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_baseline_expansion: Option<BenchDefaultBaselineExpansion>,
 }
 
 /// Compact cross-rig comparison envelope for operator-facing summary reads.
@@ -148,6 +150,16 @@ pub struct BenchComparisonSummaryOutput {
     pub failures: Vec<BenchComparisonFailure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_baseline_expansion: Option<BenchDefaultBaselineExpansion>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct BenchDefaultBaselineExpansion {
+    pub baseline_rig: String,
+    pub candidate_rig: String,
+    pub execution_order: Vec<String>,
+    pub opt_out_flag: &'static str,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -213,6 +225,7 @@ impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
                 .collect(),
             failures: output.failures,
             hints: output.hints,
+            default_baseline_expansion: output.default_baseline_expansion,
         }
     }
 }
@@ -767,6 +780,7 @@ pub fn aggregate_comparison_with_axes(
             summary,
             failures,
             hints: Some(hints),
+            default_baseline_expansion: None,
         },
         exit_code,
     )
