@@ -280,8 +280,9 @@ pub struct ComponentSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triage_remote_url: Option<String>,
 
-    /// Stack ID this component should track (Phase 2 — not enforced in MVP,
-    /// but the field is reserved so existing specs don't break on upgrade).
+    /// Stack ID this component should track. `homeboy rig sync` and explicit
+    /// `stack` pipeline steps use this to delegate combined-fixes upkeep to
+    /// the stack primitive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<String>,
 

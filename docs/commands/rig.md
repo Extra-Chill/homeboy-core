@@ -138,7 +138,7 @@ homeboy rig sync studio
 homeboy rig sync studio --dry-run
 ```
 
-`rig sync` finds every component with a `stack` field and delegates to `homeboy stack sync <stack-id>`. This is the rig-level entry point for keeping combined-fixes branches current before a local environment is brought up.
+`rig sync` finds every component with a `stack` field and delegates to `homeboy stack sync <stack-id>`. This is the rig-level entry point for keeping combined-fixes branches current before a local environment is brought up. The rig component `path` must resolve to the same checkout as the referenced stack's `component_path`; mismatches fail before branch rewriting starts.
 
 ```jsonc
 {
@@ -156,6 +156,17 @@ homeboy rig sync studio --dry-run
 ```
 
 `rig up` does not sync stacks implicitly. If stack sync should be part of an `up` pipeline, add an explicit `stack` pipeline step.
+
+```jsonc
+{
+  "pipeline": {
+    "up": [
+      { "kind": "stack", "component": "studio", "op": "sync" },
+      { "kind": "stack", "component": "playground", "op": "sync" }
+    ]
+  }
+}
+```
 
 ## App Launchers
 

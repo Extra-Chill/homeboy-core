@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::rig::spec::{ComponentSpec, RigSpec};
-use crate::stack::{GitRef, SyncOutput, SyncPreview};
+use crate::stack::{GitRef, StackPrEntry, StackSpec, SyncOutput, SyncPreview};
 
-use super::{plan_stack_sync, run_sync_with};
+use super::{plan_stack_sync, run_component_sync, run_sync_with, validate_component_stack_path};
 
 fn component(path: &str, stack: Option<&str>) -> ComponentSpec {
     ComponentSpec {
@@ -66,6 +66,24 @@ fn sync_output(stack_id: &str, picked: usize, skipped: usize, dropped: usize) ->
     }
 }
 
+fn stack_spec(id: &str, component_path: &str) -> StackSpec {
+    StackSpec {
+        id: id.to_string(),
+        description: String::new(),
+        component: "studio".to_string(),
+        component_path: component_path.to_string(),
+        base: GitRef {
+            remote: "origin".to_string(),
+            branch: "main".to_string(),
+        },
+        target: GitRef {
+            remote: "fork".to_string(),
+            branch: "dev/combined-fixes".to_string(),
+        },
+        prs: Vec::<StackPrEntry>::new(),
+    }
+}
+
 #[test]
 fn test_plan_stack_sync_uses_components_with_stack_ids_in_sorted_order() {
     let mut components = HashMap::new();
@@ -90,8 +108,9 @@ fn test_run_sync_reports_changed_and_noop_statuses() {
     components.insert("b".to_string(), component("/tmp/b", Some("b-stack")));
     let rig = rig_with_components(components);
 
-    let report = run_sync_with(&rig, false, |stack_id, dry_run| {
+    let report = run_sync_with(&rig, false, |component_id, stack_id, dry_run| {
         assert!(!dry_run);
+        assert!(component_id == "a" || component_id == "b");
         Ok(match stack_id {
             "a-stack" => sync_output(stack_id, 1, 0, 0),
             "b-stack" => sync_output(stack_id, 0, 0, 0),
@@ -115,7 +134,7 @@ fn test_run_sync_stops_on_conflict_before_later_stacks() {
     let rig = rig_with_components(components);
     let mut seen = Vec::new();
 
-    let report = run_sync_with(&rig, true, |stack_id, dry_run| {
+    let report = run_sync_with(&rig, true, |_component_id, stack_id, dry_run| {
         assert!(dry_run);
         seen.push(stack_id.to_string());
         match stack_id {
@@ -148,7 +167,7 @@ fn test_run_sync_reports_general_failure_status() {
     components.insert("a".to_string(), component("/tmp/a", Some("a-stack")));
     let rig = rig_with_components(components);
 
-    let report = run_sync_with(&rig, false, |_stack_id, _dry_run| {
+    let report = run_sync_with(&rig, false, |_component_id, _stack_id, _dry_run| {
         Err(Error::stack_not_found("a-stack", Vec::new()))
     });
 
@@ -168,7 +187,7 @@ fn test_sync_entry_serializes_counts_and_refs() {
     components.insert("a".to_string(), component("/tmp/a", Some("a-stack")));
     let rig = rig_with_components(components);
 
-    let report = run_sync_with(&rig, false, |stack_id, _dry_run| {
+    let report = run_sync_with(&rig, false, |_component_id, stack_id, _dry_run| {
         Ok(SyncOutput {
             preview: SyncPreview {
                 stack_id: stack_id.to_string(),
@@ -214,4 +233,71 @@ fn test_sync_entry_serializes_counts_and_refs() {
     assert!(json.contains("\"dropped_count\":1"));
     assert!(json.contains("\"base\":\"origin/main\""));
     assert!(json.contains("\"target\":\"fork/dev/combined-fixes\""));
+}
+
+#[test]
+fn test_validate_component_stack_path_accepts_matching_paths() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let component_path = dir.path().to_string_lossy().to_string();
+    let mut components = HashMap::new();
+    components.insert(
+        "studio".to_string(),
+        component(&component_path, Some("studio-combined")),
+    );
+    let rig = rig_with_components(components);
+    let stack = stack_spec("studio-combined", &component_path);
+
+    validate_component_stack_path(&rig, "studio", &stack).expect("path should match");
+}
+
+#[test]
+fn test_validate_component_stack_path_accepts_canonical_equivalent_paths() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let nested = dir.path().join("checkout");
+    std::fs::create_dir_all(&nested).expect("create checkout");
+    let rig_path = nested
+        .join("..")
+        .join("checkout")
+        .to_string_lossy()
+        .to_string();
+    let stack_path = nested.to_string_lossy().to_string();
+    let mut components = HashMap::new();
+    components.insert(
+        "studio".to_string(),
+        component(&rig_path, Some("studio-combined")),
+    );
+    let rig = rig_with_components(components);
+    let stack = stack_spec("studio-combined", &stack_path);
+
+    validate_component_stack_path(&rig, "studio", &stack).expect("canonical path should match");
+}
+
+#[test]
+fn test_validate_component_stack_path_errors_on_mismatch() {
+    let mut components = HashMap::new();
+    components.insert(
+        "studio".to_string(),
+        component("/tmp/studio", Some("studio-combined")),
+    );
+    let rig = rig_with_components(components);
+    let stack = stack_spec("studio-combined", "/tmp/other-studio");
+
+    let err = validate_component_stack_path(&rig, "studio", &stack).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("paths differ"));
+    assert!(msg.contains("/tmp/studio"));
+    assert!(msg.contains("/tmp/other-studio"));
+}
+
+#[test]
+fn test_run_component_sync_errors_when_component_has_no_stack() {
+    let mut components = HashMap::new();
+    components.insert("plain".to_string(), component("/tmp/plain", None));
+    let rig = rig_with_components(components);
+
+    let err = run_component_sync(&rig, "plain", true).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("component 'plain' does not declare a stack"));
 }

@@ -5,10 +5,12 @@
 //! rig components, then delegate to the existing stack primitive explicitly.
 
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
+use super::expand::expand_vars;
 use super::spec::RigSpec;
 use crate::error::{ErrorCode, Result};
-use crate::stack::{self, SyncOutput};
+use crate::stack::{self, StackSpec, SyncOutput};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RigStackPlanEntry {
@@ -64,10 +66,11 @@ pub fn plan_stack_sync(rig: &RigSpec) -> Vec<RigStackPlanEntry> {
 }
 
 pub fn run_sync(rig: &RigSpec, dry_run: bool) -> Result<RigStackSyncReport> {
-    Ok(run_sync_with(rig, dry_run, |stack_id, dry_run| {
-        let mut spec = stack::load(stack_id)?;
-        stack::sync(&mut spec, dry_run)
-    }))
+    Ok(run_sync_with(
+        rig,
+        dry_run,
+        |component_id, stack_id, dry_run| sync_checked(rig, component_id, stack_id, dry_run),
+    ))
 }
 
 pub fn run_component_sync(
@@ -93,10 +96,12 @@ pub fn run_component_sync(
         )
     })?;
 
-    let entry = run_one(component_id, stack_id, dry_run, |stack_id, dry_run| {
-        let mut spec = stack::load(stack_id)?;
-        stack::sync(&mut spec, dry_run)
-    });
+    let entry = run_one(
+        component_id,
+        stack_id,
+        dry_run,
+        |component_id, stack_id, dry_run| sync_checked(rig, component_id, stack_id, dry_run),
+    );
 
     if entry.status == "changed" || entry.status == "no-op" {
         return Ok(entry);
@@ -125,7 +130,7 @@ pub(crate) fn run_sync_with<F>(
     mut sync_stack: F,
 ) -> RigStackSyncReport
 where
-    F: FnMut(&str, bool) -> Result<SyncOutput>,
+    F: FnMut(&str, &str, bool) -> Result<SyncOutput>,
 {
     let mut stacks = Vec::new();
     let mut success = true;
@@ -159,9 +164,9 @@ fn run_one<F>(
     mut sync_stack: F,
 ) -> RigStackSyncEntry
 where
-    F: FnMut(&str, bool) -> Result<SyncOutput>,
+    F: FnMut(&str, &str, bool) -> Result<SyncOutput>,
 {
-    match sync_stack(stack_id, dry_run) {
+    match sync_stack(component_id, stack_id, dry_run) {
         Ok(output) => entry_from_output(component_id, output),
         Err(error) => {
             let status = if error.code == ErrorCode::StackApplyConflict {
@@ -183,6 +188,64 @@ where
             }
         }
     }
+}
+
+fn sync_checked(
+    rig: &RigSpec,
+    component_id: &str,
+    stack_id: &str,
+    dry_run: bool,
+) -> Result<SyncOutput> {
+    let mut spec = stack::load(stack_id)?;
+    validate_component_stack_path(rig, component_id, &spec)?;
+    stack::sync(&mut spec, dry_run)
+}
+
+pub(crate) fn validate_component_stack_path(
+    rig: &RigSpec,
+    component_id: &str,
+    stack_spec: &StackSpec,
+) -> Result<()> {
+    let component = rig.components.get(component_id).ok_or_else(|| {
+        crate::Error::rig_pipeline_failed(
+            &rig.id,
+            "stack",
+            format!(
+                "component '{}' not declared in rig `components` map",
+                component_id
+            ),
+        )
+    })?;
+
+    let rig_path = expand_vars(rig, &component.path);
+    let stack_path = stack::expand_path(&stack_spec.component_path);
+    if comparable_path(&rig_path) == comparable_path(&stack_path) {
+        return Ok(());
+    }
+
+    Err(crate::Error::rig_pipeline_failed(
+        &rig.id,
+        "stack",
+        format!(
+            "component '{}' declares stack '{}' but paths differ: rig component path '{}' vs stack component_path '{}'. Align one spec before running stack sync.",
+            component_id, stack_spec.id, rig_path, stack_path
+        ),
+    ))
+}
+
+fn comparable_path(path: &str) -> PathBuf {
+    let candidate = PathBuf::from(path);
+    if let Ok(canonical) = std::fs::canonicalize(&candidate) {
+        return canonical;
+    }
+
+    if candidate.is_absolute() {
+        return candidate;
+    }
+
+    std::env::current_dir()
+        .unwrap_or_else(|_| Path::new(".").to_path_buf())
+        .join(candidate)
 }
 
 fn entry_from_output(component_id: &str, output: SyncOutput) -> RigStackSyncEntry {

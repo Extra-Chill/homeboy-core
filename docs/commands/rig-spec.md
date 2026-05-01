@@ -52,7 +52,7 @@ Components are local checkouts used by pipeline steps. They are intentionally de
 | `path` | string | Filesystem path to the checkout. Supports `~`, `${env.NAME}`, and use through `${components.<id>.path}`. |
 | `remote_url` | string | Optional source repository URL for triage/reporting fallback. |
 | `triage_remote_url` | string | Optional reporting-only GitHub remote override. |
-| `stack` | string | Stack ID synced by `homeboy rig sync` and by explicit `stack` pipeline steps. |
+| `stack` | string | Stack ID synced by `homeboy rig sync` and by explicit `stack` pipeline steps. The component `path` must resolve to the same checkout as the stack's `component_path`. |
 | `branch` | string | Expected branch hint surfaced to humans in status/spec output. |
 | `extensions` | object | Optional rig-owned scoped extension config, mainly for rig-pinned bench dispatch. |
 
@@ -216,7 +216,7 @@ Runs git in the component checkout. Supported operations are `status`, `pull`, `
 { "kind": "stack", "component": "studio", "op": "sync", "dry_run": true }
 ```
 
-Delegates to `homeboy stack sync <stack-id>` for the named component. The component must declare `stack`. `homeboy rig sync <id>` runs this for every stacked component without needing a pipeline step.
+Delegates to `homeboy stack sync <stack-id>` for the named component. The component must declare `stack`, and the rig component `path` must match the stack spec's `component_path`. `homeboy rig sync <id>` runs this for every stacked component without needing a pipeline step.
 
 ### `patch`
 
