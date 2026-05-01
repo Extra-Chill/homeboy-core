@@ -411,22 +411,6 @@ pub fn execute_local_command_passthrough_with_process_cleanup(
     execute_local_command_passthrough_impl(command, current_dir, env, true)
 }
 
-pub fn execute_local_command_stderr_passthrough(
-    command: &str,
-    current_dir: Option<&str>,
-    env: Option<&[(&str, &str)]>,
-) -> CommandOutput {
-    execute_local_command_stderr_passthrough_impl(command, current_dir, env, false)
-}
-
-pub fn execute_local_command_stderr_passthrough_with_process_cleanup(
-    command: &str,
-    current_dir: Option<&str>,
-    env: Option<&[(&str, &str)]>,
-) -> CommandOutput {
-    execute_local_command_stderr_passthrough_impl(command, current_dir, env, true)
-}
-
 fn execute_local_command_passthrough_impl(
     command: &str,
     current_dir: Option<&str>,
@@ -539,7 +523,7 @@ fn execute_local_command_passthrough_impl(
     output
 }
 
-fn execute_local_command_stderr_passthrough_impl(
+pub(crate) fn execute_local_command_stderr_passthrough(
     command: &str,
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
@@ -1042,11 +1026,26 @@ mod tests {
     }
 
     #[test]
-    fn stderr_passthrough_captures_stdout_without_rewriting_it() {
+    fn test_execute_local_command_stderr_passthrough() {
         let output = execute_local_command_stderr_passthrough(
             "printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2",
             None,
             None,
+            false,
+        );
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "{\"ok\":true}\n");
+        assert_eq!(output.stderr, "progress turn=1\n");
+    }
+
+    #[test]
+    fn stderr_passthrough_with_process_cleanup_preserves_stdout() {
+        let output = execute_local_command_stderr_passthrough(
+            "printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2",
+            None,
+            None,
+            true,
         );
 
         assert!(output.success);

@@ -292,4 +292,11 @@ mod tests {
 
         run_dir.cleanup();
     }
+
+    #[test]
+    fn test_stderr_passthrough() {
+        let runner = ExtensionRunner::for_context(context()).stderr_passthrough(true);
+
+        assert!(runner.stderr_passthrough);
+    }
 }

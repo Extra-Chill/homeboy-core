@@ -11,8 +11,7 @@ use crate::server::{
     execute_local_command_in_dir, execute_local_command_in_dir_with_process_cleanup,
     execute_local_command_interactive, execute_local_command_passthrough,
     execute_local_command_passthrough_with_process_cleanup,
-    execute_local_command_stderr_passthrough,
-    execute_local_command_stderr_passthrough_with_process_cleanup, CommandOutput,
+    execute_local_command_stderr_passthrough, CommandOutput,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -550,19 +549,11 @@ pub(crate) fn execute_capability_script(
             env_opt,
         ))
     } else if options.stderr_passthrough {
-        if options.cleanup_process_group {
-            return Ok(
-                execute_local_command_stderr_passthrough_with_process_cleanup(
-                    &command,
-                    current_dir,
-                    env_opt,
-                ),
-            );
-        }
         Ok(execute_local_command_stderr_passthrough(
             &command,
             current_dir,
             env_opt,
+            options.cleanup_process_group,
         ))
     } else {
         if options.cleanup_process_group {
