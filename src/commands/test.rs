@@ -7,6 +7,9 @@ use homeboy::extension::test::{
     detect_test_drift, report, run_self_check_test_workflow, TestCommandOutput, TestRunWorkflowArgs,
 };
 use homeboy::extension::ExtensionCapability;
+use homeboy::git::short_head_revision_at;
+use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
+use std::path::Path;
 
 use super::utils::args::{
     BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
@@ -158,12 +161,30 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
             .component
             .has_self_check(ExtensionCapability::Test)
     {
+        let observation = start_test_observation(
+            &source_ctx.component_id,
+            &source_ctx.source_path,
+            &args,
+            "self-check",
+            None,
+        );
         let workflow = run_self_check_test_workflow(
             &source_ctx.component,
             &source_ctx.source_path,
             source_ctx.component_id.clone(),
             args.json_summary,
-        )?;
+        );
+
+        let workflow = match workflow {
+            Ok(workflow) => {
+                finish_test_observation(observation, &workflow);
+                workflow
+            }
+            Err(error) => {
+                finish_test_observation_error(observation, &error);
+                return Err(error);
+            }
+        };
 
         return Ok(report::from_main_workflow(workflow));
     }
@@ -181,12 +202,31 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
     // Drift detection mode — delegate to core drift workflow (read-only)
     // Fixes are owned by `homeboy refactor --from test --write`.
     if args.drift {
-        let result = detect_test_drift(&effective_id, &ctx.component, &args.since)?;
+        let observation =
+            start_test_observation(&ctx.component_id, &ctx.source_path, &args, "drift", None);
+        let result = detect_test_drift(&effective_id, &ctx.component, &args.since);
+        let result = match result {
+            Ok(result) => {
+                finish_test_drift_observation(observation, &result);
+                result
+            }
+            Err(error) => {
+                finish_test_observation_error(observation, &error);
+                return Err(error);
+            }
+        };
         return Ok(report::from_drift_workflow(result));
     }
 
     // Main test workflow — delegate to core
     let run_dir = RunDir::create()?;
+    let observation = start_test_observation(
+        &ctx.component_id,
+        &ctx.source_path,
+        &args,
+        "test",
+        Some(&run_dir),
+    );
     let resource_run = homeboy::engine::resource::ResourceSummaryRun::start(Some(format!(
         "test {}",
         effective_id
@@ -228,23 +268,313 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
         &run_dir,
     );
     resource_run.write_to_run_dir(&run_dir)?;
-    let workflow = workflow?;
+    let workflow = match workflow {
+        Ok(workflow) => {
+            finish_test_observation(observation, &workflow);
+            workflow
+        }
+        Err(error) => {
+            finish_test_observation_error(observation, &error);
+            return Err(error);
+        }
+    };
 
     Ok(report::from_main_workflow(workflow))
+}
+
+struct TestObservation {
+    store: ObservationStore,
+    run: RunRecord,
+    initial_metadata: serde_json::Value,
+}
+
+fn start_test_observation(
+    component_id: &str,
+    source_path: &Path,
+    args: &TestArgs,
+    mode: &str,
+    run_dir: Option<&RunDir>,
+) -> Option<TestObservation> {
+    let store = ObservationStore::open_initialized().ok()?;
+    let metadata = test_observation_initial_metadata(source_path, args, mode, run_dir);
+    let run = store
+        .start_run(NewRunRecord {
+            kind: "test".to_string(),
+            component_id: Some(component_id.to_string()),
+            command: Some(test_observation_command(component_id, args)),
+            cwd: Some(source_path.to_string_lossy().to_string()),
+            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            git_sha: short_head_revision_at(source_path),
+            rig_id: None,
+            metadata_json: metadata.clone(),
+        })
+        .ok()?;
+
+    Some(TestObservation {
+        store,
+        run,
+        initial_metadata: metadata,
+    })
+}
+
+fn finish_test_observation(
+    observation: Option<TestObservation>,
+    workflow: &extension_test::TestRunWorkflowResult,
+) {
+    let Some(observation) = observation else {
+        return;
+    };
+
+    let metadata = merge_test_observation_metadata(
+        observation.initial_metadata,
+        serde_json::json!({
+            "observation_status": workflow.status,
+            "exit_code": workflow.exit_code,
+            "test_counts": workflow.test_counts,
+            "failure_count": workflow.failed_tests.as_ref().map(Vec::len).unwrap_or(0),
+            "coverage": workflow.coverage,
+            "baseline_regression": workflow.baseline_comparison.as_ref().map(|comparison| comparison.regression),
+            "analysis_clusters": workflow.analysis.as_ref().map(|analysis| analysis.clusters.len()).unwrap_or(0),
+            "test_scope": workflow.test_scope,
+            "summary": workflow.summary,
+        }),
+    );
+    let status = if workflow.exit_code == 0 {
+        RunStatus::Pass
+    } else {
+        RunStatus::Fail
+    };
+    let _ = observation
+        .store
+        .finish_run(&observation.run.id, status, Some(metadata));
+}
+
+fn finish_test_drift_observation(
+    observation: Option<TestObservation>,
+    workflow: &extension_test::DriftWorkflowResult,
+) {
+    let Some(observation) = observation else {
+        return;
+    };
+
+    let metadata = merge_test_observation_metadata(
+        observation.initial_metadata,
+        serde_json::json!({
+            "observation_status": if workflow.exit_code == 0 { "pass" } else { "fail" },
+            "exit_code": workflow.exit_code,
+            "drift": workflow.report,
+        }),
+    );
+    let status = if workflow.exit_code == 0 {
+        RunStatus::Pass
+    } else {
+        RunStatus::Fail
+    };
+    let _ = observation
+        .store
+        .finish_run(&observation.run.id, status, Some(metadata));
+}
+
+fn finish_test_observation_error(observation: Option<TestObservation>, error: &homeboy::Error) {
+    let Some(observation) = observation else {
+        return;
+    };
+
+    let metadata = merge_test_observation_metadata(
+        observation.initial_metadata,
+        serde_json::json!({
+            "observation_status": "error",
+            "error": error.to_string(),
+        }),
+    );
+    let _ = observation
+        .store
+        .finish_run(&observation.run.id, RunStatus::Error, Some(metadata));
+}
+
+fn test_observation_command(component_id: &str, args: &TestArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "test".to_string(),
+        component_id.to_string(),
+    ];
+    if args.skip_lint {
+        parts.push("--skip-lint".to_string());
+    }
+    if args.coverage {
+        parts.push("--coverage".to_string());
+    }
+    if let Some(coverage_min) = args.coverage_min {
+        parts.push(format!("--coverage-min={coverage_min}"));
+    }
+    if args.analyze {
+        parts.push("--analyze".to_string());
+    }
+    if args.drift {
+        parts.push("--drift".to_string());
+    }
+    if let Some(changed_since) = &args.changed_since {
+        parts.push(format!("--changed-since={changed_since}"));
+    }
+    if args.json_summary {
+        parts.push("--json-summary".to_string());
+    }
+    let passthrough_args = filter_homeboy_flags(&args.args);
+    if !passthrough_args.is_empty() {
+        parts.push("--".to_string());
+        parts.extend(passthrough_args);
+    }
+    parts.join(" ")
+}
+
+fn test_observation_initial_metadata(
+    source_path: &Path,
+    args: &TestArgs,
+    mode: &str,
+    run_dir: Option<&RunDir>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "source_path": source_path.to_string_lossy(),
+        "mode": mode,
+        "skip_lint": args.skip_lint,
+        "coverage": args.coverage,
+        "coverage_min": args.coverage_min,
+        "analyze": args.analyze,
+        "drift": args.drift,
+        "baseline": {
+            "baseline": args.baseline_args.baseline,
+            "ignore_baseline": args.baseline_args.ignore_baseline,
+            "ratchet": args.baseline_args.ratchet,
+        },
+        "changed_since": args.changed_since,
+        "since": args.since,
+        "json_summary": args.json_summary,
+        "passthrough_args": filter_homeboy_flags(&args.args),
+        "run_dir": run_dir.map(|run_dir| run_dir.path().to_string_lossy().to_string()),
+    })
+}
+
+fn merge_test_observation_metadata(
+    mut initial: serde_json::Value,
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    if let (Some(initial), Some(extra)) = (initial.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            initial.insert(key.clone(), value.clone());
+        }
+    }
+    initial
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::with_isolated_home;
     use clap::Parser;
     use homeboy::component::Component;
+    use homeboy::observation::ObservationStore;
     use homeboy::refactor::plan::{build_test_refactor_request, TestSourceOptions};
+    use std::fs;
     use std::path::PathBuf;
+
+    struct XdgGuard {
+        prior: Option<String>,
+    }
+
+    impl XdgGuard {
+        fn unset() -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::remove_var("XDG_DATA_HOME");
+            Self { prior }
+        }
+
+        fn set(value: &std::path::Path) -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::set_var("XDG_DATA_HOME", value);
+            Self { prior }
+        }
+    }
+
+    impl Drop for XdgGuard {
+        fn drop(&mut self) {
+            match &self.prior {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
 
     #[derive(Parser)]
     struct TestCli {
         #[command(flatten)]
         test: TestArgs,
+    }
+
+    fn sample_args() -> TestArgs {
+        TestCli::try_parse_from([
+            "test",
+            "homeboy",
+            "--skip-lint",
+            "--json-summary",
+            "--changed-since",
+            "origin/main",
+            "--",
+            "--filter=SmokeTest",
+        ])
+        .expect("parse sample args")
+        .test
+    }
+
+    #[test]
+    fn test_observation_start_persists_run_record() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let args = sample_args();
+
+            let observation = start_test_observation("homeboy", home.path(), &args, "test", None)
+                .expect("observation should start");
+            let run_id = observation.run.id.clone();
+
+            finish_test_observation_error(
+                Some(observation),
+                &homeboy::Error::validation_invalid_argument(
+                    "fixture",
+                    "simulated test error",
+                    None,
+                    None,
+                ),
+            );
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .get_run(&run_id)
+                .expect("read run")
+                .expect("run exists");
+
+            assert_eq!(run.kind, "test");
+            assert_eq!(run.status, "error");
+            assert_eq!(run.component_id.as_deref(), Some("homeboy"));
+            assert_eq!(run.metadata_json["changed_since"], "origin/main");
+            assert_eq!(
+                run.metadata_json["passthrough_args"][0],
+                "--filter=SmokeTest"
+            );
+            assert_eq!(run.metadata_json["observation_status"], "error");
+        });
+    }
+
+    #[test]
+    fn test_observation_start_is_best_effort_when_store_unavailable() {
+        with_isolated_home(|home| {
+            let bad_data_home = home.path().join("not-a-dir");
+            fs::write(&bad_data_home, "file blocks observation dir").expect("write marker");
+            let _xdg = XdgGuard::set(&bad_data_home);
+
+            let observation =
+                start_test_observation("homeboy", home.path(), &sample_args(), "test", None);
+
+            assert!(observation.is_none());
+        });
     }
 
     #[test]
