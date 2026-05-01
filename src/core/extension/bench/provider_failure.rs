@@ -168,26 +168,30 @@ pub fn collect_provider_failures(
     if let Some(results) = results {
         for scenario in &results.scenarios {
             for (name, artifact) in &scenario.artifacts {
-                collect_artifact_failure(
-                    &mut failures,
-                    run_dir,
-                    &scenario.id,
-                    None,
-                    name,
-                    &artifact.path,
-                );
+                if let Some(path) = artifact.path.as_deref() {
+                    collect_artifact_failure(
+                        &mut failures,
+                        run_dir,
+                        &scenario.id,
+                        None,
+                        name,
+                        path,
+                    );
+                }
             }
             if let Some(runs) = &scenario.runs {
                 for (run_index, run) in runs.iter().enumerate() {
                     for (name, artifact) in &run.artifacts {
-                        collect_artifact_failure(
-                            &mut failures,
-                            run_dir,
-                            &scenario.id,
-                            Some(run_index),
-                            name,
-                            &artifact.path,
-                        );
+                        if let Some(path) = artifact.path.as_deref() {
+                            collect_artifact_failure(
+                                &mut failures,
+                                run_dir,
+                                &scenario.id,
+                                Some(run_index),
+                                name,
+                                path,
+                            );
+                        }
                     }
                 }
             }
@@ -329,8 +333,9 @@ mod tests {
         artifacts.insert(
             "transcript".to_string(),
             BenchArtifact {
-                path: "bench-artifacts/agent/transcript.txt".to_string(),
+                path: Some("bench-artifacts/agent/transcript.txt".to_string()),
                 url: None,
+                artifact_type: None,
                 kind: Some("text".to_string()),
                 label: None,
             },
