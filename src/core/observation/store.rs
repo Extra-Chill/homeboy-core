@@ -276,6 +276,104 @@ impl ObservationStore {
         collect_rows(rows, "collect run records")
     }
 
+    pub fn list_runs_started_since(&self, started_at: &str) -> Result<Vec<RunRecord>> {
+        validate_required("started_at", started_at)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, kind, component_id, started_at, finished_at, status, command, cwd,
+                       homeboy_version, git_sha, rig_id, metadata_json
+                FROM runs
+                WHERE started_at >= ?1
+                ORDER BY started_at DESC
+                "#,
+            )
+            .map_err(sqlite_error("prepare list recent run records"))?;
+        let rows = statement
+            .query_map([started_at], row_to_run_record)
+            .map_err(sqlite_error("list recent run records"))?;
+
+        collect_rows(rows, "collect recent run records")
+    }
+
+    pub fn import_run(&self, run: &RunRecord) -> Result<()> {
+        validate_required("run.id", &run.id)?;
+        if let Some(existing) = self.get_run(&run.id)? {
+            return ensure_identical("run", &run.id, &existing, run);
+        }
+        let metadata_json = serialize_metadata(&run.metadata_json)?;
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO runs(
+                    id,
+                    kind,
+                    component_id,
+                    started_at,
+                    finished_at,
+                    status,
+                    command,
+                    cwd,
+                    homeboy_version,
+                    git_sha,
+                    rig_id,
+                    metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                "#,
+                params![
+                    run.id,
+                    run.kind,
+                    run.component_id,
+                    run.started_at,
+                    run.finished_at,
+                    run.status,
+                    run.command,
+                    run.cwd,
+                    run.homeboy_version,
+                    run.git_sha,
+                    run.rig_id,
+                    metadata_json,
+                ],
+            )
+            .map_err(sqlite_error("import run record"))?;
+        Ok(())
+    }
+
+    pub fn import_artifact(&self, artifact: &ArtifactRecord) -> Result<()> {
+        validate_required("artifact.id", &artifact.id)?;
+        if self.get_run(&artifact.run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "artifact.run_id",
+                format!("referenced run record not found: {}", artifact.run_id),
+                Some(artifact.run_id.clone()),
+                None,
+            ));
+        }
+        if let Some(existing) = self.get_artifact(&artifact.id)? {
+            return ensure_identical("artifact", &artifact.id, &existing, artifact);
+        }
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO artifacts(id, run_id, kind, path, sha256, size_bytes, mime, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    artifact.id,
+                    artifact.run_id,
+                    artifact.kind,
+                    artifact.path,
+                    artifact.sha256,
+                    artifact.size_bytes,
+                    artifact.mime,
+                    artifact.created_at,
+                ],
+            )
+            .map_err(sqlite_error("import artifact record"))?;
+        Ok(())
+    }
+
     pub fn record_artifact(
         &self,
         run_id: &str,
@@ -371,6 +469,22 @@ impl ObservationStore {
             .map_err(sqlite_error("list artifact records"))?;
 
         collect_rows(rows, "collect artifact records")
+    }
+
+    pub fn get_artifact(&self, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
+        validate_required("artifact_id", artifact_id)?;
+        self.connection
+            .query_row(
+                r#"
+                SELECT id, run_id, kind, path, sha256, size_bytes, mime, created_at
+                FROM artifacts
+                WHERE id = ?1
+                "#,
+                [artifact_id],
+                row_to_artifact_record,
+            )
+            .optional()
+            .map_err(sqlite_error("read artifact record"))
     }
 
     pub fn record_trace_run(&self, record: NewTraceRunRecord) -> Result<TraceRunRecord> {
@@ -511,6 +625,66 @@ impl ObservationStore {
             .map_err(sqlite_error("list trace span records"))?;
 
         collect_rows(rows, "collect trace span records")
+    }
+
+    pub fn get_trace_span(&self, trace_span_id: &str) -> Result<Option<TraceSpanRecord>> {
+        validate_required("trace_span_id", trace_span_id)?;
+        self.connection
+            .query_row(
+                r#"
+                SELECT id, run_id, span_id, status, duration_ms, from_event, to_event,
+                       metadata_json
+                FROM trace_spans
+                WHERE id = ?1
+                "#,
+                [trace_span_id],
+                row_to_trace_span_record,
+            )
+            .optional()
+            .map_err(sqlite_error("read trace span record"))
+    }
+
+    pub fn import_trace_span(&self, span: &TraceSpanRecord) -> Result<()> {
+        validate_required("trace_span.id", &span.id)?;
+        if self.get_run(&span.run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "trace_span.run_id",
+                format!("referenced run record not found: {}", span.run_id),
+                Some(span.run_id.clone()),
+                None,
+            ));
+        }
+        if let Some(existing) = self.get_trace_span(&span.id)? {
+            return ensure_identical("trace_span", &span.id, &existing, span);
+        }
+        let metadata_json = serialize_metadata(&span.metadata_json)?;
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO trace_spans(
+                    id,
+                    run_id,
+                    span_id,
+                    status,
+                    duration_ms,
+                    from_event,
+                    to_event,
+                    metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    span.id,
+                    span.run_id,
+                    span.span_id,
+                    span.status,
+                    span.duration_ms,
+                    span.from_event,
+                    span.to_event,
+                    metadata_json,
+                ],
+            )
+            .map_err(sqlite_error("import trace span record"))?;
+        Ok(())
     }
 }
 
@@ -666,6 +840,18 @@ fn validate_required(field: &str, value: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn ensure_identical<T: PartialEq>(kind: &str, id: &str, existing: &T, incoming: &T) -> Result<()> {
+    if existing == incoming {
+        return Ok(());
+    }
+    Err(Error::validation_invalid_argument(
+        format!("{kind}.id"),
+        format!("existing {kind} record conflicts with imported bundle record: {id}"),
+        Some(id.to_string()),
+        None,
+    ))
 }
 
 fn serialize_metadata(metadata_json: &serde_json::Value) -> Result<String> {
