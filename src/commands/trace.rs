@@ -115,6 +115,40 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
 }
 
 pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutput> {
+    let ((stdout_output, _artifact_output), exit_code) = run_outputs(args)?;
+    Ok((stdout_output, exit_code))
+}
+
+pub fn run_json_with_output_artifact(
+    args: TraceArgs,
+    _global: &GlobalArgs,
+) -> (
+    homeboy::Result<serde_json::Value>,
+    i32,
+    Option<homeboy::Result<serde_json::Value>>,
+) {
+    crate::commands::utils::tty::status("homeboy is working...");
+    let output_to_json = |output: TraceCommandOutput| {
+        serde_json::to_value(output).map_err(|err| {
+            homeboy::Error::internal_json(err.to_string(), Some("serialize response".to_string()))
+        })
+    };
+    match run_outputs(args) {
+        Ok(((stdout_output, artifact_output), exit_code)) => (
+            output_to_json(stdout_output),
+            exit_code,
+            artifact_output.map(output_to_json),
+        ),
+        Err(err) => {
+            let (json_result, exit_code) = crate::commands::utils::response::map_cmd_result_to_json::<
+                TraceCommandOutput,
+            >(Err(err));
+            (json_result, exit_code, None)
+        }
+    }
+}
+
+fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCommandOutput>)> {
     if args.repeat == 0 {
         return Err(homeboy::Error::validation_invalid_argument(
             "--repeat",
@@ -125,21 +159,24 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
     }
 
     if args.scenario == "list" {
-        return run_list(args);
+        let (output, exit_code) = run_list(args)?;
+        return Ok(((output, None), exit_code));
     }
 
     if args.repeat > 1 || args.aggregate.as_deref() == Some("spans") {
-        return run_repeat(args);
+        let (output, exit_code) = run_repeat(args)?;
+        return Ok(((output, None), exit_code));
     }
 
     let summary_only = args.json_summary;
     let execution = execute_trace_run(args)?;
 
-    Ok(extension_trace::from_main_workflow(
+    let (stdout_output, artifact_output, exit_code) = extension_trace::from_main_workflow_outputs(
         execution.workflow,
         execution.rig_state,
         summary_only,
-    ))
+    );
+    Ok(((stdout_output, artifact_output), exit_code))
 }
 
 struct TraceRunExecution {
@@ -1179,6 +1216,8 @@ mod tests {
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                     overlays: Vec::new(),
                     keep_overlay: false,
                 },

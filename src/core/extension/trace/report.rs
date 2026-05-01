@@ -123,8 +123,18 @@ pub fn from_main_workflow(
     rig_state: Option<RigStateSnapshot>,
     summary_only: bool,
 ) -> (TraceCommandOutput, i32) {
+    let (output, _, exit_code) = from_main_workflow_outputs(result, rig_state, summary_only);
+    (output, exit_code)
+}
+
+pub fn from_main_workflow_outputs(
+    result: TraceRunWorkflowResult,
+    rig_state: Option<RigStateSnapshot>,
+    summary_only: bool,
+) -> (TraceCommandOutput, Option<TraceCommandOutput>, i32) {
     let exit_code = result.exit_code;
     if summary_only {
+        let full_output = from_run_workflow_result(result.clone(), rig_state.clone());
         let output = TraceRunSummaryOutput {
             summary_only: true,
             passed: exit_code == 0 && result.status == "pass",
@@ -152,30 +162,38 @@ pub fn from_main_workflow(
                 .unwrap_or(0),
             hints: result.hints,
         };
-        return (TraceCommandOutput::Summary(output), exit_code);
+        return (
+            TraceCommandOutput::Summary(output),
+            Some(full_output),
+            exit_code,
+        );
     }
 
+    (from_run_workflow_result(result, rig_state), None, exit_code)
+}
+
+fn from_run_workflow_result(
+    result: TraceRunWorkflowResult,
+    rig_state: Option<RigStateSnapshot>,
+) -> TraceCommandOutput {
     let artifacts = result
         .results
         .as_ref()
         .map(|r| r.artifacts.clone())
         .unwrap_or_default();
-    (
-        TraceCommandOutput::Run(Box::new(TraceRunOutput {
-            passed: exit_code == 0 && result.status == "pass",
-            status: result.status,
-            component: result.component,
-            exit_code,
-            artifacts,
-            results: result.results,
-            rig_state,
-            failure: result.failure,
-            overlays: result.overlays,
-            baseline_comparison: result.baseline_comparison,
-            hints: result.hints,
-        })),
-        exit_code,
-    )
+    TraceCommandOutput::Run(Box::new(TraceRunOutput {
+        passed: result.exit_code == 0 && result.status == "pass",
+        status: result.status,
+        component: result.component,
+        exit_code: result.exit_code,
+        artifacts,
+        results: result.results,
+        rig_state,
+        failure: result.failure,
+        overlays: result.overlays,
+        baseline_comparison: result.baseline_comparison,
+        hints: result.hints,
+    }))
 }
 
 pub fn render_markdown(results: &TraceResults) -> String {
@@ -341,6 +359,63 @@ mod tests {
         assert_eq!(value["overlays"][0]["path"], "/tmp/overlay.patch");
         assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
         assert_eq!(value["overlays"][0]["kept"], false);
+    }
+
+    #[test]
+    fn test_from_main_workflow_outputs_keeps_full_output_for_summary_artifact() {
+        let result = TraceRunWorkflowResult {
+            status: "pass".to_string(),
+            component: "Studio".to_string(),
+            exit_code: 0,
+            results: Some(TraceResults {
+                component_id: "studio".to_string(),
+                scenario_id: "create-site".to_string(),
+                status: TraceStatus::Pass,
+                summary: Some("Created a site".to_string()),
+                failure: None,
+                rig: None,
+                timeline: vec![crate::extension::trace::parsing::TraceEvent {
+                    t_ms: 10,
+                    source: "ui".to_string(),
+                    event: "submit".to_string(),
+                    data: std::collections::BTreeMap::new(),
+                }],
+                span_definitions: Vec::new(),
+                span_results: vec![crate::extension::trace::parsing::TraceSpanResult {
+                    id: "submit_to_cli".to_string(),
+                    from: "ui.submit".to_string(),
+                    to: "cli.start".to_string(),
+                    status: crate::extension::trace::parsing::TraceSpanStatus::Ok,
+                    duration_ms: Some(42),
+                    from_t_ms: Some(10),
+                    to_t_ms: Some(52),
+                    missing: Vec::new(),
+                    message: None,
+                }],
+                assertions: Vec::new(),
+                artifacts: Vec::new(),
+            }),
+            failure: None,
+            overlays: Vec::new(),
+            baseline_comparison: None,
+            hints: None,
+        };
+
+        let (stdout_output, artifact_output, exit_code) =
+            from_main_workflow_outputs(result, None, true);
+        let stdout_value = serde_json::to_value(stdout_output).expect("summary should serialize");
+        let artifact_value = serde_json::to_value(artifact_output.expect("full artifact output"))
+            .expect("artifact should serialize");
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(stdout_value["summary_only"], true);
+        assert_eq!(stdout_value["span_count"], 1);
+        assert!(stdout_value.get("results").is_none());
+        assert_eq!(
+            artifact_value["results"]["span_results"][0]["id"],
+            "submit_to_cli"
+        );
+        assert_eq!(artifact_value["results"]["timeline"][0]["event"], "submit");
     }
 
     #[test]
