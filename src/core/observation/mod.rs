@@ -7,5 +7,8 @@
 pub mod records;
 pub mod store;
 
-pub use records::{ArtifactRecord, NewRunRecord, RunListFilter, RunRecord, RunStatus};
+pub use records::{
+    ArtifactRecord, NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord,
+    RunStatus, TraceRunRecord, TraceSpanRecord,
+};
 pub use store::{ObservationDbStatus, ObservationStore, CURRENT_SCHEMA_VERSION};

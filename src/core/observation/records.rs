@@ -70,6 +70,51 @@ pub struct ArtifactRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct NewTraceRunRecord {
+    pub run_id: String,
+    pub component_id: String,
+    pub rig_id: Option<String>,
+    pub scenario_id: String,
+    pub status: String,
+    pub baseline_status: Option<String>,
+    pub metadata_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TraceRunRecord {
+    pub run_id: String,
+    pub component_id: String,
+    pub rig_id: Option<String>,
+    pub scenario_id: String,
+    pub status: String,
+    pub baseline_status: Option<String>,
+    pub metadata_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct NewTraceSpanRecord {
+    pub run_id: String,
+    pub span_id: String,
+    pub status: String,
+    pub duration_ms: Option<f64>,
+    pub from_event: Option<String>,
+    pub to_event: Option<String>,
+    pub metadata_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TraceSpanRecord {
+    pub id: String,
+    pub run_id: String,
+    pub span_id: String,
+    pub status: String,
+    pub duration_ms: Option<f64>,
+    pub from_event: Option<String>,
+    pub to_event: Option<String>,
+    pub metadata_json: serde_json::Value,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

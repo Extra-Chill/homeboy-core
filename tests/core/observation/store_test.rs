@@ -80,8 +80,8 @@ fn test_open_initialized() {
 
         assert!(status.exists);
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 1);
-        assert_eq!(status.table_count, 3);
+        assert_eq!(status.migration_count, 2);
+        assert_eq!(status.table_count, 5);
     });
 }
 
@@ -95,8 +95,8 @@ fn initialization_is_idempotent() {
         let status = second.status().expect("status");
 
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 1);
-        assert_eq!(status.table_count, 3);
+        assert_eq!(status.migration_count, 2);
+        assert_eq!(status.table_count, 5);
     });
 }
 

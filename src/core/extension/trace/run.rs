@@ -553,6 +553,7 @@ mod tests {
 
     use crate::component::{Component, ScopedExtensionConfig};
     use crate::extension::{ExtensionCapability, ExtensionExecutionContext};
+    use crate::test_support::with_isolated_home;
 
     use super::*;
 
@@ -745,28 +746,30 @@ JSON
 
     #[test]
     fn trace_overlay_applies_for_run_and_reverts_afterward() {
-        let fixture = overlay_fixture(false);
-        let run_dir = RunDir::create().unwrap();
-        let context = trace_context(&fixture.component, &fixture.extension_dir);
+        with_isolated_home(|_| {
+            let fixture = overlay_fixture(false);
+            let run_dir = RunDir::create().unwrap();
+            let context = trace_context(&fixture.component, &fixture.extension_dir);
 
-        let result = run_trace_workflow_with_context(
-            &context,
-            &fixture.component,
-            fixture.args,
-            &run_dir,
-            None,
-        )
-        .unwrap();
+            let result = run_trace_workflow_with_context(
+                &context,
+                &fixture.component,
+                fixture.args,
+                &run_dir,
+                None,
+            )
+            .unwrap();
 
-        assert_eq!(result.exit_code, 0);
-        assert_eq!(result.overlays.len(), 1);
-        assert_eq!(result.overlays[0].touched_files, vec!["scenario.txt"]);
-        assert!(!result.overlays[0].kept);
-        assert_eq!(
-            fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
-            "base\n"
-        );
-        run_dir.cleanup();
+            assert_eq!(result.exit_code, 0);
+            assert_eq!(result.overlays.len(), 1);
+            assert_eq!(result.overlays[0].touched_files, vec!["scenario.txt"]);
+            assert!(!result.overlays[0].kept);
+            assert_eq!(
+                fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
+                "base\n"
+            );
+            run_dir.cleanup();
+        });
     }
 
     #[test]
@@ -790,27 +793,29 @@ JSON
 
     #[test]
     fn trace_overlay_keep_overlay_leaves_changes_in_place() {
-        let fixture = overlay_fixture(true);
-        let run_dir = RunDir::create().unwrap();
-        let context = trace_context(&fixture.component, &fixture.extension_dir);
+        with_isolated_home(|_| {
+            let fixture = overlay_fixture(true);
+            let run_dir = RunDir::create().unwrap();
+            let context = trace_context(&fixture.component, &fixture.extension_dir);
 
-        let result = run_trace_workflow_with_context(
-            &context,
-            &fixture.component,
-            fixture.args,
-            &run_dir,
-            None,
-        )
-        .unwrap();
+            let result = run_trace_workflow_with_context(
+                &context,
+                &fixture.component,
+                fixture.args,
+                &run_dir,
+                None,
+            )
+            .unwrap();
 
-        assert_eq!(result.exit_code, 0);
-        assert_eq!(result.overlays.len(), 1);
-        assert!(result.overlays[0].kept);
-        assert_eq!(
-            fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
-            "overlay\n"
-        );
-        run_dir.cleanup();
+            assert_eq!(result.exit_code, 0);
+            assert_eq!(result.overlays.len(), 1);
+            assert!(result.overlays[0].kept);
+            assert_eq!(
+                fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
+                "overlay\n"
+            );
+            run_dir.cleanup();
+        });
     }
 
     struct OverlayFixture {

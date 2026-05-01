@@ -1,5 +1,5 @@
 use clap::Args;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use homeboy::component::{Component, ScopedExtensionConfig};
 use homeboy::engine::baseline::BaselineFlags;
@@ -10,6 +10,9 @@ use homeboy::extension::trace::{
     TraceCommandOutput, TraceListWorkflowArgs, TraceRunWorkflowArgs, TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
+use homeboy::observation::{
+    NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, ObservationStore, RunStatus,
+};
 use homeboy::rig::{self, RigSpec};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
@@ -133,6 +136,48 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
         .as_ref()
         .map(|context| rig::snapshot_state(&context.spec));
     let run_dir = RunDir::create()?;
+    let scenario_id = args.scenario.clone();
+    let rig_id = args.rig.clone();
+    let requested_overlays = args.overlays.clone();
+    let component_path_for_observation = path_override
+        .clone()
+        .unwrap_or_else(|| ctx.component.local_path.clone());
+    let observation = ObservationStore::open_initialized().ok().and_then(|store| {
+        store
+            .start_run(NewRunRecord {
+                kind: "trace".to_string(),
+                component_id: Some(ctx.component_id.clone()),
+                command: Some(std::env::args().collect::<Vec<_>>().join(" ")),
+                cwd: std::env::current_dir()
+                    .ok()
+                    .map(|path| path.to_string_lossy().to_string()),
+                homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                git_sha: homeboy::git::short_head_revision_at(Path::new(
+                    &component_path_for_observation,
+                )),
+                rig_id: rig_id.clone(),
+                metadata_json: serde_json::json!({
+                    "scenario_id": scenario_id,
+                    "component_path": component_path_for_observation,
+                    "requested_overlays": requested_overlays,
+                    "span_definitions": args.spans.clone(),
+                    "baseline": {
+                        "baseline": args.baseline_args.baseline,
+                        "ignore_baseline": args.baseline_args.ignore_baseline,
+                        "ratchet": args.baseline_args.ratchet,
+                        "regression_threshold_percent": args.regression_threshold
+                    }
+                }),
+            })
+            .ok()
+            .map(|run| ActiveTraceObservation {
+                store,
+                run_id: run.id,
+                component_id: ctx.component_id.clone(),
+                rig_id: rig_id.clone(),
+                scenario_id: scenario_id.clone(),
+            })
+    });
     let extra_workloads = rig_context
         .as_ref()
         .and_then(|context| {
@@ -146,10 +191,10 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
             })
         })
         .unwrap_or_default();
-    let workflow = extension_trace::run_trace_workflow(
+    let workflow = match extension_trace::run_trace_workflow(
         &ctx.component,
         TraceRunWorkflowArgs {
-            component_label: effective_id,
+            component_label: effective_id.clone(),
             component_id: ctx.component_id.clone(),
             path_override,
             settings: settings_as_strings(&ctx.settings),
@@ -170,7 +215,18 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
         },
         &run_dir,
         rig_state.clone(),
-    )?;
+    ) {
+        Ok(workflow) => workflow,
+        Err(error) => {
+            if let Some(observation) = observation.as_ref() {
+                persist_trace_workflow_error(observation, &run_dir, &error);
+            }
+            return Err(error);
+        }
+    };
+    if let Some(observation) = observation.as_ref() {
+        persist_trace_workflow_result(observation, &run_dir, &workflow, rig_state.as_ref());
+    }
 
     Ok(extension_trace::from_main_workflow(
         workflow,
@@ -350,6 +406,167 @@ fn settings_as_json(settings: &[(String, serde_json::Value)]) -> Vec<(String, se
             other => Some((key.clone(), other.clone())),
         })
         .collect()
+}
+
+struct ActiveTraceObservation {
+    store: ObservationStore,
+    run_id: String,
+    component_id: String,
+    rig_id: Option<String>,
+    scenario_id: String,
+}
+
+fn persist_trace_workflow_result(
+    observation: &ActiveTraceObservation,
+    run_dir: &RunDir,
+    workflow: &extension_trace::TraceRunWorkflowResult,
+    rig_state: Option<&rig::RigStateSnapshot>,
+) {
+    let run_status = trace_run_status(workflow);
+    let baseline_status = baseline_status(workflow);
+    let results = workflow.results.as_ref();
+    let _ = observation.store.record_trace_run(NewTraceRunRecord {
+        run_id: observation.run_id.clone(),
+        component_id: observation.component_id.clone(),
+        rig_id: observation.rig_id.clone(),
+        scenario_id: results
+            .map(|results| results.scenario_id.clone())
+            .unwrap_or_else(|| observation.scenario_id.clone()),
+        status: run_status.as_str().to_string(),
+        baseline_status: baseline_status.clone(),
+        metadata_json: serde_json::json!({
+            "status": &workflow.status,
+            "exit_code": workflow.exit_code,
+            "summary": results.and_then(|results| results.summary.clone()),
+            "failure": &workflow.failure,
+            "overlays": &workflow.overlays,
+            "baseline_comparison": &workflow.baseline_comparison,
+            "baseline_status": baseline_status,
+            "hints": &workflow.hints,
+            "rig_state": rig_state,
+            "assertion_count": results.map(|results| results.assertions.len()).unwrap_or(0),
+            "artifact_count": results.map(|results| results.artifacts.len()).unwrap_or(0),
+            "span_count": results.map(|results| results.span_results.len()).unwrap_or(0),
+        }),
+    });
+
+    if let Some(results) = results {
+        for span in &results.span_results {
+            let _ = observation.store.record_trace_span(NewTraceSpanRecord {
+                run_id: observation.run_id.clone(),
+                span_id: span.id.clone(),
+                status: format!("{:?}", span.status).to_ascii_lowercase(),
+                duration_ms: span.duration_ms.map(|value| value as f64),
+                from_event: Some(span.from.clone()),
+                to_event: Some(span.to.clone()),
+                metadata_json: serde_json::json!({
+                    "from_t_ms": span.from_t_ms,
+                    "to_t_ms": span.to_t_ms,
+                    "missing": span.missing,
+                    "message": &span.message,
+                }),
+            });
+        }
+    }
+
+    record_trace_artifacts(&observation.store, &observation.run_id, run_dir, results);
+    let _ = observation.store.finish_run(
+        &observation.run_id,
+        run_status,
+        Some(trace_run_finish_metadata(workflow)),
+    );
+}
+
+fn persist_trace_workflow_error(
+    observation: &ActiveTraceObservation,
+    run_dir: &RunDir,
+    error: &homeboy::Error,
+) {
+    let error_metadata = serde_json::json!({
+        "error": {
+            "code": error.code.as_str(),
+            "message": &error.message,
+            "details": &error.details,
+        }
+    });
+    let _ = observation.store.record_trace_run(NewTraceRunRecord {
+        run_id: observation.run_id.clone(),
+        component_id: observation.component_id.clone(),
+        rig_id: observation.rig_id.clone(),
+        scenario_id: observation.scenario_id.clone(),
+        status: RunStatus::Error.as_str().to_string(),
+        baseline_status: None,
+        metadata_json: error_metadata.clone(),
+    });
+    record_trace_artifacts(&observation.store, &observation.run_id, run_dir, None);
+    let _ =
+        observation
+            .store
+            .finish_run(&observation.run_id, RunStatus::Error, Some(error_metadata));
+}
+
+fn trace_run_status(workflow: &extension_trace::TraceRunWorkflowResult) -> RunStatus {
+    if workflow.failure.is_some() || workflow.status == "error" {
+        RunStatus::Error
+    } else if workflow.exit_code == 0 && workflow.status == "pass" {
+        RunStatus::Pass
+    } else {
+        RunStatus::Fail
+    }
+}
+
+fn baseline_status(workflow: &extension_trace::TraceRunWorkflowResult) -> Option<String> {
+    workflow.baseline_comparison.as_ref().map(|comparison| {
+        if comparison.regression {
+            "regression"
+        } else if comparison.has_improvements {
+            "improvement"
+        } else {
+            "pass"
+        }
+        .to_string()
+    })
+}
+
+fn trace_run_finish_metadata(
+    workflow: &extension_trace::TraceRunWorkflowResult,
+) -> serde_json::Value {
+    serde_json::json!({
+        "status": &workflow.status,
+        "exit_code": workflow.exit_code,
+        "failure": &workflow.failure,
+        "overlays": &workflow.overlays,
+        "baseline_comparison": &workflow.baseline_comparison,
+        "hints": &workflow.hints,
+        "results": &workflow.results,
+    })
+}
+
+fn record_trace_artifacts(
+    store: &ObservationStore,
+    run_id: &str,
+    run_dir: &RunDir,
+    results: Option<&extension_trace::TraceResults>,
+) {
+    let trace_results_path = run_dir.step_file(homeboy::engine::run_dir::files::TRACE_RESULTS);
+    record_artifact_if_file(store, run_id, "trace-results", &trace_results_path);
+    if let Some(results) = results {
+        for artifact in &results.artifacts {
+            let path = PathBuf::from(&artifact.path);
+            let resolved = if path.is_absolute() {
+                path
+            } else {
+                run_dir.path().join(path)
+            };
+            record_artifact_if_file(store, run_id, "trace-artifact", &resolved);
+        }
+    }
+}
+
+fn record_artifact_if_file(store: &ObservationStore, run_id: &str, kind: &str, path: &Path) {
+    if path.is_file() {
+        let _ = store.record_artifact(run_id, kind, path);
+    }
 }
 
 #[cfg(test)]
@@ -546,6 +763,7 @@ mod tests {
     #[test]
     fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
         with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
             write_trace_extension(home);
             let component_dir = tempfile::TempDir::new().expect("component dir");
             write_trace_rig(home, "studio-rig", "studio", component_dir.path());
@@ -586,6 +804,148 @@ mod tests {
                 _ => panic!("expected run output"),
             }
         });
+    }
+
+    #[test]
+    fn trace_run_persists_observation_history() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (_output, exit_code) = run(
+                TraceArgs {
+                    comp: PositionalComponentArgs {
+                        component: Some("studio".to_string()),
+                        path: None,
+                    },
+                    scenario: "studio-app-create-site".to_string(),
+                    rig: Some("studio-rig".to_string()),
+                    setting_args: SettingArgs::default(),
+                    _json: HiddenJsonArgs::default(),
+                    json_summary: false,
+                    report: None,
+                    spans: Vec::new(),
+                    baseline_args: BaselineArgs::default(),
+                    regression_threshold:
+                        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    overlays: Vec::new(),
+                    keep_overlay: false,
+                },
+                &GlobalArgs {},
+            )
+            .expect("trace should run");
+
+            assert_eq!(exit_code, 0);
+            let store = ObservationStore::open_initialized().expect("store");
+            let runs = store
+                .list_runs(homeboy::observation::RunListFilter {
+                    kind: Some("trace".to_string()),
+                    ..Default::default()
+                })
+                .expect("runs");
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].status, "pass");
+            assert_eq!(runs[0].component_id.as_deref(), Some("studio"));
+            assert_eq!(runs[0].rig_id.as_deref(), Some("studio-rig"));
+
+            let trace_run = store
+                .get_trace_run(&runs[0].id)
+                .expect("trace run")
+                .expect("trace run row");
+            assert_eq!(trace_run.component_id, "studio");
+            assert_eq!(trace_run.scenario_id, "studio-app-create-site");
+            assert_eq!(trace_run.status, "pass");
+            assert_eq!(trace_run.metadata_json["span_count"], 1);
+
+            let spans = store.list_trace_spans(&runs[0].id).expect("spans");
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].span_id, "boot_to_ready");
+            assert_eq!(spans[0].duration_ms, Some(125.0));
+
+            let artifacts = store.list_artifacts(&runs[0].id).expect("artifacts");
+            assert_eq!(artifacts.len(), 2);
+            assert!(artifacts
+                .iter()
+                .any(|artifact| artifact.kind == "trace-results"));
+            assert!(artifacts
+                .iter()
+                .any(|artifact| artifact.kind == "trace-artifact"));
+        });
+    }
+
+    #[test]
+    fn failed_trace_run_persists_observation_history() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (_output, exit_code) = run(
+                TraceArgs {
+                    comp: PositionalComponentArgs {
+                        component: Some("studio".to_string()),
+                        path: None,
+                    },
+                    scenario: "missing-scenario".to_string(),
+                    rig: Some("studio-rig".to_string()),
+                    setting_args: SettingArgs::default(),
+                    _json: HiddenJsonArgs::default(),
+                    json_summary: false,
+                    report: None,
+                    spans: Vec::new(),
+                    baseline_args: BaselineArgs::default(),
+                    regression_threshold:
+                        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    overlays: Vec::new(),
+                    keep_overlay: false,
+                },
+                &GlobalArgs {},
+            )
+            .expect("trace command should return structured failure output");
+
+            assert_eq!(exit_code, 3);
+            let store = ObservationStore::open_initialized().expect("store");
+            let runs = store
+                .list_runs(homeboy::observation::RunListFilter {
+                    kind: Some("trace".to_string()),
+                    ..Default::default()
+                })
+                .expect("runs");
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].status, "error");
+
+            let trace_run = store
+                .get_trace_run(&runs[0].id)
+                .expect("trace run")
+                .expect("trace run row");
+            assert_eq!(trace_run.status, "error");
+            assert!(trace_run.metadata_json["failure"]["stderr_excerpt"]
+                .as_str()
+                .expect("stderr excerpt")
+                .contains("unknown scenario missing-scenario"));
+        });
+    }
+
+    struct XdgGuard(Option<String>);
+
+    impl XdgGuard {
+        fn unset() -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::remove_var("XDG_DATA_HOME");
+            Self(prior)
+        }
+    }
+
+    impl Drop for XdgGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
     }
 
     fn write_trace_extension(home: &tempfile::TempDir) {
@@ -651,8 +1011,10 @@ case " $scenario_ids " in
 esac
 
 cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
-{"component_id":"$HOMEBOY_COMPONENT_ID","scenario_id":"$HOMEBOY_TRACE_SCENARIO","status":"pass","timeline":[],"assertions":[],"artifacts":[]}
+{"component_id":"$HOMEBOY_COMPONENT_ID","scenario_id":"$HOMEBOY_TRACE_SCENARIO","status":"pass","timeline":[{"t_ms":0,"source":"runner","event":"boot"},{"t_ms":125,"source":"runner","event":"ready"}],"span_results":[{"id":"boot_to_ready","from":"runner.boot","to":"runner.ready","status":"ok","duration_ms":125,"from_t_ms":0,"to_t_ms":125}],"assertions":[],"artifacts":[{"label":"trace log","path":"artifacts/trace-log.txt"}]}
 JSON
+mkdir -p "$HOMEBOY_TRACE_ARTIFACT_DIR"
+printf 'trace log\n' > "$HOMEBOY_TRACE_ARTIFACT_DIR/trace-log.txt"
 "#,
         )
         .expect("write trace script");

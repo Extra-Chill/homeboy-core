@@ -6,19 +6,23 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::records::{ArtifactRecord, NewRunRecord, RunListFilter, RunRecord, RunStatus};
+use super::records::{
+    ArtifactRecord, NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord,
+    RunStatus, TraceRunRecord, TraceSpanRecord,
+};
 use crate::{paths, Error, Result};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 struct Migration {
     version: i64,
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: r#"
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: r#"
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY,
             applied_at TEXT NOT NULL
@@ -51,7 +55,42 @@ const MIGRATIONS: &[Migration] = &[Migration {
             FOREIGN KEY(run_id) REFERENCES runs(id)
         );
     "#,
-}];
+    },
+    Migration {
+        version: 2,
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS trace_runs (
+            run_id TEXT PRIMARY KEY,
+            component_id TEXT NOT NULL,
+            rig_id TEXT,
+            scenario_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            baseline_status TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY(run_id) REFERENCES runs(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS trace_spans (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            span_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            duration_ms REAL,
+            from_event TEXT,
+            to_event TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            FOREIGN KEY(run_id) REFERENCES runs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trace_runs_component_scenario
+            ON trace_runs(component_id, scenario_id);
+        CREATE INDEX IF NOT EXISTS idx_trace_runs_rig
+            ON trace_runs(rig_id);
+        CREATE INDEX IF NOT EXISTS idx_trace_spans_run
+            ON trace_spans(run_id);
+    "#,
+    },
+];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ObservationDbStatus {
@@ -333,6 +372,146 @@ impl ObservationStore {
 
         collect_rows(rows, "collect artifact records")
     }
+
+    pub fn record_trace_run(&self, record: NewTraceRunRecord) -> Result<TraceRunRecord> {
+        let run_id = record.run_id.clone();
+        validate_required("run_id", &record.run_id)?;
+        validate_required("component_id", &record.component_id)?;
+        validate_required("scenario_id", &record.scenario_id)?;
+        validate_required("status", &record.status)?;
+        if self.get_run(&record.run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "run_id",
+                format!("run record not found: {}", record.run_id),
+                Some(record.run_id),
+                None,
+            ));
+        }
+        let metadata_json = serialize_metadata(&record.metadata_json)?;
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO trace_runs(
+                    run_id,
+                    component_id,
+                    rig_id,
+                    scenario_id,
+                    status,
+                    baseline_status,
+                    metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    record.run_id,
+                    record.component_id,
+                    record.rig_id,
+                    record.scenario_id,
+                    record.status,
+                    record.baseline_status,
+                    metadata_json,
+                ],
+            )
+            .map_err(sqlite_error("insert trace run record"))?;
+
+        self.get_trace_run(&run_id)?.ok_or_else(|| {
+            Error::internal_unexpected(format!(
+                "Inserted trace run record {} but could not read it back",
+                run_id
+            ))
+        })
+    }
+
+    pub fn get_trace_run(&self, run_id: &str) -> Result<Option<TraceRunRecord>> {
+        validate_required("run_id", run_id)?;
+        self.connection
+            .query_row(
+                r#"
+                SELECT run_id, component_id, rig_id, scenario_id, status, baseline_status,
+                       metadata_json
+                FROM trace_runs
+                WHERE run_id = ?1
+                "#,
+                [run_id],
+                row_to_trace_run_record,
+            )
+            .optional()
+            .map_err(sqlite_error("read trace run record"))
+    }
+
+    pub fn record_trace_span(&self, record: NewTraceSpanRecord) -> Result<TraceSpanRecord> {
+        let run_id = record.run_id.clone();
+        validate_required("run_id", &record.run_id)?;
+        validate_required("span_id", &record.span_id)?;
+        validate_required("status", &record.status)?;
+        if self.get_run(&record.run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "run_id",
+                format!("run record not found: {}", record.run_id),
+                Some(record.run_id),
+                None,
+            ));
+        }
+        let id = Uuid::new_v4().to_string();
+        let metadata_json = serialize_metadata(&record.metadata_json)?;
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO trace_spans(
+                    id,
+                    run_id,
+                    span_id,
+                    status,
+                    duration_ms,
+                    from_event,
+                    to_event,
+                    metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    id,
+                    record.run_id,
+                    record.span_id,
+                    record.status,
+                    record.duration_ms,
+                    record.from_event,
+                    record.to_event,
+                    metadata_json,
+                ],
+            )
+            .map_err(sqlite_error("insert trace span record"))?;
+
+        self.list_trace_spans(&run_id)?
+            .into_iter()
+            .find(|span| span.id == id)
+            .ok_or_else(|| {
+                Error::internal_unexpected(format!(
+                    "Inserted trace span record {id} but could not read it back"
+                ))
+            })
+    }
+
+    pub fn list_trace_spans(&self, run_id: &str) -> Result<Vec<TraceSpanRecord>> {
+        validate_required("run_id", run_id)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, run_id, span_id, status, duration_ms, from_event, to_event,
+                       metadata_json
+                FROM trace_spans
+                WHERE run_id = ?1
+                ORDER BY rowid ASC
+                "#,
+            )
+            .map_err(sqlite_error("prepare list trace span records"))?;
+        let rows = statement
+            .query_map([run_id], row_to_trace_span_record)
+            .map_err(sqlite_error("list trace span records"))?;
+
+        collect_rows(rows, "collect trace span records")
+    }
 }
 
 pub fn database_path() -> Result<PathBuf> {
@@ -535,6 +714,31 @@ fn row_to_artifact_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactR
     })
 }
 
+fn row_to_trace_run_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraceRunRecord> {
+    Ok(TraceRunRecord {
+        run_id: row.get(0)?,
+        component_id: row.get(1)?,
+        rig_id: row.get(2)?,
+        scenario_id: row.get(3)?,
+        status: row.get(4)?,
+        baseline_status: row.get(5)?,
+        metadata_json: parse_metadata(row.get(6)?)?,
+    })
+}
+
+fn row_to_trace_span_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<TraceSpanRecord> {
+    Ok(TraceSpanRecord {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        span_id: row.get(2)?,
+        status: row.get(3)?,
+        duration_ms: row.get(4)?,
+        from_event: row.get(5)?,
+        to_event: row.get(6)?,
+        metadata_json: parse_metadata(row.get(7)?)?,
+    })
+}
+
 fn collect_rows<T>(
     rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>,
     context: &'static str,
@@ -731,6 +935,95 @@ mod api_coverage_tests {
                 .record_artifact(&run.id, "log", &path)
                 .expect("artifact");
             assert_eq!(store.list_artifacts(&run.id).expect("list"), vec![artifact]);
+        });
+    }
+
+    #[test]
+    fn test_record_trace_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+
+            let trace_run = store
+                .record_trace_run(NewTraceRunRecord {
+                    run_id: run.id.clone(),
+                    component_id: "studio".to_string(),
+                    rig_id: Some("studio-rig".to_string()),
+                    scenario_id: "create-site".to_string(),
+                    status: "pass".to_string(),
+                    baseline_status: Some("pass".to_string()),
+                    metadata_json: serde_json::json!({ "span_count": 1 }),
+                })
+                .expect("trace run");
+
+            assert_eq!(trace_run.run_id, run.id);
+            assert_eq!(trace_run.component_id, "studio");
+            assert_eq!(trace_run.rig_id.as_deref(), Some("studio-rig"));
+            assert_eq!(trace_run.metadata_json["span_count"], 1);
+        });
+    }
+
+    #[test]
+    fn test_record_trace_span() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+
+            let span = store
+                .record_trace_span(NewTraceSpanRecord {
+                    run_id: run.id.clone(),
+                    span_id: "boot_to_ready".to_string(),
+                    status: "ok".to_string(),
+                    duration_ms: Some(125.0),
+                    from_event: Some("runner.boot".to_string()),
+                    to_event: Some("runner.ready".to_string()),
+                    metadata_json: serde_json::json!({ "source": "test" }),
+                })
+                .expect("trace span");
+
+            let spans = store.list_trace_spans(&run.id).expect("spans");
+            assert_eq!(spans, vec![span]);
+            assert_eq!(spans[0].duration_ms, Some(125.0));
+        });
+    }
+
+    #[test]
+    fn test_list_trace_spans() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+
+            store
+                .record_trace_span(NewTraceSpanRecord {
+                    run_id: run.id.clone(),
+                    span_id: "first".to_string(),
+                    status: "ok".to_string(),
+                    duration_ms: Some(10.0),
+                    from_event: Some("runner.first".to_string()),
+                    to_event: Some("runner.second".to_string()),
+                    metadata_json: serde_json::json!({}),
+                })
+                .expect("first span");
+            store
+                .record_trace_span(NewTraceSpanRecord {
+                    run_id: run.id.clone(),
+                    span_id: "second".to_string(),
+                    status: "skipped".to_string(),
+                    duration_ms: None,
+                    from_event: Some("runner.second".to_string()),
+                    to_event: Some("runner.third".to_string()),
+                    metadata_json: serde_json::json!({ "missing": ["runner.third"] }),
+                })
+                .expect("second span");
+
+            let spans = store.list_trace_spans(&run.id).expect("spans");
+            assert_eq!(spans.len(), 2);
+            assert_eq!(spans[0].span_id, "first");
+            assert_eq!(spans[1].span_id, "second");
+            assert_eq!(spans[1].metadata_json["missing"][0], "runner.third");
         });
     }
 }
