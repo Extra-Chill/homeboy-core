@@ -6,6 +6,8 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
@@ -19,15 +21,11 @@ pub struct LintFinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rule: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fixable: Option<bool>,
+    #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,5 +143,83 @@ mod tests {
         };
         let fp = LintFingerprint(&finding);
         assert_eq!(fp.context_label(), "lint:security");
+    }
+
+    #[test]
+    fn test_save_baseline() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let finding = LintFinding {
+            id: "id-1".to_string(),
+            message: "message".to_string(),
+            category: "security".to_string(),
+            ..LintFinding::default()
+        };
+
+        let saved = save_baseline(dir.path(), "homeboy", &[finding]).expect("baseline saved");
+
+        assert!(saved.exists());
+    }
+
+    #[test]
+    fn test_load_baseline() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let finding = LintFinding {
+            id: "id-1".to_string(),
+            message: "message".to_string(),
+            category: "security".to_string(),
+            ..LintFinding::default()
+        };
+        save_baseline(dir.path(), "homeboy", &[finding]).expect("baseline saved");
+
+        let loaded = load_baseline(dir.path()).expect("baseline loaded");
+
+        assert_eq!(loaded.context_id, "homeboy");
+        assert_eq!(loaded.item_count, 1);
+    }
+
+    #[test]
+    fn test_compare() {
+        let baseline = generic::Baseline {
+            context_id: "homeboy".to_string(),
+            created_at: "2026-05-01T00:00:00Z".to_string(),
+            item_count: 1,
+            known_fingerprints: vec!["id-1".to_string()],
+            metadata: LintBaselineMetadata { findings_count: 1 },
+        };
+        let findings = vec![
+            LintFinding {
+                id: "id-1".to_string(),
+                message: "message".to_string(),
+                category: "security".to_string(),
+                ..LintFinding::default()
+            },
+            LintFinding {
+                id: "id-2".to_string(),
+                message: "message 2".to_string(),
+                category: "i18n".to_string(),
+                ..LintFinding::default()
+            },
+        ];
+
+        let comparison = compare(&findings, &baseline);
+
+        assert_eq!(comparison.new_items.len(), 1);
+        assert_eq!(comparison.new_items[0].fingerprint, "id-2");
+    }
+
+    #[test]
+    fn test_parse_findings_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("lint-findings.json");
+        std::fs::write(
+            &path,
+            r#"[{"id":"id-1","message":"message","category":"security","file":"src/lib.rs"}]"#,
+        )
+        .expect("findings file written");
+
+        let findings = parse_findings_file(&path).expect("findings parsed");
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file.as_deref(), Some("src/lib.rs"));
     }
 }

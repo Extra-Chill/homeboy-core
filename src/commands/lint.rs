@@ -11,6 +11,7 @@ use homeboy::extension::ExtensionCapability;
 use homeboy::git;
 use homeboy::observation::{NewFindingRecord, NewRunRecord, ObservationStore, RunStatus};
 use homeboy::refactor::plan::{collect_refactor_sources, lint_refactor_request, LintSourceOptions};
+use serde_json::Value;
 
 use super::utils::args::{
     BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
@@ -104,23 +105,15 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
             &source_ctx.source_path,
             lint_command_label(&source_ctx.component_id, &args),
         );
-        let workflow = match run_self_check_lint_workflow(
-            &source_ctx.component,
-            &source_ctx.source_path,
-            source_ctx.component_id.clone(),
-            args.json_summary,
-        ) {
-            Ok(workflow) => workflow,
-            Err(error) => {
-                if let Some(observation) = observation {
-                    observation.finish_error();
-                }
-                return Err(error);
-            }
-        };
-        if let Some(observation) = observation {
-            observation.finish_workflow(&workflow);
-        }
+        let workflow = finish_lint_workflow(
+            observation,
+            run_self_check_lint_workflow(
+                &source_ctx.component,
+                &source_ctx.source_path,
+                source_ctx.component_id.clone(),
+                args.json_summary,
+            ),
+        )?;
 
         return Ok(report::from_main_workflow(workflow));
     }
@@ -195,20 +188,29 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
         &run_dir,
     );
     resource_run.write_to_run_dir(&run_dir)?;
-    let workflow = match workflow {
-        Ok(workflow) => workflow,
+    let workflow = finish_lint_workflow(observation, workflow)?;
+
+    Ok(report::from_main_workflow(workflow))
+}
+
+fn finish_lint_workflow(
+    observation: Option<LintObservation>,
+    workflow: homeboy::Result<homeboy::extension::lint::LintRunWorkflowResult>,
+) -> homeboy::Result<homeboy::extension::lint::LintRunWorkflowResult> {
+    match workflow {
+        Ok(workflow) => {
+            if let Some(observation) = observation {
+                observation.finish_workflow(&workflow);
+            }
+            Ok(workflow)
+        }
         Err(error) => {
             if let Some(observation) = observation {
                 observation.finish_error();
             }
-            return Err(error);
+            Err(error)
         }
-    };
-    if let Some(observation) = observation {
-        observation.finish_workflow(&workflow);
     }
-
-    Ok(report::from_main_workflow(workflow))
 }
 
 struct LintObservation {
@@ -271,17 +273,30 @@ fn finding_record(run_id: &str, finding: &LintFinding) -> NewFindingRecord {
     NewFindingRecord {
         run_id: run_id.to_string(),
         tool: finding.tool.clone().unwrap_or_else(|| "lint".to_string()),
-        rule: finding
-            .rule
-            .clone()
-            .or_else(|| Some(finding.category.clone())),
+        rule: extra_string(finding, "rule").or_else(|| Some(finding.category.clone())),
         file: finding.file.clone(),
-        line: finding.line,
+        line: extra_i64(finding, "line"),
         severity: finding.severity.clone(),
         fingerprint: Some(finding.id.clone()),
         message: finding.message.clone(),
-        fixable: finding.fixable,
+        fixable: extra_bool(finding, "fixable"),
         metadata_json: serde_json::json!({ "category": finding.category }),
+    }
+}
+
+fn extra_string(finding: &LintFinding, key: &str) -> Option<String> {
+    finding.extra.get(key)?.as_str().map(str::to_string)
+}
+
+fn extra_i64(finding: &LintFinding, key: &str) -> Option<i64> {
+    finding.extra.get(key)?.as_i64()
+}
+
+fn extra_bool(finding: &LintFinding, key: &str) -> Option<bool> {
+    match finding.extra.get(key)? {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
     }
 }
 

@@ -103,7 +103,29 @@ fn initialization_is_idempotent() {
 }
 
 #[test]
-fn test_record_and_list_findings() {
+fn test_record_finding() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("lint", "homeboy"))
+            .expect("start run");
+
+        let record = store
+            .record_finding(&sample_finding(&run.id, "security", "src/foo.php"))
+            .expect("record finding");
+        let fetched = store
+            .get_finding(&record.id)
+            .expect("get finding")
+            .expect("finding exists");
+
+        assert_eq!(fetched.message, "Missing security");
+        assert_eq!(fetched.fixable, Some(true));
+    });
+}
+
+#[test]
+fn test_record_findings() {
     with_isolated_home(|_home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("init store");
@@ -113,30 +135,29 @@ fn test_record_and_list_findings() {
 
         let records = store
             .record_findings(&[
-                NewFindingRecord {
-                    run_id: run.id.clone(),
-                    tool: "lint".to_string(),
-                    rule: Some("security".to_string()),
-                    file: Some("src/foo.php".to_string()),
-                    line: Some(12),
-                    severity: Some("error".to_string()),
-                    fingerprint: Some("src/foo.php::security".to_string()),
-                    message: "Missing escaping".to_string(),
-                    fixable: Some(true),
-                    metadata_json: serde_json::json!({ "category": "security" }),
-                },
-                NewFindingRecord {
-                    run_id: run.id.clone(),
-                    tool: "lint".to_string(),
-                    rule: Some("i18n".to_string()),
-                    file: Some("src/bar.php".to_string()),
-                    line: None,
-                    severity: Some("warning".to_string()),
-                    fingerprint: Some("src/bar.php::i18n".to_string()),
-                    message: "Untranslated string".to_string(),
-                    fixable: Some(false),
-                    metadata_json: serde_json::json!({ "category": "i18n" }),
-                },
+                sample_finding(&run.id, "security", "src/foo.php"),
+                sample_finding(&run.id, "i18n", "src/bar.php"),
+            ])
+            .expect("record findings");
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].rule.as_deref(), Some("security"));
+        assert_eq!(records[1].rule.as_deref(), Some("i18n"));
+    });
+}
+
+#[test]
+fn test_list_findings() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("lint", "homeboy"))
+            .expect("start run");
+        let records = store
+            .record_findings(&[
+                sample_finding(&run.id, "security", "src/foo.php"),
+                sample_finding(&run.id, "i18n", "src/bar.php"),
             ])
             .expect("record findings");
 
@@ -154,17 +175,26 @@ fn test_record_and_list_findings() {
                 ..FindingListFilter::default()
             })
             .expect("list file findings");
-        let fetched = store
-            .get_finding(&records[0].id)
-            .expect("get finding")
-            .expect("finding exists");
 
         assert_eq!(all.len(), 2);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, records[0].id);
-        assert_eq!(fetched.message, "Missing escaping");
-        assert_eq!(fetched.fixable, Some(true));
     });
+}
+
+fn sample_finding(run_id: &str, rule: &str, file: &str) -> NewFindingRecord {
+    NewFindingRecord {
+        run_id: run_id.to_string(),
+        tool: "lint".to_string(),
+        rule: Some(rule.to_string()),
+        file: Some(file.to_string()),
+        line: Some(12),
+        severity: Some("error".to_string()),
+        fingerprint: Some(format!("{file}::{rule}")),
+        message: format!("Missing {rule}"),
+        fixable: Some(true),
+        metadata_json: serde_json::json!({ "category": rule }),
+    }
 }
 
 fn sample_run(kind: &str, component_id: &str) -> NewRunRecord {

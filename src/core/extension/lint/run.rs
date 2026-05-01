@@ -641,6 +641,31 @@ mod tests {
     }
 
     #[test]
+    fn test_run_main_lint_workflow() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init should run");
+        let run_dir = RunDir::create().expect("run dir");
+        let mut args = lint_args();
+        args.changed_only = true;
+
+        let result = run_main_lint_workflow(
+            &component(&dir.path().to_string_lossy()),
+            &dir.path().to_path_buf(),
+            args,
+            &run_dir,
+        )
+        .expect("unchanged git repo should skip lint runner");
+
+        assert_eq!(result.status, "passed");
+        assert_eq!(result.exit_code, 0);
+        assert!(result.lint_findings.is_none());
+    }
+
+    #[test]
     fn lint_summary_counts_categories_and_caps_top_findings() {
         let findings = (0..25)
             .map(|index| LintFinding {

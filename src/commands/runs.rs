@@ -1,4 +1,5 @@
 mod bundle;
+mod findings;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -6,9 +7,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
 
-use homeboy::observation::{
-    ArtifactRecord, FindingListFilter, FindingRecord, ObservationStore, RunListFilter, RunRecord,
-};
+use homeboy::observation::{ArtifactRecord, ObservationStore, RunListFilter, RunRecord};
 use homeboy::Error;
 
 use super::{CmdResult, GlobalArgs};
@@ -16,6 +15,7 @@ use bundle::{
     export_runs, import_runs, ObservationBundleImportSummary, ObservationBundleManifest,
     RunsExportArgs, RunsImportArgs,
 };
+use findings::{RunsFindingOutput, RunsFindingsOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
 
@@ -34,7 +34,7 @@ enum RunsCommand {
     /// List artifacts recorded for one run
     Artifacts { run_id: String },
     /// List findings recorded for one run
-    Findings(RunsFindingsArgs),
+    Findings(findings::RunsFindingsArgs),
     /// Show one recorded finding
     Finding { finding_id: String },
     /// Export observation records as an inspectable directory bundle
@@ -59,21 +59,6 @@ pub struct RunsListArgs {
     pub status: Option<String>,
     /// Maximum runs to return
     #[arg(long, default_value_t = DEFAULT_LIMIT)]
-    pub limit: i64,
-}
-
-#[derive(Args, Clone, Default)]
-pub struct RunsFindingsArgs {
-    /// Observation run ID
-    pub run_id: String,
-    /// Finding tool, for example lint
-    #[arg(long)]
-    pub tool: Option<String>,
-    /// Finding file path
-    #[arg(long)]
-    pub file: Option<String>,
-    /// Maximum findings to return
-    #[arg(long, default_value_t = 100)]
     pub limit: i64,
 }
 
@@ -108,19 +93,6 @@ pub struct RunsArtifactsOutput {
     pub command: &'static str,
     pub run_id: String,
     pub artifacts: Vec<ArtifactRecord>,
-}
-
-#[derive(Serialize)]
-pub struct RunsFindingsOutput {
-    pub command: &'static str,
-    pub run_id: String,
-    pub findings: Vec<FindingSummary>,
-}
-
-#[derive(Serialize)]
-pub struct RunsFindingOutput {
-    pub command: &'static str,
-    pub finding: FindingRecord,
 }
 
 #[derive(Serialize)]
@@ -183,20 +155,6 @@ pub struct RunDetail {
     pub artifacts: Vec<ArtifactRecord>,
 }
 
-#[derive(Serialize)]
-pub struct FindingSummary {
-    pub id: String,
-    pub run_id: String,
-    pub tool: String,
-    pub rule: Option<String>,
-    pub file: Option<String>,
-    pub line: Option<i64>,
-    pub severity: Option<String>,
-    pub fingerprint: Option<String>,
-    pub message: String,
-    pub fixable: Option<bool>,
-}
-
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct BenchMetricComparison {
     pub scenario_id: String,
@@ -219,8 +177,8 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
-        RunsCommand::Findings(args) => findings(args),
-        RunsCommand::Finding { finding_id } => finding(&finding_id),
+        RunsCommand::Findings(args) => findings::findings(args),
+        RunsCommand::Finding { finding_id } => findings::finding(&finding_id),
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
     }
@@ -263,50 +221,6 @@ pub fn artifacts(run_id: &str) -> CmdResult<RunsOutput> {
             command: "runs.artifacts",
             run_id: run_id.to_string(),
             artifacts: store.list_artifacts(run_id)?,
-        }),
-        0,
-    ))
-}
-
-pub fn findings(args: RunsFindingsArgs) -> CmdResult<RunsOutput> {
-    let store = ObservationStore::open_initialized()?;
-    require_run(&store, &args.run_id)?;
-    let findings = store
-        .list_findings(FindingListFilter {
-            run_id: Some(args.run_id.clone()),
-            tool: args.tool,
-            file: args.file,
-            limit: Some(args.limit),
-        })?
-        .into_iter()
-        .map(finding_summary)
-        .collect();
-
-    Ok((
-        RunsOutput::Findings(RunsFindingsOutput {
-            command: "runs.findings",
-            run_id: args.run_id,
-            findings,
-        }),
-        0,
-    ))
-}
-
-pub fn finding(finding_id: &str) -> CmdResult<RunsOutput> {
-    let store = ObservationStore::open_initialized()?;
-    let finding = store.get_finding(finding_id)?.ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "finding_id",
-            format!("finding not found: {finding_id}"),
-            Some(finding_id.to_string()),
-            None,
-        )
-    })?;
-
-    Ok((
-        RunsOutput::Finding(RunsFindingOutput {
-            command: "runs.finding",
-            finding,
         }),
         0,
     ))
@@ -450,21 +364,6 @@ fn run_summary(run: RunRecord) -> RunSummary {
         git_sha: run.git_sha,
         command: run.command,
         cwd: run.cwd,
-    }
-}
-
-fn finding_summary(finding: FindingRecord) -> FindingSummary {
-    FindingSummary {
-        id: finding.id,
-        run_id: finding.run_id,
-        tool: finding.tool,
-        rule: finding.rule,
-        file: finding.file,
-        line: finding.line,
-        severity: finding.severity,
-        fingerprint: finding.fingerprint,
-        message: finding.message,
-        fixable: finding.fixable,
     }
 }
 
@@ -694,7 +593,7 @@ mod tests {
                 })
                 .expect("finding");
 
-            let (output, _) = findings(RunsFindingsArgs {
+            let (output, _) = findings::findings(findings::RunsFindingsArgs {
                 run_id: run.id,
                 tool: Some("lint".to_string()),
                 file: Some("src/foo.php".to_string()),
@@ -708,7 +607,7 @@ mod tests {
             assert_eq!(output.findings[0].id, recorded.id);
             assert_eq!(output.findings[0].message, "Missing escaping");
 
-            let (output, _) = finding(&recorded.id).expect("show finding");
+            let (output, _) = findings::finding(&recorded.id).expect("show finding");
             let RunsOutput::Finding(output) = output else {
                 panic!("expected finding output");
             };
