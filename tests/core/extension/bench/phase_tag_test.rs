@@ -56,6 +56,7 @@ fn results_with(
         component_id: "demo".to_string(),
         iterations: 10,
         run_metadata: None,
+        diagnostics: Vec::new(),
         scenarios,
         metric_policies: policies,
     }
