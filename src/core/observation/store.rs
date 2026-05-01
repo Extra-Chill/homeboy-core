@@ -1250,6 +1250,21 @@ mod api_coverage_tests {
     }
 
     #[test]
+    fn test_record_url_artifact() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            let artifact = store
+                .record_url_artifact(&run.id, "frontend_url", "https://example.test/")
+                .expect("artifact");
+
+            assert_eq!(artifact.artifact_type, "url");
+            assert_eq!(artifact.url.as_deref(), Some("https://example.test/"));
+        });
+    }
+
+    #[test]
     fn test_list_artifacts() {
         with_isolated_home(|home| {
             let _xdg = XdgGuard::unset();
