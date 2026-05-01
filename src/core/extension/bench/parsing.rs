@@ -55,6 +55,7 @@ use crate::error::{Error, Result};
 
 use super::artifact::BenchArtifact;
 use super::distribution::BenchRunDistribution;
+use super::provider_failure::BenchProviderFailure;
 
 fn default_true() -> bool {
     true
@@ -103,6 +104,8 @@ pub struct BenchRunMetadata {
     pub workloads: Vec<BenchWorkloadMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner: Option<BenchRunnerMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]

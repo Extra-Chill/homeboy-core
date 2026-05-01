@@ -25,6 +25,7 @@ pub mod baseline;
 pub mod distribution;
 pub mod metrics;
 pub mod parsing;
+pub mod provider_failure;
 pub mod report;
 pub mod run;
 #[cfg(test)]
@@ -45,6 +46,9 @@ pub use metrics::MetricDelta;
 pub use parsing::{
     evaluate_gates, parse_bench_results_file, parse_bench_results_str, BenchGate, BenchGateOp,
     BenchGateResult, BenchMemory, BenchMetrics, BenchResults, BenchRunExecution, BenchScenario,
+};
+pub use provider_failure::{
+    BenchProviderFailure, BenchProviderFailureClass, BenchProviderFailureSource,
 };
 pub use report::{
     aggregate_comparison, aggregate_comparison_with_axes, from_main_workflow,

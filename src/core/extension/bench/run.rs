@@ -18,6 +18,7 @@ use crate::extension::bench::parsing::{
     self, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata, BenchScenario,
     BenchWorkloadMetadata,
 };
+use crate::extension::bench::provider_failure::{self, BenchProviderFailure};
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
     ExtensionRunner,
@@ -78,6 +79,8 @@ pub struct BenchRunWorkflowResult {
     pub hints: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +92,8 @@ pub struct BenchRunFailure {
     pub scenario_id: Option<String>,
     pub exit_code: i32,
     pub stderr_tail: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
 }
 
 #[derive(Debug, Clone)]
@@ -480,6 +485,17 @@ pub fn run_main_bench_workflow(
         .map(parsing::evaluate_gates)
         .unwrap_or_default();
     let gates_passed = gate_failures.is_empty();
+    let provider_failures = provider_failure::collect_provider_failures(
+        parsed.as_ref(),
+        failure_stderr_tail.as_deref(),
+        run_dir.path(),
+    );
+
+    if let Some(results) = parsed.as_mut() {
+        if let Some(metadata) = results.run_metadata.as_mut() {
+            metadata.provider_failures = provider_failures.clone();
+        }
+    }
 
     let status = if runner_success && gates_passed {
         "passed"
@@ -543,6 +559,13 @@ pub fn run_main_bench_workflow(
     for failure in &gate_failures {
         hints.push(failure.clone());
     }
+    for failure in &provider_failures {
+        hints.push(format!(
+            "AI provider failure classified as `{}`: {}",
+            failure.class.as_str(),
+            failure.reason
+        ));
+    }
     hints.push("Full options: homeboy docs commands/bench".to_string());
 
     let hints = if hints.is_empty() { None } else { Some(hints) };
@@ -564,6 +587,7 @@ pub fn run_main_bench_workflow(
             scenario_id: failure_scenario_id(&execution_args.scenario_ids),
             exit_code: runner_exit_code,
             stderr_tail,
+            provider_failures: provider_failures.clone(),
         })
     } else {
         None
@@ -579,6 +603,7 @@ pub fn run_main_bench_workflow(
         baseline_comparison,
         hints,
         failure,
+        provider_failures,
     })
 }
 
@@ -613,6 +638,7 @@ fn stamp_run_metadata(
                 .to_string(),
             source_revision: source_revision_at(&execution_context.extension_path),
         }),
+        provider_failures: Vec::new(),
     });
 }
 

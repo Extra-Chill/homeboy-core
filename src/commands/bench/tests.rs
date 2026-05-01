@@ -1334,6 +1334,7 @@ fn bench_output_single_serializes_without_wrapper_key() {
         hints: None,
         rig_state: None,
         failure: None,
+        provider_failures: Vec::new(),
     };
     let value = serde_json::to_value(BenchOutput::Single(single)).unwrap();
     assert!(value.get("comparison").is_none());

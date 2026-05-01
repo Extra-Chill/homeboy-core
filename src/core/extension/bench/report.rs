@@ -8,6 +8,7 @@ use super::artifact::BenchArtifact;
 use super::baseline::BenchBaselineComparison;
 use super::distribution::BenchRunDistribution;
 use super::parsing::{BenchMetricPhase, BenchResults, BenchScenario};
+use super::provider_failure::{BenchProviderFailure, BenchProviderFailureClass};
 use super::run::{BenchRunFailure, BenchRunWorkflowResult};
 use crate::rig::RigStateSnapshot;
 
@@ -36,6 +37,8 @@ pub struct BenchCommandOutput {
     pub rig_state: Option<RigStateSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
 }
 
 pub fn from_main_workflow(result: BenchRunWorkflowResult) -> (BenchCommandOutput, i32) {
@@ -69,6 +72,7 @@ pub fn from_main_workflow_with_rig(
             hints: result.hints,
             rig_state,
             failure: result.failure,
+            provider_failures: result.provider_failures,
         },
         exit_code,
     )
@@ -122,6 +126,8 @@ pub struct BenchComparisonOutput {
     pub summary: Vec<BenchScenarioComparisonSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<BenchComparisonFailure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failure_classes: Vec<BenchProviderFailureClassSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
 }
@@ -146,6 +152,8 @@ pub struct BenchComparisonSummaryOutput {
     pub axis_diffs: Vec<BenchAxisComparisonSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<BenchComparisonFailure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failure_classes: Vec<BenchProviderFailureClassSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
 }
@@ -156,6 +164,14 @@ pub struct BenchComparisonRigSummary {
     pub passed: bool,
     pub status: String,
     pub exit_code: i32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct BenchProviderFailureClassSummary {
+    pub class: BenchProviderFailureClass,
+    pub rigs: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -168,6 +184,8 @@ pub struct BenchComparisonFailure {
     pub scenario_id: Option<String>,
     pub exit_code: i32,
     pub stderr_tail: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
 }
 
 #[derive(Serialize)]
@@ -184,6 +202,8 @@ pub struct RigBenchEntry {
     pub rig_state: Option<RigStateSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_failures: Vec<BenchProviderFailure>,
 }
 
 impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
@@ -203,6 +223,7 @@ impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
                     passed: rig.passed,
                     status: rig.status,
                     exit_code: rig.exit_code,
+                    provider_failures: rig.provider_failures,
                 })
                 .collect(),
             summary: output.summary,
@@ -212,6 +233,7 @@ impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
                 .map(BenchAxisComparisonSummary::from)
                 .collect(),
             failures: output.failures,
+            provider_failure_classes: output.provider_failure_classes,
             hints: output.hints,
         }
     }
@@ -735,11 +757,22 @@ pub fn aggregate_comparison_with_axes(
                     scenario_id: failure.scenario_id.clone(),
                     exit_code: failure.exit_code,
                     stderr_tail: failure.stderr_tail.clone(),
+                    provider_failures: failure.provider_failures.clone(),
                 })
         })
         .collect();
+    let provider_failure_classes = summarize_provider_failure_classes(&entries);
 
     let mut hints = Vec::new();
+    for summary in &provider_failure_classes {
+        if summary.rigs.len() > 1 {
+            hints.push(format!(
+                "AI provider failure `{}` occurred in multiple rigs: {}",
+                summary.class.as_str(),
+                summary.rigs.join(", ")
+            ));
+        }
+    }
     for failure in &failures {
         hints.push(format_failure_hint(failure));
     }
@@ -766,10 +799,30 @@ pub fn aggregate_comparison_with_axes(
             axis_diffs,
             summary,
             failures,
+            provider_failure_classes,
             hints: Some(hints),
         },
         exit_code,
     )
+}
+
+fn summarize_provider_failure_classes(
+    entries: &[RigBenchEntry],
+) -> Vec<BenchProviderFailureClassSummary> {
+    let mut by_class: BTreeMap<BenchProviderFailureClass, Vec<String>> = BTreeMap::new();
+    for entry in entries {
+        for failure in &entry.provider_failures {
+            let rigs = by_class.entry(failure.class).or_default();
+            if !rigs.contains(&entry.rig_id) {
+                rigs.push(entry.rig_id.clone());
+            }
+        }
+    }
+
+    by_class
+        .into_iter()
+        .map(|(class, rigs)| BenchProviderFailureClassSummary { class, rigs })
+        .collect()
 }
 
 fn build_axis_diffs(
@@ -862,13 +915,26 @@ fn format_failure_hint(failure: &BenchComparisonFailure) -> String {
         .unwrap_or_default();
 
     format!(
-        "Rig failed before producing parseable bench results:\n- rig: {}\n- component: {}{}\n- exit: {}\n- stderr: {}",
-        failure.rig_id, component, scenario, failure.exit_code, failure.stderr_tail
+        "Rig failed before producing parseable bench results:\n- rig: {}\n- component: {}{}\n- exit: {}{}\n- stderr: {}",
+        failure.rig_id,
+        component,
+        scenario,
+        failure.exit_code,
+        format_provider_failure_hint_suffix(&failure.provider_failures),
+        failure.stderr_tail
     )
+}
+
+fn format_provider_failure_hint_suffix(failures: &[BenchProviderFailure]) -> String {
+    failures
+        .first()
+        .map(|failure| format!("\n- provider_failure: {}", failure.class.as_str()))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::provider_failure::BenchProviderFailureSource;
     use super::*;
     use crate::extension::bench::artifact::BenchArtifact;
     use crate::extension::bench::parsing::{
@@ -984,6 +1050,7 @@ mod tests {
             results,
             rig_state: None,
             failure: None,
+            provider_failures: Vec::new(),
         }
     }
 
@@ -1002,7 +1069,18 @@ mod tests {
                 scenario_id: None,
                 exit_code: 2,
                 stderr_tail: "ERROR: Homeboy bench helper not found at /Users/chubes/.homeboy/runtime/bench-helper.sh".to_string(),
+                provider_failures: Vec::new(),
             }),
+            provider_failures: Vec::new(),
+        }
+    }
+
+    fn provider_failure(class: BenchProviderFailureClass) -> BenchProviderFailure {
+        BenchProviderFailure {
+            class,
+            reason: "provider auth failure".to_string(),
+            source: BenchProviderFailureSource::Stderr,
+            excerpt: "Auth error: No API key available".to_string(),
         }
     }
 
@@ -1018,6 +1096,7 @@ mod tests {
             baseline_comparison: None,
             hints: None,
             failure: None,
+            provider_failures: Vec::new(),
         });
 
         assert!(out.passed);
@@ -1039,6 +1118,7 @@ mod tests {
                 baseline_comparison: None,
                 hints: Some(vec!["check output".to_string()]),
                 failure: None,
+                provider_failures: Vec::new(),
             },
             None,
         );
@@ -1482,6 +1562,37 @@ mod tests {
         let (out, _) = aggregate_comparison("studio".into(), 10, entries);
         let hints = out.hints.as_ref().unwrap();
         assert!(hints.iter().any(|h| h.contains("no parseable results")));
+    }
+
+    #[test]
+    fn aggregate_groups_shared_provider_failure_classes_by_rig() {
+        let r = results(vec![scenario("boot", &[("p95_ms", 100.0)])]);
+        let mut baseline = entry("baseline", false, Some(r.clone()));
+        baseline
+            .provider_failures
+            .push(provider_failure(BenchProviderFailureClass::MissingApiKey));
+        let mut candidate = entry("candidate", false, Some(r));
+        candidate
+            .provider_failures
+            .push(provider_failure(BenchProviderFailureClass::MissingApiKey));
+
+        let (out, _) = aggregate_comparison("studio".into(), 10, vec![baseline, candidate]);
+
+        assert_eq!(out.provider_failure_classes.len(), 1);
+        assert_eq!(
+            out.provider_failure_classes[0].class,
+            BenchProviderFailureClass::MissingApiKey
+        );
+        assert_eq!(
+            out.provider_failure_classes[0].rigs,
+            vec!["baseline".to_string(), "candidate".to_string()]
+        );
+        assert!(out
+            .hints
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|hint| hint.contains("occurred in multiple rigs")));
     }
 
     #[test]
