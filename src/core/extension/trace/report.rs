@@ -14,6 +14,7 @@ use crate::rig::RigStateSnapshot;
 pub enum TraceCommandOutput {
     Run(Box<TraceRunOutput>),
     Summary(TraceRunSummaryOutput),
+    Aggregate(TraceAggregateOutput),
     List(TraceListOutput),
 }
 
@@ -68,6 +69,53 @@ pub struct TraceListOutput {
     pub component_id: String,
     pub count: usize,
     pub scenarios: Vec<super::parsing::TraceScenario>,
+}
+
+#[derive(Serialize)]
+pub struct TraceAggregateOutput {
+    pub command: &'static str,
+    pub passed: bool,
+    pub status: String,
+    pub component: String,
+    pub scenario_id: String,
+    pub repeat: usize,
+    pub run_count: usize,
+    pub failure_count: usize,
+    pub exit_code: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rig_state: Option<RigStateSnapshot>,
+    pub runs: Vec<TraceAggregateRunOutput>,
+    pub spans: Vec<TraceAggregateSpanOutput>,
+}
+
+#[derive(Serialize)]
+pub struct TraceAggregateRunOutput {
+    pub index: usize,
+    pub passed: bool,
+    pub status: String,
+    pub exit_code: i32,
+    pub artifact_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scenario_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TraceAggregateSpanOutput {
+    pub id: String,
+    pub n: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ms: Option<u64>,
+    pub failures: usize,
 }
 
 pub fn from_main_workflow(
