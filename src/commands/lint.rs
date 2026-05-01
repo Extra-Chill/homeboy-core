@@ -2,16 +2,14 @@ use clap::Args;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
-use homeboy::extension::lint::LintFinding;
 use homeboy::extension::lint::{
     report, run_main_lint_workflow, run_self_check_lint_workflow, LintCommandOutput,
     LintRunWorkflowArgs,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::git;
-use homeboy::observation::{NewFindingRecord, NewRunRecord, ObservationStore, RunStatus};
+use homeboy::observation::{finding_records_from_lint, NewRunRecord, ObservationStore, RunStatus};
 use homeboy::refactor::plan::{collect_refactor_sources, lint_refactor_request, LintSourceOptions};
-use serde_json::Value;
 
 use super::utils::args::{
     BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
@@ -242,10 +240,7 @@ impl LintObservation {
 
     fn finish_workflow(self, workflow: &homeboy::extension::lint::LintRunWorkflowResult) {
         if let Some(findings) = &workflow.lint_findings {
-            let records: Vec<NewFindingRecord> = findings
-                .iter()
-                .map(|finding| finding_record(&self.run_id, finding))
-                .collect();
+            let records = finding_records_from_lint(&self.run_id, findings);
             let _ = self.store.record_findings(&records);
         }
 
@@ -266,37 +261,6 @@ impl LintObservation {
 
     fn finish_error(self) {
         let _ = self.store.finish_run(&self.run_id, RunStatus::Error, None);
-    }
-}
-
-fn finding_record(run_id: &str, finding: &LintFinding) -> NewFindingRecord {
-    NewFindingRecord {
-        run_id: run_id.to_string(),
-        tool: finding.tool.clone().unwrap_or_else(|| "lint".to_string()),
-        rule: extra_string(finding, "rule").or_else(|| Some(finding.category.clone())),
-        file: finding.file.clone(),
-        line: extra_i64(finding, "line"),
-        severity: finding.severity.clone(),
-        fingerprint: Some(finding.id.clone()),
-        message: finding.message.clone(),
-        fixable: extra_bool(finding, "fixable"),
-        metadata_json: serde_json::json!({ "category": finding.category }),
-    }
-}
-
-fn extra_string(finding: &LintFinding, key: &str) -> Option<String> {
-    finding.extra.get(key)?.as_str().map(str::to_string)
-}
-
-fn extra_i64(finding: &LintFinding, key: &str) -> Option<i64> {
-    finding.extra.get(key)?.as_i64()
-}
-
-fn extra_bool(finding: &LintFinding, key: &str) -> Option<bool> {
-    match finding.extra.get(key)? {
-        Value::Bool(value) => Some(*value),
-        Value::String(value) => value.parse().ok(),
-        _ => None,
     }
 }
 
