@@ -10,7 +10,9 @@ use crate::server::http::ApiClient;
 use crate::server::{
     execute_local_command_in_dir, execute_local_command_in_dir_with_process_cleanup,
     execute_local_command_interactive, execute_local_command_passthrough,
-    execute_local_command_passthrough_with_process_cleanup, CommandOutput,
+    execute_local_command_passthrough_with_process_cleanup,
+    execute_local_command_stderr_passthrough,
+    execute_local_command_stderr_passthrough_with_process_cleanup, CommandOutput,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -533,6 +535,36 @@ pub(crate) fn execute_capability_script(
     };
 
     if let Some(dir) = working_dir {
+        if options.passthrough {
+            if options.cleanup_process_group {
+                return Ok(execute_local_command_passthrough_with_process_cleanup(
+                    &command,
+                    Some(dir),
+                    env_opt,
+                ));
+            }
+            return Ok(execute_local_command_passthrough(
+                &command,
+                Some(dir),
+                env_opt,
+            ));
+        }
+        if options.stderr_passthrough {
+            if options.cleanup_process_group {
+                return Ok(
+                    execute_local_command_stderr_passthrough_with_process_cleanup(
+                        &command,
+                        Some(dir),
+                        env_opt,
+                    ),
+                );
+            }
+            return Ok(execute_local_command_stderr_passthrough(
+                &command,
+                Some(dir),
+                env_opt,
+            ));
+        }
         if options.cleanup_process_group {
             return Ok(execute_local_command_in_dir_with_process_cleanup(
                 &command,
@@ -548,6 +580,17 @@ pub(crate) fn execute_capability_script(
             ));
         }
         Ok(execute_local_command_passthrough(&command, None, env_opt))
+    } else if options.stderr_passthrough {
+        if options.cleanup_process_group {
+            return Ok(
+                execute_local_command_stderr_passthrough_with_process_cleanup(
+                    &command, None, env_opt,
+                ),
+            );
+        }
+        Ok(execute_local_command_stderr_passthrough(
+            &command, None, env_opt,
+        ))
     } else {
         if options.cleanup_process_group {
             return Ok(execute_local_command_in_dir_with_process_cleanup(
@@ -560,6 +603,7 @@ pub(crate) fn execute_capability_script(
 
 pub(crate) struct CapabilityScriptOptions {
     pub passthrough: bool,
+    pub stderr_passthrough: bool,
     pub cleanup_process_group: bool,
 }
 

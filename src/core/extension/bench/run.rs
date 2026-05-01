@@ -839,7 +839,11 @@ fn build_runner(
         .settings_json(&args.settings_json)
         .with_run_dir(run_dir)
         .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
-        .script_args(&args.passthrough_args);
+        .env("HOMEBOY_BENCH_PROGRESS", bench_progress_env_value())
+        .env("HOMEBOY_BENCH_PROGRESS_STREAM", "stderr")
+        .script_args(&args.passthrough_args)
+        .passthrough(false)
+        .stderr_passthrough(bench_progress_enabled());
 
     if let Some(warmup_iterations) = args.warmup_iterations {
         runner = runner.env(
@@ -875,6 +879,24 @@ fn build_runner(
     }
 
     Ok(runner)
+}
+
+fn bench_progress_enabled() -> bool {
+    match std::env::var("HOMEBOY_BENCH_PROGRESS") {
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => std::env::var_os("CI").is_none(),
+    }
+}
+
+fn bench_progress_env_value() -> &'static str {
+    if bench_progress_enabled() {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {

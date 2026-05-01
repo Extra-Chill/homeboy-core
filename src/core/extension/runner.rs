@@ -39,6 +39,8 @@ pub struct ExtensionRunner {
     command_override: Option<String>,
     /// Tee runner stdout/stderr to the terminal while capturing it.
     passthrough: bool,
+    /// Tee only runner stderr to the terminal while capturing stdout/stderr.
+    stderr_passthrough: bool,
     /// Run the child shell in a process group and clean up lingering descendants.
     cleanup_process_group: bool,
     /// Run directory path for recording machine-local child process evidence.
@@ -68,6 +70,7 @@ impl ExtensionRunner {
             working_dir: None,
             command_override: None,
             passthrough: true,
+            stderr_passthrough: false,
             cleanup_process_group: false,
             run_dir_path: None,
         }
@@ -157,6 +160,13 @@ impl ExtensionRunner {
         self
     }
 
+    /// Stream stderr without streaming stdout. Useful for commands that emit
+    /// live human progress while the parent process owns stdout JSON.
+    pub(crate) fn stderr_passthrough(mut self, stderr_passthrough: bool) -> Self {
+        self.stderr_passthrough = stderr_passthrough;
+        self
+    }
+
     /// Clean up the full process group after this runner exits or is interrupted.
     pub(crate) fn cleanup_process_group(mut self, cleanup: bool) -> Self {
         self.cleanup_process_group = cleanup;
@@ -238,6 +248,7 @@ impl ExtensionRunner {
             self.command_override.as_deref(),
             super::execution::CapabilityScriptOptions {
                 passthrough: self.passthrough,
+                stderr_passthrough: self.stderr_passthrough,
                 cleanup_process_group: self.cleanup_process_group,
             },
         )
