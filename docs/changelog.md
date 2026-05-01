@@ -4,6 +4,24 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.140.0] - 2026-05-01
+
+### Added
+- add side-by-side bench reports
+- classify AI provider bench failures
+- stream bench progress without stdout noise
+
+### Changed
+- Merge origin/main into classify-ai-provider-failures
+- satisfy bench progress audit checks
+- cover capability stderr progress path
+- satisfy provider failure audit checks
+- isolate runs reconciliation
+- simplify capability output dispatch
+
+### Fixed
+- reconcile orphaned running runs
+
 ## [0.139.0] - 2026-05-01
 
 ### Added
