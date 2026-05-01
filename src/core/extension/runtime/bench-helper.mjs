@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 
+const homeboyBenchProgressStart = Date.now();
+
 // R-7 percentile, the runner contract used by Homeboy BenchResults producers.
 export function homeboyBenchPercentile(sortedValues, p) {
     const n = sortedValues.length;
@@ -42,4 +44,45 @@ export async function homeboyWriteBenchResults(resultsFile, componentId, iterati
 
 export async function homeboyWriteEmptyBenchResults(resultsFile, componentId, iterations = 0) {
     await homeboyWriteBenchResults(resultsFile, componentId, iterations, []);
+}
+
+export function homeboyBenchProgress(event = {}) {
+    if (!homeboyBenchProgressEnabled()) return;
+
+    const elapsedMs = Number.isFinite(event.elapsed_ms)
+        ? event.elapsed_ms
+        : Date.now() - homeboyBenchProgressStart;
+    const parts = [event.scenario || event.workload || 'bench', homeboyFormatBenchElapsed(elapsedMs)];
+
+    if (event.run || event.run_id) parts.splice(1, 0, `[${event.run || event.run_id}]`);
+    if (event.phase) parts.push(`phase=${event.phase}`);
+    if (event.turn !== undefined) parts.push(`turn=${event.turn}`);
+    if (event.tools !== undefined) parts.push(`tools=${event.tools}`);
+    if (event.tool_count !== undefined && event.tools === undefined) parts.push(`tools=${event.tool_count}`);
+    if (event.tool) parts.push(`tool=${homeboyBenchProgressText(event.tool)}`);
+    if (event.last) parts.push(`last=${homeboyBenchProgressText(event.last)}`);
+    if (event.message) parts.push(homeboyBenchProgressText(event.message));
+
+    const line = `${parts.join(' ')}\n`;
+    if ((process.env.HOMEBOY_BENCH_PROGRESS_STREAM || 'stderr') === 'stdout') {
+        process.stdout.write(line);
+    } else {
+        process.stderr.write(line);
+    }
+}
+
+function homeboyBenchProgressEnabled() {
+    const value = (process.env.HOMEBOY_BENCH_PROGRESS || '').trim().toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
+function homeboyFormatBenchElapsed(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+    return `${minutes}:${seconds}`;
+}
+
+function homeboyBenchProgressText(value) {
+    return String(value).replace(/[\r\n\t]+/g, ' ').trim();
 }

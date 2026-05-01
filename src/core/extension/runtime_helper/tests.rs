@@ -163,6 +163,64 @@ fn bench_shell_helper_writes_empty_envelope() {
 }
 
 #[test]
+fn bench_js_helper_emits_compact_progress_to_stderr() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let helper_path = dir.path().join("bench-helper.mjs");
+    let runner_path = dir.path().join("runner.mjs");
+    std::fs::write(&helper_path, assets::BENCH_HELPER_JS).expect("write helper");
+    std::fs::write(
+        &runner_path,
+        r#"import { homeboyBenchProgress } from './bench-helper.mjs';
+homeboyBenchProgress({ scenario: 'studio-agent-site-build', run: 'bfb', elapsed_ms: 252000, turn: 18, tools: 23, last: 'wp_cli page_update' });
+"#,
+    )
+    .expect("write runner");
+
+    let output = std::process::Command::new("node")
+        .arg(&runner_path)
+        .env("HOMEBOY_BENCH_PROGRESS", "1")
+        .env("HOMEBOY_BENCH_PROGRESS_STREAM", "stderr")
+        .output()
+        .expect("run node");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "studio-agent-site-build [bfb] 04:12 turn=18 tools=23 last=wp_cli page_update\n"
+    );
+}
+
+#[test]
+fn bench_js_helper_keeps_progress_quiet_when_disabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let helper_path = dir.path().join("bench-helper.mjs");
+    let runner_path = dir.path().join("runner.mjs");
+    std::fs::write(&helper_path, assets::BENCH_HELPER_JS).expect("write helper");
+    std::fs::write(
+        &runner_path,
+        r#"import { homeboyBenchProgress } from './bench-helper.mjs';
+homeboyBenchProgress({ scenario: 'studio-agent-site-build', phase: 'setup' });
+"#,
+    )
+    .expect("write runner");
+
+    let output = std::process::Command::new("node")
+        .arg(&runner_path)
+        .env("HOMEBOY_BENCH_PROGRESS", "0")
+        .output()
+        .expect("run node");
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[test]
 fn bench_runtime_helpers_document_shared_contract() {
     for content in [assets::BENCH_HELPER_JS, assets::BENCH_HELPER_PHP] {
         assert!(

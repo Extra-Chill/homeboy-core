@@ -523,6 +523,125 @@ fn execute_local_command_passthrough_impl(
     output
 }
 
+pub(crate) fn execute_local_command_stderr_passthrough(
+    command: &str,
+    current_dir: Option<&str>,
+    env: Option<&[(&str, &str)]>,
+    cleanup_process_group: bool,
+) -> CommandOutput {
+    use std::io::{Read, Write};
+    use std::thread;
+
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", command]);
+        cmd
+    };
+
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", command]);
+        cmd
+    };
+
+    if let Some(dir) = current_dir {
+        cmd.current_dir(dir);
+    }
+
+    if let Some(env_pairs) = env {
+        cmd.envs(env_pairs.iter().copied());
+    }
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    configure_process_group_cleanup(&mut cmd, cleanup_process_group);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return CommandOutput {
+                stdout: String::new(),
+                stderr: format!("Command error: {}", e),
+                success: false,
+                exit_code: -1,
+                child_resource: None,
+            };
+        }
+    };
+    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
+
+    fn read_all<R: Read>(mut src: R) -> String {
+        let mut captured = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match src.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => captured.extend_from_slice(&buf[..n]),
+                Err(_) => break,
+            }
+        }
+        String::from_utf8_lossy(&captured).to_string()
+    }
+
+    fn tee_to_stderr<R: Read>(mut src: R) -> String {
+        let mut captured = Vec::new();
+        let mut buf = [0u8; 4096];
+        let mut sink = std::io::stderr();
+        loop {
+            match src.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let _ = sink.write_all(&buf[..n]);
+                    let _ = sink.flush();
+                    captured.extend_from_slice(&buf[..n]);
+                }
+                Err(_) => break,
+            }
+        }
+        String::from_utf8_lossy(&captured).to_string()
+    }
+
+    let stdout_handle = child
+        .stdout
+        .take()
+        .map(|pipe| thread::spawn(move || read_all(pipe)));
+    let stderr_handle = child
+        .stderr
+        .take()
+        .map(|pipe| thread::spawn(move || tee_to_stderr(pipe)));
+
+    let status = child.wait();
+
+    let stdout = stdout_handle
+        .and_then(|h| h.join().ok())
+        .unwrap_or_default();
+    let stderr = stderr_handle
+        .and_then(|h| h.join().ok())
+        .unwrap_or_default();
+
+    let output = match status {
+        Ok(status) => CommandOutput {
+            stdout,
+            stderr,
+            success: status.success(),
+            exit_code: status.code().unwrap_or(-1),
+            child_resource: Some(monitor.finish()),
+        },
+        Err(e) => CommandOutput {
+            stdout,
+            stderr: format!("{stderr}\nCommand error: {}", e),
+            success: false,
+            exit_code: -1,
+            child_resource: Some(monitor.finish()),
+        },
+    };
+    cleanup_guard.cleanup();
+    output
+}
+
 #[cfg(unix)]
 fn configure_process_group_cleanup(cmd: &mut Command, enabled: bool) {
     if !enabled {
@@ -904,6 +1023,34 @@ mod tests {
             child.sampled_peak_rss_bytes.is_some() || !child.warnings.is_empty(),
             "resource probes should either sample RSS or explain why they could not"
         );
+    }
+
+    #[test]
+    fn test_execute_local_command_stderr_passthrough() {
+        let output = execute_local_command_stderr_passthrough(
+            "printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2",
+            None,
+            None,
+            false,
+        );
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "{\"ok\":true}\n");
+        assert_eq!(output.stderr, "progress turn=1\n");
+    }
+
+    #[test]
+    fn stderr_passthrough_with_process_cleanup_preserves_stdout() {
+        let output = execute_local_command_stderr_passthrough(
+            "printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2",
+            None,
+            None,
+            true,
+        );
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "{\"ok\":true}\n");
+        assert_eq!(output.stderr, "progress turn=1\n");
     }
 
     #[cfg(unix)]

@@ -10,7 +10,8 @@ use crate::server::http::ApiClient;
 use crate::server::{
     execute_local_command_in_dir, execute_local_command_in_dir_with_process_cleanup,
     execute_local_command_interactive, execute_local_command_passthrough,
-    execute_local_command_passthrough_with_process_cleanup, CommandOutput,
+    execute_local_command_passthrough_with_process_cleanup,
+    execute_local_command_stderr_passthrough, CommandOutput,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -532,34 +533,43 @@ pub(crate) fn execute_capability_script(
         Some(env_refs.as_slice())
     };
 
-    if let Some(dir) = working_dir {
+    let current_dir = working_dir;
+
+    if options.passthrough {
         if options.cleanup_process_group {
-            return Ok(execute_local_command_in_dir_with_process_cleanup(
+            return Ok(execute_local_command_passthrough_with_process_cleanup(
                 &command,
-                Some(dir),
+                current_dir,
                 env_opt,
             ));
         }
-        Ok(execute_local_command_in_dir(&command, Some(dir), env_opt))
-    } else if options.passthrough {
-        if options.cleanup_process_group {
-            return Ok(execute_local_command_passthrough_with_process_cleanup(
-                &command, None, env_opt,
-            ));
-        }
-        Ok(execute_local_command_passthrough(&command, None, env_opt))
+        Ok(execute_local_command_passthrough(
+            &command,
+            current_dir,
+            env_opt,
+        ))
+    } else if options.stderr_passthrough {
+        Ok(execute_local_command_stderr_passthrough(
+            &command,
+            current_dir,
+            env_opt,
+            options.cleanup_process_group,
+        ))
     } else {
         if options.cleanup_process_group {
             return Ok(execute_local_command_in_dir_with_process_cleanup(
-                &command, None, env_opt,
+                &command,
+                current_dir,
+                env_opt,
             ));
         }
-        Ok(execute_local_command_in_dir(&command, None, env_opt))
+        Ok(execute_local_command_in_dir(&command, current_dir, env_opt))
     }
 }
 
 pub(crate) struct CapabilityScriptOptions {
     pub passthrough: bool,
+    pub stderr_passthrough: bool,
     pub cleanup_process_group: bool,
 }
 
@@ -1271,5 +1281,28 @@ mod tests {
             .iter()
             .any(|(k, v)| k == "HOMEBOY_STEP" && v == "lint,test"));
         assert!(env.iter().any(|(k, v)| k == "HOMEBOY_SKIP" && v == "lint"));
+    }
+
+    #[test]
+    fn test_execute_capability_script_supports_stderr_only_passthrough() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = execute_capability_script(
+            dir.path(),
+            "unused.sh",
+            &[],
+            &[],
+            None,
+            Some("printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2"),
+            CapabilityScriptOptions {
+                passthrough: false,
+                stderr_passthrough: true,
+                cleanup_process_group: false,
+            },
+        )
+        .expect("script should run");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "{\"ok\":true}\n");
+        assert_eq!(output.stderr, "progress turn=1\n");
     }
 }
