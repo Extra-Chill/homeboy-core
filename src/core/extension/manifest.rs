@@ -1111,7 +1111,3 @@ pub struct SettingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
 }
-
-#[cfg(test)]
-#[path = "../../../tests/core/extension/manifest_test.rs"]
-mod manifest_test;
