@@ -416,6 +416,7 @@ mod tests {
                 id: format!("lint-{}", idx),
                 message: msg.to_string(),
                 category: category.to_string(),
+                ..LintFinding::default()
             })
             .collect();
 

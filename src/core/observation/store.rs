@@ -6,13 +6,16 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+mod findings;
+
 use super::records::{
-    ArtifactRecord, NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord,
-    RunStatus, TraceRunRecord, TraceSpanRecord,
+    ArtifactRecord, FindingListFilter, FindingRecord, NewFindingRecord, NewRunRecord,
+    NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord, RunStatus, TraceRunRecord,
+    TraceSpanRecord,
 };
 use crate::{paths, Error, Result};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 struct Migration {
     version: i64,
@@ -88,6 +91,33 @@ const MIGRATIONS: &[Migration] = &[
             ON trace_runs(rig_id);
         CREATE INDEX IF NOT EXISTS idx_trace_spans_run
             ON trace_spans(run_id);
+    "#,
+    },
+    Migration {
+        version: 3,
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS findings (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            rule TEXT,
+            file TEXT,
+            line INTEGER,
+            severity TEXT,
+            fingerprint TEXT,
+            message TEXT NOT NULL,
+            fixable INTEGER,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES runs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_findings_run
+            ON findings(run_id);
+        CREATE INDEX IF NOT EXISTS idx_findings_tool_file
+            ON findings(tool, file);
+        CREATE INDEX IF NOT EXISTS idx_findings_fingerprint
+            ON findings(fingerprint);
     "#,
     },
 ];

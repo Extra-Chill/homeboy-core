@@ -1,4 +1,5 @@
 mod bundle;
+mod findings;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,6 +15,7 @@ use bundle::{
     export_runs, import_runs, ObservationBundleImportSummary, ObservationBundleManifest,
     RunsExportArgs, RunsImportArgs,
 };
+use findings::{RunsFindingOutput, RunsFindingsOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
 
@@ -31,6 +33,10 @@ enum RunsCommand {
     Show { run_id: String },
     /// List artifacts recorded for one run
     Artifacts { run_id: String },
+    /// List findings recorded for one run
+    Findings(findings::RunsFindingsArgs),
+    /// Show one recorded finding
+    Finding { finding_id: String },
     /// Export observation records as an inspectable directory bundle
     Export(RunsExportArgs),
     /// Import an observation bundle into the local observation store
@@ -62,6 +68,8 @@ pub enum RunsOutput {
     List(RunsListOutput),
     Show(RunsShowOutput),
     Artifacts(RunsArtifactsOutput),
+    Findings(RunsFindingsOutput),
+    Finding(RunsFindingOutput),
     BenchHistory(BenchHistoryOutput),
     BenchCompare(BenchCompareOutput),
     Export(RunsExportOutput),
@@ -169,6 +177,8 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
+        RunsCommand::Findings(args) => findings::findings(args),
+        RunsCommand::Finding { finding_id } => findings::finding(&finding_id),
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
     }
@@ -428,7 +438,9 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use homeboy::observation::{NewRunRecord, NewTraceSpanRecord, RunStatus, TraceSpanRecord};
+    use homeboy::observation::{
+        NewFindingRecord, NewRunRecord, NewTraceSpanRecord, RunStatus, TraceSpanRecord,
+    };
     use homeboy::test_support::with_isolated_home;
     use serde::Deserialize;
 
@@ -555,6 +567,52 @@ mod tests {
             };
             assert_eq!(output.artifacts.len(), 1);
             assert_eq!(output.artifacts[0].path, artifact_path.to_string_lossy());
+        });
+    }
+
+    #[test]
+    fn findings_commands_list_and_show_records() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("lint", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let recorded = store
+                .record_finding(&NewFindingRecord {
+                    run_id: run.id.clone(),
+                    tool: "lint".to_string(),
+                    rule: Some("security".to_string()),
+                    file: Some("src/foo.php".to_string()),
+                    line: Some(12),
+                    severity: Some("error".to_string()),
+                    fingerprint: Some("src/foo.php::security".to_string()),
+                    message: "Missing escaping".to_string(),
+                    fixable: Some(true),
+                    metadata_json: serde_json::json!({ "category": "security" }),
+                })
+                .expect("finding");
+
+            let (output, _) = findings::findings(findings::RunsFindingsArgs {
+                run_id: run.id,
+                tool: Some("lint".to_string()),
+                file: Some("src/foo.php".to_string()),
+                limit: 20,
+            })
+            .expect("list findings");
+            let RunsOutput::Findings(output) = output else {
+                panic!("expected findings output");
+            };
+            assert_eq!(output.findings.len(), 1);
+            assert_eq!(output.findings[0].id, recorded.id);
+            assert_eq!(output.findings[0].message, "Missing escaping");
+
+            let (output, _) = findings::finding(&recorded.id).expect("show finding");
+            let RunsOutput::Finding(output) = output else {
+                panic!("expected finding output");
+            };
+            assert_eq!(output.finding.metadata_json["category"], "security");
+            assert_eq!(output.finding.fixable, Some(true));
         });
     }
 

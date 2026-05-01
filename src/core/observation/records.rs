@@ -71,6 +71,44 @@ pub struct ArtifactRecord {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct NewFindingRecord {
+    pub run_id: String,
+    pub tool: String,
+    pub rule: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<i64>,
+    pub severity: Option<String>,
+    pub fingerprint: Option<String>,
+    pub message: String,
+    pub fixable: Option<bool>,
+    pub metadata_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FindingRecord {
+    pub id: String,
+    pub run_id: String,
+    pub tool: String,
+    pub rule: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<i64>,
+    pub severity: Option<String>,
+    pub fingerprint: Option<String>,
+    pub message: String,
+    pub fixable: Option<bool>,
+    pub metadata_json: serde_json::Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FindingListFilter {
+    pub run_id: Option<String>,
+    pub tool: Option<String>,
+    pub file: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NewTraceRunRecord {
     pub run_id: String,
     pub component_id: String,

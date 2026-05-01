@@ -2,13 +2,16 @@ use clap::Args;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
+use homeboy::extension::lint::LintFinding;
 use homeboy::extension::lint::{
     report, run_main_lint_workflow, run_self_check_lint_workflow, LintCommandOutput,
     LintRunWorkflowArgs,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::git;
+use homeboy::observation::{NewFindingRecord, NewRunRecord, ObservationStore, RunStatus};
 use homeboy::refactor::plan::{collect_refactor_sources, lint_refactor_request, LintSourceOptions};
+use serde_json::Value;
 
 use super::utils::args::{
     BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
@@ -97,11 +100,19 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
             .component
             .has_self_check(ExtensionCapability::Lint)
     {
-        let workflow = run_self_check_lint_workflow(
-            &source_ctx.component,
-            &source_ctx.source_path,
+        let observation = LintObservation::start(
             source_ctx.component_id.clone(),
-            args.json_summary,
+            &source_ctx.source_path,
+            lint_command_label(&source_ctx.component_id, &args),
+        );
+        let workflow = finish_lint_workflow(
+            observation,
+            run_self_check_lint_workflow(
+                &source_ctx.component,
+                &source_ctx.source_path,
+                source_ctx.component_id.clone(),
+                args.json_summary,
+            ),
         )?;
 
         return Ok(report::from_main_workflow(workflow));
@@ -144,6 +155,11 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
         "lint {}",
         effective_id
     )));
+    let observation = LintObservation::start(
+        ctx.component_id.clone(),
+        &ctx.source_path,
+        lint_command_label(&effective_id, &args),
+    );
 
     let workflow = run_main_lint_workflow(
         &ctx.component,
@@ -172,9 +188,144 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
         &run_dir,
     );
     resource_run.write_to_run_dir(&run_dir)?;
-    let workflow = workflow?;
+    let workflow = finish_lint_workflow(observation, workflow)?;
 
     Ok(report::from_main_workflow(workflow))
+}
+
+fn finish_lint_workflow(
+    observation: Option<LintObservation>,
+    workflow: homeboy::Result<homeboy::extension::lint::LintRunWorkflowResult>,
+) -> homeboy::Result<homeboy::extension::lint::LintRunWorkflowResult> {
+    match workflow {
+        Ok(workflow) => {
+            if let Some(observation) = observation {
+                observation.finish_workflow(&workflow);
+            }
+            Ok(workflow)
+        }
+        Err(error) => {
+            if let Some(observation) = observation {
+                observation.finish_error();
+            }
+            Err(error)
+        }
+    }
+}
+
+struct LintObservation {
+    store: ObservationStore,
+    run_id: String,
+}
+
+impl LintObservation {
+    fn start(component_id: String, source_path: &std::path::Path, command: String) -> Option<Self> {
+        let store = ObservationStore::open_initialized().ok()?;
+        let run = store
+            .start_run(NewRunRecord {
+                kind: "lint".to_string(),
+                component_id: Some(component_id),
+                command: Some(command),
+                cwd: Some(source_path.to_string_lossy().to_string()),
+                homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                git_sha: None,
+                rig_id: None,
+                metadata_json: serde_json::json!({ "source": "homeboy lint" }),
+            })
+            .ok()?;
+
+        Some(Self {
+            store,
+            run_id: run.id,
+        })
+    }
+
+    fn finish_workflow(self, workflow: &homeboy::extension::lint::LintRunWorkflowResult) {
+        if let Some(findings) = &workflow.lint_findings {
+            let records: Vec<NewFindingRecord> = findings
+                .iter()
+                .map(|finding| finding_record(&self.run_id, finding))
+                .collect();
+            let _ = self.store.record_findings(&records);
+        }
+
+        let status = if workflow.status == "passed" {
+            RunStatus::Pass
+        } else {
+            RunStatus::Fail
+        };
+        let _ = self.store.finish_run(
+            &self.run_id,
+            status,
+            Some(serde_json::json!({
+                "exit_code": workflow.exit_code,
+                "finding_count": workflow.lint_findings.as_ref().map(Vec::len).unwrap_or(0),
+            })),
+        );
+    }
+
+    fn finish_error(self) {
+        let _ = self.store.finish_run(&self.run_id, RunStatus::Error, None);
+    }
+}
+
+fn finding_record(run_id: &str, finding: &LintFinding) -> NewFindingRecord {
+    NewFindingRecord {
+        run_id: run_id.to_string(),
+        tool: finding.tool.clone().unwrap_or_else(|| "lint".to_string()),
+        rule: extra_string(finding, "rule").or_else(|| Some(finding.category.clone())),
+        file: finding.file.clone(),
+        line: extra_i64(finding, "line"),
+        severity: finding.severity.clone(),
+        fingerprint: Some(finding.id.clone()),
+        message: finding.message.clone(),
+        fixable: extra_bool(finding, "fixable"),
+        metadata_json: serde_json::json!({ "category": finding.category }),
+    }
+}
+
+fn extra_string(finding: &LintFinding, key: &str) -> Option<String> {
+    finding.extra.get(key)?.as_str().map(str::to_string)
+}
+
+fn extra_i64(finding: &LintFinding, key: &str) -> Option<i64> {
+    finding.extra.get(key)?.as_i64()
+}
+
+fn extra_bool(finding: &LintFinding, key: &str) -> Option<bool> {
+    match finding.extra.get(key)? {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn lint_command_label(component_id: &str, args: &LintArgs) -> String {
+    let mut parts = vec![
+        "homeboy".to_string(),
+        "lint".to_string(),
+        component_id.to_string(),
+    ];
+    if let Some(path) = &args.comp.path {
+        parts.push("--path".to_string());
+        parts.push(path.clone());
+    }
+    if let Some(file) = &args.file {
+        parts.push("--file".to_string());
+        parts.push(file.clone());
+    }
+    if let Some(glob) = &args.glob {
+        parts.push("--glob".to_string());
+        parts.push(glob.clone());
+    }
+    if args.changed_only {
+        parts.push("--changed-only".to_string());
+    }
+    if let Some(changed_since) = &args.changed_since {
+        parts.push("--changed-since".to_string());
+        parts.push(changed_since.clone());
+    }
+    parts.join(" ")
 }
 
 /// Dispatch `homeboy lint --fix` to the canonical refactor sources pipeline.
@@ -280,11 +431,13 @@ mod tests {
                 id: "src/foo.php::WordPress.Security.EscapeOutput".to_string(),
                 message: "Missing esc_html()".to_string(),
                 category: "security".to_string(),
+                ..LintFinding::default()
             },
             LintFinding {
                 id: "src/bar.php::WordPress.WP.I18n".to_string(),
                 message: "Untranslated string".to_string(),
                 category: "i18n".to_string(),
+                ..LintFinding::default()
             },
         ];
 

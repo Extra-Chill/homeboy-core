@@ -8,7 +8,8 @@ pub mod records;
 pub mod store;
 
 pub use records::{
-    ArtifactRecord, NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord,
-    RunStatus, TraceRunRecord, TraceSpanRecord,
+    ArtifactRecord, FindingListFilter, FindingRecord, NewFindingRecord, NewRunRecord,
+    NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord, RunStatus, TraceRunRecord,
+    TraceSpanRecord,
 };
 pub use store::{ObservationDbStatus, ObservationStore, CURRENT_SCHEMA_VERSION};
