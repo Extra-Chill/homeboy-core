@@ -8,8 +8,9 @@ use crate::project::{self, Project};
 use crate::rig::toolchain;
 use crate::server::http::ApiClient;
 use crate::server::{
-    execute_local_command_in_dir, execute_local_command_interactive,
-    execute_local_command_passthrough, CommandOutput,
+    execute_local_command_in_dir, execute_local_command_in_dir_with_process_cleanup,
+    execute_local_command_interactive, execute_local_command_passthrough,
+    execute_local_command_passthrough_with_process_cleanup, CommandOutput,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -506,7 +507,7 @@ pub(crate) fn execute_capability_script(
     env_vars: &[(String, String)],
     working_dir: Option<&str>,
     command_override: Option<&str>,
-    passthrough: bool,
+    options: CapabilityScriptOptions,
 ) -> Result<CommandOutput> {
     let command = if let Some(cmd) = command_override {
         cmd.to_string()
@@ -532,12 +533,34 @@ pub(crate) fn execute_capability_script(
     };
 
     if let Some(dir) = working_dir {
+        if options.cleanup_process_group {
+            return Ok(execute_local_command_in_dir_with_process_cleanup(
+                &command,
+                Some(dir),
+                env_opt,
+            ));
+        }
         Ok(execute_local_command_in_dir(&command, Some(dir), env_opt))
-    } else if passthrough {
+    } else if options.passthrough {
+        if options.cleanup_process_group {
+            return Ok(execute_local_command_passthrough_with_process_cleanup(
+                &command, None, env_opt,
+            ));
+        }
         Ok(execute_local_command_passthrough(&command, None, env_opt))
     } else {
+        if options.cleanup_process_group {
+            return Ok(execute_local_command_in_dir_with_process_cleanup(
+                &command, None, env_opt,
+            ));
+        }
         Ok(execute_local_command_in_dir(&command, None, env_opt))
     }
+}
+
+pub(crate) struct CapabilityScriptOptions {
+    pub passthrough: bool,
+    pub cleanup_process_group: bool,
 }
 
 pub(crate) struct PreparedCapabilityRun {

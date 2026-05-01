@@ -39,6 +39,8 @@ pub struct ExtensionRunner {
     command_override: Option<String>,
     /// Tee runner stdout/stderr to the terminal while capturing it.
     passthrough: bool,
+    /// Run the child shell in a process group and clean up lingering descendants.
+    cleanup_process_group: bool,
     /// Run directory path for recording machine-local child process evidence.
     run_dir_path: Option<PathBuf>,
 }
@@ -66,6 +68,7 @@ impl ExtensionRunner {
             working_dir: None,
             command_override: None,
             passthrough: true,
+            cleanup_process_group: false,
             run_dir_path: None,
         }
     }
@@ -154,6 +157,12 @@ impl ExtensionRunner {
         self
     }
 
+    /// Clean up the full process group after this runner exits or is interrupted.
+    pub(crate) fn cleanup_process_group(mut self, cleanup: bool) -> Self {
+        self.cleanup_process_group = cleanup;
+        self
+    }
+
     /// Execute the extension runner script.
     ///
     /// Performs the full orchestration:
@@ -227,7 +236,10 @@ impl ExtensionRunner {
             env_vars,
             self.working_dir.as_deref(),
             self.command_override.as_deref(),
-            self.passthrough,
+            super::execution::CapabilityScriptOptions {
+                passthrough: self.passthrough,
+                cleanup_process_group: self.cleanup_process_group,
+            },
         )
     }
 }
