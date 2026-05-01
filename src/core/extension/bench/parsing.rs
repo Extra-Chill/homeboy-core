@@ -54,8 +54,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 
 use super::artifact::BenchArtifact;
+use super::diagnostic::BenchDiagnostic;
 use super::distribution::BenchRunDistribution;
-use super::provider_failure::BenchProviderFailure;
 
 fn default_true() -> bool {
     true
@@ -73,6 +73,8 @@ pub struct BenchResults {
     pub iterations: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_metadata: Option<BenchRunMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<BenchDiagnostic>,
     pub scenarios: Vec<BenchScenario>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metric_policies: BTreeMap<String, BenchMetricPolicy>,
@@ -105,7 +107,7 @@ pub struct BenchRunMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner: Option<BenchRunnerMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
@@ -188,6 +190,9 @@ pub struct BenchScenario {
     /// scenario, rig, and run without scraping logs or side-channel files.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub artifacts: BTreeMap<String, BenchArtifact>,
+    /// Workload-emitted diagnostics for this scenario.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<BenchDiagnostic>,
     /// Per-run raw metric snapshots when `homeboy bench --runs N` is used.
     /// Omitted for the default `--runs 1` path so existing envelopes keep
     /// their exact shape.
@@ -307,6 +312,8 @@ pub struct BenchRunSnapshot {
     pub memory: Option<BenchMemory>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub artifacts: BTreeMap<String, BenchArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

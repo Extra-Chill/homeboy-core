@@ -336,6 +336,7 @@ mod tests {
             passed: true,
             memory: None,
             artifacts: BTreeMap::new(),
+            diagnostics: Vec::new(),
             runs: None,
             runs_summary: None,
         }
@@ -364,6 +365,7 @@ mod tests {
             passed: true,
             memory: None,
             artifacts: BTreeMap::new(),
+            diagnostics: Vec::new(),
             runs: None,
             runs_summary: None,
         }
@@ -386,6 +388,7 @@ mod tests {
             component_id: "demo".to_string(),
             iterations: 10,
             run_metadata: None,
+            diagnostics: Vec::new(),
             scenarios,
             metric_policies: BTreeMap::new(),
         }
@@ -399,6 +402,7 @@ mod tests {
             component_id: "demo".to_string(),
             iterations: 10,
             run_metadata: None,
+            diagnostics: Vec::new(),
             scenarios,
             metric_policies,
         }

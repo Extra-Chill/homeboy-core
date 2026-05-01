@@ -66,6 +66,9 @@ the other capabilities.
   run the same component + workload + iteration count against each rig in
   sequence and emit a cross-rig comparison envelope. See "Cross-rig
   comparison" below.
+- `--rig-concurrency <N>`: For multi-rig comparisons, run up to `N` rigs
+  concurrently. Default `1` preserves sequential CI behavior. Values greater
+  than `1` are opt-in and preserve output ordering by the selected rig order.
 - `--scenario <SCENARIO_ID>`: Run or list only the exact scenario id. May
   be repeated. Homeboy validates selected ids against discovery before
   execution and forwards the comma-separated selector to runners via
@@ -164,6 +167,11 @@ homeboy bench studio --rig studio-trunk,studio-combined-fixes \
     --iterations 10 \
     --report side-by-side
 
+# Opt into parallel cross-rig execution for side-by-side exploratory runs.
+homeboy bench studio --rig studio-agent-sdk,studio-bfb \
+    --scenario studio-agent-site-build \
+    --rig-concurrency 2
+
 # Three-rig comparison to isolate one PR's contribution.
 homeboy bench studio \
     --rig trunk,combined-fixes,combined-fixes-without-3120 \
@@ -173,13 +181,16 @@ homeboy bench studio \
 ## Cross-rig comparison
 
 `--rig <a>,<b>[,<c>...]` runs the same component + workload + iteration
-count against each rig in sequence and emits a single comparison
-envelope. Useful for "is my fix actually faster than trunk?" — same
-question, two rigs differing only in component commit state.
+count against each rig and emits a single comparison envelope. By default,
+rigs run in sequence for stable CI behavior. Pass `--rig-concurrency <N>`
+to opt into bounded parallel rig execution for exploratory or product-demo
+workflows where fresh isolated sites should be built in the same wall-clock
+window.
 
 ### How it runs
 
-For each rig, in input order:
+For each rig, in input order by default, or in bounded parallel batches when
+`--rig-concurrency` is greater than `1`:
 
 1. Load the rig spec and run `rig check`. Failure aborts the entire
    comparison — comparing against an unhealthy rig would produce
@@ -202,6 +213,10 @@ result and surfaces:
 - elapsed time when `elapsed_ms` or `duration_ms` metrics are present
 - flattened key metrics, including grouped metrics like `prompt.hash_match`
 - artifact paths and URLs, including URL-looking artifact paths
+
+Parallel execution preserves the selected rig order in the output envelope,
+so the reference rig and diff interpretation do not change when concurrency
+is enabled.
 
 ### What's intentionally not done
 

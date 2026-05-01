@@ -340,6 +340,7 @@ mod tests {
             component_id: "demo".to_string(),
             iterations: 10,
             run_metadata: None,
+            diagnostics: Vec::new(),
             scenarios: vec![BenchScenario {
                 id: "scenario".to_string(),
                 file: None,
@@ -357,6 +358,7 @@ mod tests {
                 passed: true,
                 memory: None,
                 artifacts: BTreeMap::new(),
+                diagnostics: Vec::new(),
                 runs: None,
                 runs_summary: None,
             }],

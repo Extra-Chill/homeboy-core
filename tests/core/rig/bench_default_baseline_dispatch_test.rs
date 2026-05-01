@@ -58,6 +58,7 @@ fn make_args(
             report: Vec::new(),
             rig,
             rig_order: super::BenchRigOrder::Input,
+            rig_concurrency: 1,
             scenario_ids: Vec::new(),
             profile: None,
             ignore_default_baseline,

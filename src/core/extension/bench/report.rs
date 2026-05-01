@@ -6,9 +6,9 @@ use serde::Serialize;
 
 use super::artifact::BenchArtifact;
 use super::baseline::BenchBaselineComparison;
+use super::diagnostic::BenchDiagnostic;
 use super::distribution::BenchRunDistribution;
 use super::parsing::{BenchMetricPhase, BenchResults, BenchScenario};
-use super::provider_failure::{BenchProviderFailure, BenchProviderFailureClass};
 use super::run::{BenchRunFailure, BenchRunWorkflowResult};
 use crate::rig::RigStateSnapshot;
 
@@ -38,7 +38,7 @@ pub struct BenchCommandOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 pub fn from_main_workflow(result: BenchRunWorkflowResult) -> (BenchCommandOutput, i32) {
@@ -72,7 +72,7 @@ pub fn from_main_workflow_with_rig(
             hints: result.hints,
             rig_state,
             failure: result.failure,
-            provider_failures: result.provider_failures,
+            diagnostics: result.diagnostics,
         },
         exit_code,
     )
@@ -127,7 +127,7 @@ pub struct BenchComparisonOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<BenchComparisonFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failure_classes: Vec<BenchProviderFailureClassSummary>,
+    pub diagnostic_classes: Vec<BenchDiagnosticClassSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
     pub reports: BenchComparisonReports,
@@ -208,7 +208,7 @@ pub struct BenchComparisonSummaryOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<BenchComparisonFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failure_classes: Vec<BenchProviderFailureClassSummary>,
+    pub diagnostic_classes: Vec<BenchDiagnosticClassSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -230,12 +230,12 @@ pub struct BenchComparisonRigSummary {
     pub status: String,
     pub exit_code: i32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct BenchProviderFailureClassSummary {
-    pub class: BenchProviderFailureClass,
+pub struct BenchDiagnosticClassSummary {
+    pub class: String,
     pub rigs: Vec<String>,
 }
 
@@ -250,7 +250,7 @@ pub struct BenchComparisonFailure {
     pub exit_code: i32,
     pub stderr_tail: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 #[derive(Serialize)]
@@ -268,7 +268,7 @@ pub struct RigBenchEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
@@ -288,7 +288,7 @@ impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
                     passed: rig.passed,
                     status: rig.status,
                     exit_code: rig.exit_code,
-                    provider_failures: rig.provider_failures,
+                    diagnostics: rig.diagnostics,
                 })
                 .collect(),
             summary: output.summary,
@@ -298,7 +298,7 @@ impl From<BenchComparisonOutput> for BenchComparisonSummaryOutput {
                 .map(BenchAxisComparisonSummary::from)
                 .collect(),
             failures: output.failures,
-            provider_failure_classes: output.provider_failure_classes,
+            diagnostic_classes: output.diagnostic_classes,
             hints: output.hints,
             default_baseline_expansion: output.default_baseline_expansion,
         }
@@ -831,18 +831,18 @@ pub fn aggregate_comparison_with_axes(
                     scenario_id: failure.scenario_id.clone(),
                     exit_code: failure.exit_code,
                     stderr_tail: failure.stderr_tail.clone(),
-                    provider_failures: failure.provider_failures.clone(),
+                    diagnostics: failure.diagnostics.clone(),
                 })
         })
         .collect();
-    let provider_failure_classes = summarize_provider_failure_classes(&entries);
+    let diagnostic_classes = summarize_diagnostic_classes(&entries);
 
     let mut hints = Vec::new();
-    for summary in &provider_failure_classes {
+    for summary in &diagnostic_classes {
         if summary.rigs.len() > 1 {
             hints.push(format!(
-                "AI provider failure `{}` occurred in multiple rigs: {}",
-                summary.class.as_str(),
+                "Diagnostic `{}` occurred in multiple rigs: {}",
+                summary.class,
                 summary.rigs.join(", ")
             ));
         }
@@ -873,7 +873,7 @@ pub fn aggregate_comparison_with_axes(
             axis_diffs,
             summary,
             failures,
-            provider_failure_classes,
+            diagnostic_classes,
             hints: Some(hints),
             reports: BenchComparisonReports { side_by_side },
             default_baseline_expansion: None,
@@ -882,13 +882,11 @@ pub fn aggregate_comparison_with_axes(
     )
 }
 
-fn summarize_provider_failure_classes(
-    entries: &[RigBenchEntry],
-) -> Vec<BenchProviderFailureClassSummary> {
-    let mut by_class: BTreeMap<BenchProviderFailureClass, Vec<String>> = BTreeMap::new();
+fn summarize_diagnostic_classes(entries: &[RigBenchEntry]) -> Vec<BenchDiagnosticClassSummary> {
+    let mut by_class: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for entry in entries {
-        for failure in &entry.provider_failures {
-            let rigs = by_class.entry(failure.class).or_default();
+        for diagnostic in &entry.diagnostics {
+            let rigs = by_class.entry(diagnostic.class.clone()).or_default();
             if !rigs.contains(&entry.rig_id) {
                 rigs.push(entry.rig_id.clone());
             }
@@ -897,7 +895,7 @@ fn summarize_provider_failure_classes(
 
     by_class
         .into_iter()
-        .map(|(class, rigs)| BenchProviderFailureClassSummary { class, rigs })
+        .map(|(class, rigs)| BenchDiagnosticClassSummary { class, rigs })
         .collect()
 }
 
@@ -1095,21 +1093,21 @@ fn format_failure_hint(failure: &BenchComparisonFailure) -> String {
         component,
         scenario,
         failure.exit_code,
-        format_provider_failure_hint_suffix(&failure.provider_failures),
+        format_diagnostic_hint_suffix(&failure.diagnostics),
         failure.stderr_tail
     )
 }
 
-fn format_provider_failure_hint_suffix(failures: &[BenchProviderFailure]) -> String {
-    failures
+fn format_diagnostic_hint_suffix(diagnostics: &[BenchDiagnostic]) -> String {
+    diagnostics
         .first()
-        .map(|failure| format!("\n- provider_failure: {}", failure.class.as_str()))
+        .map(|diagnostic| format!("\n- diagnostic: {}", diagnostic.class))
         .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::provider_failure::BenchProviderFailureSource;
+    use super::super::diagnostic::BenchDiagnosticSource;
     use super::*;
     use crate::extension::bench::artifact::BenchArtifact;
     use crate::extension::bench::parsing::{
@@ -1139,6 +1137,7 @@ mod tests {
             passed: true,
             memory: None,
             artifacts: BTreeMap::new(),
+            diagnostics: Vec::new(),
             runs: None,
             runs_summary: None,
         }
@@ -1202,6 +1201,7 @@ mod tests {
             component_id: "studio".to_string(),
             iterations: 10,
             run_metadata: None,
+            diagnostics: Vec::new(),
             scenarios,
             metric_policies: BTreeMap::new(),
         }
@@ -1242,7 +1242,7 @@ mod tests {
             results,
             rig_state: None,
             failure: None,
-            provider_failures: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -1261,18 +1261,18 @@ mod tests {
                 scenario_id: None,
                 exit_code: 2,
                 stderr_tail: "ERROR: Homeboy bench helper not found at /Users/chubes/.homeboy/runtime/bench-helper.sh".to_string(),
-                provider_failures: Vec::new(),
+                diagnostics: Vec::new(),
             }),
-            provider_failures: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
-    fn provider_failure(class: BenchProviderFailureClass) -> BenchProviderFailure {
-        BenchProviderFailure {
-            class,
-            reason: "provider auth failure".to_string(),
-            source: BenchProviderFailureSource::Stderr,
-            excerpt: "Auth error: No API key available".to_string(),
+    fn diagnostic(class: &str) -> BenchDiagnostic {
+        BenchDiagnostic {
+            class: class.to_string(),
+            message: Some("database setup failed".to_string()),
+            source: Some(BenchDiagnosticSource::Run),
+            metadata: BTreeMap::new(),
         }
     }
 
@@ -1288,7 +1288,7 @@ mod tests {
             baseline_comparison: None,
             hints: None,
             failure: None,
-            provider_failures: Vec::new(),
+            diagnostics: Vec::new(),
         });
 
         assert!(out.passed);
@@ -1310,7 +1310,7 @@ mod tests {
                 baseline_comparison: None,
                 hints: Some(vec!["check output".to_string()]),
                 failure: None,
-                provider_failures: Vec::new(),
+                diagnostics: Vec::new(),
             },
             None,
         );
@@ -1503,6 +1503,7 @@ mod tests {
                     artifact("artifacts/run-0/raw.json", Some("json"), Some("Raw result")),
                 )]
                 .into(),
+                diagnostics: Vec::new(),
             },
             BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
@@ -1513,6 +1514,7 @@ mod tests {
                     artifact("artifacts/run-1/raw.json", None, None),
                 )]
                 .into(),
+                diagnostics: Vec::new(),
             },
         ]);
 
@@ -1568,6 +1570,7 @@ mod tests {
                 artifact("baseline/run-0/raw.json", None, None),
             )]
             .into(),
+            diagnostics: Vec::new(),
         }]);
         let mut candidate_scenario = scenario("agent-runtime", &[("p95_ms", 80.0)]);
         candidate_scenario.runs = Some(vec![BenchRunSnapshot {
@@ -1579,6 +1582,7 @@ mod tests {
                 artifact("candidate/run-0/raw.json", None, None),
             )]
             .into(),
+            diagnostics: Vec::new(),
         }]);
 
         let entries = vec![
@@ -1854,26 +1858,23 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_groups_shared_provider_failure_classes_by_rig() {
+    fn aggregate_groups_shared_diagnostic_classes_by_rig() {
         let r = results(vec![scenario("boot", &[("p95_ms", 100.0)])]);
         let mut baseline = entry("baseline", false, Some(r.clone()));
         baseline
-            .provider_failures
-            .push(provider_failure(BenchProviderFailureClass::MissingApiKey));
+            .diagnostics
+            .push(diagnostic("database_unavailable"));
         let mut candidate = entry("candidate", false, Some(r));
         candidate
-            .provider_failures
-            .push(provider_failure(BenchProviderFailureClass::MissingApiKey));
+            .diagnostics
+            .push(diagnostic("database_unavailable"));
 
         let (out, _) = aggregate_comparison("studio".into(), 10, vec![baseline, candidate]);
 
-        assert_eq!(out.provider_failure_classes.len(), 1);
+        assert_eq!(out.diagnostic_classes.len(), 1);
+        assert_eq!(out.diagnostic_classes[0].class, "database_unavailable");
         assert_eq!(
-            out.provider_failure_classes[0].class,
-            BenchProviderFailureClass::MissingApiKey
-        );
-        assert_eq!(
-            out.provider_failure_classes[0].rigs,
+            out.diagnostic_classes[0].rigs,
             vec!["baseline".to_string(), "candidate".to_string()]
         );
         assert!(out
