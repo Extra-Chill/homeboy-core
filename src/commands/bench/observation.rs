@@ -341,6 +341,7 @@ mod tests {
             args: Vec::new(),
             _json: HiddenJsonArgs::default(),
             json_summary: false,
+            report: Vec::new(),
             rig: Vec::new(),
             rig_order: BenchRigOrder::Input,
             scenario_ids: Vec::new(),
@@ -366,6 +367,7 @@ mod tests {
                 "transcript".to_string(),
                 BenchArtifact {
                     path: "bench-artifacts/cold/transcript.json".to_string(),
+                    url: None,
                     kind: Some("json".to_string()),
                     label: Some("Transcript".to_string()),
                 },

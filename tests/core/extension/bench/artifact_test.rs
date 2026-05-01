@@ -4,6 +4,7 @@ use super::BenchArtifact;
 fn bench_artifact_serializes_optional_fields_when_present() {
     let artifact = BenchArtifact {
         path: "artifacts/run-1/transcript.json".to_string(),
+        url: Some("https://example.test/transcript.json".to_string()),
         kind: Some("json".to_string()),
         label: Some("Run 1 transcript".to_string()),
     };
@@ -12,7 +13,7 @@ fn bench_artifact_serializes_optional_fields_when_present() {
 
     assert_eq!(
         raw,
-        r#"{"path":"artifacts/run-1/transcript.json","kind":"json","label":"Run 1 transcript"}"#
+        r#"{"path":"artifacts/run-1/transcript.json","url":"https://example.test/transcript.json","kind":"json","label":"Run 1 transcript"}"#
     );
 }
 
@@ -20,6 +21,7 @@ fn bench_artifact_serializes_optional_fields_when_present() {
 fn bench_artifact_omits_absent_optional_fields() {
     let artifact = BenchArtifact {
         path: "artifacts/run-1/out.txt".to_string(),
+        url: None,
         kind: None,
         label: None,
     };
