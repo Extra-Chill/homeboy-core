@@ -4,6 +4,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.141.0] - 2026-05-01
+
+### Added
+- support parallel rig bench comparisons
+- surface bench URL artifacts
+
+### Changed
+- align bench diagnostic test naming
+- cover URL artifact storage
+
+### Fixed
+- make bench diagnostics workload-owned
+- handle pathless bench artifacts in reports
+
 ## [0.140.0] - 2026-05-01
 
 ### Added
