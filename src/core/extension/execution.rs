@@ -534,70 +534,45 @@ pub(crate) fn execute_capability_script(
         Some(env_refs.as_slice())
     };
 
-    if let Some(dir) = working_dir {
-        if options.passthrough {
-            if options.cleanup_process_group {
-                return Ok(execute_local_command_passthrough_with_process_cleanup(
-                    &command,
-                    Some(dir),
-                    env_opt,
-                ));
-            }
-            return Ok(execute_local_command_passthrough(
-                &command,
-                Some(dir),
-                env_opt,
-            ));
-        }
-        if options.stderr_passthrough {
-            if options.cleanup_process_group {
-                return Ok(
-                    execute_local_command_stderr_passthrough_with_process_cleanup(
-                        &command,
-                        Some(dir),
-                        env_opt,
-                    ),
-                );
-            }
-            return Ok(execute_local_command_stderr_passthrough(
-                &command,
-                Some(dir),
-                env_opt,
-            ));
-        }
-        if options.cleanup_process_group {
-            return Ok(execute_local_command_in_dir_with_process_cleanup(
-                &command,
-                Some(dir),
-                env_opt,
-            ));
-        }
-        Ok(execute_local_command_in_dir(&command, Some(dir), env_opt))
-    } else if options.passthrough {
+    let current_dir = working_dir;
+
+    if options.passthrough {
         if options.cleanup_process_group {
             return Ok(execute_local_command_passthrough_with_process_cleanup(
-                &command, None, env_opt,
+                &command,
+                current_dir,
+                env_opt,
             ));
         }
-        Ok(execute_local_command_passthrough(&command, None, env_opt))
+        Ok(execute_local_command_passthrough(
+            &command,
+            current_dir,
+            env_opt,
+        ))
     } else if options.stderr_passthrough {
         if options.cleanup_process_group {
             return Ok(
                 execute_local_command_stderr_passthrough_with_process_cleanup(
-                    &command, None, env_opt,
+                    &command,
+                    current_dir,
+                    env_opt,
                 ),
             );
         }
         Ok(execute_local_command_stderr_passthrough(
-            &command, None, env_opt,
+            &command,
+            current_dir,
+            env_opt,
         ))
     } else {
         if options.cleanup_process_group {
             return Ok(execute_local_command_in_dir_with_process_cleanup(
-                &command, None, env_opt,
+                &command,
+                current_dir,
+                env_opt,
             ));
         }
-        Ok(execute_local_command_in_dir(&command, None, env_opt))
+        Ok(execute_local_command_in_dir(&command, current_dir, env_opt))
     }
 }
 
