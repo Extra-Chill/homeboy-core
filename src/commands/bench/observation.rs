@@ -402,7 +402,7 @@ mod tests {
                 baseline_comparison: None,
                 hints: None,
                 failure: None,
-                provider_failures: Vec::new(),
+                diagnostics: Vec::new(),
             };
 
             let args = bench_args();

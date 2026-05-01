@@ -219,6 +219,11 @@ fn merge_matrix_results(
             run_metadata: outputs
                 .iter()
                 .find_map(|output| output.results.as_ref()?.run_metadata.clone()),
+            diagnostics: outputs
+                .iter()
+                .flat_map(|output| output.results.as_ref().map(|r| r.diagnostics.clone()))
+                .flatten()
+                .collect(),
             scenarios: merged_scenarios,
             metric_policies: metric_policies_seen,
         })
@@ -304,9 +309,9 @@ pub(super) fn run_single_rig(
             hints: if hints.is_empty() { None } else { Some(hints) },
             rig_state: Some(context.snapshot),
             failure: None,
-            provider_failures: outputs
+            diagnostics: outputs
                 .iter()
-                .flat_map(|output| output.provider_failures.clone())
+                .flat_map(|output| output.diagnostics.clone())
                 .collect(),
         },
         exit_code,
@@ -750,7 +755,7 @@ mod tests {
             hints: None,
             rig_state: None,
             failure: None,
-            provider_failures: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
