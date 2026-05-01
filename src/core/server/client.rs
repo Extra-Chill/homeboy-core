@@ -13,6 +13,12 @@ use chrono::Utc;
 use super::Server;
 use std::process::{Command, Stdio};
 
+#[cfg(unix)]
+static ACTIVE_CLEANUP_PGID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(unix)]
+static CLEANUP_SIGNALS_INSTALLED: std::sync::Once = std::sync::Once::new();
+
 pub struct SshClient {
     pub host: String,
     pub user: String,
@@ -264,6 +270,23 @@ pub fn execute_local_command_in_dir(
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
 ) -> CommandOutput {
+    execute_local_command_in_dir_impl(command, current_dir, env, false)
+}
+
+pub fn execute_local_command_in_dir_with_process_cleanup(
+    command: &str,
+    current_dir: Option<&str>,
+    env: Option<&[(&str, &str)]>,
+) -> CommandOutput {
+    execute_local_command_in_dir_impl(command, current_dir, env, true)
+}
+
+fn execute_local_command_in_dir_impl(
+    command: &str,
+    current_dir: Option<&str>,
+    env: Option<&[(&str, &str)]>,
+    cleanup_process_group: bool,
+) -> CommandOutput {
     #[cfg(windows)]
     let mut cmd = {
         let mut cmd = Command::new("cmd");
@@ -288,6 +311,7 @@ pub fn execute_local_command_in_dir(
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    configure_process_group_cleanup(&mut cmd, cleanup_process_group);
 
     let child = match cmd.spawn() {
         Ok(child) => child,
@@ -301,9 +325,10 @@ pub fn execute_local_command_in_dir(
             };
         }
     };
+    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
 
-    match child.wait_with_output() {
+    let output = match child.wait_with_output() {
         Ok(out) => CommandOutput {
             stdout: String::from_utf8_lossy(&out.stdout).to_string(),
             stderr: String::from_utf8_lossy(&out.stderr).to_string(),
@@ -318,7 +343,9 @@ pub fn execute_local_command_in_dir(
             exit_code: -1,
             child_resource: Some(monitor.finish()),
         },
-    }
+    };
+    cleanup_guard.cleanup();
+    output
 }
 
 pub fn execute_local_command_interactive(
@@ -373,6 +400,23 @@ pub fn execute_local_command_passthrough(
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
 ) -> CommandOutput {
+    execute_local_command_passthrough_impl(command, current_dir, env, false)
+}
+
+pub fn execute_local_command_passthrough_with_process_cleanup(
+    command: &str,
+    current_dir: Option<&str>,
+    env: Option<&[(&str, &str)]>,
+) -> CommandOutput {
+    execute_local_command_passthrough_impl(command, current_dir, env, true)
+}
+
+fn execute_local_command_passthrough_impl(
+    command: &str,
+    current_dir: Option<&str>,
+    env: Option<&[(&str, &str)]>,
+    cleanup_process_group: bool,
+) -> CommandOutput {
     use std::io::{Read, Write};
     use std::thread;
 
@@ -400,6 +444,7 @@ pub fn execute_local_command_passthrough(
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    configure_process_group_cleanup(&mut cmd, cleanup_process_group);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -413,6 +458,7 @@ pub fn execute_local_command_passthrough(
             };
         }
     };
+    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
 
     // Tee each stream: copy every chunk to the parent's stdout/stderr as it
@@ -457,7 +503,7 @@ pub fn execute_local_command_passthrough(
         .and_then(|h| h.join().ok())
         .unwrap_or_default();
 
-    match status {
+    let output = match status {
         Ok(status) => CommandOutput {
             stdout,
             stderr,
@@ -472,6 +518,116 @@ pub fn execute_local_command_passthrough(
             exit_code: -1,
             child_resource: Some(monitor.finish()),
         },
+    };
+    cleanup_guard.cleanup();
+    output
+}
+
+#[cfg(unix)]
+fn configure_process_group_cleanup(cmd: &mut Command, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    install_process_cleanup_signal_handlers();
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_process_group_cleanup(_cmd: &mut Command, _enabled: bool) {}
+
+struct ProcessGroupCleanupGuard {
+    #[cfg(unix)]
+    pgid: Option<libc::pid_t>,
+}
+
+impl ProcessGroupCleanupGuard {
+    fn new(root_pid: u32, enabled: bool) -> Self {
+        #[cfg(unix)]
+        {
+            let pgid = enabled.then_some(root_pid as libc::pid_t);
+            if let Some(pgid) = pgid {
+                ACTIVE_CLEANUP_PGID.store(pgid, Ordering::SeqCst);
+            }
+            Self { pgid }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = (root_pid, enabled);
+            Self {}
+        }
+    }
+
+    fn cleanup(mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid {
+            cleanup_process_group(pgid);
+            ACTIVE_CLEANUP_PGID
+                .compare_exchange(pgid, 0, Ordering::SeqCst, Ordering::SeqCst)
+                .ok();
+            self.pgid = None;
+        }
+    }
+}
+
+impl Drop for ProcessGroupCleanupGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid.take() {
+            cleanup_process_group(pgid);
+            ACTIVE_CLEANUP_PGID
+                .compare_exchange(pgid, 0, Ordering::SeqCst, Ordering::SeqCst)
+                .ok();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn install_process_cleanup_signal_handlers() {
+    CLEANUP_SIGNALS_INSTALLED.call_once(|| unsafe {
+        libc::signal(
+            libc::SIGINT,
+            cleanup_signal_handler as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGTERM,
+            cleanup_signal_handler as *const () as libc::sighandler_t,
+        );
+    });
+}
+
+#[cfg(unix)]
+extern "C" fn cleanup_signal_handler(signal: libc::c_int) {
+    let pgid = ACTIVE_CLEANUP_PGID.load(Ordering::SeqCst);
+    if pgid > 0 {
+        unsafe {
+            libc::kill(-pgid, libc::SIGTERM);
+        }
+    }
+    unsafe {
+        libc::_exit(128 + signal);
+    }
+}
+
+#[cfg(unix)]
+fn cleanup_process_group(pgid: libc::pid_t) {
+    unsafe {
+        libc::kill(-pgid, libc::SIGTERM);
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    unsafe {
+        if libc::kill(-pgid, 0) == 0 {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
     }
 }
 
@@ -748,5 +904,45 @@ mod tests {
             child.sampled_peak_rss_bytes.is_some() || !child.warnings.is_empty(),
             "resource probes should either sample RSS or explain why they could not"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_cleanup_kills_lingering_background_children() {
+        let pid_file = std::env::temp_dir().join(format!(
+            "homeboy-process-cleanup-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        let command = format!(
+            "sh -c 'sleep 30 >/dev/null 2>&1 < /dev/null & echo $! > {}'",
+            crate::engine::shell::quote_path(&pid_file.to_string_lossy())
+        );
+
+        let output = execute_local_command_in_dir_with_process_cleanup(&command, None, None);
+
+        assert!(output.success, "command failed: {}", output.stderr);
+        let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .expect("pid file")
+            .trim()
+            .parse()
+            .expect("pid");
+        let _ = std::fs::remove_file(&pid_file);
+
+        for _ in 0..20 {
+            if !pid_is_alive(pid) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        assert!(
+            !pid_is_alive(pid),
+            "background child {pid} should be cleaned up"
+        );
+    }
+
+    #[cfg(unix)]
+    fn pid_is_alive(pid: libc::pid_t) -> bool {
+        unsafe { libc::kill(pid, 0) == 0 }
     }
 }

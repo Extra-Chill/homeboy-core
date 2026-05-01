@@ -321,6 +321,7 @@ pub(crate) fn build_trace_runner(
         .settings(&args.settings)
         .settings_json(&args.settings_json)
         .with_run_dir(run_dir)
+        .cleanup_process_group(true)
         .env(
             "HOMEBOY_TRACE_RESULTS_FILE",
             &run_dir
