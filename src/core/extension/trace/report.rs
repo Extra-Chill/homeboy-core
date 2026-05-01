@@ -15,6 +15,7 @@ pub enum TraceCommandOutput {
     Run(Box<TraceRunOutput>),
     Summary(TraceRunSummaryOutput),
     Aggregate(TraceAggregateOutput),
+    Compare(TraceCompareOutput),
     List(TraceListOutput),
 }
 
@@ -114,8 +115,64 @@ pub struct TraceAggregateSpanOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub p75_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p90_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_run_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_artifact_path: Option<String>,
     pub failures: usize,
+}
+
+#[derive(Serialize)]
+pub struct TraceCompareOutput {
+    pub command: &'static str,
+    pub before_path: String,
+    pub after_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_component: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_component: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_scenario_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_scenario_id: Option<String>,
+    pub span_count: usize,
+    pub spans: Vec<TraceCompareSpanOutput>,
+}
+
+#[derive(Serialize)]
+pub struct TraceCompareSpanOutput {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_n: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_n: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_median_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_median_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_delta_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_delta_percent: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_avg_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_avg_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_delta_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_delta_percent: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_failures: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_failures: Option<usize>,
 }
 
 pub fn from_main_workflow(

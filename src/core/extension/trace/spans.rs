@@ -4,6 +4,12 @@ use super::parsing::{
     TraceEvent, TraceResults, TraceSpanDefinition, TraceSpanResult, TraceSpanStatus,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TracePhaseMilestone {
+    pub label: String,
+    pub key: String,
+}
+
 pub(crate) fn parse_span_definition(raw: &str) -> Result<TraceSpanDefinition, String> {
     let parts: Vec<&str> = raw.split(':').collect();
     if parts.len() != 3 {
@@ -18,6 +24,78 @@ pub(crate) fn parse_span_definition(raw: &str) -> Result<TraceSpanDefinition, St
         return Err("span id, from, and to must be non-empty".to_string());
     }
     Ok(definition)
+}
+
+pub(crate) fn parse_phase_milestone(raw: &str) -> Result<TracePhaseMilestone, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("phase milestone must be non-empty".to_string());
+    }
+
+    let (label, key) = match raw.split_once(':') {
+        Some((label, key)) => (label.trim(), key.trim()),
+        None => (raw, raw),
+    };
+    if label.is_empty() || key.is_empty() {
+        return Err("expected [label:]source.event".to_string());
+    }
+
+    Ok(TracePhaseMilestone {
+        label: label.to_string(),
+        key: key.to_string(),
+    })
+}
+
+pub(crate) fn phase_span_definitions(
+    phases: &[TracePhaseMilestone],
+) -> Result<Vec<TraceSpanDefinition>, String> {
+    if phases.is_empty() {
+        return Ok(Vec::new());
+    }
+    if phases.len() < 2 {
+        return Err("at least two --phase milestones are required".to_string());
+    }
+
+    let mut definitions = phases
+        .windows(2)
+        .map(|pair| TraceSpanDefinition {
+            id: format!(
+                "phase.{}_to_{}",
+                phase_id_part(&pair[0].label),
+                phase_id_part(&pair[1].label)
+            ),
+            from: pair[0].key.clone(),
+            to: pair[1].key.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    definitions.push(TraceSpanDefinition {
+        id: "phase.total".to_string(),
+        from: phases.first().expect("checked non-empty").key.clone(),
+        to: phases.last().expect("checked non-empty").key.clone(),
+    });
+
+    Ok(definitions)
+}
+
+fn phase_id_part(label: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_separator = false;
+    for ch in label.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_separator = false;
+        } else if !last_was_separator {
+            out.push('_');
+            last_was_separator = true;
+        }
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "phase".to_string()
+    } else {
+        trimmed
+    }
 }
 
 pub(crate) fn apply_span_definitions(
@@ -169,6 +247,61 @@ mod tests {
         assert_eq!(definition.id, "submit");
         assert_eq!(definition.from, "ui.clicked");
         assert_eq!(definition.to, "cli.started");
+    }
+
+    #[test]
+    fn test_parse_phase_milestone_with_label() {
+        let phase = parse_phase_milestone("submit:ui.clicked").unwrap();
+
+        assert_eq!(phase.label, "submit");
+        assert_eq!(phase.key, "ui.clicked");
+    }
+
+    #[test]
+    fn test_parse_phase_milestone_without_label() {
+        let phase = parse_phase_milestone("ui.clicked").unwrap();
+
+        assert_eq!(phase.label, "ui.clicked");
+        assert_eq!(phase.key, "ui.clicked");
+    }
+
+    #[test]
+    fn test_phase_span_definitions_include_adjacent_and_total() {
+        let definitions = phase_span_definitions(&[
+            TracePhaseMilestone {
+                label: "submit".to_string(),
+                key: "ui.clicked".to_string(),
+            },
+            TracePhaseMilestone {
+                label: "cli start".to_string(),
+                key: "cli.started".to_string(),
+            },
+            TracePhaseMilestone {
+                label: "ready".to_string(),
+                key: "server.ready".to_string(),
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(definitions.len(), 3);
+        assert_eq!(definitions[0].id, "phase.submit_to_cli_start");
+        assert_eq!(definitions[0].from, "ui.clicked");
+        assert_eq!(definitions[0].to, "cli.started");
+        assert_eq!(definitions[1].id, "phase.cli_start_to_ready");
+        assert_eq!(definitions[2].id, "phase.total");
+        assert_eq!(definitions[2].from, "ui.clicked");
+        assert_eq!(definitions[2].to, "server.ready");
+    }
+
+    #[test]
+    fn phase_span_definitions_require_a_chain() {
+        let error = phase_span_definitions(&[TracePhaseMilestone {
+            label: "submit".to_string(),
+            key: "ui.clicked".to_string(),
+        }])
+        .unwrap_err();
+
+        assert_eq!(error, "at least two --phase milestones are required");
     }
 
     #[test]
