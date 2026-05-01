@@ -44,7 +44,7 @@ Extension manifests define extension metadata, runtime behavior, platform behavi
 - **`deploy`** (object): Deploy lifecycle — verifications, overrides, version patterns
 - **`executable`** (object): Standalone tool runtime, inputs, output schema
 - **`platform`** (object): Platform behavior definitions (database, deployment, version patterns)
-- **`annotations_schema_version`** (string): Schema version for structured files emitted under the `annotations/` run-dir sidecar
+- **`annotations_schema_version`** (string): Schema version for structured files emitted under the run-dir annotations sidecar
 - **`commands`** (object): Additional CLI commands provided by extension
 - **`actions`** (object): Action definitions for `homeboy extension action`
 - **`release_actions`** (object): Release pipeline step definitions
@@ -113,7 +113,7 @@ Extensions can declare which well-known structured sidecars they emit and which 
 - **`lint.findings_schema_version`** (string): Declares structured `lint-findings.json` output in the run directory.
 - **`test.results_schema_version`** (string): Declares structured `test-results.json` output in the run directory.
 - **`test.failures_schema_version`** (string): Declares structured `test-failures.json` output in the run directory.
-- **`annotations_schema_version`** (string): Declares structured annotation files under the run directory's `annotations/` subdirectory.
+- **`annotations_schema_version`** (string): Declares structured annotation files under the run directory's annotations sidecar subdirectory.
 
 ### Inspection Behavior
 
