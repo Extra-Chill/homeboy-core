@@ -170,27 +170,9 @@ pub fn finding_records_from_annotations_dir(
     }
 
     let mut entries = std::fs::read_dir(annotations_dir)
-        .map_err(|e| {
-            crate::Error::internal_io(
-                format!(
-                    "Failed to read annotations dir {}: {}",
-                    annotations_dir.display(),
-                    e
-                ),
-                Some("observation.findings.annotations".to_string()),
-            )
-        })?
+        .map_err(|e| annotation_dir_error("read", annotations_dir, e))?
         .collect::<std::io::Result<Vec<_>>>()
-        .map_err(|e| {
-            crate::Error::internal_io(
-                format!(
-                    "Failed to list annotations dir {}: {}",
-                    annotations_dir.display(),
-                    e
-                ),
-                Some("observation.findings.annotations".to_string()),
-            )
-        })?;
+        .map_err(|e| annotation_dir_error("list", annotations_dir, e))?;
     entries.sort_by_key(|entry| entry.path());
 
     let mut records = Vec::new();
@@ -202,6 +184,18 @@ pub fn finding_records_from_annotations_dir(
         records.extend(finding_records_from_annotation_file(run_id, &path)?);
     }
     Ok(records)
+}
+
+fn annotation_dir_error(action: &str, path: &Path, error: std::io::Error) -> crate::Error {
+    crate::Error::internal_io(
+        format!(
+            "Failed to {} annotations dir {}: {}",
+            action,
+            path.display(),
+            error
+        ),
+        Some("observation.findings.annotations".to_string()),
+    )
 }
 
 pub fn finding_records_from_annotation_file(
@@ -365,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_lint_sidecar_finding_to_common_record() {
+    fn test_finding_record_from_lint() {
         let finding = LintFinding {
             id: "src/lib.rs:10:lint/security".to_string(),
             message: "escape output".to_string(),
@@ -398,7 +392,23 @@ mod tests {
     }
 
     #[test]
-    fn maps_annotation_sidecar_file_to_common_records() {
+    fn test_finding_records_from_lint() {
+        let findings = [
+            lint_finding("one", "security", Some("phpcs")),
+            lint_finding("two", "i18n", None),
+        ];
+
+        let records = finding_records_from_lint("run-1", &findings);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].fingerprint.as_deref(), Some("one"));
+        assert_eq!(records[0].tool, "phpcs");
+        assert_eq!(records[1].fingerprint.as_deref(), Some("two"));
+        assert_eq!(records[1].tool, "lint");
+    }
+
+    #[test]
+    fn test_finding_records_from_annotation_file() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("phpcs.json");
         std::fs::write(
@@ -442,5 +452,72 @@ mod tests {
         assert_eq!(record.metadata_json["source_sidecar"], "annotations");
         assert_eq!(record.metadata_json["annotation_file"], "phpcs.json");
         assert_eq!(record.metadata_json["raw"]["github_level"], "warning");
+    }
+
+    #[test]
+    fn test_finding_records_from_annotations_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(temp.path().join("b.json"), annotation_json("src/b.rs", "B"))
+            .expect("write b");
+        std::fs::write(temp.path().join("a.json"), annotation_json("src/a.rs", "A"))
+            .expect("write a");
+        std::fs::write(temp.path().join("ignored.txt"), "[]").expect("write ignored");
+
+        let records = finding_records_from_annotations_dir("run-1", temp.path()).expect("records");
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].file.as_deref(), Some("src/a.rs"));
+        assert_eq!(records[0].rule.as_deref(), Some("A"));
+        assert_eq!(records[1].file.as_deref(), Some("src/b.rs"));
+        assert_eq!(records[1].rule.as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn test_finding_record_from_annotation() {
+        let annotation = AnnotationFindingRecord {
+            file: Some("src/lib.rs".to_string()),
+            line: Some(33),
+            message: "escape output".to_string(),
+            source: None,
+            severity: Some("notice".to_string()),
+            code: Some("WordPress.Security".to_string()),
+            fixable: Some(false),
+            extra: BTreeMap::from([("id".to_string(), serde_json::json!("custom-id"))]),
+        };
+
+        let record = finding_record_from_annotation("run-1", &annotation, "phpcs.json");
+
+        assert_eq!(record.run_id, "run-1");
+        assert_eq!(record.tool, "phpcs");
+        assert_eq!(record.rule.as_deref(), Some("WordPress.Security"));
+        assert_eq!(record.file.as_deref(), Some("src/lib.rs"));
+        assert_eq!(record.line, Some(33));
+        assert_eq!(record.severity.as_deref(), Some("notice"));
+        assert_eq!(record.fingerprint.as_deref(), Some("custom-id"));
+        assert_eq!(record.fixable, Some(false));
+    }
+
+    fn lint_finding(id: &str, category: &str, tool: Option<&str>) -> LintFinding {
+        LintFinding {
+            id: id.to_string(),
+            message: format!("{category} finding"),
+            category: category.to_string(),
+            tool: tool.map(str::to_string),
+            file: Some("src/lib.rs".to_string()),
+            severity: Some("error".to_string()),
+            extra: BTreeMap::new(),
+        }
+    }
+
+    fn annotation_json(file: &str, code: &str) -> String {
+        serde_json::to_string(&serde_json::json!([
+            {
+                "file": file,
+                "line": 1,
+                "message": "annotation",
+                "code": code
+            }
+        ]))
+        .expect("json")
     }
 }
