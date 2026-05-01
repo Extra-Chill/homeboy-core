@@ -311,6 +311,8 @@ pub struct ExtensionDetail {
     pub inputs: Vec<homeboy::extension::InputConfig>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<homeboy::extension::SettingConfig>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub structured_sidecars: Vec<homeboy::extension::StructuredSidecarDeclaration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires: Option<RequiresDetail>,
 }
@@ -435,6 +437,7 @@ fn show_extension(extension_id: &str) -> CmdResult<ExtensionOutput> {
         actions,
         inputs: extension.inputs().to_vec(),
         settings: extension.settings.clone(),
+        structured_sidecars: extension.structured_sidecars(),
         requires,
     };
 

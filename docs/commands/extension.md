@@ -195,6 +195,10 @@ Extension entry (`extensions[]`):
 - `linked`: whether the extension is symlinked
 - `path`: extension directory path (may be empty if unknown)
 
+Extension detail (`extension.show`):
+
+- `structured_sidecars`: declared structured sidecar contracts, each with `name`, `path`, and `schema_version`
+
 ## Exit code
 
 - `extension.run`: exit code of the executed extension's `runCommand`.
