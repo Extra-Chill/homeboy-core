@@ -284,14 +284,28 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    let (json_result, exit_code) = commands::run_json(cli.command, &global);
+    let (json_result, exit_code, output_json_result) = match cli.command {
+        Commands::Trace(args) if output_file.is_some() && args.json_summary => {
+            let (json_result, exit_code, output_json_result) =
+                trace::run_json_with_output_artifact(args, &global);
+            (json_result, exit_code, output_json_result)
+        }
+        command => {
+            let (json_result, exit_code) = commands::run_json(command, &global);
+            (json_result, exit_code, None)
+        }
+    };
 
     // Write JSON to --output file if specified (before printing to stdout).
     // Review writes its stable machine-readable artifact directly; other
     // commands retain the generic CLI envelope.
     if let Some(ref path) = output_file {
         if !is_review_command || !review::write_artifact_to_file(&json_result, path, exit_code) {
-            output::write_json_to_file(&json_result, path, exit_code);
+            output::write_json_to_file(
+                output_json_result.as_ref().unwrap_or(&json_result),
+                path,
+                exit_code,
+            );
         }
     }
 
