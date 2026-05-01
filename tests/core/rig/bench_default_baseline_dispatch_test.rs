@@ -108,11 +108,11 @@ mod cases {
         with_isolated_home(|home| {
             write_rig_fixture(home, "candidate", CANDIDATE_WITH_BASELINE);
             let args = make_args(vec!["candidate".to_string()], false, false, false);
-            let expanded = maybe_expand_default_baseline(&args.run)
+            let expansion = maybe_expand_default_baseline(&args.run)
                 .expect("dispatch ok")
                 .expect("expansion applied");
             assert_eq!(
-                expanded,
+                expansion.rig_ids,
                 vec!["homeboy-main".to_string(), "candidate".to_string()],
                 "baseline must come first (the reference); candidate second"
             );
@@ -225,11 +225,11 @@ mod cases {
             write_rig_fixture(home, "candidate", CANDIDATE_MATRIX_WITH_BASELINE);
             let mut args = make_args(vec!["candidate".to_string()], false, false, false);
             args.run.comp.component = Some("homeboy".to_string());
-            let expanded = maybe_expand_default_baseline(&args.run)
+            let expansion = maybe_expand_default_baseline(&args.run)
                 .expect("dispatch ok")
                 .expect("expansion applied");
             assert_eq!(
-                expanded,
+                expansion.rig_ids,
                 vec!["homeboy-main".to_string(), "candidate".to_string()]
             );
         });
