@@ -154,6 +154,7 @@ pub(crate) fn classify_commit(subject: &str, body: Option<&str>) -> CommitCatego
     if lower.starts_with("merge pull request")
         || lower.starts_with("merge branch")
         || lower.starts_with("merge remote-tracking")
+        || lower.starts_with("merge origin/")
     {
         return CommitCategory::Merge;
     }
@@ -442,7 +443,12 @@ pub fn get_commits_since_tag_for_path(
         .unwrap_or_else(|| "HEAD".to_string());
 
     let format_str = format!("--format=%h{}%s{}%b{}", FIELD_SEP, FIELD_SEP, RECORD_SEP);
-    let mut args = vec!["log".to_string(), range, format_str];
+    let mut args = vec![
+        "log".to_string(),
+        "--no-merges".to_string(),
+        range,
+        format_str,
+    ];
 
     // Add path filter for monorepo scoping: `git log <range> -- <path_prefix>`
     if let Some(prefix) = path_prefix {
@@ -836,6 +842,10 @@ mod tests {
         );
         assert_eq!(
             parse_conventional_commit("Merge remote-tracking branch 'origin/main'"),
+            CommitCategory::Merge
+        );
+        assert_eq!(
+            parse_conventional_commit("Merge origin/main into feature-branch"),
             CommitCategory::Merge
         );
     }
