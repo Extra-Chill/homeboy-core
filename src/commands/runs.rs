@@ -1,5 +1,6 @@
 mod bundle;
 mod findings;
+mod reconcile;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,6 +17,7 @@ use bundle::{
     RunsExportArgs, RunsImportArgs,
 };
 use findings::{RunsFindingOutput, RunsFindingsOutput};
+use reconcile::{reconcile_runs, RunsReconcileArgs, RunsReconcileOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
 
@@ -29,6 +31,8 @@ pub struct RunsArgs {
 enum RunsCommand {
     /// List persisted observation runs
     List(RunsListArgs),
+    /// Mark orphaned running observation records stale
+    Reconcile(RunsReconcileArgs),
     /// Show one persisted observation run
     Show { run_id: String },
     /// List artifacts recorded for one run
@@ -72,6 +76,7 @@ pub enum RunsOutput {
     Finding(RunsFindingOutput),
     BenchHistory(BenchHistoryOutput),
     BenchCompare(BenchCompareOutput),
+    Reconcile(RunsReconcileOutput),
     Export(RunsExportOutput),
     Import(RunsImportOutput),
 }
@@ -144,6 +149,8 @@ pub struct RunSummary {
     pub git_sha: Option<String>,
     pub command: Option<String>,
     pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -175,6 +182,7 @@ pub struct BenchMissingMetric {
 pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
     match args.command {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
+        RunsCommand::Reconcile(args) => reconcile_runs(args),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
         RunsCommand::Findings(args) => findings::findings(args),
@@ -353,6 +361,7 @@ fn run_detail(store: &ObservationStore, run: RunRecord) -> homeboy::Result<RunDe
 }
 
 fn run_summary(run: RunRecord) -> RunSummary {
+    let status_note = reconcile::running_status_note(&run);
     RunSummary {
         id: run.id,
         kind: run.kind,
@@ -364,6 +373,7 @@ fn run_summary(run: RunRecord) -> RunSummary {
         git_sha: run.git_sha,
         command: run.command,
         cwd: run.cwd,
+        status_note,
     }
 }
 

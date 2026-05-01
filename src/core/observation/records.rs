@@ -7,6 +7,7 @@ pub enum RunStatus {
     Fail,
     Error,
     Skipped,
+    Stale,
 }
 
 impl RunStatus {
@@ -17,6 +18,7 @@ impl RunStatus {
             Self::Fail => "fail",
             Self::Error => "error",
             Self::Skipped => "skipped",
+            Self::Stale => "stale",
         }
     }
 }
@@ -164,5 +166,6 @@ mod tests {
         assert_eq!(RunStatus::Fail.as_str(), "fail");
         assert_eq!(RunStatus::Error.as_str(), "error");
         assert_eq!(RunStatus::Skipped.as_str(), "skipped");
+        assert_eq!(RunStatus::Stale.as_str(), "stale");
     }
 }
