@@ -566,6 +566,7 @@ mod tests {
             report: Vec::new(),
             rig: vec!["rig".to_string()],
             rig_order: crate::commands::bench::BenchRigOrder::Input,
+            rig_concurrency: 1,
             scenario_ids: Vec::new(),
             profile: None,
             ignore_default_baseline: false,

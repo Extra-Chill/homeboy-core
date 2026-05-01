@@ -281,6 +281,7 @@ fn run_args(component: Option<&str>, rig: Vec<String>, scenario_ids: Vec<String>
             report: Vec::new(),
             rig,
             rig_order: BenchRigOrder::Input,
+            rig_concurrency: 1,
             scenario_ids,
             profile: None,
             ignore_default_baseline: false,
@@ -525,6 +526,20 @@ fn parses_rig_order_flag() {
     .expect("bench --rig-order should parse");
 
     assert_eq!(cli.bench.run.rig_order, BenchRigOrder::Reverse);
+}
+
+#[test]
+fn parses_rig_concurrency_flag() {
+    let cli = TestCli::try_parse_from([
+        "bench",
+        "--rig",
+        "studio-agent-sdk,studio-agent-pi",
+        "--rig-concurrency",
+        "2",
+    ])
+    .expect("bench --rig-concurrency should parse");
+
+    assert_eq!(cli.bench.run.rig_concurrency, 2);
 }
 
 #[test]
@@ -1297,6 +1312,19 @@ fn filter_strips_report_forms() {
 }
 
 #[test]
+fn filter_strips_rig_concurrency_forms() {
+    let args = vec![
+        "--rig-concurrency".to_string(),
+        "2".to_string(),
+        "--filter=Scenario".to_string(),
+    ];
+    assert_eq!(filter_homeboy_flags(&args), vec!["--filter=Scenario"]);
+
+    let args = vec!["--rig-concurrency=2".to_string(), "--keep".to_string()];
+    assert_eq!(filter_homeboy_flags(&args), vec!["--keep"]);
+}
+
+#[test]
 fn filter_strips_regression_threshold_forms() {
     let args = vec![
         "--regression-threshold".to_string(),
@@ -1385,3 +1413,6 @@ fn bench_output_comparison_serializes_with_discriminator() {
 #[cfg(test)]
 #[path = "../../../tests/core/rig/bench_default_baseline_dispatch_test.rs"]
 mod bench_default_baseline_dispatch_test;
+#[cfg(test)]
+#[path = "../../../tests/core/rig/bench_rig_concurrency_dispatch_test.rs"]
+mod bench_rig_concurrency_dispatch_test;

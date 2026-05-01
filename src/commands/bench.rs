@@ -2,6 +2,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::thread;
 
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
@@ -164,7 +165,7 @@ pub struct BenchRunArgs {
     ///
     /// **Multiple rigs** (`--rig <a>,<b>[,<c>...]`): runs the same
     /// component + workload + iteration count against each rig in
-    /// sequence and emits a `BenchComparisonOutput` envelope with
+    /// sequence by default and emits a `BenchComparisonOutput` envelope with
     /// per-rig results plus a `diff` table of per-metric percent deltas
     /// vs the first rig (the reference). Cross-rig runs are
     /// **comparison-only**: `--baseline` and `--ratchet` are rejected,
@@ -186,6 +187,12 @@ pub struct BenchRunArgs {
     /// external daemon or cache state.
     #[arg(long, value_enum, default_value_t = BenchRigOrder::Input)]
     rig_order: BenchRigOrder,
+
+    /// Number of rigs to run concurrently during a multi-rig comparison.
+    /// Default 1 preserves stable sequential CI behavior. Values greater
+    /// than 1 opt into bounded parallel rig execution.
+    #[arg(long, default_value_t = 1)]
+    rig_concurrency: u32,
 
     /// Only run matching benchmark scenario ids. Repeat to select multiple.
     #[arg(
@@ -242,6 +249,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--shared-state",
         "--concurrency",
         "--regression-threshold",
+        "--rig-concurrency",
         "--scenario",
         "--profile",
         "--rig-order",
@@ -363,8 +371,8 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     }
 
     // --rig with two or more values: cross-rig comparison. Run each rig
-    // in sequence, collect per-rig outputs, aggregate into a
-    // BenchComparisonOutput.
+    // in sequence by default, or in bounded parallel batches when the user
+    // explicitly opts in with --rig-concurrency.
     if run_args.baseline_args.baseline {
         return Err(homeboy::Error::validation_invalid_argument(
             "--baseline",
@@ -388,23 +396,23 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
         matrix::validate_profile_available_for_rigs(&run_args.rig, profile)?;
     }
 
-    let mut entries = Vec::with_capacity(run_args.rig.len());
+    let ordered_rigs = ordered_rig_ids(run_args);
+    let rig_outputs = run_cross_rig_benches(run_args, &passthrough_args, ordered_rigs)?;
+
+    let mut entries = Vec::with_capacity(rig_outputs.len());
     let mut effective_component_label: Option<String> = None;
     let mut axes_by_rig = BTreeMap::new();
 
-    let ordered_rigs = ordered_rig_ids(run_args);
-
-    for rig_id in ordered_rigs {
-        if let Some(axes) = rig_axes(&rig_id)? {
-            axes_by_rig.insert(rig_id.clone(), axes);
+    for rig_output in rig_outputs {
+        if let Some(axes) = rig_output.axes {
+            axes_by_rig.insert(rig_output.rig_id.clone(), axes);
         }
-        let (single_output, _exit) =
-            matrix::run_single(run_args, &passthrough_args, Some(rig_id.clone()))?;
+        let single_output = rig_output.output;
         if effective_component_label.is_none() {
             effective_component_label = Some(single_output.component.clone());
         }
         entries.push(RigBenchEntry {
-            rig_id: rig_id.clone(),
+            rig_id: rig_output.rig_id,
             passed: single_output.passed,
             status: single_output.status,
             exit_code: single_output.exit_code,
@@ -425,6 +433,66 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
         return Ok((BenchOutput::ComparisonSummary(output.into()), exit));
     }
     Ok((BenchOutput::Comparison(output), exit))
+}
+
+struct CrossRigBenchOutput {
+    rig_id: String,
+    axes: Option<BTreeMap<String, String>>,
+    output: BenchCommandOutput,
+}
+
+fn run_cross_rig_benches(
+    run_args: &BenchRunArgs,
+    passthrough_args: &[String],
+    ordered_rigs: Vec<String>,
+) -> homeboy::Result<Vec<CrossRigBenchOutput>> {
+    if run_args.rig_concurrency <= 1 || ordered_rigs.len() <= 1 {
+        return ordered_rigs
+            .into_iter()
+            .map(|rig_id| run_cross_rig_bench(run_args, passthrough_args, rig_id))
+            .collect();
+    }
+
+    let concurrency = run_args.rig_concurrency as usize;
+    let mut outputs = Vec::with_capacity(ordered_rigs.len());
+
+    for chunk in ordered_rigs.chunks(concurrency) {
+        let mut chunk_outputs = thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(chunk.len());
+            for rig_id in chunk.iter().cloned() {
+                handles.push(
+                    scope.spawn(move || run_cross_rig_bench(run_args, passthrough_args, rig_id)),
+                );
+            }
+
+            handles
+                .into_iter()
+                .map(|handle| match handle.join() {
+                    Ok(result) => result,
+                    Err(_) => Err(homeboy::Error::internal_unexpected(
+                        "bench rig worker panicked during parallel comparison",
+                    )),
+                })
+                .collect::<homeboy::Result<Vec<_>>>()
+        })?;
+        outputs.append(&mut chunk_outputs);
+    }
+
+    Ok(outputs)
+}
+
+fn run_cross_rig_bench(
+    run_args: &BenchRunArgs,
+    passthrough_args: &[String],
+    rig_id: String,
+) -> homeboy::Result<CrossRigBenchOutput> {
+    let axes = rig_axes(&rig_id)?;
+    let (output, _exit) = matrix::run_single(run_args, passthrough_args, Some(rig_id.clone()))?;
+    Ok(CrossRigBenchOutput {
+        rig_id,
+        axes,
+        output,
+    })
 }
 
 fn rig_axes(rig_id: &str) -> homeboy::Result<Option<BTreeMap<String, String>>> {
