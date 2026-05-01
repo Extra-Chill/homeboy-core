@@ -581,6 +581,32 @@ mod tests {
     }
 
     #[test]
+    fn artifacts_command_reports_url_artifacts() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("run");
+            store
+                .record_url_artifact(&run.id, "frontend_url", "https://example.test/")
+                .expect("record URL artifact");
+
+            let (output, _) = artifacts(&run.id).expect("artifacts");
+            let RunsOutput::Artifacts(output) = output else {
+                panic!("expected artifacts output");
+            };
+            assert_eq!(output.artifacts.len(), 1);
+            assert_eq!(output.artifacts[0].kind, "frontend_url");
+            assert_eq!(output.artifacts[0].artifact_type, "url");
+            assert_eq!(
+                output.artifacts[0].url.as_deref(),
+                Some("https://example.test/")
+            );
+        });
+    }
+
+    #[test]
     fn findings_commands_list_and_show_records() {
         with_isolated_home(|_home| {
             let _xdg = XdgGuard::unset();

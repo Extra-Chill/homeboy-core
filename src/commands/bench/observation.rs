@@ -245,8 +245,16 @@ fn record_bench_observation_artifacts(
         return;
     };
     for artifact in collect_artifacts(results) {
-        let path = resolve_bench_artifact_path(&artifact.path, run_dir);
-        record_if_exists(observation, "bench_artifact", path);
+        if let Some(url) = artifact.url.as_deref() {
+            let kind = artifact.kind.as_deref().unwrap_or(&artifact.name);
+            let _ = observation
+                .store
+                .record_url_artifact(&observation.run.id, kind, url);
+        }
+        if let Some(path) = artifact.path.as_deref() {
+            let path = resolve_bench_artifact_path(path, run_dir);
+            record_if_exists(observation, "bench_artifact", path);
+        }
     }
 }
 
@@ -366,10 +374,21 @@ mod tests {
             results.scenarios[0].artifacts.insert(
                 "transcript".to_string(),
                 BenchArtifact {
-                    path: "bench-artifacts/cold/transcript.json".to_string(),
+                    path: Some("bench-artifacts/cold/transcript.json".to_string()),
                     url: None,
+                    artifact_type: None,
                     kind: Some("json".to_string()),
                     label: Some("Transcript".to_string()),
+                },
+            );
+            results.scenarios[0].artifacts.insert(
+                "admin".to_string(),
+                BenchArtifact {
+                    path: None,
+                    url: Some("https://example.test/wp-admin/".to_string()),
+                    artifact_type: Some("url".to_string()),
+                    kind: Some("admin_url".to_string()),
+                    label: Some("Admin".to_string()),
                 },
             );
             let workflow = BenchRunWorkflowResult {
@@ -424,6 +443,11 @@ mod tests {
             assert!(kinds.contains(&"bench_results"));
             assert!(kinds.contains(&"resource_summary"));
             assert!(kinds.contains(&"bench_artifact"));
+            assert!(kinds.contains(&"admin_url"));
+            assert!(artifacts
+                .iter()
+                .any(|artifact| artifact.artifact_type == "url"
+                    && artifact.url.as_deref() == Some("https://example.test/wp-admin/")));
         });
     }
 

@@ -181,11 +181,11 @@ pub struct BenchScenario {
     pub passed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<BenchMemory>,
-    /// Optional local artifact pointers produced by the scenario.
+    /// Optional artifact pointers produced by the scenario.
     ///
-    /// Homeboy preserves paths and metadata but does not upload, retain, or
-    /// diff artifact contents. Consumers can correlate artifacts by scenario,
-    /// rig, and run without scraping logs or side-channel files.
+    /// Homeboy preserves paths/URLs and metadata but does not upload, retain,
+    /// or diff artifact contents. Consumers can correlate artifacts by
+    /// scenario, rig, and run without scraping logs or side-channel files.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub artifacts: BTreeMap<String, BenchArtifact>,
     /// Per-run raw metric snapshots when `homeboy bench --runs N` is used.
@@ -588,6 +588,12 @@ mod tests {
                         },
                         "final_output": {
                             "path": "artifacts/agent-loop/final.md"
+                        },
+                        "frontend": {
+                            "type": "url",
+                            "kind": "frontend_url",
+                            "url": "https://example.test/",
+                            "label": "Frontend"
                         }
                     }
                 }
@@ -597,10 +603,10 @@ mod tests {
         let parsed = parse_bench_results_str(raw).unwrap();
         let artifacts = &parsed.scenarios[0].artifacts;
 
-        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts.len(), 3);
         assert_eq!(
-            artifacts["transcript"].path,
-            "artifacts/agent-loop/transcript.json"
+            artifacts["transcript"].path.as_deref(),
+            Some("artifacts/agent-loop/transcript.json")
         );
         assert_eq!(artifacts["transcript"].kind.as_deref(), Some("json"));
         assert_eq!(
@@ -608,14 +614,21 @@ mod tests {
             Some("Agent transcript")
         );
         assert_eq!(
-            artifacts["final_output"].path,
-            "artifacts/agent-loop/final.md"
+            artifacts["final_output"].path.as_deref(),
+            Some("artifacts/agent-loop/final.md")
         );
         assert_eq!(artifacts["final_output"].kind, None);
+        assert_eq!(artifacts["frontend"].artifact_type.as_deref(), Some("url"));
+        assert_eq!(artifacts["frontend"].kind.as_deref(), Some("frontend_url"));
+        assert_eq!(
+            artifacts["frontend"].url.as_deref(),
+            Some("https://example.test/")
+        );
 
         let serialized = serde_json::to_string(&parsed).unwrap();
         assert!(serialized.contains("\"artifacts\""));
         assert!(serialized.contains("artifacts/agent-loop/transcript.json"));
+        assert!(serialized.contains("https://example.test/"));
     }
 
     #[test]

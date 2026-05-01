@@ -82,7 +82,7 @@ fn test_open_initialized() {
 
         assert!(status.exists);
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 3);
+        assert_eq!(status.migration_count, 4);
         assert_eq!(status.table_count, 6);
     });
 }
@@ -97,7 +97,7 @@ fn initialization_is_idempotent() {
         let status = second.status().expect("status");
 
         assert_eq!(status.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 3);
+        assert_eq!(status.migration_count, 4);
         assert_eq!(status.table_count, 6);
     });
 }
@@ -329,13 +329,40 @@ fn test_record_artifact() {
         assert_eq!(artifacts, vec![artifact.clone()]);
         assert_eq!(artifact.run_id, run.id);
         assert_eq!(artifact.kind, "trace-results");
+        assert_eq!(artifact.artifact_type, "file");
         assert_eq!(artifact.path, artifact_path.to_string_lossy());
+        assert_eq!(artifact.url, None);
         assert_eq!(artifact.size_bytes, Some(17));
         assert_eq!(artifact.mime.as_deref(), Some("application/json"));
         assert_eq!(
             artifact.sha256.as_deref(),
             Some("117367705c6e7ef5d779dd71de15a95ee62339e1ef635f08246f8e1ec99167e2")
         );
+    });
+}
+
+#[test]
+fn test_record_url_artifact() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start run");
+
+        let artifact = store
+            .record_url_artifact(&run.id, "frontend_url", "https://example.test/")
+            .expect("record URL artifact");
+        let artifacts = store.list_artifacts(&run.id).expect("list artifacts");
+
+        assert_eq!(artifacts, vec![artifact.clone()]);
+        assert_eq!(artifact.kind, "frontend_url");
+        assert_eq!(artifact.artifact_type, "url");
+        assert_eq!(artifact.path, "https://example.test/");
+        assert_eq!(artifact.url.as_deref(), Some("https://example.test/"));
+        assert_eq!(artifact.sha256, None);
+        assert_eq!(artifact.size_bytes, None);
+        assert_eq!(artifact.mime, None);
     });
 }
 
