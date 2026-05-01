@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.142.1] - 2026-05-01
+
+### Changed
+- cover observation finding records
+
+### Fixed
+- prioritize compare deltas
+- diagnose non-monotonic phase spans
+
 ## [0.142.0] - 2026-05-01
 
 ### Added
