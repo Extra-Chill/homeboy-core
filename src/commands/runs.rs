@@ -7,7 +7,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
 
-use homeboy::observation::{ArtifactRecord, ObservationStore, RunListFilter, RunRecord};
+use homeboy::observation::{ArtifactRecord, ObservationStore, RunListFilter, RunRecord, RunStatus};
 use homeboy::Error;
 
 use super::{CmdResult, GlobalArgs};
@@ -18,6 +18,7 @@ use bundle::{
 use findings::{RunsFindingOutput, RunsFindingsOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
+const RUN_OWNER_METADATA_KEY: &str = "homeboy_run_owner";
 
 #[derive(Args)]
 pub struct RunsArgs {
@@ -29,6 +30,8 @@ pub struct RunsArgs {
 enum RunsCommand {
     /// List persisted observation runs
     List(RunsListArgs),
+    /// Mark orphaned running observation records stale
+    Reconcile(RunsReconcileArgs),
     /// Show one persisted observation run
     Show { run_id: String },
     /// List artifacts recorded for one run
@@ -62,6 +65,16 @@ pub struct RunsListArgs {
     pub limit: i64,
 }
 
+#[derive(Args, Clone, Default)]
+pub struct RunsReconcileArgs {
+    /// Preview orphaned running records without mutating them
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Maximum running records to inspect
+    #[arg(long, default_value_t = 1000)]
+    pub limit: i64,
+}
+
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum RunsOutput {
@@ -72,6 +85,7 @@ pub enum RunsOutput {
     Finding(RunsFindingOutput),
     BenchHistory(BenchHistoryOutput),
     BenchCompare(BenchCompareOutput),
+    Reconcile(RunsReconcileOutput),
     Export(RunsExportOutput),
     Import(RunsImportOutput),
 }
@@ -144,6 +158,29 @@ pub struct RunSummary {
     pub git_sha: Option<String>,
     pub command: Option<String>,
     pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_note: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RunsReconcileOutput {
+    pub command: &'static str,
+    pub dry_run: bool,
+    pub inspected: usize,
+    pub reconciled: Vec<ReconciledRunSummary>,
+}
+
+#[derive(Serialize)]
+pub struct ReconciledRunSummary {
+    pub id: String,
+    pub kind: String,
+    pub previous_status: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub owner_pid: u32,
+    pub reason: String,
+    pub artifact_count: usize,
 }
 
 #[derive(Serialize)]
@@ -175,6 +212,7 @@ pub struct BenchMissingMetric {
 pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
     match args.command {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
+        RunsCommand::Reconcile(args) => reconcile_runs(args),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
         RunsCommand::Findings(args) => findings::findings(args),
@@ -182,6 +220,78 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
     }
+}
+
+fn reconcile_runs(args: RunsReconcileArgs) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    let inspected = store
+        .list_runs(RunListFilter {
+            status: Some(RunStatus::Running.as_str().to_string()),
+            limit: Some(args.limit.clamp(1, 1000)),
+            ..RunListFilter::default()
+        })?
+        .len();
+    let reconciled =
+        reconcile_orphaned_running_runs(&store, args.limit, args.dry_run, pid_is_running)?;
+
+    Ok((
+        RunsOutput::Reconcile(RunsReconcileOutput {
+            command: "runs.reconcile",
+            dry_run: args.dry_run,
+            inspected,
+            reconciled,
+        }),
+        0,
+    ))
+}
+
+fn reconcile_orphaned_running_runs<F>(
+    store: &ObservationStore,
+    limit: i64,
+    dry_run: bool,
+    pid_is_alive: F,
+) -> homeboy::Result<Vec<ReconciledRunSummary>>
+where
+    F: Fn(u32) -> bool,
+{
+    let running = store.list_runs(RunListFilter {
+        status: Some(RunStatus::Running.as_str().to_string()),
+        limit: Some(limit.clamp(1, 1000)),
+        ..RunListFilter::default()
+    })?;
+    let mut reconciled = Vec::new();
+
+    for run in running {
+        let Some(owner_pid) = run_owner_pid(&run) else {
+            continue;
+        };
+        if pid_is_alive(owner_pid) {
+            continue;
+        }
+
+        let reason = "owner_process_not_running".to_string();
+        let artifact_count = store.list_artifacts(&run.id)?.len();
+        let finished = if dry_run {
+            None
+        } else {
+            let metadata = with_reconcile_metadata(&run, owner_pid, &reason);
+            Some(store.finish_run(&run.id, RunStatus::Stale, Some(metadata))?)
+        };
+
+        reconciled.push(ReconciledRunSummary {
+            id: run.id,
+            kind: run.kind,
+            previous_status: run.status,
+            status: RunStatus::Stale.as_str().to_string(),
+            started_at: run.started_at,
+            finished_at: finished.and_then(|run| run.finished_at),
+            owner_pid,
+            reason,
+            artifact_count,
+        });
+    }
+
+    Ok(reconciled)
 }
 
 pub fn list_runs(args: RunsListArgs, command: &'static str) -> CmdResult<RunsOutput> {
@@ -353,6 +463,7 @@ fn run_detail(store: &ObservationStore, run: RunRecord) -> homeboy::Result<RunDe
 }
 
 fn run_summary(run: RunRecord) -> RunSummary {
+    let status_note = running_status_note(&run);
     RunSummary {
         id: run.id,
         kind: run.kind,
@@ -364,6 +475,75 @@ fn run_summary(run: RunRecord) -> RunSummary {
         git_sha: run.git_sha,
         command: run.command,
         cwd: run.cwd,
+        status_note,
+    }
+}
+
+fn running_status_note(run: &RunRecord) -> Option<String> {
+    if run.status != RunStatus::Running.as_str() {
+        return None;
+    }
+
+    let Some(owner_pid) = run_owner_pid(run) else {
+        return Some(
+            "running status has no owner metadata; run may predate reconciliation support"
+                .to_string(),
+        );
+    };
+
+    if pid_is_running(owner_pid) {
+        None
+    } else {
+        Some(
+            "owner process is not running; run may be stale; run `homeboy runs reconcile`"
+                .to_string(),
+        )
+    }
+}
+
+fn run_owner_pid(run: &RunRecord) -> Option<u32> {
+    run.metadata_json
+        .get(RUN_OWNER_METADATA_KEY)
+        .and_then(|owner| owner.get("pid"))
+        .or_else(|| run.metadata_json.get("owner_pid"))
+        .or_else(|| run.metadata_json.get("process_id"))
+        .and_then(|pid| pid.as_u64())
+        .and_then(|pid| u32::try_from(pid).ok())
+}
+
+fn with_reconcile_metadata(run: &RunRecord, owner_pid: u32, reason: &str) -> Value {
+    let mut metadata = run.metadata_json.clone();
+    let marker = serde_json::json!({
+        "status": RunStatus::Stale.as_str(),
+        "reason": reason,
+        "owner_pid": owner_pid,
+        "reconciled_at": chrono::Utc::now().to_rfc3339(),
+    });
+
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert("homeboy_reconciled".to_string(), marker);
+        return metadata;
+    }
+
+    serde_json::json!({
+        "homeboy_reconciled": marker,
+        "homeboy_original_metadata": metadata,
+    })
+}
+
+fn pid_is_running(pid: u32) -> bool {
+    if pid > i32::MAX as u32 {
+        return false;
+    }
+
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, 0) == 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        pid == std::process::id()
     }
 }
 
@@ -512,6 +692,107 @@ mod tests {
             assert_eq!(output.runs.len(), 1);
             assert_eq!(output.runs[0].id, bench.id);
         });
+    }
+
+    #[test]
+    fn reconcile_marks_dead_owner_stale_and_preserves_artifacts() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run(
+                    "bench",
+                    "homeboy",
+                    "studio",
+                    serde_json::json!({ "scenario": "fixture" }),
+                ))
+                .expect("run");
+            let artifact_path = home.path().join("bench-results.json");
+            std::fs::write(&artifact_path, b"{}").expect("artifact");
+            store
+                .record_artifact(&run.id, "bench_results", &artifact_path)
+                .expect("record artifact");
+
+            let reconciled =
+                reconcile_orphaned_running_runs(&store, 1000, false, |_| false).expect("reconcile");
+            let updated = store
+                .get_run(&run.id)
+                .expect("get run")
+                .expect("run exists");
+
+            assert_eq!(reconciled.len(), 1);
+            assert_eq!(reconciled[0].id, run.id);
+            assert_eq!(reconciled[0].previous_status, "running");
+            assert_eq!(reconciled[0].status, "stale");
+            assert_eq!(reconciled[0].artifact_count, 1);
+            assert_eq!(updated.status, "stale");
+            assert!(updated.finished_at.is_some());
+            assert_eq!(updated.metadata_json["scenario"], "fixture");
+            assert_eq!(
+                updated.metadata_json["homeboy_reconciled"]["status"],
+                "stale"
+            );
+            assert_eq!(store.list_artifacts(&run.id).expect("artifacts").len(), 1);
+        });
+    }
+
+    #[test]
+    fn reconcile_dry_run_reports_without_mutating() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("trace", "homeboy", "studio", Value::Null))
+                .expect("run");
+
+            let reconciled =
+                reconcile_orphaned_running_runs(&store, 1000, true, |_| false).expect("reconcile");
+            let unchanged = store
+                .get_run(&run.id)
+                .expect("get run")
+                .expect("run exists");
+
+            assert_eq!(reconciled.len(), 1);
+            assert!(reconciled[0].finished_at.is_none());
+            assert_eq!(unchanged.status, "running");
+            assert!(unchanged.finished_at.is_none());
+        });
+    }
+
+    #[test]
+    fn running_summary_flags_unverifiable_and_dead_owner_records() {
+        let base = RunRecord {
+            id: "run-1".to_string(),
+            kind: "bench".to_string(),
+            component_id: Some("homeboy".to_string()),
+            started_at: "2026-05-01T00:00:00Z".to_string(),
+            finished_at: None,
+            status: "running".to_string(),
+            command: Some("homeboy bench".to_string()),
+            cwd: Some("/tmp".to_string()),
+            homeboy_version: Some("test".to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some("studio".to_string()),
+            metadata_json: serde_json::json!({}),
+        };
+
+        let unverifiable = run_summary(base.clone());
+        assert!(unverifiable
+            .status_note
+            .as_deref()
+            .expect("status note")
+            .contains("no owner metadata"));
+
+        let mut dead_owner = base;
+        dead_owner.metadata_json = serde_json::json!({
+            "homeboy_run_owner": { "pid": u32::MAX }
+        });
+        let dead_owner = run_summary(dead_owner);
+        assert!(dead_owner
+            .status_note
+            .as_deref()
+            .expect("status note")
+            .contains("owner process is not running"));
     }
 
     #[test]

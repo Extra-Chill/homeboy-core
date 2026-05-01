@@ -162,7 +162,7 @@ impl ObservationStore {
         validate_required("kind", &run.kind)?;
         let id = Uuid::new_v4().to_string();
         let started_at = chrono::Utc::now().to_rfc3339();
-        let metadata_json = serialize_metadata(&run.metadata_json)?;
+        let metadata_json = serialize_metadata(&with_run_owner_metadata(run.metadata_json))?;
 
         self.connection
             .execute(
@@ -887,6 +887,23 @@ fn ensure_identical<T: PartialEq>(kind: &str, id: &str, existing: &T, incoming: 
 fn serialize_metadata(metadata_json: &serde_json::Value) -> Result<String> {
     serde_json::to_string(metadata_json).map_err(|e| {
         Error::internal_json(e.to_string(), Some("serialize run metadata".to_string()))
+    })
+}
+
+fn with_run_owner_metadata(mut metadata: serde_json::Value) -> serde_json::Value {
+    let owner = serde_json::json!({
+        "pid": std::process::id(),
+        "recorded_at": chrono::Utc::now().to_rfc3339(),
+    });
+
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert("homeboy_run_owner".to_string(), owner);
+        return metadata;
+    }
+
+    serde_json::json!({
+        "homeboy_run_owner": owner,
+        "homeboy_original_metadata": metadata,
     })
 }
 
