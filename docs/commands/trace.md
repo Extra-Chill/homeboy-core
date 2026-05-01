@@ -117,7 +117,7 @@ Each repeat uses a fresh Homeboy run directory, so completed run data is preserv
 
 ## Compare Aggregates
 
-Use `trace compare` to compare two aggregate span JSON outputs. The comparison reports each span's before/after median and average, absolute deltas, and percentage deltas. Spans are sorted by absolute median delta descending so the largest changes are first; spans that only exist in one file are included with unavailable deltas after comparable spans. Markdown reports bold non-zero absolute deltas to make regressions and improvements easier to scan.
+Use `trace compare` to compare two aggregate span JSON outputs. The comparison reports each span's before/after median and average, absolute deltas, and percentage deltas. Spans that only exist in one file are included with unavailable deltas.
 
 ```sh
 homeboy trace compare before.json after.json
