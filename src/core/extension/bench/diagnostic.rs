@@ -91,7 +91,7 @@ mod tests {
     use crate::extension::bench::parsing::{BenchMetrics, BenchRunSnapshot, BenchScenario};
 
     #[test]
-    fn collects_workload_emitted_diagnostics_with_default_sources() {
+    fn test_collect_diagnostics() {
         let run_diagnostic = diagnostic("setup_failed");
         let scenario_diagnostic = diagnostic("fixture_missing");
         let snapshot_diagnostic = diagnostic("assertion_mismatch");
