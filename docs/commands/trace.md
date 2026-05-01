@@ -85,6 +85,8 @@ Runners can emit `span_definitions`, or callers can pass repeatable `--span id:f
 
 If an endpoint is missing, Homeboy emits a skipped result with `missing` keys instead of panicking.
 
+When a timeline contains repeated events with the same key, Homeboy resolves the span to the nearest valid `from`/`to` pair where the `to` event occurs at or after the `from` event. This keeps simple `source.event` span definitions stable for common lifecycle events that naturally repeat.
+
 ## Repeat And Aggregate
 
 Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, `max_ms`, and `failures` counts.
