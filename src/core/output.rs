@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn observation_output_metadata_serializes_drill_down_commands() {
+    fn test_for_run() {
         let metadata = ObservationOutputMetadata::for_run("review", "run-123");
         let json = serde_json::to_value(metadata).expect("serialize observation metadata");
 
@@ -71,6 +71,60 @@ mod tests {
             json["details"]["export_bundle"],
             "homeboy runs export --run run-123 --output homeboy-observations"
         );
+    }
+
+    #[test]
+    fn test_exit_code() {
+        let clean = BatchResult::new();
+        assert_eq!(clean.exit_code(), 0);
+
+        let mut failed = BatchResult::new();
+        failed.record_error("item".to_string(), "failed".to_string());
+        assert_eq!(failed.exit_code(), 1);
+    }
+
+    #[test]
+    fn test_record_created() {
+        let mut result = BatchResult::new();
+        result.record_created("alpha".to_string());
+
+        assert_eq!(result.created, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "created");
+        assert_eq!(result.items[0].error, None);
+    }
+
+    #[test]
+    fn test_record_updated() {
+        let mut result = BatchResult::new();
+        result.record_updated("alpha".to_string());
+
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "updated");
+        assert_eq!(result.items[0].error, None);
+    }
+
+    #[test]
+    fn test_record_skipped() {
+        let mut result = BatchResult::new();
+        result.record_skipped("alpha".to_string());
+
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "skipped");
+        assert_eq!(result.items[0].error, None);
+    }
+
+    #[test]
+    fn test_record_error() {
+        let mut result = BatchResult::new();
+        result.record_error("alpha".to_string(), "boom".to_string());
+
+        assert_eq!(result.errors, 1);
+        assert_eq!(result.items[0].id, "alpha");
+        assert_eq!(result.items[0].status, "error");
+        assert_eq!(result.items[0].error.as_deref(), Some("boom"));
     }
 }
 
