@@ -101,6 +101,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             aggregate: None,
             spans: Vec::new(),
             phases: Vec::new(),
+            phase_preset: None,
             baseline_args: BaselineArgs::default(),
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
@@ -188,6 +189,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             aggregate: None,
             spans: Vec::new(),
             phases: Vec::new(),
+            phase_preset: None,
             baseline_args: BaselineArgs::default(),
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
@@ -232,6 +234,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 aggregate: None,
                 spans: Vec::new(),
                 phases: Vec::new(),
+                phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -283,6 +286,7 @@ fn trace_run_persists_observation_history() {
                 aggregate: None,
                 spans: Vec::new(),
                 phases: Vec::new(),
+                phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -357,6 +361,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 aggregate: Some("spans".to_string()),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -538,7 +543,7 @@ fn trace_compare_markdown_renders_span_table() {
     assert!(markdown.contains("| Span | before median | after median | median delta | median % | before avg | after avg | avg delta | avg % |"));
     assert!(markdown.contains(
             "| `boot_to_ready` | 100ms | 125ms | +25ms | +25.0% | 110.0ms | 121.0ms | +11.0ms | +10.0% |"
-        ));
+    ));
 }
 
 #[test]
@@ -575,6 +580,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                         key: "runner.ready".to_string(),
                     },
                 ],
+                phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -604,6 +610,117 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                 );
             }
             _ => panic!("expected run output"),
+        }
+    });
+}
+
+#[test]
+fn trace_run_expands_named_workload_phase_preset() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        write_trace_rig_with_phase_preset(home, "preset-rig", "studio", component_dir.path());
+
+        let (output, exit_code) = run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("studio".to_string()),
+                    path: None,
+                },
+                scenario: "studio-app-create-site".to_string(),
+                compare_after: None,
+                rig: Some("preset-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                repeat: 1,
+                aggregate: None,
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: Some("startup".to_string()),
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: Vec::new(),
+                keep_overlay: false,
+            },
+            &GlobalArgs {},
+        )
+        .expect("preset trace should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Run(result) => {
+                let results = result.results.expect("results");
+                let span_ids = results
+                    .span_results
+                    .iter()
+                    .map(|span| (span.id.as_str(), span.duration_ms))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    span_ids,
+                    vec![
+                        ("phase.boot_to_ready", Some(125)),
+                        ("phase.total", Some(125))
+                    ]
+                );
+            }
+            _ => panic!("expected run output"),
+        }
+    });
+}
+
+#[test]
+fn trace_aggregate_spans_uses_workload_default_phase_preset() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        write_trace_rig_with_phase_preset(home, "preset-rig", "studio", component_dir.path());
+
+        let (output, exit_code) = run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("studio".to_string()),
+                    path: None,
+                },
+                scenario: "studio-app-create-site".to_string(),
+                compare_after: None,
+                rig: Some("preset-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                repeat: 2,
+                aggregate: Some("spans".to_string()),
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: None,
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: Vec::new(),
+                keep_overlay: false,
+            },
+            &GlobalArgs {},
+        )
+        .expect("aggregate trace should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Aggregate(aggregate) => {
+                let span_ids = aggregate
+                    .spans
+                    .iter()
+                    .map(|span| span.id.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(span_ids, vec!["phase.boot_to_ready", "phase.total"]);
+            }
+            _ => panic!("expected aggregate output"),
         }
     });
 }
@@ -726,6 +843,7 @@ fn failed_trace_run_persists_observation_history() {
                 aggregate: None,
                 spans: Vec::new(),
                 phases: Vec::new(),
+                phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -877,6 +995,38 @@ fn write_trace_rig(
                     "trace_workloads": {{ "nodejs": [
                         "${{components.{component_id}.path}}/studio-app-create-site.trace.mjs",
                         "${{components.{component_id}.path}}/studio-list-sites.trace.mjs"
+                    ] }}
+                }}"#,
+            path.display()
+        ),
+    )
+    .expect("write rig");
+}
+
+fn write_trace_rig_with_phase_preset(
+    home: &tempfile::TempDir,
+    rig_id: &str,
+    component_id: &str,
+    path: &std::path::Path,
+) {
+    let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+    fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+    fs::write(
+        rig_dir.join(format!("{}.json", rig_id)),
+        format!(
+            r#"{{
+                    "components": {{
+                        "{component_id}": {{ "path": "{}" }}
+                    }},
+                    "trace_workloads": {{ "nodejs": [
+                        {{
+                            "path": "${{components.{component_id}.path}}/studio-app-create-site.trace.mjs",
+                            "check_groups": [],
+                            "trace_default_phase_preset": "startup",
+                            "trace_phase_presets": {{
+                                "startup": ["boot:runner.boot", "ready:runner.ready"]
+                            }}
+                        }}
                     ] }}
                 }}"#,
             path.display()

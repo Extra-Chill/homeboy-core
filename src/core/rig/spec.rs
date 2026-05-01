@@ -244,6 +244,12 @@ pub struct WorkloadEntry {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_groups: Option<Vec<String>>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_phase_presets: HashMap<String, Vec<String>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_default_phase_preset: Option<String>,
 }
 
 impl WorkloadSpec {
@@ -258,6 +264,23 @@ impl WorkloadSpec {
         match self {
             WorkloadSpec::Path(_) => None,
             WorkloadSpec::Detailed(entry) => entry.check_groups.as_deref(),
+        }
+    }
+
+    pub fn trace_phase_preset(&self, name: &str) -> Option<&[String]> {
+        match self {
+            WorkloadSpec::Path(_) => None,
+            WorkloadSpec::Detailed(entry) => entry
+                .trace_phase_presets
+                .get(name)
+                .map(|phases| phases.as_slice()),
+        }
+    }
+
+    pub fn trace_default_phase_preset(&self) -> Option<&str> {
+        match self {
+            WorkloadSpec::Path(_) => None,
+            WorkloadSpec::Detailed(entry) => entry.trace_default_phase_preset.as_deref(),
         }
     }
 }
