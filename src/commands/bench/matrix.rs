@@ -563,6 +563,7 @@ mod tests {
             args: Vec::new(),
             _json: HiddenJsonArgs::default(),
             json_summary: false,
+            report: Vec::new(),
             rig: vec!["rig".to_string()],
             rig_order: crate::commands::bench::BenchRigOrder::Input,
             scenario_ids: Vec::new(),
