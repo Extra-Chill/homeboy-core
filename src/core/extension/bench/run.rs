@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 
@@ -722,27 +721,12 @@ fn is_secret_like_env_key(key: &str) -> bool {
 }
 
 fn source_revision_at(path: &Path) -> Option<String> {
-    git_short_revision_at(path).or_else(|| {
+    crate::git::short_head_revision_at(path).or_else(|| {
         std::fs::read_to_string(path.join(".source-revision"))
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })
-}
-
-fn git_short_revision_at(path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(path)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!revision.is_empty()).then_some(revision)
 }
 
 fn run_sequential_runs(

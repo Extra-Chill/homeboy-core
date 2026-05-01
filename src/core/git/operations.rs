@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::process::Command;
 
 use crate::config::read_json_spec_to_string;
@@ -1073,6 +1074,22 @@ pub fn get_head_commit(path: &str) -> Result<String> {
     crate::engine::command::run_in(path, "git", &["rev-parse", "HEAD"], "get HEAD commit")
 }
 
+/// Get the current HEAD short commit SHA, returning `None` outside git checkouts.
+pub fn short_head_revision_at(path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(path)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!revision.is_empty()).then_some(revision)
+}
+
 /// Fetch from remote and return count of commits behind upstream.
 /// Returns Ok(Some(n)) if behind by n commits, Ok(None) if not behind or no upstream.
 pub fn fetch_and_get_behind_count(path: &str) -> Result<Option<u32>> {
@@ -1659,5 +1676,15 @@ mod tests {
             "--force-with-lease should be a known flag, got: {}",
             out.stderr
         );
+    }
+
+    #[test]
+    fn test_short_head_revision_at() {
+        let (_dir, path) = init_repo_with_initial_commit();
+
+        let revision = short_head_revision_at(Path::new(&path)).expect("short revision");
+
+        assert!(!revision.is_empty());
+        assert!(revision.len() <= 12, "unexpected short sha: {revision}");
     }
 }
