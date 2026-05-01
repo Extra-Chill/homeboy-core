@@ -415,6 +415,20 @@ fn trace_compare_reports_median_and_average_deltas() {
                 failures: 0,
             },
             TraceAggregateSpanInput {
+                id: "large_improvement".to_string(),
+                n: 5,
+                median_ms: Some(300),
+                avg_ms: Some(300.0),
+                failures: 0,
+            },
+            TraceAggregateSpanInput {
+                id: "large_regression".to_string(),
+                n: 5,
+                median_ms: Some(80),
+                avg_ms: Some(80.0),
+                failures: 0,
+            },
+            TraceAggregateSpanInput {
                 id: "before_only".to_string(),
                 n: 5,
                 median_ms: Some(25),
@@ -435,6 +449,20 @@ fn trace_compare_reports_median_and_average_deltas() {
                 failures: 0,
             },
             TraceAggregateSpanInput {
+                id: "large_improvement".to_string(),
+                n: 5,
+                median_ms: Some(100),
+                avg_ms: Some(100.0),
+                failures: 0,
+            },
+            TraceAggregateSpanInput {
+                id: "large_regression".to_string(),
+                n: 5,
+                median_ms: Some(200),
+                avg_ms: Some(200.0),
+                failures: 0,
+            },
+            TraceAggregateSpanInput {
                 id: "after_only".to_string(),
                 n: 3,
                 median_ms: Some(75),
@@ -452,7 +480,10 @@ fn trace_compare_reports_median_and_average_deltas() {
     );
 
     assert_eq!(compare.command, "trace.compare.spans");
-    assert_eq!(compare.span_count, 3);
+    assert_eq!(compare.span_count, 5);
+    assert_eq!(compare.spans[0].id, "large_improvement");
+    assert_eq!(compare.spans[1].id, "large_regression");
+    assert_eq!(compare.spans[2].id, "boot_to_ready");
     let changed = compare
         .spans
         .iter()
@@ -537,8 +568,8 @@ fn trace_compare_markdown_renders_span_table() {
     assert!(markdown.contains("# Trace Compare"));
     assert!(markdown.contains("| Span | before median | after median | median delta | median % | before avg | after avg | avg delta | avg % |"));
     assert!(markdown.contains(
-            "| `boot_to_ready` | 100ms | 125ms | +25ms | +25.0% | 110.0ms | 121.0ms | +11.0ms | +10.0% |"
-        ));
+        "| `boot_to_ready` | 100ms | 125ms | **+25ms** | +25.0% | 110.0ms | 121.0ms | **+11.0ms** | +10.0% |"
+    ));
 }
 
 #[test]
