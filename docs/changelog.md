@@ -4,6 +4,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.138.0] - 2026-05-01
+
+### Added
+- feat(obs-store): record audit and test command runs
+- declare sidecar schema contracts
+
+### Changed
+- cover sidecar schema declarations
+
+### Fixed
+- preserve full output artifact with json summary
+- avoid manifest audit churn
+- fix(obs-store): satisfy audit for command observations
+
 ## [0.137.0] - 2026-05-01
 
 ### Added
