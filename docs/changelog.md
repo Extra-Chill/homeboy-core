@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.141.1] - 2026-05-01
+
+### Changed
+- isolate default baseline output coverage
+
+### Fixed
+- handle pathless bench artifacts in provider failures
+- omit merge commits from generated changelogs
+- surface default bench baseline expansion
+
 ## [0.141.0] - 2026-05-01
 
 ### Added
