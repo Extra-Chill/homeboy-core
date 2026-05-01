@@ -152,6 +152,7 @@ mod cases {
             "transcript".to_string(),
             BenchArtifact {
                 path: "artifacts/run-1/transcript.json".to_string(),
+                url: None,
                 kind: Some("json".to_string()),
                 label: Some("Run 1 transcript".to_string()),
             },
@@ -161,6 +162,7 @@ mod cases {
             "transcript".to_string(),
             BenchArtifact {
                 path: "artifacts/run-2/transcript.json".to_string(),
+                url: None,
                 kind: Some("json".to_string()),
                 label: Some("Run 2 transcript".to_string()),
             },

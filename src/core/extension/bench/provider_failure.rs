@@ -330,6 +330,7 @@ mod tests {
             "transcript".to_string(),
             BenchArtifact {
                 path: "bench-artifacts/agent/transcript.txt".to_string(),
+                url: None,
                 kind: Some("text".to_string()),
                 label: None,
             },

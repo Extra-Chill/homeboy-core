@@ -130,6 +130,58 @@ pub struct BenchComparisonOutput {
     pub provider_failure_classes: Vec<BenchProviderFailureClassSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<String>>,
+    pub reports: BenchComparisonReports,
+}
+
+#[derive(Serialize)]
+pub struct BenchComparisonReports {
+    pub side_by_side: BenchSideBySideReport,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct BenchSideBySideReport {
+    pub report: &'static str,
+    pub component: String,
+    pub iterations: u64,
+    pub rigs: Vec<BenchSideBySideRigReport>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct BenchSideBySideRigReport {
+    pub rig_id: String,
+    pub passed: bool,
+    pub status: String,
+    pub exit_code: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub key_metrics: Vec<BenchSideBySideMetric>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<BenchSideBySideArtifact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct BenchSideBySideMetric {
+    pub scenario_id: String,
+    pub name: String,
+    pub value: f64,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct BenchSideBySideArtifact {
+    pub scenario_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_index: Option<usize>,
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Compact cross-rig comparison envelope for operator-facing summary reads.
@@ -273,6 +325,8 @@ pub struct BenchArtifactRef {
     pub name: String,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -309,6 +363,7 @@ fn artifact_ref(
         run_index,
         name: name.to_string(),
         path: artifact.path.clone(),
+        url: artifact.url.clone(),
         kind: artifact.kind.clone(),
         label: artifact.label.clone(),
     }
@@ -742,6 +797,7 @@ pub fn aggregate_comparison_with_axes(
     };
     let axis_diffs = build_axis_diffs(&entries, axes_by_rig);
     let summary = BenchScenarioComparisonSummary::build(&entries);
+    let side_by_side = build_side_by_side_report(&component, iterations, &entries);
 
     let failures: Vec<BenchComparisonFailure> = entries
         .iter()
@@ -801,6 +857,7 @@ pub fn aggregate_comparison_with_axes(
             failures,
             provider_failure_classes,
             hints: Some(hints),
+            reports: BenchComparisonReports { side_by_side },
         },
         exit_code,
     )
@@ -823,6 +880,105 @@ fn summarize_provider_failure_classes(
         .into_iter()
         .map(|(class, rigs)| BenchProviderFailureClassSummary { class, rigs })
         .collect()
+}
+
+fn build_side_by_side_report(
+    component: &str,
+    iterations: u64,
+    entries: &[RigBenchEntry],
+) -> BenchSideBySideReport {
+    BenchSideBySideReport {
+        report: "side_by_side",
+        component: component.to_string(),
+        iterations,
+        rigs: entries.iter().map(side_by_side_rig_report).collect(),
+    }
+}
+
+fn side_by_side_rig_report(entry: &RigBenchEntry) -> BenchSideBySideRigReport {
+    let key_metrics = entry
+        .results
+        .as_ref()
+        .map(side_by_side_key_metrics)
+        .unwrap_or_default();
+
+    BenchSideBySideRigReport {
+        rig_id: entry.rig_id.clone(),
+        passed: entry.passed,
+        status: entry.status.clone(),
+        exit_code: entry.exit_code,
+        elapsed_ms: entry.results.as_ref().and_then(total_elapsed_ms),
+        key_metrics,
+        artifacts: entry.artifacts.iter().map(side_by_side_artifact).collect(),
+        failure_reason: failure_reason(entry),
+    }
+}
+
+fn side_by_side_key_metrics(results: &BenchResults) -> Vec<BenchSideBySideMetric> {
+    let mut metrics = Vec::new();
+    for scenario in &results.scenarios {
+        for (name, value) in comparison_metrics(scenario) {
+            metrics.push(BenchSideBySideMetric {
+                scenario_id: scenario.id.clone(),
+                name,
+                value,
+            });
+        }
+    }
+    metrics
+}
+
+fn total_elapsed_ms(results: &BenchResults) -> Option<f64> {
+    let mut total = 0.0;
+    let mut found = false;
+    for scenario in &results.scenarios {
+        let elapsed = scenario
+            .metrics
+            .get("elapsed_ms")
+            .or_else(|| scenario.metrics.get("duration_ms"));
+        if let Some(value) = elapsed {
+            total += value;
+            found = true;
+        }
+    }
+    found.then_some(total)
+}
+
+fn side_by_side_artifact(artifact: &BenchArtifactRef) -> BenchSideBySideArtifact {
+    BenchSideBySideArtifact {
+        scenario_id: artifact.scenario_id.clone(),
+        run_index: artifact.run_index,
+        name: artifact.name.clone(),
+        path: artifact.path.clone(),
+        url: artifact
+            .url
+            .clone()
+            .or_else(|| url_from_artifact_path(&artifact.path)),
+        kind: artifact.kind.clone(),
+        label: artifact.label.clone(),
+    }
+}
+
+fn url_from_artifact_path(path: &str) -> Option<String> {
+    (path.starts_with("http://") || path.starts_with("https://")).then(|| path.to_string())
+}
+
+fn failure_reason(entry: &RigBenchEntry) -> Option<String> {
+    if let Some(failure) = &entry.failure {
+        return Some(failure.stderr_tail.clone());
+    }
+
+    entry.results.as_ref().and_then(|results| {
+        results.scenarios.iter().find_map(|scenario| {
+            scenario
+                .gate_results
+                .iter()
+                .find_map(|result| (!result.passed).then(|| result.reason.clone()).flatten())
+                .or_else(|| {
+                    (!scenario.passed).then(|| format!("scenario `{}` failed", scenario.id))
+                })
+        })
+    })
 }
 
 fn build_axis_diffs(
@@ -1035,6 +1191,21 @@ mod tests {
     fn artifact(path: &str, kind: Option<&str>, label: Option<&str>) -> BenchArtifact {
         BenchArtifact {
             path: path.to_string(),
+            url: None,
+            kind: kind.map(str::to_string),
+            label: label.map(str::to_string),
+        }
+    }
+
+    fn artifact_with_url(
+        path: &str,
+        url: &str,
+        kind: Option<&str>,
+        label: Option<&str>,
+    ) -> BenchArtifact {
+        BenchArtifact {
+            path: path.to_string(),
+            url: Some(url.to_string()),
             kind: kind.map(str::to_string),
             label: label.map(str::to_string),
         }
@@ -1381,6 +1552,78 @@ mod tests {
             value["rigs"][1]["artifacts"][0]["path"],
             "candidate/run-0/raw.json"
         );
+    }
+
+    #[test]
+    fn side_by_side_report_summarizes_multi_rig_results() {
+        let mut baseline_scenario = scenario_with_metric_groups(
+            "site-build",
+            &[("elapsed_ms", 12_000.0), ("block_count", 42.0)],
+            &[("prompt", &[("hash_match", 1.0)])],
+        );
+        baseline_scenario.artifacts.insert(
+            "site".to_string(),
+            artifact_with_url(
+                "sites/baseline",
+                "https://baseline.example.test",
+                Some("site"),
+                Some("Baseline site"),
+            ),
+        );
+
+        let mut candidate_scenario = scenario_with_metric_groups(
+            "site-build",
+            &[("elapsed_ms", 8_000.0), ("block_count", 43.0)],
+            &[("prompt", &[("hash_match", 1.0)])],
+        );
+        candidate_scenario.artifacts.insert(
+            "site".to_string(),
+            artifact(
+                "https://candidate.example.test",
+                Some("site"),
+                Some("Candidate site"),
+            ),
+        );
+
+        let entries = vec![
+            entry(
+                "studio-agent-sdk",
+                true,
+                Some(results(vec![baseline_scenario])),
+            ),
+            entry("studio-bfb", true, Some(results(vec![candidate_scenario]))),
+            failed_entry_with_stderr("studio-broken"),
+        ];
+
+        let (out, exit) = aggregate_comparison("studio".into(), 10, entries);
+        let report = &out.reports.side_by_side;
+
+        assert_eq!(exit, 2);
+        assert_eq!(report.report, "side_by_side");
+        assert_eq!(report.component, "studio");
+        assert_eq!(report.iterations, 10);
+        assert_eq!(report.rigs.len(), 3);
+        assert_eq!(report.rigs[0].rig_id, "studio-agent-sdk");
+        assert_eq!(report.rigs[0].elapsed_ms, Some(12_000.0));
+        assert!(report.rigs[0].key_metrics.contains(&BenchSideBySideMetric {
+            scenario_id: "site-build".to_string(),
+            name: "prompt.hash_match".to_string(),
+            value: 1.0,
+        }));
+        assert_eq!(
+            report.rigs[0].artifacts[0].url.as_deref(),
+            Some("https://baseline.example.test")
+        );
+        assert_eq!(
+            report.rigs[1].artifacts[0].url.as_deref(),
+            Some("https://candidate.example.test")
+        );
+        assert_eq!(report.rigs[2].status, "failed");
+        assert!(report.rigs[2]
+            .failure_reason
+            .as_deref()
+            .unwrap()
+            .contains("Homeboy bench helper not found"));
     }
 
     #[test]

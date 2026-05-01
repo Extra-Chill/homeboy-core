@@ -149,6 +149,11 @@ pub struct BenchRunArgs {
     #[arg(long)]
     json_summary: bool,
 
+    /// Include a combined comparison report artifact. Currently supports
+    /// `side-by-side` for multi-rig bench comparisons.
+    #[arg(long = "report", value_enum)]
+    report: Vec<BenchReportFormat>,
+
     /// Run bench against one or more homeboy rigs.
     ///
     /// **Single rig** (`--rig <id>`): pins the rig, runs `rig check`
@@ -208,6 +213,11 @@ pub enum BenchRigOrder {
     Reverse,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum BenchReportFormat {
+    SideBySide,
+}
+
 /// Filter out homeboy-owned flags from trailing args before passing to
 /// extension scripts.
 ///
@@ -235,6 +245,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--scenario",
         "--profile",
         "--rig-order",
+        "--report",
         "--rig",
         "--setting",
         "--path",
@@ -321,6 +332,7 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     // No --rig: legacy single bare run. No rig pinning, no rig
     // snapshot, baseline key untouched. Identical to before this PR.
     if run_args.rig.is_empty() {
+        validate_report_selection_for_single_run(run_args)?;
         let (output, exit) = matrix::run_single(run_args, &passthrough_args, None)?;
         return Ok((BenchOutput::Single(output), exit));
     }
@@ -344,6 +356,7 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     // one rig-state snapshot. Rigs with only default_component keep the
     // legacy one-component shape.
     if run_args.rig.len() == 1 {
+        validate_report_selection_for_single_run(run_args)?;
         let rig_id = run_args.rig[0].clone();
         let (output, exit) = matrix::run_single_rig(run_args, &passthrough_args, rig_id)?;
         return Ok((BenchOutput::Single(output), exit));
@@ -433,6 +446,19 @@ fn ordered_rig_ids(args: &BenchRunArgs) -> Vec<String> {
         rig_ids.reverse();
     }
     rig_ids
+}
+
+fn validate_report_selection_for_single_run(args: &BenchRunArgs) -> homeboy::Result<()> {
+    if args.report.is_empty() {
+        return Ok(());
+    }
+
+    Err(homeboy::Error::validation_invalid_argument(
+        "--report",
+        "Bench reports are only available for multi-rig comparisons. Pass two or more --rig values, for example: --rig baseline,candidate --report side-by-side.",
+        None,
+        None,
+    ))
 }
 
 fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {

@@ -278,6 +278,7 @@ fn run_args(component: Option<&str>, rig: Vec<String>, scenario_ids: Vec<String>
             args: Vec::new(),
             _json: HiddenJsonArgs::default(),
             json_summary: false,
+            report: Vec::new(),
             rig,
             rig_order: BenchRigOrder::Input,
             scenario_ids,
@@ -1032,6 +1033,21 @@ fn parses_warmup_flag() {
 }
 
 #[test]
+fn parses_side_by_side_report_flag() {
+    let cli = TestCli::try_parse_from([
+        "bench",
+        "studio",
+        "--rig",
+        "baseline,candidate",
+        "--report",
+        "side-by-side",
+    ])
+    .expect("bench --report side-by-side should parse");
+
+    assert_eq!(cli.bench.run.report, vec![BenchReportFormat::SideBySide]);
+}
+
+#[test]
 fn rejects_negative_warmup_flag() {
     let err = match TestCli::try_parse_from(["bench", "homeboy", "--warmup", "-1"]) {
         Ok(_) => panic!("negative warmup must fail at parse time"),
@@ -1264,6 +1280,19 @@ fn filter_strips_rig_order_forms() {
     assert_eq!(filter_homeboy_flags(&args), vec!["--filter=Scenario"]);
 
     let args = vec!["--rig-order=reverse".to_string(), "--keep".to_string()];
+    assert_eq!(filter_homeboy_flags(&args), vec!["--keep"]);
+}
+
+#[test]
+fn filter_strips_report_forms() {
+    let args = vec![
+        "--report".to_string(),
+        "side-by-side".to_string(),
+        "--filter=Scenario".to_string(),
+    ];
+    assert_eq!(filter_homeboy_flags(&args), vec!["--filter=Scenario"]);
+
+    let args = vec!["--report=side-by-side".to_string(), "--keep".to_string()];
     assert_eq!(filter_homeboy_flags(&args), vec!["--keep"]);
 }
 

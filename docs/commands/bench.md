@@ -55,6 +55,10 @@ the other capabilities.
 - `--path <PATH>`: Override the component's `local_path` for this run.
 - `--json-summary`: Include a compact machine-readable summary in the
   JSON output envelope (for CI wrappers).
+- `--report side-by-side`: Select the combined side-by-side comparison
+  report for a multi-rig bench envelope. The report is emitted under
+  `reports.side_by_side` and includes each rig's status, elapsed time,
+  key metrics, artifact paths/URLs, and failure reason.
 - `--rig <RIG_ID[,RIG_ID...]>`: Pin the run to one or more rigs. Single
   rig pins the rig and stores its baseline under a rig-scoped key. If
   that rig declares `bench.components`, the command fans out across those
@@ -156,7 +160,9 @@ homeboy bench --rig mdi-substrates --shared-state /tmp/mdi-bench
 # Cross-rig comparison: same workload, two rigs, side-by-side report.
 # First rig (`studio-trunk`) is the reference; the diff table expresses
 # every other rig's metrics as percent deltas vs the reference.
-homeboy bench studio --rig studio-trunk,studio-combined-fixes --iterations 10
+homeboy bench studio --rig studio-trunk,studio-combined-fixes \
+    --iterations 10 \
+    --report side-by-side
 
 # Three-rig comparison to isolate one PR's contribution.
 homeboy bench studio \
@@ -187,6 +193,15 @@ After every rig finishes, results are aggregated into a
 **first rig in the list is the reference**: per-metric percent deltas
 in the `diff` table express each subsequent rig as `(current -
 reference) / reference * 100`.
+
+Multi-rig comparison envelopes include `reports.side_by_side`, a compact
+report artifact for demo and product harnesses. It references every rig
+result and surfaces:
+
+- per-rig status, exit code, and failure reason
+- elapsed time when `elapsed_ms` or `duration_ms` metrics are present
+- flattened key metrics, including grouped metrics like `prompt.hash_match`
+- artifact paths and URLs, including URL-looking artifact paths
 
 ### What's intentionally not done
 
