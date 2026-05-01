@@ -10,6 +10,7 @@ homeboy trace <component> list
 homeboy trace <component> <scenario> --rig <rig-id>
 homeboy trace <component> <scenario> --json-summary
 homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
+homeboy trace <component> <scenario> --repeat 5 --aggregate spans
 homeboy trace <component> <scenario> --report=markdown
 homeboy trace <component> <scenario> --baseline
 homeboy trace <component> <scenario> --ratchet
@@ -83,6 +84,16 @@ Runners can emit `span_definitions`, or callers can pass repeatable `--span id:f
 ```
 
 If an endpoint is missing, Homeboy emits a skipped result with `missing` keys instead of panicking.
+
+## Repeat And Aggregate
+
+Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, `max_ms`, and `failures` counts.
+
+```sh
+homeboy trace studio studio-app-create-site --repeat 5 --aggregate spans
+```
+
+Each repeat uses a fresh Homeboy run directory, so completed run data is preserved even when a later repeat fails.
 
 ## Markdown Reports
 

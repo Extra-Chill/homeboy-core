@@ -1,4 +1,5 @@
 use clap::Args;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use homeboy::component::{Component, ScopedExtensionConfig};
@@ -18,7 +19,7 @@ use homeboy::rig::{self, RigSpec};
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct TraceArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
@@ -43,6 +44,14 @@ pub struct TraceArgs {
     /// Render a Markdown trace report instead of the JSON envelope.
     #[arg(long, value_parser = ["markdown"])]
     pub report: Option<String>,
+
+    /// Run the same trace scenario multiple times.
+    #[arg(long, value_name = "N", default_value_t = 1)]
+    pub repeat: usize,
+
+    /// Aggregate repeated trace output.
+    #[arg(long, value_parser = ["spans"])]
+    pub aggregate: Option<String>,
 
     /// Add a span definition as `id:source.event:source.event`.
     #[arg(long = "span", value_name = "ID:FROM:TO", value_parser = extension_trace::spans::parse_span_definition)]
@@ -88,6 +97,9 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
             ),
             exit_code,
         )),
+        TraceCommandOutput::Aggregate(aggregate) => {
+            Ok((render_aggregate_markdown(&aggregate), exit_code))
+        }
         TraceCommandOutput::List(list) => {
             let mut markdown = format!("# Trace Scenarios: `{}`\n\n", list.component_id);
             for scenario in list.scenarios {
@@ -103,10 +115,40 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
 }
 
 pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutput> {
+    if args.repeat == 0 {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--repeat",
+            "repeat must be at least 1",
+            None,
+            None,
+        ));
+    }
+
     if args.scenario == "list" {
         return run_list(args);
     }
 
+    if args.repeat > 1 || args.aggregate.as_deref() == Some("spans") {
+        return run_repeat(args);
+    }
+
+    let summary_only = args.json_summary;
+    let execution = execute_trace_run(args)?;
+
+    Ok(extension_trace::from_main_workflow(
+        execution.workflow,
+        execution.rig_state,
+        summary_only,
+    ))
+}
+
+struct TraceRunExecution {
+    workflow: extension_trace::TraceRunWorkflowResult,
+    run_dir: RunDir,
+    rig_state: Option<rig::RigStateSnapshot>,
+}
+
+fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
     let rig_context = load_rig_context(args.rig.as_deref())?;
     let effective_id = resolve_component_id(&args.comp, rig_context.as_ref().map(|c| &c.spec))?;
     let path_override = args.comp.path.clone().or_else(|| {
@@ -234,11 +276,227 @@ pub fn run(args: TraceArgs, _global: &GlobalArgs) -> CmdResult<TraceCommandOutpu
         persist_trace_workflow_result(observation, &run_dir, &workflow, rig_state.as_ref());
     }
 
-    Ok(extension_trace::from_main_workflow(
+    Ok(TraceRunExecution {
         workflow,
+        run_dir,
         rig_state,
-        args.json_summary,
-    ))
+    })
+}
+
+fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
+    let repeat = args.repeat;
+    let scenario_id = args.scenario.clone();
+    let mut runs = Vec::new();
+    let mut span_samples: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+    let mut span_failures: BTreeMap<String, usize> = BTreeMap::new();
+    let mut all_span_ids: BTreeSet<String> =
+        args.spans.iter().map(|span| span.id.clone()).collect();
+    let mut rig_state = None;
+    let mut component = None;
+    let mut failure_count = 0;
+
+    for index in 1..=repeat {
+        let mut run_args = args.clone();
+        run_args.repeat = 1;
+        run_args.aggregate = None;
+        match execute_trace_run(run_args) {
+            Ok(execution) => {
+                if rig_state.is_none() {
+                    rig_state = execution.rig_state.clone();
+                }
+                if component.is_none() {
+                    component = Some(execution.workflow.component.clone());
+                }
+                let passed =
+                    execution.workflow.exit_code == 0 && execution.workflow.status == "pass";
+                if !passed {
+                    failure_count += 1;
+                }
+                let artifact_path = execution
+                    .run_dir
+                    .step_file(homeboy::engine::run_dir::files::TRACE_RESULTS)
+                    .to_string_lossy()
+                    .to_string();
+                let mut seen_span_ids = BTreeSet::new();
+                if let Some(results) = execution.workflow.results.as_ref() {
+                    for span in &results.span_results {
+                        all_span_ids.insert(span.id.clone());
+                        seen_span_ids.insert(span.id.clone());
+                        if span.status == extension_trace::parsing::TraceSpanStatus::Ok {
+                            if let Some(duration) = span.duration_ms {
+                                span_samples
+                                    .entry(span.id.clone())
+                                    .or_default()
+                                    .push(duration);
+                                continue;
+                            }
+                        }
+                        *span_failures.entry(span.id.clone()).or_default() += 1;
+                    }
+                    for span_id in all_span_ids.difference(&seen_span_ids) {
+                        *span_failures.entry(span_id.clone()).or_default() += 1;
+                    }
+                } else {
+                    for span_id in &all_span_ids {
+                        *span_failures.entry(span_id.clone()).or_default() += 1;
+                    }
+                }
+                runs.push(extension_trace::TraceAggregateRunOutput {
+                    index,
+                    passed,
+                    status: execution.workflow.status,
+                    exit_code: execution.workflow.exit_code,
+                    artifact_path,
+                    scenario_id: execution
+                        .workflow
+                        .results
+                        .as_ref()
+                        .map(|r| r.scenario_id.clone()),
+                    summary: execution
+                        .workflow
+                        .results
+                        .as_ref()
+                        .and_then(|r| r.summary.clone()),
+                    failure: execution
+                        .workflow
+                        .failure
+                        .as_ref()
+                        .map(|failure| failure.stderr_excerpt.clone())
+                        .or_else(|| {
+                            execution
+                                .workflow
+                                .results
+                                .as_ref()
+                                .and_then(|r| r.failure.clone())
+                        }),
+                });
+            }
+            Err(error) => {
+                failure_count += 1;
+                for span_id in &all_span_ids {
+                    *span_failures.entry(span_id.clone()).or_default() += 1;
+                }
+                runs.push(extension_trace::TraceAggregateRunOutput {
+                    index,
+                    passed: false,
+                    status: "error".to_string(),
+                    exit_code: 1,
+                    artifact_path: String::new(),
+                    scenario_id: Some(scenario_id.clone()),
+                    summary: None,
+                    failure: Some(error.message),
+                });
+            }
+        }
+    }
+
+    let spans = all_span_ids
+        .into_iter()
+        .map(|id| {
+            let samples = span_samples.remove(&id).unwrap_or_default();
+            let failures = span_failures.remove(&id).unwrap_or(0);
+            aggregate_span(id, samples, failures)
+        })
+        .collect::<Vec<_>>();
+    let exit_code = if failure_count == 0 { 0 } else { 1 };
+    let output = extension_trace::TraceAggregateOutput {
+        command: "trace.aggregate.spans",
+        passed: failure_count == 0,
+        status: if failure_count == 0 { "pass" } else { "fail" }.to_string(),
+        component: component.unwrap_or_else(|| args.comp.component.clone().unwrap_or_default()),
+        scenario_id,
+        repeat,
+        run_count: runs.len(),
+        failure_count,
+        exit_code,
+        rig_state,
+        runs,
+        spans,
+    };
+
+    Ok((TraceCommandOutput::Aggregate(output), exit_code))
+}
+
+fn aggregate_span(
+    id: String,
+    mut durations: Vec<u64>,
+    failures: usize,
+) -> extension_trace::TraceAggregateSpanOutput {
+    durations.sort_unstable();
+    let n = durations.len();
+    let avg_ms = if n == 0 {
+        None
+    } else {
+        Some(durations.iter().sum::<u64>() as f64 / n as f64)
+    };
+    extension_trace::TraceAggregateSpanOutput {
+        id,
+        n,
+        min_ms: durations.first().copied(),
+        median_ms: median(&durations),
+        avg_ms,
+        max_ms: durations.last().copied(),
+        failures,
+    }
+}
+
+fn median(values: &[u64]) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    let midpoint = values.len() / 2;
+    if values.len() % 2 == 1 {
+        Some(values[midpoint])
+    } else {
+        Some((values[midpoint - 1] + values[midpoint]) / 2)
+    }
+}
+
+fn render_aggregate_markdown(aggregate: &extension_trace::TraceAggregateOutput) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# Trace Aggregate: `{}`\n\n",
+        aggregate.scenario_id
+    ));
+    out.push_str(&format!("- **Component:** `{}`\n", aggregate.component));
+    out.push_str(&format!("- **Status:** `{}`\n", aggregate.status));
+    out.push_str(&format!("- **Runs:** `{}`\n", aggregate.run_count));
+    out.push_str(&format!("- **Failures:** `{}`\n", aggregate.failure_count));
+
+    if !aggregate.spans.is_empty() {
+        out.push_str("\n## Spans\n\n");
+        out.push_str("| Span | n | min | median | avg | max | failures |\n");
+        out.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+        for span in &aggregate.spans {
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} | {} | {} |\n",
+                span.id,
+                span.n,
+                fmt_ms(span.min_ms),
+                fmt_ms(span.median_ms),
+                span.avg_ms
+                    .map(|value| format!("{:.1}ms", value))
+                    .unwrap_or_else(|| "-".to_string()),
+                fmt_ms(span.max_ms),
+                span.failures
+            ));
+        }
+    }
+
+    out.push_str("\n## Run Artifacts\n\n");
+    for run in &aggregate.runs {
+        out.push_str(&format!(
+            "- Run {}: `{}` `{}`\n",
+            run.index, run.status, run.artifact_path
+        ));
+    }
+    out
+}
+
+fn fmt_ms(value: Option<u64>) -> String {
+    value
+        .map(|value| format!("{}ms", value))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
@@ -663,6 +921,8 @@ mod tests {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                repeat: 1,
+                aggregate: None,
                 spans: Vec::new(),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -747,6 +1007,8 @@ mod tests {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                repeat: 1,
+                aggregate: None,
                 spans: Vec::new(),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -788,6 +1050,8 @@ mod tests {
                     _json: HiddenJsonArgs::default(),
                     json_summary: false,
                     report: None,
+                    repeat: 1,
+                    aggregate: None,
                     spans: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
@@ -836,6 +1100,8 @@ mod tests {
                     _json: HiddenJsonArgs::default(),
                     json_summary: false,
                     report: None,
+                    repeat: 1,
+                    aggregate: None,
                     spans: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
@@ -888,6 +1154,64 @@ mod tests {
     }
 
     #[test]
+    fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (output, exit_code) = run(
+                TraceArgs {
+                    comp: PositionalComponentArgs {
+                        component: Some("studio".to_string()),
+                        path: None,
+                    },
+                    scenario: "studio-app-create-site".to_string(),
+                    rig: Some("studio-rig".to_string()),
+                    setting_args: SettingArgs::default(),
+                    _json: HiddenJsonArgs::default(),
+                    json_summary: false,
+                    report: None,
+                    repeat: 3,
+                    aggregate: Some("spans".to_string()),
+                    spans: Vec::new(),
+                    baseline_args: BaselineArgs::default(),
+                    regression_threshold:
+                        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    overlays: Vec::new(),
+                    keep_overlay: false,
+                },
+                &GlobalArgs {},
+            )
+            .expect("repeat trace should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                TraceCommandOutput::Aggregate(aggregate) => {
+                    assert_eq!(aggregate.repeat, 3);
+                    assert_eq!(aggregate.run_count, 3);
+                    assert_eq!(aggregate.failure_count, 0);
+                    assert_eq!(aggregate.spans.len(), 1);
+                    let span = &aggregate.spans[0];
+                    assert_eq!(span.id, "boot_to_ready");
+                    assert_eq!(span.n, 3);
+                    assert_eq!(span.min_ms, Some(125));
+                    assert_eq!(span.median_ms, Some(125));
+                    assert_eq!(span.avg_ms, Some(125.0));
+                    assert_eq!(span.max_ms, Some(125));
+                    assert_eq!(span.failures, 0);
+                    assert!(aggregate
+                        .runs
+                        .iter()
+                        .all(|run| std::path::Path::new(&run.artifact_path).is_file()));
+                }
+                _ => panic!("expected aggregate output"),
+            }
+        });
+    }
+
+    #[test]
     fn failed_trace_run_persists_observation_history() {
         with_isolated_home(|home| {
             let _xdg = XdgGuard::unset();
@@ -907,6 +1231,8 @@ mod tests {
                     _json: HiddenJsonArgs::default(),
                     json_summary: false,
                     report: None,
+                    repeat: 1,
+                    aggregate: None,
                     spans: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
