@@ -95,7 +95,7 @@ pub(super) fn compare_trace_aggregates(
         .cloned()
         .collect::<BTreeSet<_>>();
 
-    let spans = span_ids
+    let mut spans = span_ids
         .into_iter()
         .map(|id| {
             let before_span = before_spans.get(&id);
@@ -125,6 +125,7 @@ pub(super) fn compare_trace_aggregates(
             }
         })
         .collect::<Vec<_>>();
+    spans.sort_by(compare_trace_span_impact);
 
     extension_trace::TraceCompareOutput {
         command: "trace.compare.spans",
@@ -137,6 +138,24 @@ pub(super) fn compare_trace_aggregates(
         span_count: spans.len(),
         spans,
     }
+}
+
+fn compare_trace_span_impact(
+    left: &extension_trace::TraceCompareSpanOutput,
+    right: &extension_trace::TraceCompareSpanOutput,
+) -> std::cmp::Ordering {
+    right
+        .median_delta_ms
+        .map(i64::abs)
+        .cmp(&left.median_delta_ms.map(i64::abs))
+        .then_with(|| {
+            right
+                .avg_delta_ms
+                .map(f64::abs)
+                .partial_cmp(&left.avg_delta_ms.map(f64::abs))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .then_with(|| left.id.cmp(&right.id))
 }
 
 fn option_delta_i64(before: Option<u64>, after: Option<u64>) -> Option<i64> {
@@ -308,11 +327,11 @@ pub(super) fn render_compare_markdown(compare: &extension_trace::TraceCompareOut
                 span.id,
                 fmt_ms(span.before_median_ms),
                 fmt_ms(span.after_median_ms),
-                fmt_delta_ms(span.median_delta_ms),
+                fmt_signal_delta_ms(span.median_delta_ms),
                 fmt_percent(span.median_delta_percent),
                 fmt_avg_ms(span.before_avg_ms),
                 fmt_avg_ms(span.after_avg_ms),
-                fmt_delta_avg_ms(span.avg_delta_ms),
+                fmt_signal_delta_avg_ms(span.avg_delta_ms),
                 fmt_percent(span.avg_delta_percent),
             ));
         }
@@ -339,10 +358,28 @@ fn fmt_delta_ms(value: Option<i64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn fmt_signal_delta_ms(value: Option<i64>) -> String {
+    let formatted = fmt_delta_ms(value);
+    if value.is_some_and(|value| value != 0) {
+        format!("**{}**", formatted)
+    } else {
+        formatted
+    }
+}
+
 fn fmt_delta_avg_ms(value: Option<f64>) -> String {
     value
         .map(|value| format!("{:+.1}ms", value))
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_signal_delta_avg_ms(value: Option<f64>) -> String {
+    let formatted = fmt_delta_avg_ms(value);
+    if value.is_some_and(|value| value.abs() >= f64::EPSILON) {
+        format!("**{}**", formatted)
+    } else {
+        formatted
+    }
 }
 
 fn fmt_percent(value: Option<f64>) -> String {

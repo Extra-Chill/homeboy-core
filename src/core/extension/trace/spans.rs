@@ -174,6 +174,21 @@ fn nearest_valid_pair(timeline: &[TraceEvent], from_key: &str, to_key: &str) -> 
     best
 }
 
+fn out_of_order_span_message(
+    definition: &TraceSpanDefinition,
+    from_t_ms: u64,
+    to_t_ms: u64,
+) -> String {
+    if definition.id.starts_with("phase.") {
+        format!(
+            "phase milestone `{}` occurred at {}ms before previous milestone `{}` at {}ms; phase chain is non-monotonic",
+            definition.to, to_t_ms, definition.from, from_t_ms
+        )
+    } else {
+        "span end occurred before span start".to_string()
+    }
+}
+
 fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> TraceSpanResult {
     let from_t_ms = first_event_time(timeline, &definition.from);
     let to_t_ms = first_event_time(timeline, &definition.to);
@@ -201,6 +216,12 @@ fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> 
     let Some((from_value, to_value)) =
         nearest_valid_pair(timeline, &definition.from, &definition.to)
     else {
+        let message = match (from_t_ms, to_t_ms) {
+            (Some(from_value), Some(to_value)) => {
+                out_of_order_span_message(definition, from_value, to_value)
+            }
+            _ => "span end occurred before span start".to_string(),
+        };
         return TraceSpanResult {
             id: definition.id.clone(),
             from: definition.from.clone(),
@@ -210,7 +231,7 @@ fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> 
             from_t_ms,
             to_t_ms,
             missing: Vec::new(),
-            message: Some("span end occurred before span start".to_string()),
+            message: Some(message),
         };
     };
 
@@ -378,6 +399,29 @@ mod tests {
         assert_eq!(
             results[0].message.as_deref(),
             Some("span end occurred before span start")
+        );
+    }
+
+    #[test]
+    fn out_of_order_phase_span_reports_non_monotonic_chain() {
+        let results = summarize_spans(
+            &[event(10, "runner", "ready"), event(50, "runner", "boot")],
+            &[TraceSpanDefinition {
+                id: "phase.boot_to_ready".to_string(),
+                from: "runner.boot".to_string(),
+                to: "runner.ready".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Skipped);
+        assert_eq!(results[0].duration_ms, None);
+        assert_eq!(results[0].from_t_ms, Some(50));
+        assert_eq!(results[0].to_t_ms, Some(10));
+        assert_eq!(
+            results[0].message.as_deref(),
+            Some(
+                "phase milestone `runner.ready` occurred at 10ms before previous milestone `runner.boot` at 50ms; phase chain is non-monotonic"
+            )
         );
     }
 
