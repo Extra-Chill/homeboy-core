@@ -57,6 +57,10 @@ pub struct TraceArgs {
     #[arg(long = "span", value_name = "ID:FROM:TO", value_parser = extension_trace::spans::parse_span_definition)]
     pub spans: Vec<TraceSpanDefinition>,
 
+    /// Add an ordered phase milestone as `[label:]source.event`.
+    #[arg(long = "phase", value_name = "[LABEL:]SOURCE.EVENT", value_parser = extension_trace::spans::parse_phase_milestone)]
+    pub phases: Vec<extension_trace::spans::TracePhaseMilestone>,
+
     #[command(flatten)]
     pub baseline_args: BaselineArgs,
 
@@ -186,6 +190,7 @@ struct TraceRunExecution {
 }
 
 fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
+    let span_definitions = span_definitions_for_args(&args)?;
     let rig_context = load_rig_context(args.rig.as_deref())?;
     let effective_id = resolve_component_id(&args.comp, rig_context.as_ref().map(|c| &c.spec))?;
     let path_override = args.comp.path.clone().or_else(|| {
@@ -243,7 +248,10 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
                     "scenario_id": scenario_id,
                     "component_path": component_path_for_observation,
                     "requested_overlays": requested_overlays,
-                    "span_definitions": args.spans.clone(),
+                    "span_definitions": span_definitions.clone(),
+                    "phase_milestones": args.phases.clone().into_iter().map(|phase| {
+                        serde_json::json!({ "label": phase.label, "key": phase.key })
+                    }).collect::<Vec<_>>(),
                     "baseline": {
                         "baseline": args.baseline_args.baseline,
                         "ignore_baseline": args.baseline_args.ignore_baseline,
@@ -289,7 +297,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             overlays: args.overlays,
             keep_overlay: args.keep_overlay,
             extra_workloads,
-            span_definitions: args.spans,
+            span_definitions,
             baseline_flags: BaselineFlags {
                 baseline: args.baseline_args.baseline,
                 ignore_baseline: args.baseline_args.ignore_baseline,
@@ -326,8 +334,10 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let mut runs = Vec::new();
     let mut span_samples: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut span_failures: BTreeMap<String, usize> = BTreeMap::new();
-    let mut all_span_ids: BTreeSet<String> =
-        args.spans.iter().map(|span| span.id.clone()).collect();
+    let mut all_span_ids: BTreeSet<String> = span_definitions_for_args(&args)?
+        .into_iter()
+        .map(|span| span.id)
+        .collect();
     let mut rig_state = None;
     let mut component = None;
     let mut failure_count = 0;
@@ -452,6 +462,16 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     };
 
     Ok((TraceCommandOutput::Aggregate(output), exit_code))
+}
+
+fn span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanDefinition>> {
+    let mut definitions = args.spans.clone();
+    let phase_definitions =
+        extension_trace::spans::phase_span_definitions(&args.phases).map_err(|message| {
+            homeboy::Error::validation_invalid_argument("--phase", message, None, None)
+        })?;
+    definitions.extend(phase_definitions);
+    Ok(definitions)
 }
 
 fn aggregate_span(
@@ -961,6 +981,7 @@ mod tests {
                 repeat: 1,
                 aggregate: None,
                 spans: Vec::new(),
+                phases: Vec::new(),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1047,6 +1068,7 @@ mod tests {
                 repeat: 1,
                 aggregate: None,
                 spans: Vec::new(),
+                phases: Vec::new(),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1090,6 +1112,7 @@ mod tests {
                     repeat: 1,
                     aggregate: None,
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1140,6 +1163,7 @@ mod tests {
                     repeat: 1,
                     aggregate: None,
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1213,6 +1237,7 @@ mod tests {
                     repeat: 3,
                     aggregate: Some("spans".to_string()),
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -1251,6 +1276,73 @@ mod tests {
     }
 
     #[test]
+    fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            write_trace_extension(home);
+            let component_dir = tempfile::TempDir::new().expect("component dir");
+            write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+            let (output, exit_code) = run(
+                TraceArgs {
+                    comp: PositionalComponentArgs {
+                        component: Some("studio".to_string()),
+                        path: None,
+                    },
+                    scenario: "studio-app-create-site".to_string(),
+                    rig: Some("studio-rig".to_string()),
+                    setting_args: SettingArgs::default(),
+                    _json: HiddenJsonArgs::default(),
+                    json_summary: false,
+                    report: None,
+                    repeat: 1,
+                    aggregate: None,
+                    spans: Vec::new(),
+                    phases: vec![
+                        extension_trace::spans::TracePhaseMilestone {
+                            label: "boot".to_string(),
+                            key: "runner.boot".to_string(),
+                        },
+                        extension_trace::spans::TracePhaseMilestone {
+                            label: "ready".to_string(),
+                            key: "runner.ready".to_string(),
+                        },
+                    ],
+                    baseline_args: BaselineArgs::default(),
+                    regression_threshold:
+                        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                    regression_min_delta_ms:
+                        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                    overlays: Vec::new(),
+                    keep_overlay: false,
+                },
+                &GlobalArgs {},
+            )
+            .expect("phase trace should run");
+
+            assert_eq!(exit_code, 0);
+            match output {
+                TraceCommandOutput::Run(result) => {
+                    let results = result.results.expect("results");
+                    let span_ids = results
+                        .span_results
+                        .iter()
+                        .map(|span| (span.id.as_str(), span.duration_ms))
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        span_ids,
+                        vec![
+                            ("phase.boot_to_ready", Some(125)),
+                            ("phase.total", Some(125))
+                        ]
+                    );
+                }
+                _ => panic!("expected run output"),
+            }
+        });
+    }
+
+    #[test]
     fn failed_trace_run_persists_observation_history() {
         with_isolated_home(|home| {
             let _xdg = XdgGuard::unset();
@@ -1273,6 +1365,7 @@ mod tests {
                     repeat: 1,
                     aggregate: None,
                     spans: Vec::new(),
+                    phases: Vec::new(),
                     baseline_args: BaselineArgs::default(),
                     regression_threshold:
                         extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
