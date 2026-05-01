@@ -11,6 +11,7 @@ use homeboy::extension::bench::{
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, BenchSpec, RigSpec, RigStateSnapshot};
 
+use super::observation::{self, BenchObservationStart};
 use super::{BenchRunArgs, CmdResult};
 
 struct RigBenchContext {
@@ -388,6 +389,18 @@ fn run_component_with_rig_context(
         })
         .unwrap_or_default();
 
+    let selected_scenarios = selected_scenario_ids(args, rig_spec)?;
+    let observation = observation::start(BenchObservationStart {
+        component_id: &ctx.component_id,
+        component_label: &effective_id,
+        source_path: &ctx.source_path,
+        args,
+        selected_scenarios: &selected_scenarios,
+        rig_id: rig_id.as_deref(),
+        rig_snapshot: rig_snapshot.as_ref(),
+        run_dir: &run_dir,
+    });
+
     let workflow = extension_bench::run_main_bench_workflow(
         &ctx.component,
         &ctx.source_path,
@@ -425,15 +438,27 @@ fn run_component_with_rig_context(
             regression_threshold_percent: args.regression_threshold,
             json_summary: args.json_summary,
             passthrough_args: passthrough_args.to_vec(),
-            scenario_ids: selected_scenario_ids(args, rig_spec)?,
+            scenario_ids: selected_scenarios,
             rig_id: rig_id.clone(),
             shared_state: shared_state_override.or_else(|| args.shared_state.clone()),
             extra_workloads,
         },
         &run_dir,
     );
-    resource_run.write_to_run_dir(&run_dir)?;
-    let workflow = workflow?;
+    if let Err(error) = resource_run.write_to_run_dir(&run_dir) {
+        observation::finish_error(observation, &error, &run_dir);
+        return Err(error);
+    }
+    let workflow = match workflow {
+        Ok(workflow) => {
+            observation::finish_success(observation, &workflow, &run_dir);
+            workflow
+        }
+        Err(error) => {
+            observation::finish_error(observation, &error, &run_dir);
+            return Err(error);
+        }
+    };
 
     Ok(extension_bench::from_main_workflow_with_rig(
         workflow,

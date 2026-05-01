@@ -20,6 +20,7 @@ use super::utils::args::{
 use super::{CmdResult, GlobalArgs};
 
 mod matrix;
+mod observation;
 
 #[derive(Args)]
 pub struct BenchArgs {
