@@ -29,6 +29,7 @@ pub(crate) fn scenario_with_iterations(
         passed: true,
         memory: None,
         artifacts: BTreeMap::new(),
+        diagnostics: Vec::new(),
         runs: None,
         runs_summary: None,
     }
@@ -43,6 +44,7 @@ pub(crate) fn results_with_scenarios(
         component_id: component_id.to_string(),
         iterations,
         run_metadata: None,
+        diagnostics: Vec::new(),
         scenarios,
         metric_policies: BTreeMap::new(),
     }

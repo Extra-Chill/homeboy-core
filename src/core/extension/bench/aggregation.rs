@@ -58,6 +58,10 @@ pub fn aggregate_runs(runs: &[BenchResults]) -> Result<BenchResults> {
         component_id: first.component_id.clone(),
         iterations: first.iterations,
         run_metadata: first.run_metadata.clone(),
+        diagnostics: runs
+            .iter()
+            .flat_map(|result| result.diagnostics.clone())
+            .collect(),
         scenarios,
         metric_policies,
     })
@@ -110,6 +114,7 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
                 metric_groups: scenario.metric_groups.clone(),
                 memory: scenario.memory.clone(),
                 artifacts: scenario.artifacts.clone(),
+                diagnostics: scenario.diagnostics.clone(),
             })
             .collect(),
     );

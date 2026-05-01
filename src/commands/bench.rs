@@ -420,7 +420,7 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
             results: single_output.results,
             rig_state: single_output.rig_state,
             failure: single_output.failure,
-            provider_failures: single_output.provider_failures,
+            diagnostics: single_output.diagnostics,
         });
     }
 

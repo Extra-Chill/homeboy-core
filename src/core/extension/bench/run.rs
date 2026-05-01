@@ -14,11 +14,11 @@ use crate::engine::run_dir::{self, RunDir};
 use crate::error::{Error, Result};
 use crate::extension::bench::aggregate_runs;
 use crate::extension::bench::baseline::{self, BenchBaselineComparison};
+use crate::extension::bench::diagnostic::{self, BenchDiagnostic};
 use crate::extension::bench::parsing::{
     self, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata, BenchScenario,
     BenchWorkloadMetadata,
 };
-use crate::extension::bench::provider_failure::{self, BenchProviderFailure};
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
     ExtensionRunner,
@@ -80,7 +80,7 @@ pub struct BenchRunWorkflowResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<BenchRunFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,7 +93,7 @@ pub struct BenchRunFailure {
     pub exit_code: i32,
     pub stderr_tail: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub provider_failures: Vec<BenchProviderFailure>,
+    pub diagnostics: Vec<BenchDiagnostic>,
 }
 
 #[derive(Debug, Clone)]
@@ -485,15 +485,11 @@ pub fn run_main_bench_workflow(
         .map(parsing::evaluate_gates)
         .unwrap_or_default();
     let gates_passed = gate_failures.is_empty();
-    let provider_failures = provider_failure::collect_provider_failures(
-        parsed.as_ref(),
-        failure_stderr_tail.as_deref(),
-        run_dir.path(),
-    );
+    let diagnostics = diagnostic::collect_diagnostics(parsed.as_ref());
 
     if let Some(results) = parsed.as_mut() {
         if let Some(metadata) = results.run_metadata.as_mut() {
-            metadata.provider_failures = provider_failures.clone();
+            metadata.diagnostics = diagnostics.clone();
         }
     }
 
@@ -559,12 +555,8 @@ pub fn run_main_bench_workflow(
     for failure in &gate_failures {
         hints.push(failure.clone());
     }
-    for failure in &provider_failures {
-        hints.push(format!(
-            "AI provider failure classified as `{}`: {}",
-            failure.class.as_str(),
-            failure.reason
-        ));
+    for diagnostic in &diagnostics {
+        hints.push(format_diagnostic_hint(diagnostic));
     }
     hints.push("Full options: homeboy docs commands/bench".to_string());
 
@@ -587,7 +579,7 @@ pub fn run_main_bench_workflow(
             scenario_id: failure_scenario_id(&execution_args.scenario_ids),
             exit_code: runner_exit_code,
             stderr_tail,
-            provider_failures: provider_failures.clone(),
+            diagnostics: diagnostics.clone(),
         })
     } else {
         None
@@ -603,8 +595,15 @@ pub fn run_main_bench_workflow(
         baseline_comparison,
         hints,
         failure,
-        provider_failures,
+        diagnostics,
     })
+}
+
+fn format_diagnostic_hint(diagnostic: &BenchDiagnostic) -> String {
+    match diagnostic.message.as_deref() {
+        Some(message) => format!("Diagnostic `{}`: {}", diagnostic.class, message),
+        None => format!("Diagnostic `{}`", diagnostic.class),
+    }
 }
 
 fn stamp_run_metadata(
@@ -638,7 +637,7 @@ fn stamp_run_metadata(
                 .to_string(),
             source_revision: source_revision_at(&execution_context.extension_path),
         }),
-        provider_failures: Vec::new(),
+        diagnostics: Vec::new(),
     });
 }
 
@@ -1045,6 +1044,7 @@ fn run_concurrent_instances(
             component_id: component_id_seen.unwrap_or_else(|| args.component_id.clone()),
             iterations: iterations_seen.unwrap_or(args.iterations),
             run_metadata: None,
+            diagnostics: Vec::new(),
             scenarios: merged_scenarios,
             metric_policies: metric_policies_seen,
         })
@@ -1126,6 +1126,7 @@ mod tests {
                 passed: true,
                 memory: None,
                 artifacts: BTreeMap::new(),
+                diagnostics: Vec::new(),
                 runs: None,
                 runs_summary: None,
             }],
@@ -1226,6 +1227,7 @@ mod tests {
             component_id: "homeboy".to_string(),
             iterations: 7,
             run_metadata: None,
+            diagnostics: Vec::new(),
             scenarios: vec![BenchScenario {
                 id: "boot".to_string(),
                 file: Some("tests/bench/boot.rs".to_string()),
@@ -1243,6 +1245,7 @@ mod tests {
                 passed: true,
                 memory: None,
                 artifacts: BTreeMap::new(),
+                diagnostics: Vec::new(),
                 runs: None,
                 runs_summary: None,
             }],
