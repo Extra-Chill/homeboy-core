@@ -1,6 +1,7 @@
 use crate::component::AuditConfig;
 use crate::config::ConfigEntity;
 use crate::engine::output_parse::ParseSpec;
+use crate::engine::run_dir;
 use crate::error::{Error, Result};
 use crate::paths;
 use serde::{Deserialize, Serialize};
@@ -350,6 +351,11 @@ pub struct ExtensionManifest {
     /// are reverted and the fixes are reclassified as declined. See #1167.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autofix_verify: Option<AutofixVerifyConfig>,
+    /// Schema version for structured CI annotations emitted under the
+    /// `annotations/` run-dir sidecar. Absent means no declared annotations
+    /// contract; existing consumers keep legacy best-effort behavior.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations_schema_version: Option<String>,
 
     // Actions (cross-cutting: used by both platform and executable extensions)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -469,6 +475,67 @@ impl ExtensionManifest {
     /// See [`AutofixVerifyConfig`] for the contract.
     pub fn autofix_verify(&self) -> Option<&AutofixVerifyConfig> {
         self.autofix_verify.as_ref()
+    }
+
+    /// Structured sidecars this extension explicitly declares.
+    ///
+    /// Missing declarations are intentional backward compatibility: older
+    /// extensions may still emit the well-known files, but core should only
+    /// treat a sidecar as contract-backed when it appears here.
+    pub fn structured_sidecars(&self) -> Vec<StructuredSidecarDeclaration> {
+        let mut sidecars = Vec::new();
+
+        if let Some(schema_version) = self.lint_findings_schema_version() {
+            sidecars.push(StructuredSidecarDeclaration {
+                name: "lint.findings".to_string(),
+                path: run_dir::files::LINT_FINDINGS.to_string(),
+                schema_version: schema_version.to_string(),
+            });
+        }
+
+        if let Some(schema_version) = self.test_results_schema_version() {
+            sidecars.push(StructuredSidecarDeclaration {
+                name: "test.results".to_string(),
+                path: run_dir::files::TEST_RESULTS.to_string(),
+                schema_version: schema_version.to_string(),
+            });
+        }
+
+        if let Some(schema_version) = self.test_failures_schema_version() {
+            sidecars.push(StructuredSidecarDeclaration {
+                name: "test.failures".to_string(),
+                path: run_dir::files::TEST_FAILURES.to_string(),
+                schema_version: schema_version.to_string(),
+            });
+        }
+
+        if let Some(schema_version) = self.annotations_schema_version.as_deref() {
+            sidecars.push(StructuredSidecarDeclaration {
+                name: "annotations".to_string(),
+                path: run_dir::files::ANNOTATIONS_DIR.to_string(),
+                schema_version: schema_version.to_string(),
+            });
+        }
+
+        sidecars
+    }
+
+    pub fn lint_findings_schema_version(&self) -> Option<&str> {
+        self.lint
+            .as_ref()
+            .and_then(|lint| lint.findings_schema_version.as_deref())
+    }
+
+    pub fn test_results_schema_version(&self) -> Option<&str> {
+        self.test
+            .as_ref()
+            .and_then(|test| test.results_schema_version.as_deref())
+    }
+
+    pub fn test_failures_schema_version(&self) -> Option<&str> {
+        self.test
+            .as_ref()
+            .and_then(|test| test.failures_schema_version.as_deref())
     }
 
     /// Convenience: get deploy verifications (empty if no deploy capability).
@@ -811,6 +878,12 @@ pub struct LintConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension_script: Option<String>,
 
+    /// Schema version for the structured `lint-findings.json` sidecar emitted
+    /// by this extension. Absent means legacy extension behavior: Homeboy may
+    /// still read the sidecar, but the extension has not declared a contract.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub findings_schema_version: Option<String>,
+
     /// Changed-file routing rules for split lint runners.
     ///
     /// When present, changed-file lint scopes files to the matching runner step
@@ -839,9 +912,24 @@ pub struct TestConfig {
     pub extension_script: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_parse: Option<ParseSpec>,
+    /// Schema version for the structured `test-results.json` sidecar emitted
+    /// by this extension. Absent preserves legacy stdout/sidecar fallback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub results_schema_version: Option<String>,
+    /// Schema version for the structured `test-failures.json` sidecar emitted
+    /// by this extension. Absent means failure analysis remains best-effort.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failures_schema_version: Option<String>,
     /// Source/test selection contract used by changed-test and drift workflows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drift: Option<TestDriftConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StructuredSidecarDeclaration {
+    pub name: String,
+    pub path: String,
+    pub schema_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

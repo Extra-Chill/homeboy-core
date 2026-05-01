@@ -383,6 +383,7 @@ JSON
             test: None,
             bench: None,
             trace: None,
+            annotations_schema_version: None,
             actions: vec![],
             hooks: std::collections::HashMap::new(),
             settings: vec![],

@@ -16,6 +16,7 @@ Extension manifests define extension metadata, runtime behavior, platform behavi
   "deploy": {},
   "executable": {},
   "platform": {},
+  "annotations_schema_version": "string",
   "commands": {},
   "actions": {},
   "release_actions": {},
@@ -43,6 +44,7 @@ Extension manifests define extension metadata, runtime behavior, platform behavi
 - **`deploy`** (object): Deploy lifecycle — verifications, overrides, version patterns
 - **`executable`** (object): Standalone tool runtime, inputs, output schema
 - **`platform`** (object): Platform behavior definitions (database, deployment, version patterns)
+- **`annotations_schema_version`** (string): Schema version for structured files emitted under the run-dir annotations sidecar
 - **`commands`** (object): Additional CLI commands provided by extension
 - **`actions`** (object): Action definitions for `homeboy extension action`
 - **`release_actions`** (object): Release pipeline step definitions
@@ -86,6 +88,36 @@ Scripts that implement extension capabilities. Each script path is relative to t
 
 - **`fingerprint`** (string): Script that extracts structural fingerprints from source files. Receives file content on stdin, outputs `FileFingerprint` JSON on stdout.
 - **`refactor`** (string): Script that applies refactoring edits to source files. Receives edit instructions on stdin, outputs transformed content on stdout.
+
+## Structured Sidecar Declarations
+
+Extensions can declare which well-known structured sidecars they emit and which schema version each sidecar follows. Declarations are opt-in: if a field is missing, Homeboy preserves the existing backward-compatible behavior and treats that sidecar as legacy/best-effort rather than contract-backed.
+
+```json
+{
+  "lint": {
+    "extension_script": "scripts/lint.sh",
+    "findings_schema_version": "1"
+  },
+  "test": {
+    "extension_script": "scripts/test.sh",
+    "results_schema_version": "1",
+    "failures_schema_version": "1"
+  },
+  "annotations_schema_version": "1"
+}
+```
+
+### Sidecar Fields
+
+- **`lint.findings_schema_version`** (string): Declares structured `lint-findings.json` output in the run directory.
+- **`test.results_schema_version`** (string): Declares structured `test-results.json` output in the run directory.
+- **`test.failures_schema_version`** (string): Declares structured `test-failures.json` output in the run directory.
+- **`annotations_schema_version`** (string): Declares structured annotation files under the run directory's annotations sidecar subdirectory.
+
+### Inspection Behavior
+
+Core exposes declared sidecars through manifest inspection. Consumers that need a guaranteed structured contract should check for a declaration before relying on a sidecar. Consumers that support older extensions may keep the historical fallback behavior when no declaration is present.
 
 ## Audit Configuration
 
