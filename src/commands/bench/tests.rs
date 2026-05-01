@@ -1415,5 +1415,8 @@ fn bench_output_comparison_serializes_with_discriminator() {
 #[path = "../../../tests/core/rig/bench_default_baseline_dispatch_test.rs"]
 mod bench_default_baseline_dispatch_test;
 #[cfg(test)]
+#[path = "../../../tests/core/rig/bench_default_baseline_output_test.rs"]
+mod bench_default_baseline_output_test;
+#[cfg(test)]
 #[path = "../../../tests/core/rig/bench_rig_concurrency_dispatch_test.rs"]
 mod bench_rig_concurrency_dispatch_test;

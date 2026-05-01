@@ -9,8 +9,8 @@ use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::{
     aggregate_comparison_with_axes, BenchCommandOutput, BenchComparisonOutput,
-    BenchComparisonSummaryOutput, BenchListWorkflowArgs, BenchListWorkflowResult, RigBenchEntry,
-    DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+    BenchComparisonSummaryOutput, BenchDefaultBaselineExpansion, BenchListWorkflowArgs,
+    BenchListWorkflowResult, RigBenchEntry, DEFAULT_REGRESSION_THRESHOLD_PERCENT,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, RigSpec};
@@ -313,7 +313,7 @@ pub enum BenchOutput {
     Observation(runs::RunsOutput),
 }
 
-pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
+pub fn run(mut args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     if let Some(command) = &args.command {
         return match command {
             BenchCommand::List(list_args) => run_list(list_args),
@@ -334,14 +334,12 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
         };
     }
 
-    let run_args = &args.run;
-    let passthrough_args = filter_homeboy_flags(&run_args.args);
-
     // No --rig: legacy single bare run. No rig pinning, no rig
     // snapshot, baseline key untouched. Identical to before this PR.
-    if run_args.rig.is_empty() {
-        validate_report_selection_for_single_run(run_args)?;
-        let (output, exit) = matrix::run_single(run_args, &passthrough_args, None)?;
+    if args.run.rig.is_empty() {
+        validate_report_selection_for_single_run(&args.run)?;
+        let passthrough_args = filter_homeboy_flags(&args.run.args);
+        let (output, exit) = matrix::run_single(&args.run, &passthrough_args, None)?;
         return Ok((BenchOutput::Single(output), exit));
     }
 
@@ -350,14 +348,17 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
     // [baseline, candidate] comparison shape and tail-call into the
     // multi-rig branch below. Single source of truth for the
     // comparison codepath, no parallel envelope or runner.
-    //
-    // The recursive call cannot loop: the second invocation has
-    // args.rig.len() == 2 and skips this expansion entirely.
-    if let Some(expanded) = maybe_expand_default_baseline(run_args)? {
-        let mut expanded_args = args;
-        expanded_args.run.rig = expanded;
-        return run(expanded_args, _global);
+    let mut default_baseline_expansion = None;
+    if let Some(expansion) = maybe_expand_default_baseline(&args.run)? {
+        args.run.rig = expansion.rig_ids.clone();
+        let execution_order = ordered_rig_ids(&args.run);
+        let metadata = expansion.metadata(execution_order);
+        eprintln!("{}", default_baseline_notice(&metadata));
+        default_baseline_expansion = Some(metadata);
     }
+
+    let run_args = &args.run;
+    let passthrough_args = filter_homeboy_flags(&run_args.args);
 
     // --rig with one value: single rig-pinned run. A rig that declares
     // bench.components fans out across those components while preserving
@@ -428,8 +429,9 @@ pub fn run(args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> {
         .or_else(|| run_args.comp.id().map(|s| s.to_string()))
         .unwrap_or_else(|| "<unknown>".to_string());
 
-    let (output, exit) =
+    let (mut output, exit) =
         aggregate_comparison_with_axes(component, run_args.iterations, entries, &axes_by_rig);
+    output.default_baseline_expansion = default_baseline_expansion;
     if run_args.json_summary {
         return Ok((BenchOutput::ComparisonSummary(output.into()), exit));
     }
@@ -698,7 +700,38 @@ fn run_rig_workload_preflight(spec: &RigSpec, extension_id: Option<&str>) -> hom
 /// A spec that names itself as its own default baseline is rejected
 /// with `validation_invalid_argument` — the auto-upgrade would loop
 /// and the user almost certainly meant a different rig.
-fn maybe_expand_default_baseline(args: &BenchRunArgs) -> homeboy::Result<Option<Vec<String>>> {
+#[derive(Debug, PartialEq, Eq)]
+struct DefaultBaselineExpansion {
+    baseline_rig: String,
+    candidate_rig: String,
+    rig_ids: Vec<String>,
+}
+
+impl DefaultBaselineExpansion {
+    fn metadata(&self, execution_order: Vec<String>) -> BenchDefaultBaselineExpansion {
+        BenchDefaultBaselineExpansion {
+            baseline_rig: self.baseline_rig.clone(),
+            candidate_rig: self.candidate_rig.clone(),
+            execution_order,
+            opt_out_flag: "--ignore-default-baseline",
+        }
+    }
+}
+
+fn default_baseline_notice(metadata: &BenchDefaultBaselineExpansion) -> String {
+    format!(
+        "Rig {} declares default baseline rig {}.\nRunning rigs in order: {}.\nUse {} to run only {}.",
+        metadata.candidate_rig,
+        metadata.baseline_rig,
+        metadata.execution_order.join(" -> "),
+        metadata.opt_out_flag,
+        metadata.candidate_rig,
+    )
+}
+
+fn maybe_expand_default_baseline(
+    args: &BenchRunArgs,
+) -> homeboy::Result<Option<DefaultBaselineExpansion>> {
     if args.rig.len() != 1 {
         return Ok(None);
     }
@@ -738,7 +771,11 @@ fn maybe_expand_default_baseline(args: &BenchRunArgs) -> homeboy::Result<Option<
         ));
     }
 
-    Ok(Some(vec![baseline_rig_id, candidate.clone()]))
+    Ok(Some(DefaultBaselineExpansion {
+        rig_ids: vec![baseline_rig_id.clone(), candidate.clone()],
+        baseline_rig: baseline_rig_id,
+        candidate_rig: candidate.clone(),
+    }))
 }
 
 #[cfg(test)]

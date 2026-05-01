@@ -52,7 +52,7 @@ pub use report::{
     aggregate_comparison, aggregate_comparison_with_axes, from_main_workflow,
     from_main_workflow_with_rig, BenchArtifactRef, BenchCommandOutput, BenchComparisonDiff,
     BenchComparisonOutput, BenchComparisonRigSummary, BenchComparisonSummaryOutput,
-    MetricDelta as ReportMetricDelta, RigBenchEntry,
+    BenchDefaultBaselineExpansion, MetricDelta as ReportMetricDelta, RigBenchEntry,
 };
 pub use run::{
     run_bench_list_workflow, run_main_bench_workflow, BenchListWorkflowArgs,
