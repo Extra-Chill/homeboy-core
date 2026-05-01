@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
+use super::records::{ArtifactRecord, NewRunRecord, RunListFilter, RunRecord, RunStatus};
 use crate::{paths, Error, Result};
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 1;
@@ -84,6 +87,251 @@ impl ObservationStore {
 
     pub fn status(&self) -> Result<ObservationDbStatus> {
         status_for_open_connection(&self.connection, self.path.clone(), true)
+    }
+
+    pub fn start_run(&self, run: NewRunRecord) -> Result<RunRecord> {
+        validate_required("kind", &run.kind)?;
+        let id = Uuid::new_v4().to_string();
+        let started_at = chrono::Utc::now().to_rfc3339();
+        let metadata_json = serialize_metadata(&run.metadata_json)?;
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO runs(
+                    id,
+                    kind,
+                    component_id,
+                    started_at,
+                    status,
+                    command,
+                    cwd,
+                    homeboy_version,
+                    git_sha,
+                    rig_id,
+                    metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                "#,
+                params![
+                    id,
+                    run.kind,
+                    run.component_id,
+                    started_at,
+                    RunStatus::Running.as_str(),
+                    run.command,
+                    run.cwd,
+                    run.homeboy_version,
+                    run.git_sha,
+                    run.rig_id,
+                    metadata_json,
+                ],
+            )
+            .map_err(sqlite_error("insert run record"))?;
+
+        self.get_run(&id)?.ok_or_else(|| {
+            Error::internal_unexpected(format!(
+                "Inserted run record {id} but could not read it back"
+            ))
+        })
+    }
+
+    pub fn finish_run(
+        &self,
+        run_id: &str,
+        status: RunStatus,
+        metadata_json: Option<serde_json::Value>,
+    ) -> Result<RunRecord> {
+        validate_required("run_id", run_id)?;
+        let finished_at = chrono::Utc::now().to_rfc3339();
+        let rows = match metadata_json {
+            Some(metadata_json) => {
+                let serialized = serialize_metadata(&metadata_json)?;
+                self.connection
+                    .execute(
+                        r#"
+                        UPDATE runs
+                        SET finished_at = ?1, status = ?2, metadata_json = ?3
+                        WHERE id = ?4
+                        "#,
+                        params![finished_at, status.as_str(), serialized, run_id],
+                    )
+                    .map_err(sqlite_error("finish run record with metadata"))?
+            }
+            None => self
+                .connection
+                .execute(
+                    r#"
+                    UPDATE runs
+                    SET finished_at = ?1, status = ?2
+                    WHERE id = ?3
+                    "#,
+                    params![finished_at, status.as_str(), run_id],
+                )
+                .map_err(sqlite_error("finish run record"))?,
+        };
+
+        if rows == 0 {
+            return Err(Error::validation_invalid_argument(
+                "run_id",
+                format!("run record not found: {run_id}"),
+                Some(run_id.to_string()),
+                None,
+            ));
+        }
+
+        self.get_run(run_id)?.ok_or_else(|| {
+            Error::internal_unexpected(format!(
+                "Finished run record {run_id} but could not read it back"
+            ))
+        })
+    }
+
+    pub fn get_run(&self, run_id: &str) -> Result<Option<RunRecord>> {
+        validate_required("run_id", run_id)?;
+        self.connection
+            .query_row(
+                r#"
+                SELECT id, kind, component_id, started_at, finished_at, status, command, cwd,
+                       homeboy_version, git_sha, rig_id, metadata_json
+                FROM runs
+                WHERE id = ?1
+                "#,
+                [run_id],
+                row_to_run_record,
+            )
+            .optional()
+            .map_err(sqlite_error("read run record"))
+    }
+
+    pub fn list_runs(&self, filter: RunListFilter) -> Result<Vec<RunRecord>> {
+        let limit = filter.limit.unwrap_or(100).clamp(1, 1000);
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, kind, component_id, started_at, finished_at, status, command, cwd,
+                       homeboy_version, git_sha, rig_id, metadata_json
+                FROM runs
+                WHERE (?1 IS NULL OR kind = ?1)
+                  AND (?2 IS NULL OR component_id = ?2)
+                  AND (?3 IS NULL OR status = ?3)
+                  AND (?4 IS NULL OR rig_id = ?4)
+                ORDER BY started_at DESC
+                LIMIT ?5
+                "#,
+            )
+            .map_err(sqlite_error("prepare list run records"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    filter.kind.as_deref(),
+                    filter.component_id.as_deref(),
+                    filter.status.as_deref(),
+                    filter.rig_id.as_deref(),
+                    limit,
+                ],
+                row_to_run_record,
+            )
+            .map_err(sqlite_error("list run records"))?;
+
+        collect_rows(rows, "collect run records")
+    }
+
+    pub fn record_artifact(
+        &self,
+        run_id: &str,
+        kind: &str,
+        path: impl AsRef<Path>,
+    ) -> Result<ArtifactRecord> {
+        validate_required("run_id", run_id)?;
+        validate_required("kind", kind)?;
+        if self.get_run(run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "run_id",
+                format!("run record not found: {run_id}"),
+                Some(run_id.to_string()),
+                None,
+            ));
+        }
+
+        let path = path.as_ref();
+        let metadata = fs::metadata(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Error::validation_invalid_argument(
+                    "path",
+                    format!("artifact file not found: {}", path.display()),
+                    Some(path.to_string_lossy().to_string()),
+                    None,
+                );
+            }
+            Error::internal_io(
+                e.to_string(),
+                Some(format!("read artifact metadata {}", path.display())),
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(Error::validation_invalid_argument(
+                "path",
+                format!("artifact path is not a file: {}", path.display()),
+                Some(path.to_string_lossy().to_string()),
+                None,
+            ));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let path_string = path.to_string_lossy().to_string();
+        let size_bytes = i64::try_from(metadata.len()).ok();
+        let sha256 = Some(sha256_file(path)?);
+        let mime = mime_from_path(path);
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO artifacts(id, run_id, kind, path, sha256, size_bytes, mime, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    id,
+                    run_id,
+                    kind,
+                    path_string,
+                    sha256,
+                    size_bytes,
+                    mime,
+                    created_at,
+                ],
+            )
+            .map_err(sqlite_error("insert artifact record"))?;
+
+        self.list_artifacts(run_id)?
+            .into_iter()
+            .find(|artifact| artifact.id == id)
+            .ok_or_else(|| {
+                Error::internal_unexpected(format!(
+                    "Inserted artifact record {id} but could not read it back"
+                ))
+            })
+    }
+
+    pub fn list_artifacts(&self, run_id: &str) -> Result<Vec<ArtifactRecord>> {
+        validate_required("run_id", run_id)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, run_id, kind, path, sha256, size_bytes, mime, created_at
+                FROM artifacts
+                WHERE run_id = ?1
+                ORDER BY created_at ASC
+                "#,
+            )
+            .map_err(sqlite_error("prepare list artifact records"))?;
+        let rows = statement
+            .query_map([run_id], row_to_artifact_record)
+            .map_err(sqlite_error("list artifact records"))?;
+
+        collect_rows(rows, "collect artifact records")
     }
 }
 
@@ -229,6 +477,105 @@ fn open_connection(path: &Path) -> Result<Connection> {
     )))
 }
 
+fn validate_required(field: &str, value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        return Err(Error::validation_invalid_argument(
+            field,
+            "value cannot be empty",
+            None,
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn serialize_metadata(metadata_json: &serde_json::Value) -> Result<String> {
+    serde_json::to_string(metadata_json).map_err(|e| {
+        Error::internal_json(e.to_string(), Some("serialize run metadata".to_string()))
+    })
+}
+
+fn parse_metadata(raw: String) -> rusqlite::Result<serde_json::Value> {
+    serde_json::from_str(&raw).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            raw.len(),
+            rusqlite::types::Type::Text,
+            Box::new(e),
+        )
+    })
+}
+
+fn row_to_run_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
+    Ok(RunRecord {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        component_id: row.get(2)?,
+        started_at: row.get(3)?,
+        finished_at: row.get(4)?,
+        status: row.get(5)?,
+        command: row.get(6)?,
+        cwd: row.get(7)?,
+        homeboy_version: row.get(8)?,
+        git_sha: row.get(9)?,
+        rig_id: row.get(10)?,
+        metadata_json: parse_metadata(row.get(11)?)?,
+    })
+}
+
+fn row_to_artifact_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRecord> {
+    Ok(ArtifactRecord {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        kind: row.get(2)?,
+        path: row.get(3)?,
+        sha256: row.get(4)?,
+        size_bytes: row.get(5)?,
+        mime: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn collect_rows<T>(
+    rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>,
+    context: &'static str,
+) -> Result<Vec<T>> {
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(sqlite_error(context))?);
+    }
+    Ok(records)
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!("read artifact bytes {}", path.display())),
+        )
+    })?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+fn mime_from_path(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "json" => "application/json",
+        "md" | "markdown" => "text/markdown",
+        "html" | "htm" => "text/html",
+        "txt" | "log" => "text/plain",
+        "csv" => "text/csv",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" => "application/gzip",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        _ => return None,
+    };
+    Some(mime.to_string())
+}
+
 fn sqlite_error(context: impl Into<String>) -> impl FnOnce(rusqlite::Error) -> Error {
     let context = context.into();
     move |error| {
@@ -241,3 +588,149 @@ fn sqlite_error(context: impl Into<String>) -> impl FnOnce(rusqlite::Error) -> E
 #[cfg(test)]
 #[path = "../../../tests/core/observation/store_test.rs"]
 mod store_test;
+
+#[cfg(test)]
+mod api_coverage_tests {
+    use super::*;
+    use crate::test_support::with_isolated_home;
+
+    struct XdgGuard(Option<String>);
+
+    impl XdgGuard {
+        fn unset() -> Self {
+            let prior = std::env::var("XDG_DATA_HOME").ok();
+            std::env::remove_var("XDG_DATA_HOME");
+            Self(prior)
+        }
+    }
+
+    impl Drop for XdgGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
+
+    fn new_run(kind: &str) -> NewRunRecord {
+        NewRunRecord {
+            kind: kind.to_string(),
+            component_id: Some("homeboy".to_string()),
+            command: Some(format!("homeboy {kind}")),
+            cwd: Some("/tmp/homeboy".to_string()),
+            homeboy_version: Some("test".to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some("studio".to_string()),
+            metadata_json: serde_json::json!({ "source": "inline" }),
+        }
+    }
+
+    #[test]
+    fn test_status() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let status = status().expect("status");
+            assert!(!status.exists);
+        });
+    }
+
+    #[test]
+    fn test_database_path() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            assert_eq!(
+                database_path().expect("path"),
+                home.path().join(".local/share/homeboy/homeboy.sqlite")
+            );
+        });
+    }
+
+    #[test]
+    fn test_open_initialized() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            assert_eq!(
+                store.status().expect("status").schema_version,
+                CURRENT_SCHEMA_VERSION
+            );
+        });
+    }
+
+    #[test]
+    fn test_start_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            assert_eq!(run.status, "running");
+            assert_eq!(run.kind, "bench");
+        });
+    }
+
+    #[test]
+    fn test_finish_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            let finished = store
+                .finish_run(
+                    &run.id,
+                    RunStatus::Pass,
+                    Some(serde_json::json!({ "done": true })),
+                )
+                .expect("finish");
+            assert_eq!(finished.status, "pass");
+            assert_eq!(finished.metadata_json["done"], true);
+        });
+    }
+
+    #[test]
+    fn test_list_runs() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+            let runs = store
+                .list_runs(RunListFilter {
+                    kind: Some("trace".to_string()),
+                    ..RunListFilter::default()
+                })
+                .expect("list");
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].id, run.id);
+        });
+    }
+
+    #[test]
+    fn test_record_artifact() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+            let path = home.path().join("artifact.json");
+            fs::write(&path, b"{}").expect("write artifact");
+            let artifact = store
+                .record_artifact(&run.id, "json", &path)
+                .expect("artifact");
+            assert_eq!(artifact.size_bytes, Some(2));
+        });
+    }
+
+    #[test]
+    fn test_list_artifacts() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("trace")).expect("start");
+            let path = home.path().join("artifact.log");
+            fs::write(&path, b"log").expect("write artifact");
+            let artifact = store
+                .record_artifact(&run.id, "log", &path)
+                .expect("artifact");
+            assert_eq!(store.list_artifacts(&run.id).expect("list"), vec![artifact]);
+        });
+    }
+}
