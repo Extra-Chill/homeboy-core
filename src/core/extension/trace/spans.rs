@@ -1,7 +1,5 @@
 //! Generic trace span post-processing over `source.event` timeline keys.
 
-use std::collections::HashMap;
-
 use super::parsing::{
     TraceEvent, TraceResults, TraceSpanDefinition, TraceSpanResult, TraceSpanStatus,
 };
@@ -38,10 +36,9 @@ pub(crate) fn summarize_spans(
     timeline: &[TraceEvent],
     definitions: &[TraceSpanDefinition],
 ) -> Vec<TraceSpanResult> {
-    let index = first_event_index(timeline);
     definitions
         .iter()
-        .map(|definition| summarize_span(definition, &index))
+        .map(|definition| summarize_span(definition, timeline))
         .collect()
 }
 
@@ -63,24 +60,45 @@ fn merge_definitions(
     merged
 }
 
-fn first_event_index(timeline: &[TraceEvent]) -> HashMap<String, u64> {
-    let mut index = HashMap::new();
-    for event in timeline {
-        index.entry(timeline_key(event)).or_insert(event.t_ms);
+fn event_matches_key(event: &TraceEvent, key: &str) -> bool {
+    event.source.len() + 1 + event.event.len() == key.len()
+        && key.starts_with(&event.source)
+        && key.as_bytes().get(event.source.len()) == Some(&b'.')
+        && key[event.source.len() + 1..] == event.event
+}
+
+fn first_event_time(timeline: &[TraceEvent], key: &str) -> Option<u64> {
+    timeline
+        .iter()
+        .find(|event| event_matches_key(event, key))
+        .map(|event| event.t_ms)
+}
+
+fn nearest_valid_pair(timeline: &[TraceEvent], from_key: &str, to_key: &str) -> Option<(u64, u64)> {
+    let mut best: Option<(u64, u64)> = None;
+
+    for from in timeline
+        .iter()
+        .filter(|event| event_matches_key(event, from_key))
+    {
+        for to in timeline
+            .iter()
+            .filter(|event| event_matches_key(event, to_key) && event.t_ms >= from.t_ms)
+        {
+            match best {
+                Some((best_from, best_to))
+                    if to.t_ms - from.t_ms >= best_to.saturating_sub(best_from) => {}
+                _ => best = Some((from.t_ms, to.t_ms)),
+            }
+        }
     }
-    index
+
+    best
 }
 
-fn timeline_key(event: &TraceEvent) -> String {
-    format!("{}.{}", event.source, event.event)
-}
-
-fn summarize_span(
-    definition: &TraceSpanDefinition,
-    index: &HashMap<String, u64>,
-) -> TraceSpanResult {
-    let from_t_ms = index.get(&definition.from).copied();
-    let to_t_ms = index.get(&definition.to).copied();
+fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> TraceSpanResult {
+    let from_t_ms = first_event_time(timeline, &definition.from);
+    let to_t_ms = first_event_time(timeline, &definition.to);
     let mut missing = Vec::new();
     if from_t_ms.is_none() {
         missing.push(definition.from.clone());
@@ -102,9 +120,9 @@ fn summarize_span(
         };
     }
 
-    let from_value = from_t_ms.expect("checked above");
-    let to_value = to_t_ms.expect("checked above");
-    if to_value < from_value {
+    let Some((from_value, to_value)) =
+        nearest_valid_pair(timeline, &definition.from, &definition.to)
+    else {
         return TraceSpanResult {
             id: definition.id.clone(),
             from: definition.from.clone(),
@@ -116,7 +134,7 @@ fn summarize_span(
             missing: Vec::new(),
             message: Some("span end occurred before span start".to_string()),
         };
-    }
+    };
 
     TraceSpanResult {
         id: definition.id.clone(),
@@ -124,8 +142,8 @@ fn summarize_span(
         to: definition.to.clone(),
         status: TraceSpanStatus::Ok,
         duration_ms: Some(to_value - from_value),
-        from_t_ms,
-        to_t_ms,
+        from_t_ms: Some(from_value),
+        to_t_ms: Some(to_value),
         missing: Vec::new(),
         message: None,
     }
@@ -182,6 +200,52 @@ mod tests {
         assert_eq!(results[0].status, TraceSpanStatus::Skipped);
         assert_eq!(results[0].duration_ms, None);
         assert_eq!(results[0].missing, vec!["cli.started"]);
+    }
+
+    #[test]
+    fn repeated_events_resolve_to_nearest_valid_pair() {
+        let results = summarize_spans(
+            &[
+                event(10, "renderer", "site_event_received"),
+                event(50, "renderer", "site_event_received"),
+                event(80, "renderer", "dom_status_running_seen"),
+            ],
+            &[TraceSpanDefinition {
+                id: "site_running".to_string(),
+                from: "renderer.site_event_received".to_string(),
+                to: "renderer.dom_status_running_seen".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Ok);
+        assert_eq!(results[0].from_t_ms, Some(50));
+        assert_eq!(results[0].to_t_ms, Some(80));
+        assert_eq!(results[0].duration_ms, Some(30));
+    }
+
+    #[test]
+    fn repeated_events_skip_when_no_end_occurs_after_start() {
+        let results = summarize_spans(
+            &[
+                event(10, "cli", "started"),
+                event(50, "ui", "clicked"),
+                event(75, "ui", "clicked"),
+            ],
+            &[TraceSpanDefinition {
+                id: "submit_to_cli".to_string(),
+                from: "ui.clicked".to_string(),
+                to: "cli.started".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Skipped);
+        assert_eq!(results[0].duration_ms, None);
+        assert_eq!(results[0].from_t_ms, Some(50));
+        assert_eq!(results[0].to_t_ms, Some(10));
+        assert_eq!(
+            results[0].message.as_deref(),
+            Some("span end occurred before span start")
+        );
     }
 
     #[test]
