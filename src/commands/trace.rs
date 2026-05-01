@@ -506,6 +506,11 @@ struct TraceAggregateInput {
 }
 
 #[derive(Deserialize)]
+struct TraceAggregateEnvelopeInput {
+    data: TraceAggregateInput,
+}
+
+#[derive(Deserialize)]
 struct TraceAggregateSpanInput {
     id: String,
     n: usize,
@@ -538,12 +543,21 @@ fn read_trace_aggregate(path: &Path) -> homeboy::Result<TraceAggregateInput> {
             Some("trace.compare.read".to_string()),
         )
     })?;
-    serde_json::from_str(&content).map_err(|err| {
+    parse_trace_aggregate_input(&content).map_err(|err| {
         homeboy::Error::internal_json(
             err.to_string(),
             Some(format!("parse trace aggregate {}", path.display())),
         )
     })
+}
+
+fn parse_trace_aggregate_input(content: &str) -> serde_json::Result<TraceAggregateInput> {
+    match serde_json::from_str::<TraceAggregateInput>(content) {
+        Ok(input) => Ok(input),
+        Err(direct_error) => serde_json::from_str::<TraceAggregateEnvelopeInput>(content)
+            .map(|envelope| envelope.data)
+            .map_err(|_| direct_error),
+    }
 }
 
 fn compare_trace_aggregates(
@@ -1637,6 +1651,36 @@ mod tests {
             .expect("before-only span");
         assert_eq!(before_only.after_n, None);
         assert_eq!(before_only.median_delta_ms, None);
+    }
+
+    #[test]
+    fn trace_compare_accepts_json_summary_envelope_outputs() {
+        let input = parse_trace_aggregate_input(
+            r#"{
+                "success": true,
+                "data": {
+                    "command": "trace.aggregate.spans",
+                    "component": "studio",
+                    "scenario_id": "create-site",
+                    "spans": [
+                        {
+                            "id": "submit_to_running",
+                            "n": 5,
+                            "median_ms": 6059,
+                            "avg_ms": 6019.8,
+                            "failures": 0
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("json summary envelope should parse");
+
+        assert_eq!(input.component.as_deref(), Some("studio"));
+        assert_eq!(input.scenario_id.as_deref(), Some("create-site"));
+        assert_eq!(input.spans.len(), 1);
+        assert_eq!(input.spans[0].id, "submit_to_running");
+        assert_eq!(input.spans[0].median_ms, Some(6059));
     }
 
     #[test]
