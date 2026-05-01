@@ -103,6 +103,8 @@ homeboy trace studio create-site \
 
 The example above produces span rows for `phase.submit_to_cli`, `phase.cli_to_ready`, and `phase.total`. Existing `--span` definitions still work and can be mixed with phase milestones.
 
+Phase spans keep the same ordering semantics as normal spans: a phase interval is only `ok` when the later milestone occurs at or after the previous milestone. If both phase milestones exist but the later milestone was first observed before the previous milestone, Homeboy reports the span as skipped with a non-monotonic phase-chain diagnostic instead of treating the out-of-order interval as successful. Markdown reports include that diagnostic in the span status column so asynchronous readiness events are easier to distinguish from missing events.
+
 ## Repeat And Aggregate
 
 Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, percentile fields (`p75_ms`, `p90_ms`, `p95_ms`) when enough samples are available, `max_ms`, and `failures` counts.
