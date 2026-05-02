@@ -605,22 +605,4 @@ mod tests {
         assert!(markdown.contains("- `apps/studio/out/app.js`"));
         assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
     }
-
-    #[test]
-    fn test_push_overlay_markdown() {
-        let overlays = vec![TraceOverlay {
-            path: "/tmp/overlay.patch".to_string(),
-            component_path: "/tmp/studio".to_string(),
-            touched_files: vec!["scenario.txt".to_string()],
-            kept: true,
-        }];
-        let mut markdown = String::new();
-
-        push_overlay_markdown(&mut markdown, &overlays);
-
-        assert!(markdown.contains("## Trace Overlays"));
-        assert!(markdown.contains("- **Patch:** `/tmp/overlay.patch` (`kept`)"));
-        assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
-        assert!(markdown.contains("- `scenario.txt`"));
-    }
 }

@@ -679,12 +679,20 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
     let before = TraceAggregateInput {
         component: Some("studio".to_string()),
         scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
         spans: vec![
             TraceAggregateSpanInput {
                 id: "focused".to_string(),
                 n: 6,
                 median_ms: Some(100),
                 avg_ms: Some(100.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -692,6 +700,9 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
                 n: 6,
                 median_ms: Some(100),
                 avg_ms: Some(100.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
         ],
@@ -699,12 +710,20 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
     let after = TraceAggregateInput {
         component: Some("studio".to_string()),
         scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
         spans: vec![
             TraceAggregateSpanInput {
                 id: "focused".to_string(),
                 n: 6,
                 median_ms: Some(130),
                 avg_ms: Some(130.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -712,6 +731,9 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
                 n: 6,
                 median_ms: Some(250),
                 avg_ms: Some(250.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
         ],
@@ -768,7 +790,7 @@ fn trace_compare_accepts_json_summary_envelope_outputs() {
 }
 
 #[test]
-fn trace_compare_markdown_renders_span_table() {
+fn trace_compare_markdown_and_experiment_bundle_render_artifacts() {
     let compare = extension_trace::TraceCompareOutput {
         command: "trace.compare.spans",
         before_path: "before.json".to_string(),
@@ -807,10 +829,7 @@ fn trace_compare_markdown_renders_span_table() {
     assert!(markdown.contains(
         "| `boot_to_ready` | 100ms | 125ms | **+25ms** | +25.0% | 110.0ms | 121.0ms | **+11.0ms** | +10.0% |"
     ));
-}
 
-#[test]
-fn trace_experiment_bundle_writes_manifest_report_and_overlay_copy() {
     let dir = tempfile::TempDir::new().expect("bundle dir");
     let before_path = dir.path().join("baseline-source.json");
     let after_path = dir.path().join("variant-source.json");
