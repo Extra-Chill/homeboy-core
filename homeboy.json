@@ -3,7 +3,7 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-02T20:15:50Z",
+      "created_at": "2026-05-02T22:20:01Z",
       "item_count": 703,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
@@ -77,10 +77,8 @@
         "field_patterns::src/core/engine/edit_op.rs::RepeatedFieldPattern",
         "field_patterns::src/core/extension/bench/report.rs::RepeatedFieldPattern",
         "field_patterns::src/core/extension/bench/run.rs::RepeatedFieldPattern",
-        "field_patterns::src/core/extension/bench/run.rs::RepeatedFieldPattern",
         "field_patterns::src/core/extension/mod.rs::RepeatedFieldPattern",
         "field_patterns::src/core/extension/mod.rs::RepeatedFieldPattern",
-        "field_patterns::src/core/extension/trace/run.rs::RepeatedFieldPattern",
         "field_patterns::src/core/git/operations.rs::RepeatedFieldPattern",
         "field_patterns::src/core/observation/records.rs::RepeatedFieldPattern",
         "field_patterns::src/core/project/mod.rs::RepeatedFieldPattern",
@@ -115,6 +113,7 @@
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/cli_tool.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/codebase_scan.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/edit_op_apply.rs::IntraMethodDuplicate",
@@ -126,6 +125,7 @@
         "intra-method-duplication::src/core/git/operations.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/git/operations.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/issues/reconcile.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/refactor/auto/apply.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/refactor/auto/apply.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/refactor/plan/generate/comment_fixes.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/refactor/plan/generate/duplicate_fixes.rs::IntraMethodDuplicate",
