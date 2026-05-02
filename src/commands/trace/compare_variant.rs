@@ -181,6 +181,7 @@ fn aggregate_to_compare_input(
                 max_run_index: span.max_run_index,
                 max_artifact_path: span.max_artifact_path.clone(),
                 failures: span.failures,
+                metadata: span.metadata.clone(),
             })
             .collect(),
     }

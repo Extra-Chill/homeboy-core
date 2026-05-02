@@ -190,6 +190,49 @@ pub(super) fn write_trace_rig_with_phase_preset(
     .expect("write rig");
 }
 
+pub(super) fn write_trace_rig_with_span_metadata(
+    home: &tempfile::TempDir,
+    rig_id: &str,
+    component_id: &str,
+    path: &std::path::Path,
+) {
+    let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+    fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+    fs::write(
+        rig_dir.join(format!("{}.json", rig_id)),
+        format!(
+            r#"{{
+                    "components": {{
+                        "{component_id}": {{ "path": "{}" }}
+                    }},
+                    "trace_workloads": {{ "nodejs": [
+                        {{
+                            "path": "${{components.{component_id}.path}}/studio-app-create-site.trace.mjs",
+                            "check_groups": [],
+                            "trace_default_phase_preset": "startup",
+                            "trace_phase_presets": {{
+                                "startup": ["boot:runner.boot", "ready:runner.ready"]
+                            }},
+                            "trace_span_metadata": {{
+                                "phase.boot_to_ready": {{
+                                    "critical": true,
+                                    "blocking": true,
+                                    "cacheable": true,
+                                    "prewarmable": true,
+                                    "blocks": "first_site_render",
+                                    "category": "wordpress_boot"
+                                }},
+                                "missing_span": {{ "deferrable": true }}
+                            }}
+                        }}
+                    ] }}
+                }}"#,
+            path.display()
+        ),
+    )
+    .expect("write rig");
+}
+
 pub(super) fn write_trace_rig_with_variant(
     home: &tempfile::TempDir,
     package_path: &std::path::Path,

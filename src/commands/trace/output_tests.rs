@@ -125,6 +125,62 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
 }
 
 #[test]
+fn trace_compare_includes_classification_summary_output() {
+    let metadata = extension_trace::TraceSpanMetadata {
+        critical: true,
+        blocking: true,
+        cacheable: true,
+        prewarmable: false,
+        deferrable: false,
+        blocks: Some("first_site_render".to_string()),
+        category: None,
+    };
+    let before = TraceAggregateInput {
+        component: Some("studio".to_string()),
+        scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
+        spans: vec![TraceAggregateSpanInput {
+            metadata: Some(metadata.clone()),
+            ..span_input("boot_to_ready", 5, Some(100), Some(100.0), 0)
+        }],
+    };
+    let after = TraceAggregateInput {
+        component: Some("studio".to_string()),
+        scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
+        spans: vec![TraceAggregateSpanInput {
+            metadata: Some(metadata),
+            ..span_input("boot_to_ready", 5, Some(125), Some(125.0), 0)
+        }],
+    };
+
+    let compare = compare_trace_aggregates(
+        Path::new("before.json"),
+        before,
+        Path::new("after.json"),
+        after,
+    );
+
+    assert!(compare.classification_summaries.iter().any(|summary| {
+        summary.classification == "cacheable_critical"
+            && summary.before_total_median_ms == Some(100)
+            && summary.after_total_median_ms == Some(125)
+            && summary.median_delta_ms == Some(25)
+    }));
+    let markdown = render_compare_markdown(&compare);
+    assert!(markdown.contains("## Critical Path Classification"));
+    assert!(markdown.contains("| `cacheable_critical` | 1 | 100ms | 125ms | **+25ms** |"));
+}
+
+#[test]
 fn trace_compare_accepts_json_summary_envelope_outputs() {
     let input = parse_trace_aggregate_input(
         r#"{
@@ -185,6 +241,7 @@ fn trace_compare_markdown_and_experiment_bundle_render_artifacts() {
         focus_regression_count: 0,
         focus_failure_count: 0,
         focus_status: None,
+        classification_summaries: Vec::new(),
     };
 
     let markdown = render_compare_markdown(&compare);
@@ -328,5 +385,6 @@ fn span_input(
         max_run_index: None,
         max_artifact_path: None,
         failures,
+        metadata: None,
     }
 }

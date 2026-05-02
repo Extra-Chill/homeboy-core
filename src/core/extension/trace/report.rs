@@ -1,6 +1,6 @@
 //! Trace command output envelopes.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::baseline::TraceBaselineComparison;
 use super::overlay_lock::TraceOverlayLockRecord;
@@ -112,6 +112,10 @@ pub struct TraceAggregateOutput {
     pub focus_span_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub focus_spans: Vec<TraceAggregateSpanOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classification_summaries: Vec<TraceClassificationSummaryOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unmatched_span_metadata_ids: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -159,6 +163,36 @@ pub struct TraceAggregateSpanOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_artifact_path: Option<String>,
     pub failures: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<TraceSpanMetadata>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct TraceSpanMetadata {
+    #[serde(default, skip_serializing_if = "is_default_bool")]
+    pub critical: bool,
+    #[serde(default, skip_serializing_if = "is_default_bool")]
+    pub blocking: bool,
+    #[serde(default, skip_serializing_if = "is_default_bool")]
+    pub cacheable: bool,
+    #[serde(default, skip_serializing_if = "is_default_bool")]
+    pub prewarmable: bool,
+    #[serde(default, skip_serializing_if = "is_default_bool")]
+    pub deferrable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TraceClassificationSummaryOutput {
+    pub classification: String,
+    pub span_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_median_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_avg_ms: Option<f64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -186,6 +220,20 @@ pub struct TraceCompareOutput {
     pub focus_failure_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classification_summaries: Vec<TraceCompareClassificationSummaryOutput>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TraceCompareClassificationSummaryOutput {
+    pub classification: String,
+    pub span_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_total_median_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_total_median_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_delta_ms: Option<i64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -249,6 +297,10 @@ pub struct TraceCompareSpanOutput {
 
 fn is_default_usize(value: &usize) -> bool {
     value.eq(&usize::default())
+}
+
+fn is_default_bool(value: &bool) -> bool {
+    !*value
 }
 
 pub fn from_main_workflow(

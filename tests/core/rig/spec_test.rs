@@ -330,6 +330,41 @@ fn test_trace_variants() {
         .is_none());
 }
 
+#[test]
+fn test_trace_span_metadata() {
+    let workload: WorkloadSpec = serde_json::from_str(
+        r#"{
+            "path": "/tmp/scoped.trace.mjs",
+            "trace_span_metadata": {
+                "phase.boot_to_ready": {
+                    "critical": true,
+                    "blocking": true,
+                    "cacheable": true,
+                    "prewarmable": true,
+                    "blocks": "first_site_render",
+                    "category": "wordpress_boot"
+                }
+            }
+        }"#,
+    )
+    .expect("parse detailed workload metadata");
+
+    let metadata = workload
+        .trace_span_metadata()
+        .expect("metadata")
+        .get("phase.boot_to_ready")
+        .expect("span metadata");
+    assert!(metadata.critical);
+    assert!(metadata.blocking);
+    assert!(metadata.cacheable);
+    assert!(metadata.prewarmable);
+    assert_eq!(metadata.blocks.as_deref(), Some("first_site_render"));
+    assert_eq!(metadata.category.as_deref(), Some("wordpress_boot"));
+    assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
+        .trace_span_metadata()
+        .is_none());
+}
+
 fn workload_with_trace_metadata() -> WorkloadSpec {
     WorkloadSpec::Detailed(WorkloadEntry {
         path: "/tmp/scoped.trace.mjs".to_string(),
@@ -338,6 +373,7 @@ fn workload_with_trace_metadata() -> WorkloadSpec {
             "startup".to_string(),
             vec!["boot:runner.boot".to_string()],
         )]),
+        trace_span_metadata: std::collections::HashMap::new(),
         trace_default_phase_preset: Some("startup".to_string()),
         trace_variants: std::collections::HashMap::from([(
             "fresh-install-mode".to_string(),

@@ -1,6 +1,8 @@
 //! Rig spec types — the JSON schema on disk.
 
 use serde::{Deserialize, Serialize};
+
+use crate::extension::trace::TraceSpanMetadata;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::component::ScopedExtensionConfig;
@@ -299,6 +301,9 @@ pub struct WorkloadEntry {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_phase_presets: HashMap<String, Vec<String>>,
 
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_span_metadata: HashMap<String, TraceSpanMetadata>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_default_phase_preset: Option<String>,
 
@@ -346,6 +351,13 @@ impl WorkloadSpec {
                 .trace_phase_presets
                 .get(name)
                 .map(|phases| phases.as_slice()),
+        }
+    }
+
+    pub fn trace_span_metadata(&self) -> Option<&HashMap<String, TraceSpanMetadata>> {
+        match self {
+            WorkloadSpec::Path(_) => None,
+            WorkloadSpec::Detailed(entry) => Some(&entry.trace_span_metadata),
         }
     }
 
@@ -412,6 +424,7 @@ mod tests {
                 "startup".to_string(),
                 vec!["launch".to_string(), "ready".to_string()],
             )]),
+            trace_span_metadata: HashMap::new(),
             trace_default_phase_preset: None,
             trace_variants: HashMap::new(),
         });
@@ -433,6 +446,7 @@ mod tests {
             path: "trace.mjs".to_string(),
             check_groups: None,
             trace_phase_presets: HashMap::new(),
+            trace_span_metadata: HashMap::new(),
             trace_default_phase_preset: Some("startup".to_string()),
             trace_variants: HashMap::new(),
         });

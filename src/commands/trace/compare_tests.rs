@@ -22,6 +22,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
             TraceAggregateSpanInput {
                 id: "large_improvement".to_string(),
@@ -32,6 +33,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
             TraceAggregateSpanInput {
                 id: "large_regression".to_string(),
@@ -42,6 +44,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
             TraceAggregateSpanInput {
                 id: "before_only".to_string(),
@@ -52,6 +55,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 1,
+                metadata: None,
             },
         ],
     };
@@ -73,6 +77,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
             TraceAggregateSpanInput {
                 id: "large_improvement".to_string(),
@@ -83,6 +88,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
             TraceAggregateSpanInput {
                 id: "large_regression".to_string(),
@@ -93,6 +99,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
             TraceAggregateSpanInput {
                 id: "after_only".to_string(),
@@ -103,6 +110,7 @@ fn trace_compare_reports_median_and_average_deltas() {
                 max_run_index: None,
                 max_artifact_path: None,
                 failures: 0,
+                metadata: None,
             },
         ],
     };
