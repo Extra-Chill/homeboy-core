@@ -4,7 +4,6 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::overlay_lock::TraceOverlayLock;
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
@@ -15,6 +14,11 @@ use crate::extension::{
 };
 use crate::extension::{ExtensionRunner, RunnerOutput};
 use crate::rig::RigStateSnapshot;
+
+use super::overlay::{
+    apply_trace_overlays, cleanup_after_overlay_error, cleanup_trace_overlays, TraceOverlayLock,
+    TraceOverlayRequest,
+};
 
 use super::parsing::{
     parse_trace_list_str, parse_trace_results_file, TraceList, TraceResults, TraceSpanDefinition,
@@ -70,17 +74,11 @@ pub struct TraceRunWorkflowResult {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TraceOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
+    pub component_id: Option<String>,
     pub path: String,
     pub component_path: String,
     pub touched_files: Vec<String>,
     pub kept: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraceOverlayRequest {
-    pub variant: Option<String>,
-    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,25 +108,12 @@ fn run_trace_workflow_with_context(
     run_dir: &RunDir,
     rig_state: Option<RigStateSnapshot>,
 ) -> Result<TraceRunWorkflowResult> {
-    let component_path = args
-        .path_override
-        .as_deref()
-        .unwrap_or(component.local_path.as_str());
-    let _overlay_lock = if args.overlays.is_empty() {
+    let _overlay_locks = if args.overlays.is_empty() {
         None
     } else {
-        let overlay_paths = args
-            .overlays
-            .iter()
-            .map(|overlay| overlay.path.clone())
-            .collect::<Vec<_>>();
-        Some(TraceOverlayLock::acquire(
-            Path::new(component_path),
-            &overlay_paths,
-            run_dir,
-        )?)
+        Some(TraceOverlayLock::acquire_all(&args.overlays, run_dir)?)
     };
-    let applied_overlays = apply_trace_overlays(component_path, &args.overlays, args.keep_overlay)?;
+    let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
     let runner = match build_trace_runner(execution_context, component, &args, run_dir, false) {
         Ok(runner) => runner,
         Err(error) => {
@@ -253,8 +238,8 @@ fn run_trace_workflow_with_context(
         overlays: applied_overlays
             .into_iter()
             .map(|overlay| TraceOverlay {
+                component_id: overlay.component_id,
                 path: overlay.patch_path.to_string_lossy().to_string(),
-                variant: overlay.variant,
                 component_path: overlay.component_path.to_string_lossy().to_string(),
                 touched_files: overlay.touched_files,
                 kept: overlay.keep,
@@ -403,212 +388,6 @@ fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> Tr
         exit_code: output.exit_code,
         stderr_excerpt: stderr_tail(&output.stderr),
     }
-}
-
-#[derive(Debug, Clone)]
-struct AppliedTraceOverlay {
-    variant: Option<String>,
-    component_path: PathBuf,
-    patch_path: PathBuf,
-    touched_files: Vec<String>,
-    keep: bool,
-}
-
-fn apply_trace_overlays(
-    component_path: &str,
-    overlays: &[TraceOverlayRequest],
-    keep: bool,
-) -> Result<Vec<AppliedTraceOverlay>> {
-    let component_path = PathBuf::from(component_path);
-    let mut applied = Vec::new();
-    for overlay in overlays {
-        let patch_path = PathBuf::from(&overlay.path);
-        let touched_files = match overlay_touched_files(&component_path, &patch_path) {
-            Ok(files) => files,
-            Err(error) => return cleanup_after_overlay_error(&applied, keep, error),
-        };
-        if let Err(error) =
-            ensure_overlay_targets_clean(&component_path, &patch_path, &touched_files)
-        {
-            return cleanup_after_overlay_error(&applied, keep, error);
-        }
-        if let Err(error) = run_git_apply(&component_path, &patch_path, false) {
-            return cleanup_after_overlay_error(&applied, keep, error);
-        }
-        print_trace_overlay("applied", &patch_path, &touched_files, keep);
-        applied.push(AppliedTraceOverlay {
-            variant: overlay.variant.clone(),
-            component_path: component_path.clone(),
-            patch_path,
-            touched_files,
-            keep,
-        });
-    }
-    Ok(applied)
-}
-
-fn cleanup_after_overlay_error<T>(
-    applied: &[AppliedTraceOverlay],
-    keep: bool,
-    error: Error,
-) -> Result<T> {
-    if !keep {
-        let _ = cleanup_trace_overlays(applied);
-    }
-    Err(error)
-}
-
-fn cleanup_trace_overlays(applied: &[AppliedTraceOverlay]) -> Result<()> {
-    for overlay in applied.iter().rev() {
-        run_git_apply(&overlay.component_path, &overlay.patch_path, true)?;
-        print_trace_overlay(
-            "reverted",
-            &overlay.patch_path,
-            &overlay.touched_files,
-            overlay.keep,
-        );
-    }
-    Ok(())
-}
-
-fn print_trace_overlay(action: &str, patch_path: &Path, touched_files: &[String], keep: bool) {
-    eprintln!("trace overlay {action}: {}", patch_path.display());
-    let retention = if action == "reverted" {
-        "overlay changes reverted"
-    } else if keep {
-        "overlay changes will be kept"
-    } else {
-        "overlay changes will be reverted after the run"
-    };
-    eprintln!("  status: {retention}");
-    if touched_files.is_empty() {
-        eprintln!("  touched files: none reported by git apply --numstat");
-        return;
-    }
-    eprintln!("  touched files:");
-    for file in touched_files {
-        eprintln!("    - {file}");
-    }
-}
-
-pub(super) fn overlay_touched_files(
-    component_path: &Path,
-    patch_path: &Path,
-) -> Result<Vec<String>> {
-    let output = Command::new("git")
-        .args(["apply", "--numstat"])
-        .arg(patch_path)
-        .current_dir(component_path)
-        .output()
-        .map_err(|e| {
-            Error::internal_io(
-                format!(
-                    "Failed to inspect trace overlay {}: {}",
-                    patch_path.display(),
-                    e
-                ),
-                Some("trace.overlay.inspect".to_string()),
-            )
-        })?;
-    if !output.status.success() {
-        return Err(Error::validation_invalid_argument(
-            "--overlay",
-            format!("trace overlay {} cannot be inspected", patch_path.display()),
-            Some(String::from_utf8_lossy(&output.stderr).to_string()),
-            None,
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.split('\t').nth(2))
-        .map(|path| path.trim().trim_matches('"').to_string())
-        .filter(|path| !path.is_empty())
-        .collect())
-}
-
-fn ensure_overlay_targets_clean(
-    component_path: &Path,
-    patch_path: &Path,
-    touched_files: &[String],
-) -> Result<()> {
-    if touched_files.is_empty() {
-        return Ok(());
-    }
-    let mut command = Command::new("git");
-    command
-        .args(["status", "--porcelain=v1", "--"])
-        .args(touched_files)
-        .current_dir(component_path);
-    let output = command.output().map_err(|e| {
-        Error::internal_io(
-            format!(
-                "Failed to check trace overlay targets for {}: {}",
-                patch_path.display(),
-                e
-            ),
-            Some("trace.overlay.status".to_string()),
-        )
-    })?;
-    if !output.status.success() {
-        return Err(Error::validation_invalid_argument(
-            "--overlay",
-            format!(
-                "failed to check overlay target status for {}",
-                patch_path.display()
-            ),
-            Some(String::from_utf8_lossy(&output.stderr).to_string()),
-            None,
-        ));
-    }
-    let dirty = String::from_utf8_lossy(&output.stdout);
-    if !dirty.trim().is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "--overlay",
-            format!(
-                "trace overlay {} touches files with pre-existing changes",
-                patch_path.display()
-            ),
-            Some(dirty.to_string()),
-            None,
-        ));
-    }
-    Ok(())
-}
-
-fn run_git_apply(component_path: &Path, patch_path: &Path, reverse: bool) -> Result<()> {
-    let mut command = Command::new("git");
-    command.arg("apply");
-    if reverse {
-        command.arg("--reverse");
-    }
-    let output = command
-        .arg(patch_path)
-        .current_dir(component_path)
-        .output()
-        .map_err(|e| {
-            Error::internal_io(
-                format!(
-                    "Failed to apply trace overlay {}: {}",
-                    patch_path.display(),
-                    e
-                ),
-                Some("trace.overlay.apply".to_string()),
-            )
-        })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let action = if reverse { "revert" } else { "apply" };
-    Err(Error::validation_invalid_argument(
-        "--overlay",
-        format!(
-            "failed to {} trace overlay {}",
-            action,
-            patch_path.display()
-        ),
-        Some(String::from_utf8_lossy(&output.stderr).to_string()),
-        None,
-    ))
 }
 
 #[cfg(test)]
@@ -852,10 +631,10 @@ JSON
         fs::write(fixture.component_dir.join("scenario.txt"), "dirty\n").unwrap();
 
         let err = apply_trace_overlays(
-            fixture.component_dir.to_str().unwrap(),
             &[TraceOverlayRequest {
-                variant: None,
-                path: fixture.patch_path.to_string_lossy().to_string(),
+                component_id: Some("example".to_string()),
+                component_path: fixture.component_dir.to_string_lossy().to_string(),
+                overlay_path: fixture.patch_path.to_string_lossy().to_string(),
             }],
             false,
         )
@@ -866,15 +645,6 @@ JSON
             fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
             "dirty\n"
         );
-    }
-
-    #[test]
-    fn test_overlay_touched_files() {
-        let fixture = overlay_fixture(false);
-
-        let touched = overlay_touched_files(&fixture.component_dir, &fixture.patch_path).unwrap();
-
-        assert_eq!(touched, vec!["scenario.txt"]);
     }
 
     #[test]
@@ -974,8 +744,9 @@ JSON
             json_summary: false,
             rig_id: None,
             overlays: vec![TraceOverlayRequest {
-                variant: None,
-                path: patch_path.to_string_lossy().to_string(),
+                component_id: Some("example".to_string()),
+                component_path: component_dir.to_string_lossy().to_string(),
+                overlay_path: patch_path.to_string_lossy().to_string(),
             }],
             keep_overlay,
             extra_workloads: Vec::new(),

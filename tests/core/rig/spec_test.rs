@@ -130,6 +130,36 @@ fn test_spec_minimal_only_required_fields() {
 }
 
 #[test]
+fn test_spec_trace_variants_parse_multi_component_overlays() {
+    let json = r#"{
+        "id": "studio-playground-dev",
+        "components": {
+            "studio": { "path": "/tmp/studio" },
+            "wordpress-playground": { "path": "/tmp/playground" }
+        },
+        "trace_variants": {
+            "fast-create-site": {
+                "overlays": [
+                    { "component": "studio", "overlay": "overlays/studio.patch" },
+                    { "component": "wordpress-playground", "overlay": "overlays/playground.patch" }
+                ]
+            }
+        }
+    }"#;
+    let spec: RigSpec = serde_json::from_str(json).expect("parse");
+    let variant = spec
+        .trace_variants
+        .get("fast-create-site")
+        .expect("variant");
+
+    assert_eq!(variant.overlays.len(), 2);
+    assert_eq!(variant.overlays[0].component, "studio");
+    assert_eq!(variant.overlays[0].overlay, "overlays/studio.patch");
+    assert_eq!(variant.overlays[1].component, "wordpress-playground");
+    assert_eq!(variant.overlays[1].overlay, "overlays/playground.patch");
+}
+
+#[test]
 fn test_spec_resources_block_parses_full_shape() {
     let json = r#"{
         "id": "studio-bfb",

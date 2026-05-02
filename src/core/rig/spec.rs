@@ -78,7 +78,7 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_workloads: HashMap<String, Vec<WorkloadSpec>>,
 
-    /// Named trace overlay variants keyed by user-facing variant name.
+    /// Named trace variants that can apply overlays across rig components.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_variants: HashMap<String, TraceVariantSpec>,
 
@@ -311,6 +311,16 @@ pub struct TraceVariantSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<String>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<TraceVariantOverlaySpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceVariantOverlaySpec {
+    pub component: String,
     pub overlay: String,
 }
 

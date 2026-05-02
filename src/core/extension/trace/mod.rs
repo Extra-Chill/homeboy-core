@@ -9,6 +9,7 @@
 //! milestones.
 
 pub mod baseline;
+mod overlay;
 mod overlay_lock;
 pub mod parsing;
 pub mod report;
@@ -22,6 +23,7 @@ pub use overlay_lock::{cleanup_stale_trace_overlay_locks, list_trace_overlay_loc
 pub use overlay_lock::{
     TraceOverlayLockCleanupResult, TraceOverlayLockRecord, TraceOverlayLockStatus,
 };
+pub use overlay::TraceOverlayRequest;
 pub use parsing::{parse_trace_list_str, parse_trace_results_file};
 pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,
@@ -35,7 +37,7 @@ pub use report::{
 };
 pub use report::{push_overlay_markdown, render_markdown};
 pub use run::{run_trace_list_workflow, run_trace_workflow, TraceListWorkflowArgs};
-pub use run::{TraceOverlayRequest, TraceRunWorkflowArgs, TraceRunWorkflowResult};
+pub use run::{TraceRunWorkflowArgs, TraceRunWorkflowResult};
 
 pub fn resolve_trace_command(
     component: &Component,
