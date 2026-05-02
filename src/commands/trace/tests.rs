@@ -494,6 +494,58 @@ fn trace_run_order_planner_supports_grouped_and_interleaved_variants() {
             (4, "variant", 2),
         ]
     );
+
+    let stack = vec![
+        TraceVariantStackItem {
+            label: "a".to_string(),
+            overlay: "a.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "b".to_string(),
+            overlay: "b.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "c".to_string(),
+            overlay: "c.patch".to_string(),
+        },
+    ];
+    let single = expand_variant_matrix(&stack, TraceVariantMatrixMode::Single);
+    assert_eq!(
+        single
+            .iter()
+            .map(|combo| combo
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["a"], vec!["b"], vec!["c"]]
+    );
+
+    let cumulative = expand_variant_matrix(&stack, TraceVariantMatrixMode::Cumulative);
+    assert_eq!(
+        cumulative
+            .iter()
+            .map(|combo| combo
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
+    );
+
+    let full_stack = expand_variant_matrix(&stack[..2], TraceVariantMatrixMode::None);
+    assert_eq!(full_stack.len(), 1);
+    assert_eq!(full_stack[0].label, "a+b");
+    assert_eq!(
+        full_stack[0]
+            .items
+            .iter()
+            .map(|item| item.overlay.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a.patch", "b.patch"]
+    );
 }
 
 #[test]
@@ -1027,80 +1079,6 @@ fn trace_compare_markdown_and_experiment_bundle_render_artifacts() {
     assert!(report.contains("## Top Average Improvements"));
     assert!(report.contains("## Variant Failures and Outliers"));
     assert!(report.contains("/tmp/variant-1.json"));
-}
-
-#[test]
-fn trace_variant_matrix_expands_ordered_stack_modes() {
-    let stack = vec![
-        TraceVariantStackItem {
-            label: "a".to_string(),
-            overlay: "a.patch".to_string(),
-        },
-        TraceVariantStackItem {
-            label: "b".to_string(),
-            overlay: "b.patch".to_string(),
-        },
-        TraceVariantStackItem {
-            label: "c".to_string(),
-            overlay: "c.patch".to_string(),
-        },
-    ];
-
-    let single = expand_variant_matrix(&stack, TraceVariantMatrixMode::Single);
-    assert_eq!(
-        single
-            .iter()
-            .map(|combo| combo
-                .items
-                .iter()
-                .map(|item| item.label.as_str())
-                .collect::<Vec<_>>())
-            .collect::<Vec<_>>(),
-        vec![vec!["a"], vec!["b"], vec!["c"]]
-    );
-
-    let cumulative = expand_variant_matrix(&stack, TraceVariantMatrixMode::Cumulative);
-    assert_eq!(
-        cumulative
-            .iter()
-            .map(|combo| combo
-                .items
-                .iter()
-                .map(|item| item.label.as_str())
-                .collect::<Vec<_>>())
-            .collect::<Vec<_>>(),
-        vec![vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
-    );
-}
-
-#[test]
-fn trace_variant_matrix_none_runs_full_stack_once() {
-    let stack = vec![
-        TraceVariantStackItem {
-            label: "fresh-install-mode".to_string(),
-            overlay: "fresh-install-mode.patch".to_string(),
-        },
-        TraceVariantStackItem {
-            label: "disable-install-mail".to_string(),
-            overlay: "disable-install-mail.patch".to_string(),
-        },
-    ];
-
-    let combinations = expand_variant_matrix(&stack, TraceVariantMatrixMode::None);
-
-    assert_eq!(combinations.len(), 1);
-    assert_eq!(
-        combinations[0].label,
-        "fresh-install-mode+disable-install-mail"
-    );
-    assert_eq!(
-        combinations[0]
-            .items
-            .iter()
-            .map(|item| item.overlay.as_str())
-            .collect::<Vec<_>>(),
-        vec!["fresh-install-mode.patch", "disable-install-mail.patch"]
-    );
 }
 
 #[test]
