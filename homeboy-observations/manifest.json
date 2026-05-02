@@ -1,8 +1,8 @@
 {
   "format": "homeboy-observations",
   "version": 1,
-  "created_at": "2026-05-02T22:19:35.272787850+00:00",
-  "homeboy_version": "0.145.1",
+  "created_at": "2026-05-02T22:51:00.230668400+00:00",
+  "homeboy_version": "0.145.2",
   "run_count": 7,
   "artifact_count": 0,
   "trace_span_count": 0
