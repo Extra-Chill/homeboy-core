@@ -113,6 +113,10 @@ fn run_trace_workflow_with_context(
     run_dir: &RunDir,
     rig_state: Option<RigStateSnapshot>,
 ) -> Result<TraceRunWorkflowResult> {
+    let component_path = args
+        .path_override
+        .as_deref()
+        .unwrap_or(component.local_path.as_str());
     let _overlay_locks = if args.overlays.is_empty() {
         None
     } else {
