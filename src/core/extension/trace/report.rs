@@ -72,7 +72,7 @@ pub struct TraceListOutput {
     pub scenarios: Vec<super::parsing::TraceScenario>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TraceAggregateOutput {
     pub command: &'static str,
     pub passed: bool,
@@ -84,14 +84,29 @@ pub struct TraceAggregateOutput {
     pub failure_count: usize,
     pub exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_order: Vec<TraceRunOrderEntryOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rig_state: Option<RigStateSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<TraceOverlay>,
     pub runs: Vec<TraceAggregateRunOutput>,
     pub spans: Vec<TraceAggregateSpanOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_span_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_spans: Vec<TraceAggregateSpanOutput>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
+pub struct TraceRunOrderEntryOutput {
+    pub index: usize,
+    pub group: String,
+    pub iteration: usize,
+}
+
+#[derive(Serialize, Clone)]
 pub struct TraceAggregateRunOutput {
     pub index: usize,
     pub passed: bool,
@@ -106,7 +121,7 @@ pub struct TraceAggregateRunOutput {
     pub failure: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TraceAggregateSpanOutput {
     pub id: String,
     pub n: usize,
@@ -131,7 +146,7 @@ pub struct TraceAggregateSpanOutput {
     pub failures: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TraceCompareOutput {
     pub command: &'static str,
     pub before_path: String,
@@ -146,9 +161,19 @@ pub struct TraceCompareOutput {
     pub after_scenario_id: Option<String>,
     pub span_count: usize,
     pub spans: Vec<TraceCompareSpanOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_span_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_spans: Vec<TraceCompareSpanOutput>,
+    #[serde(default, skip_serializing_if = "is_default_usize")]
+    pub focus_regression_count: usize,
+    #[serde(default, skip_serializing_if = "is_default_usize")]
+    pub focus_failure_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focus_status: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TraceCompareSpanOutput {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +200,10 @@ pub struct TraceCompareSpanOutput {
     pub before_failures: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after_failures: Option<usize>,
+}
+
+fn is_default_usize(value: &usize) -> bool {
+    value.eq(&usize::default())
 }
 
 pub fn from_main_workflow(
@@ -503,6 +532,34 @@ mod tests {
             "submit_to_cli"
         );
         assert_eq!(artifact_value["results"]["timeline"][0]["event"], "submit");
+    }
+
+    #[test]
+    fn test_push_overlay_markdown() {
+        let mut markdown = String::new();
+        let overlays = vec![
+            TraceOverlay {
+                path: "/tmp/overlay.patch".to_string(),
+                component_path: "/tmp/studio".to_string(),
+                touched_files: vec!["apps/studio/out/app.js".to_string()],
+                kept: false,
+            },
+            TraceOverlay {
+                path: "/tmp/kept.patch".to_string(),
+                component_path: "/tmp/studio".to_string(),
+                touched_files: Vec::new(),
+                kept: true,
+            },
+        ];
+
+        push_overlay_markdown(&mut markdown, &overlays);
+
+        assert!(markdown.contains("## Trace Overlays"));
+        assert!(markdown.contains("- **Patch:** `/tmp/overlay.patch` (`reverted`)"));
+        assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
+        assert!(markdown.contains("- `apps/studio/out/app.js`"));
+        assert!(markdown.contains("- **Patch:** `/tmp/kept.patch` (`kept`)"));
+        assert!(markdown.contains("Touched files: none reported by `git apply --numstat`"));
     }
 
     #[test]
