@@ -81,6 +81,17 @@ script.
 
 ## Observation History
 
+Every `homeboy bench` run is persisted to the local observation store. The
+normal bench output includes hints with the persisted run ID, the observation DB
+path, and follow-up commands such as:
+
+```bash
+homeboy runs show <run-id>
+homeboy runs list --kind bench --component <component> --rig <rig>
+```
+
+Omit `--rig <rig>` from the list command for unpinned bench runs.
+
 `homeboy bench history <component>` lists persisted benchmark runs from the local observation store. `--scenario` filters to runs whose stored metadata includes the scenario, and `--rig` narrows to rig-pinned runs.
 
 `homeboy bench compare --from-run <run-id> --to-run <run-id>` compares numeric metrics recorded in two persisted benchmark runs. It matches scenario + metric rows, reports absolute deltas and percent changes, and lists metrics that exist in only one run. The command is read-only and exits successfully for a valid comparison even when the numbers regress.
@@ -130,6 +141,12 @@ Failed gates add `gate_results`, set the scenario's `passed` field to
 ```bash
 # Benchmark a component with defaults (10 iterations, 5% regression threshold)
 homeboy bench my-component
+
+# Inspect the persisted observation from a completed bench run
+homeboy runs show <run-id>
+
+# List related persisted bench runs for comparison loops
+homeboy runs list --kind bench --component my-component --rig studio-trunk
 
 # List declared scenarios without executing them
 homeboy bench list my-component
