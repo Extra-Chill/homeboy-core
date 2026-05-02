@@ -1,7 +1,9 @@
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use homeboy::component::{Component, ScopedExtensionConfig};
 use homeboy::engine::baseline::BaselineFlags;
@@ -335,15 +337,6 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         ));
     }
 
-    if args.experiment.is_some() {
-        return Err(homeboy::Error::validation_invalid_argument(
-            "--experiment",
-            "trace experiment bundles are only supported by `homeboy trace compare before.json after.json --experiment <name>`",
-            None,
-            None,
-        ));
-    }
-
     if args.repeat == 0 {
         return Err(homeboy::Error::validation_invalid_argument(
             "--repeat",
@@ -495,11 +488,26 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         &effective_id,
         &component_path_for_overlays,
     )?;
+    let experiment = trace_experiment_for_args(&args, rig_context.as_ref())?;
 
     let rig_state = rig_context
         .as_ref()
         .map(|context| rig::snapshot_state(&context.rig_spec));
     let run_dir = RunDir::create()?;
+    if let (Some(experiment_name), Some(experiment_spec), Some(context)) = (
+        args.experiment.as_deref(),
+        experiment.as_ref(),
+        rig_context.as_ref(),
+    ) {
+        run_trace_experiment_commands(
+            context,
+            experiment_name,
+            "setup",
+            &experiment_spec.setup,
+            &experiment_spec.env,
+            &run_dir,
+        )?;
+    }
     let scenario_id = scenario.clone();
     let rig_id = args.rig.clone();
     let requested_overlays = args.overlays.clone();
@@ -562,6 +570,23 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             })
         })
         .unwrap_or_default();
+    let experiment_settings = experiment
+        .as_ref()
+        .map(|experiment| trace_experiment_settings(rig_context.as_ref().unwrap(), experiment))
+        .transpose()?
+        .unwrap_or_default();
+    let experiment_env = experiment
+        .as_ref()
+        .map(|experiment| trace_experiment_env(rig_context.as_ref().unwrap(), experiment))
+        .transpose()?
+        .unwrap_or_default();
+    let mut json_settings = experiment_settings;
+    json_settings.extend(settings_as_json(&ctx.settings));
+    json_settings.extend(
+        settings_as_strings(&ctx.settings)
+            .into_iter()
+            .map(|(key, value)| (key, serde_json::Value::String(value))),
+    );
     let workflow = match extension_trace::run_trace_workflow(
         &ctx.component,
         TraceRunWorkflowArgs {
@@ -570,7 +595,8 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             path_override,
             settings: settings_as_strings(&ctx.settings),
             runner_inputs: TraceRunnerInputs {
-                json_settings: settings_as_json(&ctx.settings),
+                json_settings,
+                env: experiment_env.clone(),
                 workload_paths: extra_workloads,
             },
             scenario_id,
@@ -590,8 +616,59 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         &run_dir,
         rig_state.clone(),
     ) {
-        Ok(workflow) => workflow,
+        Ok(mut workflow) => {
+            let artifact_result =
+                if let (Some(experiment_name), Some(experiment_spec), Some(context)) = (
+                    args.experiment.as_deref(),
+                    experiment.as_ref(),
+                    rig_context.as_ref(),
+                ) {
+                    collect_trace_experiment_artifacts(
+                        context,
+                        experiment_name,
+                        experiment_spec,
+                        &run_dir,
+                        &mut workflow,
+                    )
+                } else {
+                    Ok(())
+                };
+            let teardown_result =
+                if let (Some(experiment_name), Some(experiment_spec), Some(context)) = (
+                    args.experiment.as_deref(),
+                    experiment.as_ref(),
+                    rig_context.as_ref(),
+                ) {
+                    run_trace_experiment_commands(
+                        context,
+                        experiment_name,
+                        "teardown",
+                        &experiment_spec.teardown,
+                        &experiment_spec.env,
+                        &run_dir,
+                    )
+                } else {
+                    Ok(())
+                };
+            artifact_result?;
+            teardown_result?;
+            workflow
+        }
         Err(error) => {
+            if let (Some(experiment_name), Some(experiment_spec), Some(context)) = (
+                args.experiment.as_deref(),
+                experiment.as_ref(),
+                rig_context.as_ref(),
+            ) {
+                let _ = run_trace_experiment_commands(
+                    context,
+                    experiment_name,
+                    "teardown",
+                    &experiment_spec.teardown,
+                    &experiment_spec.env,
+                    &run_dir,
+                );
+            }
             if let Some(observation) = observation.as_ref() {
                 persist_trace_workflow_error(observation, &run_dir, &error);
             }
@@ -989,6 +1066,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             settings: settings_as_strings(&ctx.settings),
             runner_inputs: TraceRunnerInputs {
                 json_settings: settings_as_json(&ctx.settings),
+                env: Vec::new(),
                 workload_paths: extra_workloads,
             },
             rig_id: args.rig,
@@ -1020,6 +1098,236 @@ fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigCont
         rig_package_root: package_root,
         rig_config_root: config_root,
     }))
+}
+
+fn trace_experiment_for_args<'a>(
+    args: &TraceArgs,
+    rig_context: Option<&'a TraceRigContext>,
+) -> homeboy::Result<Option<&'a rig::TraceExperimentSpec>> {
+    let Some(name) = args.experiment.as_deref() else {
+        return Ok(None);
+    };
+    let context = rig_context.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "--experiment",
+            "trace experiment plans require --rig so Homeboy can read rig metadata",
+            None,
+            None,
+        )
+    })?;
+    let experiment = context
+        .rig_spec
+        .trace_experiments
+        .get(name)
+        .ok_or_else(|| {
+            let available = context
+                .rig_spec
+                .trace_experiments
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            homeboy::Error::validation_invalid_argument(
+                "--experiment",
+                format!(
+                    "unknown trace experiment '{}' for rig '{}'",
+                    name, context.rig_spec.id
+                ),
+                Some(format!(
+                    "available experiments: {}",
+                    if available.is_empty() {
+                        "none".to_string()
+                    } else {
+                        available.join(", ")
+                    }
+                )),
+                None,
+            )
+        })?;
+    Ok(Some(experiment))
+}
+
+fn trace_experiment_settings(
+    context: &TraceRigContext,
+    experiment: &rig::TraceExperimentSpec,
+) -> homeboy::Result<Vec<(String, serde_json::Value)>> {
+    experiment
+        .settings
+        .iter()
+        .map(|(key, value)| {
+            Ok((
+                key.clone(),
+                match value {
+                    serde_json::Value::String(value) => {
+                        serde_json::Value::String(resolve_trace_experiment_string(context, value))
+                    }
+                    other => other.clone(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn trace_experiment_env(
+    context: &TraceRigContext,
+    experiment: &rig::TraceExperimentSpec,
+) -> homeboy::Result<Vec<(String, String)>> {
+    experiment
+        .env
+        .iter()
+        .map(|(key, value)| Ok((key.clone(), resolve_trace_experiment_string(context, value))))
+        .collect()
+}
+
+fn run_trace_experiment_commands(
+    context: &TraceRigContext,
+    experiment_name: &str,
+    phase: &str,
+    commands: &[rig::TraceExperimentCommandSpec],
+    experiment_env: &BTreeMap<String, String>,
+    run_dir: &RunDir,
+) -> homeboy::Result<()> {
+    for command_spec in commands {
+        let command_text = resolve_trace_experiment_string(context, &command_spec.command);
+        let mut command = Command::new(trace_experiment_shell());
+        command.arg("-c").arg(&command_text);
+        command.env("HOMEBOY_TRACE_EXPERIMENT", experiment_name);
+        command.env("HOMEBOY_TRACE_EXPERIMENT_PHASE", phase);
+        command.env("HOMEBOY_RUN_DIR", run_dir.path());
+        command.env(
+            "HOMEBOY_TRACE_ARTIFACT_DIR",
+            run_dir.path().join("artifacts"),
+        );
+        for (key, value) in experiment_env {
+            command.env(key, resolve_trace_experiment_string(context, value));
+        }
+        for (key, value) in &command_spec.env {
+            command.env(key, resolve_trace_experiment_string(context, value));
+        }
+        if let Some(cwd) = &command_spec.cwd {
+            command.current_dir(PathBuf::from(resolve_trace_experiment_string(context, cwd)));
+        }
+        let status = command.status().map_err(|err| {
+            homeboy::Error::validation_invalid_argument(
+                "--experiment",
+                format!(
+                    "trace experiment '{}' {} command failed to spawn: {}",
+                    experiment_name, phase, err
+                ),
+                Some(command_text.clone()),
+                None,
+            )
+        })?;
+        if !status.success() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "--experiment",
+                format!(
+                    "trace experiment '{}' {} command exited {}",
+                    experiment_name,
+                    phase,
+                    status.code().unwrap_or(-1)
+                ),
+                Some(command_text),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn collect_trace_experiment_artifacts(
+    context: &TraceRigContext,
+    experiment_name: &str,
+    experiment: &rig::TraceExperimentSpec,
+    run_dir: &RunDir,
+    workflow: &mut extension_trace::TraceRunWorkflowResult,
+) -> homeboy::Result<()> {
+    let Some(results) = workflow.results.as_mut() else {
+        return Ok(());
+    };
+    for (index, artifact) in experiment.artifacts.iter().enumerate() {
+        let (label, source) = match artifact {
+            rig::TraceExperimentArtifactSpec::Path(path) => (
+                Path::new(path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("experiment artifact")
+                    .to_string(),
+                path.as_str(),
+            ),
+            rig::TraceExperimentArtifactSpec::Detailed { label, path } => {
+                (label.clone(), path.as_str())
+            }
+        };
+        let source_path = PathBuf::from(resolve_trace_experiment_string(context, source));
+        if !source_path.is_file() {
+            return Err(homeboy::Error::validation_invalid_argument(
+                "--experiment",
+                format!(
+                    "trace experiment '{}' artifact '{}' does not exist or is not a file",
+                    experiment_name,
+                    source_path.display()
+                ),
+                None,
+                None,
+            ));
+        }
+        let file_name = source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("artifact");
+        let relative = PathBuf::from("artifacts")
+            .join("experiments")
+            .join(experiment_name)
+            .join(format!("{:02}-{}", index + 1, file_name));
+        let destination = run_dir.path().join(&relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                homeboy::Error::internal_io(
+                    format!(
+                        "Failed to create trace experiment artifact dir {}: {}",
+                        parent.display(),
+                        err
+                    ),
+                    Some("trace.experiment.artifact.mkdir".to_string()),
+                )
+            })?;
+        }
+        fs::copy(&source_path, &destination).map_err(|err| {
+            homeboy::Error::internal_io(
+                format!(
+                    "Failed to collect trace experiment artifact {} to {}: {}",
+                    source_path.display(),
+                    destination.display(),
+                    err
+                ),
+                Some("trace.experiment.artifact.copy".to_string()),
+            )
+        })?;
+        results.artifacts.push(extension_trace::TraceArtifact {
+            label,
+            path: relative.to_string_lossy().to_string(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn trace_experiment_shell() -> &'static str {
+    "/bin/sh"
+}
+
+#[cfg(not(unix))]
+fn trace_experiment_shell() -> &'static str {
+    "sh"
+}
+
+fn resolve_trace_experiment_string(context: &TraceRigContext, value: &str) -> String {
+    let expanded = rig::expand::expand_vars(&context.rig_spec, value);
+    if let Some(root) = context.rig_package_root.as_ref() {
+        expanded.replace("${package.root}", &root.to_string_lossy())
+    } else {
+        expanded
+    }
 }
 
 fn trace_overlays_for_args(

@@ -50,6 +50,7 @@ fn minimal_spec(id: &str) -> RigSpec {
         bench_workloads: HashMap::new(),
         trace_workloads: HashMap::new(),
         trace_variants: HashMap::new(),
+        trace_experiments: HashMap::new(),
         bench_profiles: HashMap::new(),
         app_launcher: None,
     }
@@ -500,6 +501,7 @@ fn test_run_down_cleans_state_owned_shared_paths() {
             bench_workloads: HashMap::new(),
             trace_workloads: HashMap::new(),
             trace_variants: HashMap::new(),
+            trace_experiments: HashMap::new(),
             bench_profiles: HashMap::new(),
             app_launcher: None,
         };
@@ -563,6 +565,7 @@ fn test_run_status() {
             bench_workloads: HashMap::new(),
             trace_workloads: HashMap::new(),
             trace_variants: HashMap::new(),
+            trace_experiments: HashMap::new(),
             bench_profiles: HashMap::new(),
         };
 
@@ -720,6 +723,7 @@ fn test_snapshot_state() {
         bench_workloads: HashMap::new(),
         trace_workloads: HashMap::new(),
         trace_variants: HashMap::new(),
+        trace_experiments: HashMap::new(),
         bench_profiles: HashMap::new(),
         app_launcher: None,
     };

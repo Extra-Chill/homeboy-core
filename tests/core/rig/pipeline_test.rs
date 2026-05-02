@@ -144,6 +144,7 @@ mod dag {
             bench_workloads: Default::default(),
             trace_workloads: Default::default(),
             trace_variants: Default::default(),
+            trace_experiments: Default::default(),
             bench_profiles: Default::default(),
         }
     }
@@ -413,6 +414,7 @@ mod extension_lifecycle {
             bench_workloads: Default::default(),
             trace_workloads: Default::default(),
             trace_variants: Default::default(),
+            trace_experiments: Default::default(),
             bench_profiles: Default::default(),
         }
     }
@@ -535,6 +537,7 @@ mod command_env {
             bench_workloads: Default::default(),
             trace_workloads: Default::default(),
             trace_variants: Default::default(),
+            trace_experiments: Default::default(),
             bench_profiles: Default::default(),
             app_launcher: None,
         }
@@ -637,6 +640,7 @@ mod patch {
             bench_workloads: Default::default(),
             trace_workloads: Default::default(),
             trace_variants: Default::default(),
+            trace_experiments: Default::default(),
             bench_profiles: Default::default(),
             app_launcher: None,
         }
@@ -850,6 +854,7 @@ mod shared_path {
             bench_workloads: Default::default(),
             trace_workloads: Default::default(),
             trace_variants: Default::default(),
+            trace_experiments: Default::default(),
             bench_profiles: Default::default(),
             app_launcher: None,
         }

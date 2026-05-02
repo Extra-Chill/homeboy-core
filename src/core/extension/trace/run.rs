@@ -54,6 +54,7 @@ pub struct TraceListWorkflowArgs {
 #[derive(Debug, Clone, Default)]
 pub struct TraceRunnerInputs {
     pub json_settings: Vec<(String, serde_json::Value)>,
+    pub env: Vec<(String, String)>,
     pub workload_paths: Vec<PathBuf>,
 }
 
@@ -372,6 +373,9 @@ pub(crate) fn build_trace_runner(
             &extra_workloads_env_value(&args.runner_inputs.workload_paths)?,
         );
     }
+    for (key, value) in &args.runner_inputs.env {
+        runner = runner.env(key, value);
+    }
 
     Ok(runner)
 }
@@ -459,6 +463,7 @@ JSON
             settings: Vec::new(),
             runner_inputs: TraceRunnerInputs {
                 json_settings: Vec::new(),
+                env: Vec::new(),
                 workload_paths: vec![component_dir.join("trace-fixture.trace.mjs")],
             },
             scenario_id: "close-window".to_string(),

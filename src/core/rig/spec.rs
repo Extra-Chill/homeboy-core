@@ -84,6 +84,11 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_variants: HashMap<String, TraceVariantSpec>,
 
+    /// Named trace experiment plans that wrap a trace run with lifecycle
+    /// commands, workload settings/env, and artifact collection.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_experiments: HashMap<String, TraceExperimentSpec>,
+
     /// Named bench scenario suites keyed by profile name.
     ///
     /// `homeboy bench --rig <id> --profile <name>` resolves the profile to
@@ -327,6 +332,42 @@ pub struct TraceVariantSpec {
 pub struct TraceVariantOverlaySpec {
     pub component: String,
     pub overlay: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TraceExperimentSpec {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<TraceExperimentCommandSpec>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teardown: Vec<TraceExperimentCommandSpec>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub settings: BTreeMap<String, serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<TraceExperimentArtifactSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceExperimentCommandSpec {
+    pub command: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TraceExperimentArtifactSpec {
+    Path(String),
+    Detailed { label: String, path: String },
 }
 
 impl WorkloadSpec {
