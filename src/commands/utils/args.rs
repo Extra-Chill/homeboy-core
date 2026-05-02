@@ -50,41 +50,26 @@ pub(crate) fn normalize_version_show(args: Vec<String>) -> Vec<String> {
 /// Adding a new global flag to `Cli` requires adding the long form here
 /// and the equals-form lookup happens automatically.
 const GLOBAL_FLAGS: &[&str] = &["--output", "-h", "--help"];
+const COMPONENT_SET_MERGE_FLAGS: &[&str] = &[
+    "--json",
+    "--base64",
+    "--replace",
+    "--version-target",
+    "--extension",
+    "--help",
+    "-h",
+];
 
 /// Auto-insert '--' separator before unknown flags for trailing_var_arg commands.
 pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
     let commands: &[(&str, &str, &[&str])] = &[
-        (
-            "component",
-            "set",
-            &[
-                "--json",
-                "--base64",
-                "--replace",
-                "--version-target",
-                "--extension",
-                "--help",
-                "-h",
-            ],
-        ),
+        ("component", "set", COMPONENT_SET_MERGE_FLAGS),
         (
             "component",
             "edit",
             &["--json", "--base64", "--replace", "--help", "-h"],
         ),
-        (
-            "component",
-            "merge",
-            &[
-                "--json",
-                "--base64",
-                "--replace",
-                "--version-target",
-                "--extension",
-                "--help",
-                "-h",
-            ],
-        ),
+        ("component", "merge", COMPONENT_SET_MERGE_FLAGS),
         (
             "server",
             "set",
