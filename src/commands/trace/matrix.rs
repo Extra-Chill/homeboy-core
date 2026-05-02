@@ -7,7 +7,9 @@ use super::output::{
     compare_trace_aggregates_with_focus, render_matrix_markdown, TraceAggregateInput,
     TraceAggregateSpanInput,
 };
-use super::{run_repeat, trace_scenario, TraceArgs, TraceVariantMatrixMode};
+use super::{
+    apply_command_target_component, run_repeat, trace_scenario, TraceArgs, TraceVariantMatrixMode,
+};
 use crate::commands::CmdResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,7 +138,7 @@ fn run_variant_aggregate(
     overlays: Vec<String>,
 ) -> homeboy::Result<extension_trace::TraceAggregateOutput> {
     let mut run_args = args.clone();
-    run_args.comp.component = None;
+    apply_command_target_component(&mut run_args);
     run_args.repeat = args.repeat.max(1);
     run_args.aggregate = Some("spans".to_string());
     run_args.overlays = overlays;

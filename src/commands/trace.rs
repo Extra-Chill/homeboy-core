@@ -42,6 +42,10 @@ pub struct TraceArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
 
+    /// Target component for command-shaped trace modes like `compare-variant`.
+    #[arg(long = "component", value_name = "COMPONENT_ID")]
+    pub component_arg: Option<String>,
+
     /// Scenario ID to run, or `list` to discover available scenarios.
     pub scenario: Option<String>,
 
@@ -366,6 +370,10 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         summary_only,
     );
     Ok(((stdout_output, artifact_output), exit_code))
+}
+
+pub(super) fn apply_command_target_component(args: &mut TraceArgs) {
+    args.comp.component = args.component_arg.clone();
 }
 
 fn run_overlay_locks(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
