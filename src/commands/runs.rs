@@ -194,6 +194,7 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
 
 pub fn list_runs(args: RunsListArgs, command: &'static str) -> CmdResult<RunsOutput> {
     let store = ObservationStore::open_initialized()?;
+    reconcile::reconcile_owned_stale_running_runs(&store, 1000)?;
     let runs = store
         .list_runs(RunListFilter {
             kind: args.kind,
@@ -449,7 +450,7 @@ mod tests {
     use std::path::Path;
 
     use homeboy::observation::{
-        NewFindingRecord, NewRunRecord, NewTraceSpanRecord, RunStatus, TraceSpanRecord,
+        NewFindingRecord, NewRunRecord, NewTraceSpanRecord, RunRecord, RunStatus, TraceSpanRecord,
     };
     use homeboy::test_support::with_isolated_home;
     use serde::Deserialize;
@@ -521,6 +522,63 @@ mod tests {
             };
             assert_eq!(output.runs.len(), 1);
             assert_eq!(output.runs[0].id, bench.id);
+        });
+    }
+
+    #[test]
+    fn run_list_reconciles_owned_dead_running_runs_before_listing() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            store
+                .import_run(&RunRecord {
+                    id: "dead-owned-run".to_string(),
+                    kind: "bench".to_string(),
+                    component_id: Some("homeboy".to_string()),
+                    started_at: "2026-05-02T16:46:46Z".to_string(),
+                    finished_at: None,
+                    status: "running".to_string(),
+                    command: Some("homeboy bench".to_string()),
+                    cwd: Some("/tmp/homeboy-fixture".to_string()),
+                    homeboy_version: Some("test-version".to_string()),
+                    git_sha: Some("abc123".to_string()),
+                    rig_id: Some("studio".to_string()),
+                    metadata_json: serde_json::json!({
+                        "homeboy_run_owner": { "pid": u32::MAX }
+                    }),
+                })
+                .expect("import stale fixture");
+
+            let (output, _) = list_runs(
+                RunsListArgs {
+                    kind: Some("bench".to_string()),
+                    component_id: Some("homeboy".to_string()),
+                    rig: Some("studio".to_string()),
+                    status: None,
+                    limit: 20,
+                },
+                "runs.list",
+            )
+            .expect("list");
+
+            let RunsOutput::List(output) = output else {
+                panic!("expected list output");
+            };
+            assert_eq!(output.runs.len(), 1);
+            assert_eq!(output.runs[0].id, "dead-owned-run");
+            assert_eq!(output.runs[0].status, "stale");
+            assert!(output.runs[0].finished_at.is_some());
+            assert_eq!(output.runs[0].status_note, None);
+
+            let stored = store
+                .get_run("dead-owned-run")
+                .expect("get run")
+                .expect("run exists");
+            assert_eq!(stored.status, "stale");
+            assert_eq!(
+                stored.metadata_json["homeboy_reconciled"]["reason"],
+                "owner_process_not_running"
+            );
         });
     }
 

@@ -63,6 +63,13 @@ pub fn reconcile_runs(args: RunsReconcileArgs) -> CmdResult<RunsOutput> {
     ))
 }
 
+pub(super) fn reconcile_owned_stale_running_runs(
+    store: &ObservationStore,
+    limit: i64,
+) -> homeboy::Result<Vec<ReconciledRunSummary>> {
+    reconcile_orphaned_running_runs(store, limit, false, pid_is_running)
+}
+
 fn reconcile_orphaned_running_runs<F>(
     store: &ObservationStore,
     limit: i64,
