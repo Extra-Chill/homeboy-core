@@ -4,6 +4,29 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.144.0] - 2026-05-02
+
+### Added
+- compare observation run metrics
+- add trace variant matrix runs
+- add trace compare-variant experiment runner
+
+### Changed
+- split trace matrix helpers
+- align trace coverage with main
+- cover trace overlay markdown
+- Support rig-declared bench metric gates
+
+### Fixed
+- satisfy audit for runs compare
+- integrate trace matrix after rebase
+- refresh trace compare-variant against main
+- clear trace audit drift
+- share component normalizer flags
+- avoid trace normalizer audit duplicate
+- integrate compare-variant with focused trace spans
+- address trace compare-variant audit findings
+
 ## [0.143.1] - 2026-05-02
 
 ### Changed
