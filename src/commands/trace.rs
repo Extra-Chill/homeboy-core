@@ -21,7 +21,12 @@ use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, 
 use super::{CmdResult, GlobalArgs};
 
 mod bundle;
+mod compare_variant;
 mod output;
+#[cfg(test)]
+mod test_fixture;
+
+use compare_variant::run_compare_variant;
 
 use output::{
     aggregate_span, render_aggregate_markdown, render_compare_markdown, run_compare,
@@ -32,10 +37,7 @@ use output::{
 use bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
 
 #[cfg(test)]
-use output::{
-    compare_trace_aggregates, compare_trace_aggregates_with_focus, parse_trace_aggregate_input,
-    TraceAggregateInput, TraceAggregateSpanInput,
-};
+use output::{compare_trace_aggregates, parse_trace_aggregate_input};
 
 #[derive(Args, Clone)]
 pub struct TraceArgs {
@@ -117,6 +119,10 @@ pub struct TraceArgs {
     /// Apply a named trace variant declared by the selected rig/workload.
     #[arg(long = "variant", value_name = "NAME")]
     pub variants: Vec<String>,
+
+    /// Directory for `trace compare-variant` experiment bundle output.
+    #[arg(long, value_name = "DIR")]
+    pub output_dir: Option<PathBuf>,
 
     /// Leave overlay changes in place after the trace run.
     #[arg(long)]
@@ -275,6 +281,11 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
 
     if args.comp.component.as_deref() == Some("compare") {
         let (output, exit_code) = run_compare(args)?;
+        return Ok(((output, None), exit_code));
+    }
+
+    if args.comp.component.as_deref() == Some("compare-variant") {
+        let (output, exit_code) = run_compare_variant(args)?;
         return Ok(((output, None), exit_code));
     }
 
@@ -957,7 +968,8 @@ fn trace_overlays_for_args(
                 None,
             )
         })?;
-        let variants = trace_variants_for_args(args, context, component_id);
+        let scenario = required_trace_scenario(args)?;
+        let variants = trace_variants_for_args(context, component_id, &scenario);
         let available = variants.keys().cloned().collect::<Vec<_>>();
         for name in &args.variants {
             let variant = variants.get(name).ok_or_else(|| {
@@ -965,7 +977,7 @@ fn trace_overlays_for_args(
                     "--variant",
                     format!(
                         "unknown trace variant '{}' for component '{}' and scenario '{}'",
-                        name, component_id, args.scenario
+                        name, component_id, scenario
                     ),
                     Some(format!(
                         "available variants: {}",
@@ -997,9 +1009,9 @@ fn trace_overlays_for_args(
 }
 
 fn trace_variants_for_args<'a>(
-    args: &TraceArgs,
     context: &'a TraceRigContext,
     component_id: &str,
+    scenario: &str,
 ) -> BTreeMap<String, &'a rig::TraceVariantSpec> {
     let mut variants = BTreeMap::new();
     for (name, variant) in &context.rig_spec.trace_variants {
@@ -1013,7 +1025,7 @@ fn trace_variants_for_args<'a>(
         .values()
         .flat_map(|workloads| workloads.iter())
     {
-        if trace_workload_scenario_id(workload.path()) != args.scenario {
+        if trace_workload_scenario_id(workload.path()) != scenario {
             continue;
         }
         if let Some(workload_variants) = workload.trace_variants() {
@@ -1310,6 +1322,9 @@ fn record_artifact_if_file(store: &ObservationStore, run_id: &str, kind: &str, p
         let _ = store.record_artifact(run_id, kind, path);
     }
 }
+
+#[cfg(test)]
+mod compare_tests;
 
 #[cfg(test)]
 mod tests;

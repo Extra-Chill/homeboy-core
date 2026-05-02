@@ -50,41 +50,99 @@ pub(crate) fn normalize_version_show(args: Vec<String>) -> Vec<String> {
 /// Adding a new global flag to `Cli` requires adding the long form here
 /// and the equals-form lookup happens automatically.
 const GLOBAL_FLAGS: &[&str] = &["--output", "-h", "--help"];
+const COMPONENT_SET_MERGE_FLAGS: &[&str] = &[
+    "--json",
+    "--base64",
+    "--replace",
+    "--version-target",
+    "--extension",
+    "--help",
+    "-h",
+];
+const TEST_FLAGS: &[&str] = &[
+    "--skip-lint",
+    "--coverage",
+    "--coverage-min",
+    "--baseline",
+    "--ignore-baseline",
+    "--ratchet",
+    "--analyze",
+    "--drift",
+    "--write",
+    "--since",
+    "--changed-since",
+    "--setting",
+    "--path",
+    "--extension",
+    "--json-summary",
+    "--json",
+    "--help",
+    "-h",
+];
+const BENCH_FLAGS: &[&str] = &[
+    "--iterations",
+    "--warmup",
+    "--runs",
+    "--baseline",
+    "--ignore-baseline",
+    "--ignore-default-baseline",
+    "--ratchet",
+    "--regression-threshold",
+    "--shared-state",
+    "--concurrency",
+    "--rig-concurrency",
+    "--rig",
+    "--scenario",
+    "--profile",
+    "--setting",
+    "--path",
+    "--json-summary",
+    "--extension",
+    "--json",
+    "--help",
+    "-h",
+];
+const DOCS_AUDIT_FLAGS: &[&str] = &[
+    "--path",
+    "--docs-dir",
+    "--baseline",
+    "--ignore-baseline",
+    "--features",
+    "--help",
+    "-h",
+];
+const LINT_FLAGS: &[&str] = &[
+    "--baseline",
+    "--ignore-baseline",
+    "--summary",
+    "--file",
+    "--glob",
+    "--changed-only",
+    "--changed-since",
+    "--errors-only",
+    "--sniffs",
+    "--exclude-sniffs",
+    "--category",
+    "--fix",
+    "--setting",
+    "--path",
+    "--json-summary",
+    "--extension",
+    "--json",
+    "--help",
+    "-h",
+];
 
 /// Auto-insert '--' separator before unknown flags for trailing_var_arg commands.
 pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
     let commands: &[(&str, &str, &[&str])] = &[
-        (
-            "component",
-            "set",
-            &[
-                "--json",
-                "--base64",
-                "--replace",
-                "--version-target",
-                "--extension",
-                "--help",
-                "-h",
-            ],
-        ),
+        ("component", "set", COMPONENT_SET_MERGE_FLAGS),
         (
             "component",
             "edit",
             &["--json", "--base64", "--replace", "--help", "-h"],
         ),
-        (
-            "component",
-            "merge",
-            &[
-                "--json",
-                "--base64",
-                "--replace",
-                "--version-target",
-                "--extension",
-                "--help",
-                "-h",
-            ],
-        ),
+        ("component", "merge", COMPONENT_SET_MERGE_FLAGS),
         (
             "server",
             "set",
@@ -115,100 +173,15 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
             "merge",
             &["--json", "--base64", "--replace", "--help", "-h"],
         ),
-        (
-            "test",
-            "",
-            &[
-                "--skip-lint",
-                "--coverage",
-                "--coverage-min",
-                "--baseline",
-                "--ignore-baseline",
-                "--ratchet",
-                "--analyze",
-                "--drift",
-                "--write",
-                "--since",
-                "--changed-since",
-                "--setting",
-                "--path",
-                "--extension",
-                "--json-summary",
-                "--json",
-                "--help",
-                "-h",
-            ],
-        ),
-        (
-            "bench",
-            "",
-            &[
-                "--iterations",
-                "--warmup",
-                "--runs",
-                "--baseline",
-                "--ignore-baseline",
-                "--ignore-default-baseline",
-                "--ratchet",
-                "--regression-threshold",
-                "--shared-state",
-                "--concurrency",
-                "--rig-concurrency",
-                "--rig",
-                "--scenario",
-                "--profile",
-                "--setting",
-                "--path",
-                "--extension",
-                "--json-summary",
-                "--json",
-                "--help",
-                "-h",
-            ],
-        ),
+        ("test", "", TEST_FLAGS),
+        ("bench", "", BENCH_FLAGS),
         (
             "scaffold",
             "test",
             &["--file", "--write", "--path", "--json", "--help", "-h"],
         ),
-        (
-            "docs",
-            "audit",
-            &[
-                "--path",
-                "--docs-dir",
-                "--baseline",
-                "--ignore-baseline",
-                "--features",
-                "--help",
-                "-h",
-            ],
-        ),
-        (
-            "lint",
-            "",
-            &[
-                "--baseline",
-                "--ignore-baseline",
-                "--summary",
-                "--file",
-                "--glob",
-                "--changed-only",
-                "--changed-since",
-                "--errors-only",
-                "--sniffs",
-                "--exclude-sniffs",
-                "--category",
-                "--fix",
-                "--setting",
-                "--path",
-                "--extension",
-                "--json-summary",
-                "--json",
-                "--help",
-                "-h",
-            ],
-        ),
+        ("docs", "audit", DOCS_AUDIT_FLAGS),
+        ("lint", "", LINT_FLAGS),
     ];
 
     let known_flags = commands.iter().find_map(|(cmd, subcmd, flags)| {
@@ -278,7 +251,46 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
 /// Apply all argument normalizations in sequence.
 pub fn normalize(args: Vec<String>) -> Vec<String> {
     let args = normalize_version_show(args);
+    let args = normalize_trace_compare_variant_scenario(args);
     normalize_trailing_flags(args)
+}
+
+fn normalize_trace_compare_variant_scenario(args: Vec<String>) -> Vec<String> {
+    if args.get(1).map(|arg| arg.as_str()) != Some("trace")
+        || args.get(2).map(|arg| arg.as_str()) != Some("compare-variant")
+    {
+        return args;
+    }
+
+    let already_has_positional_scenario = args.get(3).is_some_and(|arg| !arg.starts_with('-'));
+    if already_has_positional_scenario {
+        return args;
+    }
+
+    let mut result = Vec::with_capacity(args.len());
+    let mut scenario = None;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--scenario" {
+            if let Some(value) = args.get(index + 1) {
+                scenario = Some(value.clone());
+                index += 2;
+                continue;
+            }
+        } else if let Some(value) = arg.strip_prefix("--scenario=") {
+            scenario = Some(value.to_string());
+            index += 1;
+            continue;
+        }
+        result.push(arg.clone());
+        index += 1;
+    }
+
+    if let Some(scenario) = scenario {
+        result.insert(3, scenario);
+    }
+    result
 }
 
 // ============================================================================
@@ -405,7 +417,7 @@ mod positional_tests {
 
 #[cfg(test)]
 mod normalize_tests {
-    use super::normalize_trailing_flags;
+    use super::{normalize, normalize_trailing_flags};
 
     fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
@@ -502,6 +514,36 @@ mod normalize_tests {
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn trace_compare_variant_scenario_flag_becomes_positional() {
+        let input = argv(&[
+            "homeboy",
+            "trace",
+            "compare-variant",
+            "--rig",
+            "studio",
+            "--scenario",
+            "studio-app-create-site",
+            "--overlay",
+            "overlays/change.patch",
+            "--output-dir",
+            ".homeboy/experiments/change",
+        ]);
+        let expected = argv(&[
+            "homeboy",
+            "trace",
+            "compare-variant",
+            "studio-app-create-site",
+            "--rig",
+            "studio",
+            "--overlay",
+            "overlays/change.patch",
+            "--output-dir",
+            ".homeboy/experiments/change",
+        ]);
+        assert_eq!(normalize(input), expected);
     }
 
     #[test]

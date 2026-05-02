@@ -14,6 +14,7 @@ homeboy trace <component> <scenario> --phase submit:ui.submit --phase cli:cli.st
 homeboy trace <component> <scenario> --rig <rig-id> --phase-preset create-site
 homeboy trace <component> <scenario> --repeat 5 --aggregate spans --schedule interleaved
 homeboy trace compare before.json after.json --focus-span phase.wp_boot_start_to_wp_boot_ready
+homeboy trace compare-variant --rig studio --scenario studio-app-create-site --repeat 5 --overlay overlays/change.patch --output-dir .homeboy/experiments/change
 homeboy trace <component> <scenario> --report=markdown
 homeboy trace <component> <scenario> --baseline
 homeboy trace <component> <scenario> --ratchet
@@ -154,6 +155,23 @@ homeboy trace compare before.json after.json --focus-span phase.wp_boot_start_to
 ```
 
 Focused compare spans are evaluated independently from the full span table. When a focused span's median slowdown exceeds both `--regression-threshold` and `--regression-min-delta-ms`, or its failure count increases, `trace compare` returns a failing exit code and records `focus_status`, `focus_regression_count`, and `focus_failure_count` in JSON output. All compared spans remain present in `spans`.
+
+## Compare Variant Experiments
+
+Use `trace compare-variant` to run a baseline aggregate, run the same trace with one or more overlays, compare the aggregate span outputs, and keep the evidence in one directory:
+
+```sh
+homeboy trace compare-variant \
+  --rig studio \
+  --scenario studio-app-create-site \
+  --phase-preset wordpress-boot-steps \
+  --repeat 5 \
+  --overlay overlays/fresh-install-mode.patch \
+  --overlay overlays/disable-install-mail.patch \
+  --output-dir .homeboy/experiments/fast-install
+```
+
+The bundle contains `baseline.json`, `variant.json`, `compare.json`, and `summary.md`. The summary includes component SHAs from rig state when available plus the files touched by each variant overlay.
 
 ## Markdown Reports
 

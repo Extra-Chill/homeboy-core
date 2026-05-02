@@ -117,9 +117,14 @@ fn run_trace_workflow_with_context(
     let _overlay_lock = if args.overlays.is_empty() {
         None
     } else {
+        let overlay_paths = args
+            .overlays
+            .iter()
+            .map(|overlay| overlay.path.clone())
+            .collect::<Vec<_>>();
         Some(TraceOverlayLock::acquire(
             Path::new(component_path),
-            &args.overlays,
+            &overlay_paths,
             run_dir,
         )?)
     };
