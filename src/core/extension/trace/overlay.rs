@@ -443,3 +443,212 @@ fn run_git_apply(component_path: &Path, patch_path: &Path, reverse: bool) -> Res
 fn unquote_numstat_path(path: &str) -> String {
     path.trim().trim_matches('"').to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::process::Command;
+
+    use crate::engine::baseline::BaselineFlags;
+    use crate::engine::run_dir::RunDir;
+    use crate::test_support::with_isolated_home;
+
+    use super::super::run::{TraceRunWorkflowArgs, TraceWorkflowInputs};
+    use super::*;
+
+    #[test]
+    fn test_acquire() {
+        with_isolated_home(|_| {
+            let component_dir = tempfile::tempdir().unwrap();
+            let run_dir = RunDir::create().unwrap();
+            let lock_path;
+
+            {
+                let lock = TraceOverlayLock::acquire(component_dir.path(), &run_dir).unwrap();
+                lock_path = lock.path.clone();
+                assert!(lock_path.exists());
+                assert!(lock_path.join("holder.json").exists());
+            }
+
+            assert!(!lock_path.exists());
+            run_dir.cleanup();
+        });
+    }
+
+    #[test]
+    fn test_acquire_all() {
+        with_isolated_home(|_| {
+            let first = tempfile::tempdir().unwrap();
+            let second = tempfile::tempdir().unwrap();
+            let run_dir = RunDir::create().unwrap();
+            let requests = vec![
+                TraceOverlayRequest {
+                    component_id: Some("first".to_string()),
+                    component_path: first.path().to_string_lossy().to_string(),
+                    overlay_path: "/tmp/first.patch".to_string(),
+                },
+                TraceOverlayRequest {
+                    component_id: Some("second".to_string()),
+                    component_path: second.path().to_string_lossy().to_string(),
+                    overlay_path: "/tmp/second.patch".to_string(),
+                },
+            ];
+
+            let locks = TraceOverlayLock::acquire_all(&requests, &run_dir).unwrap();
+
+            assert_eq!(locks.len(), 2);
+            assert!(locks.iter().all(|lock| lock.path.exists()));
+            run_dir.cleanup();
+        });
+    }
+
+    #[test]
+    fn test_apply_trace_overlays() {
+        let fixture = overlay_fixture("overlay");
+        let applied = apply_trace_overlays(&[fixture.request.clone()], true).unwrap();
+
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].touched_files, vec!["scenario.txt"]);
+        assert_eq!(
+            fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
+            "overlay\n"
+        );
+    }
+
+    #[test]
+    fn test_cleanup_trace_overlays() {
+        let fixture = overlay_fixture("overlay");
+        let applied = apply_trace_overlays(&[fixture.request.clone()], true).unwrap();
+
+        cleanup_trace_overlays(&applied).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
+            "base\n"
+        );
+    }
+
+    #[test]
+    fn test_normalize_component_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let normalized = super::normalize_component_path(dir.path());
+
+        assert!(normalized.is_absolute());
+        assert_eq!(normalized, fs::canonicalize(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn test_trace_overlay_lock_id() {
+        let first = super::trace_overlay_lock_id(Path::new("/tmp/component-a"));
+        let second = super::trace_overlay_lock_id(Path::new("/tmp/component-b"));
+
+        assert_eq!(first.len(), 24);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_trace_overlay_requests() {
+        let variant_request = TraceOverlayRequest {
+            component_id: Some("secondary".to_string()),
+            component_path: "/tmp/secondary".to_string(),
+            overlay_path: "/tmp/secondary.patch".to_string(),
+        };
+        let args = TraceRunWorkflowArgs {
+            component_label: "primary".to_string(),
+            component_id: "primary".to_string(),
+            path_override: Some("/tmp/primary".to_string()),
+            workflow: TraceWorkflowInputs::default(),
+            scenario_id: "scenario".to_string(),
+            json_summary: false,
+            rig_id: Some("rig".to_string()),
+            overlays: vec!["/tmp/primary.patch".to_string()],
+            variant_overlays: vec![variant_request.clone()],
+            keep_overlay: false,
+            span_definitions: Vec::new(),
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent:
+                super::super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms: super::super::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+        };
+
+        let requests = super::trace_overlay_requests("/tmp/primary", &args);
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0], variant_request);
+        assert_eq!(requests[1].component_id.as_deref(), Some("primary"));
+        assert_eq!(requests[1].component_path, "/tmp/primary");
+        assert_eq!(requests[1].overlay_path, "/tmp/primary.patch");
+    }
+
+    struct OverlayFixture {
+        _temp: tempfile::TempDir,
+        component_dir: PathBuf,
+        request: TraceOverlayRequest,
+    }
+
+    fn overlay_fixture(replacement: &str) -> OverlayFixture {
+        let temp = tempfile::tempdir().unwrap();
+        let component_dir = temp.path().join("component");
+        fs::create_dir_all(&component_dir).unwrap();
+        fs::write(component_dir.join("scenario.txt"), "base\n").unwrap();
+        init_git_repo(&component_dir);
+        let patch_path = temp.path().join("overlay.patch");
+        fs::write(
+            &patch_path,
+            format!(
+                r#"--- a/scenario.txt
++++ b/scenario.txt
+@@ -1 +1 @@
+-base
++{replacement}
+"#
+            ),
+        )
+        .unwrap();
+
+        OverlayFixture {
+            _temp: temp,
+            component_dir: component_dir.clone(),
+            request: TraceOverlayRequest {
+                component_id: Some("component".to_string()),
+                component_path: component_dir.to_string_lossy().to_string(),
+                overlay_path: patch_path.to_string_lossy().to_string(),
+            },
+        }
+    }
+
+    fn init_git_repo(path: &Path) {
+        git(path, &["init"]);
+        git(path, &["add", "scenario.txt"]);
+        git(
+            path,
+            &[
+                "-c",
+                "user.name=Homeboy Test",
+                "-c",
+                "user.email=homeboy@example.test",
+                "commit",
+                "-m",
+                "init",
+            ],
+        );
+    }
+
+    fn git(path: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
