@@ -136,9 +136,10 @@ fn missing_extension_and_self_check_keeps_existing_error() {
         Err(err) => err,
     };
 
+    assert_eq!(err.code.as_str(), "extension.unsupported");
     assert!(
         err.to_string()
-            .contains("Component 'fixture' has no extensions configured"),
+            .contains("No extension provider configured for component 'fixture'"),
         "unexpected error: {err}"
     );
 }
