@@ -69,15 +69,9 @@ pub(super) struct TraceAggregateRunInput {
 }
 
 pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
-    let before_path = PathBuf::from(super::required_trace_scenario(&args)?);
-    let Some(after_path) = args.compare_after else {
-        return Err(homeboy::Error::validation_invalid_argument(
-            "AFTER_JSON",
-            "trace compare requires before and after aggregate JSON files",
-            None,
-            None,
-        ));
-    };
+    let before = required_compare_path_arg(args.scenario.as_deref(), "BEFORE_JSON")?;
+    let before_path = PathBuf::from(before);
+    let after_path = required_compare_path_arg(args.compare_after, "AFTER_JSON")?;
 
     let before_json = read_trace_aggregate_json(&before_path)?;
     let after_json = read_trace_aggregate_json(&after_path)?;
@@ -114,6 +108,17 @@ pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         })?;
     }
     Ok((TraceCommandOutput::Compare(output), exit_code))
+}
+
+fn required_compare_path_arg<T>(value: Option<T>, field: &'static str) -> homeboy::Result<T> {
+    value.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            field,
+            "trace compare requires before and after aggregate JSON files",
+            None,
+            None,
+        )
+    })
 }
 
 fn read_trace_aggregate_json(path: &Path) -> homeboy::Result<String> {
