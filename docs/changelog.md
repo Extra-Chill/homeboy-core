@@ -4,6 +4,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.145.0] - 2026-05-02
+
+### Added
+- support multi-component trace variants
+
+### Changed
+- cover trace overlay module
+
+### Fixed
+- keep trace tests on main
+- refresh trace variant rebase
+- keep trace variants audit clean
+- adapt trace variants to latest main
+
 ## [0.144.0] - 2026-05-02
 
 ### Added
