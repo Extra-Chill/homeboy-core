@@ -6,9 +6,12 @@ use homeboy::extension::test as extension_test;
 use homeboy::extension::test::{
     detect_test_drift, report, run_self_check_test_workflow, TestCommandOutput, TestRunWorkflowArgs,
 };
+use homeboy::extension::test::{FailureCategory, FailureCluster, TestAnalysisInput, TestFailure};
 use homeboy::extension::ExtensionCapability;
 use homeboy::git::short_head_revision_at;
-use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
+use homeboy::observation::{
+    NewFindingRecord, NewRunRecord, ObservationStore, RunRecord, RunStatus,
+};
 use std::path::Path;
 
 use super::utils::args::{
@@ -324,7 +327,7 @@ fn finish_test_observation(
     };
 
     let metadata = merge_test_observation_metadata(
-        observation.test_metadata,
+        observation.test_metadata.clone(),
         serde_json::json!({
             "observation_status": workflow.status,
             "exit_code": workflow.exit_code,
@@ -342,9 +345,129 @@ fn finish_test_observation(
     } else {
         RunStatus::Fail
     };
+    persist_test_findings(&observation, workflow);
     let _ = observation
         .store
         .finish_run(&observation.test_run.id, status, Some(metadata));
+}
+
+fn persist_test_findings(
+    observation: &TestObservation,
+    workflow: &extension_test::TestRunWorkflowResult,
+) {
+    let mut records = Vec::new();
+    if let Some(input) = &workflow.failure_analysis_input {
+        records.extend(test_failure_finding_records(
+            &observation.test_run.id,
+            input,
+        ));
+    }
+    if let Some(analysis) = &workflow.analysis {
+        records.extend(
+            analysis
+                .clusters
+                .iter()
+                .map(|cluster| test_cluster_finding_record(&observation.test_run.id, cluster)),
+        );
+    }
+    let _ = observation.store.record_findings(&records);
+}
+
+fn test_failure_finding_records(run_id: &str, input: &TestAnalysisInput) -> Vec<NewFindingRecord> {
+    input
+        .failures
+        .iter()
+        .map(|failure| test_failure_finding_record(run_id, failure))
+        .collect()
+}
+
+fn test_failure_finding_record(run_id: &str, failure: &TestFailure) -> NewFindingRecord {
+    let file =
+        non_empty_string(&failure.test_file).or_else(|| non_empty_string(&failure.source_file));
+    let line = (failure.source_line > 0).then_some(i64::from(failure.source_line));
+    NewFindingRecord {
+        run_id: run_id.to_string(),
+        tool: "test".to_string(),
+        rule: non_empty_string(&failure.error_type),
+        file,
+        line,
+        severity: Some("error".to_string()),
+        fingerprint: Some(test_failure_fingerprint(failure)),
+        message: test_failure_message(failure),
+        fixable: None,
+        metadata_json: serde_json::json!({
+            "record_kind": "failure",
+            "source_sidecar": "test-failures",
+            "test_name": failure.test_name,
+            "test_file": failure.test_file,
+            "source_file": failure.source_file,
+            "source_line": failure.source_line,
+            "raw": failure,
+        }),
+    }
+}
+
+fn test_cluster_finding_record(run_id: &str, cluster: &FailureCluster) -> NewFindingRecord {
+    NewFindingRecord {
+        run_id: run_id.to_string(),
+        tool: "test".to_string(),
+        rule: Some(format!(
+            "cluster:{}",
+            failure_category_slug(&cluster.category)
+        )),
+        file: None,
+        line: None,
+        severity: Some("error".to_string()),
+        fingerprint: Some(format!("test-cluster::{}", cluster.id)),
+        message: cluster.pattern.clone(),
+        fixable: cluster.suggested_fix.is_some().then_some(true),
+        metadata_json: serde_json::json!({
+            "record_kind": "analysis_cluster",
+            "cluster_id": cluster.id,
+            "category": failure_category_slug(&cluster.category),
+            "count": cluster.count,
+            "affected_files": cluster.affected_files,
+            "example_tests": cluster.example_tests,
+            "suggested_fix": cluster.suggested_fix,
+            "raw": cluster,
+        }),
+    }
+}
+
+fn test_failure_message(failure: &TestFailure) -> String {
+    if failure.error_type.is_empty() {
+        failure.message.clone()
+    } else if failure.message.is_empty() {
+        failure.error_type.clone()
+    } else {
+        format!("{}: {}", failure.error_type, failure.message)
+    }
+}
+
+fn test_failure_fingerprint(failure: &TestFailure) -> String {
+    format!(
+        "test::{}::{}::{}::{}",
+        failure.test_file, failure.test_name, failure.error_type, failure.message
+    )
+}
+
+fn failure_category_slug(category: &FailureCategory) -> &'static str {
+    match category {
+        FailureCategory::MissingMethod => "missing_method",
+        FailureCategory::MissingClass => "missing_class",
+        FailureCategory::ReturnTypeChange => "return_type_change",
+        FailureCategory::ErrorCodeChange => "error_code_change",
+        FailureCategory::AssertionMismatch => "assertion_mismatch",
+        FailureCategory::MockError => "mock_error",
+        FailureCategory::FatalError => "fatal_error",
+        FailureCategory::SignatureChange => "signature_change",
+        FailureCategory::EnvironmentError => "environment_error",
+        FailureCategory::Other => "other",
+    }
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn finish_test_drift_observation(
@@ -471,7 +594,7 @@ mod tests {
     use crate::test_support::with_isolated_home;
     use clap::Parser;
     use homeboy::component::Component;
-    use homeboy::observation::ObservationStore;
+    use homeboy::observation::{FindingListFilter, ObservationStore};
     use homeboy::refactor::plan::{build_test_refactor_request, TestSourceOptions};
     use std::fs;
     use std::path::PathBuf;
@@ -559,6 +682,77 @@ mod tests {
                 "--filter=SmokeTest"
             );
             assert_eq!(run.metadata_json["observation_status"], "error");
+        });
+    }
+
+    #[test]
+    fn test_observation_persists_test_failures_and_analysis_clusters() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let args = sample_args();
+            let observation = start_test_observation("homeboy", home.path(), &args, "test", None)
+                .expect("observation should start");
+            let run_id = observation.test_run.id.clone();
+            let input = TestAnalysisInput {
+                failures: vec![TestFailure {
+                    test_name: "tests::fails".to_string(),
+                    test_file: "tests/fails.rs".to_string(),
+                    error_type: "AssertionFailed".to_string(),
+                    message: "expected true".to_string(),
+                    source_file: "src/lib.rs".to_string(),
+                    source_line: 42,
+                }],
+                total: 2,
+                passed: 1,
+            };
+            let analysis = extension_test::analyze::analyze("homeboy", &input);
+            let cluster_fingerprint = format!("test-cluster::{}", analysis.clusters[0].id);
+
+            finish_test_observation(
+                Some(observation),
+                &extension_test::TestRunWorkflowResult {
+                    status: "failed".to_string(),
+                    component: "homeboy".to_string(),
+                    exit_code: 1,
+                    test_counts: None,
+                    failed_tests: None,
+                    failure_analysis_input: Some(input),
+                    coverage: None,
+                    baseline_comparison: None,
+                    analysis: Some(analysis),
+                    autofix: None,
+                    hints: None,
+                    test_scope: None,
+                    summary: None,
+                    raw_output: None,
+                },
+            );
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let findings = store
+                .list_findings(FindingListFilter {
+                    run_id: Some(run_id.clone()),
+                    tool: Some("test".to_string()),
+                    ..FindingListFilter::default()
+                })
+                .expect("list test findings");
+            assert_eq!(findings.len(), 2);
+            assert_eq!(findings[0].metadata_json["record_kind"], "failure");
+            assert_eq!(findings[0].file.as_deref(), Some("tests/fails.rs"));
+            assert_eq!(findings[0].line, Some(42));
+            assert_eq!(findings[1].metadata_json["record_kind"], "analysis_cluster");
+            assert_eq!(findings[1].metadata_json["count"], 1);
+
+            let cluster = store
+                .list_findings(FindingListFilter {
+                    run_id: Some(run_id),
+                    tool: Some("test".to_string()),
+                    fingerprint: Some(cluster_fingerprint),
+                    ..FindingListFilter::default()
+                })
+                .expect("list cluster by fingerprint");
+            assert_eq!(cluster.len(), 1);
+            assert_eq!(cluster[0].metadata_json["record_kind"], "analysis_cluster");
         });
     }
 

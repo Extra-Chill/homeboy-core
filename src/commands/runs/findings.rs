@@ -16,6 +16,9 @@ pub struct RunsFindingsArgs {
     /// Finding file path
     #[arg(long)]
     pub file: Option<String>,
+    /// Finding fingerprint
+    #[arg(long)]
+    pub fingerprint: Option<String>,
     /// Maximum findings to return
     #[arg(long, default_value_t = 100)]
     pub limit: i64,
@@ -41,6 +44,7 @@ pub fn findings(args: RunsFindingsArgs) -> CmdResult<RunsOutput> {
         run_id: Some(args.run_id.clone()),
         tool: args.tool,
         file: args.file,
+        fingerprint: args.fingerprint,
         limit: Some(args.limit),
     })?;
 

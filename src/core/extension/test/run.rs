@@ -37,6 +37,8 @@ pub struct TestRunWorkflowResult {
     pub exit_code: i32,
     pub test_counts: Option<TestCounts>,
     pub failed_tests: Option<Vec<FailedTest>>,
+    #[serde(skip)]
+    pub failure_analysis_input: Option<TestAnalysisInput>,
     pub coverage: Option<CoverageOutput>,
     pub baseline_comparison: Option<TestBaselineComparison>,
     pub analysis: Option<TestAnalysis>,
@@ -173,6 +175,7 @@ pub fn run_main_test_workflow(
                 exit_code: 0,
                 test_counts: None,
                 failed_tests: None,
+                failure_analysis_input: None,
                 coverage: None,
                 baseline_comparison: None,
                 analysis: None,
@@ -229,14 +232,16 @@ pub fn run_main_test_workflow(
         .and_then(failed_tests_from_analysis_input);
 
     let analysis = if args.analyze {
-        let analysis_input = failure_analysis_input.unwrap_or_else(|| TestAnalysisInput {
-            failures: Vec::new(),
-            total: test_counts.as_ref().map(|counts| counts.total).unwrap_or(0),
-            passed: test_counts
-                .as_ref()
-                .map(|counts| counts.passed)
-                .unwrap_or(0),
-        });
+        let analysis_input = failure_analysis_input
+            .clone()
+            .unwrap_or_else(|| TestAnalysisInput {
+                failures: Vec::new(),
+                total: test_counts.as_ref().map(|counts| counts.total).unwrap_or(0),
+                passed: test_counts
+                    .as_ref()
+                    .map(|counts| counts.passed)
+                    .unwrap_or(0),
+            });
 
         Some(analyze(&args.component_id, &analysis_input))
     } else {
@@ -389,6 +394,7 @@ pub fn run_main_test_workflow(
         exit_code,
         test_counts,
         failed_tests,
+        failure_analysis_input,
         coverage,
         baseline_comparison,
         analysis,
@@ -425,6 +431,7 @@ pub fn run_self_check_test_workflow(
         exit_code: output.exit_code,
         test_counts: None,
         failed_tests: None,
+        failure_analysis_input: None,
         coverage: None,
         baseline_comparison: None,
         analysis: None,
