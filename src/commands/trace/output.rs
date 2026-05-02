@@ -43,8 +43,21 @@ pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
 
     let before = read_trace_aggregate(&before_path)?;
     let after = read_trace_aggregate(&after_path)?;
-    let output = compare_trace_aggregates(&before_path, before, &after_path, after);
-    Ok((TraceCommandOutput::Compare(output), 0))
+    let output = compare_trace_aggregates_with_focus(
+        &before_path,
+        before,
+        &after_path,
+        after,
+        &args.focus_spans,
+        args.regression_threshold,
+        args.regression_min_delta_ms,
+    );
+    let exit_code = if output.focus_status.as_deref() == Some("fail") {
+        1
+    } else {
+        0
+    };
+    Ok((TraceCommandOutput::Compare(output), exit_code))
 }
 
 fn read_trace_aggregate(path: &Path) -> homeboy::Result<TraceAggregateInput> {
@@ -73,11 +86,32 @@ pub(super) fn parse_trace_aggregate_input(
     }
 }
 
+#[cfg(test)]
 pub(super) fn compare_trace_aggregates(
     before_path: &Path,
     before: TraceAggregateInput,
     after_path: &Path,
     after: TraceAggregateInput,
+) -> extension_trace::TraceCompareOutput {
+    compare_trace_aggregates_with_focus(
+        before_path,
+        before,
+        after_path,
+        after,
+        &[],
+        extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+        extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+    )
+}
+
+pub(super) fn compare_trace_aggregates_with_focus(
+    before_path: &Path,
+    before: TraceAggregateInput,
+    after_path: &Path,
+    after: TraceAggregateInput,
+    focus_span_ids: &[String],
+    regression_threshold_percent: f64,
+    regression_min_delta_ms: u64,
 ) -> extension_trace::TraceCompareOutput {
     let before_spans = before
         .spans
@@ -127,6 +161,25 @@ pub(super) fn compare_trace_aggregates(
         .collect::<Vec<_>>();
     spans.sort_by(compare_trace_span_impact);
 
+    let focus_spans = focus_compare_spans(&spans, focus_span_ids);
+    let focus_regression_count = focus_spans
+        .iter()
+        .filter(|span| {
+            is_focused_span_regression(span, regression_threshold_percent, regression_min_delta_ms)
+        })
+        .count();
+    let focus_failure_count = focus_spans
+        .iter()
+        .filter(|span| span.after_failures.unwrap_or(0) > span.before_failures.unwrap_or(0))
+        .count();
+    let focus_status = if focus_span_ids.is_empty() {
+        None
+    } else if focus_regression_count > 0 || focus_failure_count > 0 {
+        Some("fail".to_string())
+    } else {
+        Some("pass".to_string())
+    };
+
     extension_trace::TraceCompareOutput {
         command: "trace.compare.spans",
         before_path: before_path.display().to_string(),
@@ -137,7 +190,42 @@ pub(super) fn compare_trace_aggregates(
         after_scenario_id: after.scenario_id,
         span_count: spans.len(),
         spans,
+        focus_span_ids: focus_span_ids.to_vec(),
+        focus_spans,
+        focus_regression_count,
+        focus_failure_count,
+        focus_status,
     }
+}
+
+fn focus_compare_spans(
+    spans: &[extension_trace::TraceCompareSpanOutput],
+    focus_span_ids: &[String],
+) -> Vec<extension_trace::TraceCompareSpanOutput> {
+    if focus_span_ids.is_empty() {
+        return Vec::new();
+    }
+    let focus = focus_span_ids.iter().collect::<BTreeSet<_>>();
+    spans
+        .iter()
+        .filter(|span| focus.contains(&span.id))
+        .cloned()
+        .collect()
+}
+
+fn is_focused_span_regression(
+    span: &extension_trace::TraceCompareSpanOutput,
+    regression_threshold_percent: f64,
+    regression_min_delta_ms: u64,
+) -> bool {
+    let Some(delta_ms) = span.median_delta_ms else {
+        return false;
+    };
+    if delta_ms <= 0 || delta_ms < regression_min_delta_ms as i64 {
+        return false;
+    }
+    span.median_delta_percent
+        .is_some_and(|percent| percent >= regression_threshold_percent)
 }
 
 fn compare_trace_span_impact(
@@ -256,28 +344,30 @@ pub(super) fn render_aggregate_markdown(
     out.push_str(&format!("- **Status:** `{}`\n", aggregate.status));
     out.push_str(&format!("- **Runs:** `{}`\n", aggregate.run_count));
     out.push_str(&format!("- **Failures:** `{}`\n", aggregate.failure_count));
+    if let Some(schedule) = aggregate.schedule.as_deref() {
+        out.push_str(&format!("- **Schedule:** `{}`\n", schedule));
+    }
     extension_trace::push_overlay_markdown(&mut out, &aggregate.overlays);
+
+    if !aggregate.focus_span_ids.is_empty() {
+        out.push_str("\n## Focus Spans\n\n");
+        if aggregate.focus_spans.is_empty() {
+            out.push_str("No focused spans matched the aggregate output.\n");
+        } else {
+            out.push_str("| Span | n | min | median | avg | p75 | p90 | p95 | max | failures |\n");
+            out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+            for span in &aggregate.focus_spans {
+                push_aggregate_span_row(&mut out, span);
+            }
+        }
+    }
 
     if !aggregate.spans.is_empty() {
         out.push_str("\n## Spans\n\n");
         out.push_str("| Span | n | min | median | avg | p75 | p90 | p95 | max | failures |\n");
         out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for span in &aggregate.spans {
-            out.push_str(&format!(
-                "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
-                span.id,
-                span.n,
-                fmt_ms(span.min_ms),
-                fmt_ms(span.median_ms),
-                span.avg_ms
-                    .map(|value| format!("{:.1}ms", value))
-                    .unwrap_or_else(|| "-".to_string()),
-                fmt_ms(span.p75_ms),
-                fmt_ms(span.p90_ms),
-                fmt_ms(span.p95_ms),
-                fmt_ms(span.max_ms),
-                span.failures
-            ));
+            push_aggregate_span_row(&mut out, span);
         }
 
         let outliers = aggregate
@@ -309,6 +399,24 @@ pub(super) fn render_aggregate_markdown(
     out
 }
 
+fn push_aggregate_span_row(out: &mut String, span: &extension_trace::TraceAggregateSpanOutput) {
+    out.push_str(&format!(
+        "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+        span.id,
+        span.n,
+        fmt_ms(span.min_ms),
+        fmt_ms(span.median_ms),
+        span.avg_ms
+            .map(|value| format!("{:.1}ms", value))
+            .unwrap_or_else(|| "-".to_string()),
+        fmt_ms(span.p75_ms),
+        fmt_ms(span.p90_ms),
+        fmt_ms(span.p95_ms),
+        fmt_ms(span.max_ms),
+        span.failures
+    ));
+}
+
 pub(super) fn render_compare_markdown(compare: &extension_trace::TraceCompareOutput) -> String {
     let mut out = String::new();
     out.push_str("# Trace Compare\n\n");
@@ -338,7 +446,51 @@ pub(super) fn render_compare_markdown(compare: &extension_trace::TraceCompareOut
         }
     }
 
+    if !compare.focus_span_ids.is_empty() {
+        out.push_str("\n## Focus Spans\n\n");
+        out.push_str(&format!(
+            "- **Status:** `{}`\n",
+            compare.focus_status.as_deref().unwrap_or("pass")
+        ));
+        out.push_str(&format!(
+            "- **Regressions:** `{}`\n",
+            compare.focus_regression_count
+        ));
+        out.push_str(&format!(
+            "- **Failures:** `{}`\n",
+            compare.focus_failure_count
+        ));
+        if compare.focus_spans.is_empty() {
+            out.push_str("\nNo focused spans matched the compared aggregates.\n");
+        } else {
+            out.push_str("\n| Span | before median | after median | median delta | median % | before avg | after avg | avg delta | avg % | before failures | after failures |\n");
+            out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+            for span in &compare.focus_spans {
+                out.push_str(&format!(
+                    "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+                    span.id,
+                    fmt_ms(span.before_median_ms),
+                    fmt_ms(span.after_median_ms),
+                    fmt_signal_delta_ms(span.median_delta_ms),
+                    fmt_percent(span.median_delta_percent),
+                    fmt_avg_ms(span.before_avg_ms),
+                    fmt_avg_ms(span.after_avg_ms),
+                    fmt_signal_delta_avg_ms(span.avg_delta_ms),
+                    fmt_percent(span.avg_delta_percent),
+                    fmt_count(span.before_failures),
+                    fmt_count(span.after_failures),
+                ));
+            }
+        }
+    }
+
     out
+}
+
+fn fmt_count(value: Option<usize>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn fmt_ms(value: Option<u64>) -> String {

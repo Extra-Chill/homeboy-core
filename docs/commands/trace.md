@@ -12,8 +12,8 @@ homeboy trace <component> <scenario> --json-summary
 homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
 homeboy trace <component> <scenario> --phase submit:ui.submit --phase cli:cli.start --phase ready:server.ready
 homeboy trace <component> <scenario> --rig <rig-id> --phase-preset create-site
-homeboy trace <component> <scenario> --repeat 5 --aggregate spans
-homeboy trace compare before.json after.json
+homeboy trace <component> <scenario> --repeat 5 --aggregate spans --schedule interleaved
+homeboy trace compare before.json after.json --focus-span phase.wp_boot_start_to_wp_boot_ready
 homeboy trace <component> <scenario> --report=markdown
 homeboy trace <component> <scenario> --baseline
 homeboy trace <component> <scenario> --ratchet
@@ -140,14 +140,20 @@ homeboy trace studio studio-app-create-site --repeat 5 --aggregate spans
 
 Each repeat uses a fresh Homeboy run directory, so completed run data is preserved even when a later repeat fails.
 
+Use `--schedule grouped` or `--schedule interleaved` to record the intended run order in the aggregate manifest. The current single-scenario repeat runner records one `run` group; the planner is shared with future baseline/variant runners so paired experiments can use grouped order (`baseline...variant...`) or interleaved order (`baseline, variant, baseline, variant`).
+
+Use repeatable `--focus-span <span-id>` to add a focused span section while keeping the full span table in the JSON and Markdown report.
+
 ## Compare Aggregates
 
 Use `trace compare` to compare two aggregate span JSON outputs. The comparison reports each span's before/after median and average, absolute deltas, and percentage deltas. Spans are sorted by absolute median delta descending so the largest changes are first; spans that only exist in one file are included with unavailable deltas after comparable spans. Markdown reports bold non-zero absolute deltas to make regressions and improvements easier to scan.
 
 ```sh
 homeboy trace compare before.json after.json
-homeboy trace compare before.json after.json --report=markdown
+homeboy trace compare before.json after.json --focus-span phase.wp_boot_start_to_wp_boot_ready --report=markdown
 ```
+
+Focused compare spans are evaluated independently from the full span table. When a focused span's median slowdown exceeds both `--regression-threshold` and `--regression-min-delta-ms`, or its failure count increases, `trace compare` returns a failing exit code and records `focus_status`, `focus_regression_count`, and `focus_failure_count` in JSON output. All compared spans remain present in `spans`.
 
 ## Markdown Reports
 

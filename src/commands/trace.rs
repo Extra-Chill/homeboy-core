@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{Args, ValueEnum};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -28,8 +28,8 @@ use output::{
 
 #[cfg(test)]
 use output::{
-    compare_trace_aggregates, parse_trace_aggregate_input, TraceAggregateInput,
-    TraceAggregateSpanInput,
+    compare_trace_aggregates, compare_trace_aggregates_with_focus, parse_trace_aggregate_input,
+    TraceAggregateInput, TraceAggregateSpanInput,
 };
 
 #[derive(Args, Clone)]
@@ -70,6 +70,14 @@ pub struct TraceArgs {
     #[arg(long, value_parser = ["spans"])]
     pub aggregate: Option<String>,
 
+    /// Run order for repeated trace executions.
+    #[arg(long, value_enum, default_value_t = TraceSchedule::Grouped)]
+    pub schedule: TraceSchedule,
+
+    /// Highlight a span in aggregate and compare reports. Repeatable.
+    #[arg(long = "focus-span", value_name = "SPAN_ID")]
+    pub focus_spans: Vec<String>,
+
     /// Add a span definition as `id:source.event:source.event`.
     #[arg(long = "span", value_name = "ID:FROM:TO", value_parser = extension_trace::spans::parse_span_definition)]
     pub spans: Vec<TraceSpanDefinition>,
@@ -100,6 +108,61 @@ pub struct TraceArgs {
     /// Leave overlay changes in place after the trace run.
     #[arg(long)]
     pub keep_overlay: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TraceSchedule {
+    Grouped,
+    Interleaved,
+}
+
+impl TraceSchedule {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Grouped => "grouped",
+            Self::Interleaved => "interleaved",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TraceRunPlanEntry {
+    index: usize,
+    group: String,
+    iteration: usize,
+}
+
+fn plan_trace_run_order(
+    repeat: usize,
+    schedule: TraceSchedule,
+    groups: &[&str],
+) -> Vec<TraceRunPlanEntry> {
+    let mut entries = Vec::new();
+    match schedule {
+        TraceSchedule::Grouped => {
+            for group in groups {
+                for iteration in 1..=repeat {
+                    entries.push(TraceRunPlanEntry {
+                        index: entries.len() + 1,
+                        group: (*group).to_string(),
+                        iteration,
+                    });
+                }
+            }
+        }
+        TraceSchedule::Interleaved => {
+            for iteration in 1..=repeat {
+                for group in groups {
+                    entries.push(TraceRunPlanEntry {
+                        index: entries.len() + 1,
+                        group: (*group).to_string(),
+                        iteration,
+                    });
+                }
+            }
+        }
+    }
+    entries
 }
 
 pub fn is_markdown_mode(args: &TraceArgs) -> bool {
@@ -391,7 +454,10 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let mut component = None;
     let mut failure_count = 0;
 
-    for index in 1..=repeat {
+    let run_order = plan_trace_run_order(repeat, args.schedule, &["run"]);
+
+    for plan_entry in &run_order {
+        let index = plan_entry.index;
         let mut run_args = args.clone();
         run_args.repeat = 1;
         match execute_trace_run(run_args) {
@@ -499,6 +565,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             aggregate_span(id, samples, failures)
         })
         .collect::<Vec<_>>();
+    let focus_spans = focus_aggregate_spans(&spans, &args.focus_spans);
     let exit_code = if failure_count == 0 { 0 } else { 1 };
     let output = extension_trace::TraceAggregateOutput {
         command: "trace.aggregate.spans",
@@ -510,13 +577,39 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         run_count: runs.len(),
         failure_count,
         exit_code,
+        schedule: Some(args.schedule.as_str().to_string()),
+        run_order: run_order
+            .into_iter()
+            .map(|entry| extension_trace::TraceRunOrderEntryOutput {
+                index: entry.index,
+                group: entry.group,
+                iteration: entry.iteration,
+            })
+            .collect(),
         rig_state,
         overlays,
         runs,
         spans,
+        focus_span_ids: args.focus_spans.clone(),
+        focus_spans,
     };
 
     Ok((TraceCommandOutput::Aggregate(output), exit_code))
+}
+
+fn focus_aggregate_spans(
+    spans: &[extension_trace::TraceAggregateSpanOutput],
+    focus_span_ids: &[String],
+) -> Vec<extension_trace::TraceAggregateSpanOutput> {
+    if focus_span_ids.is_empty() {
+        return Vec::new();
+    }
+    let focus = focus_span_ids.iter().collect::<BTreeSet<_>>();
+    spans
+        .iter()
+        .filter(|span| focus.contains(&span.id))
+        .cloned()
+        .collect()
 }
 
 const DEFAULT_TRACE_PHASE_PRESET: &str = "default";

@@ -100,6 +100,8 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             report: None,
             repeat: 1,
             aggregate: None,
+            schedule: TraceSchedule::Grouped,
+            focus_spans: Vec::new(),
             spans: Vec::new(),
             phases: Vec::new(),
             phase_preset: None,
@@ -188,6 +190,8 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             report: None,
             repeat: 1,
             aggregate: None,
+            schedule: TraceSchedule::Grouped,
+            focus_spans: Vec::new(),
             spans: Vec::new(),
             phases: Vec::new(),
             phase_preset: None,
@@ -233,6 +237,8 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 report: None,
                 repeat: 1,
                 aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: None,
@@ -285,6 +291,8 @@ fn trace_run_persists_observation_history() {
                 report: None,
                 repeat: 1,
                 aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: None,
@@ -360,6 +368,8 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 report: None,
                 repeat: 3,
                 aggregate: Some("spans".to_string()),
+                schedule: TraceSchedule::Interleaved,
+                focus_spans: vec!["boot_to_ready".to_string()],
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: None,
@@ -380,7 +390,14 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 assert_eq!(aggregate.repeat, 3);
                 assert_eq!(aggregate.run_count, 3);
                 assert_eq!(aggregate.failure_count, 0);
+                assert_eq!(aggregate.schedule.as_deref(), Some("interleaved"));
+                assert_eq!(aggregate.run_order.len(), 3);
+                assert_eq!(aggregate.run_order[0].index, 1);
+                assert_eq!(aggregate.run_order[0].group, "run");
+                assert_eq!(aggregate.run_order[0].iteration, 1);
                 assert_eq!(aggregate.spans.len(), 1);
+                assert_eq!(aggregate.focus_span_ids, vec!["boot_to_ready"]);
+                assert_eq!(aggregate.focus_spans.len(), 1);
                 let span = &aggregate.spans[0];
                 assert_eq!(span.id, "boot_to_ready");
                 assert_eq!(span.n, 3);
@@ -405,6 +422,37 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
             _ => panic!("expected aggregate output"),
         }
     });
+}
+
+#[test]
+fn trace_run_order_planner_supports_grouped_and_interleaved_variants() {
+    let grouped = plan_trace_run_order(2, TraceSchedule::Grouped, &["baseline", "variant"]);
+    assert_eq!(
+        grouped
+            .iter()
+            .map(|entry| (entry.index, entry.group.as_str(), entry.iteration))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, "baseline", 1),
+            (2, "baseline", 2),
+            (3, "variant", 1),
+            (4, "variant", 2),
+        ]
+    );
+
+    let interleaved = plan_trace_run_order(2, TraceSchedule::Interleaved, &["baseline", "variant"]);
+    assert_eq!(
+        interleaved
+            .iter()
+            .map(|entry| (entry.index, entry.group.as_str(), entry.iteration))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, "baseline", 1),
+            (2, "variant", 1),
+            (3, "baseline", 2),
+            (4, "variant", 2),
+        ]
+    );
 }
 
 #[test]
@@ -443,6 +491,8 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                 report: None,
                 repeat: 2,
                 aggregate: Some("spans".to_string()),
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: None,
@@ -585,6 +635,69 @@ fn trace_compare_reports_median_and_average_deltas() {
 }
 
 #[test]
+fn trace_compare_focus_spans_report_independent_regression_status() {
+    let before = TraceAggregateInput {
+        component: Some("studio".to_string()),
+        scenario_id: Some("create-site".to_string()),
+        spans: vec![
+            TraceAggregateSpanInput {
+                id: "focused".to_string(),
+                n: 6,
+                median_ms: Some(100),
+                avg_ms: Some(100.0),
+                failures: 0,
+            },
+            TraceAggregateSpanInput {
+                id: "unfocused".to_string(),
+                n: 6,
+                median_ms: Some(100),
+                avg_ms: Some(100.0),
+                failures: 0,
+            },
+        ],
+    };
+    let after = TraceAggregateInput {
+        component: Some("studio".to_string()),
+        scenario_id: Some("create-site".to_string()),
+        spans: vec![
+            TraceAggregateSpanInput {
+                id: "focused".to_string(),
+                n: 6,
+                median_ms: Some(130),
+                avg_ms: Some(130.0),
+                failures: 0,
+            },
+            TraceAggregateSpanInput {
+                id: "unfocused".to_string(),
+                n: 6,
+                median_ms: Some(250),
+                avg_ms: Some(250.0),
+                failures: 0,
+            },
+        ],
+    };
+
+    let compare = compare_trace_aggregates_with_focus(
+        Path::new("before.json"),
+        before,
+        Path::new("after.json"),
+        after,
+        &["focused".to_string()],
+        20.0,
+        10,
+    );
+
+    assert_eq!(compare.span_count, 2);
+    assert_eq!(compare.spans.len(), 2);
+    assert_eq!(compare.focus_span_ids, vec!["focused"]);
+    assert_eq!(compare.focus_spans.len(), 1);
+    assert_eq!(compare.focus_spans[0].id, "focused");
+    assert_eq!(compare.focus_regression_count, 1);
+    assert_eq!(compare.focus_failure_count, 0);
+    assert_eq!(compare.focus_status.as_deref(), Some("fail"));
+}
+
+#[test]
 fn trace_compare_accepts_json_summary_envelope_outputs() {
     let input = parse_trace_aggregate_input(
         r#"{
@@ -640,6 +753,11 @@ fn trace_compare_markdown_renders_span_table() {
             before_failures: Some(0),
             after_failures: Some(0),
         }],
+        focus_span_ids: Vec::new(),
+        focus_spans: Vec::new(),
+        focus_regression_count: 0,
+        focus_failure_count: 0,
+        focus_status: None,
     };
 
     let markdown = render_compare_markdown(&compare);
@@ -674,6 +792,8 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                 report: None,
                 repeat: 1,
                 aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: vec![
                     extension_trace::spans::TracePhaseMilestone {
@@ -742,6 +862,8 @@ fn trace_run_expands_named_workload_phase_preset() {
                 report: None,
                 repeat: 1,
                 aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: Some("startup".to_string()),
@@ -801,6 +923,8 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                 report: None,
                 repeat: 2,
                 aggregate: Some("spans".to_string()),
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: None,
@@ -903,6 +1027,8 @@ fn aggregate_markdown_includes_percentile_columns() {
         failure_count: 0,
         exit_code: 0,
         rig_state: None,
+        schedule: None,
+        run_order: Vec::new(),
         overlays: Vec::new(),
         runs: Vec::new(),
         spans: vec![aggregate_span(
@@ -910,6 +1036,8 @@ fn aggregate_markdown_includes_percentile_columns() {
             aggregate_samples(&((1..=20).map(|value| value * 10).collect::<Vec<_>>())),
             0,
         )],
+        focus_span_ids: Vec::new(),
+        focus_spans: Vec::new(),
     };
 
     let markdown = render_aggregate_markdown(&aggregate);
@@ -947,6 +1075,8 @@ fn failed_trace_run_persists_observation_history() {
                 report: None,
                 repeat: 1,
                 aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
                 phase_preset: None,
