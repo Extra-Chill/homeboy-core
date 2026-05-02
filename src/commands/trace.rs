@@ -1,4 +1,5 @@
 use clap::{Args, ValueEnum};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,7 @@ use super::{CmdResult, GlobalArgs};
 
 mod bundle;
 mod compare_variant;
+mod matrix;
 mod output;
 #[cfg(test)]
 mod test_fixture;
@@ -29,16 +31,12 @@ mod test_fixture;
 use compare_variant::run_compare_variant;
 
 use output::{
-    aggregate_span, render_aggregate_markdown, render_compare_markdown, run_compare,
-    TraceAggregateSpanSample,
+    aggregate_span, render_aggregate_markdown, render_compare_markdown, render_matrix_markdown,
+    run_compare, TraceAggregateSpanSample,
 };
 
 #[cfg(test)]
-use bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
-
-#[cfg(test)]
-use output::{compare_trace_aggregates, parse_trace_aggregate_input};
-
+use matrix::{expand_variant_matrix, TraceVariantStackItem};
 #[derive(Args, Clone)]
 pub struct TraceArgs {
     #[command(flatten)]
@@ -46,6 +44,10 @@ pub struct TraceArgs {
 
     /// Scenario ID to run, or `list` to discover available scenarios.
     pub scenario: Option<String>,
+
+    /// Scenario ID for command-shaped trace modes like `compare-variant`.
+    #[arg(long = "scenario", value_name = "SCENARIO_ID")]
+    pub scenario_arg: Option<String>,
 
     /// After aggregate JSON when running `homeboy trace compare before.json after.json`.
     #[arg(value_name = "AFTER_JSON")]
@@ -121,7 +123,13 @@ pub struct TraceArgs {
     pub variants: Vec<String>,
 
     /// Directory for `trace compare-variant` experiment bundle output.
-    #[arg(long, value_name = "DIR")]
+
+    /// Expand variants for `trace compare-variant`.
+    #[arg(long = "matrix", value_enum, default_value_t = TraceVariantMatrixMode::None)]
+    pub matrix: TraceVariantMatrixMode,
+
+    /// Directory where `trace compare-variant` writes aggregate, compare, and summary artifacts.
+    #[arg(long = "output-dir", value_name = "DIR")]
     pub output_dir: Option<PathBuf>,
 
     /// Leave overlay changes in place after the trace run.
@@ -148,6 +156,24 @@ impl TraceSchedule {
         match self {
             Self::Grouped => "grouped",
             Self::Interleaved => "interleaved",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, ValueEnum)]
+pub enum TraceVariantMatrixMode {
+    #[default]
+    None,
+    Single,
+    Cumulative,
+}
+
+impl TraceVariantMatrixMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Single => "single",
+            Self::Cumulative => "cumulative",
         }
     }
 }
@@ -218,6 +244,7 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
             Ok((render_aggregate_markdown(&aggregate), exit_code))
         }
         TraceCommandOutput::Compare(compare) => Ok((render_compare_markdown(&compare), exit_code)),
+        TraceCommandOutput::Matrix(matrix) => Ok((render_matrix_markdown(&matrix), exit_code)),
         TraceCommandOutput::List(list) => {
             let mut markdown = format!("# Trace Scenarios: `{}`\n\n", list.component_id);
             for scenario in list.scenarios {
@@ -285,7 +312,11 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
     }
 
     if args.comp.component.as_deref() == Some("compare-variant") {
-        let (output, exit_code) = run_compare_variant(args)?;
+        let (output, exit_code) = if args.matrix == TraceVariantMatrixMode::None {
+            run_compare_variant(args)?
+        } else {
+            matrix::run_variant_matrix(args)?
+        };
         return Ok(((output, None), exit_code));
     }
 
@@ -316,7 +347,7 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         ));
     }
 
-    if args.scenario.as_deref() == Some("list") {
+    if trace_scenario(&args)? == "list" {
         let (output, exit_code) = run_list(args)?;
         return Ok(((output, None), exit_code));
     }
@@ -521,7 +552,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             path_override,
             settings: settings_as_strings(&ctx.settings),
             settings_json: settings_as_json(&ctx.settings),
-            scenario_id: scenario,
+            scenario_id,
             json_summary: args.json_summary,
             rig_id: args.rig,
             overlays,
@@ -560,7 +591,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
 
 fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let repeat = args.repeat;
-    let scenario_id = required_trace_scenario(&args)?;
+    let scenario_id = trace_scenario(&args)?.to_string();
     let mut runs = Vec::new();
     let mut overlays = Vec::new();
     let mut span_samples: BTreeMap<String, Vec<TraceAggregateSpanSample>> = BTreeMap::new();
@@ -732,6 +763,20 @@ fn focus_aggregate_spans(
         .collect()
 }
 
+fn trace_scenario(args: &TraceArgs) -> homeboy::Result<&str> {
+    args.scenario_arg
+        .as_deref()
+        .or(args.scenario.as_deref())
+        .ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "scenario",
+                "trace requires a scenario positional argument or --scenario",
+                None,
+                None,
+            )
+        })
+}
+
 const DEFAULT_TRACE_PHASE_PRESET: &str = "default";
 
 fn cli_span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanDefinition>> {
@@ -775,6 +820,7 @@ fn default_trace_phase_preset_for_args<'a>(
     rig_context: Option<&'a TraceRigContext>,
     extension_id: Option<&str>,
 ) -> Option<&'a str> {
+    let scenario = trace_scenario(args).ok()?;
     let context = rig_context?;
     let extension_id = extension_id?;
     let workload = context
@@ -782,11 +828,9 @@ fn default_trace_phase_preset_for_args<'a>(
         .trace_workloads
         .get(extension_id)
         .and_then(|workloads| {
-            workloads.iter().find(|workload| {
-                args.scenario
-                    .as_deref()
-                    .is_some_and(|scenario| trace_workload_scenario_id(workload.path()) == scenario)
-            })
+            workloads
+                .iter()
+                .find(|workload| trace_workload_scenario_id(workload.path()) == scenario)
         })?;
     workload.trace_default_phase_preset().or_else(|| {
         workload
@@ -801,6 +845,7 @@ fn trace_phase_preset_for_args(
     extension_id: Option<&str>,
     preset_name: &str,
 ) -> homeboy::Result<Vec<extension_trace::spans::TracePhaseMilestone>> {
+    let scenario = trace_scenario(args)?;
     let context = rig_context.ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
             "--phase-preset",
@@ -824,11 +869,9 @@ fn trace_phase_preset_for_args(
         .get(extension_id)
         .map(|workloads| workloads.as_slice())
         .unwrap_or(&[]);
-    let workload = workloads.iter().find(|workload| {
-        args.scenario
-            .as_deref()
-            .is_some_and(|scenario| trace_workload_scenario_id(workload.path()) == scenario)
-    });
+    let workload = workloads
+        .iter()
+        .find(|workload| trace_workload_scenario_id(workload.path()) == scenario);
     let phases = workload
         .and_then(|workload| workload.trace_phase_preset(preset_name))
         .ok_or_else(|| {
@@ -836,8 +879,7 @@ fn trace_phase_preset_for_args(
                 "--phase-preset",
                 format!(
                     "trace phase preset '{}' is not declared for scenario '{}'",
-                    preset_name,
-                    args.scenario.as_deref().unwrap_or("<missing>")
+                    preset_name, scenario
                 ),
                 None,
                 None,
@@ -1328,3 +1370,6 @@ mod compare_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod output_tests;

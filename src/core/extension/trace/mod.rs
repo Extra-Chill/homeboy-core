@@ -31,6 +31,7 @@ pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
     TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceCommandOutput, TraceCompareOutput,
     TraceCompareSpanOutput, TraceOverlayLocksOutput, TraceRunOrderEntryOutput,
+    TraceVariantMatrixOutput, TraceVariantMatrixRunOutput,
 };
 pub use report::{push_overlay_markdown, render_markdown};
 pub use run::{run_trace_list_workflow, run_trace_workflow, TraceListWorkflowArgs};

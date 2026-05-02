@@ -69,15 +69,9 @@ pub(super) struct TraceAggregateRunInput {
 }
 
 pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
-    let before_path = PathBuf::from(super::required_trace_scenario(&args)?);
-    let Some(after_path) = args.compare_after else {
-        return Err(homeboy::Error::validation_invalid_argument(
-            "AFTER_JSON",
-            "trace compare requires before and after aggregate JSON files",
-            None,
-            None,
-        ));
-    };
+    let before = required_compare_path_arg(args.scenario.as_deref(), "BEFORE_JSON")?;
+    let before_path = PathBuf::from(before);
+    let after_path = required_compare_path_arg(args.compare_after, "AFTER_JSON")?;
 
     let before_json = read_trace_aggregate_json(&before_path)?;
     let after_json = read_trace_aggregate_json(&after_path)?;
@@ -114,6 +108,17 @@ pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         })?;
     }
     Ok((TraceCommandOutput::Compare(output), exit_code))
+}
+
+fn required_compare_path_arg<T>(value: Option<T>, field: &'static str) -> homeboy::Result<T> {
+    value.ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            field,
+            "trace compare requires before and after aggregate JSON files",
+            None,
+            None,
+        )
+    })
 }
 
 fn read_trace_aggregate_json(path: &Path) -> homeboy::Result<String> {
@@ -553,6 +558,38 @@ fn fmt_count(value: Option<usize>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "-".to_string())
+}
+
+pub(super) fn render_matrix_markdown(matrix: &extension_trace::TraceVariantMatrixOutput) -> String {
+    let mut out = String::new();
+    out.push_str("# Trace Variant Matrix\n\n");
+    out.push_str(&format!("- **Component:** `{}`\n", matrix.component));
+    out.push_str(&format!("- **Scenario:** `{}`\n", matrix.scenario_id));
+    out.push_str(&format!("- **Matrix:** `{}`\n", matrix.matrix));
+    out.push_str(&format!("- **Status:** `{}`\n", matrix.status));
+    out.push_str(&format!("- **Output dir:** `{}`\n", matrix.output_dir));
+    out.push_str(&format!("- **Baseline:** `{}`\n", matrix.baseline_path));
+
+    out.push_str("\n## Combinations\n\n");
+    out.push_str("| Combination | Variants | Status | Exit | Aggregate | Compare |\n");
+    out.push_str("|---|---|---|---:|---|---|\n");
+    for run in &matrix.runs {
+        let variants = if run.variants.is_empty() {
+            "-".to_string()
+        } else {
+            run.variants
+                .iter()
+                .map(|variant| format!("`{}`", variant))
+                .collect::<Vec<_>>()
+                .join(" + ")
+        };
+        out.push_str(&format!(
+            "| `{}` | {} | `{}` | {} | `{}` | `{}` |\n",
+            run.label, variants, run.status, run.exit_code, run.aggregate_path, run.compare_path
+        ));
+    }
+
+    out
 }
 
 pub(super) fn fmt_ms(value: Option<u64>) -> String {

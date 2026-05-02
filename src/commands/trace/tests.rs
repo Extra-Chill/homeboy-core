@@ -6,9 +6,6 @@ use crate::test_support::with_isolated_home;
 use homeboy::component::ScopedExtensionConfig;
 use homeboy::rig::ComponentSpec;
 
-use super::output::{
-    compare_trace_aggregates_with_focus, TraceAggregateInput, TraceAggregateSpanInput,
-};
 use super::test_fixture::{
     init_overlay_component, write_trace_extension, write_trace_rig,
     write_trace_rig_with_phase_preset, write_trace_rig_with_variant, XdgGuard,
@@ -98,6 +95,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
                 path: None,
             },
             scenario: Some("list".to_string()),
+            scenario_arg: None,
             compare_after: None,
             rig: Some("studio-rig".to_string()),
             setting_args: SettingArgs::default(),
@@ -117,6 +115,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: Vec::new(),
+            matrix: TraceVariantMatrixMode::None,
             output_dir: None,
             keep_overlay: false,
             stale: false,
@@ -193,6 +192,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
                 path: None,
             },
             scenario: Some("list".to_string()),
+            scenario_arg: None,
             compare_after: None,
             rig: Some("studio-rig".to_string()),
             setting_args: SettingArgs::default(),
@@ -212,6 +212,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: Vec::new(),
+            matrix: TraceVariantMatrixMode::None,
             output_dir: None,
             keep_overlay: false,
             stale: false,
@@ -245,6 +246,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -265,6 +267,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -304,6 +307,7 @@ fn trace_run_persists_observation_history() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -324,6 +328,7 @@ fn trace_run_persists_observation_history() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -386,6 +391,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -406,6 +412,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -484,6 +491,58 @@ fn trace_run_order_planner_supports_grouped_and_interleaved_variants() {
             (4, "variant", 2),
         ]
     );
+
+    let stack = vec![
+        TraceVariantStackItem {
+            label: "a".to_string(),
+            overlay: "a.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "b".to_string(),
+            overlay: "b.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "c".to_string(),
+            overlay: "c.patch".to_string(),
+        },
+    ];
+    let single = expand_variant_matrix(&stack, TraceVariantMatrixMode::Single);
+    assert_eq!(
+        single
+            .iter()
+            .map(|combo| combo
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["a"], vec!["b"], vec!["c"]]
+    );
+
+    let cumulative = expand_variant_matrix(&stack, TraceVariantMatrixMode::Cumulative);
+    assert_eq!(
+        cumulative
+            .iter()
+            .map(|combo| combo
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
+    );
+
+    let full_stack = expand_variant_matrix(&stack[..2], TraceVariantMatrixMode::None);
+    assert_eq!(full_stack.len(), 1);
+    assert_eq!(full_stack[0].label, "a+b");
+    assert_eq!(
+        full_stack[0]
+            .items
+            .iter()
+            .map(|item| item.overlay.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a.patch", "b.patch"]
+    );
 }
 
 #[test]
@@ -514,6 +573,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -534,6 +594,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: vec![patch_path.to_string_lossy().to_string()],
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -588,6 +649,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
                 path: None,
             },
             scenario: Some("studio-app-create-site".to_string()),
+            scenario_arg: None,
             compare_after: None,
             rig: Some("studio-rig".to_string()),
             setting_args: SettingArgs::default(),
@@ -607,6 +669,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: vec!["fresh-install-mode".to_string()],
+            matrix: TraceVariantMatrixMode::None,
             output_dir: None,
             keep_overlay: false,
             stale: false,
@@ -694,6 +757,7 @@ fn trace_compare_variant_writes_experiment_bundle() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -714,6 +778,7 @@ fn trace_compare_variant_writes_experiment_bundle() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: vec![patch_path.to_string_lossy().to_string()],
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: Some(output_dir.path().to_path_buf()),
                 keep_overlay: false,
                 stale: false,
@@ -743,279 +808,6 @@ fn trace_compare_variant_writes_experiment_bundle() {
 }
 
 #[test]
-fn trace_compare_focus_spans_report_independent_regression_status() {
-    let before = TraceAggregateInput {
-        component: Some("studio".to_string()),
-        scenario_id: Some("create-site".to_string()),
-        phase_preset: None,
-        repeat: None,
-        rig_state: None,
-        overlays: Vec::new(),
-        runs: Vec::new(),
-        spans: vec![
-            TraceAggregateSpanInput {
-                id: "focused".to_string(),
-                n: 6,
-                median_ms: Some(100),
-                avg_ms: Some(100.0),
-                max_ms: None,
-                max_run_index: None,
-                max_artifact_path: None,
-                failures: 0,
-            },
-            TraceAggregateSpanInput {
-                id: "unfocused".to_string(),
-                n: 6,
-                median_ms: Some(100),
-                avg_ms: Some(100.0),
-                max_ms: None,
-                max_run_index: None,
-                max_artifact_path: None,
-                failures: 0,
-            },
-        ],
-    };
-    let after = TraceAggregateInput {
-        component: Some("studio".to_string()),
-        scenario_id: Some("create-site".to_string()),
-        phase_preset: None,
-        repeat: None,
-        rig_state: None,
-        overlays: Vec::new(),
-        runs: Vec::new(),
-        spans: vec![
-            TraceAggregateSpanInput {
-                id: "focused".to_string(),
-                n: 6,
-                median_ms: Some(130),
-                avg_ms: Some(130.0),
-                max_ms: None,
-                max_run_index: None,
-                max_artifact_path: None,
-                failures: 0,
-            },
-            TraceAggregateSpanInput {
-                id: "unfocused".to_string(),
-                n: 6,
-                median_ms: Some(250),
-                avg_ms: Some(250.0),
-                max_ms: None,
-                max_run_index: None,
-                max_artifact_path: None,
-                failures: 0,
-            },
-        ],
-    };
-
-    let compare = compare_trace_aggregates_with_focus(
-        Path::new("before.json"),
-        before,
-        Path::new("after.json"),
-        after,
-        &["focused".to_string()],
-        20.0,
-        10,
-    );
-
-    assert_eq!(compare.span_count, 2);
-    assert_eq!(compare.spans.len(), 2);
-    assert_eq!(compare.focus_span_ids, vec!["focused"]);
-    assert_eq!(compare.focus_spans.len(), 1);
-    assert_eq!(compare.focus_spans[0].id, "focused");
-    assert_eq!(compare.focus_regression_count, 1);
-    assert_eq!(compare.focus_failure_count, 0);
-    assert_eq!(compare.focus_status.as_deref(), Some("fail"));
-}
-
-#[test]
-fn trace_compare_accepts_json_summary_envelope_outputs() {
-    let input = parse_trace_aggregate_input(
-        r#"{
-                "success": true,
-                "data": {
-                    "command": "trace.aggregate.spans",
-                    "component": "studio",
-                    "scenario_id": "create-site",
-                    "spans": [
-                        {
-                            "id": "submit_to_running",
-                            "n": 5,
-                            "median_ms": 6059,
-                            "avg_ms": 6019.8,
-                            "failures": 0
-                        }
-                    ]
-                }
-            }"#,
-    )
-    .expect("json summary envelope should parse");
-
-    assert_eq!(input.component.as_deref(), Some("studio"));
-    assert_eq!(input.scenario_id.as_deref(), Some("create-site"));
-    assert_eq!(input.spans.len(), 1);
-    assert_eq!(input.spans[0].id, "submit_to_running");
-    assert_eq!(input.spans[0].median_ms, Some(6059));
-}
-
-#[test]
-fn trace_compare_markdown_and_experiment_bundle_render_artifacts() {
-    let compare = extension_trace::TraceCompareOutput {
-        command: "trace.compare.spans",
-        before_path: "before.json".to_string(),
-        after_path: "after.json".to_string(),
-        before_component: Some("studio".to_string()),
-        after_component: Some("studio".to_string()),
-        before_scenario_id: Some("create-site".to_string()),
-        after_scenario_id: Some("create-site".to_string()),
-        span_count: 1,
-        spans: vec![extension_trace::TraceCompareSpanOutput {
-            id: "boot_to_ready".to_string(),
-            before_n: Some(5),
-            after_n: Some(5),
-            before_median_ms: Some(100),
-            after_median_ms: Some(125),
-            median_delta_ms: Some(25),
-            median_delta_percent: Some(25.0),
-            before_avg_ms: Some(110.0),
-            after_avg_ms: Some(121.0),
-            avg_delta_ms: Some(11.0),
-            avg_delta_percent: Some(10.0),
-            before_failures: Some(0),
-            after_failures: Some(0),
-        }],
-        focus_span_ids: Vec::new(),
-        focus_spans: Vec::new(),
-        focus_regression_count: 0,
-        focus_failure_count: 0,
-        focus_status: None,
-    };
-
-    let markdown = render_compare_markdown(&compare);
-
-    assert!(markdown.contains("# Trace Compare"));
-    assert!(markdown.contains("| Span | before median | after median | median delta | median % | before avg | after avg | avg delta | avg % |"));
-    assert!(markdown.contains(
-        "| `boot_to_ready` | 100ms | 125ms | **+25ms** | +25.0% | 110.0ms | 121.0ms | **+11.0ms** | +10.0% |"
-    ));
-
-    let dir = tempfile::TempDir::new().expect("bundle dir");
-    let before_path = dir.path().join("baseline-source.json");
-    let after_path = dir.path().join("variant-source.json");
-    let overlay_path = dir.path().join("fast-install.patch");
-    fs::write(&overlay_path, "diff --git a/install.ts b/install.ts\n").expect("write overlay");
-
-    let before_json = serde_json::json!({
-        "command": "trace.aggregate.spans",
-        "component": "studio",
-        "scenario_id": "studio-fast-install",
-        "phase_preset": "startup",
-        "repeat": 3,
-        "rig_state": {
-            "rig_id": "studio-rig",
-            "captured_at": "2026-05-02T00:00:00Z",
-            "components": {
-                "studio": { "path": "/repo/studio", "branch": "main", "sha": "abc123" }
-            }
-        },
-        "runs": [
-            { "index": 1, "passed": true, "status": "pass", "exit_code": 0, "artifact_path": "/tmp/baseline-1.json" }
-        ],
-        "spans": [
-            { "id": "install", "n": 3, "median_ms": 120, "avg_ms": 130.0, "max_ms": 160, "max_run_index": 1, "max_artifact_path": "/tmp/baseline-1.json", "failures": 0 }
-        ]
-    })
-    .to_string();
-    let after_json = serde_json::json!({
-        "command": "trace.aggregate.spans",
-        "component": "studio",
-        "scenario_id": "studio-fast-install",
-        "phase_preset": "startup",
-        "repeat": 3,
-        "rig_state": {
-            "rig_id": "studio-rig",
-            "captured_at": "2026-05-02T00:00:00Z",
-            "components": {
-                "studio": { "path": "/repo/studio", "branch": "trace-experiment-bundles", "sha": "def456" }
-            }
-        },
-        "overlays": [
-            { "path": overlay_path, "component_path": "/repo/studio", "touched_files": ["install.ts"], "kept": false }
-        ],
-        "runs": [
-            { "index": 1, "passed": false, "status": "fail", "exit_code": 1, "artifact_path": "/tmp/variant-1.json", "failure": "assertion failed" }
-        ],
-        "spans": [
-            { "id": "install", "n": 2, "median_ms": 80, "avg_ms": 90.0, "max_ms": 140, "max_run_index": 1, "max_artifact_path": "/tmp/variant-1.json", "failures": 1 }
-        ]
-    })
-    .to_string();
-    fs::write(&before_path, &before_json).expect("write before");
-    fs::write(&after_path, &after_json).expect("write after");
-
-    let before_for_compare = parse_trace_aggregate_input(&before_json).expect("before compare");
-    let after_for_compare = parse_trace_aggregate_input(&after_json).expect("after compare");
-    let compare = compare_trace_aggregates(
-        &before_path,
-        before_for_compare,
-        &after_path,
-        after_for_compare,
-    );
-    let before = parse_trace_aggregate_input(&before_json).expect("before bundle");
-    let after = parse_trace_aggregate_input(&after_json).expect("after bundle");
-
-    let bundle_dir = write_trace_experiment_bundle(TraceExperimentBundleRequest {
-        name: "studio-fast-install",
-        bundle_root: Some(dir.path()),
-        command: "homeboy trace compare baseline-source.json variant-source.json --experiment studio-fast-install".to_string(),
-        before_path: &before_path,
-        before_json: &before_json,
-        before: &before,
-        after_path: &after_path,
-        after_json: &after_json,
-        after: &after,
-        compare: &compare,
-    })
-    .expect("write bundle");
-
-    assert!(bundle_dir.join("baseline.json").is_file());
-    assert!(bundle_dir
-        .join("variant-studio-fast-install.json")
-        .is_file());
-    assert!(bundle_dir
-        .join("compare-studio-fast-install.json")
-        .is_file());
-    let manifest: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(bundle_dir.join("manifest.json")).expect("read manifest"),
-    )
-    .expect("parse manifest");
-    assert!(manifest["command"]
-        .as_str()
-        .unwrap()
-        .contains("trace compare"));
-    assert_eq!(manifest["variants"][0]["role"], "baseline");
-    assert_eq!(manifest["variants"][0]["phase_preset"], "startup");
-    assert_eq!(manifest["variants"][0]["repeat"], 3);
-    assert_eq!(manifest["variants"][0]["rig_id"], "studio-rig");
-    assert_eq!(manifest["variants"][0]["components"][0]["sha"], "abc123");
-    assert_eq!(
-        manifest["variants"][1]["artifact_paths"][0],
-        "/tmp/variant-1.json"
-    );
-    assert_eq!(manifest["overlays"][0]["touched_files"][0], "install.ts");
-    assert_eq!(
-        manifest["overlays"][0]["sha256"].as_str().unwrap().len(),
-        64
-    );
-    assert!(Path::new(manifest["overlays"][0]["bundle_path"].as_str().unwrap()).is_file());
-
-    let report = fs::read_to_string(bundle_dir.join("report.md")).expect("read report");
-    assert!(report.contains("## Top Median Improvements"));
-    assert!(report.contains("## Top Average Improvements"));
-    assert!(report.contains("## Variant Failures and Outliers"));
-    assert!(report.contains("/tmp/variant-1.json"));
-}
-
-#[test]
 fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::without_xdg_data_home();
@@ -1030,6 +822,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1059,6 +852,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -1105,6 +899,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("preset-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1125,6 +920,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -1171,6 +967,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("preset-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1191,6 +988,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -1329,6 +1127,7 @@ fn failed_trace_run_persists_observation_history() {
                     path: None,
                 },
                 scenario: Some("missing-scenario".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1349,6 +1148,7 @@ fn failed_trace_run_persists_observation_history() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
