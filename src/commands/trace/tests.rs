@@ -808,6 +808,162 @@ fn trace_compare_variant_writes_experiment_bundle() {
 }
 
 #[test]
+fn trace_compare_variant_resolves_named_variants() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        init_overlay_component(component_dir.path());
+        let package_dir = tempfile::TempDir::new().expect("package dir");
+        write_trace_rig_with_variant(
+            home,
+            package_dir.path(),
+            "studio-rig",
+            "studio",
+            component_dir.path(),
+        );
+        let output_dir = tempfile::TempDir::new().expect("output dir");
+
+        let (output, exit_code) = run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("compare-variant".to_string()),
+                    path: None,
+                },
+                scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
+                compare_after: None,
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                experiment: None,
+                repeat: 2,
+                aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: None,
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: Vec::new(),
+                variants: vec!["fresh-install-mode".to_string()],
+                matrix: TraceVariantMatrixMode::None,
+                output_dir: Some(output_dir.path().to_path_buf()),
+                keep_overlay: false,
+                stale: false,
+                force: false,
+            },
+            &GlobalArgs {},
+        )
+        .expect("named variant compare-variant should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Compare(compare) => {
+                assert_eq!(compare.span_count, 1);
+                assert!(compare.before_path.ends_with("baseline.json"));
+                assert!(compare.after_path.ends_with("variant.json"));
+            }
+            _ => panic!("expected compare output"),
+        }
+        let baseline: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(output_dir.path().join("baseline.json")).expect("baseline"),
+        )
+        .expect("baseline json");
+        let variant: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(output_dir.path().join("variant.json")).expect("variant"),
+        )
+        .expect("variant json");
+        assert!(baseline
+            .get("overlays")
+            .and_then(|overlays| overlays.as_array())
+            .map(|overlays| overlays.is_empty())
+            .unwrap_or(true));
+        assert_eq!(variant["overlays"][0]["variant"], "fresh-install-mode");
+        assert_eq!(
+            variant["overlays"][0]["path"],
+            package_dir
+                .path()
+                .join("overlays/fresh-install-mode.patch")
+                .to_string_lossy()
+                .as_ref()
+        );
+    });
+}
+
+#[test]
+fn trace_compare_variant_reports_unknown_named_variants() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        init_overlay_component(component_dir.path());
+        let package_dir = tempfile::TempDir::new().expect("package dir");
+        write_trace_rig_with_variant(
+            home,
+            package_dir.path(),
+            "studio-rig",
+            "studio",
+            component_dir.path(),
+        );
+        let output_dir = tempfile::TempDir::new().expect("output dir");
+
+        let err = match run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("compare-variant".to_string()),
+                    path: None,
+                },
+                scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
+                compare_after: None,
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                experiment: None,
+                repeat: 2,
+                aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: None,
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: Vec::new(),
+                variants: vec!["missing".to_string()],
+                matrix: TraceVariantMatrixMode::None,
+                output_dir: Some(output_dir.path().to_path_buf()),
+                keep_overlay: false,
+                stale: false,
+                force: false,
+            },
+            &GlobalArgs {},
+        ) {
+            Ok(_) => panic!("unknown variant should fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.message.contains("unknown trace variant 'missing'"));
+        assert!(err
+            .details
+            .get("id")
+            .and_then(|value| value.as_str())
+            .expect("details id")
+            .contains("fresh-install-mode"));
+    });
+}
+
+#[test]
 fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::without_xdg_data_home();

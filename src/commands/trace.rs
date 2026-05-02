@@ -1067,6 +1067,29 @@ fn trace_overlays_for_args(
     Ok(overlays)
 }
 
+pub(super) fn validate_trace_variants_for_args(args: &TraceArgs) -> homeboy::Result<()> {
+    if args.variants.is_empty() {
+        return Ok(());
+    }
+    let rig_context = load_rig_context(args.rig.as_deref())?;
+    let effective_id = resolve_component_id(
+        &args.comp,
+        rig_context.as_ref().map(|context| &context.rig_spec),
+    )?;
+    let component_path = args
+        .comp
+        .path
+        .clone()
+        .or_else(|| {
+            rig_context
+                .as_ref()
+                .and_then(|context| rig_component_path(&context.rig_spec, &effective_id))
+        })
+        .unwrap_or_default();
+    trace_overlays_for_args(args, rig_context.as_ref(), &effective_id, &component_path)?;
+    Ok(())
+}
+
 fn trace_variant_overlay_requests(
     context: &TraceRigContext,
     variant_name: &str,
