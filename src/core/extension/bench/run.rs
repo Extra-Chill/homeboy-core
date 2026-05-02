@@ -16,8 +16,8 @@ use crate::extension::bench::aggregate_runs;
 use crate::extension::bench::baseline::{self, BenchBaselineComparison};
 use crate::extension::bench::diagnostic::{self, BenchDiagnostic};
 use crate::extension::bench::parsing::{
-    self, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata, BenchScenario,
-    BenchWorkloadMetadata,
+    self, BenchGate, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata,
+    BenchScenario, BenchWorkloadMetadata,
 };
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
@@ -64,6 +64,9 @@ pub struct BenchRunWorkflowArgs {
     /// Rig-declared out-of-tree workloads to run alongside in-tree discovery.
     /// Exported to dispatchers as `HOMEBOY_BENCH_EXTRA_WORKLOADS`.
     pub extra_workloads: Vec<PathBuf>,
+    /// Homeboy-owned scenario gates declared outside the workload output.
+    /// Keys are exact scenario ids after filtering and before matrix suffixes.
+    pub scenario_gates: BTreeMap<String, Vec<BenchGate>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,6 +155,7 @@ pub fn run_bench_list_workflow(
             rig_id: None,
             shared_state: None,
             extra_workloads: args.extra_workloads,
+            scenario_gates: BTreeMap::new(),
         },
         run_dir,
         None,
@@ -471,6 +475,7 @@ pub fn run_main_bench_workflow(
         };
 
     if let Some(results) = parsed.as_mut() {
+        apply_scenario_gates(results, &execution_args.scenario_gates);
         stamp_run_metadata(
             results,
             &execution_context,
@@ -597,6 +602,21 @@ pub fn run_main_bench_workflow(
         failure,
         diagnostics,
     })
+}
+
+fn apply_scenario_gates(
+    results: &mut BenchResults,
+    scenario_gates: &BTreeMap<String, Vec<BenchGate>>,
+) {
+    if scenario_gates.is_empty() {
+        return;
+    }
+
+    for scenario in &mut results.scenarios {
+        if let Some(gates) = scenario_gates.get(&scenario.id) {
+            scenario.gates.extend(gates.clone());
+        }
+    }
 }
 
 fn format_diagnostic_hint(diagnostic: &BenchDiagnostic) -> String {
@@ -1104,6 +1124,54 @@ mod tests {
     }
 
     #[test]
+    fn declared_scenario_gates_attach_before_evaluation() {
+        let mut results = BenchResults {
+            component_id: "studio".to_string(),
+            iterations: 1,
+            run_metadata: None,
+            diagnostics: Vec::new(),
+            scenarios: vec![BenchScenario {
+                id: "import-wordpress-is-dead".to_string(),
+                file: None,
+                source: None,
+                default_iterations: None,
+                tags: Vec::new(),
+                iterations: 1,
+                metrics: parsing::BenchMetrics {
+                    values: BTreeMap::from([("native_block_quality_pass".to_string(), 0.0)]),
+                    distributions: BTreeMap::new(),
+                },
+                metric_groups: BTreeMap::new(),
+                gates: Vec::new(),
+                gate_results: Vec::new(),
+                passed: true,
+                memory: None,
+                artifacts: BTreeMap::new(),
+                diagnostics: Vec::new(),
+                runs: None,
+                runs_summary: None,
+            }],
+            metric_policies: BTreeMap::new(),
+        };
+        let gates = BTreeMap::from([(
+            "import-wordpress-is-dead".to_string(),
+            vec![BenchGate {
+                metric: "native_block_quality_pass".to_string(),
+                op: parsing::BenchGateOp::Eq,
+                value: 1.0,
+            }],
+        )]);
+
+        apply_scenario_gates(&mut results, &gates);
+        let failures = parsing::evaluate_gates(&mut results);
+
+        assert_eq!(results.scenarios[0].gates.len(), 1);
+        assert_eq!(failures.len(), 1);
+        assert!(!results.scenarios[0].passed);
+        assert!(failures[0].contains("native_block_quality_pass eq 1"));
+    }
+
+    #[test]
     fn test_run_bench_list_workflow() {
         let result = BenchListWorkflowResult {
             component: "homeboy".to_string(),
@@ -1168,6 +1236,7 @@ mod tests {
                 rig_id: None,
                 shared_state: None,
                 extra_workloads: Vec::new(),
+                scenario_gates: BTreeMap::new(),
             },
             &run_dir,
         )
@@ -1222,6 +1291,7 @@ mod tests {
             rig_id: Some("studio".to_string()),
             shared_state: Some(component_dir.path().join("shared")),
             extra_workloads: Vec::new(),
+            scenario_gates: BTreeMap::new(),
         };
         let mut results = BenchResults {
             component_id: "homeboy".to_string(),

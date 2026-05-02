@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::component::ScopedExtensionConfig;
+use crate::extension::bench::{BenchGate, BenchGateOp};
 
 /// A rig: components + services + pipelines.
 ///
@@ -225,6 +226,52 @@ pub struct BenchSpec {
     /// can emit supplemental pairwise diffs grouped by the non-varying axes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub axes: BTreeMap<String, String>,
+
+    /// Scenario-level metric gates declared by the rig. Keys are bench
+    /// scenario ids; values map metric names to pass/fail conditions.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metric_gates: BTreeMap<String, BTreeMap<String, BenchMetricGateCondition>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BenchMetricGateCondition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equals: Option<f64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gte: Option<f64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lte: Option<f64>,
+}
+
+impl BenchMetricGateCondition {
+    pub fn to_gates(&self, metric: &str) -> Vec<BenchGate> {
+        let mut gates = Vec::new();
+        if let Some(value) = self.equals {
+            gates.push(BenchGate {
+                metric: metric.to_string(),
+                op: BenchGateOp::Eq,
+                value,
+            });
+        }
+        if let Some(value) = self.gte {
+            gates.push(BenchGate {
+                metric: metric.to_string(),
+                op: BenchGateOp::Gte,
+                value,
+            });
+        }
+        if let Some(value) = self.lte {
+            gates.push(BenchGate {
+                metric: metric.to_string(),
+                op: BenchGateOp::Lte,
+                value,
+            });
+        }
+        gates
+    }
 }
 
 /// Rig-owned extension workload declaration.

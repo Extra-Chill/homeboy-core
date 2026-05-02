@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use homeboy::component::Component;
@@ -6,7 +7,7 @@ use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::report::collect_artifacts;
 use homeboy::extension::bench::{
-    BenchCommandOutput, BenchResults, BenchRunExecution, BenchRunWorkflowArgs,
+    BenchCommandOutput, BenchGate, BenchResults, BenchRunExecution, BenchRunWorkflowArgs,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, BenchSpec, RigSpec, RigStateSnapshot};
@@ -175,6 +176,25 @@ fn effective_warmup_iterations(args: &BenchRunArgs, rig_spec: Option<&RigSpec>) 
             .and_then(|spec| spec.bench.as_ref())
             .and_then(|bench| bench.warmup_iterations)
     })
+}
+
+fn declared_scenario_gates(rig_spec: Option<&RigSpec>) -> BTreeMap<String, Vec<BenchGate>> {
+    rig_spec
+        .and_then(|spec| spec.bench.as_ref())
+        .map(|bench| {
+            bench
+                .metric_gates
+                .iter()
+                .filter_map(|(scenario_id, metric_gates)| {
+                    let gates: Vec<BenchGate> = metric_gates
+                        .iter()
+                        .flat_map(|(metric, condition)| condition.to_gates(metric))
+                        .collect();
+                    (!gates.is_empty()).then(|| (scenario_id.clone(), gates))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn suffix_component_results(mut results: BenchResults, component_id: &str) -> BenchResults {
@@ -451,6 +471,7 @@ fn run_component_with_rig_context(
             rig_id: rig_id.clone(),
             shared_state: shared_state_override.or_else(|| args.shared_state.clone()),
             extra_workloads,
+            scenario_gates: declared_scenario_gates(rig_spec),
         },
         &run_dir,
     );
@@ -595,6 +616,42 @@ mod tests {
 
         args.shared_state = None;
         assert_eq!(component_shared_state(&args, "mdi-primary", 3), None);
+    }
+
+    #[test]
+    fn declared_scenario_gates_parse_from_rig_bench_spec() {
+        let rig_spec: RigSpec = serde_json::from_str(
+            r#"{
+                "id": "studio-bfb",
+                "bench": {
+                    "default_component": "studio",
+                    "metric_gates": {
+                        "wordpress-is-dead": {
+                            "native_block_quality_pass": { "equals": 1 },
+                            "tool_error_count": { "lte": 0 }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("parse rig spec");
+
+        let gates = declared_scenario_gates(Some(&rig_spec));
+        let scenario_gates = gates
+            .get("wordpress-is-dead")
+            .expect("scenario gates should be declared");
+
+        assert_eq!(scenario_gates.len(), 2);
+        assert!(scenario_gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == homeboy::extension::bench::BenchGateOp::Eq
+                && gate.value == 1.0
+        }));
+        assert!(scenario_gates.iter().any(|gate| {
+            gate.metric == "tool_error_count"
+                && gate.op == homeboy::extension::bench::BenchGateOp::Lte
+                && gate.value == 0.0
+        }));
     }
 
     #[test]
