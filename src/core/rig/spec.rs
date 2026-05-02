@@ -1060,6 +1060,78 @@ pub struct TimeSource {
 }
 
 #[cfg(test)]
+mod trace_experiment_spec_tests {
+    use super::{RigSpec, TraceExperimentArtifactSpec};
+
+    #[test]
+    fn trace_experiments_parse_lifecycle_settings_and_artifacts() {
+        let json = r#"{
+            "id": "studio-playground-dev",
+            "trace_experiments": {
+                "template-site": {
+                    "setup": [
+                        { "command": "node bench/create-template-site.mjs", "cwd": "${package.root}" }
+                    ],
+                    "settings": {
+                        "STUDIO_TRACE_SITE_TEMPLATE": "/tmp/studio-template-site",
+                        "USE_TEMPLATE": true
+                    },
+                    "env": {
+                        "STUDIO_EXPERIMENT_MODE": "template"
+                    },
+                    "artifacts": [
+                        "/tmp/studio-template-site/report.json",
+                        { "label": "template log", "path": "/tmp/studio-template-site/template.log" }
+                    ],
+                    "teardown": [
+                        { "command": "rm -rf /tmp/studio-template-site" }
+                    ]
+                }
+            }
+        }"#;
+        let spec: RigSpec = serde_json::from_str(json).expect("parse");
+        let experiment = spec
+            .trace_experiments
+            .get("template-site")
+            .expect("experiment");
+
+        assert_eq!(
+            experiment.setup[0].command,
+            "node bench/create-template-site.mjs"
+        );
+        assert_eq!(experiment.setup[0].cwd.as_deref(), Some("${package.root}"));
+        assert_eq!(
+            experiment.settings["STUDIO_TRACE_SITE_TEMPLATE"],
+            serde_json::Value::String("/tmp/studio-template-site".to_string())
+        );
+        assert_eq!(
+            experiment.settings["USE_TEMPLATE"],
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(
+            experiment
+                .env
+                .get("STUDIO_EXPERIMENT_MODE")
+                .map(String::as_str),
+            Some("template")
+        );
+        assert!(matches!(
+            &experiment.artifacts[0],
+            TraceExperimentArtifactSpec::Path(path) if path == "/tmp/studio-template-site/report.json"
+        ));
+        assert!(matches!(
+            &experiment.artifacts[1],
+            TraceExperimentArtifactSpec::Detailed { label, path }
+                if label == "template log" && path == "/tmp/studio-template-site/template.log"
+        ));
+        assert_eq!(
+            experiment.teardown[0].command,
+            "rm -rf /tmp/studio-template-site"
+        );
+    }
+}
+
+#[cfg(test)]
 #[path = "../../../tests/core/rig/spec_test.rs"]
 mod spec_test;
 
