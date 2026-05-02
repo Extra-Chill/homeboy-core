@@ -4,6 +4,19 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.146.0] - 2026-05-02
+
+### Added
+- add trace experiment plans
+- classify trace critical path spans
+
+### Changed
+- split trace experiment support
+- keep trace classification audit-clean
+
+### Fixed
+- preserve trace aggregate fields after rebase
+
 ## [0.145.3] - 2026-05-02
 
 ### Fixed
