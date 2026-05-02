@@ -292,7 +292,7 @@ impl ObservationStore {
                   AND (?2 IS NULL OR component_id = ?2)
                   AND (?3 IS NULL OR status = ?3)
                   AND (?4 IS NULL OR rig_id = ?4)
-                ORDER BY started_at DESC
+                ORDER BY started_at DESC, rowid DESC
                 LIMIT ?5
                 "#,
             )
@@ -311,6 +311,11 @@ impl ObservationStore {
             .map_err(sqlite_error("list run records"))?;
 
         collect_rows(rows, "collect run records")
+    }
+
+    pub fn latest_run(&self, mut filter: RunListFilter) -> Result<Option<RunRecord>> {
+        filter.limit = Some(1);
+        Ok(self.list_runs(filter)?.into_iter().next())
     }
 
     pub fn list_runs_started_since(&self, started_at: &str) -> Result<Vec<RunRecord>> {

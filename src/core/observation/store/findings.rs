@@ -112,6 +112,36 @@ impl ObservationStore {
 
         collect_rows(rows, "collect finding records")
     }
+
+    pub fn latest_finding(&self, filter: FindingListFilter) -> Result<Option<FindingRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, run_id, tool, rule, file, line, severity, fingerprint, message,
+                       fixable, metadata_json, created_at
+                FROM findings
+                WHERE (?1 IS NULL OR run_id = ?1)
+                  AND (?2 IS NULL OR tool = ?2)
+                  AND (?3 IS NULL OR file = ?3)
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1
+                "#,
+            )
+            .map_err(sqlite_error("prepare latest finding record"))?;
+
+        statement
+            .query_row(
+                params![
+                    filter.run_id.as_deref(),
+                    filter.tool.as_deref(),
+                    filter.file.as_deref(),
+                ],
+                row_to_finding_record,
+            )
+            .optional()
+            .map_err(sqlite_error("read latest finding record"))
+    }
 }
 
 fn row_to_finding_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingRecord> {
@@ -239,6 +269,44 @@ mod tests {
                 .expect("list");
 
             assert_eq!(findings.len(), 2);
+        });
+    }
+
+    #[test]
+    fn test_latest_finding_uses_filters_and_deterministic_tie_break() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run()).expect("start");
+            let old = store
+                .record_finding(&new_finding(&run.id, "security"))
+                .expect("old finding");
+            let latest = store
+                .record_finding(&new_finding(&run.id, "security"))
+                .expect("latest finding");
+            store
+                .record_finding(&new_finding(&run.id, "i18n"))
+                .expect("other finding");
+
+            let selected = store
+                .latest_finding(FindingListFilter {
+                    run_id: Some(run.id),
+                    tool: Some("lint".to_string()),
+                    file: Some("src/security.rs".to_string()),
+                    ..FindingListFilter::default()
+                })
+                .expect("latest finding")
+                .expect("finding exists");
+            let missing = store
+                .latest_finding(FindingListFilter {
+                    file: Some("src/missing.rs".to_string()),
+                    ..FindingListFilter::default()
+                })
+                .expect("missing latest");
+
+            assert_eq!(selected.id, latest.id);
+            assert_ne!(selected.id, old.id);
+            assert!(missing.is_none());
         });
     }
 }
