@@ -21,7 +21,7 @@ use homeboy::commands::utils::{args, entity_suggest, response as output, tty};
 use homeboy::commands::{changelog, cli, file, logs, report, review, trace};
 use homeboy::extension::load_all_extensions;
 
-fn response_mode(command: &Commands) -> ResponseMode {
+fn response_mode(command: &Commands, has_output_file: bool) -> ResponseMode {
     match command {
         Commands::Ssh(args) if args.subcommand.is_none() && args.command.is_empty() => {
             ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
@@ -41,6 +41,9 @@ fn response_mode(command: &Commands) -> ResponseMode {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Trace(args) if trace::is_markdown_mode(args) => {
+            ResponseMode::Raw(RawOutputMode::Markdown)
+        }
+        Commands::Runs(args) if !has_output_file && commands::runs::is_markdown_mode(args) => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Report(args) if report::is_markdown_mode(args) => {
@@ -207,7 +210,7 @@ fn main() -> std::process::ExitCode {
         homeboy::extension::update_check::run_startup_check();
     }
 
-    let mode = response_mode(&cli.command);
+    let mode = response_mode(&cli.command, output_file.is_some());
     let is_review_command = matches!(cli.command, Commands::Review(_));
 
     match mode {

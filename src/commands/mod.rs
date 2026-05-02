@@ -326,6 +326,7 @@ pub fn run_markdown(
         crate::cli_surface::Commands::Changelog(args) => changelog::run_markdown(args),
         crate::cli_surface::Commands::Review(args) => review::run_markdown(args, global),
         crate::cli_surface::Commands::Trace(args) => trace::run_markdown(args, global),
+        crate::cli_surface::Commands::Runs(args) => runs::run_markdown(args, global),
         crate::cli_surface::Commands::Report(args) => report::run_markdown(args),
         _ => Err(homeboy::Error::validation_invalid_argument(
             "output_mode",

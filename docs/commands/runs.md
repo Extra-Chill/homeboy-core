@@ -6,6 +6,7 @@ Inspect persisted observation-store runs and artifacts.
 
 ```bash
 homeboy runs list [--kind bench|rig|trace] [--component <id>] [--rig <id>] [--status <status>] [--limit 20]
+homeboy runs compare [--kind bench] [--component <id>] [--rig <id>] [--scenario <id>] [--metric <name>] [--limit 20] [--format table|json]
 homeboy runs show <run-id>
 homeboy runs artifacts <run-id>
 homeboy runs export --run <run-id> --output <dir>
@@ -18,6 +19,23 @@ homeboy runs import <dir>
 `homeboy runs` is a read-only query surface over Homeboy's local observation store. Producers such as `bench`, `rig`, and `trace` write run and artifact records; this command lets humans and agents inspect that evidence without opening SQLite directly.
 
 The JSON output includes stable run fields: run id, kind, status, timestamps, component id, rig id, git SHA, command, cwd, metadata, and artifact records where relevant.
+
+## Compare Metrics Across History
+
+`homeboy runs compare` compares selected persisted metrics across recent observation runs. It defaults to benchmark history and the `total_elapsed_ms` metric:
+
+```bash
+homeboy runs compare --kind bench --component studio --metric total_elapsed_ms --limit 20
+homeboy runs compare --kind bench --component studio --rig studio-bfb --scenario studio-agent-site-build --metric total_elapsed_ms --metric p95_ms
+```
+
+The default output is a Markdown table with run id, status, start time, git SHA, rig id, artifact count, scenario, and selected metric columns. Use `--format=json` for structured output, or pair it with global `--output <file>` to write command JSON to disk:
+
+```bash
+homeboy runs compare --kind bench --component studio --metric total_elapsed_ms --format=json --output runs-compare.json
+```
+
+Metric lookup supports top-level run metadata such as `results.total_elapsed_ms`, direct dotted paths, and benchmark scenario metrics recorded under `scenario_metrics[].metrics` or `metric_groups`.
 
 ## Related Readers
 
