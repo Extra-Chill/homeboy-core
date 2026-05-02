@@ -138,26 +138,25 @@ fn plan_trace_run_order(
     groups: &[&str],
 ) -> Vec<TraceRunPlanEntry> {
     let mut entries = Vec::new();
+    let mut push_entry = |group: &str, iteration: usize| {
+        entries.push(TraceRunPlanEntry {
+            index: entries.len() + 1,
+            group: group.to_string(),
+            iteration,
+        });
+    };
     match schedule {
         TraceSchedule::Grouped => {
             for group in groups {
                 for iteration in 1..=repeat {
-                    entries.push(TraceRunPlanEntry {
-                        index: entries.len() + 1,
-                        group: (*group).to_string(),
-                        iteration,
-                    });
+                    push_entry(group, iteration);
                 }
             }
         }
         TraceSchedule::Interleaved => {
             for iteration in 1..=repeat {
                 for group in groups {
-                    entries.push(TraceRunPlanEntry {
-                        index: entries.len() + 1,
-                        group: (*group).to_string(),
-                        iteration,
-                    });
+                    push_entry(group, iteration);
                 }
             }
         }

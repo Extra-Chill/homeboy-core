@@ -165,9 +165,9 @@ pub struct TraceCompareOutput {
     pub focus_span_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub focus_spans: Vec<TraceCompareSpanOutput>,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_default_usize")]
     pub focus_regression_count: usize,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_default_usize")]
     pub focus_failure_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_status: Option<String>,
@@ -202,8 +202,8 @@ pub struct TraceCompareSpanOutput {
     pub after_failures: Option<usize>,
 }
 
-fn is_zero(value: &usize) -> bool {
-    *value == 0
+fn is_default_usize(value: &usize) -> bool {
+    value.eq(&usize::default())
 }
 
 pub fn from_main_workflow(
@@ -532,6 +532,34 @@ mod tests {
             "submit_to_cli"
         );
         assert_eq!(artifact_value["results"]["timeline"][0]["event"], "submit");
+    }
+
+    #[test]
+    fn test_push_overlay_markdown() {
+        let mut markdown = String::new();
+        let overlays = vec![
+            TraceOverlay {
+                path: "/tmp/overlay.patch".to_string(),
+                component_path: "/tmp/studio".to_string(),
+                touched_files: vec!["apps/studio/out/app.js".to_string()],
+                kept: false,
+            },
+            TraceOverlay {
+                path: "/tmp/kept.patch".to_string(),
+                component_path: "/tmp/studio".to_string(),
+                touched_files: Vec::new(),
+                kept: true,
+            },
+        ];
+
+        push_overlay_markdown(&mut markdown, &overlays);
+
+        assert!(markdown.contains("## Trace Overlays"));
+        assert!(markdown.contains("- **Patch:** `/tmp/overlay.patch` (`reverted`)"));
+        assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
+        assert!(markdown.contains("- `apps/studio/out/app.js`"));
+        assert!(markdown.contains("- **Patch:** `/tmp/kept.patch` (`kept`)"));
+        assert!(markdown.contains("Touched files: none reported by `git apply --numstat`"));
     }
 
     #[test]
