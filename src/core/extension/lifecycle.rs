@@ -32,6 +32,138 @@ pub struct UpdateResult {
     pub extension_id: String,
     pub url: String,
     pub path: PathBuf,
+    pub repaired_source_metadata: Option<source_metadata::SourceMetadataRepair>,
+}
+
+pub mod source_metadata {
+    use super::{load_extension, read_source_revision, write_source_metadata};
+    use crate::error::{Error, Result};
+    use crate::paths;
+
+    #[derive(Debug, Clone, serde::Serialize)]
+    pub struct SourceMetadataRepair {
+        pub source_url: String,
+        pub reason: String,
+        pub repair_command: String,
+    }
+
+    #[derive(Debug)]
+    pub(super) struct SourceMetadataResolution {
+        pub(super) url: String,
+        pub(super) repair: Option<SourceMetadataRepair>,
+    }
+
+    pub(super) const OFFICIAL_EXTENSION_SOURCE_URL: &str =
+        "https://github.com/Extra-Chill/homeboy-extensions";
+    const OFFICIAL_EXTENSION_IDS: &[&str] = &[
+        "rust",
+        "wordpress",
+        "php",
+        "javascript",
+        "typescript",
+        "nodejs",
+    ];
+
+    pub(super) fn resolve_source_url(extension_id: &str) -> Result<SourceMetadataResolution> {
+        let extension = load_extension(extension_id)?;
+        let extension_dir = paths::extension(extension_id)?;
+        let metadata_path = extension_dir.join(".source-url");
+        let metadata_url = std::fs::read_to_string(&metadata_path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let manifest_source_url = extension.source_url.clone().or_else(|| {
+            extension
+                .extra
+                .get("sourceUrl")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .filter(|value| !value.trim().is_empty())
+        });
+
+        if let Some(source_url) = manifest_source_url {
+            let repair = if metadata_url.as_deref() != Some(source_url.as_str()) {
+                write_source_metadata(
+                    &extension_dir,
+                    &source_url,
+                    read_source_revision(extension_id),
+                );
+                Some(SourceMetadataRepair {
+                    source_url: source_url.clone(),
+                    reason: "restored .source-url from manifest sourceUrl".to_string(),
+                    repair_command: repair_command(extension_id, &source_url),
+                })
+            } else {
+                None
+            };
+
+            return Ok(SourceMetadataResolution {
+                url: source_url,
+                repair,
+            });
+        }
+
+        if let Some(source_url) = metadata_url {
+            return Ok(SourceMetadataResolution {
+                url: source_url,
+                repair: None,
+            });
+        }
+
+        if let Some(source_url) = official_source_url_for_id(extension_id) {
+            write_source_metadata(
+                &extension_dir,
+                source_url,
+                read_source_revision(extension_id),
+            );
+            return Ok(SourceMetadataResolution {
+                url: source_url.to_string(),
+                repair: Some(SourceMetadataRepair {
+                    source_url: source_url.to_string(),
+                    reason: "restored .source-url for known official Homeboy extension".to_string(),
+                    repair_command: repair_command(extension_id, source_url),
+                }),
+            });
+        }
+
+        let mut err = Error::validation_invalid_argument(
+            "extension_id",
+            format!(
+                "Extension '{}' has no sourceUrl or .source-url metadata, so Homeboy cannot determine where to update it from.",
+                extension_id
+            ),
+            Some(extension_id.to_string()),
+            None,
+        )
+        .with_hint(format!(
+            "Repair by reinstalling from the original source: homeboy extension install <url> --id {}",
+            extension_id
+        ))
+        .with_hint(format!(
+            "If this is an official extension, use: {}",
+            repair_command(extension_id, OFFICIAL_EXTENSION_SOURCE_URL)
+        ));
+
+        if let Some(path) = extension.extension_path {
+            err = err.with_hint(format!("Installed extension path: {}", path));
+        }
+
+        Err(err)
+    }
+
+    fn official_source_url_for_id(extension_id: &str) -> Option<&'static str> {
+        OFFICIAL_EXTENSION_IDS
+            .contains(&extension_id)
+            .then_some(OFFICIAL_EXTENSION_SOURCE_URL)
+    }
+
+    fn repair_command(extension_id: &str, source_url: &str) -> String {
+        format!(
+            "homeboy extension install {} --id {}",
+            source_url, extension_id
+        )
+    }
 }
 
 pub fn slugify_id(value: &str) -> Result<String> {
@@ -496,7 +628,9 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         ));
     }
 
-    let source_url = resolve_source_url(extension_id)?;
+    let source = source_metadata::resolve_source_url(extension_id)?;
+    let source_url = source.url;
+    let mut source_repair = source.repair;
 
     if extension_dir.join(".git").exists() {
         git::pull_repo(&extension_dir)?;
@@ -514,6 +648,7 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
             extension_id: extension_id.to_string(),
             url: source_url,
             path: extension_dir,
+            repaired_source_metadata: source_repair.take(),
         });
     }
 
@@ -525,27 +660,7 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         extension_id: extension_id.to_string(),
         url: source_url,
         path: extension_dir,
-    })
-}
-
-fn resolve_source_url(extension_id: &str) -> Result<String> {
-    let extension = load_extension(extension_id)?;
-    let metadata_url = paths::extension(extension_id)
-        .ok()
-        .and_then(|extension_dir| std::fs::read_to_string(extension_dir.join(".source-url")).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-
-    extension.source_url.or(metadata_url).ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "extension_id",
-            format!(
-                "Extension '{}' has no sourceUrl or .source-url metadata. Reinstall with 'homeboy extension install <url>'.",
-                extension_id
-            ),
-            Some(extension_id.to_string()),
-            None,
-        )
+        repaired_source_metadata: source_repair,
     })
 }
 
@@ -698,6 +813,7 @@ fn update_linked_extension(
         extension_id: extension_id.to_string(),
         url,
         path: source_dir,
+        repaired_source_metadata: None,
     })
 }
 
@@ -865,7 +981,7 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
 mod tests {
     use super::{
         install, install_for_component, is_workdir_clean, load_extension, read_source_revision,
-        update,
+        source_metadata, update,
     };
     use crate::component;
     use crate::extension::update_all;
@@ -1292,6 +1408,107 @@ mod tests {
                 result.path.join("wordpress.json").exists(),
                 "failed update must leave the prior install in place"
             );
+        });
+    }
+
+    #[test]
+    fn copied_official_extension_missing_source_metadata_repairs_source_url() {
+        with_isolated_home(|home| {
+            let extensions_dir = home.path().join(".config/homeboy/extensions");
+            write_extension_fixture(&extensions_dir, "rust");
+            let extension_dir = extensions_dir.join("rust");
+
+            let source =
+                source_metadata::resolve_source_url("rust").expect("official source repair");
+
+            assert_eq!(source.url, source_metadata::OFFICIAL_EXTENSION_SOURCE_URL);
+            let repair = source.repair.expect("repair result");
+            assert_eq!(
+                repair.source_url,
+                source_metadata::OFFICIAL_EXTENSION_SOURCE_URL
+            );
+            assert!(repair.reason.contains("official Homeboy extension"));
+            assert_eq!(
+                fs::read_to_string(extension_dir.join(".source-url"))
+                    .expect("source url marker")
+                    .trim(),
+                source_metadata::OFFICIAL_EXTENSION_SOURCE_URL
+            );
+        });
+    }
+
+    #[test]
+    fn manifest_source_url_alias_repairs_missing_source_url_marker() {
+        with_isolated_home(|home| {
+            let extension_dir = home.path().join(".config/homeboy/extensions/custom");
+            fs::create_dir_all(&extension_dir).expect("extension dir");
+            fs::write(
+                extension_dir.join("custom.json"),
+                r#"{
+  "name": "custom extension",
+  "version": "1.0.0",
+  "sourceUrl": "https://example.com/custom.git"
+}"#,
+            )
+            .expect("extension manifest");
+
+            let source =
+                source_metadata::resolve_source_url("custom").expect("manifest source repair");
+
+            assert_eq!(source.url, "https://example.com/custom.git");
+            let repair = source.repair.expect("repair result");
+            assert!(repair.reason.contains("manifest sourceUrl"));
+            assert_eq!(
+                fs::read_to_string(extension_dir.join(".source-url"))
+                    .expect("source url marker")
+                    .trim(),
+                "https://example.com/custom.git"
+            );
+        });
+    }
+
+    #[test]
+    fn copied_unknown_extension_missing_source_metadata_is_actionable_error() {
+        with_isolated_home(|home| {
+            let extensions_dir = home.path().join(".config/homeboy/extensions");
+            write_extension_fixture(&extensions_dir, "custom");
+            let extension_dir = extensions_dir.join("custom");
+
+            let err = source_metadata::resolve_source_url("custom")
+                .expect_err("unknown source stays unresolved");
+            let text = err.to_string();
+            let hints = err
+                .hints
+                .iter()
+                .map(|hint| hint.message.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            assert!(text.contains("no sourceUrl or .source-url metadata"));
+            assert!(hints.contains("homeboy extension install <url> --id custom"));
+            assert!(hints.contains("homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id custom"));
+            assert!(hints.contains(&extension_dir.to_string_lossy().to_string()));
+        });
+    }
+
+    #[test]
+    fn update_all_reports_actionable_missing_source_metadata_skip() {
+        with_isolated_home(|home| {
+            let extensions_dir = home.path().join(".config/homeboy/extensions");
+            write_extension_fixture(&extensions_dir, "custom");
+
+            let result = update_all(false);
+
+            assert_eq!(result.skipped, vec!["custom"]);
+            assert_eq!(result.skipped_details.len(), 1);
+            assert_eq!(result.skipped_details[0].extension_id, "custom");
+            assert!(result.skipped_details[0]
+                .reason
+                .contains("no sourceUrl or .source-url metadata"));
+            assert!(result.skipped_details[0]
+                .hints
+                .iter()
+                .any(|hint| hint.contains("homeboy extension install <url> --id custom")));
         });
     }
 

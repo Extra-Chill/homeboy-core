@@ -267,6 +267,8 @@ pub enum ExtensionOutput {
         old_version: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         new_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        repaired_source_metadata: Option<homeboy::extension::SourceMetadataRepair>,
     },
     #[serde(rename = "extension.update_all")]
     UpdateAll {
@@ -643,6 +645,7 @@ fn update_extension(
             path: result.path.to_string_lossy().to_string(),
             old_version,
             new_version,
+            repaired_source_metadata: result.repaired_source_metadata,
         },
         0,
     ))
