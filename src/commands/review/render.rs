@@ -17,7 +17,7 @@
 
 use std::fmt::Write as _;
 
-use homeboy::code_audit::AuditCommandOutput;
+use homeboy::code_audit::{AuditCommandOutput, AuditFinding, Severity};
 use homeboy::extension::lint::LintCommandOutput;
 use homeboy::extension::test::{FailedTest, TestCommandOutput};
 use homeboy::top_n::top_n_by;
@@ -169,51 +169,100 @@ fn render_test_stage(out: &mut String, stage: &ReviewStage<TestCommandOutput>) {
 
 // ── Per-stage bodies ────────────────────────────────────────────────────
 
-/// Render the audit stage body — top finding categories (by `convention`)
-/// with counts. Empty bodies mean no findings; we say nothing.
+/// Render the audit stage body as actionable finding snippets. Empty bodies
+/// mean no findings; we say nothing.
 fn render_audit_body(out: &mut String, output: &AuditCommandOutput) {
     let findings = audit_findings(output);
-    let buckets = top_n_by(findings, |label| label.clone(), TOP_N);
-    if buckets.is_empty() {
+    if findings.is_empty() {
         return;
     }
 
-    for (label, count) in &buckets.items {
-        let _ = writeln!(out, "- **{}** — {} finding(s)", label, count);
+    for finding in findings.iter().take(TOP_N) {
+        render_audit_finding(out, finding);
     }
-    if buckets.remainder > 0 {
+    if findings.len() > TOP_N {
         let _ = writeln!(
             out,
-            "- _… {} more categor{}_",
-            buckets.remainder,
-            if buckets.remainder == 1 { "y" } else { "ies" }
+            "- _… {} more audit finding(s)_",
+            findings.len() - TOP_N
         );
     }
-    let _ = writeln!(out, "- _Total: {} finding(s)_", buckets.total);
+    let _ = writeln!(out, "- _Total: {} finding(s)_", findings.len());
 }
 
-/// Pull labels for grouping audit findings. We use the convention name when
-/// available; falls back to the kind for variants without conventions.
-fn audit_findings(output: &AuditCommandOutput) -> Vec<String> {
+fn render_audit_finding(out: &mut String, finding: &AuditFindingLine) {
+    let _ = write!(
+        out,
+        "- `{}` — **{}**: {}",
+        finding.file,
+        audit_kind_label(&finding.kind),
+        finding.description
+    );
+    if !finding.suggestion.is_empty() {
+        let _ = write!(out, "; {}", finding.suggestion);
+    }
+    if matches!(finding.severity, Severity::Info) {
+        let _ = write!(out, " _(info)_");
+    }
+    out.push('\n');
+}
+
+#[derive(Clone)]
+struct AuditFindingLine {
+    file: String,
+    kind: AuditFinding,
+    severity: Severity,
+    description: String,
+    suggestion: String,
+}
+
+/// Pull actionable audit finding details. PR comments should answer "where and
+/// why?" without forcing the reviewer to run the deep-dive command first.
+fn audit_findings(output: &AuditCommandOutput) -> Vec<AuditFindingLine> {
     match output {
         AuditCommandOutput::Full { result, .. } => result
             .findings
             .iter()
-            .map(|f| f.convention.clone())
+            .map(|f| AuditFindingLine {
+                file: f.file.clone(),
+                kind: f.kind.clone(),
+                severity: f.severity.clone(),
+                description: f.description.clone(),
+                suggestion: f.suggestion.clone(),
+            })
             .collect(),
         AuditCommandOutput::Compared { result, .. } => result
             .findings
             .iter()
-            .map(|f| f.convention.clone())
+            .map(|f| AuditFindingLine {
+                file: f.file.clone(),
+                kind: f.kind.clone(),
+                severity: f.severity.clone(),
+                description: f.description.clone(),
+                suggestion: f.suggestion.clone(),
+            })
             .collect(),
         AuditCommandOutput::Summary(summary) => summary
             .top_findings
             .iter()
-            .map(|f| f.convention.clone())
+            .map(|f| AuditFindingLine {
+                file: f.file.clone(),
+                kind: f.kind.clone(),
+                severity: f.severity.clone(),
+                description: f.description.clone(),
+                suggestion: f.suggestion.clone(),
+            })
             .collect(),
         AuditCommandOutput::BaselineSaved { .. } => Vec::new(),
         AuditCommandOutput::Conventions { .. } => Vec::new(),
     }
+}
+
+fn audit_kind_label(kind: &AuditFinding) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("{:?}", kind).to_lowercase())
 }
 
 /// Render the lint stage body — top sniff codes (by `category`) with counts.
@@ -536,7 +585,7 @@ mod tests {
         env.summary.status = "failed".to_string();
         env.summary.total_findings = 5;
 
-        // Audit fails with three convention buckets.
+        // Audit fails with three actionable findings.
         env.audit.passed = false;
         env.audit.exit_code = 1;
         env.audit.finding_count = 3;
@@ -559,8 +608,8 @@ mod tests {
         assert!(md.contains(":x: **audit**"), "audit failed icon:\n{}", md);
         assert!(md.contains(":x: **lint**"), "lint failed icon:\n{}", md);
         assert!(
-            md.contains("- **ability-shape** — 2 finding(s)"),
-            "convention bucket count:\n{}",
+            md.contains("- `src/foo.rs` — **missing_method**: deviates from convention; align with siblings"),
+            "audit finding detail:\n{}",
             md
         );
         assert!(
@@ -776,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn caps_audit_categories_at_top_10() {
+    fn caps_audit_findings_at_top_10() {
         let conventions: Vec<String> = (0..15).map(|i| format!("convention-{:02}", i)).collect();
         let conv_refs: Vec<&str> = conventions.iter().map(|s| s.as_str()).collect();
 
@@ -787,14 +836,14 @@ mod tests {
         env.audit.output = Some(audit_full_with_findings(conv_refs));
 
         let md = render_pr_comment(&env);
-        let bullet_count = md.matches("- **convention-").count();
+        let bullet_count = md.matches("- `src/foo.rs` — **missing_method**").count();
         assert_eq!(
             bullet_count, TOP_N,
-            "should render exactly 10 audit category bullets:\n{}",
+            "should render exactly 10 audit finding bullets:\n{}",
             md
         );
         assert!(
-            md.contains("_… 5 more categories_"),
+            md.contains("_… 5 more audit finding(s)_"),
             "missing overflow hint:\n{}",
             md
         );
