@@ -3,10 +3,11 @@
 use serde::Serialize;
 
 use super::baseline::TraceBaselineComparison;
+use super::overlay_lock::TraceOverlayLockRecord;
 use super::parsing::{
     TraceArtifact, TraceAssertionStatus, TraceList, TraceResults, TraceSpanStatus,
 };
-use super::run::{TraceOverlay, TraceOverlayLockRecord, TraceRunWorkflowResult};
+use super::run::{TraceOverlay, TraceRunWorkflowResult};
 use crate::rig::RigStateSnapshot;
 
 #[derive(Serialize)]
@@ -613,5 +614,23 @@ mod tests {
         assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
         assert!(markdown.contains("- `apps/studio/out/app.js`"));
         assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
+    }
+
+    #[test]
+    fn test_push_overlay_markdown() {
+        let overlays = vec![TraceOverlay {
+            path: "/tmp/overlay.patch".to_string(),
+            component_path: "/tmp/studio".to_string(),
+            touched_files: vec!["apps/studio/out/app.js".to_string()],
+            kept: false,
+        }];
+        let mut markdown = String::new();
+
+        push_overlay_markdown(&mut markdown, &overlays);
+
+        assert!(markdown.contains("## Trace Overlays"));
+        assert!(markdown.contains("- **Patch:** `/tmp/overlay.patch` (`reverted`)"));
+        assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
+        assert!(markdown.contains("- `apps/studio/out/app.js`"));
     }
 }
