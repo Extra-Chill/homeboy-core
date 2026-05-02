@@ -10,7 +10,7 @@ use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::{
     TraceCommandOutput, TraceListWorkflowArgs, TraceOverlayRequest, TraceRunWorkflowArgs,
-    TraceSpanDefinition,
+    TraceRunnerInputs, TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::observation::{
@@ -476,7 +476,15 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             && args.phases.is_empty()
             && args.spans.is_empty(),
     )?;
-    let overlays = trace_overlays_for_args(&args, rig_context.as_ref(), &effective_id)?;
+    let component_path_for_overlays = path_override
+        .clone()
+        .unwrap_or_else(|| ctx.component.local_path.clone());
+    let overlays = trace_overlays_for_args(
+        &args,
+        rig_context.as_ref(),
+        &effective_id,
+        &component_path_for_overlays,
+    )?;
 
     let rig_state = rig_context
         .as_ref()
@@ -551,13 +559,15 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             component_id: ctx.component_id.clone(),
             path_override,
             settings: settings_as_strings(&ctx.settings),
-            settings_json: settings_as_json(&ctx.settings),
+            runner_inputs: TraceRunnerInputs {
+                json_settings: settings_as_json(&ctx.settings),
+                workload_paths: extra_workloads,
+            },
             scenario_id,
             json_summary: args.json_summary,
             rig_id: args.rig,
             overlays,
             keep_overlay: args.keep_overlay,
-            extra_workloads,
             span_definitions,
             baseline_flags: BaselineFlags {
                 baseline: args.baseline_args.baseline,
@@ -962,9 +972,11 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             component_id: ctx.component_id.clone(),
             path_override,
             settings: settings_as_strings(&ctx.settings),
-            settings_json: settings_as_json(&ctx.settings),
+            runner_inputs: TraceRunnerInputs {
+                json_settings: settings_as_json(&ctx.settings),
+                workload_paths: extra_workloads,
+            },
             rig_id: args.rig,
-            extra_workloads,
         },
         &run_dir,
     )?;
@@ -999,6 +1011,7 @@ fn trace_overlays_for_args(
     args: &TraceArgs,
     rig_context: Option<&TraceRigContext>,
     component_id: &str,
+    component_path: &str,
 ) -> homeboy::Result<Vec<TraceOverlayRequest>> {
     let mut overlays = Vec::new();
     if !args.variants.is_empty() {
@@ -1032,22 +1045,78 @@ fn trace_overlays_for_args(
                     None,
                 )
             })?;
-            overlays.push(TraceOverlayRequest {
-                variant: Some(name.clone()),
-                path: resolve_trace_variant_overlay(context, &variant.overlay),
-            });
+            overlays.extend(trace_variant_overlay_requests(
+                context,
+                name,
+                variant,
+                component_id,
+            )?);
         }
     }
     overlays.extend(
         args.overlays
             .iter()
             .cloned()
-            .map(|path| TraceOverlayRequest {
+            .map(|overlay_path| TraceOverlayRequest {
                 variant: None,
-                path,
+                component_id: Some(component_id.to_string()),
+                component_path: component_path.to_string(),
+                overlay_path,
             }),
     );
     Ok(overlays)
+}
+
+fn trace_variant_overlay_requests(
+    context: &TraceRigContext,
+    variant_name: &str,
+    variant: &rig::TraceVariantSpec,
+    default_component_id: &str,
+) -> homeboy::Result<Vec<TraceOverlayRequest>> {
+    let mut requests = Vec::new();
+    if let Some(overlay) = variant.overlay.as_deref() {
+        let component_id = variant.component.as_deref().unwrap_or(default_component_id);
+        requests.push(trace_overlay_request_for_component(
+            context,
+            variant_name,
+            component_id,
+            overlay,
+        )?);
+    }
+    for overlay in &variant.overlays {
+        requests.push(trace_overlay_request_for_component(
+            context,
+            variant_name,
+            &overlay.component,
+            &overlay.overlay,
+        )?);
+    }
+    Ok(requests)
+}
+
+fn trace_overlay_request_for_component(
+    context: &TraceRigContext,
+    variant_name: &str,
+    component_id: &str,
+    overlay: &str,
+) -> homeboy::Result<TraceOverlayRequest> {
+    let component_path = rig_component_path(&context.rig_spec, component_id).ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "--variant",
+            format!(
+                "trace variant '{}' overlay references unknown component '{}'",
+                variant_name, component_id
+            ),
+            None,
+            None,
+        )
+    })?;
+    Ok(TraceOverlayRequest {
+        variant: Some(variant_name.to_string()),
+        component_id: Some(component_id.to_string()),
+        component_path,
+        overlay_path: resolve_trace_variant_overlay(context, overlay),
+    })
 }
 
 fn trace_variants_for_args<'a>(
@@ -1082,6 +1151,12 @@ fn trace_variants_for_args<'a>(
 }
 
 fn trace_variant_matches_component(variant: &rig::TraceVariantSpec, component_id: &str) -> bool {
+    if !variant.overlays.is_empty() {
+        return variant
+            .overlays
+            .iter()
+            .any(|overlay| overlay.component == component_id);
+    }
     variant
         .component
         .as_deref()

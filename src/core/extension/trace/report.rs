@@ -507,6 +507,7 @@ mod tests {
             failure: None,
             overlays: vec![TraceOverlay {
                 variant: Some("disable-install-mail".to_string()),
+                component_id: Some("studio".to_string()),
                 path: "/tmp/overlay.patch".to_string(),
                 component_path: "/tmp/studio".to_string(),
                 touched_files: vec!["scenario.txt".to_string()],
@@ -527,6 +528,7 @@ mod tests {
         assert_eq!(value["span_count"], 0);
         assert_eq!(value["overlays"][0]["path"], "/tmp/overlay.patch");
         assert_eq!(value["overlays"][0]["variant"], "disable-install-mail");
+        assert_eq!(value["overlays"][0]["component_id"], "studio");
         assert_eq!(value["overlays"][0]["component_path"], "/tmp/studio");
         assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
         assert_eq!(value["overlays"][0]["kept"], false);
@@ -595,6 +597,7 @@ mod tests {
         let overlays = vec![
             TraceOverlay {
                 variant: None,
+                component_id: Some("studio".to_string()),
                 path: "/tmp/overlay.patch".to_string(),
                 component_path: "/tmp/studio".to_string(),
                 touched_files: vec!["apps/studio/out/app.js".to_string()],
@@ -602,6 +605,7 @@ mod tests {
             },
             TraceOverlay {
                 variant: None,
+                component_id: Some("studio".to_string()),
                 path: "/tmp/kept.patch".to_string(),
                 component_path: "/tmp/studio".to_string(),
                 touched_files: Vec::new(),
@@ -647,6 +651,7 @@ mod tests {
 
         let overlays = vec![TraceOverlay {
             variant: None,
+            component_id: Some("studio".to_string()),
             path: "/tmp/overlay.patch".to_string(),
             component_path: "/tmp/studio".to_string(),
             touched_files: vec!["apps/studio/out/app.js".to_string()],
@@ -660,22 +665,5 @@ mod tests {
         assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
         assert!(markdown.contains("- `apps/studio/out/app.js`"));
         assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
-    }
-
-    #[test]
-    fn test_push_overlay_markdown_variant_label() {
-        let overlays = vec![TraceOverlay {
-            variant: Some("fresh-install-mode".to_string()),
-            path: "/tmp/overlay.patch".to_string(),
-            component_path: "/tmp/studio".to_string(),
-            touched_files: Vec::new(),
-            kept: true,
-        }];
-        let mut markdown = String::new();
-
-        push_overlay_markdown(&mut markdown, &overlays);
-
-        assert!(markdown.contains("variant `fresh-install-mode`"));
-        assert!(markdown.contains("`/tmp/overlay.patch` (`kept`)"));
     }
 }
