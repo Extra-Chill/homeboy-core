@@ -10,7 +10,9 @@ use super::output::{
     compare_trace_aggregates_with_focus, TraceAggregateInput, TraceAggregateRunInput,
     TraceAggregateSpanInput, TraceOverlayInput,
 };
-use super::{run_repeat, validate_trace_variants_for_args, TraceArgs};
+use super::{
+    apply_command_target_component, run_repeat, validate_trace_variants_for_args, TraceArgs,
+};
 use crate::commands::CmdResult;
 
 const TRACE_COMPARE_VARIANT_BASELINE_FILE: &str = "baseline.json";
@@ -47,7 +49,7 @@ pub(super) fn run_compare_variant(mut args: TraceArgs) -> CmdResult<TraceCommand
         ));
     }
 
-    args.comp.component = None;
+    apply_command_target_component(&mut args);
     args.aggregate = Some("spans".to_string());
     args.json_summary = false;
     args.report = None;
