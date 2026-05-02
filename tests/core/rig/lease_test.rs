@@ -20,6 +20,7 @@ fn rig(id: &str, resources: RigResourcesSpec) -> RigSpec {
         bench_workloads: Default::default(),
         trace_workloads: Default::default(),
         trace_variants: Default::default(),
+        trace_experiments: Default::default(),
         bench_profiles: Default::default(),
         app_launcher: None,
     }

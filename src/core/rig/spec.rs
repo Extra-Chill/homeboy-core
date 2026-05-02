@@ -84,6 +84,11 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_variants: HashMap<String, TraceVariantSpec>,
 
+    /// Named trace experiment plans that wrap a trace run with lifecycle
+    /// commands, workload settings/env, and artifact collection.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_experiments: HashMap<String, TraceExperimentSpec>,
+
     /// Named bench scenario suites keyed by profile name.
     ///
     /// `homeboy bench --rig <id> --profile <name>` resolves the profile to
@@ -327,6 +332,42 @@ pub struct TraceVariantSpec {
 pub struct TraceVariantOverlaySpec {
     pub component: String,
     pub overlay: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TraceExperimentSpec {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<TraceExperimentCommandSpec>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teardown: Vec<TraceExperimentCommandSpec>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub settings: BTreeMap<String, serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<TraceExperimentArtifactSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceExperimentCommandSpec {
+    pub command: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TraceExperimentArtifactSpec {
+    Path(String),
+    Detailed { label: String, path: String },
 }
 
 impl WorkloadSpec {
@@ -1016,6 +1057,78 @@ pub struct TimeSource {
     /// passes — there's no stale process to flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_start: Option<DiscoverSpec>,
+}
+
+#[cfg(test)]
+mod trace_experiment_spec_tests {
+    use super::{RigSpec, TraceExperimentArtifactSpec};
+
+    #[test]
+    fn trace_experiments_parse_lifecycle_settings_and_artifacts() {
+        let json = r#"{
+            "id": "studio-playground-dev",
+            "trace_experiments": {
+                "template-site": {
+                    "setup": [
+                        { "command": "node bench/create-template-site.mjs", "cwd": "${package.root}" }
+                    ],
+                    "settings": {
+                        "STUDIO_TRACE_SITE_TEMPLATE": "/tmp/studio-template-site",
+                        "USE_TEMPLATE": true
+                    },
+                    "env": {
+                        "STUDIO_EXPERIMENT_MODE": "template"
+                    },
+                    "artifacts": [
+                        "/tmp/studio-template-site/report.json",
+                        { "label": "template log", "path": "/tmp/studio-template-site/template.log" }
+                    ],
+                    "teardown": [
+                        { "command": "rm -rf /tmp/studio-template-site" }
+                    ]
+                }
+            }
+        }"#;
+        let spec: RigSpec = serde_json::from_str(json).expect("parse");
+        let experiment = spec
+            .trace_experiments
+            .get("template-site")
+            .expect("experiment");
+
+        assert_eq!(
+            experiment.setup[0].command,
+            "node bench/create-template-site.mjs"
+        );
+        assert_eq!(experiment.setup[0].cwd.as_deref(), Some("${package.root}"));
+        assert_eq!(
+            experiment.settings["STUDIO_TRACE_SITE_TEMPLATE"],
+            serde_json::Value::String("/tmp/studio-template-site".to_string())
+        );
+        assert_eq!(
+            experiment.settings["USE_TEMPLATE"],
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(
+            experiment
+                .env
+                .get("STUDIO_EXPERIMENT_MODE")
+                .map(String::as_str),
+            Some("template")
+        );
+        assert!(matches!(
+            &experiment.artifacts[0],
+            TraceExperimentArtifactSpec::Path(path) if path == "/tmp/studio-template-site/report.json"
+        ));
+        assert!(matches!(
+            &experiment.artifacts[1],
+            TraceExperimentArtifactSpec::Detailed { label, path }
+                if label == "template log" && path == "/tmp/studio-template-site/template.log"
+        ));
+        assert_eq!(
+            experiment.teardown[0].command,
+            "rm -rf /tmp/studio-template-site"
+        );
+    }
 }
 
 #[cfg(test)]

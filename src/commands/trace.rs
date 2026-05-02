@@ -1,5 +1,4 @@
-use clap::{Args, ValueEnum};
-use serde::Serialize;
+use clap::Args;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -23,19 +22,27 @@ use super::{CmdResult, GlobalArgs};
 
 mod bundle;
 mod compare_variant;
+mod experiment;
 mod matrix;
 mod metadata;
 mod output;
+mod schedule;
 #[cfg(test)]
 mod test_fixture;
 
 use compare_variant::run_compare_variant;
+use experiment::{
+    collect_trace_experiment_artifacts_for_plan, run_trace_experiment_setup_for_plan,
+    run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args,
+    trace_experiment_settings,
+};
 use metadata::trace_span_metadata_for_args;
 
 use output::{
     aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
     render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
 };
+use schedule::{TraceSchedule, TraceVariantMatrixMode};
 
 #[cfg(test)]
 use matrix::{expand_variant_matrix, TraceVariantStackItem};
@@ -128,8 +135,6 @@ pub struct TraceArgs {
     #[arg(long = "variant", value_name = "NAME")]
     pub variants: Vec<String>,
 
-    /// Directory for `trace compare-variant` experiment bundle output.
-
     /// Expand variants for `trace compare-variant`.
     #[arg(long = "matrix", value_enum, default_value_t = TraceVariantMatrixMode::None)]
     pub matrix: TraceVariantMatrixMode,
@@ -149,39 +154,6 @@ pub struct TraceArgs {
     /// Remove stale trace overlay locks even when touched files are dirty.
     #[arg(long, alias = "force-stale-lock-cleanup")]
     pub force: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum TraceSchedule {
-    Grouped,
-    Interleaved,
-}
-
-impl TraceSchedule {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Grouped => "grouped",
-            Self::Interleaved => "interleaved",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, ValueEnum)]
-pub enum TraceVariantMatrixMode {
-    #[default]
-    None,
-    Single,
-    Cumulative,
-}
-
-impl TraceVariantMatrixMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Single => "single",
-            Self::Cumulative => "cumulative",
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -330,15 +302,6 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         return Err(homeboy::Error::validation_invalid_argument(
             "AFTER_JSON",
             "extra positional argument is only supported by `homeboy trace compare before.json after.json`",
-            None,
-            None,
-        ));
-    }
-
-    if args.experiment.is_some() {
-        return Err(homeboy::Error::validation_invalid_argument(
-            "--experiment",
-            "trace experiment bundles are only supported by `homeboy trace compare before.json after.json --experiment <name>`",
             None,
             None,
         ));
@@ -495,11 +458,13 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         &effective_id,
         &component_path_for_overlays,
     )?;
+    let experiment_plan = trace_experiment_plan_for_args(&args, rig_context.as_ref())?;
 
     let rig_state = rig_context
         .as_ref()
         .map(|context| rig::snapshot_state(&context.rig_spec));
     let run_dir = RunDir::create()?;
+    run_trace_experiment_setup_for_plan(experiment_plan.as_ref(), &run_dir)?;
     let scenario_id = scenario.clone();
     let rig_id = args.rig.clone();
     let requested_overlays = args.overlays.clone();
@@ -562,6 +527,15 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             })
         })
         .unwrap_or_default();
+    let experiment_settings = trace_experiment_settings(experiment_plan.as_ref())?;
+    let experiment_env = trace_experiment_env(experiment_plan.as_ref())?;
+    let mut json_settings = experiment_settings;
+    json_settings.extend(settings_as_json(&ctx.settings));
+    json_settings.extend(
+        settings_as_strings(&ctx.settings)
+            .into_iter()
+            .map(|(key, value)| (key, serde_json::Value::String(value))),
+    );
     let workflow = match extension_trace::run_trace_workflow(
         &ctx.component,
         TraceRunWorkflowArgs {
@@ -570,7 +544,8 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             path_override,
             settings: settings_as_strings(&ctx.settings),
             runner_inputs: TraceRunnerInputs {
-                json_settings: settings_as_json(&ctx.settings),
+                json_settings,
+                env: experiment_env.clone(),
                 workload_paths: extra_workloads,
             },
             scenario_id,
@@ -590,8 +565,20 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         &run_dir,
         rig_state.clone(),
     ) {
-        Ok(workflow) => workflow,
+        Ok(mut workflow) => {
+            let artifact_result = collect_trace_experiment_artifacts_for_plan(
+                experiment_plan.as_ref(),
+                &run_dir,
+                &mut workflow,
+            );
+            let teardown_result =
+                run_trace_experiment_teardown_for_plan(experiment_plan.as_ref(), &run_dir);
+            artifact_result?;
+            teardown_result?;
+            workflow
+        }
         Err(error) => {
+            let _ = run_trace_experiment_teardown_for_plan(experiment_plan.as_ref(), &run_dir);
             if let Some(observation) = observation.as_ref() {
                 persist_trace_workflow_error(observation, &run_dir, &error);
             }
@@ -989,6 +976,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             settings: settings_as_strings(&ctx.settings),
             runner_inputs: TraceRunnerInputs {
                 json_settings: settings_as_json(&ctx.settings),
+                env: Vec::new(),
                 workload_paths: extra_workloads,
             },
             rig_id: args.rig,
@@ -1483,6 +1471,9 @@ mod compare_tests;
 
 #[cfg(test)]
 mod compare_variant_tests;
+
+#[cfg(test)]
+mod experiment_tests;
 
 #[cfg(test)]
 mod tests;

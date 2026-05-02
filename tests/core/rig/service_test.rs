@@ -44,6 +44,7 @@ mod lifecycle {
             bench_workloads: HashMap::new(),
             trace_workloads: HashMap::new(),
             trace_variants: HashMap::new(),
+            trace_experiments: HashMap::new(),
             bench_profiles: HashMap::new(),
         }
     }
@@ -65,6 +66,7 @@ mod lifecycle {
             bench_workloads: HashMap::new(),
             trace_workloads: HashMap::new(),
             trace_variants: HashMap::new(),
+            trace_experiments: HashMap::new(),
             bench_profiles: HashMap::new(),
         }
     }
