@@ -8,7 +8,8 @@ use homeboy::rig::ComponentSpec;
 
 use super::test_fixture::{
     init_overlay_component, write_trace_extension, write_trace_rig,
-    write_trace_rig_with_phase_preset, write_trace_rig_with_variant, XdgGuard,
+    write_trace_rig_with_phase_preset, write_trace_rig_with_span_metadata,
+    write_trace_rig_with_variant, XdgGuard,
 };
 use super::*;
 
@@ -461,6 +462,86 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                     .runs
                     .iter()
                     .all(|run| std::path::Path::new(&run.artifact_path).is_file()));
+            }
+            _ => panic!("expected aggregate output"),
+        }
+    });
+}
+
+#[test]
+fn trace_repeat_loads_span_metadata_and_reports_unknown_ids() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        write_trace_rig_with_span_metadata(home, "studio-rig", "studio", component_dir.path());
+
+        let (output, exit_code) = run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("studio".to_string()),
+                    path: None,
+                },
+                component_arg: None,
+                scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
+                compare_after: None,
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                experiment: None,
+                repeat: 2,
+                aggregate: Some("spans".to_string()),
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: None,
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: Vec::new(),
+                variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
+                output_dir: None,
+                keep_overlay: false,
+                stale: false,
+                force: false,
+            },
+            &GlobalArgs {},
+        )
+        .expect("repeat trace should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Aggregate(aggregate) => {
+                let span = aggregate
+                    .spans
+                    .iter()
+                    .find(|span| span.id == "phase.boot_to_ready")
+                    .expect("boot span");
+                let metadata = span.metadata.as_ref().expect("span metadata");
+                assert!(metadata.critical);
+                assert!(metadata.blocking);
+                assert!(metadata.cacheable);
+                assert!(metadata.prewarmable);
+                assert_eq!(metadata.blocks.as_deref(), Some("first_site_render"));
+                assert_eq!(metadata.category.as_deref(), Some("wordpress_boot"));
+                assert_eq!(aggregate.unmatched_span_metadata_ids, vec!["missing_span"]);
+                assert!(aggregate.classification_summaries.iter().any(|summary| {
+                    summary.classification == "cacheable_critical"
+                        && summary.span_count == 1
+                        && summary.total_median_ms == Some(125)
+                }));
+
+                let markdown = render_aggregate_markdown(&aggregate);
+                assert!(markdown.contains("## Critical Path Classification"));
+                assert!(markdown.contains("| `cacheable_critical` | 1 | 125ms | 125.0ms |"));
+                assert!(markdown.contains("## Unmatched Span Metadata"));
+                assert!(markdown.contains("- `missing_span`"));
             }
             _ => panic!("expected aggregate output"),
         }
@@ -1267,6 +1348,8 @@ fn aggregate_markdown_includes_percentile_columns() {
         )],
         focus_span_ids: Vec::new(),
         focus_spans: Vec::new(),
+        classification_summaries: Vec::new(),
+        unmatched_span_metadata_ids: Vec::new(),
     };
 
     let markdown = render_aggregate_markdown(&aggregate);

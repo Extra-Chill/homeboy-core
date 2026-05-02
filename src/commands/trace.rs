@@ -24,15 +24,17 @@ use super::{CmdResult, GlobalArgs};
 mod bundle;
 mod compare_variant;
 mod matrix;
+mod metadata;
 mod output;
 #[cfg(test)]
 mod test_fixture;
 
 use compare_variant::run_compare_variant;
+use metadata::trace_span_metadata_for_args;
 
 use output::{
-    aggregate_span, render_aggregate_markdown, render_compare_markdown, render_matrix_markdown,
-    run_compare, TraceAggregateSpanSample,
+    aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
+    render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
 };
 
 #[cfg(test)]
@@ -620,6 +622,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         .collect();
     let mut rig_state = None;
     let mut component = None;
+    let span_metadata = trace_span_metadata_for_args(&args)?;
     let mut failure_count = 0;
 
     let run_order = plan_trace_run_order(repeat, args.schedule, &["run"]);
@@ -725,7 +728,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         }
     }
 
-    let spans = all_span_ids
+    let mut spans = all_span_ids
         .into_iter()
         .map(|id| {
             let samples = span_samples.remove(&id).unwrap_or_default();
@@ -733,6 +736,8 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             aggregate_span(id, samples, failures)
         })
         .collect::<Vec<_>>();
+    let unmatched_span_metadata_ids = attach_span_metadata(&mut spans, &span_metadata);
+    let classification_summaries = classification_summaries(&spans);
     let focus_spans = focus_aggregate_spans(&spans, &args.focus_spans);
     let exit_code = if failure_count == 0 { 0 } else { 1 };
     let output = extension_trace::TraceAggregateOutput {
@@ -761,6 +766,8 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         spans,
         focus_span_ids: args.focus_spans.clone(),
         focus_spans,
+        classification_summaries,
+        unmatched_span_metadata_ids,
     };
 
     Ok((TraceCommandOutput::Aggregate(output), exit_code))

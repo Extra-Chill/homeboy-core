@@ -47,6 +47,8 @@ pub(super) struct TraceAggregateSpanInput {
     #[serde(default)]
     pub(super) max_artifact_path: Option<String>,
     pub(super) failures: usize,
+    #[serde(default)]
+    pub(super) metadata: Option<extension_trace::TraceSpanMetadata>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +229,7 @@ pub(super) fn compare_trace_aggregates_with_focus(
         })
         .collect::<Vec<_>>();
     spans.sort_by(compare_trace_span_impact);
+    let classification_summaries = compare_classification_summaries(&before_spans, &after_spans);
 
     let focus_spans = focus_compare_spans(&spans, focus_span_ids);
     let focus_regression_count = focus_spans
@@ -262,6 +265,73 @@ pub(super) fn compare_trace_aggregates_with_focus(
         focus_regression_count,
         focus_failure_count,
         focus_status,
+        classification_summaries,
+    }
+}
+
+fn compare_classification_summaries(
+    before_spans: &BTreeMap<String, TraceAggregateSpanInput>,
+    after_spans: &BTreeMap<String, TraceAggregateSpanInput>,
+) -> Vec<extension_trace::TraceCompareClassificationSummaryOutput> {
+    let mut totals: BTreeMap<String, (usize, Option<u64>, Option<u64>)> = BTreeMap::new();
+    for (id, before_span) in before_spans {
+        let metadata = after_spans
+            .get(id)
+            .and_then(|span| span.metadata.as_ref())
+            .or(before_span.metadata.as_ref());
+        add_compare_classification_totals(
+            &mut totals,
+            metadata,
+            before_span.median_ms,
+            after_spans.get(id).and_then(|span| span.median_ms),
+        );
+    }
+    for (id, after_span) in after_spans {
+        if before_spans.contains_key(id) {
+            continue;
+        }
+        add_compare_classification_totals(
+            &mut totals,
+            after_span.metadata.as_ref(),
+            None,
+            after_span.median_ms,
+        );
+    }
+    totals
+        .into_iter()
+        .map(
+            |(classification, (span_count, before_total_median_ms, after_total_median_ms))| {
+                extension_trace::TraceCompareClassificationSummaryOutput {
+                    classification,
+                    span_count,
+                    before_total_median_ms,
+                    after_total_median_ms,
+                    median_delta_ms: option_delta_i64(
+                        before_total_median_ms,
+                        after_total_median_ms,
+                    ),
+                }
+            },
+        )
+        .collect()
+}
+
+fn add_compare_classification_totals(
+    totals: &mut BTreeMap<String, (usize, Option<u64>, Option<u64>)>,
+    metadata: Option<&extension_trace::TraceSpanMetadata>,
+    before_median_ms: Option<u64>,
+    after_median_ms: Option<u64>,
+) {
+    let Some(metadata) = metadata else {
+        return;
+    };
+    for classification in span_classifications(metadata) {
+        let entry = totals
+            .entry(classification)
+            .or_insert((0, Some(0), Some(0)));
+        entry.0 += 1;
+        entry.1 = option_sum(entry.1, before_median_ms);
+        entry.2 = option_sum(entry.2, after_median_ms);
     }
 }
 
@@ -369,7 +439,107 @@ pub(super) fn aggregate_span(
         max_run_index: max_sample.as_ref().map(|sample| sample.run_index),
         max_artifact_path: max_sample.map(|sample| sample.artifact_path),
         failures,
+        metadata: None,
     }
+}
+
+pub(super) fn attach_span_metadata(
+    spans: &mut [extension_trace::TraceAggregateSpanOutput],
+    span_metadata: &BTreeMap<String, extension_trace::TraceSpanMetadata>,
+) -> Vec<String> {
+    if span_metadata.is_empty() {
+        return Vec::new();
+    }
+    let mut matched = BTreeSet::new();
+    for span in spans {
+        if let Some(metadata) = span_metadata.get(&span.id) {
+            span.metadata = Some(metadata.clone());
+            matched.insert(span.id.clone());
+        }
+    }
+    span_metadata
+        .keys()
+        .filter(|id| !matched.contains(*id))
+        .cloned()
+        .collect()
+}
+
+pub(super) fn classification_summaries(
+    spans: &[extension_trace::TraceAggregateSpanOutput],
+) -> Vec<extension_trace::TraceClassificationSummaryOutput> {
+    let mut totals: BTreeMap<String, (usize, Option<u64>, Option<f64>)> = BTreeMap::new();
+    for span in spans {
+        let Some(metadata) = span.metadata.as_ref() else {
+            continue;
+        };
+        for classification in span_classifications(metadata) {
+            let entry = totals
+                .entry(classification)
+                .or_insert((0, Some(0), Some(0.0)));
+            entry.0 += 1;
+            entry.1 = option_sum(entry.1, span.median_ms);
+            entry.2 = option_sum_f64(entry.2, span.avg_ms);
+        }
+    }
+    totals
+        .into_iter()
+        .map(
+            |(classification, (span_count, total_median_ms, total_avg_ms))| {
+                extension_trace::TraceClassificationSummaryOutput {
+                    classification,
+                    span_count,
+                    total_median_ms,
+                    total_avg_ms,
+                }
+            },
+        )
+        .collect()
+}
+
+fn span_classifications(metadata: &extension_trace::TraceSpanMetadata) -> Vec<String> {
+    let mut classifications = Vec::new();
+    if metadata.critical {
+        classifications.push("critical".to_string());
+    }
+    if metadata.blocking {
+        classifications.push("blocking".to_string());
+    }
+    if metadata.cacheable {
+        classifications.push("cacheable".to_string());
+        if metadata.critical {
+            classifications.push("cacheable_critical".to_string());
+        }
+    }
+    if metadata.prewarmable {
+        classifications.push("prewarmable".to_string());
+        if metadata.critical {
+            classifications.push("prewarmable_critical".to_string());
+        }
+    }
+    if metadata.deferrable {
+        classifications.push("deferrable".to_string());
+        if metadata.critical {
+            classifications.push("deferrable_critical".to_string());
+        }
+    }
+    if let Some(category) = metadata.category.as_deref() {
+        classifications.push(format!("category:{category}"));
+    }
+    if let Some(blocks) = metadata.blocks.as_deref() {
+        classifications.push(format!("blocks:{blocks}"));
+    }
+    classifications
+}
+
+fn option_sum<T>(left: Option<T>, right: Option<T>) -> Option<T>
+where
+    T: std::ops::Add<Output = T>,
+{
+    Some(left? + right?)
+}
+
+fn option_sum_f64(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    Some(left? + right?)
 }
 
 #[derive(Clone)]
@@ -415,6 +585,17 @@ pub(super) fn render_aggregate_markdown(
         out.push_str(&format!("- **Schedule:** `{}`\n", schedule));
     }
     extension_trace::push_overlay_markdown(&mut out, &aggregate.overlays);
+
+    if !aggregate.classification_summaries.is_empty() {
+        out.push_str("\n## Critical Path Classification\n\n");
+        push_classification_summary_table(&mut out, &aggregate.classification_summaries);
+    }
+    if !aggregate.unmatched_span_metadata_ids.is_empty() {
+        out.push_str("\n## Unmatched Span Metadata\n\n");
+        for id in &aggregate.unmatched_span_metadata_ids {
+            out.push_str(&format!("- `{id}`\n"));
+        }
+    }
 
     if !aggregate.focus_span_ids.is_empty() {
         out.push_str("\n## Focus Spans\n\n");
@@ -466,6 +647,23 @@ pub(super) fn render_aggregate_markdown(
     out
 }
 
+fn push_classification_summary_table(
+    out: &mut String,
+    summaries: &[extension_trace::TraceClassificationSummaryOutput],
+) {
+    out.push_str("| Classification | spans | total median | total avg |\n");
+    out.push_str("|---|---:|---:|---:|\n");
+    for summary in summaries {
+        out.push_str(&format!(
+            "| `{}` | {} | {} | {} |\n",
+            summary.classification,
+            summary.span_count,
+            fmt_ms(summary.total_median_ms),
+            fmt_avg_ms(summary.total_avg_ms),
+        ));
+    }
+}
+
 fn push_aggregate_span_row(out: &mut String, span: &extension_trace::TraceAggregateSpanOutput) {
     out.push_str(&format!(
         "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
@@ -509,6 +707,24 @@ pub(super) fn render_compare_markdown(compare: &extension_trace::TraceCompareOut
                 fmt_avg_ms(span.after_avg_ms),
                 fmt_signal_delta_avg_ms(span.avg_delta_ms),
                 fmt_percent(span.avg_delta_percent),
+            ));
+        }
+    }
+
+    if !compare.classification_summaries.is_empty() {
+        out.push_str("\n## Critical Path Classification\n\n");
+        out.push_str(
+            "| Classification | spans | before median total | after median total | delta |\n",
+        );
+        out.push_str("|---|---:|---:|---:|---:|\n");
+        for summary in &compare.classification_summaries {
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} |\n",
+                summary.classification,
+                summary.span_count,
+                fmt_ms(summary.before_total_median_ms),
+                fmt_ms(summary.after_total_median_ms),
+                fmt_signal_delta_ms(summary.median_delta_ms),
             ));
         }
     }

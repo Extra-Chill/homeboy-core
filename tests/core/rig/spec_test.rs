@@ -338,6 +338,7 @@ fn workload_with_trace_metadata() -> WorkloadSpec {
             "startup".to_string(),
             vec!["boot:runner.boot".to_string()],
         )]),
+        trace_span_metadata: std::collections::HashMap::new(),
         trace_default_phase_preset: Some("startup".to_string()),
         trace_variants: std::collections::HashMap::from([(
             "fresh-install-mode".to_string(),

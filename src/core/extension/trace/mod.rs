@@ -31,8 +31,9 @@ pub use parsing::{
 pub use parsing::{TraceAssertionStatus, TraceResults, TraceSpanDefinition, TraceSpanResult};
 pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
-    TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceCommandOutput, TraceCompareOutput,
-    TraceCompareSpanOutput, TraceOverlayLocksOutput, TraceRunOrderEntryOutput,
+    TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceClassificationSummaryOutput,
+    TraceCommandOutput, TraceCompareClassificationSummaryOutput, TraceCompareOutput,
+    TraceCompareSpanOutput, TraceOverlayLocksOutput, TraceRunOrderEntryOutput, TraceSpanMetadata,
     TraceVariantMatrixOutput, TraceVariantMatrixRunOutput,
 };
 pub use report::{push_overlay_markdown, render_markdown};
