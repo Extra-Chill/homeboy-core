@@ -3,7 +3,7 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-02T18:25:06Z",
+      "created_at": "2026-05-02T18:58:18Z",
       "item_count": 708,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
@@ -115,6 +115,7 @@
         "intra-method-duplication::src/core/db/operations.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/cli_tool.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/codebase_scan.rs::IntraMethodDuplicate",
@@ -431,7 +432,6 @@
         "test_coverage::src/core/extension/test/report.rs::MissingTestMethod",
         "test_coverage::src/core/extension/test/run.rs::MissingTestMethod",
         "test_coverage::src/core/extension/test/workflow.rs::MissingTestFile",
-        "test_coverage::src/core/extension/trace/report.rs::MissingTestMethod",
         "test_coverage::src/core/extension/update_check.rs::MissingTestMethod",
         "test_coverage::src/core/extension/update_check.rs::OrphanedTest",
         "test_coverage::src/core/extension/version.rs::OrphanedTest",
