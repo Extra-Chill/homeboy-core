@@ -435,6 +435,41 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_component_path() {
+        let component_dir = tempfile::tempdir().unwrap();
+
+        let normalized = normalize_component_path(component_dir.path());
+
+        assert!(normalized.is_absolute());
+        assert_eq!(normalized, fs::canonicalize(component_dir.path()).unwrap());
+    }
+
+    #[test]
+    fn test_trace_overlay_lock_id() {
+        let first = trace_overlay_lock_id(Path::new("/tmp/component-a"));
+        let second = trace_overlay_lock_id(Path::new("/tmp/component-b"));
+
+        assert_eq!(first.len(), 24);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_read_trace_overlay_lock_holder() {
+        with_isolated_home(|_| {
+            let component_dir = tempfile::tempdir().unwrap();
+            let run_dir = RunDir::create().unwrap();
+            let lock = TraceOverlayLock::acquire(component_dir.path(), &[], &run_dir).unwrap();
+
+            let holder = read_trace_overlay_lock_holder(&lock.path).unwrap();
+
+            assert_eq!(holder.pid, std::process::id());
+            assert_eq!(holder.run_dir, run_dir.path().to_string_lossy());
+            drop(lock);
+            run_dir.cleanup();
+        });
+    }
+
+    #[test]
     fn trace_overlay_lock_contention_fails_fast_with_context() {
         with_isolated_home(|_| {
             let component_dir = tempfile::tempdir().unwrap();

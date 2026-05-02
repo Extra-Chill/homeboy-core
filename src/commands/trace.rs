@@ -10,7 +10,7 @@ use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::{
     TraceCommandOutput, TraceListWorkflowArgs, TraceOverlayRequest, TraceRunWorkflowArgs,
-    TraceSpanDefinition,
+    TraceRunnerInputs, TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::observation::{
@@ -559,13 +559,15 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             component_id: ctx.component_id.clone(),
             path_override,
             settings: settings_as_strings(&ctx.settings),
-            settings_json: settings_as_json(&ctx.settings),
+            runner_inputs: TraceRunnerInputs {
+                json_settings: settings_as_json(&ctx.settings),
+                workload_paths: extra_workloads,
+            },
             scenario_id,
             json_summary: args.json_summary,
             rig_id: args.rig,
             overlays,
             keep_overlay: args.keep_overlay,
-            extra_workloads,
             span_definitions,
             baseline_flags: BaselineFlags {
                 baseline: args.baseline_args.baseline,
@@ -970,9 +972,11 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             component_id: ctx.component_id.clone(),
             path_override,
             settings: settings_as_strings(&ctx.settings),
-            settings_json: settings_as_json(&ctx.settings),
+            runner_inputs: TraceRunnerInputs {
+                json_settings: settings_as_json(&ctx.settings),
+                workload_paths: extra_workloads,
+            },
             rig_id: args.rig,
-            extra_workloads,
         },
         &run_dir,
     )?;
@@ -1054,6 +1058,7 @@ fn trace_overlays_for_args(
             .iter()
             .cloned()
             .map(|overlay_path| TraceOverlayRequest {
+                variant: None,
                 component_id: Some(component_id.to_string()),
                 component_path: component_path.to_string(),
                 overlay_path,
@@ -1107,6 +1112,7 @@ fn trace_overlay_request_for_component(
         )
     })?;
     Ok(TraceOverlayRequest {
+        variant: Some(variant_name.to_string()),
         component_id: Some(component_id.to_string()),
         component_path,
         overlay_path: resolve_trace_variant_overlay(context, overlay),

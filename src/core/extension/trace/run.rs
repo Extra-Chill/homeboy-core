@@ -15,8 +15,8 @@ use crate::extension::{ExtensionRunner, RunnerOutput};
 use crate::rig::RigStateSnapshot;
 
 use super::overlay::{
-    apply_trace_overlays, cleanup_after_overlay_error, cleanup_trace_overlays, TraceOverlayLock,
-    TraceOverlayRequest,
+    acquire_trace_overlay_locks, apply_trace_overlays, cleanup_after_overlay_error,
+    cleanup_trace_overlays, TraceOverlayRequest,
 };
 
 use super::parsing::{
@@ -29,13 +29,12 @@ pub struct TraceRunWorkflowArgs {
     pub component_id: String,
     pub path_override: Option<String>,
     pub settings: Vec<(String, String)>,
-    pub settings_json: Vec<(String, serde_json::Value)>,
+    pub runner_inputs: TraceRunnerInputs,
     pub scenario_id: String,
     pub json_summary: bool,
     pub rig_id: Option<String>,
     pub overlays: Vec<TraceOverlayRequest>,
     pub keep_overlay: bool,
-    pub extra_workloads: Vec<PathBuf>,
     pub span_definitions: Vec<TraceSpanDefinition>,
     pub baseline_flags: BaselineFlags,
     pub regression_threshold_percent: f64,
@@ -48,9 +47,14 @@ pub struct TraceListWorkflowArgs {
     pub component_id: String,
     pub path_override: Option<String>,
     pub settings: Vec<(String, String)>,
-    pub settings_json: Vec<(String, serde_json::Value)>,
+    pub runner_inputs: TraceRunnerInputs,
     pub rig_id: Option<String>,
-    pub extra_workloads: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TraceRunnerInputs {
+    pub json_settings: Vec<(String, serde_json::Value)>,
+    pub workload_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,6 +76,8 @@ pub struct TraceRunWorkflowResult {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TraceOverlay {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_id: Option<String>,
     pub path: String,
@@ -110,7 +116,7 @@ fn run_trace_workflow_with_context(
     let _overlay_locks = if args.overlays.is_empty() {
         None
     } else {
-        Some(TraceOverlayLock::acquire_all(&args.overlays, run_dir)?)
+        Some(acquire_trace_overlay_locks(&args.overlays, run_dir)?)
     };
     let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
     let runner = match build_trace_runner(execution_context, component, &args, run_dir, false) {
@@ -237,6 +243,7 @@ fn run_trace_workflow_with_context(
         overlays: applied_overlays
             .into_iter()
             .map(|overlay| TraceOverlay {
+                variant: overlay.variant,
                 component_id: overlay.component_id,
                 path: overlay.patch_path.to_string_lossy().to_string(),
                 component_path: overlay.component_path.to_string_lossy().to_string(),
@@ -260,13 +267,12 @@ pub fn run_trace_list_workflow(
         component_id: args.component_id,
         path_override: args.path_override,
         settings: args.settings,
-        settings_json: args.settings_json,
+        runner_inputs: args.runner_inputs,
         scenario_id: String::new(),
         json_summary: false,
         rig_id: args.rig_id,
         overlays: Vec::new(),
         keep_overlay: false,
-        extra_workloads: args.extra_workloads,
         span_definitions: Vec::new(),
         baseline_flags: BaselineFlags {
             baseline: false,
@@ -334,7 +340,7 @@ pub(crate) fn build_trace_runner(
         .component(component.clone())
         .path_override(args.path_override.clone())
         .settings(&args.settings)
-        .settings_json(&args.settings_json)
+        .settings_json(&args.runner_inputs.json_settings)
         .with_run_dir(run_dir)
         .cleanup_process_group(true)
         .env(
@@ -356,10 +362,10 @@ pub(crate) fn build_trace_runner(
     if let Some(path) = &args.path_override {
         runner = runner.env("HOMEBOY_TRACE_COMPONENT_PATH", path);
     }
-    if !args.extra_workloads.is_empty() {
+    if !args.runner_inputs.workload_paths.is_empty() {
         runner = runner.env(
             "HOMEBOY_TRACE_EXTRA_WORKLOADS",
-            &extra_workloads_env_value(&args.extra_workloads)?,
+            &extra_workloads_env_value(&args.runner_inputs.workload_paths)?,
         );
     }
 
@@ -447,13 +453,15 @@ JSON
             component_id: "example".to_string(),
             path_override: Some(component_dir.to_string_lossy().to_string()),
             settings: Vec::new(),
-            settings_json: Vec::new(),
+            runner_inputs: TraceRunnerInputs {
+                json_settings: Vec::new(),
+                workload_paths: vec![component_dir.join("trace-fixture.trace.mjs")],
+            },
             scenario_id: "close-window".to_string(),
             json_summary: false,
             rig_id: Some("studio".to_string()),
             overlays: Vec::new(),
             keep_overlay: false,
-            extra_workloads: vec![component_dir.join("trace-fixture.trace.mjs")],
             span_definitions: Vec::new(),
             baseline_flags: BaselineFlags {
                 baseline: false,
@@ -521,13 +529,12 @@ JSON
             component_id: "example".to_string(),
             path_override: Some(component_dir.to_string_lossy().to_string()),
             settings: Vec::new(),
-            settings_json: Vec::new(),
+            runner_inputs: TraceRunnerInputs::default(),
             scenario_id: String::new(),
             json_summary: false,
             rig_id: None,
             overlays: Vec::new(),
             keep_overlay: false,
-            extra_workloads: Vec::new(),
             span_definitions: Vec::new(),
             baseline_flags: BaselineFlags {
                 baseline: false,
@@ -559,13 +566,12 @@ JSON
             component_id: "example".to_string(),
             path_override: Some("/tmp/example".to_string()),
             settings: Vec::new(),
-            settings_json: Vec::new(),
+            runner_inputs: TraceRunnerInputs::default(),
             scenario_id: "close-window".to_string(),
             json_summary: false,
             rig_id: None,
             overlays: Vec::new(),
             keep_overlay: false,
-            extra_workloads: Vec::new(),
             span_definitions: Vec::new(),
             baseline_flags: BaselineFlags {
                 baseline: false,
@@ -631,6 +637,7 @@ JSON
 
         let err = apply_trace_overlays(
             &[TraceOverlayRequest {
+                variant: None,
                 component_id: Some("example".to_string()),
                 component_path: fixture.component_dir.to_string_lossy().to_string(),
                 overlay_path: fixture.patch_path.to_string_lossy().to_string(),
@@ -738,17 +745,17 @@ JSON
             component_id: "example".to_string(),
             path_override: Some(component_dir.to_string_lossy().to_string()),
             settings: Vec::new(),
-            settings_json: Vec::new(),
+            runner_inputs: TraceRunnerInputs::default(),
             scenario_id: "overlay".to_string(),
             json_summary: false,
             rig_id: None,
             overlays: vec![TraceOverlayRequest {
+                variant: None,
                 component_id: Some("example".to_string()),
                 component_path: component_dir.to_string_lossy().to_string(),
                 overlay_path: patch_path.to_string_lossy().to_string(),
             }],
             keep_overlay,
-            extra_workloads: Vec::new(),
             span_definitions: Vec::new(),
             baseline_flags: BaselineFlags {
                 baseline: false,
