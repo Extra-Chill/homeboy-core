@@ -4,6 +4,37 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.143.0] - 2026-05-02
+
+### Added
+- add trace focus span reporting
+- add trace phase presets
+
+### Changed
+- cover extension source url manifest metadata
+- Add extension repair workflow
+
+### Fixed
+- address trace audit findings
+- surface persisted bench run history
+- reconcile stale runs before listing
+- clarify missing extension provider errors
+- address audit findings for observations
+- surface trace overlay touched files
+- lock trace overlay runs per component
+- persist audit findings in observations
+- persist test observations as findings
+- keep source metadata repair under audit threshold
+- keep linked extension update audit clean
+- satisfy linked extension upgrade audit
+- group linked extension root updates
+- keep source url repair in lifecycle
+- repair extension source metadata
+- Fix linked extension updates in feature worktrees
+- show actionable audit findings in review comments
+- refresh matching local rig installs
+- support nested detail spans
+
 ## [0.142.1] - 2026-05-01
 
 ### Changed
