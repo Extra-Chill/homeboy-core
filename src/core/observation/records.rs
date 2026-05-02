@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, path::Path};
 
+use crate::code_audit::{self, report::finding_kind_key};
 use crate::extension::lint::LintFinding;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -159,6 +160,56 @@ pub fn finding_records_from_lint(run_id: &str, findings: &[LintFinding]) -> Vec<
         .iter()
         .map(|finding| finding_record_from_lint(run_id, finding))
         .collect()
+}
+
+pub fn finding_record_from_audit(run_id: &str, finding: &code_audit::Finding) -> NewFindingRecord {
+    let kind = finding_kind_key(&finding.kind);
+    NewFindingRecord {
+        run_id: run_id.to_string(),
+        tool: "audit".to_string(),
+        rule: Some(kind.clone()),
+        file: Some(finding.file.clone()),
+        line: None,
+        severity: Some(audit_severity_key(&finding.severity)),
+        fingerprint: Some(audit_finding_fingerprint(finding)),
+        message: finding.description.clone(),
+        fixable: None,
+        metadata_json: serde_json::json!({
+            "source_sidecar": "audit-findings",
+            "convention": finding.convention,
+            "suggestion": finding.suggestion,
+            "confidence": finding.kind.confidence(),
+            "kind": kind,
+            "raw": finding,
+        }),
+    }
+}
+
+pub fn finding_records_from_audit(
+    run_id: &str,
+    findings: &[code_audit::Finding],
+) -> Vec<NewFindingRecord> {
+    findings
+        .iter()
+        .map(|finding| finding_record_from_audit(run_id, finding))
+        .collect()
+}
+
+fn audit_finding_fingerprint(finding: &code_audit::Finding) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        finding.file,
+        finding_kind_key(&finding.kind),
+        finding.convention,
+        finding.description
+    )
+}
+
+fn audit_severity_key(severity: &code_audit::Severity) -> String {
+    serde_json::to_value(severity)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{severity:?}").to_lowercase())
 }
 
 pub fn finding_records_from_annotations_dir(
@@ -405,6 +456,32 @@ mod tests {
         assert_eq!(records[0].tool, "phpcs");
         assert_eq!(records[1].fingerprint.as_deref(), Some("two"));
         assert_eq!(records[1].tool, "lint");
+    }
+
+    #[test]
+    fn test_finding_record_from_audit() {
+        let finding = code_audit::Finding {
+            convention: "command modules".to_string(),
+            severity: code_audit::Severity::Warning,
+            file: "src/commands/foo.rs".to_string(),
+            description: "Missing run function".to_string(),
+            suggestion: "Add run()".to_string(),
+            kind: code_audit::AuditFinding::MissingMethod,
+        };
+
+        let first = finding_record_from_audit("run-1", &finding);
+        let second = finding_record_from_audit("run-2", &finding);
+
+        assert_eq!(first.run_id, "run-1");
+        assert_eq!(first.tool, "audit");
+        assert_eq!(first.rule.as_deref(), Some("missing_method"));
+        assert_eq!(first.file.as_deref(), Some("src/commands/foo.rs"));
+        assert_eq!(first.severity.as_deref(), Some("warning"));
+        assert_eq!(first.message, "Missing run function");
+        assert_eq!(first.fingerprint, second.fingerprint);
+        assert_eq!(first.metadata_json["source_sidecar"], "audit-findings");
+        assert_eq!(first.metadata_json["convention"], "command modules");
+        assert_eq!(first.metadata_json["kind"], "missing_method");
     }
 
     #[test]

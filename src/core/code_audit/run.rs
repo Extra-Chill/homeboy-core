@@ -33,6 +33,7 @@ pub struct AuditRunWorkflowArgs {
 pub struct AuditRunWorkflowResult {
     pub output: AuditCommandOutput,
     pub exit_code: i32,
+    pub findings: Vec<code_audit::Finding>,
 }
 
 /// Run the main audit workflow.
@@ -68,6 +69,7 @@ pub fn run_main_audit_workflow(
                     fixability: None,
                 },
                 exit_code: 0,
+                findings: Vec::new(),
             });
         }
     };
@@ -81,6 +83,7 @@ pub fn run_main_audit_workflow(
                 directory_conventions: result.directory_conventions,
             },
             exit_code: 0,
+            findings: Vec::new(),
         });
     }
 
@@ -205,6 +208,7 @@ fn run_baseline_save(
     result: CodeAuditResult,
     args: &AuditRunWorkflowArgs,
 ) -> crate::Result<AuditRunWorkflowResult> {
+    let findings = result.findings.clone();
     let saved = if let Some(ref git_ref) = args.changed_since {
         let changed = git::get_files_changed_since(&args.source_path, git_ref)?;
         if changed.is_empty() {
@@ -253,6 +257,7 @@ fn run_baseline_save(
             alignment_score: baseline_data.metadata.alignment_score,
         },
         exit_code: 0,
+        findings,
     })
 }
 
@@ -289,14 +294,17 @@ fn run_comparison_workflow(
     };
 
     if args.json_summary {
+        let findings = result.findings.clone();
         let mut summary = report::build_audit_summary(&result, exit_code);
         summary.fixability = compute_fixability_if_requested(&result, args);
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Summary(summary),
             exit_code,
+            findings,
         })
     } else {
         let fixability = compute_fixability_if_requested(&result, args);
+        let findings = result.findings.clone();
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Full {
                 passed: exit_code == 0,
@@ -304,6 +312,7 @@ fn run_comparison_workflow(
                 fixability,
             },
             exit_code,
+            findings,
         })
     }
 }
@@ -351,15 +360,18 @@ fn build_comparison_output(
     }
 
     if args.json_summary {
+        let findings = result.findings.clone();
         let mut summary = report::build_audit_summary(&result, exit_code);
         summary.fixability = compute_fixability_if_requested(&result, args);
         summary.changed_since = changed_since_summary;
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Summary(summary),
             exit_code,
+            findings,
         })
     } else {
         let fixability = compute_fixability_if_requested(&result, args);
+        let findings = result.findings.clone();
 
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Compared {
@@ -371,6 +383,7 @@ fn build_comparison_output(
                 fixability,
             },
             exit_code,
+            findings,
         })
     }
 }

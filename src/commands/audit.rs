@@ -6,7 +6,9 @@ use homeboy::code_audit::{
 };
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::git::short_head_revision_at;
-use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
+use homeboy::observation::{
+    finding_records_from_audit, NewRunRecord, ObservationStore, RunRecord, RunStatus,
+};
 
 use super::utils::args::{BaselineArgs, PositionalComponentArgs};
 use super::{CmdResult, GlobalArgs};
@@ -182,6 +184,8 @@ fn finish_audit_observation(
             "summary": audit_observation_summary(&workflow.output),
         }),
     );
+    let records = finding_records_from_audit(&observation.audit_run.id, &workflow.findings);
+    let _ = observation.store.record_findings(&records);
     let status = if workflow.exit_code == 0 {
         RunStatus::Pass
     } else {
@@ -515,6 +519,72 @@ mod tests {
             assert_eq!(run.component_id.as_deref(), Some("homeboy"));
             assert_eq!(run.metadata_json["changed_since"], "origin/main");
             assert_eq!(run.metadata_json["observation_status"], "error");
+        });
+    }
+
+    #[test]
+    fn audit_observation_finish_persists_findings() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let args = sample_args();
+            let observation =
+                start_audit_observation("homeboy", &home.path().to_string_lossy(), &args)
+                    .expect("observation should start");
+            let run_id = observation.audit_run.id.clone();
+            let finding = code_audit::Finding {
+                convention: "command modules".to_string(),
+                severity: code_audit::Severity::Warning,
+                file: "src/commands/foo.rs".to_string(),
+                description: "Missing run function".to_string(),
+                suggestion: "Add run()".to_string(),
+                kind: code_audit::AuditFinding::MissingMethod,
+            };
+            let workflow = code_audit::AuditRunWorkflowResult {
+                output: AuditCommandOutput::Full {
+                    passed: false,
+                    result: code_audit::CodeAuditResult {
+                        component_id: "homeboy".to_string(),
+                        source_path: home.path().to_string_lossy().to_string(),
+                        summary: code_audit::AuditSummary {
+                            files_scanned: 1,
+                            conventions_detected: 1,
+                            outliers_found: 1,
+                            alignment_score: Some(0.5),
+                            files_skipped: 0,
+                            warnings: vec![],
+                        },
+                        conventions: vec![],
+                        directory_conventions: vec![],
+                        findings: vec![finding.clone()],
+                        duplicate_groups: vec![],
+                    },
+                    fixability: None,
+                },
+                exit_code: 1,
+                findings: vec![finding],
+            };
+
+            finish_audit_observation(Some(observation), &workflow);
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let findings = store
+                .list_findings(homeboy::observation::FindingListFilter {
+                    run_id: Some(run_id),
+                    tool: Some("audit".to_string()),
+                    ..homeboy::observation::FindingListFilter::default()
+                })
+                .expect("list findings");
+
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].rule.as_deref(), Some("missing_method"));
+            assert_eq!(
+                findings[0].fingerprint.as_deref(),
+                Some("src/commands/foo.rs:missing_method:command modules:Missing run function")
+            );
+            assert_eq!(
+                findings[0].metadata_json["source_sidecar"],
+                "audit-findings"
+            );
         });
     }
 
