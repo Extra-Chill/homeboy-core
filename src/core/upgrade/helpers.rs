@@ -272,48 +272,37 @@ fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
         extension_ids.len()
     );
 
-    let result = extension::update_all(false);
-    let updated = result
-        .updated
-        .into_iter()
-        .map(|entry| {
-            if entry.old_version != entry.new_version {
-                log_status!(
-                    "upgrade",
-                    "  {} {} → {}",
-                    entry.extension_id,
-                    entry.old_version,
-                    entry.new_version
-                );
-            } else {
-                log_status!(
-                    "upgrade",
-                    "  {} {} (up to date)",
-                    entry.extension_id,
-                    entry.new_version
-                );
-            }
+    let mut updated = Vec::new();
+    let mut skipped = Vec::new();
 
-            ExtensionUpgradeEntry {
-                extension_id: entry.extension_id,
-                old_version: entry.old_version,
-                new_version: entry.new_version,
-            }
-        })
-        .collect::<Vec<_>>();
+    for id in &extension_ids {
+        let old_version = extension::load_extension(id)
+            .ok()
+            .map(|m| m.version.clone())
+            .unwrap_or_default();
 
-    let skipped = result.skipped;
-    for id in &skipped {
-        if let Ok(extension_dir) = crate::paths::extension(id) {
-            if crate::extension::is_extension_linked(id) {
-                log_status!(
-                    "upgrade",
-                    "  {} skipped: linked source repo update failed for {}",
-                    id,
-                    extension_dir.display()
-                );
-            } else {
-                log_status!("upgrade", "  {} skipped: update failed", id);
+        match extension::update(id, false) {
+            Ok(_) => {
+                let new_version = extension::load_extension(id)
+                    .ok()
+                    .map(|m| m.version.clone())
+                    .unwrap_or_default();
+
+                if old_version != new_version {
+                    log_status!("upgrade", "  {} {} → {}", id, old_version, new_version);
+                } else {
+                    log_status!("upgrade", "  {} {} (up to date)", id, new_version);
+                }
+
+                updated.push(ExtensionUpgradeEntry {
+                    extension_id: id.clone(),
+                    old_version,
+                    new_version,
+                });
+            }
+            Err(e) => {
+                log_status!("upgrade", "  {} skipped: {}", id, e.message);
+                skipped.push(id.clone());
             }
         }
     }
