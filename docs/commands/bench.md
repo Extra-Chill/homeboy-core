@@ -136,6 +136,28 @@ Supported operators are `eq`, `gte`, and `lte`:
 Failed gates add `gate_results`, set the scenario's `passed` field to
 `false`, and add top-level `gate_failures` to the bench output.
 
+Rigs can also declare gates for scenario metrics when the workload output is
+owned elsewhere. The keys under `metric_gates` are exact scenario ids:
+
+```json
+{
+  "bench": {
+    "default_component": "studio",
+    "metric_gates": {
+      "wordpress-is-dead": {
+        "native_block_quality_pass": { "equals": 1 },
+        "tool_error_count": { "equals": 0 },
+        "success_rate": { "equals": 1 }
+      }
+    }
+  }
+}
+```
+
+Rig-declared metric gates are merged with workload-emitted `gates` before
+Homeboy evaluates scenario status. Supported rig operators are `equals`, `gte`,
+and `lte`.
+
 ## Examples
 
 ```bash

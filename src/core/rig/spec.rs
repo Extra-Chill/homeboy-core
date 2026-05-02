@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::component::ScopedExtensionConfig;
+use crate::extension::bench::{BenchGate, BenchGateOp};
 
 /// A rig: components + services + pipelines.
 ///
@@ -229,6 +230,52 @@ pub struct BenchSpec {
     /// can emit supplemental pairwise diffs grouped by the non-varying axes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub axes: BTreeMap<String, String>,
+
+    /// Scenario-level metric gates declared by the rig. Keys are bench
+    /// scenario ids; values map metric names to pass/fail conditions.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metric_gates: BTreeMap<String, BTreeMap<String, BenchMetricGateCondition>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BenchMetricGateCondition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equals: Option<f64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gte: Option<f64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lte: Option<f64>,
+}
+
+impl BenchMetricGateCondition {
+    pub fn to_gates(&self, metric: &str) -> Vec<BenchGate> {
+        let mut gates = Vec::new();
+        if let Some(value) = self.equals {
+            gates.push(BenchGate {
+                metric: metric.to_string(),
+                op: BenchGateOp::Eq,
+                value,
+            });
+        }
+        if let Some(value) = self.gte {
+            gates.push(BenchGate {
+                metric: metric.to_string(),
+                op: BenchGateOp::Gte,
+                value,
+            });
+        }
+        if let Some(value) = self.lte {
+            gates.push(BenchGate {
+                metric: metric.to_string(),
+                op: BenchGateOp::Lte,
+                value,
+            });
+        }
+        gates
+    }
 }
 
 /// Rig-owned extension workload declaration.
@@ -304,6 +351,85 @@ impl WorkloadSpec {
             WorkloadSpec::Path(_) => None,
             WorkloadSpec::Detailed(entry) => Some(&entry.trace_variants),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_gates() {
+        let condition = BenchMetricGateCondition {
+            equals: Some(1.0),
+            gte: Some(0.5),
+            lte: Some(2.0),
+        };
+
+        let gates = condition.to_gates("native_block_quality_pass");
+
+        assert_eq!(gates.len(), 3);
+        assert!(gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == BenchGateOp::Eq
+                && gate.value == 1.0
+        }));
+        assert!(gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == BenchGateOp::Gte
+                && gate.value == 0.5
+        }));
+        assert!(gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == BenchGateOp::Lte
+                && gate.value == 2.0
+        }));
+        assert!(BenchMetricGateCondition {
+            equals: None,
+            gte: None,
+            lte: None,
+        }
+        .to_gates("metric")
+        .is_empty());
+    }
+
+    #[test]
+    fn test_trace_phase_preset() {
+        let workload = WorkloadSpec::Detailed(WorkloadEntry {
+            path: "trace.mjs".to_string(),
+            check_groups: None,
+            trace_phase_presets: HashMap::from([(
+                "startup".to_string(),
+                vec!["launch".to_string(), "ready".to_string()],
+            )]),
+            trace_default_phase_preset: None,
+        });
+
+        assert_eq!(workload.trace_phase_preset("missing"), None);
+        assert_eq!(
+            workload.trace_phase_preset("startup"),
+            Some(["launch".to_string(), "ready".to_string()].as_slice())
+        );
+        assert_eq!(
+            WorkloadSpec::Path("trace.mjs".to_string()).trace_phase_preset("startup"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_trace_default_phase_preset() {
+        let workload = WorkloadSpec::Detailed(WorkloadEntry {
+            path: "trace.mjs".to_string(),
+            check_groups: None,
+            trace_phase_presets: HashMap::new(),
+            trace_default_phase_preset: Some("startup".to_string()),
+        });
+
+        assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
+        assert_eq!(
+            WorkloadSpec::Path("trace.mjs".to_string()).trace_default_phase_preset(),
+            None
+        );
     }
 }
 
