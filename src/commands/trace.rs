@@ -26,6 +26,7 @@ mod experiment;
 mod guardrails;
 mod matrix;
 mod metadata;
+mod observations;
 mod output;
 mod schedule;
 #[cfg(test)]
@@ -39,6 +40,7 @@ use experiment::{
 };
 use guardrails::run_trace_guardrails_for_args;
 use metadata::trace_span_metadata_for_args;
+use observations::record_trace_artifacts;
 
 use output::{
     aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
@@ -1452,44 +1454,15 @@ fn trace_run_finish_metadata(
     })
 }
 
-fn record_trace_artifacts(
-    store: &ObservationStore,
-    run_id: &str,
-    run_dir: &RunDir,
-    results: Option<&extension_trace::TraceResults>,
-) {
-    let trace_results_path = run_dir.step_file(homeboy::engine::run_dir::files::TRACE_RESULTS);
-    record_artifact_if_file(store, run_id, "trace-results", &trace_results_path);
-    if let Some(results) = results {
-        for artifact in &results.artifacts {
-            let path = PathBuf::from(&artifact.path);
-            let resolved = if path.is_absolute() {
-                path
-            } else {
-                run_dir.path().join(path)
-            };
-            record_artifact_if_file(store, run_id, "trace-artifact", &resolved);
-        }
-    }
-}
-
-fn record_artifact_if_file(store: &ObservationStore, run_id: &str, kind: &str, path: &Path) {
-    if path.is_file() {
-        let _ = store.record_artifact(run_id, kind, path);
-    }
-}
-
 #[cfg(test)]
 mod compare_tests;
-
 #[cfg(test)]
 mod compare_variant_tests;
-
 #[cfg(test)]
 mod experiment_tests;
-
 #[cfg(test)]
-mod tests;
-
+mod guardrail_tests;
 #[cfg(test)]
 mod output_tests;
+#[cfg(test)]
+mod tests;
