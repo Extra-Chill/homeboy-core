@@ -6,8 +6,8 @@ use homeboy::Error;
 
 use crate::commands::{
     runs::{
-        require_latest_run, run_filter_from_latest_args, run_summary, RunsLatestFindingOutput,
-        RunsLatestRunArgs, RunsOutput,
+        latest::require_latest_run, latest::run_filter_from_latest_args,
+        latest::RunsLatestFindingOutput, latest::RunsLatestRunArgs, run_summary, RunsOutput,
     },
     CmdResult,
 };

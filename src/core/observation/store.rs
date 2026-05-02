@@ -1213,6 +1213,28 @@ mod api_coverage_tests {
     }
 
     #[test]
+    fn test_latest_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let old = store.start_run(new_run("lint")).expect("old");
+            let latest = store.start_run(new_run("lint")).expect("latest");
+
+            let selected = store
+                .latest_run(RunListFilter {
+                    kind: Some("lint".to_string()),
+                    component_id: Some("homeboy".to_string()),
+                    ..RunListFilter::default()
+                })
+                .expect("latest run")
+                .expect("run exists");
+
+            assert_eq!(selected.id, latest.id);
+            assert_ne!(selected.id, old.id);
+        });
+    }
+
+    #[test]
     fn test_list_runs_started_since() {
         with_isolated_home(|_| {
             let _xdg = XdgGuard::unset();

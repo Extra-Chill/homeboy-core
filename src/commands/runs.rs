@@ -1,5 +1,6 @@
 mod bundle;
 mod findings;
+mod latest;
 mod reconcile;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -8,9 +9,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
 
-use homeboy::observation::{
-    ArtifactRecord, FindingRecord, ObservationStore, RunListFilter, RunRecord,
-};
+use homeboy::observation::{ArtifactRecord, ObservationStore, RunListFilter, RunRecord};
 use homeboy::Error;
 
 use super::{CmdResult, GlobalArgs};
@@ -19,6 +18,7 @@ use bundle::{
     RunsExportArgs, RunsImportArgs,
 };
 use findings::{RunsFindingOutput, RunsFindingsOutput};
+use latest::{RunsLatestFindingOutput, RunsLatestRunArgs, RunsLatestRunOutput};
 use reconcile::{reconcile_runs, RunsReconcileArgs, RunsReconcileOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
@@ -72,22 +72,6 @@ pub struct RunsListArgs {
     pub limit: i64,
 }
 
-#[derive(Args, Clone, Default)]
-pub struct RunsLatestRunArgs {
-    /// Run kind: bench, rig, trace, etc.
-    #[arg(long)]
-    pub kind: Option<String>,
-    /// Component ID
-    #[arg(long = "component")]
-    pub component_id: Option<String>,
-    /// Rig ID
-    #[arg(long)]
-    pub rig: Option<String>,
-    /// Run status
-    #[arg(long)]
-    pub status: Option<String>,
-}
-
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum RunsOutput {
@@ -115,19 +99,6 @@ pub struct RunsListOutput {
 pub struct RunsShowOutput {
     pub command: &'static str,
     pub run: RunDetail,
-}
-
-#[derive(Serialize)]
-pub struct RunsLatestRunOutput {
-    pub command: &'static str,
-    pub run: RunSummary,
-}
-
-#[derive(Serialize)]
-pub struct RunsLatestFindingOutput {
-    pub command: &'static str,
-    pub run: RunSummary,
-    pub finding: FindingRecord,
 }
 
 #[derive(Serialize)]
@@ -219,7 +190,7 @@ pub struct BenchMissingMetric {
 pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
     match args.command {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
-        RunsCommand::LatestRun(args) => latest_run(args),
+        RunsCommand::LatestRun(args) => latest::latest_run(args),
         RunsCommand::Reconcile(args) => reconcile_runs(args),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
@@ -229,19 +200,6 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
     }
-}
-
-pub fn latest_run(args: RunsLatestRunArgs) -> CmdResult<RunsOutput> {
-    let store = ObservationStore::open_initialized()?;
-    let run = require_latest_run(&store, run_filter_from_latest_args(args))?;
-
-    Ok((
-        RunsOutput::LatestRun(RunsLatestRunOutput {
-            command: "runs.latest-run",
-            run: run_summary(run),
-        }),
-        0,
-    ))
 }
 
 pub fn list_runs(args: RunsListArgs, command: &'static str) -> CmdResult<RunsOutput> {
@@ -271,30 +229,6 @@ fn show_run(run_id: &str) -> CmdResult<RunsOutput> {
         }),
         0,
     ))
-}
-
-pub(crate) fn require_latest_run(
-    store: &ObservationStore,
-    filter: RunListFilter,
-) -> homeboy::Result<RunRecord> {
-    store.latest_run(filter)?.ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "filter",
-            "no observation run matched the provided filters",
-            None,
-            None,
-        )
-    })
-}
-
-pub(crate) fn run_filter_from_latest_args(args: RunsLatestRunArgs) -> RunListFilter {
-    RunListFilter {
-        kind: args.kind,
-        component_id: args.component_id,
-        status: args.status,
-        rig_id: args.rig,
-        limit: Some(1),
-    }
 }
 
 pub fn artifacts(run_id: &str) -> CmdResult<RunsOutput> {
@@ -746,7 +680,7 @@ mod tests {
                 .finish_run(&latest.id, RunStatus::Fail, None)
                 .expect("finish latest");
 
-            let (output, _) = latest_run(RunsLatestRunArgs {
+            let (output, _) = latest::latest_run(latest::RunsLatestRunArgs {
                 kind: Some("lint".to_string()),
                 component_id: Some("homeboy".to_string()),
                 rig: Some("studio".to_string()),

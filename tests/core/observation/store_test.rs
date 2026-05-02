@@ -311,7 +311,7 @@ fn test_list_runs() {
 }
 
 #[test]
-fn test_latest_run_uses_filters_and_deterministic_tie_break() {
+fn test_latest_run() {
     with_isolated_home(|_home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("init store");
