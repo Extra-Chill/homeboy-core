@@ -1,6 +1,6 @@
 //! Trace workflows: invoke extension runners, parse JSON, preserve artifacts.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -113,6 +113,7 @@ fn run_trace_workflow_with_context(
     } else {
         Some(TraceOverlayLock::acquire(
             Path::new(component_path),
+            &args.overlays,
             run_dir,
         )?)
     };
@@ -397,28 +398,44 @@ struct TraceOverlayLock {
     path: PathBuf,
 }
 
-#[derive(Debug, Serialize)]
-struct TraceOverlayLockHolder {
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TraceOverlayLockHolder {
     pid: u32,
     component_path: String,
     run_dir: String,
     acquired_at: String,
     command: String,
+    #[serde(default)]
+    overlay_paths: Vec<String>,
+    #[serde(default)]
+    touched_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TraceOverlayLockRecord {
+    pub lock_path: String,
+    pub status: TraceOverlayLockStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holder: Option<TraceOverlayLockHolder>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceOverlayLockStatus {
+    Active,
+    Stale,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TraceOverlayLockCleanupResult {
+    pub removed: Vec<TraceOverlayLockRecord>,
+    pub kept: Vec<TraceOverlayLockRecord>,
 }
 
 impl TraceOverlayLock {
-    fn acquire(component_path: &Path, run_dir: &RunDir) -> Result<Self> {
-        let lock_dir = paths::homeboy_data()?.join("trace-overlay-locks");
-        fs::create_dir_all(&lock_dir).map_err(|e| {
-            Error::internal_io(
-                format!(
-                    "Failed to create trace overlay lock dir {}: {}",
-                    lock_dir.display(),
-                    e
-                ),
-                Some("trace.overlay.lock.create_dir".to_string()),
-            )
-        })?;
+    fn acquire(component_path: &Path, overlay_paths: &[String], run_dir: &RunDir) -> Result<Self> {
+        let lock_dir = trace_overlay_lock_dir()?;
 
         let normalized_component_path = normalize_component_path(component_path);
         let path = lock_dir.join(format!(
@@ -428,12 +445,18 @@ impl TraceOverlayLock {
 
         match fs::create_dir(&path) {
             Ok(()) => {
+                let touched_files = trace_overlay_touched_files_for_paths(
+                    &normalized_component_path,
+                    overlay_paths,
+                )?;
                 let holder = TraceOverlayLockHolder {
                     pid: std::process::id(),
                     component_path: normalized_component_path.to_string_lossy().to_string(),
                     run_dir: run_dir.path().to_string_lossy().to_string(),
                     acquired_at: chrono::Utc::now().to_rfc3339(),
                     command: std::env::args().collect::<Vec<_>>().join(" "),
+                    overlay_paths: overlay_paths.to_vec(),
+                    touched_files,
                 };
                 let holder_path = path.join("holder.json");
                 if let Err(error) = write_trace_overlay_lock_holder(&holder_path, &holder) {
@@ -443,11 +466,12 @@ impl TraceOverlayLock {
                 Ok(Self { path })
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let holder = read_trace_overlay_lock_holder(&path);
                 Err(trace_overlay_lock_error(
                     &normalized_component_path,
                     &path,
                     run_dir,
-                    read_trace_overlay_lock_holder(&path),
+                    holder,
                 ))
             }
             Err(e) => Err(Error::internal_io(
@@ -460,6 +484,129 @@ impl TraceOverlayLock {
             )),
         }
     }
+}
+
+pub fn list_trace_overlay_locks() -> Result<Vec<TraceOverlayLockRecord>> {
+    let lock_dir = trace_overlay_lock_dir()?;
+    let entries = fs::read_dir(&lock_dir).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to read trace overlay lock dir {}: {}",
+                lock_dir.display(),
+                e
+            ),
+            Some("trace.overlay.lock.read_dir".to_string()),
+        )
+    })?;
+    let mut records = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(
+                format!("Failed to read trace overlay lock entry: {e}"),
+                Some("trace.overlay.lock.read_entry".to_string()),
+            )
+        })?;
+        let path = entry.path();
+        if !path.is_dir() || path.extension().and_then(|ext| ext.to_str()) != Some("lock") {
+            continue;
+        }
+        records.push(read_trace_overlay_lock_record(&path));
+    }
+    records.sort_by(|a, b| a.lock_path.cmp(&b.lock_path));
+    Ok(records)
+}
+
+pub fn cleanup_stale_trace_overlay_locks(force: bool) -> Result<TraceOverlayLockCleanupResult> {
+    let locks = list_trace_overlay_locks()?;
+    let mut removed = Vec::new();
+    let mut kept = Vec::new();
+    for lock in locks {
+        if lock.status != TraceOverlayLockStatus::Stale {
+            kept.push(lock);
+            continue;
+        }
+        if !force {
+            ensure_trace_overlay_lock_touched_files_clean(&lock)?;
+        }
+        fs::remove_dir_all(&lock.lock_path).map_err(|e| {
+            Error::internal_io(
+                format!(
+                    "Failed to remove stale trace overlay lock {}: {}",
+                    lock.lock_path, e
+                ),
+                Some("trace.overlay.lock.cleanup".to_string()),
+            )
+        })?;
+        removed.push(lock);
+    }
+    Ok(TraceOverlayLockCleanupResult { removed, kept })
+}
+
+fn trace_overlay_lock_dir() -> Result<PathBuf> {
+    let lock_dir = paths::homeboy_data()?.join("trace-overlay-locks");
+    fs::create_dir_all(&lock_dir).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to create trace overlay lock dir {}: {}",
+                lock_dir.display(),
+                e
+            ),
+            Some("trace.overlay.lock.create_dir".to_string()),
+        )
+    })?;
+    Ok(lock_dir)
+}
+
+fn read_trace_overlay_lock_record(lock_path: &Path) -> TraceOverlayLockRecord {
+    let holder = read_trace_overlay_lock_holder(lock_path);
+    let status = holder
+        .as_ref()
+        .map(trace_overlay_lock_status)
+        .unwrap_or(TraceOverlayLockStatus::Unknown);
+    TraceOverlayLockRecord {
+        lock_path: lock_path.to_string_lossy().to_string(),
+        status,
+        holder,
+    }
+}
+
+fn trace_overlay_lock_status(holder: &TraceOverlayLockHolder) -> TraceOverlayLockStatus {
+    if process_is_alive(holder.pid) {
+        TraceOverlayLockStatus::Active
+    } else {
+        TraceOverlayLockStatus::Stale
+    }
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    unsafe {
+        if libc::kill(pid as libc::pid_t, 0) == 0 {
+            return true;
+        }
+        last_errno() == libc::EPERM
+    }
+}
+
+#[cfg(all(unix, any(target_os = "linux", target_os = "android")))]
+unsafe fn last_errno() -> i32 {
+    unsafe { *libc::__errno_location() }
+}
+
+#[cfg(all(
+    unix,
+    any(target_os = "macos", target_os = "ios", target_os = "freebsd")
+))]
+unsafe fn last_errno() -> i32 {
+    unsafe { *libc::__error() }
+}
+
+#[cfg(not(unix))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
 }
 
 impl Drop for TraceOverlayLock {
@@ -499,7 +646,7 @@ fn write_trace_overlay_lock_holder(path: &Path, holder: &TraceOverlayLockHolder)
     })
 }
 
-fn read_trace_overlay_lock_holder(lock_path: &Path) -> Option<serde_json::Value> {
+fn read_trace_overlay_lock_holder(lock_path: &Path) -> Option<TraceOverlayLockHolder> {
     let holder_path = lock_path.join("holder.json");
     let content = fs::read_to_string(holder_path).ok()?;
     serde_json::from_str(&content).ok()
@@ -509,43 +656,116 @@ fn trace_overlay_lock_error(
     component_path: &Path,
     lock_path: &Path,
     run_dir: &RunDir,
-    holder: Option<serde_json::Value>,
+    holder: Option<TraceOverlayLockHolder>,
 ) -> Error {
     let holder_summary = holder
         .as_ref()
         .and_then(trace_overlay_holder_summary)
         .unwrap_or_else(|| "unavailable".to_string());
-    Error::new(
-        ErrorCode::ValidationInvalidArgument,
-        format!(
+    let status = holder
+        .as_ref()
+        .map(trace_overlay_lock_status)
+        .unwrap_or(TraceOverlayLockStatus::Unknown);
+    let status_label = match status {
+        TraceOverlayLockStatus::Active => "active",
+        TraceOverlayLockStatus::Stale => "stale",
+        TraceOverlayLockStatus::Unknown => "unknown",
+    };
+    let message = match status {
+        TraceOverlayLockStatus::Stale => format!(
+            "Trace overlay lock is stale for component path {}. Lock path: {}. Dead holder: {}. Current run directory: {}",
+            component_path.display(),
+            lock_path.display(),
+            holder_summary,
+            run_dir.path().display()
+        ),
+        _ => format!(
             "Trace overlay already active for component path {}. Lock path: {}. Active holder: {}. Current run directory: {}",
             component_path.display(),
             lock_path.display(),
             holder_summary,
             run_dir.path().display()
         ),
+    };
+    Error::new(
+        ErrorCode::ValidationInvalidArgument,
+        message,
         serde_json::json!({
             "field": "--overlay",
             "component_path": component_path.to_string_lossy(),
             "lock_path": lock_path.to_string_lossy(),
             "run_dir": run_dir.path().to_string_lossy(),
-            "active_holder": holder,
+            "lock_status": status_label,
+            "holder": holder,
         }),
+    )
+    .with_hint("Inspect locks: homeboy trace overlay-locks list")
+    .with_hint(
+        "Remove stale locks after safety checks: homeboy trace overlay-locks cleanup --stale",
     )
 }
 
-fn trace_overlay_holder_summary(holder: &serde_json::Value) -> Option<String> {
-    let pid = holder.get("pid").and_then(|value| value.as_u64())?;
-    let run_dir = holder.get("run_dir").and_then(|value| value.as_str());
-    let acquired_at = holder.get("acquired_at").and_then(|value| value.as_str());
-    Some(match (run_dir, acquired_at) {
-        (Some(run_dir), Some(acquired_at)) => {
-            format!("pid {pid}, run directory {run_dir}, acquired at {acquired_at}")
+fn trace_overlay_holder_summary(holder: &TraceOverlayLockHolder) -> Option<String> {
+    let pid = holder.pid;
+    Some(
+        match (
+            Some(holder.run_dir.as_str()),
+            Some(holder.acquired_at.as_str()),
+        ) {
+            (Some(run_dir), Some(acquired_at)) => {
+                format!("pid {pid}, run directory {run_dir}, acquired at {acquired_at}")
+            }
+            (Some(run_dir), None) => format!("pid {pid}, run directory {run_dir}"),
+            (None, Some(acquired_at)) => format!("pid {pid}, acquired at {acquired_at}"),
+            (None, None) => format!("pid {pid}"),
+        },
+    )
+}
+
+fn trace_overlay_touched_files_for_paths(
+    component_path: &Path,
+    overlay_paths: &[String],
+) -> Result<Vec<String>> {
+    let mut touched_files = Vec::new();
+    for overlay_path in overlay_paths {
+        for touched_file in overlay_touched_files(component_path, Path::new(overlay_path))? {
+            if !touched_files.contains(&touched_file) {
+                touched_files.push(touched_file);
+            }
         }
-        (Some(run_dir), None) => format!("pid {pid}, run directory {run_dir}"),
-        (None, Some(acquired_at)) => format!("pid {pid}, acquired at {acquired_at}"),
-        (None, None) => format!("pid {pid}"),
-    })
+    }
+    Ok(touched_files)
+}
+
+fn ensure_trace_overlay_lock_touched_files_clean(lock: &TraceOverlayLockRecord) -> Result<()> {
+    let Some(holder) = &lock.holder else {
+        return Err(Error::validation_invalid_argument(
+            "--stale",
+            format!(
+                "trace overlay lock {} has no holder metadata; pass --force to remove it",
+                lock.lock_path
+            ),
+            None,
+            None,
+        ));
+    };
+    if holder.touched_files.is_empty() {
+        return Ok(());
+    }
+    let component_path = Path::new(&holder.component_path);
+    let dirty = trace_overlay_dirty_files(component_path, &holder.touched_files, &lock.lock_path)?;
+    if dirty.trim().is_empty() {
+        return Ok(());
+    }
+    Err(Error::validation_invalid_argument(
+        "--stale",
+        format!(
+            "stale trace overlay lock {} touches dirty files; pass --force to remove the lock anyway",
+            lock.lock_path
+        ),
+        Some(dirty),
+        None,
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -711,6 +931,36 @@ fn ensure_overlay_targets_clean(
         ));
     }
     Ok(())
+}
+
+fn trace_overlay_dirty_files(
+    component_path: &Path,
+    touched_files: &[String],
+    context_path: &str,
+) -> Result<String> {
+    let mut command = Command::new("git");
+    command
+        .args(["status", "--porcelain=v1", "--"])
+        .args(touched_files)
+        .current_dir(component_path);
+    let output = command.output().map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to check trace overlay target status for {}: {}",
+                context_path, e
+            ),
+            Some("trace.overlay.status".to_string()),
+        )
+    })?;
+    if !output.status.success() {
+        return Err(Error::validation_invalid_argument(
+            "--overlay",
+            format!("failed to check overlay target status for {}", context_path),
+            Some(String::from_utf8_lossy(&output.stderr).to_string()),
+            None,
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn run_git_apply(component_path: &Path, patch_path: &Path, reverse: bool) -> Result<()> {
@@ -1015,7 +1265,7 @@ JSON
             let lock_path;
 
             {
-                let lock = TraceOverlayLock::acquire(component_dir.path(), &run_dir).unwrap();
+                let lock = TraceOverlayLock::acquire(component_dir.path(), &[], &run_dir).unwrap();
                 lock_path = lock.path.clone();
                 assert!(lock_path.exists());
                 assert!(lock_path.join("holder.json").exists());
@@ -1032,9 +1282,11 @@ JSON
             let component_dir = tempfile::tempdir().unwrap();
             let first_run_dir = RunDir::create().unwrap();
             let second_run_dir = RunDir::create().unwrap();
-            let lock = TraceOverlayLock::acquire(component_dir.path(), &first_run_dir).unwrap();
+            let lock =
+                TraceOverlayLock::acquire(component_dir.path(), &[], &first_run_dir).unwrap();
 
-            let err = TraceOverlayLock::acquire(component_dir.path(), &second_run_dir).unwrap_err();
+            let err =
+                TraceOverlayLock::acquire(component_dir.path(), &[], &second_run_dir).unwrap_err();
 
             assert!(err.message.contains("Trace overlay already active"));
             assert!(err
@@ -1059,6 +1311,7 @@ JSON
                 err.details["lock_path"].as_str(),
                 Some(lock.path.to_str().unwrap())
             );
+            assert_eq!(err.details["lock_status"].as_str(), Some("active"));
 
             drop(lock);
             first_run_dir.cleanup();
@@ -1125,6 +1378,57 @@ JSON
             );
             assert!(!lock_path.exists());
             run_dir.cleanup();
+        });
+    }
+
+    #[test]
+    fn trace_overlay_locks_list_reports_active_holder() {
+        with_isolated_home(|_| {
+            let component_dir = tempfile::tempdir().unwrap();
+            let run_dir = RunDir::create().unwrap();
+            let lock = TraceOverlayLock::acquire(component_dir.path(), &[], &run_dir).unwrap();
+
+            let locks = list_trace_overlay_locks().unwrap();
+
+            assert_eq!(locks.len(), 1);
+            assert_eq!(locks[0].status, TraceOverlayLockStatus::Active);
+            assert_eq!(locks[0].lock_path, lock.path.to_string_lossy());
+            assert_eq!(locks[0].holder.as_ref().unwrap().pid, std::process::id());
+
+            drop(lock);
+            run_dir.cleanup();
+        });
+    }
+
+    #[test]
+    fn trace_overlay_locks_cleanup_removes_dead_holder_with_clean_checkout() {
+        with_isolated_home(|_| {
+            let fixture = overlay_fixture(false);
+            let lock_path = write_test_overlay_lock(&fixture.component_dir, dead_test_pid());
+
+            let result = cleanup_stale_trace_overlay_locks(false).unwrap();
+
+            assert_eq!(result.removed.len(), 1);
+            assert_eq!(result.removed[0].status, TraceOverlayLockStatus::Stale);
+            assert!(!lock_path.exists());
+        });
+    }
+
+    #[test]
+    fn trace_overlay_locks_cleanup_refuses_dead_holder_with_dirty_checkout() {
+        with_isolated_home(|_| {
+            let fixture = overlay_fixture(false);
+            let lock_path = write_test_overlay_lock(&fixture.component_dir, dead_test_pid());
+            fs::write(fixture.component_dir.join("scenario.txt"), "dirty\n").unwrap();
+
+            let err = cleanup_stale_trace_overlay_locks(false).unwrap_err();
+
+            assert!(err.message.contains("touches dirty files"));
+            assert!(lock_path.exists());
+
+            let forced = cleanup_stale_trace_overlay_locks(true).unwrap();
+            assert_eq!(forced.removed.len(), 1);
+            assert!(!lock_path.exists());
         });
     }
 
@@ -1262,6 +1566,28 @@ exit 7
             args,
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn write_test_overlay_lock(component_dir: &std::path::Path, pid: u32) -> std::path::PathBuf {
+        let component_path = normalize_component_path(component_dir);
+        let lock_dir = trace_overlay_lock_dir().unwrap();
+        let lock_path = lock_dir.join(format!("{}.lock", trace_overlay_lock_id(&component_path)));
+        fs::create_dir_all(&lock_path).unwrap();
+        let holder = TraceOverlayLockHolder {
+            pid,
+            component_path: component_path.to_string_lossy().to_string(),
+            run_dir: component_dir.join("run").to_string_lossy().to_string(),
+            acquired_at: "2026-05-02T00:00:00Z".to_string(),
+            command: "homeboy trace example overlay --overlay overlay.patch".to_string(),
+            overlay_paths: vec!["overlay.patch".to_string()],
+            touched_files: vec!["scenario.txt".to_string()],
+        };
+        write_trace_overlay_lock_holder(&lock_path.join("holder.json"), &holder).unwrap();
+        lock_path
+    }
+
+    fn dead_test_pid() -> u32 {
+        999_999
     }
 
     fn component_with_extension(id: &str, path: &std::path::Path) -> Component {

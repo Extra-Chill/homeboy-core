@@ -31,7 +31,7 @@ pub(super) struct TraceAggregateSpanInput {
 }
 
 pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
-    let before_path = PathBuf::from(&args.scenario);
+    let before_path = PathBuf::from(super::required_trace_scenario(&args)?);
     let Some(after_path) = args.compare_after else {
         return Err(homeboy::Error::validation_invalid_argument(
             "AFTER_JSON",

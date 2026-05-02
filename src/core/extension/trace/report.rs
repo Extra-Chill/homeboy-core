@@ -6,7 +6,7 @@ use super::baseline::TraceBaselineComparison;
 use super::parsing::{
     TraceArtifact, TraceAssertionStatus, TraceList, TraceResults, TraceSpanStatus,
 };
-use super::run::{TraceOverlay, TraceRunWorkflowResult};
+use super::run::{TraceOverlay, TraceOverlayLockRecord, TraceRunWorkflowResult};
 use crate::rig::RigStateSnapshot;
 
 #[derive(Serialize)]
@@ -17,6 +17,7 @@ pub enum TraceCommandOutput {
     Aggregate(TraceAggregateOutput),
     Compare(TraceCompareOutput),
     List(TraceListOutput),
+    OverlayLocks(TraceOverlayLocksOutput),
 }
 
 #[derive(Serialize)]
@@ -70,6 +71,16 @@ pub struct TraceListOutput {
     pub component_id: String,
     pub count: usize,
     pub scenarios: Vec<super::parsing::TraceScenario>,
+}
+
+#[derive(Serialize)]
+pub struct TraceOverlayLocksOutput {
+    pub command: &'static str,
+    pub count: usize,
+    pub active_count: usize,
+    pub stale_count: usize,
+    pub unknown_count: usize,
+    pub locks: Vec<TraceOverlayLockRecord>,
 }
 
 #[derive(Serialize, Clone)]
