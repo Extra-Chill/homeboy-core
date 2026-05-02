@@ -428,6 +428,9 @@ fn run_compare_variant(mut args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     args.json_summary = false;
     args.report = None;
     args.compare_after = None;
+    let focus_spans = args.focus_spans.clone();
+    let regression_threshold = args.regression_threshold;
+    let regression_min_delta_ms = args.regression_min_delta_ms;
 
     let mut baseline_args = args.clone();
     baseline_args.overlays.clear();
@@ -449,9 +452,9 @@ fn run_compare_variant(mut args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         aggregate_to_compare_input(&baseline),
         &variant_path,
         aggregate_to_compare_input(&variant),
-        &args.focus_spans,
-        args.regression_threshold,
-        args.regression_min_delta_ms,
+        &focus_spans,
+        regression_threshold,
+        regression_min_delta_ms,
     );
     write_trace_compare_variant_json(&compare_path, &compare)?;
     write_trace_compare_variant_summary(&summary_path, &output_dir, &baseline, &variant, &compare)?;
