@@ -684,7 +684,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             TraceCommandOutput::Run(result) => {
                 assert_eq!(result.overlays.len(), 1);
                 let overlay = &result.overlays[0];
-                assert_eq!(overlay.component_id.as_deref(), Some("studio"));
+                assert_eq!(overlay.variant.as_deref(), Some("fresh-install-mode"));
                 assert_eq!(
                     overlay.path,
                     package_dir
@@ -694,7 +694,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
                 );
                 assert_eq!(overlay.touched_files, vec!["scenario.txt"]);
                 let value = serde_json::to_value(&result).expect("result serializes");
-                assert_eq!(value["overlays"][0]["component_id"], "studio");
+                assert_eq!(value["overlays"][0]["variant"], "fresh-install-mode");
                 assert_eq!(
                     value["overlays"][0]["path"],
                     package_dir
