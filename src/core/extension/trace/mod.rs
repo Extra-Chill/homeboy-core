@@ -19,11 +19,11 @@ pub mod spans;
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext};
 
+pub use overlay::TraceOverlayRequest;
 pub use overlay_lock::{cleanup_stale_trace_overlay_locks, list_trace_overlay_locks};
 pub use overlay_lock::{
     TraceOverlayLockCleanupResult, TraceOverlayLockRecord, TraceOverlayLockStatus,
 };
-pub use overlay::TraceOverlayRequest;
 pub use parsing::{parse_trace_list_str, parse_trace_results_file};
 pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,

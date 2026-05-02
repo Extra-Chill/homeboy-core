@@ -1,7 +1,6 @@
 //! Trace overlay application and locking.
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,6 +9,8 @@ use std::process::Command;
 use crate::engine::run_dir::RunDir;
 use crate::error::{Error, ErrorCode, Result};
 use crate::paths;
+
+use super::overlay_lock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceOverlayRequest {
@@ -77,7 +78,7 @@ impl TraceOverlayLock {
         let normalized_component_path = normalize_component_path(component_path);
         let path = lock_dir.join(format!(
             "{}.lock",
-            trace_overlay_lock_id(&normalized_component_path)
+            overlay_lock::trace_overlay_lock_id(&normalized_component_path)
         ));
 
         match fs::create_dir(&path) {
@@ -101,7 +102,8 @@ impl TraceOverlayLock {
                     &normalized_component_path,
                     &path,
                     run_dir,
-                    read_trace_overlay_lock_holder(&path),
+                    overlay_lock::read_trace_overlay_lock_holder(&path)
+                        .and_then(|holder| serde_json::to_value(holder).ok()),
                 ))
             }
             Err(e) => Err(Error::internal_io(
@@ -126,17 +128,6 @@ pub(super) fn normalize_component_path(component_path: &Path) -> PathBuf {
     fs::canonicalize(component_path).unwrap_or_else(|_| component_path.to_path_buf())
 }
 
-pub(super) fn trace_overlay_lock_id(component_path: &Path) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(component_path.to_string_lossy().as_bytes());
-    let digest = hasher.finalize();
-    let hex = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    hex[..24].to_string()
-}
-
 fn write_trace_overlay_lock_holder(path: &Path, holder: &TraceOverlayLockHolder) -> Result<()> {
     let content = serde_json::to_string_pretty(holder).map_err(|e| {
         Error::internal_json(e.to_string(), Some("trace.overlay.lock.holder".to_string()))
@@ -151,12 +142,6 @@ fn write_trace_overlay_lock_holder(path: &Path, holder: &TraceOverlayLockHolder)
             Some("trace.overlay.lock.write_holder".to_string()),
         )
     })
-}
-
-fn read_trace_overlay_lock_holder(lock_path: &Path) -> Option<serde_json::Value> {
-    let holder_path = lock_path.join("holder.json");
-    let content = fs::read_to_string(holder_path).ok()?;
-    serde_json::from_str(&content).ok()
 }
 
 fn trace_overlay_lock_error(
@@ -323,7 +308,10 @@ fn print_trace_overlay(action: &str, patch_path: &Path, touched_files: &[String]
     }
 }
 
-fn overlay_touched_files(component_path: &Path, patch_path: &Path) -> Result<Vec<String>> {
+pub(super) fn overlay_touched_files(
+    component_path: &Path,
+    patch_path: &Path,
+) -> Result<Vec<String>> {
     let output = Command::new("git")
         .args(["apply", "--numstat"])
         .arg(patch_path)
@@ -449,11 +437,9 @@ mod tests {
     use std::fs;
     use std::process::Command;
 
-    use crate::engine::baseline::BaselineFlags;
     use crate::engine::run_dir::RunDir;
     use crate::test_support::with_isolated_home;
 
-    use super::super::run::{TraceRunWorkflowArgs, TraceWorkflowInputs};
     use super::*;
 
     #[test]
@@ -529,6 +515,19 @@ mod tests {
     }
 
     #[test]
+    fn test_overlay_touched_files() {
+        let fixture = overlay_fixture("overlay");
+
+        let touched = overlay_touched_files(
+            &fixture.component_dir,
+            Path::new(&fixture.request.overlay_path),
+        )
+        .unwrap();
+
+        assert_eq!(touched, vec!["scenario.txt"]);
+    }
+
+    #[test]
     fn test_normalize_component_path() {
         let dir = tempfile::tempdir().unwrap();
         let normalized = super::normalize_component_path(dir.path());
@@ -539,49 +538,11 @@ mod tests {
 
     #[test]
     fn test_trace_overlay_lock_id() {
-        let first = super::trace_overlay_lock_id(Path::new("/tmp/component-a"));
-        let second = super::trace_overlay_lock_id(Path::new("/tmp/component-b"));
+        let first = overlay_lock::trace_overlay_lock_id(Path::new("/tmp/component-a"));
+        let second = overlay_lock::trace_overlay_lock_id(Path::new("/tmp/component-b"));
 
         assert_eq!(first.len(), 24);
         assert_ne!(first, second);
-    }
-
-    #[test]
-    fn test_trace_overlay_requests() {
-        let variant_request = TraceOverlayRequest {
-            component_id: Some("secondary".to_string()),
-            component_path: "/tmp/secondary".to_string(),
-            overlay_path: "/tmp/secondary.patch".to_string(),
-        };
-        let args = TraceRunWorkflowArgs {
-            component_label: "primary".to_string(),
-            component_id: "primary".to_string(),
-            path_override: Some("/tmp/primary".to_string()),
-            workflow: TraceWorkflowInputs::default(),
-            scenario_id: "scenario".to_string(),
-            json_summary: false,
-            rig_id: Some("rig".to_string()),
-            overlays: vec!["/tmp/primary.patch".to_string()],
-            variant_overlays: vec![variant_request.clone()],
-            keep_overlay: false,
-            span_definitions: Vec::new(),
-            baseline_flags: BaselineFlags {
-                baseline: false,
-                ignore_baseline: true,
-                ratchet: false,
-            },
-            regression_threshold_percent:
-                super::super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
-            regression_min_delta_ms: super::super::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
-        };
-
-        let requests = super::trace_overlay_requests("/tmp/primary", &args);
-
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0], variant_request);
-        assert_eq!(requests[1].component_id.as_deref(), Some("primary"));
-        assert_eq!(requests[1].component_path, "/tmp/primary");
-        assert_eq!(requests[1].overlay_path, "/tmp/primary.patch");
     }
 
     struct OverlayFixture {

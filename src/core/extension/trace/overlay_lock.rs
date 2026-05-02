@@ -233,11 +233,11 @@ fn process_is_alive(_pid: u32) -> bool {
     true
 }
 
-fn normalize_component_path(component_path: &Path) -> PathBuf {
+pub(super) fn normalize_component_path(component_path: &Path) -> PathBuf {
     fs::canonicalize(component_path).unwrap_or_else(|_| component_path.to_path_buf())
 }
 
-fn trace_overlay_lock_id(component_path: &Path) -> String {
+pub(super) fn trace_overlay_lock_id(component_path: &Path) -> String {
     let mut hasher = Sha256::new();
     hasher.update(component_path.to_string_lossy().as_bytes());
     let digest = hasher.finalize();
@@ -264,7 +264,7 @@ fn write_trace_overlay_lock_holder(path: &Path, holder: &TraceOverlayLockHolder)
     })
 }
 
-fn read_trace_overlay_lock_holder(lock_path: &Path) -> Option<TraceOverlayLockHolder> {
+pub(super) fn read_trace_overlay_lock_holder(lock_path: &Path) -> Option<TraceOverlayLockHolder> {
     let holder_path = lock_path.join("holder.json");
     let content = fs::read_to_string(holder_path).ok()?;
     serde_json::from_str(&content).ok()
@@ -339,7 +339,7 @@ fn trace_overlay_touched_files_for_paths(
     let mut touched_files = Vec::new();
     for overlay_path in overlay_paths {
         for touched_file in
-            super::run::overlay_touched_files(component_path, Path::new(overlay_path))?
+            super::overlay::overlay_touched_files(component_path, Path::new(overlay_path))?
         {
             if !touched_files.contains(&touched_file) {
                 touched_files.push(touched_file);

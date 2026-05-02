@@ -412,10 +412,7 @@ pub fn push_overlay_markdown(out: &mut String, overlays: &[TraceOverlay]) {
     out.push_str("\n## Trace Overlays\n\n");
     for overlay in overlays {
         let status = if overlay.kept { "kept" } else { "reverted" };
-        out.push_str(&format!(
-            "- **Patch:** `{}` (`{}`)\n",
-            overlay.path, status
-        ));
+        out.push_str(&format!("- **Patch:** `{}` (`{}`)\n", overlay.path, status));
         out.push_str(&format!(
             "  - Applied relative to: `{}`\n",
             overlay.component_path
@@ -656,5 +653,4 @@ mod tests {
         assert!(markdown.contains("- `apps/studio/out/app.js`"));
         assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
     }
-
 }

@@ -2,7 +2,6 @@
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
