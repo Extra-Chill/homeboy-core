@@ -6,6 +6,7 @@ pub mod grammar_items;
 mod lifecycle;
 pub mod lint;
 mod manifest;
+mod repair;
 mod runner;
 mod runner_contract;
 mod runtime_helper;
@@ -56,9 +57,10 @@ pub use scope::ExtensionScope;
 // Re-export lifecycle types and functions
 pub use lifecycle::{
     check_update_available, derive_id_from_url, install, install_for_component, is_git_url,
-    read_source_revision, relink, replace, slugify_id, uninstall, update,
-    InstallForComponentResult, InstallResult, ReplaceResult, UpdateAvailable, UpdateResult,
+    read_source_revision, slugify_id, uninstall, update, InstallForComponentResult, InstallResult,
+    UpdateAvailable, UpdateResult,
 };
+pub use repair::{relink, replace, ReplaceResult};
 
 pub(crate) fn stderr_tail(stderr: &str) -> String {
     const MAX_LINES: usize = 20;
