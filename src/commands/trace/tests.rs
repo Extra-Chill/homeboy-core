@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::process::Command;
 
 use crate::test_support::with_isolated_home;
 
@@ -400,6 +401,79 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                     .runs
                     .iter()
                     .all(|run| std::path::Path::new(&run.artifact_path).is_file()));
+            }
+            _ => panic!("expected aggregate output"),
+        }
+    });
+}
+
+#[test]
+fn trace_repeat_reports_overlay_touched_files_at_top_level() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        init_overlay_component(component_dir.path());
+        let patch_path = component_dir.path().join("overlay.patch");
+        fs::write(
+            &patch_path,
+            r#"diff --git a/scenario.txt b/scenario.txt
+--- a/scenario.txt
++++ b/scenario.txt
+@@ -1 +1 @@
+-base
++overlay
+"#,
+        )
+        .expect("write patch");
+        write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+
+        let (output, exit_code) = run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("studio".to_string()),
+                    path: None,
+                },
+                scenario: "studio-app-create-site".to_string(),
+                compare_after: None,
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                repeat: 2,
+                aggregate: Some("spans".to_string()),
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: None,
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: vec![patch_path.to_string_lossy().to_string()],
+                keep_overlay: false,
+            },
+            &GlobalArgs {},
+        )
+        .expect("repeat trace should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Aggregate(aggregate) => {
+                assert_eq!(aggregate.overlays.len(), 1);
+                let component_path = component_dir.path().to_string_lossy();
+                assert_eq!(
+                    aggregate.overlays[0].component_path,
+                    component_path.as_ref()
+                );
+                assert_eq!(aggregate.overlays[0].touched_files, vec!["scenario.txt"]);
+                assert!(!aggregate.overlays[0].kept);
+                let value = serde_json::to_value(&aggregate).expect("aggregate serializes");
+                assert_eq!(
+                    value["overlays"][0]["component_path"],
+                    component_path.as_ref()
+                );
+                assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
             }
             _ => panic!("expected aggregate output"),
         }
@@ -829,6 +903,7 @@ fn aggregate_markdown_includes_percentile_columns() {
         failure_count: 0,
         exit_code: 0,
         rig_state: None,
+        overlays: Vec::new(),
         runs: Vec::new(),
         spans: vec![aggregate_span(
             "boot_to_ready".to_string(),
@@ -1006,6 +1081,38 @@ printf 'trace log\n' > "$HOMEBOY_TRACE_ARTIFACT_DIR/trace-log.txt"
         permissions.set_mode(0o755);
         fs::set_permissions(&script_path, permissions).expect("chmod script");
     }
+}
+
+fn init_overlay_component(path: &std::path::Path) {
+    fs::write(path.join("scenario.txt"), "base\n").expect("write scenario");
+    run_git(path, &["init"]);
+    run_git(path, &["add", "scenario.txt"]);
+    run_git(
+        path,
+        &[
+            "-c",
+            "user.name=Homeboy Test",
+            "-c",
+            "user.email=homeboy@example.test",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+}
+
+fn run_git(path: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(path)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn write_trace_rig(

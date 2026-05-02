@@ -256,6 +256,7 @@ pub(super) fn render_aggregate_markdown(
     out.push_str(&format!("- **Status:** `{}`\n", aggregate.status));
     out.push_str(&format!("- **Runs:** `{}`\n", aggregate.run_count));
     out.push_str(&format!("- **Failures:** `{}`\n", aggregate.failure_count));
+    extension_trace::push_overlay_markdown(&mut out, &aggregate.overlays);
 
     if !aggregate.spans.is_empty() {
         out.push_str("\n## Spans\n\n");

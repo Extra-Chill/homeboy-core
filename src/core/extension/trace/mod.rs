@@ -22,12 +22,12 @@ pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,
 };
 pub use parsing::{TraceAssertionStatus, TraceResults, TraceSpanDefinition, TraceSpanResult};
-pub use report::render_markdown;
 pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
     TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceCommandOutput, TraceCompareOutput,
     TraceCompareSpanOutput,
 };
+pub use report::{push_overlay_markdown, render_markdown};
 pub use run::{run_trace_list_workflow, run_trace_workflow, TraceListWorkflowArgs};
 pub use run::{TraceRunWorkflowArgs, TraceRunWorkflowResult};
 
