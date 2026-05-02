@@ -243,15 +243,24 @@ fn copy_overlay_file(
         .map(sanitize_path_component)
         .unwrap_or_else(|| format!("overlay-{}.patch", index + 1));
     let target = overlay_dir.join(format!("{}-{}", role, filename));
-    fs::copy(source, &target).map_err(|err| {
+    let bytes = fs::read(source).map_err(|err| {
         homeboy::Error::internal_io(
             format!(
-                "Failed to copy trace overlay {} to {}: {}",
+                "Failed to read trace overlay {} for bundling: {}",
                 source.display(),
+                err
+            ),
+            Some("trace.experiment.overlay.read".to_string()),
+        )
+    })?;
+    fs::write(&target, bytes).map_err(|err| {
+        homeboy::Error::internal_io(
+            format!(
+                "Failed to write bundled trace overlay {}: {}",
                 target.display(),
                 err
             ),
-            Some("trace.experiment.overlay.copy".to_string()),
+            Some("trace.experiment.overlay.write".to_string()),
         )
     })?;
     Ok(target)
