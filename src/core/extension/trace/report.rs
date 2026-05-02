@@ -3,6 +3,7 @@
 use serde::Serialize;
 
 use super::baseline::TraceBaselineComparison;
+use super::overlay_lock::TraceOverlayLockRecord;
 use super::parsing::{
     TraceArtifact, TraceAssertionStatus, TraceList, TraceResults, TraceSpanStatus,
 };
@@ -17,6 +18,7 @@ pub enum TraceCommandOutput {
     Aggregate(TraceAggregateOutput),
     Compare(TraceCompareOutput),
     List(TraceListOutput),
+    OverlayLocks(TraceOverlayLocksOutput),
 }
 
 #[derive(Serialize)]
@@ -70,6 +72,16 @@ pub struct TraceListOutput {
     pub component_id: String,
     pub count: usize,
     pub scenarios: Vec<super::parsing::TraceScenario>,
+}
+
+#[derive(Serialize)]
+pub struct TraceOverlayLocksOutput {
+    pub command: &'static str,
+    pub count: usize,
+    pub active_count: usize,
+    pub stale_count: usize,
+    pub unknown_count: usize,
+    pub locks: Vec<TraceOverlayLockRecord>,
 }
 
 #[derive(Serialize, Clone)]

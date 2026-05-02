@@ -9,6 +9,7 @@
 //! milestones.
 
 pub mod baseline;
+mod overlay_lock;
 pub mod parsing;
 pub mod report;
 pub mod run;
@@ -17,6 +18,10 @@ pub mod spans;
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext};
 
+pub use overlay_lock::{cleanup_stale_trace_overlay_locks, list_trace_overlay_locks};
+pub use overlay_lock::{
+    TraceOverlayLockCleanupResult, TraceOverlayLockRecord, TraceOverlayLockStatus,
+};
 pub use parsing::{parse_trace_list_str, parse_trace_results_file};
 pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,
@@ -25,7 +30,7 @@ pub use parsing::{TraceAssertionStatus, TraceResults, TraceSpanDefinition, Trace
 pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
     TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceCommandOutput, TraceCompareOutput,
-    TraceCompareSpanOutput, TraceRunOrderEntryOutput,
+    TraceCompareSpanOutput, TraceOverlayLocksOutput, TraceRunOrderEntryOutput,
 };
 pub use report::{push_overlay_markdown, render_markdown};
 pub use run::{run_trace_list_workflow, run_trace_workflow, TraceListWorkflowArgs};

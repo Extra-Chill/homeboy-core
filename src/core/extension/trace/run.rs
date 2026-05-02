@@ -1,21 +1,19 @@
 //! Trace workflows: invoke extension runners, parse JSON, preserve artifacts.
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::overlay_lock::TraceOverlayLock;
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
-use crate::error::{Error, ErrorCode, Result};
+use crate::error::{Error, Result};
 use crate::extension::trace::baseline::TraceBaselineComparison;
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
 };
 use crate::extension::{ExtensionRunner, RunnerOutput};
-use crate::paths;
 use crate::rig::RigStateSnapshot;
 
 use super::parsing::{
@@ -113,6 +111,7 @@ fn run_trace_workflow_with_context(
     } else {
         Some(TraceOverlayLock::acquire(
             Path::new(component_path),
+            &args.overlays,
             run_dir,
         )?)
     };
@@ -392,162 +391,6 @@ fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> Tr
     }
 }
 
-#[derive(Debug)]
-struct TraceOverlayLock {
-    path: PathBuf,
-}
-
-#[derive(Debug, Serialize)]
-struct TraceOverlayLockHolder {
-    pid: u32,
-    component_path: String,
-    run_dir: String,
-    acquired_at: String,
-    command: String,
-}
-
-impl TraceOverlayLock {
-    fn acquire(component_path: &Path, run_dir: &RunDir) -> Result<Self> {
-        let lock_dir = paths::homeboy_data()?.join("trace-overlay-locks");
-        fs::create_dir_all(&lock_dir).map_err(|e| {
-            Error::internal_io(
-                format!(
-                    "Failed to create trace overlay lock dir {}: {}",
-                    lock_dir.display(),
-                    e
-                ),
-                Some("trace.overlay.lock.create_dir".to_string()),
-            )
-        })?;
-
-        let normalized_component_path = normalize_component_path(component_path);
-        let path = lock_dir.join(format!(
-            "{}.lock",
-            trace_overlay_lock_id(&normalized_component_path)
-        ));
-
-        match fs::create_dir(&path) {
-            Ok(()) => {
-                let holder = TraceOverlayLockHolder {
-                    pid: std::process::id(),
-                    component_path: normalized_component_path.to_string_lossy().to_string(),
-                    run_dir: run_dir.path().to_string_lossy().to_string(),
-                    acquired_at: chrono::Utc::now().to_rfc3339(),
-                    command: std::env::args().collect::<Vec<_>>().join(" "),
-                };
-                let holder_path = path.join("holder.json");
-                if let Err(error) = write_trace_overlay_lock_holder(&holder_path, &holder) {
-                    let _ = fs::remove_dir_all(&path);
-                    return Err(error);
-                }
-                Ok(Self { path })
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                Err(trace_overlay_lock_error(
-                    &normalized_component_path,
-                    &path,
-                    run_dir,
-                    read_trace_overlay_lock_holder(&path),
-                ))
-            }
-            Err(e) => Err(Error::internal_io(
-                format!(
-                    "Failed to acquire trace overlay lock {}: {}",
-                    path.display(),
-                    e
-                ),
-                Some("trace.overlay.lock.acquire".to_string()),
-            )),
-        }
-    }
-}
-
-impl Drop for TraceOverlayLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-fn normalize_component_path(component_path: &Path) -> PathBuf {
-    fs::canonicalize(component_path).unwrap_or_else(|_| component_path.to_path_buf())
-}
-
-fn trace_overlay_lock_id(component_path: &Path) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(component_path.to_string_lossy().as_bytes());
-    let digest = hasher.finalize();
-    let hex = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    hex[..24].to_string()
-}
-
-fn write_trace_overlay_lock_holder(path: &Path, holder: &TraceOverlayLockHolder) -> Result<()> {
-    let content = serde_json::to_string_pretty(holder).map_err(|e| {
-        Error::internal_json(e.to_string(), Some("trace.overlay.lock.holder".to_string()))
-    })?;
-    fs::write(path, content).map_err(|e| {
-        Error::internal_io(
-            format!(
-                "Failed to write trace overlay lock holder {}: {}",
-                path.display(),
-                e
-            ),
-            Some("trace.overlay.lock.write_holder".to_string()),
-        )
-    })
-}
-
-fn read_trace_overlay_lock_holder(lock_path: &Path) -> Option<serde_json::Value> {
-    let holder_path = lock_path.join("holder.json");
-    let content = fs::read_to_string(holder_path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-fn trace_overlay_lock_error(
-    component_path: &Path,
-    lock_path: &Path,
-    run_dir: &RunDir,
-    holder: Option<serde_json::Value>,
-) -> Error {
-    let holder_summary = holder
-        .as_ref()
-        .and_then(trace_overlay_holder_summary)
-        .unwrap_or_else(|| "unavailable".to_string());
-    Error::new(
-        ErrorCode::ValidationInvalidArgument,
-        format!(
-            "Trace overlay already active for component path {}. Lock path: {}. Active holder: {}. Current run directory: {}",
-            component_path.display(),
-            lock_path.display(),
-            holder_summary,
-            run_dir.path().display()
-        ),
-        serde_json::json!({
-            "field": "--overlay",
-            "component_path": component_path.to_string_lossy(),
-            "lock_path": lock_path.to_string_lossy(),
-            "run_dir": run_dir.path().to_string_lossy(),
-            "active_holder": holder,
-        }),
-    )
-}
-
-fn trace_overlay_holder_summary(holder: &serde_json::Value) -> Option<String> {
-    let pid = holder.get("pid").and_then(|value| value.as_u64())?;
-    let run_dir = holder.get("run_dir").and_then(|value| value.as_str());
-    let acquired_at = holder.get("acquired_at").and_then(|value| value.as_str());
-    Some(match (run_dir, acquired_at) {
-        (Some(run_dir), Some(acquired_at)) => {
-            format!("pid {pid}, run directory {run_dir}, acquired at {acquired_at}")
-        }
-        (Some(run_dir), None) => format!("pid {pid}, run directory {run_dir}"),
-        (None, Some(acquired_at)) => format!("pid {pid}, acquired at {acquired_at}"),
-        (None, None) => format!("pid {pid}"),
-    })
-}
-
 #[derive(Debug, Clone)]
 struct AppliedTraceOverlay {
     component_path: PathBuf,
@@ -632,7 +475,10 @@ fn print_trace_overlay(action: &str, patch_path: &Path, touched_files: &[String]
     }
 }
 
-fn overlay_touched_files(component_path: &Path, patch_path: &Path) -> Result<Vec<String>> {
+pub(super) fn overlay_touched_files(
+    component_path: &Path,
+    patch_path: &Path,
+) -> Result<Vec<String>> {
     let output = Command::new("git")
         .args(["apply", "--numstat"])
         .arg(patch_path)
@@ -1008,62 +854,12 @@ JSON
     }
 
     #[test]
-    fn trace_overlay_lock_acquisition_releases_on_drop() {
-        with_isolated_home(|_| {
-            let component_dir = tempfile::tempdir().unwrap();
-            let run_dir = RunDir::create().unwrap();
-            let lock_path;
+    fn test_overlay_touched_files() {
+        let fixture = overlay_fixture(false);
 
-            {
-                let lock = TraceOverlayLock::acquire(component_dir.path(), &run_dir).unwrap();
-                lock_path = lock.path.clone();
-                assert!(lock_path.exists());
-                assert!(lock_path.join("holder.json").exists());
-            }
+        let touched = overlay_touched_files(&fixture.component_dir, &fixture.patch_path).unwrap();
 
-            assert!(!lock_path.exists());
-            run_dir.cleanup();
-        });
-    }
-
-    #[test]
-    fn trace_overlay_lock_contention_fails_fast_with_context() {
-        with_isolated_home(|_| {
-            let component_dir = tempfile::tempdir().unwrap();
-            let first_run_dir = RunDir::create().unwrap();
-            let second_run_dir = RunDir::create().unwrap();
-            let lock = TraceOverlayLock::acquire(component_dir.path(), &first_run_dir).unwrap();
-
-            let err = TraceOverlayLock::acquire(component_dir.path(), &second_run_dir).unwrap_err();
-
-            assert!(err.message.contains("Trace overlay already active"));
-            assert!(err
-                .message
-                .contains(&component_dir.path().display().to_string()));
-            assert!(err.message.contains(&lock.path.display().to_string()));
-            assert!(err
-                .message
-                .contains(&first_run_dir.path().display().to_string()));
-            assert!(err
-                .message
-                .contains(&second_run_dir.path().display().to_string()));
-            assert_eq!(
-                err.details["component_path"].as_str(),
-                Some(
-                    normalize_component_path(component_dir.path())
-                        .to_str()
-                        .unwrap()
-                )
-            );
-            assert_eq!(
-                err.details["lock_path"].as_str(),
-                Some(lock.path.to_str().unwrap())
-            );
-
-            drop(lock);
-            first_run_dir.cleanup();
-            second_run_dir.cleanup();
-        });
+        assert_eq!(touched, vec!["scenario.txt"]);
     }
 
     #[test]
@@ -1100,14 +896,6 @@ JSON
             write_failing_overlay_runner(&fixture.extension_dir.join("trace-runner.sh"));
             let run_dir = RunDir::create().unwrap();
             let context = trace_context(&fixture.component, &fixture.extension_dir);
-            let lock_path = paths::homeboy_data()
-                .unwrap()
-                .join("trace-overlay-locks")
-                .join(format!(
-                    "{}.lock",
-                    trace_overlay_lock_id(&normalize_component_path(&fixture.component_dir))
-                ));
-
             let result = run_trace_workflow_with_context(
                 &context,
                 &fixture.component,
@@ -1123,7 +911,9 @@ JSON
                 fs::read_to_string(fixture.component_dir.join("scenario.txt")).unwrap(),
                 "base\n"
             );
-            assert!(!lock_path.exists());
+            assert!(crate::extension::trace::list_trace_overlay_locks()
+                .unwrap()
+                .is_empty());
             run_dir.cleanup();
         });
     }

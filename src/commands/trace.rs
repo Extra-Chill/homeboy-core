@@ -38,7 +38,7 @@ pub struct TraceArgs {
     comp: PositionalComponentArgs,
 
     /// Scenario ID to run, or `list` to discover available scenarios.
-    pub scenario: String,
+    pub scenario: Option<String>,
 
     /// After aggregate JSON when running `homeboy trace compare before.json after.json`.
     #[arg(value_name = "AFTER_JSON")]
@@ -108,6 +108,14 @@ pub struct TraceArgs {
     /// Leave overlay changes in place after the trace run.
     #[arg(long)]
     pub keep_overlay: bool,
+
+    /// Clean only stale trace overlay locks.
+    #[arg(long)]
+    pub stale: bool,
+
+    /// Remove stale trace overlay locks even when touched files are dirty.
+    #[arg(long, alias = "force-stale-lock-cleanup")]
+    pub force: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -202,6 +210,13 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
             }
             Ok((markdown, exit_code))
         }
+        TraceCommandOutput::OverlayLocks(locks) => {
+            let mut markdown = format!("# Trace Overlay Locks\n\n- **Count:** `{}`\n- **Active:** `{}`\n- **Stale:** `{}`\n- **Unknown:** `{}`\n\n", locks.count, locks.active_count, locks.stale_count, locks.unknown_count);
+            for lock in locks.locks {
+                markdown.push_str(&format!("- `{}`: `{:?}`\n", lock.lock_path, lock.status));
+            }
+            Ok((markdown, exit_code))
+        }
     }
 }
 
@@ -240,6 +255,11 @@ pub fn run_json_with_output_artifact(
 }
 
 fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCommandOutput>)> {
+    if args.comp.component.as_deref() == Some("overlay-locks") {
+        let (output, exit_code) = run_overlay_locks(args)?;
+        return Ok(((output, None), exit_code));
+    }
+
     if args.comp.component.as_deref() == Some("compare") {
         let (output, exit_code) = run_compare(args)?;
         return Ok(((output, None), exit_code));
@@ -263,7 +283,7 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         ));
     }
 
-    if args.scenario == "list" {
+    if args.scenario.as_deref() == Some("list") {
         let (output, exit_code) = run_list(args)?;
         return Ok(((output, None), exit_code));
     }
@@ -284,6 +304,69 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
     Ok(((stdout_output, artifact_output), exit_code))
 }
 
+fn run_overlay_locks(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
+    match args.scenario.as_deref() {
+        Some("list") => {
+            let locks = extension_trace::list_trace_overlay_locks()?;
+            let output = overlay_locks_output(locks);
+            Ok((TraceCommandOutput::OverlayLocks(output), 0))
+        }
+        Some("cleanup") => {
+            if !args.stale {
+                return Err(homeboy::Error::validation_invalid_argument(
+                    "--stale",
+                    "trace overlay lock cleanup requires --stale",
+                    None,
+                    None,
+                ));
+            }
+            let result = extension_trace::cleanup_stale_trace_overlay_locks(args.force)?;
+            let output = overlay_locks_output(result.removed);
+            Ok((TraceCommandOutput::OverlayLocks(output), 0))
+        }
+        Some(other) => Err(homeboy::Error::validation_invalid_argument(
+            "overlay-locks",
+            format!("unsupported trace overlay-locks command `{other}`"),
+            None,
+            Some(vec!["list".to_string(), "cleanup --stale".to_string()]),
+        )),
+        None => Err(homeboy::Error::validation_missing_argument(vec![
+            "overlay-locks command".to_string(),
+        ])),
+    }
+}
+
+fn overlay_locks_output(
+    locks: Vec<extension_trace::TraceOverlayLockRecord>,
+) -> extension_trace::TraceOverlayLocksOutput {
+    let active_count = locks
+        .iter()
+        .filter(|lock| lock.status == extension_trace::TraceOverlayLockStatus::Active)
+        .count();
+    let stale_count = locks
+        .iter()
+        .filter(|lock| lock.status == extension_trace::TraceOverlayLockStatus::Stale)
+        .count();
+    let unknown_count = locks
+        .iter()
+        .filter(|lock| lock.status == extension_trace::TraceOverlayLockStatus::Unknown)
+        .count();
+    extension_trace::TraceOverlayLocksOutput {
+        command: "trace.overlay-locks",
+        count: locks.len(),
+        active_count,
+        stale_count,
+        unknown_count,
+        locks,
+    }
+}
+
+pub(super) fn required_trace_scenario(args: &TraceArgs) -> homeboy::Result<String> {
+    args.scenario.clone().ok_or_else(|| {
+        homeboy::Error::validation_missing_argument(vec!["trace scenario".to_string()])
+    })
+}
+
 struct TraceRunExecution {
     workflow: extension_trace::TraceRunWorkflowResult,
     run_dir: RunDir,
@@ -291,6 +374,7 @@ struct TraceRunExecution {
 }
 
 fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
+    let scenario = required_trace_scenario(&args)?;
     let rig_context = load_rig_context(args.rig.as_deref())?;
     let effective_id = resolve_component_id(&args.comp, rig_context.as_ref().map(|c| &c.rig_spec))?;
     let path_override = args.comp.path.clone().or_else(|| {
@@ -333,7 +417,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         .as_ref()
         .map(|context| rig::snapshot_state(&context.rig_spec));
     let run_dir = RunDir::create()?;
-    let scenario_id = args.scenario.clone();
+    let scenario_id = scenario.clone();
     let rig_id = args.rig.clone();
     let requested_overlays = args.overlays.clone();
     let component_path_for_observation = path_override
@@ -401,7 +485,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             path_override,
             settings: settings_as_strings(&ctx.settings),
             settings_json: settings_as_json(&ctx.settings),
-            scenario_id: args.scenario,
+            scenario_id: scenario,
             json_summary: args.json_summary,
             rig_id: args.rig,
             overlays: args.overlays,
@@ -440,7 +524,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
 
 fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let repeat = args.repeat;
-    let scenario_id = args.scenario.clone();
+    let scenario_id = required_trace_scenario(&args)?;
     let mut runs = Vec::new();
     let mut overlays = Vec::new();
     let mut span_samples: BTreeMap<String, Vec<TraceAggregateSpanSample>> = BTreeMap::new();
@@ -661,9 +745,11 @@ fn default_trace_phase_preset_for_args<'a>(
         .trace_workloads
         .get(extension_id)
         .and_then(|workloads| {
-            workloads
-                .iter()
-                .find(|workload| trace_workload_scenario_id(workload.path()) == args.scenario)
+            workloads.iter().find(|workload| {
+                args.scenario
+                    .as_deref()
+                    .is_some_and(|scenario| trace_workload_scenario_id(workload.path()) == scenario)
+            })
         })?;
     workload.trace_default_phase_preset().or_else(|| {
         workload
@@ -701,9 +787,11 @@ fn trace_phase_preset_for_args(
         .get(extension_id)
         .map(|workloads| workloads.as_slice())
         .unwrap_or(&[]);
-    let workload = workloads
-        .iter()
-        .find(|workload| trace_workload_scenario_id(workload.path()) == args.scenario);
+    let workload = workloads.iter().find(|workload| {
+        args.scenario
+            .as_deref()
+            .is_some_and(|scenario| trace_workload_scenario_id(workload.path()) == scenario)
+    });
     let phases = workload
         .and_then(|workload| workload.trace_phase_preset(preset_name))
         .ok_or_else(|| {
@@ -711,7 +799,8 @@ fn trace_phase_preset_for_args(
                 "--phase-preset",
                 format!(
                     "trace phase preset '{}' is not declared for scenario '{}'",
-                    preset_name, args.scenario
+                    preset_name,
+                    args.scenario.as_deref().unwrap_or("<missing>")
                 ),
                 None,
                 None,
