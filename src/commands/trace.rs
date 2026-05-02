@@ -29,7 +29,8 @@ use output::{
 #[cfg(test)]
 use output::{
     compare_trace_aggregates, compare_trace_aggregates_with_focus, parse_trace_aggregate_input,
-    TraceAggregateInput, TraceAggregateSpanInput,
+    write_trace_experiment_bundle, TraceAggregateInput, TraceAggregateSpanInput,
+    TraceExperimentBundleRequest,
 };
 
 #[derive(Args, Clone)]
@@ -61,6 +62,10 @@ pub struct TraceArgs {
     /// Render a Markdown trace report instead of the JSON envelope.
     #[arg(long, value_parser = ["markdown"])]
     pub report: Option<String>,
+
+    /// Bundle trace compare inputs, output, report, and overlay metadata under .homeboy/experiments/NAME.
+    #[arg(long, value_name = "NAME")]
+    pub experiment: Option<String>,
 
     /// Run the same trace scenario multiple times.
     #[arg(long, value_name = "N", default_value_t = 1)]
@@ -249,6 +254,15 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         return Err(homeboy::Error::validation_invalid_argument(
             "AFTER_JSON",
             "extra positional argument is only supported by `homeboy trace compare before.json after.json`",
+            None,
+            None,
+        ));
+    }
+
+    if args.experiment.is_some() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--experiment",
+            "trace experiment bundles are only supported by `homeboy trace compare before.json after.json --experiment <name>`",
             None,
             None,
         ));
@@ -572,6 +586,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         status: if failure_count == 0 { "pass" } else { "fail" }.to_string(),
         component: component.unwrap_or_else(|| args.comp.component.clone().unwrap_or_default()),
         scenario_id,
+        phase_preset: args.phase_preset.clone(),
         repeat,
         run_count: runs.len(),
         failure_count,

@@ -79,6 +79,8 @@ pub struct TraceAggregateOutput {
     pub status: String,
     pub component: String,
     pub scenario_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase_preset: Option<String>,
     pub repeat: usize,
     pub run_count: usize,
     pub failure_count: usize,

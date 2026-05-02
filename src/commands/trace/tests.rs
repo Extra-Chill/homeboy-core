@@ -98,6 +98,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             _json: HiddenJsonArgs::default(),
             json_summary: false,
             report: None,
+            experiment: None,
             repeat: 1,
             aggregate: None,
             schedule: TraceSchedule::Grouped,
@@ -188,6 +189,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             _json: HiddenJsonArgs::default(),
             json_summary: false,
             report: None,
+            experiment: None,
             repeat: 1,
             aggregate: None,
             schedule: TraceSchedule::Grouped,
@@ -235,6 +237,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 1,
                 aggregate: None,
                 schedule: TraceSchedule::Grouped,
@@ -289,6 +292,7 @@ fn trace_run_persists_observation_history() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 1,
                 aggregate: None,
                 schedule: TraceSchedule::Grouped,
@@ -366,6 +370,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 3,
                 aggregate: Some("spans".to_string()),
                 schedule: TraceSchedule::Interleaved,
@@ -489,6 +494,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 2,
                 aggregate: Some("spans".to_string()),
                 schedule: TraceSchedule::Grouped,
@@ -535,12 +541,20 @@ fn trace_compare_reports_median_and_average_deltas() {
     let before = TraceAggregateInput {
         component: Some("studio".to_string()),
         scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
         spans: vec![
             TraceAggregateSpanInput {
                 id: "boot_to_ready".to_string(),
                 n: 5,
                 median_ms: Some(100),
                 avg_ms: Some(110.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -548,6 +562,9 @@ fn trace_compare_reports_median_and_average_deltas() {
                 n: 5,
                 median_ms: Some(300),
                 avg_ms: Some(300.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -555,6 +572,9 @@ fn trace_compare_reports_median_and_average_deltas() {
                 n: 5,
                 median_ms: Some(80),
                 avg_ms: Some(80.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -562,6 +582,9 @@ fn trace_compare_reports_median_and_average_deltas() {
                 n: 5,
                 median_ms: Some(25),
                 avg_ms: Some(25.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 1,
             },
         ],
@@ -569,12 +592,20 @@ fn trace_compare_reports_median_and_average_deltas() {
     let after = TraceAggregateInput {
         component: Some("studio".to_string()),
         scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
         spans: vec![
             TraceAggregateSpanInput {
                 id: "boot_to_ready".to_string(),
                 n: 5,
                 median_ms: Some(125),
                 avg_ms: Some(121.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -582,6 +613,9 @@ fn trace_compare_reports_median_and_average_deltas() {
                 n: 5,
                 median_ms: Some(100),
                 avg_ms: Some(100.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -589,6 +623,9 @@ fn trace_compare_reports_median_and_average_deltas() {
                 n: 5,
                 median_ms: Some(200),
                 avg_ms: Some(200.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
             TraceAggregateSpanInput {
@@ -596,6 +633,9 @@ fn trace_compare_reports_median_and_average_deltas() {
                 n: 3,
                 median_ms: Some(75),
                 avg_ms: Some(80.0),
+                max_ms: None,
+                max_run_index: None,
+                max_artifact_path: None,
                 failures: 0,
             },
         ],
@@ -770,6 +810,125 @@ fn trace_compare_markdown_renders_span_table() {
 }
 
 #[test]
+fn trace_experiment_bundle_writes_manifest_report_and_overlay_copy() {
+    let dir = tempfile::TempDir::new().expect("bundle dir");
+    let before_path = dir.path().join("baseline-source.json");
+    let after_path = dir.path().join("variant-source.json");
+    let overlay_path = dir.path().join("fast-install.patch");
+    fs::write(&overlay_path, "diff --git a/install.ts b/install.ts\n").expect("write overlay");
+
+    let before_json = serde_json::json!({
+        "command": "trace.aggregate.spans",
+        "component": "studio",
+        "scenario_id": "studio-fast-install",
+        "phase_preset": "startup",
+        "repeat": 3,
+        "rig_state": {
+            "rig_id": "studio-rig",
+            "captured_at": "2026-05-02T00:00:00Z",
+            "components": {
+                "studio": { "path": "/repo/studio", "branch": "main", "sha": "abc123" }
+            }
+        },
+        "runs": [
+            { "index": 1, "passed": true, "status": "pass", "exit_code": 0, "artifact_path": "/tmp/baseline-1.json" }
+        ],
+        "spans": [
+            { "id": "install", "n": 3, "median_ms": 120, "avg_ms": 130.0, "max_ms": 160, "max_run_index": 1, "max_artifact_path": "/tmp/baseline-1.json", "failures": 0 }
+        ]
+    })
+    .to_string();
+    let after_json = serde_json::json!({
+        "command": "trace.aggregate.spans",
+        "component": "studio",
+        "scenario_id": "studio-fast-install",
+        "phase_preset": "startup",
+        "repeat": 3,
+        "rig_state": {
+            "rig_id": "studio-rig",
+            "captured_at": "2026-05-02T00:00:00Z",
+            "components": {
+                "studio": { "path": "/repo/studio", "branch": "trace-experiment-bundles", "sha": "def456" }
+            }
+        },
+        "overlays": [
+            { "path": overlay_path, "component_path": "/repo/studio", "touched_files": ["install.ts"], "kept": false }
+        ],
+        "runs": [
+            { "index": 1, "passed": false, "status": "fail", "exit_code": 1, "artifact_path": "/tmp/variant-1.json", "failure": "assertion failed" }
+        ],
+        "spans": [
+            { "id": "install", "n": 2, "median_ms": 80, "avg_ms": 90.0, "max_ms": 140, "max_run_index": 1, "max_artifact_path": "/tmp/variant-1.json", "failures": 1 }
+        ]
+    })
+    .to_string();
+    fs::write(&before_path, &before_json).expect("write before");
+    fs::write(&after_path, &after_json).expect("write after");
+
+    let before_for_compare = parse_trace_aggregate_input(&before_json).expect("before compare");
+    let after_for_compare = parse_trace_aggregate_input(&after_json).expect("after compare");
+    let compare = compare_trace_aggregates(
+        &before_path,
+        before_for_compare,
+        &after_path,
+        after_for_compare,
+    );
+    let before = parse_trace_aggregate_input(&before_json).expect("before bundle");
+    let after = parse_trace_aggregate_input(&after_json).expect("after bundle");
+
+    let bundle_dir = write_trace_experiment_bundle(TraceExperimentBundleRequest {
+        name: "studio-fast-install",
+        bundle_root: Some(dir.path()),
+        command: "homeboy trace compare baseline-source.json variant-source.json --experiment studio-fast-install".to_string(),
+        before_path: &before_path,
+        before_json: &before_json,
+        before: &before,
+        after_path: &after_path,
+        after_json: &after_json,
+        after: &after,
+        compare: &compare,
+    })
+    .expect("write bundle");
+
+    assert!(bundle_dir.join("baseline.json").is_file());
+    assert!(bundle_dir
+        .join("variant-studio-fast-install.json")
+        .is_file());
+    assert!(bundle_dir
+        .join("compare-studio-fast-install.json")
+        .is_file());
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(bundle_dir.join("manifest.json")).expect("read manifest"),
+    )
+    .expect("parse manifest");
+    assert!(manifest["command"]
+        .as_str()
+        .unwrap()
+        .contains("trace compare"));
+    assert_eq!(manifest["variants"][0]["role"], "baseline");
+    assert_eq!(manifest["variants"][0]["phase_preset"], "startup");
+    assert_eq!(manifest["variants"][0]["repeat"], 3);
+    assert_eq!(manifest["variants"][0]["rig_id"], "studio-rig");
+    assert_eq!(manifest["variants"][0]["components"][0]["sha"], "abc123");
+    assert_eq!(
+        manifest["variants"][1]["artifact_paths"][0],
+        "/tmp/variant-1.json"
+    );
+    assert_eq!(manifest["overlays"][0]["touched_files"][0], "install.ts");
+    assert_eq!(
+        manifest["overlays"][0]["sha256"].as_str().unwrap().len(),
+        64
+    );
+    assert!(Path::new(manifest["overlays"][0]["bundle_path"].as_str().unwrap()).is_file());
+
+    let report = fs::read_to_string(bundle_dir.join("report.md")).expect("read report");
+    assert!(report.contains("## Top Median Improvements"));
+    assert!(report.contains("## Top Average Improvements"));
+    assert!(report.contains("## Variant Failures and Outliers"));
+    assert!(report.contains("/tmp/variant-1.json"));
+}
+
+#[test]
 fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::without_xdg_data_home();
@@ -790,6 +949,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 1,
                 aggregate: None,
                 schedule: TraceSchedule::Grouped,
@@ -860,6 +1020,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 1,
                 aggregate: None,
                 schedule: TraceSchedule::Grouped,
@@ -921,6 +1082,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 2,
                 aggregate: Some("spans".to_string()),
                 schedule: TraceSchedule::Grouped,
@@ -1022,6 +1184,7 @@ fn aggregate_markdown_includes_percentile_columns() {
         status: "pass".to_string(),
         component: "studio".to_string(),
         scenario_id: "create-site".to_string(),
+        phase_preset: None,
         repeat: 20,
         run_count: 20,
         failure_count: 0,
@@ -1073,6 +1236,7 @@ fn failed_trace_run_persists_observation_history() {
                 _json: HiddenJsonArgs::default(),
                 json_summary: false,
                 report: None,
+                experiment: None,
                 repeat: 1,
                 aggregate: None,
                 schedule: TraceSchedule::Grouped,
