@@ -77,6 +77,10 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_workloads: HashMap<String, Vec<WorkloadSpec>>,
 
+    /// Named trace overlay variants keyed by user-facing variant name.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_variants: HashMap<String, TraceVariantSpec>,
+
     /// Named bench scenario suites keyed by profile name.
     ///
     /// `homeboy bench --rig <id> --profile <name>` resolves the profile to
@@ -250,6 +254,17 @@ pub struct WorkloadEntry {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_default_phase_preset: Option<String>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub trace_variants: HashMap<String, TraceVariantSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceVariantSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+
+    pub overlay: String,
 }
 
 impl WorkloadSpec {
@@ -281,6 +296,13 @@ impl WorkloadSpec {
         match self {
             WorkloadSpec::Path(_) => None,
             WorkloadSpec::Detailed(entry) => entry.trace_default_phase_preset.as_deref(),
+        }
+    }
+
+    pub fn trace_variants(&self) -> Option<&HashMap<String, TraceVariantSpec>> {
+        match self {
+            WorkloadSpec::Path(_) => None,
+            WorkloadSpec::Detailed(entry) => Some(&entry.trace_variants),
         }
     }
 }

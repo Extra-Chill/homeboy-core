@@ -338,7 +338,15 @@ pub fn push_overlay_markdown(out: &mut String, overlays: &[TraceOverlay]) {
     out.push_str("\n## Trace Overlays\n\n");
     for overlay in overlays {
         let status = if overlay.kept { "kept" } else { "reverted" };
-        out.push_str(&format!("- **Patch:** `{}` (`{}`)\n", overlay.path, status));
+        let variant = overlay
+            .variant
+            .as_ref()
+            .map(|name| format!(" variant `{name}`,"))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "- **Patch:**{} `{}` (`{}`)\n",
+            variant, overlay.path, status
+        ));
         out.push_str(&format!(
             "  - Applied relative to: `{}`\n",
             overlay.component_path
@@ -424,6 +432,7 @@ mod tests {
             }),
             failure: None,
             overlays: vec![TraceOverlay {
+                variant: Some("disable-install-mail".to_string()),
                 path: "/tmp/overlay.patch".to_string(),
                 component_path: "/tmp/studio".to_string(),
                 touched_files: vec!["scenario.txt".to_string()],
@@ -443,6 +452,7 @@ mod tests {
         assert_eq!(value["artifact_count"], 1);
         assert_eq!(value["span_count"], 0);
         assert_eq!(value["overlays"][0]["path"], "/tmp/overlay.patch");
+        assert_eq!(value["overlays"][0]["variant"], "disable-install-mail");
         assert_eq!(value["overlays"][0]["component_path"], "/tmp/studio");
         assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
         assert_eq!(value["overlays"][0]["kept"], false);
@@ -532,6 +542,7 @@ mod tests {
         };
 
         let overlays = vec![TraceOverlay {
+            variant: None,
             path: "/tmp/overlay.patch".to_string(),
             component_path: "/tmp/studio".to_string(),
             touched_files: vec!["apps/studio/out/app.js".to_string()],

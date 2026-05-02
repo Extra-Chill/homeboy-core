@@ -252,6 +252,7 @@ fn test_check_groups() {
         check_groups: Some(vec!["desktop-app".to_string()]),
         trace_phase_presets: std::collections::HashMap::new(),
         trace_default_phase_preset: None,
+        trace_variants: std::collections::HashMap::new(),
     });
     assert_eq!(detailed.path(), "/tmp/scoped.trace.mjs");
     assert_eq!(

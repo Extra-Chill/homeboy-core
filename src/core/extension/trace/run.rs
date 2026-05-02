@@ -32,7 +32,7 @@ pub struct TraceRunWorkflowArgs {
     pub scenario_id: String,
     pub json_summary: bool,
     pub rig_id: Option<String>,
-    pub overlays: Vec<String>,
+    pub overlays: Vec<TraceOverlayRequest>,
     pub keep_overlay: bool,
     pub extra_workloads: Vec<PathBuf>,
     pub span_definitions: Vec<TraceSpanDefinition>,
@@ -71,10 +71,18 @@ pub struct TraceRunWorkflowResult {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TraceOverlay {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
     pub path: String,
     pub component_path: String,
     pub touched_files: Vec<String>,
     pub kept: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceOverlayRequest {
+    pub variant: Option<String>,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -242,6 +250,7 @@ fn run_trace_workflow_with_context(
             .into_iter()
             .map(|overlay| TraceOverlay {
                 path: overlay.patch_path.to_string_lossy().to_string(),
+                variant: overlay.variant,
                 component_path: overlay.component_path.to_string_lossy().to_string(),
                 touched_files: overlay.touched_files,
                 kept: overlay.keep,
@@ -550,6 +559,7 @@ fn trace_overlay_holder_summary(holder: &serde_json::Value) -> Option<String> {
 
 #[derive(Debug, Clone)]
 struct AppliedTraceOverlay {
+    variant: Option<String>,
     component_path: PathBuf,
     patch_path: PathBuf,
     touched_files: Vec<String>,
@@ -558,13 +568,13 @@ struct AppliedTraceOverlay {
 
 fn apply_trace_overlays(
     component_path: &str,
-    overlay_paths: &[String],
+    overlays: &[TraceOverlayRequest],
     keep: bool,
 ) -> Result<Vec<AppliedTraceOverlay>> {
     let component_path = PathBuf::from(component_path);
     let mut applied = Vec::new();
-    for overlay_path in overlay_paths {
-        let patch_path = PathBuf::from(overlay_path);
+    for overlay in overlays {
+        let patch_path = PathBuf::from(&overlay.path);
         let touched_files = match overlay_touched_files(&component_path, &patch_path) {
             Ok(files) => files,
             Err(error) => return cleanup_after_overlay_error(&applied, keep, error),
@@ -579,6 +589,7 @@ fn apply_trace_overlays(
         }
         print_trace_overlay("applied", &patch_path, &touched_files, keep);
         applied.push(AppliedTraceOverlay {
+            variant: overlay.variant.clone(),
             component_path: component_path.clone(),
             patch_path,
             touched_files,
@@ -995,7 +1006,10 @@ JSON
 
         let err = apply_trace_overlays(
             fixture.component_dir.to_str().unwrap(),
-            &[fixture.patch_path.to_string_lossy().to_string()],
+            &[TraceOverlayRequest {
+                variant: None,
+                path: fixture.patch_path.to_string_lossy().to_string(),
+            }],
             false,
         )
         .unwrap_err();
@@ -1168,7 +1182,10 @@ JSON
             scenario_id: "overlay".to_string(),
             json_summary: false,
             rig_id: None,
-            overlays: vec![patch_path.to_string_lossy().to_string()],
+            overlays: vec![TraceOverlayRequest {
+                variant: None,
+                path: patch_path.to_string_lossy().to_string(),
+            }],
             keep_overlay,
             extra_workloads: Vec::new(),
             span_definitions: Vec::new(),
