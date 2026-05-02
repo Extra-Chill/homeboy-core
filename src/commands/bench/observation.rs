@@ -15,6 +15,13 @@ pub(super) struct BenchObservation {
     initial_metadata: serde_json::Value,
 }
 
+pub(super) struct BenchObservationSummary {
+    pub run_id: String,
+    pub component_id: String,
+    pub rig_id: Option<String>,
+    pub store_path: String,
+}
+
 pub(super) struct BenchObservationStart<'a> {
     pub component_id: &'a str,
     pub component_label: &'a str,
@@ -63,10 +70,8 @@ pub(super) fn finish_success(
     observation: Option<BenchObservation>,
     workflow: &BenchRunWorkflowResult,
     run_dir: &RunDir,
-) {
-    let Some(observation) = observation else {
-        return;
-    };
+) -> Option<BenchObservationSummary> {
+    let observation = observation?;
 
     record_bench_observation_artifacts(&observation, workflow, run_dir);
     let metadata = bench_observation_finish_metadata(observation.initial_metadata, workflow);
@@ -75,9 +80,37 @@ pub(super) fn finish_success(
     } else {
         RunStatus::Fail
     };
+    let summary = BenchObservationSummary {
+        run_id: observation.run.id.clone(),
+        component_id: observation.run.component_id.clone().unwrap_or_default(),
+        rig_id: observation.run.rig_id.clone(),
+        store_path: observation
+            .store
+            .status()
+            .map(|status| status.path)
+            .unwrap_or_else(|_| "<unavailable>".to_string()),
+    };
     let _ = observation
         .store
         .finish_run(&observation.run.id, status, Some(metadata));
+    Some(summary)
+}
+
+pub(super) fn history_hints(summary: &BenchObservationSummary) -> Vec<String> {
+    let mut list_command = format!(
+        "homeboy runs list --kind bench --component {}",
+        summary.component_id
+    );
+    if let Some(rig_id) = &summary.rig_id {
+        list_command.push_str(&format!(" --rig {rig_id}"));
+    }
+
+    vec![
+        format!("Persisted benchmark run ID: {}", summary.run_id),
+        format!("View this run: homeboy runs show {}", summary.run_id),
+        format!("List related bench runs: {list_command}"),
+        format!("Observation store: {}", summary.store_path),
+    ]
 }
 
 pub(super) fn finish_error(
@@ -419,7 +452,21 @@ mod tests {
             })
             .expect("start observation");
             let run_id = observation.run.id.clone();
-            finish_success(Some(observation), &workflow, &run_dir);
+            let summary = finish_success(Some(observation), &workflow, &run_dir)
+                .expect("observation summary");
+            assert_eq!(summary.run_id, run_id);
+            assert_eq!(summary.component_id, "homeboy");
+            assert_eq!(summary.rig_id, None);
+
+            let hints = history_hints(&summary);
+            assert!(hints
+                .iter()
+                .any(|hint| hint == &format!("View this run: homeboy runs show {run_id}")));
+            assert!(hints.iter().any(|hint| hint
+                == "List related bench runs: homeboy runs list --kind bench --component homeboy"));
+            assert!(hints
+                .iter()
+                .any(|hint| hint.starts_with("Observation store: ")));
 
             let store = ObservationStore::open_initialized().expect("store");
             let run = store.get_run(&run_id).expect("read run").expect("run");
@@ -491,5 +538,18 @@ mod tests {
                 .contains("synthetic bench error"));
             assert_eq!(store.list_artifacts(&run_id).expect("artifacts").len(), 1);
         });
+    }
+
+    #[test]
+    fn history_hints_include_rig_filter_when_present() {
+        let hints = history_hints(&BenchObservationSummary {
+            run_id: "run-123".to_string(),
+            component_id: "studio".to_string(),
+            rig_id: Some("studio-trunk".to_string()),
+            store_path: "/tmp/homeboy.sqlite".to_string(),
+        });
+
+        assert!(hints.iter().any(|hint| hint
+            == "List related bench runs: homeboy runs list --kind bench --component studio --rig studio-trunk"));
     }
 }

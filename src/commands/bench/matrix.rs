@@ -459,8 +459,11 @@ fn run_component_with_rig_context(
         return Err(error);
     }
     let workflow = match workflow {
-        Ok(workflow) => {
-            observation::finish_success(observation, &workflow, &run_dir);
+        Ok(mut workflow) => {
+            if let Some(summary) = observation::finish_success(observation, &workflow, &run_dir) {
+                let hints = workflow.hints.get_or_insert_with(Vec::new);
+                hints.extend(observation::history_hints(&summary));
+            }
             workflow
         }
         Err(error) => {
