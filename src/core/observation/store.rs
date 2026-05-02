@@ -292,7 +292,7 @@ impl ObservationStore {
                   AND (?2 IS NULL OR component_id = ?2)
                   AND (?3 IS NULL OR status = ?3)
                   AND (?4 IS NULL OR rig_id = ?4)
-                ORDER BY started_at DESC
+                ORDER BY started_at DESC, rowid DESC
                 LIMIT ?5
                 "#,
             )
@@ -311,6 +311,11 @@ impl ObservationStore {
             .map_err(sqlite_error("list run records"))?;
 
         collect_rows(rows, "collect run records")
+    }
+
+    pub fn latest_run(&self, mut filter: RunListFilter) -> Result<Option<RunRecord>> {
+        filter.limit = Some(1);
+        Ok(self.list_runs(filter)?.into_iter().next())
     }
 
     pub fn list_runs_started_since(&self, started_at: &str) -> Result<Vec<RunRecord>> {
@@ -1204,6 +1209,28 @@ mod api_coverage_tests {
                 .expect("list");
             assert_eq!(runs.len(), 1);
             assert_eq!(runs[0].id, run.id);
+        });
+    }
+
+    #[test]
+    fn test_latest_run() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let old = store.start_run(new_run("lint")).expect("old");
+            let latest = store.start_run(new_run("lint")).expect("latest");
+
+            let selected = store
+                .latest_run(RunListFilter {
+                    kind: Some("lint".to_string()),
+                    component_id: Some("homeboy".to_string()),
+                    ..RunListFilter::default()
+                })
+                .expect("latest run")
+                .expect("run exists");
+
+            assert_eq!(selected.id, latest.id);
+            assert_ne!(selected.id, old.id);
         });
     }
 

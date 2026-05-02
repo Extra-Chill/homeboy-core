@@ -4,7 +4,13 @@ use serde::Serialize;
 use homeboy::observation::{FindingListFilter, FindingRecord, ObservationStore};
 use homeboy::Error;
 
-use crate::commands::{runs::RunsOutput, CmdResult};
+use crate::commands::{
+    runs::{
+        latest::require_latest_run, latest::run_filter_from_latest_args,
+        latest::RunsLatestFindingOutput, latest::RunsLatestRunArgs, run_summary, RunsOutput,
+    },
+    CmdResult,
+};
 
 #[derive(Args, Clone, Default)]
 pub struct RunsFindingsArgs {
@@ -22,6 +28,28 @@ pub struct RunsFindingsArgs {
     /// Maximum findings to return
     #[arg(long, default_value_t = 100)]
     pub limit: i64,
+}
+
+#[derive(Args, Clone, Default)]
+pub struct RunsLatestFindingArgs {
+    /// Run kind: bench, rig, trace, etc.
+    #[arg(long)]
+    pub kind: Option<String>,
+    /// Component ID
+    #[arg(long = "component")]
+    pub component_id: Option<String>,
+    /// Rig ID
+    #[arg(long)]
+    pub rig: Option<String>,
+    /// Run status
+    #[arg(long)]
+    pub status: Option<String>,
+    /// Finding tool, for example lint
+    #[arg(long)]
+    pub tool: Option<String>,
+    /// Finding file path
+    #[arg(long)]
+    pub file: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -72,6 +100,46 @@ pub fn finding(finding_id: &str) -> CmdResult<RunsOutput> {
     Ok((
         RunsOutput::Finding(RunsFindingOutput {
             command: "runs.finding",
+            finding,
+        }),
+        0,
+    ))
+}
+
+pub fn latest_finding(args: RunsLatestFindingArgs) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    let run = require_latest_run(
+        &store,
+        run_filter_from_latest_args(RunsLatestRunArgs {
+            kind: args.kind,
+            component_id: args.component_id,
+            rig: args.rig,
+            status: args.status,
+        }),
+    )?;
+    let finding = store
+        .latest_finding(FindingListFilter {
+            run_id: Some(run.id.clone()),
+            tool: args.tool,
+            file: args.file,
+            limit: Some(1),
+        })?
+        .ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "filter",
+                format!(
+                    "no finding matched the provided filters in latest run {}",
+                    run.id
+                ),
+                Some(run.id.clone()),
+                None,
+            )
+        })?;
+
+    Ok((
+        RunsOutput::LatestFinding(RunsLatestFindingOutput {
+            command: "runs.latest-finding",
+            run: run_summary(run),
             finding,
         }),
         0,

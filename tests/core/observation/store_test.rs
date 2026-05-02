@@ -311,6 +311,50 @@ fn test_list_runs() {
 }
 
 #[test]
+fn test_latest_run() {
+    with_isolated_home(|_home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+
+        let old = store
+            .start_run(sample_run("lint", "homeboy"))
+            .expect("start old");
+        store
+            .finish_run(&old.id, RunStatus::Pass, None)
+            .expect("finish old");
+        let latest = store
+            .start_run(sample_run("lint", "homeboy"))
+            .expect("start latest");
+        store
+            .finish_run(&latest.id, RunStatus::Fail, None)
+            .expect("finish latest");
+        let other_kind = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start bench");
+
+        let selected = store
+            .latest_run(RunListFilter {
+                kind: Some("lint".to_string()),
+                component_id: Some("homeboy".to_string()),
+                ..RunListFilter::default()
+            })
+            .expect("latest run")
+            .expect("run exists");
+        let missing = store
+            .latest_run(RunListFilter {
+                status: Some("stale".to_string()),
+                ..RunListFilter::default()
+            })
+            .expect("missing latest");
+
+        assert_eq!(selected.id, latest.id);
+        assert_ne!(selected.id, old.id);
+        assert_ne!(selected.id, other_kind.id);
+        assert!(missing.is_none());
+    });
+}
+
+#[test]
 fn test_record_artifact() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::unset();

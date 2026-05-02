@@ -1,5 +1,6 @@
 mod bundle;
 mod findings;
+mod latest;
 mod reconcile;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,6 +18,7 @@ use bundle::{
     RunsExportArgs, RunsImportArgs,
 };
 use findings::{RunsFindingOutput, RunsFindingsOutput};
+use latest::{RunsLatestFindingOutput, RunsLatestRunArgs, RunsLatestRunOutput};
 use reconcile::{reconcile_runs, RunsReconcileArgs, RunsReconcileOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
@@ -31,6 +33,8 @@ pub struct RunsArgs {
 enum RunsCommand {
     /// List persisted observation runs
     List(RunsListArgs),
+    /// Show the latest persisted observation run matching filters
+    LatestRun(RunsLatestRunArgs),
     /// Mark orphaned running observation records stale
     Reconcile(RunsReconcileArgs),
     /// Show one persisted observation run
@@ -41,6 +45,8 @@ enum RunsCommand {
     Findings(findings::RunsFindingsArgs),
     /// Show one recorded finding
     Finding { finding_id: String },
+    /// Show the latest finding from the latest run matching filters
+    LatestFinding(findings::RunsLatestFindingArgs),
     /// Export observation records as an inspectable directory bundle
     Export(RunsExportArgs),
     /// Import an observation bundle into the local observation store
@@ -70,10 +76,12 @@ pub struct RunsListArgs {
 #[serde(untagged)]
 pub enum RunsOutput {
     List(RunsListOutput),
+    LatestRun(RunsLatestRunOutput),
     Show(RunsShowOutput),
     Artifacts(RunsArtifactsOutput),
     Findings(RunsFindingsOutput),
     Finding(RunsFindingOutput),
+    LatestFinding(RunsLatestFindingOutput),
     BenchHistory(BenchHistoryOutput),
     BenchCompare(BenchCompareOutput),
     Reconcile(RunsReconcileOutput),
@@ -182,11 +190,13 @@ pub struct BenchMissingMetric {
 pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
     match args.command {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
+        RunsCommand::LatestRun(args) => latest::latest_run(args),
         RunsCommand::Reconcile(args) => reconcile_runs(args),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
         RunsCommand::Findings(args) => findings::findings(args),
         RunsCommand::Finding { finding_id } => findings::finding(&finding_id),
+        RunsCommand::LatestFinding(args) => findings::latest_finding(args),
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
     }
@@ -361,7 +371,7 @@ fn run_detail(store: &ObservationStore, run: RunRecord) -> homeboy::Result<RunDe
     })
 }
 
-fn run_summary(run: RunRecord) -> RunSummary {
+pub(crate) fn run_summary(run: RunRecord) -> RunSummary {
     let status_note = reconcile::running_status_note(&run);
     RunSummary {
         id: run.id,
@@ -708,6 +718,100 @@ mod tests {
             };
             assert_eq!(output.finding.metadata_json["category"], "security");
             assert_eq!(output.finding.fixable, Some(true));
+        });
+    }
+
+    #[test]
+    fn latest_run_command_returns_newest_matching_run() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let old = store
+                .start_run(sample_run("lint", "homeboy", "studio", Value::Null))
+                .expect("old");
+            store
+                .finish_run(&old.id, RunStatus::Pass, None)
+                .expect("finish old");
+            let latest = store
+                .start_run(sample_run("lint", "homeboy", "studio", Value::Null))
+                .expect("latest");
+            store
+                .finish_run(&latest.id, RunStatus::Fail, None)
+                .expect("finish latest");
+
+            let (output, _) = latest::latest_run(latest::RunsLatestRunArgs {
+                kind: Some("lint".to_string()),
+                component_id: Some("homeboy".to_string()),
+                rig: Some("studio".to_string()),
+                status: None,
+            })
+            .expect("latest run");
+
+            let RunsOutput::LatestRun(output) = output else {
+                panic!("expected latest run output");
+            };
+            assert_eq!(output.command, "runs.latest-run");
+            assert_eq!(output.run.id, latest.id);
+        });
+    }
+
+    #[test]
+    fn latest_finding_command_uses_latest_matching_run() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let old_run = store
+                .start_run(sample_run("lint", "homeboy", "studio", Value::Null))
+                .expect("old run");
+            store
+                .record_finding(&NewFindingRecord {
+                    run_id: old_run.id.clone(),
+                    tool: "lint".to_string(),
+                    rule: Some("security".to_string()),
+                    file: Some("src/foo.php".to_string()),
+                    line: Some(12),
+                    severity: Some("error".to_string()),
+                    fingerprint: Some("old".to_string()),
+                    message: "Old finding".to_string(),
+                    fixable: Some(true),
+                    metadata_json: serde_json::json!({}),
+                })
+                .expect("old finding");
+            let latest_run = store
+                .start_run(sample_run("lint", "homeboy", "studio", Value::Null))
+                .expect("latest run");
+            let latest_finding = store
+                .record_finding(&NewFindingRecord {
+                    run_id: latest_run.id.clone(),
+                    tool: "lint".to_string(),
+                    rule: Some("security".to_string()),
+                    file: Some("src/foo.php".to_string()),
+                    line: Some(12),
+                    severity: Some("error".to_string()),
+                    fingerprint: Some("latest".to_string()),
+                    message: "Latest finding".to_string(),
+                    fixable: Some(true),
+                    metadata_json: serde_json::json!({}),
+                })
+                .expect("latest finding");
+
+            let (output, _) = findings::latest_finding(findings::RunsLatestFindingArgs {
+                kind: Some("lint".to_string()),
+                component_id: Some("homeboy".to_string()),
+                rig: Some("studio".to_string()),
+                status: None,
+                tool: Some("lint".to_string()),
+                file: Some("src/foo.php".to_string()),
+            })
+            .expect("latest finding command");
+
+            let RunsOutput::LatestFinding(output) = output else {
+                panic!("expected latest finding output");
+            };
+            assert_eq!(output.command, "runs.latest-finding");
+            assert_eq!(output.run.id, latest_run.id);
+            assert_eq!(output.finding.id, latest_finding.id);
+            assert_eq!(output.finding.message, "Latest finding");
         });
     }
 
