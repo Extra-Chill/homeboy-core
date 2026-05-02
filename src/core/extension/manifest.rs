@@ -723,6 +723,10 @@ impl ConfigEntity for ExtensionManifest {
     }
 }
 
+#[cfg(test)]
+#[path = "../../../tests/core/extension/manifest_test.rs"]
+mod manifest_test;
+
 // ============================================================================
 // Sub-structs (unchanged from original)
 // ============================================================================
