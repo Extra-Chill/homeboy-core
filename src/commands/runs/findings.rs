@@ -122,6 +122,7 @@ pub fn latest_finding(args: RunsLatestFindingArgs) -> CmdResult<RunsOutput> {
             run_id: Some(run.id.clone()),
             tool: args.tool,
             file: args.file,
+            fingerprint: None,
             limit: Some(1),
         })?
         .ok_or_else(|| {

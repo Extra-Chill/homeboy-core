@@ -563,12 +563,14 @@ mod tests {
         let mut markdown = String::new();
         let overlays = vec![
             TraceOverlay {
+                variant: None,
                 path: "/tmp/overlay.patch".to_string(),
                 component_path: "/tmp/studio".to_string(),
                 touched_files: vec!["apps/studio/out/app.js".to_string()],
                 kept: false,
             },
             TraceOverlay {
+                variant: None,
                 path: "/tmp/kept.patch".to_string(),
                 component_path: "/tmp/studio".to_string(),
                 touched_files: Vec::new(),
@@ -630,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn test_push_overlay_markdown() {
+    fn test_push_overlay_markdown_variant_label() {
         let overlays = vec![TraceOverlay {
             variant: Some("fresh-install-mode".to_string()),
             path: "/tmp/overlay.patch".to_string(),
