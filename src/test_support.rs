@@ -52,6 +52,10 @@ pub(crate) fn with_isolated_home<R>(body: impl FnOnce(&TempDir) -> R) -> R {
     body(&home.dir)
 }
 
+pub(crate) fn home_env_guard() -> MutexGuard<'static, ()> {
+    home_lock().lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn home_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
