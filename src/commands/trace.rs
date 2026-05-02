@@ -19,6 +19,7 @@ use homeboy::rig::{self, RigSpec};
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
 use super::{CmdResult, GlobalArgs};
 
+mod bundle;
 mod output;
 
 use output::{
@@ -27,10 +28,12 @@ use output::{
 };
 
 #[cfg(test)]
+use bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
+
+#[cfg(test)]
 use output::{
     compare_trace_aggregates, compare_trace_aggregates_with_focus, parse_trace_aggregate_input,
-    write_trace_experiment_bundle, TraceAggregateInput, TraceAggregateSpanInput,
-    TraceExperimentBundleRequest,
+    TraceAggregateInput, TraceAggregateSpanInput,
 };
 
 #[derive(Args, Clone)]
