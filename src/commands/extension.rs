@@ -70,6 +70,16 @@ enum ExtensionCommand {
         /// Override extension id
         #[arg(long)]
         id: Option<String>,
+        /// Replace an existing extension install/link
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Relink an installed symlinked extension to a new local source path
+    Relink {
+        /// Extension ID
+        extension_id: String,
+        /// Local path to extension directory
+        source: String,
     },
     /// Install every extension configured by a component
     InstallForComponent {
@@ -163,7 +173,15 @@ pub fn run(
             skip,
         ),
         ExtensionCommand::Setup { extension_id } => setup_extension(&extension_id),
-        ExtensionCommand::Install { source, id } => install_extension(&source, id),
+        ExtensionCommand::Install {
+            source,
+            id,
+            replace,
+        } => install_extension(&source, id, replace),
+        ExtensionCommand::Relink {
+            extension_id,
+            source,
+        } => relink_extension(&extension_id, &source),
         ExtensionCommand::InstallForComponent { source, path } => {
             install_for_component(&source, path.as_deref())
         }
@@ -219,6 +237,16 @@ pub enum ExtensionOutput {
         extension_id: String,
         source: String,
         path: String,
+        linked: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_revision: Option<String>,
+    },
+    #[serde(rename = "extension.replace")]
+    Replace {
+        extension_id: String,
+        old_path: String,
+        new_path: String,
+        source: String,
         linked: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         source_revision: Option<String>,
@@ -488,7 +516,26 @@ fn run_extension(
     ))
 }
 
-fn install_extension(source: &str, id: Option<String>) -> CmdResult<ExtensionOutput> {
+fn install_extension(
+    source: &str,
+    id: Option<String>,
+    replace: bool,
+) -> CmdResult<ExtensionOutput> {
+    if replace {
+        let result = homeboy::extension::replace(source, id.as_deref())?;
+        return Ok((
+            ExtensionOutput::Replace {
+                extension_id: result.extension_id,
+                old_path: result.old_path.to_string_lossy().to_string(),
+                new_path: result.new_path.to_string_lossy().to_string(),
+                source: result.source,
+                linked: result.linked,
+                source_revision: result.source_revision,
+            },
+            0,
+        ));
+    }
+
     let result = homeboy::extension::install(source, id.as_deref())?;
     let linked = is_extension_linked(&result.extension_id);
 
@@ -498,6 +545,22 @@ fn install_extension(source: &str, id: Option<String>) -> CmdResult<ExtensionOut
             source: result.url,
             path: result.path.to_string_lossy().to_string(),
             linked,
+            source_revision: result.source_revision,
+        },
+        0,
+    ))
+}
+
+fn relink_extension(extension_id: &str, source: &str) -> CmdResult<ExtensionOutput> {
+    let result = homeboy::extension::relink(extension_id, source)?;
+
+    Ok((
+        ExtensionOutput::Replace {
+            extension_id: result.extension_id,
+            old_path: result.old_path.to_string_lossy().to_string(),
+            new_path: result.new_path.to_string_lossy().to_string(),
+            source: result.source,
+            linked: result.linked,
             source_revision: result.source_revision,
         },
         0,

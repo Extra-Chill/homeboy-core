@@ -260,7 +260,7 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
 /// repo or a monorepo and move the right content to the final extension directory.
 ///
 /// Returns the installed extension ID on success.
-fn resolve_cloned_extension(
+pub(crate) fn resolve_cloned_extension(
     temp_dir: &Path,
     extension_id: &str,
     extension_dir: &Path,
@@ -348,7 +348,7 @@ fn scan_available_extensions(repo_dir: &Path) -> Vec<String> {
 
 /// Move a directory, falling back to recursive copy + delete if rename fails
 /// (e.g., across filesystem boundaries).
-fn rename_dir(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn rename_dir(from: &Path, to: &Path) -> Result<()> {
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
@@ -594,14 +594,18 @@ fn update_extracted_extension(
     Ok(())
 }
 
-fn write_source_metadata(extension_dir: &Path, source_url: &str, source_revision: Option<String>) {
+pub(crate) fn write_source_metadata(
+    extension_dir: &Path,
+    source_url: &str,
+    source_revision: Option<String>,
+) {
     if let Some(rev) = source_revision {
         let _ = std::fs::write(extension_dir.join(".source-revision"), rev);
     }
     let _ = std::fs::write(extension_dir.join(".source-url"), source_url);
 }
 
-fn run_setup_if_configured(extension_id: &str) {
+pub(crate) fn run_setup_if_configured(extension_id: &str) {
     if let Ok(extension) = load_extension(extension_id) {
         if extension
             .runtime()
@@ -815,7 +819,7 @@ pub struct UpdateAvailable {
 
 /// Get the short HEAD revision from a git directory.
 /// Returns None if the directory is not a git repo or the command fails.
-fn get_short_head_revision(dir: &Path) -> Option<String> {
+pub(crate) fn get_short_head_revision(dir: &Path) -> Option<String> {
     let output = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(dir)
@@ -1059,6 +1063,23 @@ mod tests {
 
             assert_eq!(result.component_id, "multi-extension-component");
             assert_eq!(result.installed.len(), 2);
+        });
+    }
+
+    #[test]
+    fn install_without_replace_remains_non_destructive() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source");
+            write_extension_fixture(&source, "swift");
+
+            install(&source.join("swift").to_string_lossy(), Some("swift"))
+                .expect("initial install");
+
+            let err = install(&source.join("swift").to_string_lossy(), Some("swift"))
+                .expect_err("second install should still fail");
+
+            assert!(err.to_string().contains("already exists"));
         });
     }
 

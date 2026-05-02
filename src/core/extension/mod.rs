@@ -6,6 +6,7 @@ pub mod grammar_items;
 mod lifecycle;
 pub mod lint;
 mod manifest;
+mod repair;
 mod runner;
 mod runner_contract;
 mod runtime_helper;
@@ -59,6 +60,7 @@ pub use lifecycle::{
     read_source_revision, slugify_id, uninstall, update, InstallForComponentResult, InstallResult,
     UpdateAvailable, UpdateResult,
 };
+pub use repair::{relink, replace, ReplaceResult};
 
 pub(crate) fn stderr_tail(stderr: &str) -> String {
     const MAX_LINES: usize = 20;
