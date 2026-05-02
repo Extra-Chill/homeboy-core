@@ -4,8 +4,10 @@ use crate::engine::local_files::{self, FileSystem};
 use crate::error::{Error, Result};
 use crate::git;
 use crate::paths;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 use super::execution::run_setup;
 use super::manifest::ExtensionManifest;
@@ -191,17 +193,6 @@ pub fn is_git_url(source: &str) -> bool {
         || source.ends_with(".git")
 }
 
-/// Check if an extension directory is safe to overwrite on update.
-///
-/// Treats the directory as "clean" when:
-/// - It is not a git working tree (tarball / plain-directory installs have no
-///   `.git`, so there is no working tree to be dirty in the first place), or
-/// - It is a git working tree with no uncommitted changes.
-///
-/// Returns `false` only when the directory is a git working tree **and** has
-/// uncommitted changes. This avoids the historical false positive where
-/// `git status` returning a non-zero exit on a non-repo directory was treated
-/// as "dirty" (see Extra-Chill/homeboy#1181).
 fn is_workdir_clean(path: &Path) -> bool {
     // If the directory is not a git working tree, there is nothing that can
     // be "uncommitted". Short-circuit to clean before running `git status`.
@@ -731,83 +722,101 @@ pub(crate) fn run_setup_if_configured(extension_id: &str) {
     }
 }
 
-/// Update a linked extension by pulling the source repository.
-///
-/// Linked extensions are symlinks pointing to a source directory, which may be
-/// a subdirectory of a monorepo (e.g. `homeboy-extensions/wordpress`). This
-/// function resolves the git root, verifies it is on the default branch, and pulls.
 fn update_linked_extension(
     extension_id: &str,
     extension_dir: &Path,
     force: bool,
 ) -> Result<UpdateResult> {
-    // Resolve symlink to actual source directory
     let source_dir = std::fs::read_link(extension_dir).map_err(|e| {
         Error::internal_io(
             e.to_string(),
             Some(format!("read symlink for {}", extension_id)),
         )
     })?;
-
-    // Find the git root (source may be a subdirectory of a larger repo)
+    let source_dir = if source_dir.is_absolute() {
+        source_dir
+    } else {
+        extension_dir
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(source_dir)
+    };
+    let source_dir = source_dir.canonicalize().unwrap_or(source_dir);
     let git_root_str = git::get_git_root(&source_dir.to_string_lossy())?;
-    let git_root = PathBuf::from(&git_root_str);
+    let git_root = PathBuf::from(&git_root_str)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(git_root_str));
 
-    if !force && !is_workdir_clean(&git_root) {
-        return Err(Error::validation_invalid_argument(
+    static UPDATED_ROOTS: OnceLock<Mutex<HashMap<PathBuf, Option<String>>>> = OnceLock::new();
+    let updated_roots = UPDATED_ROOTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let cached = updated_roots
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&git_root)
+        .cloned();
+    match cached {
+        Some(None) => {}
+        Some(Some(message)) => return Err(Error::validation_invalid_argument(
             "extension_id",
-            format!(
-                "Linked extension '{}' source repo has uncommitted changes. Use --force to proceed.",
-                extension_id,
-            ),
+            format!("Linked extension '{}' skipped because shared source repo update previously failed: {}", extension_id, message),
             Some(extension_id.to_string()),
             None,
-        ));
-    }
-
-    let default_branch = detect_default_branch(&git_root).unwrap_or_else(|| "main".to_string());
-    let current_branch = git_silent(&git_root, &["branch", "--show-current"])
-        .and_then(|output| {
-            if output.status.success() {
-                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !branch.is_empty() {
-                    return Some(branch);
+        )),
+        None => {
+            let result = (|| {
+                if !force && !is_workdir_clean(&git_root) {
+                    return Err(Error::validation_invalid_argument(
+                        "extension_id",
+                        format!(
+                            "Linked extension source repo has uncommitted changes for {}. Use --force to proceed.",
+                            extension_id,
+                        ),
+                        Some(extension_id.to_string()),
+                        None,
+                    ));
                 }
-            }
 
-            None
-        })
-        .unwrap_or_else(|| "DETACHED".to_string());
-    if current_branch != default_branch {
-        return Err(Error::validation_invalid_argument(
-            "extension_id",
-            format!(
-                "Linked extension '{}' points at {} on branch '{}', but updates require the default branch '{}'. Relink the extension to a stable checkout, for example: homeboy extension uninstall {} && homeboy extension install <{} checkout path> --id {}",
-                extension_id,
-                source_dir.display(),
-                current_branch,
-                default_branch,
-                extension_id,
-                default_branch,
-                extension_id,
-            ),
-            Some(extension_id.to_string()),
-            None,
-        ));
-    }
+                let default_branch =
+                    detect_default_branch(&git_root).unwrap_or_else(|| "main".to_string());
+                let current_branch = git_silent(&git_root, &["branch", "--show-current"])
+                    .and_then(|output| {
+                        if output.status.success() {
+                            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            if !branch.is_empty() {
+                                return Some(branch);
+                            }
+                        }
 
-    git::pull_repo(&git_root)?;
+                        None
+                    })
+                    .unwrap_or_else(|| "DETACHED".to_string());
+                if current_branch != default_branch {
+                    return Err(Error::validation_invalid_argument(
+                        "extension_id",
+                        format!(
+                            "Linked extension '{}' points at {} on branch '{}', but updates require the default branch '{}'. Relink the extension to a stable checkout before upgrading.",
+                            extension_id,
+                            source_dir.display(),
+                            current_branch,
+                            default_branch,
+                        ),
+                        Some(extension_id.to_string()),
+                        None,
+                    ));
+                }
 
-    // Auto-run setup if extension defines a setup_command
-    if let Ok(extension) = load_extension(extension_id) {
-        if extension
-            .runtime()
-            .is_some_and(|r| r.setup_command.is_some())
-        {
-            let _ = run_setup(extension_id);
+                git::pull_repo(&git_root)?;
+
+                Ok(())
+            })();
+            updated_roots
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(git_root, result.as_ref().err().map(|e| e.message.clone()));
+            result?;
         }
-    }
-
+    };
+    run_setup_if_configured(extension_id);
     let url = format!("linked:{}", source_dir.display());
     Ok(UpdateResult {
         extension_id: extension_id.to_string(),
@@ -817,18 +826,13 @@ fn update_linked_extension(
     })
 }
 
-/// Detect the default branch of a git repository.
-/// Checks `refs/remotes/origin/HEAD` first, then tries `main` and `master`.
 fn detect_default_branch(repo_dir: &Path) -> Option<String> {
-    // Try symbolic-ref first (most reliable)
     let output = git_silent(repo_dir, &["symbolic-ref", "refs/remotes/origin/HEAD"])?;
     if output.status.success() {
         let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        // refs/remotes/origin/main → main
         return refname.rsplit('/').next().map(|s| s.to_string());
     }
 
-    // Fallback: check if main or master exist as local branches
     for branch in &["main", "master"] {
         let check = git_silent(repo_dir, &["rev-parse", "--verify", branch])?;
         if check.status.success() {
@@ -991,6 +995,9 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     fn write_extension_fixture(root: &Path, id: &str) {
         write_extension_fixture_with_version(root, id, "1.0.0");
     }
@@ -1006,6 +1013,19 @@ mod tests {
   "version": "{}"
 }}"#,
                 id, version
+            ),
+        )
+        .expect("extension manifest");
+    }
+
+    fn write_extension_fixture_with_setup(root: &Path, id: &str) {
+        let dir = root.join(id);
+        fs::create_dir_all(&dir).expect("extension dir");
+        fs::write(
+            dir.join(format!("{}.json", id)),
+            format!(
+                r#"{{"name":"{} extension","version":"1.0.0","executable":{{"runtime":{{"setup_command":"printf setup >> setup-count.txt"}}}}}}"#,
+                id
             ),
         )
         .expect("extension manifest");
@@ -1060,6 +1080,17 @@ mod tests {
 
     fn prepare_git_extension_repo(repo: &Path, extension_id: &str) -> Option<TempDir> {
         write_extension_fixture(repo, extension_id);
+        prepare_git_repo(repo)
+    }
+
+    fn prepare_git_extension_monorepo(repo: &Path, extension_ids: &[&str]) -> Option<TempDir> {
+        for extension_id in extension_ids {
+            write_extension_fixture_with_setup(repo, extension_id);
+        }
+        prepare_git_repo(repo)
+    }
+
+    fn prepare_git_repo(repo: &Path) -> Option<TempDir> {
         if !run_git(repo, &["init", "--quiet"]) || !commit_all(repo, "init") {
             return None;
         }
@@ -1097,6 +1128,29 @@ mod tests {
         }
 
         Some(remote_parent)
+    }
+
+    #[cfg(unix)]
+    fn write_git_wrapper(bin_dir: &Path, pull_count_file: &Path) {
+        fs::create_dir_all(bin_dir).expect("wrapper bin dir");
+        let real_git = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .expect("locate git");
+        let real_git = String::from_utf8_lossy(&real_git.stdout).trim().to_string();
+        let script = format!(
+            r#"#!/bin/sh
+if [ "$1" = "pull" ]; then
+  printf x >> '{}'
+fi
+exec '{}' "$@"
+"#,
+            pull_count_file.display(),
+            real_git
+        );
+        let wrapper = bin_dir.join("git");
+        fs::write(&wrapper, script).expect("git wrapper");
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).expect("wrapper perms");
     }
 
     #[test]
@@ -1289,6 +1343,66 @@ mod tests {
         });
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_run_setup_if_configured() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let _remote = match prepare_git_extension_monorepo(&source, &["nodejs", "rust"]) {
+                Some(remote) => remote,
+                None => return,
+            };
+
+            install(&source.join("nodejs").to_string_lossy(), Some("nodejs"))
+                .expect("install linked nodejs extension");
+            install(&source.join("rust").to_string_lossy(), Some("rust"))
+                .expect("install linked rust extension");
+
+            let bin_dir = home.join("bin");
+            let pull_count_file = home.join("pull-count");
+            write_git_wrapper(&bin_dir, &pull_count_file);
+            let old_path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), old_path));
+
+            let result = update_all(false);
+
+            std::env::set_var("PATH", old_path);
+
+            let updated_ids = result
+                .updated
+                .iter()
+                .map(|entry| entry.extension_id.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(updated_ids, vec!["nodejs", "rust"]);
+            assert!(result.skipped.is_empty());
+            assert_eq!(
+                fs::read_to_string(&pull_count_file)
+                    .unwrap_or_default()
+                    .len(),
+                1,
+                "linked extensions sharing one git root should run one git pull"
+            );
+            assert_eq!(
+                fs::read_to_string(source.join("nodejs/setup-count.txt"))
+                    .unwrap_or_default()
+                    .matches("setup")
+                    .count(),
+                1,
+                "nodejs setup should still run after the shared root update"
+            );
+            assert_eq!(
+                fs::read_to_string(source.join("rust/setup-count.txt"))
+                    .unwrap_or_default()
+                    .matches("setup")
+                    .count(),
+                1,
+                "rust setup should still run after the shared root update"
+            );
+        });
+    }
+
     #[test]
     fn linked_update_fails_instead_of_checking_out_default_branch_in_feature_worktree() {
         with_isolated_home(|home| {
@@ -1332,7 +1446,7 @@ mod tests {
             assert!(message.contains("Linked extension 'wordpress' points at"));
             assert!(message.contains("feature-linked-extension"));
             assert!(message.contains(default_branch));
-            assert!(message.contains("homeboy extension uninstall wordpress"));
+            assert!(message.contains("Relink the extension to a stable checkout"));
 
             let branch_output = Command::new("git")
                 .args(["branch", "--show-current"])
