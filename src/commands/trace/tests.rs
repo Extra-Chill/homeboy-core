@@ -8,6 +8,10 @@ use homeboy::component::ScopedExtensionConfig;
 use homeboy::rig::ComponentSpec;
 
 use super::*;
+use trace_fixture::{
+    init_overlay_component, write_trace_extension, write_trace_rig,
+    write_trace_rig_with_phase_preset,
+};
 
 fn aggregate_samples(durations: &[u64]) -> Vec<TraceAggregateSpanSample> {
     durations
@@ -1532,26 +1536,29 @@ impl Drop for XdgGuard {
     }
 }
 
-fn write_trace_extension(home: &tempfile::TempDir) {
-    let extension_dir = home
-        .path()
-        .join(".config")
-        .join("homeboy")
-        .join("extensions")
-        .join("nodejs");
-    fs::create_dir_all(&extension_dir).expect("mkdir extension");
-    fs::write(
-        extension_dir.join("nodejs.json"),
-        r#"{
+mod trace_fixture {
+    use super::*;
+
+    pub(super) fn write_trace_extension(home: &tempfile::TempDir) {
+        let extension_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("extensions")
+            .join("nodejs");
+        fs::create_dir_all(&extension_dir).expect("mkdir extension");
+        fs::write(
+            extension_dir.join("nodejs.json"),
+            r#"{
                 "name": "Node.js",
                 "version": "0.0.0",
                 "trace": { "extension_script": "trace-runner.sh" }
             }"#,
-    )
-    .expect("write extension manifest");
+        )
+        .expect("write extension manifest");
 
-    let script_path = extension_dir.join("trace-runner.sh");
-    fs::write(
+        let script_path = extension_dir.join("trace-runner.sh");
+        fs::write(
             &script_path,
             r#"#!/bin/sh
 set -eu
@@ -1601,61 +1608,61 @@ printf 'trace log\n' > "$HOMEBOY_TRACE_ARTIFACT_DIR/trace-log.txt"
         )
         .expect("write trace script");
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(&script_path)
-            .expect("script metadata")
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script_path, permissions).expect("chmod script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&script_path)
+                .expect("script metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&script_path, permissions).expect("chmod script");
+        }
     }
-}
 
-fn init_overlay_component(path: &std::path::Path) {
-    fs::write(path.join("scenario.txt"), "base\n").expect("write scenario");
-    run_git(path, &["init"]);
-    run_git(path, &["add", "scenario.txt"]);
-    run_git(
-        path,
-        &[
-            "-c",
-            "user.name=Homeboy Test",
-            "-c",
-            "user.email=homeboy@example.test",
-            "commit",
-            "-m",
-            "initial",
-        ],
-    );
-}
+    pub(super) fn init_overlay_component(path: &std::path::Path) {
+        fs::write(path.join("scenario.txt"), "base\n").expect("write scenario");
+        run_git(path, &["init"]);
+        run_git(path, &["add", "scenario.txt"]);
+        run_git(
+            path,
+            &[
+                "-c",
+                "user.name=Homeboy Test",
+                "-c",
+                "user.email=homeboy@example.test",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+    }
 
-fn run_git(path: &std::path::Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(path)
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+    fn run_git(path: &std::path::Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
-fn write_trace_rig(
-    home: &tempfile::TempDir,
-    rig_id: &str,
-    component_id: &str,
-    path: &std::path::Path,
-) {
-    let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
-    fs::create_dir_all(&rig_dir).expect("mkdir rigs");
-    fs::write(
-        rig_dir.join(format!("{}.json", rig_id)),
-        format!(
-            r#"{{
+    pub(super) fn write_trace_rig(
+        home: &tempfile::TempDir,
+        rig_id: &str,
+        component_id: &str,
+        path: &std::path::Path,
+    ) {
+        let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+        fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+        fs::write(
+            rig_dir.join(format!("{}.json", rig_id)),
+            format!(
+                r#"{{
                     "components": {{
                         "{component_id}": {{ "path": "{}" }}
                     }},
@@ -1664,24 +1671,24 @@ fn write_trace_rig(
                         "${{components.{component_id}.path}}/studio-list-sites.trace.mjs"
                     ] }}
                 }}"#,
-            path.display()
-        ),
-    )
-    .expect("write rig");
-}
+                path.display()
+            ),
+        )
+        .expect("write rig");
+    }
 
-fn write_trace_rig_with_phase_preset(
-    home: &tempfile::TempDir,
-    rig_id: &str,
-    component_id: &str,
-    path: &std::path::Path,
-) {
-    let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
-    fs::create_dir_all(&rig_dir).expect("mkdir rigs");
-    fs::write(
-        rig_dir.join(format!("{}.json", rig_id)),
-        format!(
-            r#"{{
+    pub(super) fn write_trace_rig_with_phase_preset(
+        home: &tempfile::TempDir,
+        rig_id: &str,
+        component_id: &str,
+        path: &std::path::Path,
+    ) {
+        let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+        fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+        fs::write(
+            rig_dir.join(format!("{}.json", rig_id)),
+            format!(
+                r#"{{
                     "components": {{
                         "{component_id}": {{ "path": "{}" }}
                     }},
@@ -1696,10 +1703,11 @@ fn write_trace_rig_with_phase_preset(
                         }}
                     ] }}
                 }}"#,
-            path.display()
-        ),
-    )
-    .expect("write rig");
+                path.display()
+            ),
+        )
+        .expect("write rig");
+    }
 }
 
 fn write_trace_rig_with_variant(
