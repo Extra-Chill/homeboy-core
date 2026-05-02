@@ -312,7 +312,7 @@ pub struct ExtensionManifest {
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "sourceUrl", skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
 
     // Capability groups

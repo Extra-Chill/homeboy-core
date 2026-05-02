@@ -57,7 +57,7 @@ pub use scope::ExtensionScope;
 pub use lifecycle::{
     check_update_available, derive_id_from_url, install, install_for_component, is_git_url,
     read_source_revision, slugify_id, uninstall, update, InstallForComponentResult, InstallResult,
-    UpdateAvailable, UpdateResult,
+    SourceMetadataRepair, UpdateAvailable, UpdateResult,
 };
 
 pub(crate) fn stderr_tail(stderr: &str) -> String {
@@ -829,6 +829,10 @@ pub fn list_summaries(project: Option<&crate::project::Project>) -> Vec<Extensio
 pub struct UpdateAllResult {
     pub updated: Vec<UpdateEntry>,
     pub skipped: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_details: Vec<UpdateSkippedEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub repaired_source_metadata: Vec<SourceMetadataRepairEntry>,
 }
 
 /// A single extension update entry with before/after versions.
@@ -837,6 +841,23 @@ pub struct UpdateEntry {
     pub extension_id: String,
     pub old_version: String,
     pub new_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repaired_source_metadata: Option<SourceMetadataRepair>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceMetadataRepairEntry {
+    pub extension_id: String,
+    #[serde(flatten)]
+    pub repair: SourceMetadataRepair,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateSkippedEntry {
+    pub extension_id: String,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hints: Vec<String>,
 }
 
 /// Update all installed extensions through the same path used by single-extension updates.
@@ -844,30 +865,51 @@ pub fn update_all(force: bool) -> UpdateAllResult {
     let extension_ids = available_extension_ids();
     let mut updated = Vec::new();
     let mut skipped = Vec::new();
+    let mut skipped_details = Vec::new();
+    let mut repaired_source_metadata = Vec::new();
 
     for id in &extension_ids {
         let old_version = load_extension(id).ok().map(|m| m.version.clone());
 
         match update(id, force) {
-            Ok(_) => {
+            Ok(result) => {
                 let new_version = load_extension(id)
                     .ok()
                     .map(|m| m.version.clone())
                     .unwrap_or_default();
+                let repaired = result.repaired_source_metadata;
+
+                if let Some(repair) = repaired.clone() {
+                    repaired_source_metadata.push(SourceMetadataRepairEntry {
+                        extension_id: id.clone(),
+                        repair,
+                    });
+                }
 
                 updated.push(UpdateEntry {
                     extension_id: id.clone(),
                     old_version: old_version.unwrap_or_default(),
                     new_version,
+                    repaired_source_metadata: repaired,
                 });
             }
-            Err(_) => {
+            Err(err) => {
                 skipped.push(id.clone());
+                skipped_details.push(UpdateSkippedEntry {
+                    extension_id: id.clone(),
+                    reason: err.message,
+                    hints: err.hints.into_iter().map(|hint| hint.message).collect(),
+                });
             }
         }
     }
 
-    UpdateAllResult { updated, skipped }
+    UpdateAllResult {
+        updated,
+        skipped,
+        skipped_details,
+        repaired_source_metadata,
+    }
 }
 
 /// Execute a tool from an extension's vendor directory.
