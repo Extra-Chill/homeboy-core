@@ -25,6 +25,7 @@ fn observation_spec(id: &str) -> RigSpec {
         trace_workloads: HashMap::new(),
         trace_variants: HashMap::new(),
         trace_experiments: HashMap::new(),
+        trace_guardrails: Vec::new(),
         bench_profiles: HashMap::new(),
         app_launcher: None,
     }

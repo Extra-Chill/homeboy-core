@@ -82,7 +82,10 @@ pub(super) fn run_variant_matrix(args: TraceArgs) -> CmdResult<TraceCommandOutpu
             args.regression_min_delta_ms,
         );
         write_json_artifact(&compare_path, &compare)?;
-        if !aggregate.passed || compare.focus_status.as_deref() == Some("fail") {
+        if !aggregate.passed
+            || compare.focus_status.as_deref() == Some("fail")
+            || compare.guardrail_status.as_deref() == Some("fail")
+        {
             failure_count += 1;
         }
         runs.push(extension_trace::TraceVariantMatrixRunOutput {
@@ -270,6 +273,8 @@ fn aggregate_to_compare_input(
                 metadata: span.metadata.clone(),
             })
             .collect(),
+        guardrails: aggregate.guardrails.clone(),
+        guardrail_failure_count: aggregate.guardrail_failure_count,
     }
 }
 

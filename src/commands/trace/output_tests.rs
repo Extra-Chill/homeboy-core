@@ -6,8 +6,9 @@ use homeboy::extension::trace as extension_trace;
 use super::bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
 use super::output::{
     compare_trace_aggregates, compare_trace_aggregates_with_focus, parse_trace_aggregate_input,
-    render_compare_markdown, TraceAggregateInput, TraceAggregateSpanInput,
+    render_compare_markdown, run_compare, TraceAggregateInput, TraceAggregateSpanInput,
 };
+use super::*;
 
 #[test]
 fn trace_compare_reports_median_and_average_deltas() {
@@ -25,6 +26,8 @@ fn trace_compare_reports_median_and_average_deltas() {
             span_input("large_regression", 5, Some(80), Some(80.0), 0),
             span_input("before_only", 5, Some(25), Some(25.0), 1),
         ],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
     let after = TraceAggregateInput {
         component: Some("studio".to_string()),
@@ -40,6 +43,8 @@ fn trace_compare_reports_median_and_average_deltas() {
             span_input("large_regression", 5, Some(200), Some(200.0), 0),
             span_input("after_only", 3, Some(75), Some(80.0), 0),
         ],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
 
     let compare = compare_trace_aggregates(
@@ -89,6 +94,8 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
             span_input("focused", 6, Some(100), Some(100.0), 0),
             span_input("unfocused", 6, Some(100), Some(100.0), 0),
         ],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
     let after = TraceAggregateInput {
         component: Some("studio".to_string()),
@@ -102,6 +109,8 @@ fn trace_compare_focus_spans_report_independent_regression_status() {
             span_input("focused", 6, Some(130), Some(130.0), 0),
             span_input("unfocused", 6, Some(250), Some(250.0), 0),
         ],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
 
     let compare = compare_trace_aggregates_with_focus(
@@ -147,6 +156,8 @@ fn trace_compare_includes_classification_summary_output() {
             metadata: Some(metadata.clone()),
             ..span_input("boot_to_ready", 5, Some(100), Some(100.0), 0)
         }],
+        guardrail_failure_count: 0,
+        guardrails: Vec::new(),
     };
     let after = TraceAggregateInput {
         component: Some("studio".to_string()),
@@ -160,6 +171,8 @@ fn trace_compare_includes_classification_summary_output() {
             metadata: Some(metadata),
             ..span_input("boot_to_ready", 5, Some(125), Some(125.0), 0)
         }],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
 
     let compare = compare_trace_aggregates(
@@ -178,6 +191,128 @@ fn trace_compare_includes_classification_summary_output() {
     let markdown = render_compare_markdown(&compare);
     assert!(markdown.contains("## Critical Path Classification"));
     assert!(markdown.contains("| `cacheable_critical` | 1 | 100ms | 125ms | **+25ms** |"));
+}
+
+#[test]
+fn trace_compare_reports_guardrail_failures() {
+    let before = TraceAggregateInput {
+        component: Some("studio".to_string()),
+        scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
+        spans: vec![span_input("boot", 1, Some(100), Some(100.0), 0)],
+        guardrails: vec![extension_trace::TraceGuardrailOutput {
+            label: "baseline smoke".to_string(),
+            source: "rig:baseline".to_string(),
+            passed: true,
+            status: "pass".to_string(),
+            failure: None,
+        }],
+        guardrail_failure_count: 0,
+    };
+    let after = TraceAggregateInput {
+        component: Some("studio".to_string()),
+        scenario_id: Some("create-site".to_string()),
+        phase_preset: None,
+        repeat: None,
+        rig_state: None,
+        overlays: Vec::new(),
+        runs: Vec::new(),
+        spans: vec![span_input("boot", 1, Some(90), Some(90.0), 0)],
+        guardrails: vec![extension_trace::TraceGuardrailOutput {
+            label: "behavior smoke".to_string(),
+            source: "rig:variant".to_string(),
+            passed: false,
+            status: "fail".to_string(),
+            failure: Some("assertion changed".to_string()),
+        }],
+        guardrail_failure_count: 1,
+    };
+
+    let compare = compare_trace_aggregates(
+        Path::new("before.json"),
+        before,
+        Path::new("after.json"),
+        after,
+    );
+
+    assert_eq!(compare.guardrail_status.as_deref(), Some("fail"));
+    assert_eq!(compare.guardrail_failure_count, 1);
+    assert_eq!(compare.before_guardrails.len(), 1);
+    assert_eq!(compare.after_guardrails[0].label, "behavior smoke");
+    let markdown = render_compare_markdown(&compare);
+    assert!(markdown.contains("## After Guardrails"));
+    assert!(markdown.contains("assertion changed"));
+}
+
+#[test]
+fn trace_compare_exits_nonzero_for_guardrail_failures() {
+    let dir = tempfile::TempDir::new().expect("compare dir");
+    let before_path = dir.path().join("before.json");
+    let after_path = dir.path().join("after.json");
+    fs::write(
+        &before_path,
+        serde_json::json!({
+            "component": "studio",
+            "scenario_id": "create-site",
+            "spans": [{ "id": "boot", "n": 1, "median_ms": 100, "avg_ms": 100.0, "failures": 0 }],
+            "guardrails": [{ "label": "baseline smoke", "source": "rig:baseline", "passed": true, "status": "pass" }]
+        })
+        .to_string(),
+    )
+    .expect("write before");
+    fs::write(
+        &after_path,
+        serde_json::json!({
+            "component": "studio",
+            "scenario_id": "create-site",
+            "spans": [{ "id": "boot", "n": 1, "median_ms": 80, "avg_ms": 80.0, "failures": 0 }],
+            "guardrails": [{ "label": "variant smoke", "source": "rig:variant", "passed": false, "status": "fail", "failure": "behavior changed" }],
+            "guardrail_failure_count": 1
+        })
+        .to_string(),
+    )
+    .expect("write after");
+
+    let (_output, exit_code) = run_compare(TraceArgs {
+        comp: PositionalComponentArgs {
+            component: Some("compare".to_string()),
+            path: None,
+        },
+        component_arg: None,
+        scenario: Some(before_path.to_string_lossy().to_string()),
+        scenario_arg: None,
+        compare_after: Some(after_path),
+        rig: None,
+        setting_args: SettingArgs::default(),
+        _json: HiddenJsonArgs::default(),
+        json_summary: false,
+        report: None,
+        experiment: None,
+        repeat: 1,
+        aggregate: None,
+        schedule: TraceSchedule::Grouped,
+        focus_spans: Vec::new(),
+        spans: Vec::new(),
+        phases: Vec::new(),
+        phase_preset: None,
+        baseline_args: BaselineArgs::default(),
+        regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+        regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+        overlays: Vec::new(),
+        variants: Vec::new(),
+        matrix: TraceVariantMatrixMode::None,
+        output_dir: None,
+        keep_overlay: false,
+        stale: false,
+        force: false,
+    })
+    .expect("compare should run");
+
+    assert_eq!(exit_code, 1);
 }
 
 #[test]
@@ -241,6 +376,10 @@ fn trace_compare_markdown_and_experiment_bundle_render_artifacts() {
         focus_regression_count: 0,
         focus_failure_count: 0,
         focus_status: None,
+        before_guardrails: Vec::new(),
+        after_guardrails: Vec::new(),
+        guardrail_failure_count: 0,
+        guardrail_status: None,
         classification_summaries: Vec::new(),
     };
 

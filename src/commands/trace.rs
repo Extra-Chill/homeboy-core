@@ -23,6 +23,7 @@ use super::{CmdResult, GlobalArgs};
 mod bundle;
 mod compare_variant;
 mod experiment;
+mod guardrails;
 mod matrix;
 mod metadata;
 mod output;
@@ -36,6 +37,7 @@ use experiment::{
     run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args,
     trace_experiment_settings,
 };
+use guardrails::run_trace_guardrails_for_args;
 use metadata::trace_span_metadata_for_args;
 
 use output::{
@@ -725,12 +727,21 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         .collect::<Vec<_>>();
     let unmatched_span_metadata_ids = attach_span_metadata(&mut spans, &span_metadata);
     let classification_summaries = classification_summaries(&spans);
+    let guardrails = run_trace_guardrails_for_args(&args)?;
+    let guardrail_failure_count = guardrails
+        .iter()
+        .filter(|guardrail| !guardrail.passed)
+        .count();
     let focus_spans = focus_aggregate_spans(&spans, &args.focus_spans);
-    let exit_code = if failure_count == 0 { 0 } else { 1 };
+    let exit_code = if failure_count == 0 && guardrail_failure_count == 0 {
+        0
+    } else {
+        1
+    };
     let output = extension_trace::TraceAggregateOutput {
         command: "trace.aggregate.spans",
-        passed: failure_count == 0,
-        status: if failure_count == 0 { "pass" } else { "fail" }.to_string(),
+        passed: exit_code == 0,
+        status: if exit_code == 0 { "pass" } else { "fail" }.to_string(),
         component: component.unwrap_or_else(|| args.comp.component.clone().unwrap_or_default()),
         scenario_id,
         phase_preset: args.phase_preset.clone(),
@@ -751,6 +762,8 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         overlays,
         runs,
         spans,
+        guardrails,
+        guardrail_failure_count,
         focus_span_ids: args.focus_spans.clone(),
         focus_spans,
         classification_summaries,
