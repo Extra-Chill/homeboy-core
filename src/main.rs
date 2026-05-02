@@ -43,7 +43,7 @@ fn response_mode(command: &Commands, has_output_file: bool) -> ResponseMode {
         Commands::Trace(args) if trace::is_markdown_mode(args) => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
-        Commands::Runs(args) if !has_output_file && commands::runs::is_markdown_mode(args) => {
+        Commands::Runs(args) if !has_output_file && args.is_markdown_mode() => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Report(args) if report::is_markdown_mode(args) => {
@@ -178,7 +178,11 @@ fn main() -> std::process::ExitCode {
 
     // Extract --output early so it's available for all code paths (including
     // extension CLI commands which exit before Cli::from_arg_matches).
-    let output_file: Option<String> = matches.get_one::<String>("output").cloned();
+    let mut output_file: Option<String> = matches
+        .try_get_one::<std::path::PathBuf>("output")
+        .ok()
+        .flatten()
+        .map(|path| path.to_string_lossy().to_string());
 
     if let Some(extension_cmd) = try_parse_extension_cli_command(&matches, &extension_info) {
         let cli_args = cli::CliArgs {
@@ -200,6 +204,10 @@ fn main() -> std::process::ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
+
+    if matches!(&cli.command, Commands::Runs(args) if args.is_bundle_export()) {
+        output_file = None;
+    }
 
     // Startup update checks — skip for upgrade (it handles this itself)
     if !matches!(
