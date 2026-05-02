@@ -232,14 +232,86 @@ fn install_multi_rig_package_can_install_all() {
 }
 
 #[test]
-fn install_rejects_existing_rig_collision() {
+fn install_refreshes_existing_matching_local_rig_without_metadata() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    let refreshed = minimal_rig("alpha").replace("alpha rig", "alpha rig refreshed");
+    write_rig(package.path(), "alpha", &refreshed);
+
+    fs::create_dir_all(crate::paths::rigs().expect("rigs dir")).expect("rigs dir");
+    fs::write(
+        crate::paths::rig_config("alpha").expect("alpha rig path"),
+        minimal_rig("alpha"),
+    )
+    .expect("stale installed rig");
+
+    let result = install(package.path().to_str().unwrap(), None, false).expect("refresh");
+
+    assert_eq!(result.installed.len(), 1);
+    let installed =
+        fs::read_to_string(crate::paths::rig_config("alpha").unwrap()).expect("installed rig");
+    assert!(installed.contains("alpha rig refreshed"));
+    assert_eq!(
+        read_source_metadata("alpha").expect("metadata").rig_path,
+        package.path().join("rigs/alpha/rig.json").to_string_lossy()
+    );
+}
+
+#[test]
+fn install_rejects_existing_rig_with_different_declared_id() {
     let _home = HomeGuard::new();
     let package = tempfile::tempdir().expect("package");
     write_rig(package.path(), "alpha", &minimal_rig("alpha"));
 
-    install(package.path().to_str().unwrap(), None, false).expect("first install");
+    fs::create_dir_all(crate::paths::rigs().expect("rigs dir")).expect("rigs dir");
+    fs::write(
+        crate::paths::rig_config("alpha").expect("alpha rig path"),
+        minimal_rig("beta"),
+    )
+    .expect("conflicting installed rig");
+
     let err = install(package.path().to_str().unwrap(), None, false).expect_err("collision");
-    assert!(err.message.contains("already exists"));
+    assert!(err.message.contains("refusing to replace"));
+}
+
+#[test]
+fn install_refreshes_existing_matching_stack_without_metadata() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "studio", &minimal_rig("studio"));
+    let stack_path = write_stack(package.path(), "studio-combined", "studio");
+
+    fs::create_dir_all(crate::paths::stacks().expect("stacks dir")).expect("stacks dir");
+    fs::write(
+        crate::paths::stack_config("studio-combined").expect("stack path"),
+        fs::read_to_string(&stack_path).expect("package stack"),
+    )
+    .expect("existing stack");
+
+    let result = install(package.path().to_str().unwrap(), None, false).expect("refresh");
+
+    assert_eq!(result.installed_stacks.len(), 1);
+    assert_eq!(result.installed_stacks[0].id, "studio-combined");
+    let metadata = read_stack_source_metadata("studio-combined").expect("stack metadata");
+    assert_eq!(metadata.stack_path, stack_path.to_string_lossy());
+}
+
+#[test]
+fn install_rejects_existing_stack_with_different_content() {
+    let _home = HomeGuard::new();
+    let package = tempfile::tempdir().expect("package");
+    write_rig(package.path(), "studio", &minimal_rig("studio"));
+    write_stack(package.path(), "studio-combined", "studio");
+
+    fs::create_dir_all(crate::paths::stacks().expect("stacks dir")).expect("stacks dir");
+    fs::write(
+        crate::paths::stack_config("studio-combined").expect("stack path"),
+        minimal_stack("studio-combined", "other"),
+    )
+    .expect("conflicting stack");
+
+    let err = install(package.path().to_str().unwrap(), None, false).expect_err("stack collision");
+    assert!(err.message.contains("different content"));
 }
 
 #[test]

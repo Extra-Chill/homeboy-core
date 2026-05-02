@@ -103,16 +103,7 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
     for stack in &discovered_stacks {
         let target = paths::stack_config(&stack.id)?;
         if target.exists() || fs::symlink_metadata(&target).is_ok() {
-            return Err(Error::validation_invalid_argument(
-                "stack_id",
-                format!(
-                    "Stack '{}' already exists at {}",
-                    stack.id,
-                    target.display()
-                ),
-                Some(stack.id.clone()),
-                None,
-            ));
+            ensure_stack_refreshable(stack, &target)?;
         }
     }
 
@@ -120,12 +111,8 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
     for rig in selected {
         let target = paths::rig_config(&rig.id)?;
         if target.exists() || fs::symlink_metadata(&target).is_ok() {
-            return Err(Error::validation_invalid_argument(
-                "rig_id",
-                format!("Rig '{}' already exists at {}", rig.id, target.display()),
-                Some(rig.id),
-                None,
-            ));
+            ensure_rig_refreshable(&rig, &target)?;
+            remove_existing_config(&target, "replace rig config link")?;
         }
 
         link_or_copy_file(&rig.rig_path, &target)?;
@@ -152,6 +139,9 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
     let mut installed_stacks = Vec::new();
     for stack in discovered_stacks {
         let target = paths::stack_config(&stack.id)?;
+        if target.exists() || fs::symlink_metadata(&target).is_ok() {
+            remove_existing_config(&target, "replace stack config link")?;
+        }
         link_or_copy_file(&stack.stack_path, &target)?;
 
         let metadata = StackSourceMetadata {
@@ -180,6 +170,104 @@ pub fn install(source: &str, id: Option<&str>, all: bool) -> Result<RigInstallRe
         installed,
         installed_stacks,
     })
+}
+
+fn ensure_rig_refreshable(rig: &DiscoveredRig, target: &Path) -> Result<()> {
+    let content = fs::read_to_string(target)
+        .map_err(|e| Error::internal_io(e.to_string(), Some("read existing rig spec".into())))?;
+    let mut spec: super::RigSpec = serde_json::from_str(&content).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some(format!("parse existing rig spec {}", target.display())),
+            Some(content.chars().take(200).collect()),
+        )
+    })?;
+    if spec.id.is_empty() {
+        spec.id = rig.id.clone();
+    }
+    let existing_id = extension::slugify_id(&spec.id)?;
+    if existing_id == rig.id {
+        return Ok(());
+    }
+
+    Err(Error::validation_invalid_argument(
+        "rig_id",
+        format!(
+            "Rig '{}' already exists at {} but declares '{}'; refusing to replace it",
+            rig.id,
+            target.display(),
+            existing_id
+        ),
+        Some(rig.id.clone()),
+        None,
+    ))
+}
+
+fn ensure_stack_refreshable(stack: &DiscoveredStack, target: &Path) -> Result<()> {
+    if config_matches_source(target, &stack.stack_path) {
+        return Ok(());
+    }
+
+    let existing = normalized_stack_spec(target, "parse existing stack spec")?;
+    let incoming = normalized_stack_spec(&stack.stack_path, "parse incoming stack spec")?;
+    if existing == incoming {
+        return Ok(());
+    }
+
+    Err(Error::validation_invalid_argument(
+        "stack_id",
+        format!(
+            "Stack '{}' already exists at {} with different content; refusing to replace it",
+            stack.id,
+            target.display()
+        ),
+        Some(stack.id.clone()),
+        None,
+    ))
+}
+
+fn normalized_stack_spec(path: &Path, context: &'static str) -> Result<serde_json::Value> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| Error::internal_io(e.to_string(), Some(context.into())))?;
+    let mut spec: stack::StackSpec = serde_json::from_str(&content).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some(format!("{} {}", context, path.display())),
+            Some(content.chars().take(200).collect()),
+        )
+    })?;
+    if spec.id.is_empty() {
+        spec.id = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+    }
+    serde_json::to_value(spec)
+        .map_err(|e| Error::internal_json(e.to_string(), Some("serialize stack spec".into())))
+}
+
+fn config_matches_source(config_path: &Path, source_path: &Path) -> bool {
+    if fs::read_link(config_path).is_ok_and(|target| target == source_path) {
+        return true;
+    }
+
+    match (config_path.canonicalize(), source_path.canonicalize()) {
+        (Ok(config), Ok(source)) if config == source => true,
+        (Ok(_), Ok(_)) => files_match(config_path, source_path),
+        _ => false,
+    }
+}
+
+fn files_match(left: &Path, right: &Path) -> bool {
+    match (fs::read(left), fs::read(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn remove_existing_config(target: &Path, context: &'static str) -> Result<()> {
+    fs::remove_file(target).map_err(|e| Error::internal_io(e.to_string(), Some(context.into())))
 }
 
 pub fn read_source_metadata(id: &str) -> Option<RigSourceMetadata> {
