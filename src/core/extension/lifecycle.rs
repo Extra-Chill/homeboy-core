@@ -616,7 +616,7 @@ fn run_setup_if_configured(extension_id: &str) {
 ///
 /// Linked extensions are symlinks pointing to a source directory, which may be
 /// a subdirectory of a monorepo (e.g. `homeboy-extensions/wordpress`). This
-/// function resolves the git root, checks out the default branch, and pulls.
+/// function resolves the git root, verifies it is on the default branch, and pulls.
 fn update_linked_extension(
     extension_id: &str,
     extension_dir: &Path,
@@ -646,28 +646,35 @@ fn update_linked_extension(
         ));
     }
 
-    // Checkout the default branch before pulling.
-    // Try main first, fall back to master.
     let default_branch = detect_default_branch(&git_root).unwrap_or_else(|| "main".to_string());
-    let checkout_output = Command::new("git")
-        .args(["checkout", &default_branch])
-        .current_dir(&git_root)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output();
+    let current_branch = git_silent(&git_root, &["branch", "--show-current"])
+        .and_then(|output| {
+            if output.status.success() {
+                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !branch.is_empty() {
+                    return Some(branch);
+                }
+            }
 
-    if let Ok(output) = &checkout_output {
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            log_status!(
-                "extension",
-                "Warning: could not checkout {} for {}: {}",
+            None
+        })
+        .unwrap_or_else(|| "DETACHED".to_string());
+    if current_branch != default_branch {
+        return Err(Error::validation_invalid_argument(
+            "extension_id",
+            format!(
+                "Linked extension '{}' points at {} on branch '{}', but updates require the default branch '{}'. Relink the extension to a stable checkout, for example: homeboy extension uninstall {} && homeboy extension install <{} checkout path> --id {}",
+                extension_id,
+                source_dir.display(),
+                current_branch,
                 default_branch,
                 extension_id,
-                stderr.trim()
-            );
-            // Continue anyway — pull on current branch is better than nothing
-        }
+                default_branch,
+                extension_id,
+            ),
+            Some(extension_id.to_string()),
+            None,
+        ));
     }
 
     git::pull_repo(&git_root)?;
@@ -1141,6 +1148,64 @@ mod tests {
             assert!(
                 result.skipped.is_empty(),
                 "linked extensions should not be pre-skipped by update_all"
+            );
+        });
+    }
+
+    #[test]
+    fn linked_update_fails_instead_of_checking_out_default_branch_in_feature_worktree() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let _remote = match prepare_git_extension_repo(&source, "wordpress") {
+                Some(remote) => remote,
+                None => return,
+            };
+            let default_branch = if run_git(&source, &["rev-parse", "--verify", "main"]) {
+                "main"
+            } else {
+                "master"
+            };
+
+            assert!(run_git(
+                &source,
+                &["checkout", "-b", "feature-linked-extension"]
+            ));
+            let stable_checkout = home.join("stable-checkout");
+            assert!(run_git(
+                &source,
+                &[
+                    "worktree",
+                    "add",
+                    "--quiet",
+                    stable_checkout.to_str().expect("stable checkout path"),
+                    default_branch,
+                ]
+            ));
+
+            install(
+                &source.join("wordpress").to_string_lossy(),
+                Some("wordpress"),
+            )
+            .expect("install linked extension");
+
+            let err = update("wordpress", false).expect_err("feature worktree update must fail");
+            let message = err.to_string();
+            assert!(message.contains("Linked extension 'wordpress' points at"));
+            assert!(message.contains("feature-linked-extension"));
+            assert!(message.contains(default_branch));
+            assert!(message.contains("homeboy extension uninstall wordpress"));
+
+            let branch_output = Command::new("git")
+                .args(["branch", "--show-current"])
+                .current_dir(&source)
+                .output()
+                .expect("current branch");
+            assert_eq!(
+                String::from_utf8_lossy(&branch_output.stdout).trim(),
+                "feature-linked-extension",
+                "linked update must not checkout the default branch in the feature worktree"
             );
         });
     }
