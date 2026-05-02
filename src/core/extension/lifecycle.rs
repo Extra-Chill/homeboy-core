@@ -647,7 +647,18 @@ fn update_linked_extension(
     }
 
     let default_branch = detect_default_branch(&git_root).unwrap_or_else(|| "main".to_string());
-    let current_branch = current_branch(&git_root).unwrap_or_else(|| "DETACHED".to_string());
+    let current_branch = git_silent(&git_root, &["branch", "--show-current"])
+        .and_then(|output| {
+            if output.status.success() {
+                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !branch.is_empty() {
+                    return Some(branch);
+                }
+            }
+
+            None
+        })
+        .unwrap_or_else(|| "DETACHED".to_string());
     if current_branch != default_branch {
         return Err(Error::validation_invalid_argument(
             "extension_id",
@@ -684,19 +695,6 @@ fn update_linked_extension(
         url,
         path: source_dir,
     })
-}
-
-/// Return the currently checked out branch for a git repository.
-fn current_branch(repo_dir: &Path) -> Option<String> {
-    let output = git_silent(repo_dir, &["branch", "--show-current"])?;
-    if output.status.success() {
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !branch.is_empty() {
-            return Some(branch);
-        }
-    }
-
-    None
 }
 
 /// Detect the default branch of a git repository.
@@ -862,8 +860,8 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        current_branch, install, install_for_component, is_workdir_clean, load_extension,
-        read_source_revision, update,
+        install, install_for_component, is_workdir_clean, load_extension, read_source_revision,
+        update,
     };
     use crate::component;
     use crate::extension::update_all;
@@ -1164,7 +1162,11 @@ mod tests {
                 Some(remote) => remote,
                 None => return,
             };
-            let default_branch = current_branch(&source).expect("default branch");
+            let default_branch = if run_git(&source, &["rev-parse", "--verify", "main"]) {
+                "main"
+            } else {
+                "master"
+            };
 
             assert!(run_git(
                 &source,
@@ -1178,7 +1180,7 @@ mod tests {
                     "add",
                     "--quiet",
                     stable_checkout.to_str().expect("stable checkout path"),
-                    &default_branch,
+                    default_branch,
                 ]
             ));
 
@@ -1192,12 +1194,17 @@ mod tests {
             let message = err.to_string();
             assert!(message.contains("Linked extension 'wordpress' points at"));
             assert!(message.contains("feature-linked-extension"));
-            assert!(message.contains(&default_branch));
+            assert!(message.contains(default_branch));
             assert!(message.contains("homeboy extension uninstall wordpress"));
 
+            let branch_output = Command::new("git")
+                .args(["branch", "--show-current"])
+                .current_dir(&source)
+                .output()
+                .expect("current branch");
             assert_eq!(
-                current_branch(&source).as_deref(),
-                Some("feature-linked-extension"),
+                String::from_utf8_lossy(&branch_output.stdout).trim(),
+                "feature-linked-extension",
                 "linked update must not checkout the default branch in the feature worktree"
             );
         });
