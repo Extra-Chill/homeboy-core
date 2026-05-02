@@ -3,7 +3,7 @@
 
 use crate::rig::{
     PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathSpec, SymlinkSpec,
-    WorkloadEntry, WorkloadSpec,
+    TraceVariantSpec, WorkloadEntry, WorkloadSpec,
 };
 
 /// Canonical fixture matching the studio-playground-dev shape used as the
@@ -247,18 +247,75 @@ fn test_check_groups() {
     assert_eq!(legacy.path(), "/tmp/legacy.trace.mjs");
     assert!(legacy.check_groups().is_none());
 
-    let detailed = WorkloadSpec::Detailed(WorkloadEntry {
-        path: "/tmp/scoped.trace.mjs".to_string(),
-        check_groups: Some(vec!["desktop-app".to_string()]),
-        trace_phase_presets: std::collections::HashMap::new(),
-        trace_default_phase_preset: None,
-        trace_variants: std::collections::HashMap::new(),
-    });
+    let detailed: WorkloadSpec = serde_json::from_str(
+        r#"{
+            "path": "/tmp/scoped.trace.mjs",
+            "check_groups": ["desktop-app"]
+        }"#,
+    )
+    .expect("parse detailed workload");
     assert_eq!(detailed.path(), "/tmp/scoped.trace.mjs");
     assert_eq!(
         detailed.check_groups(),
         Some(&["desktop-app".to_string()][..])
     );
+}
+
+#[test]
+fn test_trace_phase_preset() {
+    let workload = workload_with_trace_metadata();
+
+    assert_eq!(
+        workload.trace_phase_preset("startup"),
+        Some(&["boot:runner.boot".to_string()][..])
+    );
+    assert!(workload.trace_phase_preset("missing").is_none());
+}
+
+#[test]
+fn test_trace_default_phase_preset() {
+    let workload = workload_with_trace_metadata();
+
+    assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
+    assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
+        .trace_default_phase_preset()
+        .is_none());
+}
+
+#[test]
+fn test_trace_variants() {
+    let workload = workload_with_trace_metadata();
+    let variants = workload.trace_variants().expect("variants");
+
+    assert_eq!(
+        variants.get("fresh-install-mode"),
+        Some(&TraceVariantSpec {
+            component: Some("studio".to_string()),
+            overlay: "overlays/fresh-install-mode.patch".to_string(),
+        })
+    );
+    assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
+        .trace_variants()
+        .is_none());
+}
+
+fn workload_with_trace_metadata() -> WorkloadSpec {
+    WorkloadSpec::Detailed(WorkloadEntry {
+        path: "/tmp/scoped.trace.mjs".to_string(),
+        check_groups: Some(vec!["desktop-app".to_string()]),
+        trace_phase_presets: std::collections::HashMap::from([(
+            "startup".to_string(),
+            vec!["boot:runner.boot".to_string()],
+        )]),
+        trace_default_phase_preset: Some("startup".to_string()),
+        trace_variants: std::collections::HashMap::from([(
+            "fresh-install-mode".to_string(),
+            TraceVariantSpec {
+                component: Some("studio".to_string()),
+                overlay: "overlays/fresh-install-mode.patch".to_string(),
+            },
+        )]),
+    })
 }
 
 #[test]

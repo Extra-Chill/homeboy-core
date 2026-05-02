@@ -487,14 +487,13 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
 }
 
 #[test]
-fn trace_run_applies_named_variant_from_rig_package_root() {
+fn trace_run_resolves_named_variants_and_reports_unknown_names() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
         let package_dir = tempfile::TempDir::new().expect("package dir");
-        write_trace_rig_source_metadata(home, "studio-rig", package_dir.path());
         write_trace_rig_with_variant(
             home,
             package_dir.path(),
@@ -503,35 +502,33 @@ fn trace_run_applies_named_variant_from_rig_package_root() {
             component_dir.path(),
         );
 
-        let (output, exit_code) = run(
-            TraceArgs {
-                comp: PositionalComponentArgs {
-                    component: Some("studio".to_string()),
-                    path: None,
-                },
-                scenario: "studio-app-create-site".to_string(),
-                compare_after: None,
-                rig: Some("studio-rig".to_string()),
-                setting_args: SettingArgs::default(),
-                _json: HiddenJsonArgs::default(),
-                json_summary: false,
-                report: None,
-                repeat: 1,
-                aggregate: None,
-                spans: Vec::new(),
-                phases: Vec::new(),
-                phase_preset: None,
-                baseline_args: BaselineArgs::default(),
-                regression_threshold:
-                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
-                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
-                overlays: Vec::new(),
-                variants: vec!["fresh-install-mode".to_string()],
-                keep_overlay: false,
+        let valid_args = TraceArgs {
+            comp: PositionalComponentArgs {
+                component: Some("studio".to_string()),
+                path: None,
             },
-            &GlobalArgs {},
-        )
-        .expect("variant trace should run");
+            scenario: "studio-app-create-site".to_string(),
+            compare_after: None,
+            rig: Some("studio-rig".to_string()),
+            setting_args: SettingArgs::default(),
+            _json: HiddenJsonArgs::default(),
+            json_summary: false,
+            report: None,
+            repeat: 1,
+            aggregate: None,
+            spans: Vec::new(),
+            phases: Vec::new(),
+            phase_preset: None,
+            baseline_args: BaselineArgs::default(),
+            regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+            overlays: Vec::new(),
+            variants: vec!["fresh-install-mode".to_string()],
+            keep_overlay: false,
+        };
+
+        let (output, exit_code) =
+            run(valid_args.clone(), &GlobalArgs {}).expect("variant trace should run");
 
         assert_eq!(exit_code, 0);
         match output {
@@ -564,54 +561,10 @@ fn trace_run_applies_named_variant_from_rig_package_root() {
             fs::read_to_string(component_dir.path().join("scenario.txt")).unwrap(),
             "base\n"
         );
-    });
-}
 
-#[test]
-fn trace_run_unknown_variant_reports_available_names() {
-    with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
-        write_trace_extension(home);
-        let component_dir = tempfile::TempDir::new().expect("component dir");
-        init_overlay_component(component_dir.path());
-        let package_dir = tempfile::TempDir::new().expect("package dir");
-        write_trace_rig_source_metadata(home, "studio-rig", package_dir.path());
-        write_trace_rig_with_variant(
-            home,
-            package_dir.path(),
-            "studio-rig",
-            "studio",
-            component_dir.path(),
-        );
-
-        let err = match run(
-            TraceArgs {
-                comp: PositionalComponentArgs {
-                    component: Some("studio".to_string()),
-                    path: None,
-                },
-                scenario: "studio-app-create-site".to_string(),
-                compare_after: None,
-                rig: Some("studio-rig".to_string()),
-                setting_args: SettingArgs::default(),
-                _json: HiddenJsonArgs::default(),
-                json_summary: false,
-                report: None,
-                repeat: 1,
-                aggregate: None,
-                spans: Vec::new(),
-                phases: Vec::new(),
-                phase_preset: None,
-                baseline_args: BaselineArgs::default(),
-                regression_threshold:
-                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
-                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
-                overlays: Vec::new(),
-                variants: vec!["missing".to_string()],
-                keep_overlay: false,
-            },
-            &GlobalArgs {},
-        ) {
+        let mut invalid_args = valid_args;
+        invalid_args.variants = vec!["missing".to_string()];
+        let err = match run(invalid_args, &GlobalArgs {}) {
             Ok(_) => panic!("unknown variant should fail"),
             Err(err) => err,
         };
@@ -1323,10 +1276,12 @@ fn write_trace_rig_with_phase_preset(
     .expect("write rig");
 }
 
-fn write_trace_rig_source_metadata(
+fn write_trace_rig_with_variant(
     home: &tempfile::TempDir,
-    rig_id: &str,
     package_path: &std::path::Path,
+    rig_id: &str,
+    component_id: &str,
+    path: &std::path::Path,
 ) {
     let sources_dir = home
         .path()
@@ -1350,15 +1305,7 @@ fn write_trace_rig_source_metadata(
         ),
     )
     .expect("write rig source metadata");
-}
 
-fn write_trace_rig_with_variant(
-    home: &tempfile::TempDir,
-    package_path: &std::path::Path,
-    rig_id: &str,
-    component_id: &str,
-    path: &std::path::Path,
-) {
     let overlay_dir = package_path.join("overlays");
     fs::create_dir_all(&overlay_dir).expect("mkdir overlays");
     fs::write(

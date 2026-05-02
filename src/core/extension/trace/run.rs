@@ -670,7 +670,7 @@ fn overlay_touched_files(component_path: &Path, patch_path: &Path) -> Result<Vec
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.split('\t').nth(2))
-        .map(unquote_numstat_path)
+        .map(|path| path.trim().trim_matches('"').to_string())
         .filter(|path| !path.is_empty())
         .collect())
 }
@@ -758,10 +758,6 @@ fn run_git_apply(component_path: &Path, patch_path: &Path, reverse: bool) -> Res
         Some(String::from_utf8_lossy(&output.stderr).to_string()),
         None,
     ))
-}
-
-fn unquote_numstat_path(path: &str) -> String {
-    path.trim().trim_matches('"').to_string()
 }
 
 #[cfg(test)]

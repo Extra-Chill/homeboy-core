@@ -557,4 +557,21 @@ mod tests {
         assert!(markdown.contains("- `apps/studio/out/app.js`"));
         assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
     }
+
+    #[test]
+    fn test_push_overlay_markdown() {
+        let overlays = vec![TraceOverlay {
+            variant: Some("fresh-install-mode".to_string()),
+            path: "/tmp/overlay.patch".to_string(),
+            component_path: "/tmp/studio".to_string(),
+            touched_files: Vec::new(),
+            kept: true,
+        }];
+        let mut markdown = String::new();
+
+        push_overlay_markdown(&mut markdown, &overlays);
+
+        assert!(markdown.contains("variant `fresh-install-mode`"));
+        assert!(markdown.contains("`/tmp/overlay.patch` (`kept`)"));
+    }
 }
