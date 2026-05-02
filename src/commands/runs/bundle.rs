@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use homeboy::observation::{ArtifactRecord, ObservationStore, RunRecord, TraceSpanRecord};
 use homeboy::Error;
 
-use super::{require_run, CmdResult, RunsExportOutput, RunsImportOutput, RunsOutput};
+use super::{require_run, CmdResult, RunsOutput};
 
 const BUNDLE_FORMAT: &str = "homeboy-observations";
 const BUNDLE_VERSION: u32 = 1;
@@ -56,6 +56,23 @@ pub struct ObservationBundleImportSummary {
     pub runs: usize,
     pub artifacts: usize,
     pub trace_spans: usize,
+}
+
+#[derive(Serialize)]
+pub struct RunsExportOutput {
+    pub command: &'static str,
+    pub output: String,
+    pub manifest: ObservationBundleManifest,
+    pub run_count: usize,
+    pub artifact_count: usize,
+    pub trace_span_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct RunsImportOutput {
+    pub command: &'static str,
+    pub input: String,
+    pub imported: ObservationBundleImportSummary,
 }
 
 pub(super) fn export_runs(args: RunsExportArgs) -> CmdResult<RunsOutput> {

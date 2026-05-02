@@ -1,4 +1,5 @@
 use clap::{Command, CommandFactory, Parser, Subcommand};
+use std::path::PathBuf;
 
 use crate::commands::{
     api, audit, auth, bench, build, changelog, changes, component, config, daemon, db, deploy,
@@ -17,7 +18,7 @@ pub struct Cli {
     /// Write structured JSON output to a file (in addition to stdout).
     /// The file contains command-specific JSON — no log text.
     #[arg(long, global = true, value_name = "PATH")]
-    pub output: Option<String>,
+    pub output: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Commands,

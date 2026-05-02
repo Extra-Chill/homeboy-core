@@ -1,4 +1,5 @@
 mod bundle;
+mod compare;
 mod findings;
 mod latest;
 mod reconcile;
@@ -14,27 +15,29 @@ use homeboy::Error;
 
 use super::{CmdResult, GlobalArgs};
 use bundle::{
-    export_runs, import_runs, ObservationBundleImportSummary, ObservationBundleManifest,
-    RunsExportArgs, RunsImportArgs,
+    export_runs, import_runs, RunsExportArgs, RunsExportOutput, RunsImportArgs, RunsImportOutput,
 };
+use compare::{compare_runs, RunsCompareArgs, RunsCompareOutput};
 use findings::{RunsFindingOutput, RunsFindingsOutput};
 use latest::{RunsLatestFindingOutput, RunsLatestRunArgs, RunsLatestRunOutput};
 use reconcile::{reconcile_runs, RunsReconcileArgs, RunsReconcileOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct RunsArgs {
     #[command(subcommand)]
     command: RunsCommand,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum RunsCommand {
     /// List persisted observation runs
     List(RunsListArgs),
     /// Show the latest persisted observation run matching filters
     LatestRun(RunsLatestRunArgs),
+    /// Compare selected metrics across persisted run history
+    Compare(RunsCompareArgs),
     /// Mark orphaned running observation records stale
     Reconcile(RunsReconcileArgs),
     /// Show one persisted observation run
@@ -77,6 +80,7 @@ pub struct RunsListArgs {
 pub enum RunsOutput {
     List(RunsListOutput),
     LatestRun(RunsLatestRunOutput),
+    Compare(RunsCompareOutput),
     Show(RunsShowOutput),
     Artifacts(RunsArtifactsOutput),
     Findings(RunsFindingsOutput),
@@ -128,24 +132,7 @@ pub struct BenchCompareOutput {
     pub missing: Vec<BenchMissingMetric>,
 }
 
-#[derive(Serialize)]
-pub struct RunsExportOutput {
-    pub command: &'static str,
-    pub output: String,
-    pub manifest: ObservationBundleManifest,
-    pub run_count: usize,
-    pub artifact_count: usize,
-    pub trace_span_count: usize,
-}
-
-#[derive(Serialize)]
-pub struct RunsImportOutput {
-    pub command: &'static str,
-    pub input: String,
-    pub imported: ObservationBundleImportSummary,
-}
-
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct RunSummary {
     pub id: String,
     pub kind: String,
@@ -191,6 +178,7 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
     match args.command {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
         RunsCommand::LatestRun(args) => latest::latest_run(args),
+        RunsCommand::Compare(args) => compare_runs(args),
         RunsCommand::Reconcile(args) => reconcile_runs(args),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
@@ -199,6 +187,28 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::LatestFinding(args) => findings::latest_finding(args),
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
+    }
+}
+
+impl RunsArgs {
+    pub fn is_markdown_mode(&self) -> bool {
+        matches!(self.command, RunsCommand::Compare(ref compare) if compare::is_table_mode(compare))
+    }
+
+    pub fn is_bundle_export(&self) -> bool {
+        matches!(self.command, RunsCommand::Export(_))
+    }
+}
+
+pub fn run_markdown(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<String> {
+    match args.command {
+        RunsCommand::Compare(args) => compare::run_markdown(args),
+        _ => Err(Error::validation_invalid_argument(
+            "output_mode",
+            "Only `homeboy runs compare --format=table` supports table output",
+            None,
+            None,
+        )),
     }
 }
 

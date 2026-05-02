@@ -21,7 +21,7 @@ use homeboy::commands::utils::{args, entity_suggest, response as output, tty};
 use homeboy::commands::{changelog, cli, file, logs, report, review, trace};
 use homeboy::extension::load_all_extensions;
 
-fn response_mode(command: &Commands) -> ResponseMode {
+fn response_mode(command: &Commands, has_output_file: bool) -> ResponseMode {
     match command {
         Commands::Ssh(args) if args.subcommand.is_none() && args.command.is_empty() => {
             ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
@@ -41,6 +41,9 @@ fn response_mode(command: &Commands) -> ResponseMode {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Trace(args) if trace::is_markdown_mode(args) => {
+            ResponseMode::Raw(RawOutputMode::Markdown)
+        }
+        Commands::Runs(args) if !has_output_file && args.is_markdown_mode() => {
             ResponseMode::Raw(RawOutputMode::Markdown)
         }
         Commands::Report(args) if report::is_markdown_mode(args) => {
@@ -175,7 +178,11 @@ fn main() -> std::process::ExitCode {
 
     // Extract --output early so it's available for all code paths (including
     // extension CLI commands which exit before Cli::from_arg_matches).
-    let output_file: Option<String> = matches.get_one::<String>("output").cloned();
+    let mut output_file: Option<String> = matches
+        .try_get_one::<std::path::PathBuf>("output")
+        .ok()
+        .flatten()
+        .map(|path| path.to_string_lossy().to_string());
 
     if let Some(extension_cmd) = try_parse_extension_cli_command(&matches, &extension_info) {
         let cli_args = cli::CliArgs {
@@ -198,6 +205,10 @@ fn main() -> std::process::ExitCode {
         Err(e) => e.exit(),
     };
 
+    if matches!(&cli.command, Commands::Runs(args) if args.is_bundle_export()) {
+        output_file = None;
+    }
+
     // Startup update checks — skip for upgrade (it handles this itself)
     if !matches!(
         &cli.command,
@@ -207,7 +218,7 @@ fn main() -> std::process::ExitCode {
         homeboy::extension::update_check::run_startup_check();
     }
 
-    let mode = response_mode(&cli.command);
+    let mode = response_mode(&cli.command, output_file.is_some());
     let is_review_command = matches!(cli.command, Commands::Review(_));
 
     match mode {
