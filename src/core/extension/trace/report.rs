@@ -17,6 +17,7 @@ pub enum TraceCommandOutput {
     Summary(TraceRunSummaryOutput),
     Aggregate(TraceAggregateOutput),
     Compare(TraceCompareOutput),
+    Matrix(TraceVariantMatrixOutput),
     List(TraceListOutput),
     OverlayLocks(TraceOverlayLocksOutput),
 }
@@ -185,6 +186,36 @@ pub struct TraceCompareOutput {
     pub focus_failure_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_status: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TraceVariantMatrixOutput {
+    pub command: &'static str,
+    pub passed: bool,
+    pub status: String,
+    pub component: String,
+    pub scenario_id: String,
+    pub matrix: String,
+    pub output_dir: String,
+    pub baseline_path: String,
+    pub summary_path: String,
+    pub run_count: usize,
+    pub failure_count: usize,
+    pub exit_code: i32,
+    pub runs: Vec<TraceVariantMatrixRunOutput>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TraceVariantMatrixRunOutput {
+    pub label: String,
+    pub variants: Vec<String>,
+    pub overlays: Vec<String>,
+    pub aggregate_path: String,
+    pub compare_path: String,
+    pub passed: bool,
+    pub status: String,
+    pub exit_code: i32,
+    pub span_count: usize,
 }
 
 #[derive(Serialize, Clone)]
@@ -559,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn test_push_overlay_markdown() {
+    fn test_push_overlay_markdown_lists_paths() {
         let mut markdown = String::new();
         let overlays = vec![
             TraceOverlay {

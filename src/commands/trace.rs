@@ -1,4 +1,5 @@
 use clap::{Args, ValueEnum};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -29,8 +30,9 @@ mod test_fixture;
 use compare_variant::run_compare_variant;
 
 use output::{
-    aggregate_span, render_aggregate_markdown, render_compare_markdown, run_compare,
-    TraceAggregateSpanSample,
+    aggregate_span, compare_trace_aggregates_with_focus, render_aggregate_markdown,
+    render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateInput,
+    TraceAggregateSpanInput, TraceAggregateSpanSample,
 };
 
 #[cfg(test)]
@@ -38,7 +40,6 @@ use bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
 
 #[cfg(test)]
 use output::{compare_trace_aggregates, parse_trace_aggregate_input};
-
 #[derive(Args, Clone)]
 pub struct TraceArgs {
     #[command(flatten)]
@@ -46,6 +47,10 @@ pub struct TraceArgs {
 
     /// Scenario ID to run, or `list` to discover available scenarios.
     pub scenario: Option<String>,
+
+    /// Scenario ID for command-shaped trace modes like `compare-variant`.
+    #[arg(long = "scenario", value_name = "SCENARIO_ID")]
+    pub scenario_arg: Option<String>,
 
     /// After aggregate JSON when running `homeboy trace compare before.json after.json`.
     #[arg(value_name = "AFTER_JSON")]
@@ -121,7 +126,13 @@ pub struct TraceArgs {
     pub variants: Vec<String>,
 
     /// Directory for `trace compare-variant` experiment bundle output.
-    #[arg(long, value_name = "DIR")]
+
+    /// Expand variants for `trace compare-variant`.
+    #[arg(long = "matrix", value_enum, default_value_t = TraceVariantMatrixMode::None)]
+    pub matrix: TraceVariantMatrixMode,
+
+    /// Directory where `trace compare-variant` writes aggregate, compare, and summary artifacts.
+    #[arg(long = "output-dir", value_name = "DIR")]
     pub output_dir: Option<PathBuf>,
 
     /// Leave overlay changes in place after the trace run.
@@ -148,6 +159,24 @@ impl TraceSchedule {
         match self {
             Self::Grouped => "grouped",
             Self::Interleaved => "interleaved",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, ValueEnum)]
+pub enum TraceVariantMatrixMode {
+    #[default]
+    None,
+    Single,
+    Cumulative,
+}
+
+impl TraceVariantMatrixMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Single => "single",
+            Self::Cumulative => "cumulative",
         }
     }
 }
@@ -218,6 +247,7 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
             Ok((render_aggregate_markdown(&aggregate), exit_code))
         }
         TraceCommandOutput::Compare(compare) => Ok((render_compare_markdown(&compare), exit_code)),
+        TraceCommandOutput::Matrix(matrix) => Ok((render_matrix_markdown(&matrix), exit_code)),
         TraceCommandOutput::List(list) => {
             let mut markdown = format!("# Trace Scenarios: `{}`\n\n", list.component_id);
             for scenario in list.scenarios {
@@ -316,7 +346,7 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
         ));
     }
 
-    if args.scenario.as_deref() == Some("list") {
+    if trace_scenario(&args)? == "list" {
         let (output, exit_code) = run_list(args)?;
         return Ok(((output, None), exit_code));
     }
@@ -521,7 +551,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             path_override,
             settings: settings_as_strings(&ctx.settings),
             settings_json: settings_as_json(&ctx.settings),
-            scenario_id: scenario,
+            scenario_id,
             json_summary: args.json_summary,
             rig_id: args.rig,
             overlays,
@@ -560,7 +590,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
 
 fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let repeat = args.repeat;
-    let scenario_id = required_trace_scenario(&args)?;
+    let scenario_id = trace_scenario(&args)?.to_string();
     let mut runs = Vec::new();
     let mut overlays = Vec::new();
     let mut span_samples: BTreeMap<String, Vec<TraceAggregateSpanSample>> = BTreeMap::new();
@@ -732,6 +762,292 @@ fn focus_aggregate_spans(
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TraceVariantStackItem {
+    label: String,
+    overlay: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TraceVariantCombination {
+    label: String,
+    items: Vec<TraceVariantStackItem>,
+}
+
+fn run_variant_matrix(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
+    if args.keep_overlay {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--keep-overlay",
+            "trace compare-variant reuses the same component checkout across runs, so overlays must be reverted after each combination",
+            None,
+            None,
+        ));
+    }
+
+    let scenario_id = trace_scenario(&args)?.to_string();
+    let stack = variant_stack_items(&args)?;
+    let combinations = expand_variant_matrix(&stack, args.matrix);
+    let output_dir = args.output_dir.clone().unwrap_or_else(|| {
+        PathBuf::from(".homeboy").join("experiments").join(format!(
+            "{}-{}",
+            scenario_id,
+            chrono::Utc::now().format("%Y%m%d%H%M%S")
+        ))
+    });
+    std::fs::create_dir_all(&output_dir).map_err(|err| {
+        homeboy::Error::internal_io(
+            format!(
+                "Failed to create trace variant output dir {}: {}",
+                output_dir.display(),
+                err
+            ),
+            Some("trace.variant.output_dir".to_string()),
+        )
+    })?;
+
+    let baseline = run_variant_aggregate(&args, Vec::new())?;
+    let baseline_path = output_dir.join("baseline.aggregate.json");
+    write_json_artifact(&baseline_path, &baseline)?;
+
+    let mut runs = Vec::new();
+    let mut failure_count = usize::from(!baseline.passed);
+    for combination in combinations {
+        let overlays = combination
+            .items
+            .iter()
+            .map(|item| item.overlay.clone())
+            .collect::<Vec<_>>();
+        let aggregate = run_variant_aggregate(&args, overlays.clone())?;
+        let slug = variant_combination_slug(&combination.label);
+        let aggregate_path = output_dir.join(format!("{}.aggregate.json", slug));
+        let compare_path = output_dir.join(format!("{}.compare.json", slug));
+        write_json_artifact(&aggregate_path, &aggregate)?;
+        let compare = compare_trace_aggregates_with_focus(
+            &baseline_path,
+            aggregate_to_compare_input(&baseline),
+            &aggregate_path,
+            aggregate_to_compare_input(&aggregate),
+            &args.focus_spans,
+            args.regression_threshold,
+            args.regression_min_delta_ms,
+        );
+        write_json_artifact(&compare_path, &compare)?;
+        if !aggregate.passed || compare.focus_status.as_deref() == Some("fail") {
+            failure_count += 1;
+        }
+        runs.push(extension_trace::TraceVariantMatrixRunOutput {
+            label: combination.label,
+            variants: combination
+                .items
+                .into_iter()
+                .map(|item| item.label)
+                .collect(),
+            overlays,
+            aggregate_path: aggregate_path.to_string_lossy().to_string(),
+            compare_path: compare_path.to_string_lossy().to_string(),
+            passed: aggregate.passed,
+            status: aggregate.status,
+            exit_code: aggregate.exit_code,
+            span_count: compare.span_count,
+        });
+    }
+
+    let summary_path = output_dir.join("summary.md");
+    let exit_code = if failure_count == 0 { 0 } else { 1 };
+    let output = extension_trace::TraceVariantMatrixOutput {
+        command: "trace.variant_matrix",
+        passed: failure_count == 0,
+        status: if failure_count == 0 { "pass" } else { "fail" }.to_string(),
+        component: baseline.component.clone(),
+        scenario_id,
+        matrix: args.matrix.as_str().to_string(),
+        output_dir: output_dir.to_string_lossy().to_string(),
+        baseline_path: baseline_path.to_string_lossy().to_string(),
+        summary_path: summary_path.to_string_lossy().to_string(),
+        run_count: runs.len() + 1,
+        failure_count,
+        exit_code,
+        runs,
+    };
+    std::fs::write(&summary_path, render_matrix_markdown(&output)).map_err(|err| {
+        homeboy::Error::internal_io(
+            format!(
+                "Failed to write trace variant summary {}: {}",
+                summary_path.display(),
+                err
+            ),
+            Some("trace.variant.summary".to_string()),
+        )
+    })?;
+
+    Ok((TraceCommandOutput::Matrix(output), exit_code))
+}
+
+fn run_variant_aggregate(
+    args: &TraceArgs,
+    overlays: Vec<String>,
+) -> homeboy::Result<extension_trace::TraceAggregateOutput> {
+    let mut run_args = args.clone();
+    run_args.comp.component = None;
+    run_args.repeat = args.repeat.max(1);
+    run_args.aggregate = Some("spans".to_string());
+    run_args.overlays = overlays;
+    run_args.variants = Vec::new();
+    run_args.output_dir = None;
+    match run_repeat(run_args)?.0 {
+        TraceCommandOutput::Aggregate(output) => Ok(output),
+        _ => unreachable!("run_repeat returns aggregate output"),
+    }
+}
+
+fn variant_stack_items(args: &TraceArgs) -> homeboy::Result<Vec<TraceVariantStackItem>> {
+    if !args.variants.is_empty() && !args.overlays.is_empty() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--variant",
+            "mixing --variant and --overlay would make stack order ambiguous; use one ordered stack source",
+            None,
+            None,
+        ));
+    }
+    let values = if !args.variants.is_empty() {
+        &args.variants
+    } else {
+        &args.overlays
+    };
+    if values.is_empty() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--overlay",
+            "trace compare-variant requires at least one --overlay or --variant",
+            None,
+            None,
+        ));
+    }
+    Ok(values
+        .iter()
+        .map(|value| TraceVariantStackItem {
+            label: variant_label(value),
+            overlay: value.clone(),
+        })
+        .collect())
+}
+
+fn expand_variant_matrix(
+    stack: &[TraceVariantStackItem],
+    mode: TraceVariantMatrixMode,
+) -> Vec<TraceVariantCombination> {
+    match mode {
+        TraceVariantMatrixMode::None => vec![TraceVariantCombination {
+            label: variant_combination_label(stack),
+            items: stack.to_vec(),
+        }],
+        TraceVariantMatrixMode::Single => stack
+            .iter()
+            .map(|item| TraceVariantCombination {
+                label: item.label.clone(),
+                items: vec![item.clone()],
+            })
+            .collect(),
+        TraceVariantMatrixMode::Cumulative => (1..=stack.len())
+            .map(|len| {
+                let items = stack[..len].to_vec();
+                TraceVariantCombination {
+                    label: variant_combination_label(&items),
+                    items,
+                }
+            })
+            .collect(),
+    }
+}
+
+fn variant_combination_label(stack: &[TraceVariantStackItem]) -> String {
+    stack
+        .iter()
+        .map(|item| item.label.as_str())
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn variant_label(value: &str) -> String {
+    Path::new(value)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(value)
+        .to_string()
+}
+
+fn variant_combination_slug(label: &str) -> String {
+    label
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn aggregate_to_compare_input(
+    aggregate: &extension_trace::TraceAggregateOutput,
+) -> TraceAggregateInput {
+    TraceAggregateInput {
+        component: Some(aggregate.component.clone()),
+        scenario_id: Some(aggregate.scenario_id.clone()),
+        phase_preset: aggregate.phase_preset.clone(),
+        repeat: Some(aggregate.repeat),
+        rig_state: aggregate
+            .rig_state
+            .as_ref()
+            .and_then(|state| serde_json::to_value(state).ok()),
+        overlays: Vec::new(),
+        runs: Vec::new(),
+        spans: aggregate
+            .spans
+            .iter()
+            .map(|span| TraceAggregateSpanInput {
+                id: span.id.clone(),
+                n: span.n,
+                median_ms: span.median_ms,
+                avg_ms: span.avg_ms,
+                max_ms: span.max_ms,
+                max_run_index: span.max_run_index,
+                max_artifact_path: span.max_artifact_path.clone(),
+                failures: span.failures,
+            })
+            .collect(),
+    }
+}
+
+fn write_json_artifact<T: serde::Serialize>(path: &Path, value: &T) -> homeboy::Result<()> {
+    let content = serde_json::to_string_pretty(value).map_err(|err| {
+        homeboy::Error::internal_json(err.to_string(), Some("trace.variant.json".to_string()))
+    })?;
+    std::fs::write(path, content).map_err(|err| {
+        homeboy::Error::internal_io(
+            format!("Failed to write trace artifact {}: {}", path.display(), err),
+            Some("trace.variant.write".to_string()),
+        )
+    })
+}
+
+fn trace_scenario(args: &TraceArgs) -> homeboy::Result<&str> {
+    args.scenario_arg
+        .as_deref()
+        .or(args.scenario.as_deref())
+        .ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "scenario",
+                "trace requires a scenario positional argument or --scenario",
+                None,
+                None,
+            )
+        })
+}
+
 const DEFAULT_TRACE_PHASE_PRESET: &str = "default";
 
 fn cli_span_definitions_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceSpanDefinition>> {
@@ -775,6 +1091,7 @@ fn default_trace_phase_preset_for_args<'a>(
     rig_context: Option<&'a TraceRigContext>,
     extension_id: Option<&str>,
 ) -> Option<&'a str> {
+    let scenario = trace_scenario(args).ok()?;
     let context = rig_context?;
     let extension_id = extension_id?;
     let workload = context
@@ -782,11 +1099,9 @@ fn default_trace_phase_preset_for_args<'a>(
         .trace_workloads
         .get(extension_id)
         .and_then(|workloads| {
-            workloads.iter().find(|workload| {
-                args.scenario
-                    .as_deref()
-                    .is_some_and(|scenario| trace_workload_scenario_id(workload.path()) == scenario)
-            })
+            workloads
+                .iter()
+                .find(|workload| trace_workload_scenario_id(workload.path()) == scenario)
         })?;
     workload.trace_default_phase_preset().or_else(|| {
         workload
@@ -801,6 +1116,7 @@ fn trace_phase_preset_for_args(
     extension_id: Option<&str>,
     preset_name: &str,
 ) -> homeboy::Result<Vec<extension_trace::spans::TracePhaseMilestone>> {
+    let scenario = trace_scenario(args)?;
     let context = rig_context.ok_or_else(|| {
         homeboy::Error::validation_invalid_argument(
             "--phase-preset",
@@ -824,11 +1140,9 @@ fn trace_phase_preset_for_args(
         .get(extension_id)
         .map(|workloads| workloads.as_slice())
         .unwrap_or(&[]);
-    let workload = workloads.iter().find(|workload| {
-        args.scenario
-            .as_deref()
-            .is_some_and(|scenario| trace_workload_scenario_id(workload.path()) == scenario)
-    });
+    let workload = workloads
+        .iter()
+        .find(|workload| trace_workload_scenario_id(workload.path()) == scenario);
     let phases = workload
         .and_then(|workload| workload.trace_phase_preset(preset_name))
         .ok_or_else(|| {
@@ -836,8 +1150,7 @@ fn trace_phase_preset_for_args(
                 "--phase-preset",
                 format!(
                     "trace phase preset '{}' is not declared for scenario '{}'",
-                    preset_name,
-                    args.scenario.as_deref().unwrap_or("<missing>")
+                    preset_name, scenario
                 ),
                 None,
                 None,

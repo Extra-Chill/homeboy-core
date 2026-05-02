@@ -98,6 +98,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
                 path: None,
             },
             scenario: Some("list".to_string()),
+            scenario_arg: None,
             compare_after: None,
             rig: Some("studio-rig".to_string()),
             setting_args: SettingArgs::default(),
@@ -117,6 +118,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: Vec::new(),
+            matrix: TraceVariantMatrixMode::None,
             output_dir: None,
             keep_overlay: false,
             stale: false,
@@ -193,6 +195,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
                 path: None,
             },
             scenario: Some("list".to_string()),
+            scenario_arg: None,
             compare_after: None,
             rig: Some("studio-rig".to_string()),
             setting_args: SettingArgs::default(),
@@ -212,6 +215,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: Vec::new(),
+            matrix: TraceVariantMatrixMode::None,
             output_dir: None,
             keep_overlay: false,
             stale: false,
@@ -245,6 +249,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -265,6 +270,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -304,6 +310,7 @@ fn trace_run_persists_observation_history() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -324,6 +331,7 @@ fn trace_run_persists_observation_history() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -386,6 +394,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -406,6 +415,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -514,6 +524,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -534,6 +545,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: vec![patch_path.to_string_lossy().to_string()],
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -588,6 +600,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
                 path: None,
             },
             scenario: Some("studio-app-create-site".to_string()),
+            scenario_arg: None,
             compare_after: None,
             rig: Some("studio-rig".to_string()),
             setting_args: SettingArgs::default(),
@@ -607,6 +620,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: vec!["fresh-install-mode".to_string()],
+            matrix: TraceVariantMatrixMode::None,
             output_dir: None,
             keep_overlay: false,
             stale: false,
@@ -1016,6 +1030,80 @@ fn trace_compare_markdown_and_experiment_bundle_render_artifacts() {
 }
 
 #[test]
+fn trace_variant_matrix_expands_ordered_stack_modes() {
+    let stack = vec![
+        TraceVariantStackItem {
+            label: "a".to_string(),
+            overlay: "a.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "b".to_string(),
+            overlay: "b.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "c".to_string(),
+            overlay: "c.patch".to_string(),
+        },
+    ];
+
+    let single = expand_variant_matrix(&stack, TraceVariantMatrixMode::Single);
+    assert_eq!(
+        single
+            .iter()
+            .map(|combo| combo
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["a"], vec!["b"], vec!["c"]]
+    );
+
+    let cumulative = expand_variant_matrix(&stack, TraceVariantMatrixMode::Cumulative);
+    assert_eq!(
+        cumulative
+            .iter()
+            .map(|combo| combo
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        vec![vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
+    );
+}
+
+#[test]
+fn trace_variant_matrix_none_runs_full_stack_once() {
+    let stack = vec![
+        TraceVariantStackItem {
+            label: "fresh-install-mode".to_string(),
+            overlay: "fresh-install-mode.patch".to_string(),
+        },
+        TraceVariantStackItem {
+            label: "disable-install-mail".to_string(),
+            overlay: "disable-install-mail.patch".to_string(),
+        },
+    ];
+
+    let combinations = expand_variant_matrix(&stack, TraceVariantMatrixMode::None);
+
+    assert_eq!(combinations.len(), 1);
+    assert_eq!(
+        combinations[0].label,
+        "fresh-install-mode+disable-install-mail"
+    );
+    assert_eq!(
+        combinations[0]
+            .items
+            .iter()
+            .map(|item| item.overlay.as_str())
+            .collect::<Vec<_>>(),
+        vec!["fresh-install-mode.patch", "disable-install-mail.patch"]
+    );
+}
+
+#[test]
 fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::without_xdg_data_home();
@@ -1030,6 +1118,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1059,6 +1148,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -1105,6 +1195,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("preset-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1125,6 +1216,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -1171,6 +1263,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("preset-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1191,6 +1284,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,
@@ -1329,6 +1423,7 @@ fn failed_trace_run_persists_observation_history() {
                     path: None,
                 },
                 scenario: Some("missing-scenario".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),
@@ -1349,6 +1444,7 @@ fn failed_trace_run_persists_observation_history() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                matrix: TraceVariantMatrixMode::None,
                 output_dir: None,
                 keep_overlay: false,
                 stale: false,

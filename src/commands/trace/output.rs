@@ -555,6 +555,38 @@ fn fmt_count(value: Option<usize>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+pub(super) fn render_matrix_markdown(matrix: &extension_trace::TraceVariantMatrixOutput) -> String {
+    let mut out = String::new();
+    out.push_str("# Trace Variant Matrix\n\n");
+    out.push_str(&format!("- **Component:** `{}`\n", matrix.component));
+    out.push_str(&format!("- **Scenario:** `{}`\n", matrix.scenario_id));
+    out.push_str(&format!("- **Matrix:** `{}`\n", matrix.matrix));
+    out.push_str(&format!("- **Status:** `{}`\n", matrix.status));
+    out.push_str(&format!("- **Output dir:** `{}`\n", matrix.output_dir));
+    out.push_str(&format!("- **Baseline:** `{}`\n", matrix.baseline_path));
+
+    out.push_str("\n## Combinations\n\n");
+    out.push_str("| Combination | Variants | Status | Exit | Aggregate | Compare |\n");
+    out.push_str("|---|---|---|---:|---|---|\n");
+    for run in &matrix.runs {
+        let variants = if run.variants.is_empty() {
+            "-".to_string()
+        } else {
+            run.variants
+                .iter()
+                .map(|variant| format!("`{}`", variant))
+                .collect::<Vec<_>>()
+                .join(" + ")
+        };
+        out.push_str(&format!(
+            "| `{}` | {} | `{}` | {} | `{}` | `{}` |\n",
+            run.label, variants, run.status, run.exit_code, run.aggregate_path, run.compare_path
+        ));
+    }
+
+    out
+}
+
 pub(super) fn fmt_ms(value: Option<u64>) -> String {
     value
         .map(|value| format!("{}ms", value))
