@@ -1,0 +1,237 @@
+[
+  {
+    "id": "b9456570-b3c0-4aa7-ba6d-695a723a6008",
+    "kind": "test",
+    "component_id": "fixture",
+    "started_at": "2026-05-02T22:19:31.859854169+00:00",
+    "finished_at": "2026-05-02T22:19:31.879075201+00:00",
+    "status": "fail",
+    "command": "homeboy test fixture",
+    "cwd": "/tmp/.tmpuuukI6",
+    "homeboy_version": "0.145.1",
+    "git_sha": null,
+    "rig_id": null,
+    "metadata_json": {
+      "analysis_clusters": 0,
+      "analyze": false,
+      "baseline": {
+        "baseline": false,
+        "ignore_baseline": false,
+        "ratchet": false
+      },
+      "baseline_regression": null,
+      "changed_since": null,
+      "coverage": null,
+      "coverage_min": null,
+      "drift": false,
+      "exit_code": 7,
+      "failure_count": 0,
+      "json_summary": false,
+      "mode": "self-check",
+      "observation_status": "failed",
+      "passthrough_args": [],
+      "run_dir": null,
+      "since": "HEAD~10",
+      "skip_lint": false,
+      "source_path": "/tmp/.tmpuuukI6",
+      "summary": null,
+      "test_counts": null,
+      "test_scope": null
+    }
+  },
+  {
+    "id": "27a5c54f-d798-4655-9e9b-6154387b8e9f",
+    "kind": "test",
+    "component_id": "fixture",
+    "started_at": "2026-05-02T22:19:31.859316197+00:00",
+    "finished_at": "2026-05-02T22:19:31.875111720+00:00",
+    "status": "pass",
+    "command": "homeboy test fixture",
+    "cwd": "/tmp/.tmpfSn1Rr",
+    "homeboy_version": "0.145.1",
+    "git_sha": null,
+    "rig_id": null,
+    "metadata_json": {
+      "analysis_clusters": 0,
+      "analyze": false,
+      "baseline": {
+        "baseline": false,
+        "ignore_baseline": false,
+        "ratchet": false
+      },
+      "baseline_regression": null,
+      "changed_since": null,
+      "coverage": null,
+      "coverage_min": null,
+      "drift": false,
+      "exit_code": 0,
+      "failure_count": 0,
+      "json_summary": false,
+      "mode": "self-check",
+      "observation_status": "passed",
+      "passthrough_args": [],
+      "run_dir": null,
+      "since": "HEAD~10",
+      "skip_lint": false,
+      "source_path": "/tmp/.tmpfSn1Rr",
+      "summary": null,
+      "test_counts": null,
+      "test_scope": null
+    }
+  },
+  {
+    "id": "a97cec95-34aa-4d1d-973a-4a73040b9a64",
+    "kind": "lint",
+    "component_id": "fixture",
+    "started_at": "2026-05-02T22:19:31.859010815+00:00",
+    "finished_at": "2026-05-02T22:19:31.871470544+00:00",
+    "status": "pass",
+    "command": "homeboy lint fixture --path /tmp/.tmpQY6LEE",
+    "cwd": "/tmp/.tmpQY6LEE",
+    "homeboy_version": "0.145.1",
+    "git_sha": null,
+    "rig_id": null,
+    "metadata_json": {
+      "exit_code": 0,
+      "finding_count": 0
+    }
+  },
+  {
+    "id": "e6fa4dd6-d45f-4b93-80e7-aca9c0a7b90e",
+    "kind": "audit",
+    "component_id": "homeboy-audit-command-audit-read-only-1777760324604124638",
+    "started_at": "2026-05-02T22:18:44.607550093+00:00",
+    "finished_at": "2026-05-02T22:18:45.007734468+00:00",
+    "status": "fail",
+    "command": "homeboy audit homeboy-audit-command-audit-read-only-1777760324604124638",
+    "cwd": "/tmp/homeboy-audit-command-audit-read-only-1777760324604124638",
+    "homeboy_version": "0.145.1",
+    "git_sha": null,
+    "rig_id": null,
+    "metadata_json": {
+      "baseline": {
+        "baseline": false,
+        "ignore_baseline": true,
+        "ratchet": false
+      },
+      "changed_since": null,
+      "exclude": [],
+      "exit_code": 1,
+      "fixability": false,
+      "json_summary": false,
+      "mode": "audit",
+      "observation_status": "fail",
+      "only": [],
+      "source_path": "/tmp/homeboy-audit-command-audit-read-only-1777760324604124638",
+      "summary": {
+        "alignment_score": 0.75,
+        "component_id": "homeboy-audit-command-audit-read-only-1777760324604124638",
+        "conventions_detected": 1,
+        "files_scanned": 4,
+        "findings": 1,
+        "outliers_found": 1,
+        "passed": false
+      }
+    }
+  },
+  {
+    "id": "edc9340a-1b23-4677-963a-352e7987cee6",
+    "kind": "test",
+    "component_id": "homeboy",
+    "started_at": "2026-05-02T22:17:10.331404707+00:00",
+    "finished_at": "2026-05-02T22:19:35.015068308+00:00",
+    "status": "pass",
+    "command": "homeboy test homeboy",
+    "cwd": "/home/runner/work/homeboy/homeboy",
+    "homeboy_version": "0.145.1",
+    "git_sha": "2bb08919",
+    "rig_id": null,
+    "metadata_json": {
+      "analysis_clusters": 0,
+      "analyze": false,
+      "baseline": {
+        "baseline": false,
+        "ignore_baseline": false,
+        "ratchet": false
+      },
+      "baseline_regression": null,
+      "changed_since": null,
+      "coverage": null,
+      "coverage_min": null,
+      "drift": false,
+      "exit_code": 0,
+      "failure_count": 0,
+      "json_summary": false,
+      "mode": "test",
+      "observation_status": "passed",
+      "passthrough_args": [],
+      "run_dir": "/home/runner/.config/homeboy/runtime/tmp/homeboy-run-14e29cc8-d2f0-4920-bda2-8e3b812f8175-1777760230329664930",
+      "since": "HEAD~10",
+      "skip_lint": false,
+      "source_path": "/home/runner/work/homeboy/homeboy",
+      "summary": null,
+      "test_counts": {
+        "failed": 0,
+        "passed": 2456,
+        "skipped": 6,
+        "total": 2462
+      },
+      "test_scope": null
+    }
+  },
+  {
+    "id": "ee5ab73b-3505-4c2b-bb2d-dca2e30f5da4",
+    "kind": "lint",
+    "component_id": "homeboy",
+    "started_at": "2026-05-02T22:16:32.194546579+00:00",
+    "finished_at": "2026-05-02T22:17:10.299554628+00:00",
+    "status": "pass",
+    "command": "homeboy lint homeboy --path /home/runner/work/homeboy/homeboy",
+    "cwd": "/home/runner/work/homeboy/homeboy",
+    "homeboy_version": "0.145.1",
+    "git_sha": null,
+    "rig_id": null,
+    "metadata_json": {
+      "exit_code": 0,
+      "finding_count": 0
+    }
+  },
+  {
+    "id": "681eddd4-4f87-41ec-b34a-c9f6a684042e",
+    "kind": "audit",
+    "component_id": "homeboy",
+    "started_at": "2026-05-02T22:15:18.797302972+00:00",
+    "finished_at": "2026-05-02T22:16:32.155071056+00:00",
+    "status": "pass",
+    "command": "homeboy audit homeboy",
+    "cwd": "/home/runner/work/homeboy/homeboy",
+    "homeboy_version": "0.145.1",
+    "git_sha": "2bb08919",
+    "rig_id": null,
+    "metadata_json": {
+      "baseline": {
+        "baseline": false,
+        "ignore_baseline": false,
+        "ratchet": false
+      },
+      "changed_since": null,
+      "exclude": [],
+      "exit_code": 0,
+      "fixability": false,
+      "json_summary": false,
+      "mode": "audit",
+      "observation_status": "pass",
+      "only": [],
+      "source_path": "/home/runner/work/homeboy/homeboy",
+      "summary": {
+        "alignment_score": 0.9285714030265808,
+        "component_id": "homeboy",
+        "conventions_detected": 2,
+        "files_scanned": 380,
+        "findings": 702,
+        "outliers_found": 3,
+        "passed": true
+      }
+    }
+  }
+]
