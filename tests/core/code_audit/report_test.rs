@@ -291,6 +291,7 @@ fn test_from_main_workflow() {
     let (output, exit_code) = from_main_workflow(crate::code_audit::run::AuditRunWorkflowResult {
         output,
         exit_code: 3,
+        findings: Vec::new(),
     });
 
     assert_eq!(exit_code, 3);
