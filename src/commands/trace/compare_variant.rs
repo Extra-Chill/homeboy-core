@@ -10,7 +10,7 @@ use super::output::{
     compare_trace_aggregates_with_focus, TraceAggregateInput, TraceAggregateRunInput,
     TraceAggregateSpanInput, TraceOverlayInput,
 };
-use super::{run_repeat, TraceArgs};
+use super::{run_repeat, validate_trace_variants_for_args, TraceArgs};
 use crate::commands::CmdResult;
 
 const TRACE_COMPARE_VARIANT_BASELINE_FILE: &str = "baseline.json";
@@ -22,10 +22,18 @@ pub(super) fn run_compare_variant(mut args: TraceArgs) -> CmdResult<TraceCommand
     let output_dir = args.output_dir.clone().ok_or_else(|| {
         homeboy::Error::validation_missing_argument(vec!["--output-dir".to_string()])
     })?;
-    if args.overlays.is_empty() {
+    if !args.variants.is_empty() && !args.overlays.is_empty() {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "--variant",
+            "mixing --variant and --overlay would make stack order ambiguous; use one ordered stack source",
+            None,
+            None,
+        ));
+    }
+    if args.overlays.is_empty() && args.variants.is_empty() {
         return Err(homeboy::Error::validation_invalid_argument(
             "--overlay",
-            "trace compare-variant requires at least one --overlay for the variant run",
+            "trace compare-variant requires at least one --overlay or --variant for the variant run",
             None,
             None,
         ));
@@ -44,12 +52,14 @@ pub(super) fn run_compare_variant(mut args: TraceArgs) -> CmdResult<TraceCommand
     args.json_summary = false;
     args.report = None;
     args.compare_after = None;
+    validate_trace_variants_for_args(&args)?;
     let focus_spans = args.focus_spans.clone();
     let regression_threshold = args.regression_threshold;
     let regression_min_delta_ms = args.regression_min_delta_ms;
 
     let mut baseline_args = args.clone();
     baseline_args.overlays.clear();
+    baseline_args.variants.clear();
     let baseline = run_repeat_output(baseline_args)?;
 
     let variant = run_repeat_output(args)?;
