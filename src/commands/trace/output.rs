@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::TraceCommandOutput;
 
+use super::bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
 use super::TraceArgs;
 use crate::commands::CmdResult;
 
@@ -13,6 +16,16 @@ use crate::commands::CmdResult;
 pub(super) struct TraceAggregateInput {
     pub(super) component: Option<String>,
     pub(super) scenario_id: Option<String>,
+    #[serde(default)]
+    pub(super) phase_preset: Option<String>,
+    #[serde(default)]
+    pub(super) repeat: Option<usize>,
+    #[serde(default)]
+    pub(super) rig_state: Option<Value>,
+    #[serde(default)]
+    pub(super) overlays: Vec<TraceOverlayInput>,
+    #[serde(default)]
+    pub(super) runs: Vec<TraceAggregateRunInput>,
     pub(super) spans: Vec<TraceAggregateSpanInput>,
 }
 
@@ -27,7 +40,32 @@ pub(super) struct TraceAggregateSpanInput {
     pub(super) n: usize,
     pub(super) median_ms: Option<u64>,
     pub(super) avg_ms: Option<f64>,
+    #[serde(default)]
+    pub(super) max_ms: Option<u64>,
+    #[serde(default)]
+    pub(super) max_run_index: Option<usize>,
+    #[serde(default)]
+    pub(super) max_artifact_path: Option<String>,
     pub(super) failures: usize,
+}
+
+#[derive(Deserialize)]
+pub(super) struct TraceOverlayInput {
+    pub(super) path: String,
+    pub(super) component_path: String,
+    #[serde(default)]
+    pub(super) touched_files: Vec<String>,
+    pub(super) kept: bool,
+}
+
+#[derive(Deserialize)]
+pub(super) struct TraceAggregateRunInput {
+    pub(super) index: usize,
+    pub(super) status: String,
+    pub(super) exit_code: i32,
+    pub(super) artifact_path: String,
+    #[serde(default)]
+    pub(super) failure: Option<String>,
 }
 
 pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
@@ -41,8 +79,10 @@ pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         ));
     };
 
-    let before = read_trace_aggregate(&before_path)?;
-    let after = read_trace_aggregate(&after_path)?;
+    let before_json = read_trace_aggregate_json(&before_path)?;
+    let after_json = read_trace_aggregate_json(&after_path)?;
+    let before = parse_trace_aggregate_for_path(&before_json, &before_path)?;
+    let after = parse_trace_aggregate_for_path(&after_json, &after_path)?;
     let output = compare_trace_aggregates_with_focus(
         &before_path,
         before,
@@ -57,17 +97,39 @@ pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     } else {
         0
     };
+    if let Some(experiment) = args.experiment.as_deref() {
+        let before = parse_trace_aggregate_for_path(&before_json, &before_path)?;
+        let after = parse_trace_aggregate_for_path(&after_json, &after_path)?;
+        write_trace_experiment_bundle(TraceExperimentBundleRequest {
+            name: experiment,
+            bundle_root: None,
+            command: std::env::args().collect::<Vec<_>>().join(" "),
+            before_path: &before_path,
+            before_json: &before_json,
+            before: &before,
+            after_path: &after_path,
+            after_json: &after_json,
+            after: &after,
+            compare: &output,
+        })?;
+    }
     Ok((TraceCommandOutput::Compare(output), exit_code))
 }
 
-fn read_trace_aggregate(path: &Path) -> homeboy::Result<TraceAggregateInput> {
-    let content = std::fs::read_to_string(path).map_err(|err| {
+fn read_trace_aggregate_json(path: &Path) -> homeboy::Result<String> {
+    fs::read_to_string(path).map_err(|err| {
         homeboy::Error::internal_io(
             format!("Failed to read trace aggregate {}: {}", path.display(), err),
             Some("trace.compare.read".to_string()),
         )
-    })?;
-    parse_trace_aggregate_input(&content).map_err(|err| {
+    })
+}
+
+fn parse_trace_aggregate_for_path(
+    content: &str,
+    path: &Path,
+) -> homeboy::Result<TraceAggregateInput> {
+    parse_trace_aggregate_input(content).map_err(|err| {
         homeboy::Error::internal_json(
             err.to_string(),
             Some(format!("parse trace aggregate {}", path.display())),
@@ -493,7 +555,7 @@ fn fmt_count(value: Option<usize>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn fmt_ms(value: Option<u64>) -> String {
+pub(super) fn fmt_ms(value: Option<u64>) -> String {
     value
         .map(|value| format!("{}ms", value))
         .unwrap_or_else(|| "-".to_string())
@@ -505,7 +567,7 @@ fn fmt_avg_ms(value: Option<f64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn fmt_delta_ms(value: Option<i64>) -> String {
+pub(super) fn fmt_delta_ms(value: Option<i64>) -> String {
     value
         .map(|value| format!("{:+}ms", value))
         .unwrap_or_else(|| "-".to_string())
@@ -520,7 +582,7 @@ fn fmt_signal_delta_ms(value: Option<i64>) -> String {
     }
 }
 
-fn fmt_delta_avg_ms(value: Option<f64>) -> String {
+pub(super) fn fmt_delta_avg_ms(value: Option<f64>) -> String {
     value
         .map(|value| format!("{:+.1}ms", value))
         .unwrap_or_else(|| "-".to_string())
