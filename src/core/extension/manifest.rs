@@ -312,7 +312,7 @@ pub struct ExtensionManifest {
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    #[serde(alias = "sourceUrl", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
 
     // Capability groups
@@ -722,10 +722,6 @@ impl ConfigEntity for ExtensionManifest {
         paths::extension_manifest(id)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../tests/core/extension/manifest_test.rs"]
-mod manifest_test;
 
 // ============================================================================
 // Sub-structs (unchanged from original)

@@ -565,7 +565,7 @@ fn resolve_source_url(extension_id: &str) -> Result<SourceMetadataResolution> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    if let Some(source_url) = extension.source_url {
+    if let Some(source_url) = extension_source_url(&extension) {
         let repair = if metadata_url.as_deref() != Some(source_url.as_str()) {
             write_source_metadata(
                 &extension_dir,
@@ -633,6 +633,17 @@ fn resolve_source_url(extension_id: &str) -> Result<SourceMetadataResolution> {
     }
 
     Err(err)
+}
+
+fn extension_source_url(extension: &ExtensionManifest) -> Option<String> {
+    extension.source_url.clone().or_else(|| {
+        extension
+            .extra
+            .get("sourceUrl")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .filter(|value| !value.trim().is_empty())
+    })
 }
 
 fn official_source_url_for_id(extension_id: &str) -> Option<&'static str> {
