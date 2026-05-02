@@ -8,8 +8,9 @@ use homeboy::extension::trace::TraceCommandOutput;
 use homeboy::rig;
 
 use super::output::{
-    aggregate_span, compare_trace_aggregates_with_focus, TraceAggregateInput,
-    TraceAggregateRunInput, TraceAggregateSpanInput, TraceAggregateSpanSample, TraceOverlayInput,
+    aggregate_span, classification_summaries, compare_trace_aggregates_with_focus,
+    TraceAggregateInput, TraceAggregateRunInput, TraceAggregateSpanInput, TraceAggregateSpanSample,
+    TraceOverlayInput,
 };
 use super::{
     apply_command_target_component, focus_aggregate_spans, plan_trace_run_order, run_repeat,
@@ -246,6 +247,7 @@ impl TraceCompareVariantAggregateBuilder {
             })
             .collect::<Vec<_>>();
         let focus_spans = focus_aggregate_spans(&spans, &self.args.focus_spans);
+        let classification_summaries = classification_summaries(&spans);
         extension_trace::TraceAggregateOutput {
             command: "trace.aggregate.spans",
             passed: self.failure_count == 0,
@@ -282,6 +284,8 @@ impl TraceCompareVariantAggregateBuilder {
             spans,
             focus_span_ids: self.args.focus_spans.clone(),
             focus_spans,
+            classification_summaries,
+            unmatched_span_metadata_ids: Vec::new(),
         }
     }
 }
