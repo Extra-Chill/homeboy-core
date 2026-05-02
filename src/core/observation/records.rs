@@ -460,28 +460,31 @@ mod tests {
 
     #[test]
     fn test_finding_record_from_audit() {
-        let finding = code_audit::Finding {
-            convention: "command modules".to_string(),
-            severity: code_audit::Severity::Warning,
-            file: "src/commands/foo.rs".to_string(),
-            description: "Missing run function".to_string(),
-            suggestion: "Add run()".to_string(),
-            kind: code_audit::AuditFinding::MissingMethod,
-        };
+        let finding = audit_finding();
 
-        let first = finding_record_from_audit("run-1", &finding);
-        let second = finding_record_from_audit("run-2", &finding);
+        let record = finding_record_from_audit("run-1", &finding);
 
-        assert_eq!(first.run_id, "run-1");
-        assert_eq!(first.tool, "audit");
-        assert_eq!(first.rule.as_deref(), Some("missing_method"));
-        assert_eq!(first.file.as_deref(), Some("src/commands/foo.rs"));
-        assert_eq!(first.severity.as_deref(), Some("warning"));
-        assert_eq!(first.message, "Missing run function");
-        assert_eq!(first.fingerprint, second.fingerprint);
-        assert_eq!(first.metadata_json["source_sidecar"], "audit-findings");
-        assert_eq!(first.metadata_json["convention"], "command modules");
-        assert_eq!(first.metadata_json["kind"], "missing_method");
+        assert_eq!(record.run_id, "run-1");
+        assert_eq!(record.tool, "audit");
+        assert_eq!(record.rule.as_deref(), Some("missing_method"));
+        assert_eq!(record.file.as_deref(), Some("src/commands/foo.rs"));
+        assert_eq!(record.severity.as_deref(), Some("warning"));
+        assert_eq!(record.message, "Missing run function");
+        assert_eq!(record.metadata_json["source_sidecar"], "audit-findings");
+        assert_eq!(record.metadata_json["convention"], "command modules");
+        assert_eq!(record.metadata_json["kind"], "missing_method");
+    }
+
+    #[test]
+    fn test_finding_records_from_audit() {
+        let finding = audit_finding();
+
+        let first = finding_records_from_audit("run-1", std::slice::from_ref(&finding));
+        let second = finding_records_from_audit("run-2", &[finding]);
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_eq!(first[0].fingerprint, second[0].fingerprint);
     }
 
     #[test]
@@ -583,6 +586,17 @@ mod tests {
             file: Some("src/lib.rs".to_string()),
             severity: Some("error".to_string()),
             extra: BTreeMap::new(),
+        }
+    }
+
+    fn audit_finding() -> code_audit::Finding {
+        code_audit::Finding {
+            convention: "command modules".to_string(),
+            severity: code_audit::Severity::Warning,
+            file: "src/commands/foo.rs".to_string(),
+            description: "Missing run function".to_string(),
+            suggestion: "Add run()".to_string(),
+            kind: code_audit::AuditFinding::MissingMethod,
         }
     }
 

@@ -47,8 +47,8 @@ pub fn run_main_audit_workflow(
     let mut result = match result {
         Some(r) => r,
         None => {
-            return Ok(AuditRunWorkflowResult {
-                output: AuditCommandOutput::Full {
+            return Ok(audit_run_workflow_result(
+                AuditCommandOutput::Full {
                     passed: true,
                     result: CodeAuditResult {
                         component_id: args.component_id,
@@ -68,23 +68,24 @@ pub fn run_main_audit_workflow(
                     },
                     fixability: None,
                 },
-                exit_code: 0,
-                findings: Vec::new(),
-            });
+                0,
+                Vec::new(),
+            ));
         }
     };
 
     // --conventions: just show conventions
     if args.conventions {
-        return Ok(AuditRunWorkflowResult {
-            output: AuditCommandOutput::Conventions {
+        let findings = Vec::new();
+        return Ok(audit_run_workflow_result(
+            AuditCommandOutput::Conventions {
                 component_id: result.component_id,
                 conventions: result.conventions,
                 directory_conventions: result.directory_conventions,
             },
-            exit_code: 0,
-            findings: Vec::new(),
-        });
+            0,
+            findings,
+        ));
     }
 
     // --baseline: save current state. Saved baselines record the *full* finding
@@ -107,6 +108,18 @@ pub fn run_main_audit_workflow(
 
     // Default: compare against baseline or return full result
     run_comparison_workflow(result, &args)
+}
+
+fn audit_run_workflow_result(
+    output: AuditCommandOutput,
+    exit_code: i32,
+    findings: Vec<code_audit::Finding>,
+) -> AuditRunWorkflowResult {
+    AuditRunWorkflowResult {
+        output,
+        exit_code,
+        findings,
+    }
 }
 
 /// Filter `result.findings` by kind allow/deny lists and refresh
