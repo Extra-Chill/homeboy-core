@@ -72,6 +72,7 @@ pub struct TraceRunWorkflowResult {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TraceOverlay {
     pub path: String,
+    pub component_path: String,
     pub touched_files: Vec<String>,
     pub kept: bool,
 }
@@ -241,6 +242,7 @@ fn run_trace_workflow_with_context(
             .into_iter()
             .map(|overlay| TraceOverlay {
                 path: overlay.patch_path.to_string_lossy().to_string(),
+                component_path: overlay.component_path.to_string_lossy().to_string(),
                 touched_files: overlay.touched_files,
                 kept: overlay.keep,
             })
@@ -575,6 +577,7 @@ fn apply_trace_overlays(
         if let Err(error) = run_git_apply(&component_path, &patch_path, false) {
             return cleanup_after_overlay_error(&applied, keep, error);
         }
+        print_trace_overlay("applied", &patch_path, &touched_files, keep);
         applied.push(AppliedTraceOverlay {
             component_path: component_path.clone(),
             patch_path,
@@ -599,8 +602,34 @@ fn cleanup_after_overlay_error<T>(
 fn cleanup_trace_overlays(applied: &[AppliedTraceOverlay]) -> Result<()> {
     for overlay in applied.iter().rev() {
         run_git_apply(&overlay.component_path, &overlay.patch_path, true)?;
+        print_trace_overlay(
+            "reverted",
+            &overlay.patch_path,
+            &overlay.touched_files,
+            overlay.keep,
+        );
     }
     Ok(())
+}
+
+fn print_trace_overlay(action: &str, patch_path: &Path, touched_files: &[String], keep: bool) {
+    eprintln!("trace overlay {action}: {}", patch_path.display());
+    let retention = if action == "reverted" {
+        "overlay changes reverted"
+    } else if keep {
+        "overlay changes will be kept"
+    } else {
+        "overlay changes will be reverted after the run"
+    };
+    eprintln!("  status: {retention}");
+    if touched_files.is_empty() {
+        eprintln!("  touched files: none reported by git apply --numstat");
+        return;
+    }
+    eprintln!("  touched files:");
+    for file in touched_files {
+        eprintln!("    - {file}");
+    }
 }
 
 fn overlay_touched_files(component_path: &Path, patch_path: &Path) -> Result<Vec<String>> {

@@ -85,6 +85,8 @@ pub struct TraceAggregateOutput {
     pub exit_code: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rig_state: Option<RigStateSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<TraceOverlay>,
     pub runs: Vec<TraceAggregateRunOutput>,
     pub spans: Vec<TraceAggregateSpanOutput>,
 }
@@ -253,7 +255,7 @@ fn from_run_workflow_result(
     }))
 }
 
-pub fn render_markdown(results: &TraceResults) -> String {
+pub fn render_markdown(results: &TraceResults, overlays: &[TraceOverlay]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# Trace: `{}`\n\n", results.scenario_id));
     out.push_str(&format!("- **Component:** `{}`\n", results.component_id));
@@ -264,6 +266,8 @@ pub fn render_markdown(results: &TraceResults) -> String {
     if let Some(failure) = &results.failure {
         out.push_str(&format!("- **Failure:** {}\n", failure));
     }
+
+    push_overlay_markdown(&mut out, overlays);
 
     if !results.span_results.is_empty() {
         out.push_str("\n## Spans\n\n");
@@ -324,6 +328,30 @@ pub fn render_markdown(results: &TraceResults) -> String {
     }
 
     out
+}
+
+pub fn push_overlay_markdown(out: &mut String, overlays: &[TraceOverlay]) {
+    if overlays.is_empty() {
+        return;
+    }
+
+    out.push_str("\n## Trace Overlays\n\n");
+    for overlay in overlays {
+        let status = if overlay.kept { "kept" } else { "reverted" };
+        out.push_str(&format!("- **Patch:** `{}` (`{}`)\n", overlay.path, status));
+        out.push_str(&format!(
+            "  - Applied relative to: `{}`\n",
+            overlay.component_path
+        ));
+        if overlay.touched_files.is_empty() {
+            out.push_str("  - Touched files: none reported by `git apply --numstat`\n");
+        } else {
+            out.push_str("  - Touched files:\n");
+            for file in &overlay.touched_files {
+                out.push_str(&format!("    - `{}`\n", file));
+            }
+        }
+    }
 }
 
 pub fn from_list_workflow(component: String, list: TraceList) -> (TraceCommandOutput, i32) {
@@ -397,6 +425,7 @@ mod tests {
             failure: None,
             overlays: vec![TraceOverlay {
                 path: "/tmp/overlay.patch".to_string(),
+                component_path: "/tmp/studio".to_string(),
                 touched_files: vec!["scenario.txt".to_string()],
                 kept: false,
             }],
@@ -414,6 +443,7 @@ mod tests {
         assert_eq!(value["artifact_count"], 1);
         assert_eq!(value["span_count"], 0);
         assert_eq!(value["overlays"][0]["path"], "/tmp/overlay.patch");
+        assert_eq!(value["overlays"][0]["component_path"], "/tmp/studio");
         assert_eq!(value["overlays"][0]["touched_files"][0], "scenario.txt");
         assert_eq!(value["overlays"][0]["kept"], false);
     }
@@ -501,9 +531,19 @@ mod tests {
             artifacts: Vec::new(),
         };
 
-        let markdown = render_markdown(&results);
+        let overlays = vec![TraceOverlay {
+            path: "/tmp/overlay.patch".to_string(),
+            component_path: "/tmp/studio".to_string(),
+            touched_files: vec!["apps/studio/out/app.js".to_string()],
+            kept: false,
+        }];
+        let markdown = render_markdown(&results, &overlays);
 
         assert!(markdown.contains("# Trace: `create-site`"));
+        assert!(markdown.contains("## Trace Overlays"));
+        assert!(markdown.contains("- **Patch:** `/tmp/overlay.patch` (`reverted`)"));
+        assert!(markdown.contains("- Applied relative to: `/tmp/studio`"));
+        assert!(markdown.contains("- `apps/studio/out/app.js`"));
         assert!(markdown.contains("| `submit_to_cli` | `ui.submit` | `cli.start` | 42ms | ok |"));
     }
 }

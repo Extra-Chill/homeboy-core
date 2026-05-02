@@ -113,7 +113,10 @@ pub fn run_markdown(args: TraceArgs, global: &GlobalArgs) -> CmdResult<String> {
             let Some(results) = run_output.results else {
                 return Ok(("# Trace\n\nNo trace results were produced.\n".to_string(), exit_code));
             };
-            Ok((extension_trace::render_markdown(&results), exit_code))
+            Ok((
+                extension_trace::render_markdown(&results, &run_output.overlays),
+                exit_code,
+            ))
         }
         TraceCommandOutput::Summary(summary) => Ok((
             format!(
@@ -377,6 +380,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
     let repeat = args.repeat;
     let scenario_id = args.scenario.clone();
     let mut runs = Vec::new();
+    let mut overlays = Vec::new();
     let mut span_samples: BTreeMap<String, Vec<TraceAggregateSpanSample>> = BTreeMap::new();
     let mut span_failures: BTreeMap<String, usize> = BTreeMap::new();
     let mut all_span_ids: BTreeSet<String> = cli_span_definitions_for_args(&args)?
@@ -397,6 +401,9 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
                 }
                 if component.is_none() {
                     component = Some(execution.workflow.component.clone());
+                }
+                if overlays.is_empty() && !execution.workflow.overlays.is_empty() {
+                    overlays = execution.workflow.overlays.clone();
                 }
                 let passed =
                     execution.workflow.exit_code == 0 && execution.workflow.status == "pass";
@@ -504,6 +511,7 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         failure_count,
         exit_code,
         rig_state,
+        overlays,
         runs,
         spans,
     };
