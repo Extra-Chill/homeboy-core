@@ -77,8 +77,8 @@ pub(crate) fn stderr_tail(stderr: &str) -> String {
 
 use crate::component::Component;
 use crate::config;
-use crate::error::Error;
 use crate::error::Result;
+use crate::error::{Error, ErrorCode};
 use crate::output::MergeOutput;
 use crate::paths;
 use std::collections::HashMap;
@@ -188,11 +188,16 @@ pub struct ExtensionExecutionContext {
 }
 
 fn no_extensions_error(component: &Component) -> Error {
-    let mut err = Error::validation_invalid_argument(
-        "component",
-        format!("Component '{}' has no extensions configured", component.id),
-        None,
-        None,
+    let mut err = Error::new(
+        ErrorCode::ExtensionUnsupported,
+        format!(
+            "No extension provider configured for component '{}'",
+            component.id
+        ),
+        serde_json::json!({
+            "component_id": component.id,
+            "problem": "no extensions configured",
+        }),
     );
 
     for hint in extension_guidance_hints(component, None) {
@@ -240,6 +245,7 @@ pub(crate) fn extension_guidance_hints(
     vec![
         link_hint,
         "List installed extensions: homeboy extension list".to_string(),
+        "The component path resolved correctly; the requested command needs an extension provider.".to_string(),
         "For one-off shell builds or checks, model the workflow as a rig `command` step; component-level `build_command` is not supported.".to_string(),
     ]
 }

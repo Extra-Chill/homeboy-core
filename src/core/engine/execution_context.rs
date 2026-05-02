@@ -465,7 +465,7 @@ mod tests {
         let message = err.to_string();
 
         assert!(
-            message.contains("has no extensions configured"),
+            message.contains("No extension provider configured"),
             "expected unsupported-shape error, got: {message}"
         );
         assert!(

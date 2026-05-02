@@ -290,6 +290,7 @@ pub struct ComponentArgs {
     #[arg(short, long)]
     pub component: Option<String>,
 
+    /// Override the component checkout path for this invocation
     #[arg(long)]
     pub path: Option<String>,
 }
@@ -326,6 +327,7 @@ pub struct PositionalComponentArgs {
     /// Component ID (optional — auto-detected from CWD if omitted)
     pub component: Option<String>,
 
+    /// Override the component checkout path for this invocation
     #[arg(long)]
     pub path: Option<String>,
 }
