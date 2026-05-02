@@ -23,6 +23,7 @@ fn observation_spec(id: &str) -> RigSpec {
         bench: None,
         bench_workloads: HashMap::new(),
         trace_workloads: HashMap::new(),
+        trace_variants: HashMap::new(),
         bench_profiles: HashMap::new(),
         app_launcher: None,
     }

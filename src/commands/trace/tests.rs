@@ -109,6 +109,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
+            variants: Vec::new(),
             keep_overlay: false,
             stale: false,
             force: false,
@@ -201,6 +202,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
+            variants: Vec::new(),
             keep_overlay: false,
             stale: false,
             force: false,
@@ -251,6 +253,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -307,6 +310,7 @@ fn trace_run_persists_observation_history() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -386,6 +390,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -511,6 +516,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: vec![patch_path.to_string_lossy().to_string()],
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -539,6 +545,99 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
             }
             _ => panic!("expected aggregate output"),
         }
+    });
+}
+
+#[test]
+fn trace_run_resolves_named_variants_and_reports_unknown_names() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        init_overlay_component(component_dir.path());
+        let package_dir = tempfile::TempDir::new().expect("package dir");
+        write_trace_rig_with_variant(
+            home,
+            package_dir.path(),
+            "studio-rig",
+            "studio",
+            component_dir.path(),
+        );
+
+        let valid_args = TraceArgs {
+            comp: PositionalComponentArgs {
+                component: Some("studio".to_string()),
+                path: None,
+            },
+            scenario: "studio-app-create-site".to_string(),
+            compare_after: None,
+            rig: Some("studio-rig".to_string()),
+            setting_args: SettingArgs::default(),
+            _json: HiddenJsonArgs::default(),
+            json_summary: false,
+            report: None,
+            repeat: 1,
+            aggregate: None,
+            spans: Vec::new(),
+            phases: Vec::new(),
+            phase_preset: None,
+            baseline_args: BaselineArgs::default(),
+            regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+            overlays: Vec::new(),
+            variants: vec!["fresh-install-mode".to_string()],
+            keep_overlay: false,
+        };
+
+        let (output, exit_code) =
+            run(valid_args.clone(), &GlobalArgs {}).expect("variant trace should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Run(result) => {
+                assert_eq!(result.overlays.len(), 1);
+                let overlay = &result.overlays[0];
+                assert_eq!(overlay.variant.as_deref(), Some("fresh-install-mode"));
+                assert_eq!(
+                    overlay.path,
+                    package_dir
+                        .path()
+                        .join("overlays/fresh-install-mode.patch")
+                        .to_string_lossy()
+                );
+                assert_eq!(overlay.touched_files, vec!["scenario.txt"]);
+                let value = serde_json::to_value(&result).expect("result serializes");
+                assert_eq!(value["overlays"][0]["variant"], "fresh-install-mode");
+                assert_eq!(
+                    value["overlays"][0]["path"],
+                    package_dir
+                        .path()
+                        .join("overlays/fresh-install-mode.patch")
+                        .to_string_lossy()
+                        .as_ref()
+                );
+            }
+            _ => panic!("expected run output"),
+        }
+        assert_eq!(
+            fs::read_to_string(component_dir.path().join("scenario.txt")).unwrap(),
+            "base\n"
+        );
+
+        let mut invalid_args = valid_args;
+        invalid_args.variants = vec!["missing".to_string()];
+        let err = match run(invalid_args, &GlobalArgs {}) {
+            Ok(_) => panic!("unknown variant should fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.message.contains("unknown trace variant 'missing'"));
+        assert!(err
+            .details
+            .get("id")
+            .and_then(|value| value.as_str())
+            .expect("details id")
+            .contains("fresh-install-mode"));
     });
 }
 
@@ -823,6 +922,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -886,6 +986,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -949,6 +1050,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -1103,6 +1205,7 @@ fn failed_trace_run_persists_observation_history() {
                     extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
+                variants: Vec::new(),
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -1316,6 +1419,74 @@ fn write_trace_rig_with_phase_preset(
                             }}
                         }}
                     ] }}
+                }}"#,
+            path.display()
+        ),
+    )
+    .expect("write rig");
+}
+
+fn write_trace_rig_with_variant(
+    home: &tempfile::TempDir,
+    package_path: &std::path::Path,
+    rig_id: &str,
+    component_id: &str,
+    path: &std::path::Path,
+) {
+    let sources_dir = home
+        .path()
+        .join(".config")
+        .join("homeboy")
+        .join("rig-sources");
+    fs::create_dir_all(&sources_dir).expect("mkdir rig sources");
+    fs::write(
+        sources_dir.join(format!("{}.json", rig_id)),
+        format!(
+            r#"{{
+                "source": "{}",
+                "package_path": "{}",
+                "rig_path": "{}/rig.json",
+                "linked": true,
+                "source_revision": null
+            }}"#,
+            package_path.display(),
+            package_path.display(),
+            package_path.display()
+        ),
+    )
+    .expect("write rig source metadata");
+
+    let overlay_dir = package_path.join("overlays");
+    fs::create_dir_all(&overlay_dir).expect("mkdir overlays");
+    fs::write(
+        overlay_dir.join("fresh-install-mode.patch"),
+        r#"diff --git a/scenario.txt b/scenario.txt
+--- a/scenario.txt
++++ b/scenario.txt
+@@ -1 +1 @@
+-base
++overlay
+"#,
+    )
+    .expect("write variant overlay");
+    let rig_dir = home.path().join(".config").join("homeboy").join("rigs");
+    fs::create_dir_all(&rig_dir).expect("mkdir rigs");
+    fs::write(
+        rig_dir.join(format!("{}.json", rig_id)),
+        format!(
+            r#"{{
+                    "components": {{
+                        "{component_id}": {{ "path": "{}" }}
+                    }},
+                    "trace_workloads": {{ "nodejs": [
+                        "${{components.{component_id}.path}}/studio-app-create-site.trace.mjs"
+                    ] }},
+                    "trace_variants": {{
+                        "fresh-install-mode": {{
+                            "component": "{component_id}",
+                            "overlay": "overlays/fresh-install-mode.patch"
+                        }}
+                    }}
                 }}"#,
             path.display()
         ),

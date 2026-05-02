@@ -189,6 +189,7 @@ mod tests {
                 bench: None,
                 bench_workloads: Default::default(),
                 trace_workloads: Default::default(),
+                trace_variants: Default::default(),
                 bench_profiles: Default::default(),
                 app_launcher: None,
             },

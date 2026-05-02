@@ -8,7 +8,8 @@ use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::{
-    TraceCommandOutput, TraceListWorkflowArgs, TraceRunWorkflowArgs, TraceSpanDefinition,
+    TraceCommandOutput, TraceListWorkflowArgs, TraceOverlayRequest, TraceRunWorkflowArgs,
+    TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::observation::{
@@ -104,6 +105,10 @@ pub struct TraceArgs {
     /// Apply a patch file for this trace run, then reverse it afterward.
     #[arg(long = "overlay", value_name = "PATCH_FILE")]
     pub overlays: Vec<String>,
+
+    /// Apply a named trace variant declared by the selected rig/workload.
+    #[arg(long = "variant", value_name = "NAME")]
+    pub variants: Vec<String>,
 
     /// Leave overlay changes in place after the trace run.
     #[arg(long)]
@@ -412,6 +417,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             && args.phases.is_empty()
             && args.spans.is_empty(),
     )?;
+    let overlays = trace_overlays_for_args(&args, rig_context.as_ref(), &effective_id)?;
 
     let rig_state = rig_context
         .as_ref()
@@ -420,6 +426,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
     let scenario_id = scenario.clone();
     let rig_id = args.rig.clone();
     let requested_overlays = args.overlays.clone();
+    let requested_variants = args.variants.clone();
     let component_path_for_observation = path_override
         .clone()
         .unwrap_or_else(|| ctx.component.local_path.clone());
@@ -441,6 +448,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
                     "scenario_id": scenario_id,
                     "component_path": component_path_for_observation,
                     "requested_overlays": requested_overlays,
+                    "requested_variants": requested_variants,
                     "span_definitions": span_definitions.clone(),
                     "phase_preset": args.phase_preset.clone(),
                     "phase_milestones": args.phases.clone().into_iter().map(|phase| {
@@ -488,7 +496,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             scenario_id: scenario,
             json_summary: args.json_summary,
             rig_id: args.rig,
-            overlays: args.overlays,
+            overlays,
             keep_overlay: args.keep_overlay,
             extra_workloads,
             span_definitions,
@@ -896,6 +904,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
 struct TraceRigContext {
     rig_spec: RigSpec,
     rig_package_root: Option<PathBuf>,
+    rig_config_root: Option<PathBuf>,
 }
 
 fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigContext>> {
@@ -905,10 +914,125 @@ fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigCont
     let spec = rig::load(rig_id)?;
     let package_root =
         rig::read_source_metadata(&spec.id).map(|metadata| PathBuf::from(metadata.package_path));
+    let config_root = homeboy::paths::rig_config(&spec.id)
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
     Ok(Some(TraceRigContext {
         rig_spec: spec,
         rig_package_root: package_root,
+        rig_config_root: config_root,
     }))
+}
+
+fn trace_overlays_for_args(
+    args: &TraceArgs,
+    rig_context: Option<&TraceRigContext>,
+    component_id: &str,
+) -> homeboy::Result<Vec<TraceOverlayRequest>> {
+    let mut overlays = Vec::new();
+    if !args.variants.is_empty() {
+        let context = rig_context.ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "--variant",
+                "trace variants require --rig so Homeboy can read rig/workload metadata",
+                None,
+                None,
+            )
+        })?;
+        let variants = trace_variants_for_args(args, context, component_id);
+        let available = variants.keys().cloned().collect::<Vec<_>>();
+        for name in &args.variants {
+            let variant = variants.get(name).ok_or_else(|| {
+                homeboy::Error::validation_invalid_argument(
+                    "--variant",
+                    format!(
+                        "unknown trace variant '{}' for component '{}' and scenario '{}'",
+                        name, component_id, args.scenario
+                    ),
+                    Some(format!(
+                        "available variants: {}",
+                        if available.is_empty() {
+                            "none".to_string()
+                        } else {
+                            available.join(", ")
+                        }
+                    )),
+                    None,
+                )
+            })?;
+            overlays.push(TraceOverlayRequest {
+                variant: Some(name.clone()),
+                path: resolve_trace_variant_overlay(context, &variant.overlay),
+            });
+        }
+    }
+    overlays.extend(
+        args.overlays
+            .iter()
+            .cloned()
+            .map(|path| TraceOverlayRequest {
+                variant: None,
+                path,
+            }),
+    );
+    Ok(overlays)
+}
+
+fn trace_variants_for_args<'a>(
+    args: &TraceArgs,
+    context: &'a TraceRigContext,
+    component_id: &str,
+) -> BTreeMap<String, &'a rig::TraceVariantSpec> {
+    let mut variants = BTreeMap::new();
+    for (name, variant) in &context.rig_spec.trace_variants {
+        if trace_variant_matches_component(variant, component_id) {
+            variants.insert(name.clone(), variant);
+        }
+    }
+    for workload in context
+        .rig_spec
+        .trace_workloads
+        .values()
+        .flat_map(|workloads| workloads.iter())
+    {
+        if trace_workload_scenario_id(workload.path()) != args.scenario {
+            continue;
+        }
+        if let Some(workload_variants) = workload.trace_variants() {
+            for (name, variant) in workload_variants {
+                if trace_variant_matches_component(variant, component_id) {
+                    variants.insert(name.clone(), variant);
+                }
+            }
+        }
+    }
+    variants
+}
+
+fn trace_variant_matches_component(variant: &rig::TraceVariantSpec, component_id: &str) -> bool {
+    variant
+        .component
+        .as_deref()
+        .map_or(true, |id| id == component_id)
+}
+
+fn resolve_trace_variant_overlay(context: &TraceRigContext, overlay: &str) -> String {
+    let expanded = rig::expand::expand_vars(&context.rig_spec, overlay);
+    let expanded = if let Some(root) = context.rig_package_root.as_ref() {
+        expanded.replace("${package.root}", &root.to_string_lossy())
+    } else {
+        expanded
+    };
+    let path = PathBuf::from(&expanded);
+    if path.is_absolute() {
+        return path.to_string_lossy().to_string();
+    }
+    context
+        .rig_package_root
+        .as_ref()
+        .or(context.rig_config_root.as_ref())
+        .map(|root| root.join(path).to_string_lossy().to_string())
+        .unwrap_or(expanded)
 }
 
 fn run_rig_workload_preflight(
