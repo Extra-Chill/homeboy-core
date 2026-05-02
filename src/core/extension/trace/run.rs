@@ -854,6 +854,15 @@ JSON
     }
 
     #[test]
+    fn test_overlay_touched_files() {
+        let fixture = overlay_fixture(false);
+
+        let touched = overlay_touched_files(&fixture.component_dir, &fixture.patch_path).unwrap();
+
+        assert_eq!(touched, vec!["scenario.txt"]);
+    }
+
+    #[test]
     fn trace_overlay_keep_overlay_leaves_changes_in_place() {
         with_isolated_home(|_| {
             let fixture = overlay_fixture(true);

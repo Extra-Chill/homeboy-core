@@ -416,7 +416,7 @@ mod tests {
     use crate::test_support::with_isolated_home;
 
     #[test]
-    fn trace_overlay_lock_acquisition_releases_on_drop() {
+    fn test_acquire() {
         with_isolated_home(|_| {
             let component_dir = tempfile::tempdir().unwrap();
             let run_dir = RunDir::create().unwrap();
