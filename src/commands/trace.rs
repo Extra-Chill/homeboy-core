@@ -1475,6 +1475,9 @@ fn record_artifact_if_file(store: &ObservationStore, run_id: &str, kind: &str, p
 mod compare_tests;
 
 #[cfg(test)]
+mod compare_variant_tests;
+
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]
