@@ -6,9 +6,6 @@ use crate::test_support::with_isolated_home;
 use homeboy::component::ScopedExtensionConfig;
 use homeboy::rig::ComponentSpec;
 
-use super::output::{
-    compare_trace_aggregates_with_focus, TraceAggregateInput, TraceAggregateSpanInput,
-};
 use super::test_fixture::{
     init_overlay_component, write_trace_extension, write_trace_rig,
     write_trace_rig_with_phase_preset, write_trace_rig_with_variant, XdgGuard,
@@ -760,6 +757,7 @@ fn trace_compare_variant_writes_experiment_bundle() {
                     path: None,
                 },
                 scenario: Some("studio-app-create-site".to_string()),
+                scenario_arg: None,
                 compare_after: None,
                 rig: Some("studio-rig".to_string()),
                 setting_args: SettingArgs::default(),

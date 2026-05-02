@@ -36,13 +36,7 @@ use output::{
 };
 
 #[cfg(test)]
-use bundle::{write_trace_experiment_bundle, TraceExperimentBundleRequest};
-
-#[cfg(test)]
 use matrix::{expand_variant_matrix, TraceVariantStackItem};
-
-#[cfg(test)]
-use output::{compare_trace_aggregates, parse_trace_aggregate_input};
 #[derive(Args, Clone)]
 pub struct TraceArgs {
     #[command(flatten)]
@@ -318,7 +312,11 @@ fn run_outputs(args: TraceArgs) -> CmdResult<(TraceCommandOutput, Option<TraceCo
     }
 
     if args.comp.component.as_deref() == Some("compare-variant") {
-        let (output, exit_code) = run_compare_variant(args)?;
+        let (output, exit_code) = if args.matrix == TraceVariantMatrixMode::None {
+            run_compare_variant(args)?
+        } else {
+            matrix::run_variant_matrix(args)?
+        };
         return Ok(((output, None), exit_code));
     }
 

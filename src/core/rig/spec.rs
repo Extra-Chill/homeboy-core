@@ -403,6 +403,7 @@ mod tests {
                 vec!["launch".to_string(), "ready".to_string()],
             )]),
             trace_default_phase_preset: None,
+            trace_variants: HashMap::new(),
         });
 
         assert_eq!(workload.trace_phase_preset("missing"), None);
@@ -423,6 +424,7 @@ mod tests {
             check_groups: None,
             trace_phase_presets: HashMap::new(),
             trace_default_phase_preset: Some("startup".to_string()),
+            trace_variants: HashMap::new(),
         });
 
         assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
