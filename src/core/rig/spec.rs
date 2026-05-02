@@ -562,6 +562,56 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn test_trace_guardrails_parse_at_rig_workload_and_variant_scope() {
+        let spec: RigSpec = serde_json::from_str(
+            r#"{
+                "id": "studio-rig",
+                "trace_guardrails": [
+                    { "label": "health", "http": "http://127.0.0.1:3000/health" }
+                ],
+                "trace_workloads": {
+                    "nodejs": [
+                        {
+                            "path": "trace/create-site.trace.mjs",
+                            "trace_guardrails": [
+                                { "label": "list sites", "command": "npm run smoke:list-sites" }
+                            ],
+                            "trace_variants": {
+                                "fast-install": {
+                                    "overlay": "overlays/fast-install.patch",
+                                    "trace_guardrails": [
+                                        { "label": "install smoke", "command": "npm run smoke:install" }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("parse guardrails");
+
+        assert_eq!(spec.trace_guardrails[0].label.as_deref(), Some("health"));
+        assert_eq!(
+            spec.trace_guardrails[0].check.http.as_deref(),
+            Some("http://127.0.0.1:3000/health")
+        );
+        let workload = spec.trace_workloads["nodejs"].first().expect("workload");
+        assert_eq!(
+            workload.trace_guardrails()[0].check.command.as_deref(),
+            Some("npm run smoke:list-sites")
+        );
+        let variants = workload.trace_variants().expect("variants");
+        assert_eq!(
+            variants["fast-install"].trace_guardrails[0]
+                .check
+                .command
+                .as_deref(),
+            Some("npm run smoke:install")
+        );
+    }
 }
 
 /// Component reference inside a rig spec. Decoupled from the global component
