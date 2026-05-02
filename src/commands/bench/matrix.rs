@@ -8,6 +8,7 @@ use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::report::collect_artifacts;
 use homeboy::extension::bench::{
     BenchCommandOutput, BenchGate, BenchResults, BenchRunExecution, BenchRunWorkflowArgs,
+    BenchRunWorkflowResult,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, BenchSpec, RigSpec, RigStateSnapshot};
@@ -195,6 +196,38 @@ fn declared_scenario_gates(rig_spec: Option<&RigSpec>) -> BTreeMap<String, Vec<B
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn apply_declared_scenario_gates(
+    workflow: &mut BenchRunWorkflowResult,
+    scenario_gates: BTreeMap<String, Vec<BenchGate>>,
+) {
+    if scenario_gates.is_empty() {
+        return;
+    }
+
+    let Some(results) = workflow.results.as_mut() else {
+        return;
+    };
+
+    for scenario in &mut results.scenarios {
+        if let Some(gates) = scenario_gates.get(&scenario.id) {
+            scenario.gates.extend(gates.clone());
+        }
+    }
+
+    let failures = extension_bench::evaluate_gates(results);
+    if failures.is_empty() {
+        return;
+    }
+
+    workflow.gate_failures.extend(failures.iter().cloned());
+    let hints = workflow.hints.get_or_insert_with(Vec::new);
+    hints.extend(failures);
+    workflow.status = "failed".to_string();
+    if workflow.exit_code == 0 {
+        workflow.exit_code = 1;
+    }
 }
 
 fn suffix_component_results(mut results: BenchResults, component_id: &str) -> BenchResults {
@@ -471,7 +504,6 @@ fn run_component_with_rig_context(
             rig_id: rig_id.clone(),
             shared_state: shared_state_override.or_else(|| args.shared_state.clone()),
             extra_workloads,
-            scenario_gates: declared_scenario_gates(rig_spec),
         },
         &run_dir,
     );
@@ -481,6 +513,7 @@ fn run_component_with_rig_context(
     }
     let workflow = match workflow {
         Ok(mut workflow) => {
+            apply_declared_scenario_gates(&mut workflow, declared_scenario_gates(rig_spec));
             if let Some(summary) = observation::finish_success(observation, &workflow, &run_dir) {
                 let hints = workflow.hints.get_or_insert_with(Vec::new);
                 hints.extend(observation::history_hints(&summary));

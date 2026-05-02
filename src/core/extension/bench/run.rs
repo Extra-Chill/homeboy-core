@@ -16,8 +16,8 @@ use crate::extension::bench::aggregate_runs;
 use crate::extension::bench::baseline::{self, BenchBaselineComparison};
 use crate::extension::bench::diagnostic::{self, BenchDiagnostic};
 use crate::extension::bench::parsing::{
-    self, BenchGate, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata,
-    BenchScenario, BenchWorkloadMetadata,
+    self, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata, BenchScenario,
+    BenchWorkloadMetadata,
 };
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
@@ -64,9 +64,6 @@ pub struct BenchRunWorkflowArgs {
     /// Rig-declared out-of-tree workloads to run alongside in-tree discovery.
     /// Exported to dispatchers as `HOMEBOY_BENCH_EXTRA_WORKLOADS`.
     pub extra_workloads: Vec<PathBuf>,
-    /// Homeboy-owned scenario gates declared outside the workload output.
-    /// Keys are exact scenario ids after filtering and before matrix suffixes.
-    pub scenario_gates: BTreeMap<String, Vec<BenchGate>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,7 +152,6 @@ pub fn run_bench_list_workflow(
             rig_id: None,
             shared_state: None,
             extra_workloads: args.extra_workloads,
-            scenario_gates: BTreeMap::new(),
         },
         run_dir,
         None,
@@ -475,11 +471,6 @@ pub fn run_main_bench_workflow(
         };
 
     if let Some(results) = parsed.as_mut() {
-        for scenario in &mut results.scenarios {
-            if let Some(gates) = execution_args.scenario_gates.get(&scenario.id) {
-                scenario.gates.extend(gates.clone());
-            }
-        }
         stamp_run_metadata(
             results,
             &execution_context,
@@ -1177,7 +1168,6 @@ mod tests {
                 rig_id: None,
                 shared_state: None,
                 extra_workloads: Vec::new(),
-                scenario_gates: BTreeMap::new(),
             },
             &run_dir,
         )
@@ -1232,7 +1222,6 @@ mod tests {
             rig_id: Some("studio".to_string()),
             shared_state: Some(component_dir.path().join("shared")),
             extra_workloads: Vec::new(),
-            scenario_gates: BTreeMap::new(),
         };
         let mut results = BenchResults {
             component_id: "homeboy".to_string(),

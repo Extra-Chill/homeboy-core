@@ -332,6 +332,85 @@ impl WorkloadSpec {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_gates() {
+        let condition = BenchMetricGateCondition {
+            equals: Some(1.0),
+            gte: Some(0.5),
+            lte: Some(2.0),
+        };
+
+        let gates = condition.to_gates("native_block_quality_pass");
+
+        assert_eq!(gates.len(), 3);
+        assert!(gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == BenchGateOp::Eq
+                && gate.value == 1.0
+        }));
+        assert!(gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == BenchGateOp::Gte
+                && gate.value == 0.5
+        }));
+        assert!(gates.iter().any(|gate| {
+            gate.metric == "native_block_quality_pass"
+                && gate.op == BenchGateOp::Lte
+                && gate.value == 2.0
+        }));
+        assert!(BenchMetricGateCondition {
+            equals: None,
+            gte: None,
+            lte: None,
+        }
+        .to_gates("metric")
+        .is_empty());
+    }
+
+    #[test]
+    fn test_trace_phase_preset() {
+        let workload = WorkloadSpec::Detailed(WorkloadEntry {
+            path: "trace.mjs".to_string(),
+            check_groups: None,
+            trace_phase_presets: HashMap::from([(
+                "startup".to_string(),
+                vec!["launch".to_string(), "ready".to_string()],
+            )]),
+            trace_default_phase_preset: None,
+        });
+
+        assert_eq!(workload.trace_phase_preset("missing"), None);
+        assert_eq!(
+            workload.trace_phase_preset("startup"),
+            Some(["launch".to_string(), "ready".to_string()].as_slice())
+        );
+        assert_eq!(
+            WorkloadSpec::Path("trace.mjs".to_string()).trace_phase_preset("startup"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_trace_default_phase_preset() {
+        let workload = WorkloadSpec::Detailed(WorkloadEntry {
+            path: "trace.mjs".to_string(),
+            check_groups: None,
+            trace_phase_presets: HashMap::new(),
+            trace_default_phase_preset: Some("startup".to_string()),
+        });
+
+        assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
+        assert_eq!(
+            WorkloadSpec::Path("trace.mjs".to_string()).trace_default_phase_preset(),
+            None
+        );
+    }
+}
+
 /// Component reference inside a rig spec. Decoupled from the global component
 /// registry because rigs should work even when a component isn't registered.
 #[derive(Debug, Clone, Serialize, Deserialize)]
