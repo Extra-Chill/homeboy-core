@@ -1346,6 +1346,8 @@ fn aggregate_markdown_includes_percentile_columns() {
             aggregate_samples(&((1..=20).map(|value| value * 10).collect::<Vec<_>>())),
             0,
         )],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
         focus_span_ids: Vec::new(),
         focus_spans: Vec::new(),
         classification_summaries: Vec::new(),

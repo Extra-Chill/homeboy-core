@@ -23,8 +23,10 @@ use super::{CmdResult, GlobalArgs};
 mod bundle;
 mod compare_variant;
 mod experiment;
+mod guardrails;
 mod matrix;
 mod metadata;
+mod observations;
 mod output;
 mod schedule;
 #[cfg(test)]
@@ -36,7 +38,9 @@ use experiment::{
     run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args,
     trace_experiment_settings,
 };
+use guardrails::run_trace_guardrails_for_args;
 use metadata::trace_span_metadata_for_args;
+use observations::record_trace_artifacts;
 
 use output::{
     aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
@@ -725,12 +729,21 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         .collect::<Vec<_>>();
     let unmatched_span_metadata_ids = attach_span_metadata(&mut spans, &span_metadata);
     let classification_summaries = classification_summaries(&spans);
+    let guardrails = run_trace_guardrails_for_args(&args)?;
+    let guardrail_failure_count = guardrails
+        .iter()
+        .filter(|guardrail| !guardrail.passed)
+        .count();
     let focus_spans = focus_aggregate_spans(&spans, &args.focus_spans);
-    let exit_code = if failure_count == 0 { 0 } else { 1 };
+    let exit_code = if failure_count == 0 && guardrail_failure_count == 0 {
+        0
+    } else {
+        1
+    };
     let output = extension_trace::TraceAggregateOutput {
         command: "trace.aggregate.spans",
-        passed: failure_count == 0,
-        status: if failure_count == 0 { "pass" } else { "fail" }.to_string(),
+        passed: exit_code == 0,
+        status: if exit_code == 0 { "pass" } else { "fail" }.to_string(),
         component: component.unwrap_or_else(|| args.comp.component.clone().unwrap_or_default()),
         scenario_id,
         phase_preset: args.phase_preset.clone(),
@@ -751,6 +764,8 @@ fn run_repeat(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         overlays,
         runs,
         spans,
+        guardrails,
+        guardrail_failure_count,
         focus_span_ids: args.focus_spans.clone(),
         focus_spans,
         classification_summaries,
@@ -1439,44 +1454,15 @@ fn trace_run_finish_metadata(
     })
 }
 
-fn record_trace_artifacts(
-    store: &ObservationStore,
-    run_id: &str,
-    run_dir: &RunDir,
-    results: Option<&extension_trace::TraceResults>,
-) {
-    let trace_results_path = run_dir.step_file(homeboy::engine::run_dir::files::TRACE_RESULTS);
-    record_artifact_if_file(store, run_id, "trace-results", &trace_results_path);
-    if let Some(results) = results {
-        for artifact in &results.artifacts {
-            let path = PathBuf::from(&artifact.path);
-            let resolved = if path.is_absolute() {
-                path
-            } else {
-                run_dir.path().join(path)
-            };
-            record_artifact_if_file(store, run_id, "trace-artifact", &resolved);
-        }
-    }
-}
-
-fn record_artifact_if_file(store: &ObservationStore, run_id: &str, kind: &str, path: &Path) {
-    if path.is_file() {
-        let _ = store.record_artifact(run_id, kind, path);
-    }
-}
-
 #[cfg(test)]
 mod compare_tests;
-
 #[cfg(test)]
 mod compare_variant_tests;
-
 #[cfg(test)]
 mod experiment_tests;
-
 #[cfg(test)]
-mod tests;
-
+mod guardrail_tests;
 #[cfg(test)]
 mod output_tests;
+#[cfg(test)]
+mod tests;

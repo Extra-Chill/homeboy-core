@@ -34,6 +34,7 @@ fn rig_with_components(components: HashMap<String, ComponentSpec>) -> RigSpec {
         trace_workloads: Default::default(),
         trace_variants: Default::default(),
         trace_experiments: Default::default(),
+        trace_guardrails: Default::default(),
         bench_profiles: Default::default(),
         app_launcher: None,
     }

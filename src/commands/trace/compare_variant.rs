@@ -98,6 +98,7 @@ pub(super) fn run_compare_variant(mut args: TraceArgs) -> CmdResult<TraceCommand
     let exit_code = if baseline.exit_code == 0
         && variant.exit_code == 0
         && compare.focus_status.as_deref() != Some("fail")
+        && compare.guardrail_status.as_deref() != Some("fail")
     {
         0
     } else {
@@ -179,6 +180,8 @@ struct TraceCompareVariantAggregateBuilder {
     span_failures: BTreeMap<String, usize>,
     all_span_ids: BTreeSet<String>,
     overlays: Vec<extension_trace::run::TraceOverlay>,
+    guardrails: Vec<extension_trace::TraceGuardrailOutput>,
+    guardrail_failure_count: usize,
     failure_count: usize,
 }
 
@@ -194,6 +197,8 @@ impl TraceCompareVariantAggregateBuilder {
             span_failures: BTreeMap::new(),
             all_span_ids: BTreeSet::new(),
             overlays: Vec::new(),
+            guardrails: Vec::new(),
+            guardrail_failure_count: 0,
             failure_count: 0,
         }
     }
@@ -206,6 +211,8 @@ impl TraceCompareVariantAggregateBuilder {
             self.overlays = aggregate.overlays.clone();
         }
         self.failure_count += aggregate.failure_count;
+        self.guardrail_failure_count += aggregate.guardrail_failure_count;
+        self.guardrails.extend(aggregate.guardrails.clone());
         self.run_order
             .push(extension_trace::TraceRunOrderEntryOutput {
                 index: plan.index,
@@ -248,15 +255,15 @@ impl TraceCompareVariantAggregateBuilder {
             .collect::<Vec<_>>();
         let focus_spans = focus_aggregate_spans(&spans, &self.args.focus_spans);
         let classification_summaries = classification_summaries(&spans);
+        let exit_code = if self.failure_count == 0 && self.guardrail_failure_count == 0 {
+            0
+        } else {
+            1
+        };
         extension_trace::TraceAggregateOutput {
             command: "trace.aggregate.spans",
-            passed: self.failure_count == 0,
-            status: if self.failure_count == 0 {
-                "pass"
-            } else {
-                "fail"
-            }
-            .to_string(),
+            passed: exit_code == 0,
+            status: if exit_code == 0 { "pass" } else { "fail" }.to_string(),
             component: template
                 .as_ref()
                 .map(|aggregate| aggregate.component.clone())
@@ -275,13 +282,15 @@ impl TraceCompareVariantAggregateBuilder {
             repeat: self.args.repeat,
             run_count: self.runs.len(),
             failure_count: self.failure_count,
-            exit_code: if self.failure_count == 0 { 0 } else { 1 },
+            exit_code,
             schedule: Some(self.args.schedule.as_str().to_string()),
             run_order: self.run_order,
             rig_state: template.and_then(|aggregate| aggregate.rig_state),
             overlays: self.overlays,
             runs: self.runs,
             spans,
+            guardrails: self.guardrails,
+            guardrail_failure_count: self.guardrail_failure_count,
             focus_span_ids: self.args.focus_spans.clone(),
             focus_spans,
             classification_summaries,
@@ -376,6 +385,8 @@ fn aggregate_to_compare_input(
                 metadata: span.metadata.clone(),
             })
             .collect(),
+        guardrails: aggregate.guardrails.clone(),
+        guardrail_failure_count: aggregate.guardrail_failure_count,
     }
 }
 
@@ -402,6 +413,13 @@ fn write_trace_compare_variant_summary(
     ));
     out.push_str(&format!("- **Baseline status:** `{}`\n", baseline.status));
     out.push_str(&format!("- **Variant status:** `{}`\n", variant.status));
+    if compare.guardrail_status.is_some() {
+        out.push_str(&format!(
+            "- **Guardrails:** `{}` (`{}` failures)\n",
+            compare.guardrail_status.as_deref().unwrap_or("pass"),
+            compare.guardrail_failure_count
+        ));
+    }
     out.push_str(&format!(
         "- **Files:** `{}`, `{}`, `{}`, `{}`\n",
         TRACE_COMPARE_VARIANT_BASELINE_FILE,

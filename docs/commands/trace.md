@@ -145,6 +145,38 @@ Use `--schedule grouped` or `--schedule interleaved` to record the intended run 
 
 Use repeatable `--focus-span <span-id>` to add a focused span section while keeping the full span table in the JSON and Markdown report.
 
+## Guardrails
+
+Rig-pinned aggregate traces can run post-trace guardrails after timing artifacts are captured. Guardrails reuse rig `check` probes, so command and HTTP checks are supported with the same fields as pipeline checks. Declare them at the rig level, on a trace workload, or on a named trace variant:
+
+```jsonc
+{
+  "trace_guardrails": [
+    { "label": "app health", "http": "http://127.0.0.1:3000/health", "expect_status": 200 }
+  ],
+  "trace_workloads": {
+    "nodejs": [
+      {
+        "path": "${package.root}/trace/create-site.trace.mjs",
+        "trace_guardrails": [
+          { "label": "site still lists", "command": "npm run smoke:list-sites" }
+        ]
+      }
+    ]
+  },
+  "trace_variants": {
+    "fast-install": {
+      "overlay": "overlays/fast-install.patch",
+      "trace_guardrails": [
+        { "label": "install behavior", "command": "npm run smoke:install" }
+      ]
+    }
+  }
+}
+```
+
+Guardrail failures mark the aggregate or experiment result as failed, but Homeboy still writes the timing artifacts, span summaries, and compare JSON. Compare outputs include before/after guardrail results alongside span deltas so a faster run cannot hide a behavior regression.
+
 ## Compare Aggregates
 
 Use `trace compare` to compare two aggregate span JSON outputs. The comparison reports each span's before/after median and average, absolute deltas, and percentage deltas. Spans are sorted by absolute median delta descending so the largest changes are first; spans that only exist in one file are included with unavailable deltas after comparable spans. Markdown reports bold non-zero absolute deltas to make regressions and improvements easier to scan.

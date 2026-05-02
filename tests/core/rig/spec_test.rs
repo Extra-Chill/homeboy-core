@@ -323,6 +323,7 @@ fn test_trace_variants() {
             component: Some("studio".to_string()),
             overlay: Some("overlays/fresh-install-mode.patch".to_string()),
             overlays: Vec::new(),
+            trace_guardrails: Vec::new(),
         })
     );
     assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
@@ -346,8 +347,10 @@ fn workload_with_trace_metadata() -> WorkloadSpec {
                 component: Some("studio".to_string()),
                 overlay: Some("overlays/fresh-install-mode.patch".to_string()),
                 overlays: Vec::new(),
+                trace_guardrails: Vec::new(),
             },
         )]),
+        trace_guardrails: Vec::new(),
     })
 }
 

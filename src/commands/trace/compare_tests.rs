@@ -58,6 +58,8 @@ fn trace_compare_reports_median_and_average_deltas() {
                 metadata: None,
             },
         ],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
     let after = TraceAggregateInput {
         component: Some("studio".to_string()),
@@ -113,6 +115,8 @@ fn trace_compare_reports_median_and_average_deltas() {
                 metadata: None,
             },
         ],
+        guardrails: Vec::new(),
+        guardrail_failure_count: 0,
     };
 
     let compare = compare_trace_aggregates(

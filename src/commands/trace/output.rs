@@ -27,6 +27,10 @@ pub(super) struct TraceAggregateInput {
     #[serde(default)]
     pub(super) runs: Vec<TraceAggregateRunInput>,
     pub(super) spans: Vec<TraceAggregateSpanInput>,
+    #[serde(default)]
+    pub(super) guardrails: Vec<extension_trace::TraceGuardrailOutput>,
+    #[serde(default)]
+    pub(super) guardrail_failure_count: usize,
 }
 
 #[derive(Deserialize)]
@@ -88,7 +92,9 @@ pub(super) fn run_compare(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         args.regression_threshold,
         args.regression_min_delta_ms,
     );
-    let exit_code = if output.focus_status.as_deref() == Some("fail") {
+    let exit_code = if output.focus_status.as_deref() == Some("fail")
+        || output.guardrail_status.as_deref() == Some("fail")
+    {
         1
     } else {
         0
@@ -249,6 +255,16 @@ pub(super) fn compare_trace_aggregates_with_focus(
     } else {
         Some("pass".to_string())
     };
+    let before_guardrails = before.guardrails;
+    let after_guardrails = after.guardrails;
+    let guardrail_failure_count = before.guardrail_failure_count + after.guardrail_failure_count;
+    let guardrail_status = if before_guardrails.is_empty() && after_guardrails.is_empty() {
+        None
+    } else if guardrail_failure_count > 0 {
+        Some("fail".to_string())
+    } else {
+        Some("pass".to_string())
+    };
 
     extension_trace::TraceCompareOutput {
         command: "trace.compare.spans",
@@ -265,6 +281,10 @@ pub(super) fn compare_trace_aggregates_with_focus(
         focus_regression_count,
         focus_failure_count,
         focus_status,
+        before_guardrails,
+        after_guardrails,
+        guardrail_failure_count,
+        guardrail_status,
         classification_summaries,
     }
 }
@@ -581,6 +601,17 @@ pub(super) fn render_aggregate_markdown(
     out.push_str(&format!("- **Status:** `{}`\n", aggregate.status));
     out.push_str(&format!("- **Runs:** `{}`\n", aggregate.run_count));
     out.push_str(&format!("- **Failures:** `{}`\n", aggregate.failure_count));
+    if !aggregate.guardrails.is_empty() {
+        out.push_str(&format!(
+            "- **Guardrails:** `{}` (`{}` failures)\n",
+            if aggregate.guardrail_failure_count == 0 {
+                "pass"
+            } else {
+                "fail"
+            },
+            aggregate.guardrail_failure_count
+        ));
+    }
     if let Some(schedule) = aggregate.schedule.as_deref() {
         out.push_str(&format!("- **Schedule:** `{}`\n", schedule));
     }
@@ -636,6 +667,8 @@ pub(super) fn render_aggregate_markdown(
             }
         }
     }
+
+    push_guardrail_markdown(&mut out, "Guardrails", &aggregate.guardrails);
 
     out.push_str("\n## Run Artifacts\n\n");
     for run in &aggregate.runs {
@@ -767,7 +800,36 @@ pub(super) fn render_compare_markdown(compare: &extension_trace::TraceCompareOut
         }
     }
 
+    push_guardrail_markdown(&mut out, "Before Guardrails", &compare.before_guardrails);
+    push_guardrail_markdown(&mut out, "After Guardrails", &compare.after_guardrails);
+
     out
+}
+
+fn push_guardrail_markdown(
+    out: &mut String,
+    title: &str,
+    guardrails: &[extension_trace::TraceGuardrailOutput],
+) {
+    if guardrails.is_empty() {
+        return;
+    }
+    out.push_str(&format!("\n## {title}\n\n"));
+    out.push_str("| Guardrail | Source | Status | Failure |\n");
+    out.push_str("|---|---|---|---|\n");
+    for guardrail in guardrails {
+        out.push_str(&format!(
+            "| `{}` | `{}` | `{}` | {} |\n",
+            guardrail.label,
+            guardrail.source,
+            guardrail.status,
+            guardrail
+                .failure
+                .as_deref()
+                .map(|failure| format!("`{}`", failure.replace('`', "'")))
+                .unwrap_or_else(|| "-".to_string())
+        ));
+    }
 }
 
 fn fmt_count(value: Option<usize>) -> String {

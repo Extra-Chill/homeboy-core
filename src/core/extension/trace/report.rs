@@ -109,6 +109,10 @@ pub struct TraceAggregateOutput {
     pub runs: Vec<TraceAggregateRunOutput>,
     pub spans: Vec<TraceAggregateSpanOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guardrails: Vec<TraceGuardrailOutput>,
+    #[serde(default, skip_serializing_if = "is_default_usize")]
+    pub guardrail_failure_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub focus_span_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub focus_spans: Vec<TraceAggregateSpanOutput>,
@@ -195,6 +199,16 @@ pub struct TraceClassificationSummaryOutput {
     pub total_avg_ms: Option<f64>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TraceGuardrailOutput {
+    pub label: String,
+    pub source: String,
+    pub passed: bool,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+}
+
 #[derive(Serialize, Clone)]
 pub struct TraceCompareOutput {
     pub command: &'static str,
@@ -220,6 +234,14 @@ pub struct TraceCompareOutput {
     pub focus_failure_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub before_guardrails: Vec<TraceGuardrailOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after_guardrails: Vec<TraceGuardrailOutput>,
+    #[serde(default, skip_serializing_if = "is_default_usize")]
+    pub guardrail_failure_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guardrail_status: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classification_summaries: Vec<TraceCompareClassificationSummaryOutput>,
 }

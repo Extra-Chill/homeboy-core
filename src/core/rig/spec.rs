@@ -89,6 +89,11 @@ pub struct RigSpec {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_experiments: HashMap<String, TraceExperimentSpec>,
 
+    /// Post-trace guardrails for trace experiments. These run after timing
+    /// artifacts are captured so speedups cannot hide behavior regressions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace_guardrails: Vec<TraceGuardrailSpec>,
+
     /// Named bench scenario suites keyed by profile name.
     ///
     /// `homeboy bench --rig <id> --profile <name>` resolves the profile to
@@ -314,6 +319,9 @@ pub struct WorkloadEntry {
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_variants: HashMap<String, TraceVariantSpec>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace_guardrails: Vec<TraceGuardrailSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -326,6 +334,18 @@ pub struct TraceVariantSpec {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<TraceVariantOverlaySpec>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace_guardrails: Vec<TraceGuardrailSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceGuardrailSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+
+    #[serde(flatten)]
+    pub check: CheckSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -415,6 +435,13 @@ impl WorkloadSpec {
             WorkloadSpec::Detailed(entry) => Some(&entry.trace_variants),
         }
     }
+
+    pub fn trace_guardrails(&self) -> &[TraceGuardrailSpec] {
+        match self {
+            WorkloadSpec::Path(_) => &[],
+            WorkloadSpec::Detailed(entry) => &entry.trace_guardrails,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +495,7 @@ mod tests {
             trace_span_metadata: HashMap::new(),
             trace_default_phase_preset: None,
             trace_variants: HashMap::new(),
+            trace_guardrails: Vec::new(),
         });
 
         assert_eq!(workload.trace_phase_preset("missing"), None);
@@ -525,12 +553,63 @@ mod tests {
             trace_span_metadata: HashMap::new(),
             trace_default_phase_preset: Some("startup".to_string()),
             trace_variants: HashMap::new(),
+            trace_guardrails: Vec::new(),
         });
 
         assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
         assert_eq!(
             WorkloadSpec::Path("trace.mjs".to_string()).trace_default_phase_preset(),
             None
+        );
+    }
+
+    #[test]
+    fn test_trace_guardrails_parse_at_rig_workload_and_variant_scope() {
+        let spec: RigSpec = serde_json::from_str(
+            r#"{
+                "id": "studio-rig",
+                "trace_guardrails": [
+                    { "label": "health", "http": "http://127.0.0.1:3000/health" }
+                ],
+                "trace_workloads": {
+                    "nodejs": [
+                        {
+                            "path": "trace/create-site.trace.mjs",
+                            "trace_guardrails": [
+                                { "label": "list sites", "command": "npm run smoke:list-sites" }
+                            ],
+                            "trace_variants": {
+                                "fast-install": {
+                                    "overlay": "overlays/fast-install.patch",
+                                    "trace_guardrails": [
+                                        { "label": "install smoke", "command": "npm run smoke:install" }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("parse guardrails");
+
+        assert_eq!(spec.trace_guardrails[0].label.as_deref(), Some("health"));
+        assert_eq!(
+            spec.trace_guardrails[0].check.http.as_deref(),
+            Some("http://127.0.0.1:3000/health")
+        );
+        let workload = spec.trace_workloads["nodejs"].first().expect("workload");
+        assert_eq!(
+            workload.trace_guardrails()[0].check.command.as_deref(),
+            Some("npm run smoke:list-sites")
+        );
+        let variants = workload.trace_variants().expect("variants");
+        assert_eq!(
+            variants["fast-install"].trace_guardrails[0]
+                .check
+                .command
+                .as_deref(),
+            Some("npm run smoke:install")
         );
     }
 }
@@ -620,7 +699,7 @@ pub struct ServiceSpec {
 /// matching PID. Multiple matches are not an error — a stale child + a fresh
 /// child is the case we care about, and the fresh one is what the rig wants to
 /// interact with.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscoverSpec {
     /// Substring that must appear in the target process's command line.
     /// Matched against `ps -o args= -p <pid>` output, so users can pin
@@ -994,7 +1073,7 @@ pub enum PatchOp {
 /// Validated at check-time, not parse-time, because serde flattening
 /// across tagged enums is awkward and explicit-field checks keep the
 /// spec readable.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckSpec {
     /// HTTP GET — passes if status matches `expect_status` (default 200).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1036,7 +1115,7 @@ pub struct CheckSpec {
 /// ⇒ fail. "Source missing" semantics differ by side: if `left` is a
 /// `process_start` and no process matches, the check passes (interpretation:
 /// no stale daemon to fight with). Any other missing source is an error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewerThanSpec {
     pub left: TimeSource,
     pub right: TimeSource,
@@ -1044,7 +1123,7 @@ pub struct NewerThanSpec {
 
 /// A time source for `newer_than` checks. One-of semantics enforced at
 /// evaluate-time.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeSource {
     /// File mtime (seconds since epoch). Path supports `~` and `${...}`
     /// expansion.
