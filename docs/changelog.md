@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.143.1] - 2026-05-02
+
+### Changed
+- Bundle trace compare experiment artifacts
+- support named variants in rig configuration
+- Add latest observation query helpers
+
+### Fixed
+- address trace overlay audit follow-up
+- satisfy trace overlay lock audit
+- recover stale trace overlay locks
+
 ## [0.143.0] - 2026-05-02
 
 ### Added
