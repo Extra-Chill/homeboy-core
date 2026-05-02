@@ -111,6 +111,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: Vec::new(),
+            output_dir: None,
             keep_overlay: false,
             stale: false,
             force: false,
@@ -205,6 +206,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: Vec::new(),
+            output_dir: None,
             keep_overlay: false,
             stale: false,
             force: false,
@@ -257,6 +259,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -315,6 +318,7 @@ fn trace_run_persists_observation_history() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -396,6 +400,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -523,6 +528,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: vec![patch_path.to_string_lossy().to_string()],
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -582,8 +588,11 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             _json: HiddenJsonArgs::default(),
             json_summary: false,
             report: None,
+            experiment: None,
             repeat: 1,
             aggregate: None,
+            schedule: TraceSchedule::Grouped,
+            focus_spans: Vec::new(),
             spans: Vec::new(),
             phases: Vec::new(),
             phase_preset: None,
@@ -592,7 +601,10 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
             overlays: Vec::new(),
             variants: vec!["fresh-install-mode".to_string()],
+            output_dir: None,
             keep_overlay: false,
+            stale: false,
+            force: false,
         };
 
         let (output, exit_code) =
@@ -644,6 +656,83 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             .and_then(|value| value.as_str())
             .expect("details id")
             .contains("fresh-install-mode"));
+    });
+}
+
+#[test]
+fn trace_compare_variant_writes_experiment_bundle() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::without_xdg_data_home();
+        write_trace_extension(home);
+        let component_dir = tempfile::TempDir::new().expect("component dir");
+        init_overlay_component(component_dir.path());
+        let patch_path = component_dir.path().join("overlay.patch");
+        fs::write(
+            &patch_path,
+            r#"diff --git a/scenario.txt b/scenario.txt
+--- a/scenario.txt
++++ b/scenario.txt
+@@ -1 +1 @@
+-base
++overlay
+"#,
+        )
+        .expect("write patch");
+        write_trace_rig(home, "studio-rig", "studio", component_dir.path());
+        let output_dir = tempfile::TempDir::new().expect("output dir");
+
+        let (output, exit_code) = run(
+            TraceArgs {
+                comp: PositionalComponentArgs {
+                    component: Some("compare-variant".to_string()),
+                    path: None,
+                },
+                scenario: Some("studio-app-create-site".to_string()),
+                compare_after: None,
+                rig: Some("studio-rig".to_string()),
+                setting_args: SettingArgs::default(),
+                _json: HiddenJsonArgs::default(),
+                json_summary: false,
+                report: None,
+                experiment: None,
+                repeat: 2,
+                aggregate: None,
+                schedule: TraceSchedule::Grouped,
+                focus_spans: Vec::new(),
+                spans: Vec::new(),
+                phases: Vec::new(),
+                phase_preset: None,
+                baseline_args: BaselineArgs::default(),
+                regression_threshold:
+                    extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+                overlays: vec![patch_path.to_string_lossy().to_string()],
+                variants: Vec::new(),
+                output_dir: Some(output_dir.path().to_path_buf()),
+                keep_overlay: false,
+                stale: false,
+                force: false,
+            },
+            &GlobalArgs {},
+        )
+        .expect("compare-variant should run");
+
+        assert_eq!(exit_code, 0);
+        match output {
+            TraceCommandOutput::Compare(compare) => {
+                assert_eq!(compare.span_count, 1);
+                assert!(compare.before_path.ends_with("baseline.json"));
+                assert!(compare.after_path.ends_with("variant.json"));
+            }
+            _ => panic!("expected compare output"),
+        }
+        assert!(output_dir.path().join("baseline.json").is_file());
+        assert!(output_dir.path().join("variant.json").is_file());
+        assert!(output_dir.path().join("compare.json").is_file());
+        let summary = fs::read_to_string(output_dir.path().join("summary.md")).expect("summary");
+        assert!(summary.contains("## Baseline Component SHAs"));
+        assert!(summary.contains("## Variant Component SHAs"));
+        assert!(summary.contains("scenario.txt"));
     });
 }
 
@@ -1102,6 +1191,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -1167,6 +1257,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -1232,6 +1323,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,
@@ -1389,6 +1481,7 @@ fn failed_trace_run_persists_observation_history() {
                 regression_min_delta_ms: extension_trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
                 overlays: Vec::new(),
                 variants: Vec::new(),
+                output_dir: None,
                 keep_overlay: false,
                 stale: false,
                 force: false,

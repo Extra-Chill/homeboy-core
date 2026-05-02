@@ -278,7 +278,46 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
 /// Apply all argument normalizations in sequence.
 pub fn normalize(args: Vec<String>) -> Vec<String> {
     let args = normalize_version_show(args);
+    let args = normalize_trace_compare_variant_scenario(args);
     normalize_trailing_flags(args)
+}
+
+fn normalize_trace_compare_variant_scenario(args: Vec<String>) -> Vec<String> {
+    if args.get(1).map(|arg| arg.as_str()) != Some("trace")
+        || args.get(2).map(|arg| arg.as_str()) != Some("compare-variant")
+    {
+        return args;
+    }
+
+    let already_has_positional_scenario = args.get(3).is_some_and(|arg| !arg.starts_with('-'));
+    if already_has_positional_scenario {
+        return args;
+    }
+
+    let mut result = Vec::with_capacity(args.len());
+    let mut scenario = None;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--scenario" {
+            if let Some(value) = args.get(index + 1) {
+                scenario = Some(value.clone());
+                index += 2;
+                continue;
+            }
+        } else if let Some(value) = arg.strip_prefix("--scenario=") {
+            scenario = Some(value.to_string());
+            index += 1;
+            continue;
+        }
+        result.push(arg.clone());
+        index += 1;
+    }
+
+    if let Some(scenario) = scenario {
+        result.insert(3, scenario);
+    }
+    result
 }
 
 // ============================================================================
@@ -405,7 +444,7 @@ mod positional_tests {
 
 #[cfg(test)]
 mod normalize_tests {
-    use super::normalize_trailing_flags;
+    use super::{normalize, normalize_trailing_flags};
 
     fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
@@ -502,6 +541,36 @@ mod normalize_tests {
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn trace_compare_variant_scenario_flag_becomes_positional() {
+        let input = argv(&[
+            "homeboy",
+            "trace",
+            "compare-variant",
+            "--rig",
+            "studio",
+            "--scenario",
+            "studio-app-create-site",
+            "--overlay",
+            "overlays/change.patch",
+            "--output-dir",
+            ".homeboy/experiments/change",
+        ]);
+        let expected = argv(&[
+            "homeboy",
+            "trace",
+            "compare-variant",
+            "studio-app-create-site",
+            "--rig",
+            "studio",
+            "--overlay",
+            "overlays/change.patch",
+            "--output-dir",
+            ".homeboy/experiments/change",
+        ]);
+        assert_eq!(normalize(input), expected);
     }
 
     #[test]
