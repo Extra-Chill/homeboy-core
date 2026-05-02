@@ -63,13 +63,22 @@ homeboy extension setup <extension_id>
 ### `install`
 
 ```sh
-homeboy extension install <source> [--id <extension_id>]
+homeboy extension install <source> [--id <extension_id>] [--replace]
 ```
 
 Installs a extension into Homeboy's extensions directory.
 
 - If `<source>` is a git URL, Homeboy clones it and writes `sourceUrl` into the installed extension's `<extension_id>.json` manifest.
 - If `<source>` is a local path, Homeboy symlinks the directory into the extensions directory.
+- By default, install refuses to overwrite an existing extension. Use `--replace` to explicitly replace an existing install or link.
+
+### `relink`
+
+```sh
+homeboy extension relink <extension_id> <source>
+```
+
+Repoints an existing symlinked extension to a new local source path. This command only repairs linked extensions; use `install --replace` for copied or cloned installs.
 
 ### `update`
 
@@ -178,6 +187,7 @@ Top-level variants (`data.command`):
 - `extension.run`: `{ extension_id, project_id? }`
 - `extension.setup`: `{ extension_id }`
 - `extension.install`: `{ extension_id, source, path, linked }`
+- `extension.replace`: `{ extension_id, old_path, new_path, source, linked, source_revision? }`
 - `extension.update`: `{ extension_id, url, path }`
 - `extension.update_all`: `{ updated: UpdateEntry[], skipped: string[] }`
 - `extension.uninstall`: `{ extension_id, path, was_linked }`

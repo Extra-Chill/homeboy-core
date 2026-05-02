@@ -56,8 +56,8 @@ pub use scope::ExtensionScope;
 // Re-export lifecycle types and functions
 pub use lifecycle::{
     check_update_available, derive_id_from_url, install, install_for_component, is_git_url,
-    read_source_revision, slugify_id, uninstall, update, InstallForComponentResult, InstallResult,
-    UpdateAvailable, UpdateResult,
+    read_source_revision, relink, replace, slugify_id, uninstall, update,
+    InstallForComponentResult, InstallResult, ReplaceResult, UpdateAvailable, UpdateResult,
 };
 
 pub(crate) fn stderr_tail(stderr: &str) -> String {
