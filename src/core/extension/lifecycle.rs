@@ -1327,10 +1327,10 @@ exec '{}' "$@"
 
             let err = update("wordpress", false).expect_err("feature worktree update must fail");
             let message = err.to_string();
-            assert!(message.contains("Linked extensions wordpress point at"));
+            assert!(message.contains("Linked extension 'wordpress' points at"));
             assert!(message.contains("feature-linked-extension"));
             assert!(message.contains(default_branch));
-            assert!(message.contains("Relink the extensions to a stable checkout"));
+            assert!(message.contains("Relink the extension to a stable checkout"));
 
             let branch_output = Command::new("git")
                 .args(["branch", "--show-current"])
