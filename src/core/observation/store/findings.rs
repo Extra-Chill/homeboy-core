@@ -93,8 +93,9 @@ impl ObservationStore {
                 WHERE (?1 IS NULL OR run_id = ?1)
                   AND (?2 IS NULL OR tool = ?2)
                   AND (?3 IS NULL OR file = ?3)
+                  AND (?4 IS NULL OR fingerprint = ?4)
                 ORDER BY created_at ASC, rowid ASC
-                LIMIT ?4
+                LIMIT ?5
                 "#,
             )
             .map_err(sqlite_error("prepare list finding records"))?;
@@ -104,6 +105,7 @@ impl ObservationStore {
                     filter.run_id.as_deref(),
                     filter.tool.as_deref(),
                     filter.file.as_deref(),
+                    filter.fingerprint.as_deref(),
                     limit,
                 ],
                 row_to_finding_record,

@@ -119,6 +119,7 @@ pub struct FindingListFilter {
     pub run_id: Option<String>,
     pub tool: Option<String>,
     pub file: Option<String>,
+    pub fingerprint: Option<String>,
     pub limit: Option<i64>,
 }
 

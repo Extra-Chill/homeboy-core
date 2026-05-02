@@ -633,6 +633,7 @@ mod tests {
                 run_id: run.id,
                 tool: Some("lint".to_string()),
                 file: Some("src/foo.php".to_string()),
+                fingerprint: None,
                 limit: 20,
             })
             .expect("list findings");
