@@ -97,13 +97,29 @@ fn emit_file_watch_events(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
     use std::thread;
     use std::time::Duration;
 
     use super::super::{ActiveTraceProbes, TraceProbeConfig};
+    use super::file_state;
 
     #[test]
-    fn file_watch_emits_create_write_and_delete_events() {
+    fn test_file_state() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing = file_state(&PathBuf::from(temp.path().join("missing.txt")));
+        assert!(!missing.exists);
+
+        let path = temp.path().join("present.txt");
+        fs::write(&path, "content").expect("write file");
+        let present = file_state(&path);
+        assert!(present.exists);
+        assert_eq!(present.len, 7);
+        assert!(present.modified_ms.is_some());
+    }
+
+    #[test]
+    fn test_run_file_watch() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("watched.txt");
         let probes = ActiveTraceProbes::start(&[TraceProbeConfig::FileWatch {

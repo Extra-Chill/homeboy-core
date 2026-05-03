@@ -12,14 +12,11 @@ pub(super) fn run_cmd_run(
     events: Arc<Mutex<Vec<TraceEvent>>>,
     stop: mpsc::Receiver<()>,
 ) {
-    push_event(
+    push_cmd_event(
         &events,
-        event(
-            started_at,
-            "cmd.run",
-            "cmd.start",
-            command_start_data(&command, &args),
-        ),
+        started_at,
+        "cmd.start",
+        command_start_data(&command, &args),
     );
 
     let command_started = Instant::now();
@@ -37,17 +34,14 @@ pub(super) fn run_cmd_run(
                 started_at,
                 &events,
             );
-            push_event(
+            push_cmd_event(
                 &events,
-                event(
-                    started_at,
-                    "cmd.run",
-                    "cmd.exit",
-                    command_finish_data(
-                        command_started,
-                        output.status.code(),
-                        output.status.success(),
-                    ),
+                started_at,
+                "cmd.exit",
+                command_finish_data(
+                    command_started,
+                    output.status.code(),
+                    output.status.success(),
                 ),
             );
         }
@@ -61,6 +55,15 @@ pub(super) fn run_cmd_run(
         }
     }
     let _ = stop.recv_timeout(Duration::from_millis(1));
+}
+
+fn push_cmd_event(
+    events: &Arc<Mutex<Vec<TraceEvent>>>,
+    started_at: Instant,
+    event_name: &str,
+    data: BTreeMap<String, serde_json::Value>,
+) {
+    push_event(events, event(started_at, "cmd.run", event_name, data));
 }
 
 fn command_start_data(command: &str, args: &[String]) -> BTreeMap<String, serde_json::Value> {
@@ -112,7 +115,7 @@ fn emit_cmd_lines(
             "line".to_string(),
             serde_json::Value::String(line.to_string()),
         );
-        push_event(events, event(started_at, "cmd.run", event_name, data));
+        push_cmd_event(events, started_at, event_name, data);
     }
 }
 
@@ -124,7 +127,7 @@ mod tests {
     use super::super::{ActiveTraceProbes, TraceProbeConfig};
 
     #[test]
-    fn cmd_run_emits_command_lifecycle_events() {
+    fn test_run_cmd_run() {
         let probes = ActiveTraceProbes::start(&[TraceProbeConfig::CmdRun {
             command: "sh".to_string(),
             args: vec!["-c".to_string(), "printf probe-output".to_string()],

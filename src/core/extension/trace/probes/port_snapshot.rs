@@ -128,9 +128,10 @@ mod tests {
     use std::time::Duration;
 
     use super::super::{ActiveTraceProbes, TraceProbeConfig};
+    use super::ports_for_snapshot;
 
     #[test]
-    fn port_snapshot_emits_listening_events() {
+    fn test_run_port_snapshot() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
         let port = listener.local_addr().expect("local addr").port();
         let probes = ActiveTraceProbes::start(&[TraceProbeConfig::PortSnapshot {
@@ -154,7 +155,12 @@ mod tests {
     }
 
     #[test]
-    fn port_range_parser_rejects_invalid_ranges() {
+    fn test_ports_for_snapshot() {
+        assert_eq!(
+            ports_for_snapshot(Some(3000), Some("3002-3003")).expect("ports"),
+            vec![3000, 3002, 3003]
+        );
+
         let result = ActiveTraceProbes::start(&[TraceProbeConfig::PortSnapshot {
             port: None,
             port_range: Some("9002-9001".to_string()),

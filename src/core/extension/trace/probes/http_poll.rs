@@ -96,7 +96,7 @@ mod tests {
     use super::super::{ActiveTraceProbes, TraceProbeConfig};
 
     #[test]
-    fn http_poll_emits_response_events() {
+    fn test_run_http_poll() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test server");
         let url = format!("http://{}", listener.local_addr().expect("local addr"));
         let server = thread::spawn(move || {
