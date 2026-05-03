@@ -236,7 +236,7 @@ When `--repeat <N> --aggregate spans` is used with `--rig` and no explicit `--ph
 
 ## Repeat And Aggregate
 
-Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, percentile fields (`p75_ms`, `p90_ms`, `p95_ms`) when enough samples are available, `max_ms`, the run index and artifact path for that max sample, and `failures` counts. Markdown aggregate reports also include an outlier table sorted by max duration so the slowest run artifacts are easy to inspect first.
+Use `--repeat <N> --aggregate spans` to run the same trace scenario multiple times and summarize span timings across runs. The aggregate output includes each run's preserved `trace.json` artifact path plus per-span `min_ms`, `median_ms`, `avg_ms`, percentile fields (`p75_ms` with at least 4 samples, `p90_ms` with at least 10, and `p95_ms` with at least 20), `max_ms`, the run index and artifact path for that max sample, and `failures` counts. Markdown aggregate reports also include those percentile columns and an outlier table sorted by max duration so the slowest run artifacts are easy to inspect first.
 
 ```sh
 homeboy trace studio studio-app-create-site --repeat 5 --aggregate spans

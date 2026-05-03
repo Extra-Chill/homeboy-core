@@ -1381,6 +1381,32 @@ fn aggregate_markdown_includes_percentile_columns() {
 }
 
 #[test]
+fn aggregate_json_serializes_available_percentiles() {
+    let span = aggregate_span(
+        "boot_to_ready".to_string(),
+        aggregate_samples(&((1..=20).map(|value| value * 10).collect::<Vec<_>>())),
+        0,
+    );
+
+    let value = serde_json::to_value(&span).expect("span serializes");
+
+    assert_eq!(value["p75_ms"], 150);
+    assert_eq!(value["p90_ms"], 180);
+    assert_eq!(value["p95_ms"], 190);
+}
+
+#[test]
+fn aggregate_json_omits_unavailable_percentiles() {
+    let span = aggregate_span("boot_to_ready".to_string(), aggregate_samples(&[10, 20]), 0);
+
+    let value = serde_json::to_value(&span).expect("span serializes");
+
+    assert!(value.get("p75_ms").is_none());
+    assert!(value.get("p90_ms").is_none());
+    assert!(value.get("p95_ms").is_none());
+}
+
+#[test]
 fn failed_trace_run_persists_observation_history() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::without_xdg_data_home();
