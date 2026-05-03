@@ -56,6 +56,39 @@ fn expand_trace_probe(
             pattern: expand_trace_probe_value(context, pattern),
             interval_ms: *interval_ms,
         },
+        extension_trace::TraceProbeConfig::FileWatch { path, interval_ms } => {
+            extension_trace::TraceProbeConfig::FileWatch {
+                path: expand_trace_probe_value(context, path),
+                interval_ms: *interval_ms,
+            }
+        }
+        extension_trace::TraceProbeConfig::PortSnapshot {
+            port,
+            port_range,
+            interval_ms,
+        } => extension_trace::TraceProbeConfig::PortSnapshot {
+            port: *port,
+            port_range: port_range.clone(),
+            interval_ms: *interval_ms,
+        },
+        extension_trace::TraceProbeConfig::HttpPoll {
+            url,
+            interval_ms,
+            assert_status,
+        } => extension_trace::TraceProbeConfig::HttpPoll {
+            url: expand_trace_probe_value(context, url),
+            interval_ms: *interval_ms,
+            assert_status: *assert_status,
+        },
+        extension_trace::TraceProbeConfig::CmdRun { command, args } => {
+            extension_trace::TraceProbeConfig::CmdRun {
+                command: expand_trace_probe_value(context, command),
+                args: args
+                    .iter()
+                    .map(|arg| expand_trace_probe_value(context, arg))
+                    .collect(),
+            }
+        }
     })
 }
 

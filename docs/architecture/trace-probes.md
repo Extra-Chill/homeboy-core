@@ -25,7 +25,11 @@ Probes are declared on detailed `trace_workloads` entries:
         "path": "${package.root}/trace/create-site.trace.mjs",
         "trace_probes": [
           { "type": "log.tail", "path": "${components.app.path}/app.log", "grep": "invalid_grant" },
-          { "type": "process.snapshot", "pattern": "opencode.*serve", "interval_ms": 250 }
+          { "type": "process.snapshot", "pattern": "opencode.*serve", "interval_ms": 250 },
+          { "type": "file.watch", "path": "${components.app.path}/auth.json" },
+          { "type": "port.snapshot", "port": 3000 },
+          { "type": "http.poll", "url": "http://127.0.0.1:3000/health", "assert-status": 200 },
+          { "type": "cmd.run", "command": "kimaki", "args": ["send", "--thread", "123", "--prompt", "test"] }
         ]
       }
     ]
@@ -66,6 +70,73 @@ Events:
 
 Data includes `pattern` and `processes` for list events, and `pid` plus `command` for delta events.
 
+### `file.watch`
+
+Inputs:
+
+- `path`: file path to poll for existence, size, or modification-time changes.
+- `interval_ms`: optional polling interval, default `250`.
+
+Events:
+
+- `fs.create`: path appeared after the probe started.
+- `fs.write`: existing path changed size or modification time.
+- `fs.delete`: path disappeared after the probe started.
+
+Data includes `path`, `exists`, and `len` when the file exists.
+
+The v1 implementation is polling-based and portable. It does not yet provide PID-of-writer attribution or rename pairing.
+
+### `port.snapshot`
+
+Inputs:
+
+- `port`: one TCP port to monitor on `127.0.0.1`.
+- `port-range`: inclusive `start-end` TCP port range.
+- `interval_ms`: optional polling interval, default `500`.
+
+Events:
+
+- `net.listening`: matching ports that appear to be bound/listening.
+- `net.bind`: matching port became bound since the previous snapshot.
+- `net.unbind`: matching port became unbound since the previous snapshot.
+
+Data includes `ports` for list events and `port` for delta events.
+
+The v1 implementation uses a bind probe for portability. It detects whether a port is available, not the owning process or active connection flows.
+
+### `http.poll`
+
+Inputs:
+
+- `url`: URL to fetch.
+- `interval_ms`: optional polling interval, default `1000`.
+- `assert-status`: optional expected HTTP status code.
+
+Events:
+
+- `http.response`: request completed with a response.
+- `http.error`: request failed.
+
+Data includes `url`, `status`, `latency_ms`, and `ok` when `assert-status` is configured.
+
+### `cmd.run`
+
+Inputs:
+
+- `command`: executable to run.
+- `args`: optional argument array.
+
+Events:
+
+- `cmd.start`: command was invoked.
+- `cmd.stdout`: one event per stdout line collected from the command.
+- `cmd.stderr`: one event per stderr line collected from the command.
+- `cmd.exit`: command exited successfully or unsuccessfully.
+- `cmd.error`: command could not be spawned.
+
+Data includes `command` and `args` on start, `line` on output events, and `exit_code`, `success`, and `duration_ms` on exit.
+
 ## Deferred
 
-This substrate intentionally does not implement fanotify, PID-of-writer attribution, systemd integration, port owner detection, or the full six-probe inventory from issue #2163. Those can layer onto the same collection and merge contract later.
+This substrate intentionally does not implement fanotify, PID-of-writer attribution, systemd integration, port owner detection, active connection flow reporting, streaming command output before process exit, or rename pairing. Those can layer onto the same collection and merge contract later.
