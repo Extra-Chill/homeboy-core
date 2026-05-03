@@ -649,19 +649,27 @@ pub(super) fn render_aggregate_markdown(
             push_aggregate_span_row(&mut out, span);
         }
 
-        let outliers = aggregate
+        let mut outliers = aggregate
             .spans
             .iter()
             .filter(|span| span.max_ms.is_some() && span.max_run_index.is_some())
             .collect::<Vec<_>>();
         if !outliers.is_empty() {
             out.push_str("\n## Outliers\n\n");
+            out.push_str("| Span | max | max run | max artifact |\n");
+            out.push_str("|---|---:|---:|---|\n");
+            outliers.sort_by(|left, right| {
+                right
+                    .max_ms
+                    .cmp(&left.max_ms)
+                    .then_with(|| left.id.cmp(&right.id))
+            });
             for span in outliers {
                 out.push_str(&format!(
-                    "- `{}`: run {}, max={}, artifact=`{}`\n",
+                    "| `{}` | {} | {} | `{}` |\n",
                     span.id,
-                    span.max_run_index.unwrap_or_default(),
                     fmt_ms(span.max_ms),
+                    span.max_run_index.unwrap_or_default(),
                     span.max_artifact_path.as_deref().unwrap_or("")
                 ));
             }
