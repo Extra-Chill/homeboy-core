@@ -45,6 +45,14 @@ contract and return the same JSON envelope shape as other daemon responses.
 - `GET /stacks`
 - `GET /stacks/:id`
 - `POST /stacks/:id/status`
+- `GET /runs?kind=bench|audit&component=<id>&rig=<id>&status=<status>&limit=<n>`
+- `GET /runs/:id`
+- `GET /runs/:id/artifacts`
+- `GET /audit/runs?component=<id>&rig=<id>&status=<status>&limit=<n>`
+- `GET /bench/runs?component=<id>&rig=<id>&status=<status>&limit=<n>`
+
+The run readers expose persisted observation-store evidence from previous
+analysis runs. They do not start audit, lint, test, bench, rig, or stack work.
 
 The analysis entry points `POST /audit`, `POST /lint`, `POST /test`, and
 `POST /bench` are reserved by the contract, but intentionally return a job-model
