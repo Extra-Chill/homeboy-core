@@ -24,12 +24,40 @@ pub struct AuditSummaryOutput {
     pub warnings: usize,
     pub info: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub finding_groups: Vec<AuditSummaryGroup>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub top_findings: Vec<AuditSummaryFinding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixability: Option<AuditFixability>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub changed_since: Option<AuditChangedSinceSummary>,
     pub exit_code: i32,
+}
+
+/// Aggregated finding bucket for compact summaries.
+#[derive(Serialize)]
+pub struct AuditSummaryGroup {
+    pub kind: String,
+    pub count: usize,
+    pub warnings: usize,
+    pub info: usize,
+    pub confidence: FindingConfidence,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sample_files: Vec<String>,
+    pub drilldown_command: String,
+}
+
+#[derive(Default)]
+struct AuditSummarySeverityCounts {
+    warnings: usize,
+    info: usize,
+}
+
+struct AuditSummaryGroupAccumulator {
+    kind: AuditFinding,
+    count: usize,
+    severities: AuditSummarySeverityCounts,
+    sample_files: Vec<String>,
 }
 
 /// Changed-since audit classification.
@@ -159,17 +187,60 @@ pub fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSum
             suggestion: f.suggestion.clone(),
         })
         .collect();
+    let finding_groups = build_finding_groups(result);
 
     AuditSummaryOutput {
         alignment_score: result.summary.alignment_score,
         total_findings: result.findings.len(),
         warnings,
         info,
+        finding_groups,
         top_findings,
         fixability: None,
         changed_since: None,
         exit_code,
     }
+}
+
+fn build_finding_groups(result: &CodeAuditResult) -> Vec<AuditSummaryGroup> {
+    let mut groups: BTreeMap<String, AuditSummaryGroupAccumulator> = BTreeMap::new();
+
+    for finding in &result.findings {
+        let kind = finding_kind_key(&finding.kind);
+        let group = groups
+            .entry(kind)
+            .or_insert_with(|| AuditSummaryGroupAccumulator {
+                kind: finding.kind.clone(),
+                count: 0,
+                severities: AuditSummarySeverityCounts::default(),
+                sample_files: Vec::new(),
+            });
+
+        group.count += 1;
+        match finding.severity {
+            Severity::Warning => group.severities.warnings += 1,
+            Severity::Info => group.severities.info += 1,
+        }
+        if group.sample_files.len() < 5 && !group.sample_files.contains(&finding.file) {
+            group.sample_files.push(finding.file.clone());
+        }
+    }
+
+    let mut grouped: Vec<_> = groups
+        .into_iter()
+        .map(|(kind, group)| AuditSummaryGroup {
+            drilldown_command: format!("homeboy audit {} --only {}", result.component_id, kind),
+            confidence: group.kind.confidence(),
+            kind,
+            count: group.count,
+            warnings: group.severities.warnings,
+            info: group.severities.info,
+            sample_files: group.sample_files,
+        })
+        .collect();
+
+    grouped.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.kind.cmp(&b.kind)));
+    grouped
 }
 
 pub fn build_changed_since_summary(

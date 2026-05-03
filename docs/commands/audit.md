@@ -107,6 +107,31 @@ homeboy audit my-plugin --path /var/lib/datamachine/workspace/my-plugin
 
 ## JSON Output
 
+`--json-summary` keeps large audit runs compact by returning grouped finding buckets in
+`finding_groups`. Each bucket includes count/severity totals, a few sample files, and a
+ready-to-run drill-down command scoped to that finding kind.
+
+```json
+{
+  "command": "audit.summary",
+  "total_findings": 87,
+  "warnings": 80,
+  "info": 7,
+  "finding_groups": [
+    {
+      "kind": "missing_test_file",
+      "count": 34,
+      "warnings": 34,
+      "info": 0,
+      "confidence": "heuristic",
+      "sample_files": ["src/commands/audit.rs", "src/core/code_audit/report.rs"],
+      "drilldown_command": "homeboy audit homeboy --only missing_test_file"
+    }
+  ],
+  "exit_code": 1
+}
+```
+
 ```json
 {
   "success": true,
