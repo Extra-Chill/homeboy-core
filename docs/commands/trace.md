@@ -13,6 +13,7 @@ homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
 homeboy trace <component> <scenario> --phase submit:ui.submit --phase cli:cli.start --phase ready:server.ready
 homeboy trace <component> <scenario> --rig <rig-id> --phase-preset create-site
 homeboy trace <component> <scenario> --repeat 5 --aggregate spans --schedule interleaved
+homeboy trace <component> <scenario> --attach logfile:/tmp/service.log --attach pid:1234
 homeboy trace compare before.json after.json --focus-span phase.wp_boot_start_to_wp_boot_ready
 homeboy trace compare-variant --rig studio --scenario studio-app-create-site --repeat 5 --overlay overlays/change.patch --output-dir .homeboy/experiments/change
 homeboy trace <component> <scenario> --report=markdown
@@ -53,6 +54,7 @@ Generic workloads are dispatched by extension:
 - `HOMEBOY_TRACE_SCENARIO`
 - `HOMEBOY_TRACE_LIST_ONLY`
 - `HOMEBOY_TRACE_ARTIFACT_DIR`
+- `HOMEBOY_TRACE_ATTACHMENTS` when `--attach` is used; JSON array of `{ "kind", "target" }` objects
 - `HOMEBOY_TRACE_RIG_ID` when `--rig` is used
 - `HOMEBOY_TRACE_COMPONENT_PATH` when Homeboy resolves a path override
 - `HOMEBOY_RUN_DIR`
@@ -85,6 +87,28 @@ Rig-owned trace workloads can declare passive `trace_probes` that Homeboy runs b
 ```
 
 V1 statuses are `pass`, `fail`, and `error`.
+
+## Attachments
+
+Use repeatable `--attach KIND:TARGET` flags to observe already-running local systems while the selected trace scenario still runs normally. Attachments do not start, stop, restart, or kill the target; they only add before/after observation events to the trace timeline and write `artifacts/trace-attachments.json`.
+
+Supported v1 attachment kinds:
+
+- `logfile:<path>` records whether the file exists and its byte length before and after the scenario.
+- `pid:<n>` records whether a local process exists before and after the scenario.
+- `port:<n>` checks whether `127.0.0.1:<n>` accepts TCP connections before and after the scenario.
+- `http:<url>` or a direct `http://` / `https://` URL performs a local HTTP GET before and after the scenario and records the response status or connection error.
+
+Example:
+
+```sh
+homeboy trace wp-coding-agents auth-multi-session-race \
+  --attach logfile:/root/.kimaki/kimaki.log \
+  --attach pid:3679661 \
+  --attach http://127.0.0.1:46227/health
+```
+
+Core also exports the parsed attachments to the runner through `HOMEBOY_TRACE_ATTACHMENTS` so extension-owned scenarios can correlate their own events with the same observation surfaces. V1 intentionally omits `systemd:` and remote attach targets; those require reliable platform-specific probes.
 
 ## Spans
 

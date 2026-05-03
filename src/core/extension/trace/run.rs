@@ -1,8 +1,11 @@
 //! Trace workflows: invoke extension runners, parse JSON, preserve artifacts.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
@@ -21,9 +24,12 @@ use super::overlay::{
 };
 
 use super::parsing::{
-    parse_trace_list_str, parse_trace_results_file, TraceList, TraceResults, TraceSpanDefinition,
+    parse_trace_list_str, parse_trace_results_file, TraceArtifact, TraceEvent, TraceList,
+    TraceResults, TraceSpanDefinition,
 };
 use super::probes::{ActiveTraceProbes, TraceProbeConfig};
+
+const TRACE_ATTACHMENTS_ARTIFACT: &str = "trace-attachments.json";
 
 #[derive(Debug, Clone)]
 pub struct TraceRunWorkflowArgs {
@@ -59,6 +65,101 @@ pub struct TraceRunnerInputs {
     pub env: Vec<(String, String)>,
     pub workload_paths: Vec<PathBuf>,
     pub probes: Vec<TraceProbeConfig>,
+    pub attachments: Vec<TraceAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TraceAttachment {
+    pub kind: String,
+    pub target: String,
+}
+
+impl TraceAttachment {
+    pub fn parse(raw: &str) -> Result<Self> {
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            return Ok(Self {
+                kind: "http".to_string(),
+                target: raw.to_string(),
+            });
+        }
+        let Some((kind, target)) = raw.split_once(':') else {
+            return Err(invalid_attachment(raw, "expected KIND:TARGET"));
+        };
+        if target.is_empty() {
+            return Err(invalid_attachment(raw, "attachment target cannot be empty"));
+        }
+        match kind {
+            "logfile" => Ok(Self {
+                kind: kind.to_string(),
+                target: target.to_string(),
+            }),
+            "pid" => {
+                let pid = target.parse::<u32>().map_err(|_| {
+                    invalid_attachment(raw, "pid target must be a positive integer")
+                })?;
+                if pid == 0 {
+                    return Err(invalid_attachment(
+                        raw,
+                        "pid target must be greater than zero",
+                    ));
+                }
+                Ok(Self {
+                    kind: kind.to_string(),
+                    target: target.to_string(),
+                })
+            }
+            "port" => {
+                let port = target
+                    .parse::<u16>()
+                    .map_err(|_| invalid_attachment(raw, "port target must be a TCP port"))?;
+                if port == 0 {
+                    return Err(invalid_attachment(
+                        raw,
+                        "port target must be greater than zero",
+                    ));
+                }
+                Ok(Self {
+                    kind: kind.to_string(),
+                    target: port.to_string(),
+                })
+            }
+            "http" => {
+                if !(target.starts_with("http://") || target.starts_with("https://")) {
+                    return Err(invalid_attachment(
+                        raw,
+                        "http target must start with http:// or https://",
+                    ));
+                }
+                Ok(Self {
+                    kind: kind.to_string(),
+                    target: target.to_string(),
+                })
+            }
+            _ => Err(invalid_attachment(
+                raw,
+                "supported attachment kinds are logfile, pid, port, and http",
+            )),
+        }
+    }
+}
+
+fn invalid_attachment(raw: &str, reason: &str) -> Error {
+    Error::validation_invalid_argument(
+        "trace.attach",
+        format!("invalid trace attachment `{raw}`: {reason}"),
+        None,
+        None,
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TraceAttachmentObservation {
+    phase: &'static str,
+    elapsed_ms: u64,
+    attachment: TraceAttachment,
+    status: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    data: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -246,6 +347,9 @@ fn run_trace_workflow_with_context(
     };
     let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
     let active_probes = ActiveTraceProbes::start(&args.runner_inputs.probes)?;
+    let started_at = Instant::now();
+    let mut attach_observations =
+        observe_trace_attachments(&args.runner_inputs.attachments, "before", started_at);
     let runner_output =
         match build_trace_runner(execution_context, component, &args, run_dir, false) {
             Ok(output) => output,
@@ -254,6 +358,11 @@ fn run_trace_workflow_with_context(
             }
         };
     let probe_events = active_probes.stop();
+    attach_observations.extend(observe_trace_attachments(
+        &args.runner_inputs.attachments,
+        "after",
+        started_at,
+    ));
     if !args.keep_overlay {
         cleanup_trace_overlays(&applied_overlays)?
     }
@@ -271,6 +380,7 @@ fn run_trace_workflow_with_context(
     if let Some(parsed) = results.as_mut() {
         parsed.timeline.extend(probe_events);
         parsed.timeline.sort_by_key(|event| event.t_ms);
+        append_attach_observations(parsed, run_dir, &attach_observations)?;
         super::spans::apply_span_definitions(parsed, &args.span_definitions);
         super::assertions::apply_temporal_assertions(parsed);
         persist_trace_results(&results_path, parsed)?;
@@ -587,6 +697,16 @@ pub(crate) fn build_trace_runner(
             &extra_workloads_env_value(&args.runner_inputs.workload_paths)?,
         );
     }
+    if !args.runner_inputs.attachments.is_empty() {
+        let attachments_json =
+            serde_json::to_string(&args.runner_inputs.attachments).map_err(|e| {
+                Error::internal_json(
+                    format!("Failed to serialize trace attachments: {e}"),
+                    Some("trace.attach.serialize".to_string()),
+                )
+            })?;
+        runner = runner.env("HOMEBOY_TRACE_ATTACHMENTS", &attachments_json);
+    }
     for (key, value) in &args.runner_inputs.env {
         runner = runner.env(key, value);
     }
@@ -828,10 +948,217 @@ fn generic_trace_env(
     if let Some(rig_id) = &args.rig_id {
         env.push(("HOMEBOY_TRACE_RIG_ID".to_string(), rig_id.clone()));
     }
+    if !args.runner_inputs.attachments.is_empty() {
+        env.push((
+            "HOMEBOY_TRACE_ATTACHMENTS".to_string(),
+            serde_json::to_string(&args.runner_inputs.attachments).map_err(|e| {
+                Error::internal_json(
+                    format!("Failed to serialize trace attachments: {e}"),
+                    Some("trace.attach.serialize".to_string()),
+                )
+            })?,
+        ));
+    }
     for (key, value) in &args.runner_inputs.env {
         env.push((key.clone(), value.clone()));
     }
     Ok(env)
+}
+
+fn observe_trace_attachments(
+    attachments: &[TraceAttachment],
+    phase: &'static str,
+    started_at: Instant,
+) -> Vec<TraceAttachmentObservation> {
+    attachments
+        .iter()
+        .map(|attachment| {
+            let (status, data) = observe_trace_attachment(attachment);
+            TraceAttachmentObservation {
+                phase,
+                elapsed_ms: started_at
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
+                attachment: attachment.clone(),
+                status,
+                data,
+            }
+        })
+        .collect()
+}
+
+fn observe_trace_attachment(
+    attachment: &TraceAttachment,
+) -> (String, BTreeMap<String, serde_json::Value>) {
+    match attachment.kind.as_str() {
+        "logfile" => observe_logfile(&attachment.target),
+        "pid" => observe_pid(&attachment.target),
+        "port" => observe_port(&attachment.target),
+        "http" => observe_http(&attachment.target),
+        _ => ("unsupported".to_string(), BTreeMap::new()),
+    }
+}
+
+fn observe_logfile(path: &str) -> (String, BTreeMap<String, serde_json::Value>) {
+    let mut data = BTreeMap::new();
+    data.insert(
+        "path".to_string(),
+        serde_json::Value::String(path.to_string()),
+    );
+    match std::fs::metadata(path) {
+        Ok(metadata) => {
+            data.insert("bytes".to_string(), serde_json::json!(metadata.len()));
+            ("present".to_string(), data)
+        }
+        Err(error) => {
+            data.insert(
+                "error".to_string(),
+                serde_json::Value::String(error.to_string()),
+            );
+            ("missing".to_string(), data)
+        }
+    }
+}
+
+fn observe_pid(raw_pid: &str) -> (String, BTreeMap<String, serde_json::Value>) {
+    let mut data = BTreeMap::new();
+    data.insert("pid".to_string(), serde_json::json!(raw_pid));
+    let Ok(pid) = raw_pid.parse::<u32>() else {
+        return ("error".to_string(), data);
+    };
+    let running = process_exists(pid);
+    data.insert("running".to_string(), serde_json::json!(running));
+    if running {
+        ("running".to_string(), data)
+    } else {
+        ("missing".to_string(), data)
+    }
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn process_exists(_pid: u32) -> bool {
+    false
+}
+
+fn observe_port(raw_port: &str) -> (String, BTreeMap<String, serde_json::Value>) {
+    let mut data = BTreeMap::new();
+    data.insert("port".to_string(), serde_json::json!(raw_port));
+    let Ok(port) = raw_port.parse::<u16>() else {
+        return ("error".to_string(), data);
+    };
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listening = TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok();
+    data.insert("listening".to_string(), serde_json::json!(listening));
+    if listening {
+        ("listening".to_string(), data)
+    } else {
+        ("closed".to_string(), data)
+    }
+}
+
+fn observe_http(url: &str) -> (String, BTreeMap<String, serde_json::Value>) {
+    let mut data = BTreeMap::new();
+    data.insert(
+        "url".to_string(),
+        serde_json::Value::String(url.to_string()),
+    );
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            data.insert(
+                "error".to_string(),
+                serde_json::Value::String(error.to_string()),
+            );
+            return ("error".to_string(), data);
+        }
+    };
+    match client.get(url).send() {
+        Ok(response) => {
+            data.insert(
+                "status_code".to_string(),
+                serde_json::json!(response.status().as_u16()),
+            );
+            ("reachable".to_string(), data)
+        }
+        Err(error) => {
+            data.insert(
+                "error".to_string(),
+                serde_json::Value::String(error.to_string()),
+            );
+            ("unreachable".to_string(), data)
+        }
+    }
+}
+
+fn append_attach_observations(
+    results: &mut TraceResults,
+    run_dir: &RunDir,
+    observations: &[TraceAttachmentObservation],
+) -> Result<()> {
+    if observations.is_empty() {
+        return Ok(());
+    }
+
+    for observation in observations {
+        let mut data = observation.data.clone();
+        data.insert(
+            "kind".to_string(),
+            serde_json::Value::String(observation.attachment.kind.clone()),
+        );
+        data.insert(
+            "target".to_string(),
+            serde_json::Value::String(observation.attachment.target.clone()),
+        );
+        data.insert(
+            "status".to_string(),
+            serde_json::Value::String(observation.status.clone()),
+        );
+        results.timeline.push(TraceEvent {
+            t_ms: observation.elapsed_ms,
+            source: format!("attach.{}", observation.attachment.kind),
+            event: format!("{}.{}", observation.phase, observation.status),
+            data,
+        });
+    }
+
+    let artifact_path = run_dir
+        .path()
+        .join("artifacts")
+        .join(TRACE_ATTACHMENTS_ARTIFACT);
+    std::fs::write(
+        &artifact_path,
+        serde_json::to_string_pretty(observations).map_err(|e| {
+            Error::internal_json(
+                format!("Failed to serialize trace attachment observations: {e}"),
+                Some("trace.attach.observations.serialize".to_string()),
+            )
+        })?,
+    )
+    .map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to write trace attachment artifact {}: {}",
+                artifact_path.display(),
+                e
+            ),
+            Some("trace.attach.observations.write".to_string()),
+        )
+    })?;
+    results.artifacts.push(TraceArtifact {
+        label: "Trace attachments".to_string(),
+        path: format!("artifacts/{TRACE_ATTACHMENTS_ARTIFACT}"),
+    });
+    Ok(())
 }
 
 fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
@@ -891,6 +1218,32 @@ mod tests {
     }
 
     #[test]
+    fn trace_attachment_parse_supports_v1_kinds() {
+        assert_eq!(
+            TraceAttachment::parse("logfile:/tmp/service.log").unwrap(),
+            TraceAttachment {
+                kind: "logfile".to_string(),
+                target: "/tmp/service.log".to_string(),
+            }
+        );
+        assert_eq!(TraceAttachment::parse("pid:1234").unwrap().target, "1234");
+        assert_eq!(TraceAttachment::parse("port:8080").unwrap().target, "8080");
+        assert_eq!(
+            TraceAttachment::parse("http:http://127.0.0.1:8080/health")
+                .unwrap()
+                .target,
+            "http://127.0.0.1:8080/health"
+        );
+        assert_eq!(
+            TraceAttachment::parse("http://127.0.0.1:8080/health")
+                .unwrap()
+                .target,
+            "http://127.0.0.1:8080/health"
+        );
+        assert!(TraceAttachment::parse("systemd:kimaki.service").is_err());
+    }
+
+    #[test]
     fn test_build_trace_runner() {
         let _home_env_guard = crate::test_support::home_env_guard();
         let temp = tempfile::tempdir().unwrap();
@@ -913,6 +1266,7 @@ set -euo pipefail
   printf 'rig=%s\n' "${HOMEBOY_TRACE_RIG_ID:-}"
   printf 'component_path=%s\n' "${HOMEBOY_TRACE_COMPONENT_PATH:-}"
   printf 'extra_workloads=%s\n' "${HOMEBOY_TRACE_EXTRA_WORKLOADS:-}"
+  printf 'attachments=%s\n' "${HOMEBOY_TRACE_ATTACHMENTS:-}"
 } > "$HOMEBOY_TRACE_ARTIFACT_DIR/env.txt"
 cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
 {"component_id":"example","scenario_id":"close-window","status":"pass","timeline":[],"assertions":[],"artifacts":[{"label":"env","path":"artifacts/env.txt"}]}
@@ -941,6 +1295,7 @@ JSON
                 env: Vec::new(),
                 workload_paths: vec![component_dir.join("trace-fixture.trace.mjs")],
                 probes: Vec::new(),
+                attachments: vec![TraceAttachment::parse("logfile:/tmp/homeboy-trace.log").unwrap()],
             },
             scenario_id: "close-window".to_string(),
             json_summary: false,
@@ -969,6 +1324,8 @@ JSON
         assert!(env_dump.contains("rig=studio"));
         assert!(env_dump.contains(&format!("component_path={}", component_dir.display())));
         assert!(env_dump.contains("trace-fixture.trace.mjs"));
+        assert!(env_dump.contains("logfile"));
+        assert!(env_dump.contains("/tmp/homeboy-trace.log"));
         assert!(env_dump.contains("results="));
         assert!(env_dump.contains("artifact="));
         assert!(env_dump.contains("run="));
@@ -1217,6 +1574,105 @@ JSON
             .timeline
             .iter()
             .any(|event| event.event == "log.match"));
+        run_dir.cleanup();
+    }
+
+    #[test]
+    fn trace_attach_logfile_observes_without_owning_lifecycle() {
+        let _home_env_guard = crate::test_support::home_env_guard();
+        let temp = tempfile::tempdir().unwrap();
+        let extension_dir = temp.path().join("extension");
+        let component_dir = temp.path().join("component");
+        fs::create_dir_all(&extension_dir).unwrap();
+        fs::create_dir_all(&component_dir).unwrap();
+        write_extension_manifest(&extension_dir);
+        let log_path = temp.path().join("already-running.log");
+        fs::write(&log_path, "before\n").unwrap();
+        let script = extension_dir.join("trace-runner.sh");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env bash
+set -euo pipefail
+printf 'during\n' >> '{}'
+cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
+{{"component_id":"example","scenario_id":"attach","status":"pass","timeline":[{{"t_ms":5,"source":"runner","event":"scenario"}}],"assertions":[],"artifacts":[]}}
+JSON
+"#,
+                log_path.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&script).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script, perms).unwrap();
+        }
+
+        let component = component_with_extension("example", &component_dir);
+        let context = trace_context(&component, &extension_dir);
+        let run_dir = RunDir::create().unwrap();
+        let result = run_trace_workflow_with_context(
+            Some(&context),
+            &component,
+            TraceRunWorkflowArgs {
+                component_label: "example".to_string(),
+                component_id: "example".to_string(),
+                path_override: Some(component_dir.to_string_lossy().to_string()),
+                settings: Vec::new(),
+                runner_inputs: TraceRunnerInputs {
+                    json_settings: Vec::new(),
+                    env: Vec::new(),
+                    workload_paths: Vec::new(),
+                    probes: Vec::new(),
+                    attachments: vec![TraceAttachment::parse(&format!(
+                        "logfile:{}",
+                        log_path.display()
+                    ))
+                    .unwrap()],
+                },
+                scenario_id: "attach".to_string(),
+                json_summary: false,
+                rig_id: None,
+                overlays: Vec::new(),
+                keep_overlay: false,
+                span_definitions: Vec::new(),
+                baseline_flags: BaselineFlags {
+                    baseline: false,
+                    ignore_baseline: true,
+                    ratchet: false,
+                },
+                regression_threshold_percent:
+                    crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+                regression_min_delta_ms:
+                    crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+            },
+            &run_dir,
+            None,
+        )
+        .unwrap();
+
+        let results = result.results.expect("trace results");
+        assert_eq!(results.timeline.len(), 3);
+        assert!(results
+            .timeline
+            .iter()
+            .any(|event| { event.source == "attach.logfile" && event.event == "before.present" }));
+        assert!(results
+            .timeline
+            .iter()
+            .any(|event| { event.source == "attach.logfile" && event.event == "after.present" }));
+        assert!(results
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path == "artifacts/trace-attachments.json"));
+        assert!(run_dir
+            .path()
+            .join("artifacts/trace-attachments.json")
+            .exists());
+        assert_eq!(fs::read_to_string(&log_path).unwrap(), "before\nduring\n");
         run_dir.cleanup();
     }
 

@@ -56,6 +56,7 @@ fn trace_compare_variant_interleaves_run_order_and_reports_focus_spans() {
                 focus_spans: vec!["boot_to_ready".to_string()],
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -192,6 +193,7 @@ fn trace_compare_variant_uses_component_arg_for_multi_component_named_variants()
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -277,6 +279,7 @@ fn trace_compare_variant_reports_unknown_named_variant_for_component_arg() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:

@@ -88,6 +88,18 @@ variables most runners care about:
 | `HOMEBOY_DEBUG` | user | `"1"` → verbose runner output |
 | `HOMEBOY_RUNTIME_*` | core | Paths to core-provided runtime helpers (see below) |
 
+Trace runners also receive trace-specific variables when invoked by `homeboy trace`:
+
+| Variable | Source | Meaning |
+|----------|--------|---------|
+| `HOMEBOY_TRACE_RESULTS_FILE` | core | JSON trace envelope path the runner should write |
+| `HOMEBOY_TRACE_SCENARIO` | CLI | Scenario ID being executed |
+| `HOMEBOY_TRACE_LIST_ONLY` | core | `"1"` when listing scenarios instead of running one |
+| `HOMEBOY_TRACE_ARTIFACT_DIR` | core | Directory for runner artifacts |
+| `HOMEBOY_TRACE_ATTACHMENTS` | CLI | JSON array of observation-only attach targets from repeatable `--attach KIND:TARGET` |
+
+`HOMEBOY_TRACE_ATTACHMENTS` v1 supports local `logfile`, `pid`, `port`, and `http` targets. HTTP attachments accept `http:<url>` or a direct `http://` / `https://` URL. Core observes attachments before and after the scenario and writes timeline events plus `artifacts/trace-attachments.json`; runners may also read the same JSON to correlate their own scenario events. Attachments are explicitly observation-only: runners and core must not start, stop, restart, or kill attached targets as part of attach handling.
+
 ## Core-provided runtime helpers
 
 Core ships three shell helpers as embedded assets
@@ -267,6 +279,12 @@ validation.
 
 Invokes `build.extension_script`. Sidecar contracts are different (build
 artifacts, version targets) — see [release-pipeline.md](release-pipeline.md).
+
+### `homeboy trace`
+
+Invokes `trace.extension_script` with the trace-specific sidecar and artifact variables documented above. The runner drives the requested scenario and writes a trace results envelope to `HOMEBOY_TRACE_RESULTS_FILE`.
+
+When `--attach` is present, core observes the declared already-running local targets before and after the runner executes. This augments the trace evidence but does not replace the scenario: the extension script still runs normally, and attach handling does not own the target lifecycle.
 
 ### `homeboy audit`
 

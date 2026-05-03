@@ -298,6 +298,7 @@ fn trace_compare_exits_nonzero_for_guardrail_failures() {
         focus_spans: Vec::new(),
         spans: Vec::new(),
         phases: Vec::new(),
+        attachments: Vec::new(),
         phase_preset: None,
         baseline_args: BaselineArgs::default(),
         regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
