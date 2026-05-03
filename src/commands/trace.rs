@@ -12,7 +12,9 @@ use homeboy::extension::trace::{
     TraceRunWorkflowArgs, TraceRunnerInputs, TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
-use homeboy::observation::{NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, ObservationStore, RunStatus};
+use homeboy::observation::{
+    NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, ObservationStore, RunStatus,
+};
 use homeboy::rig::{self, RigSpec};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
@@ -32,12 +34,19 @@ mod schedule;
 mod test_fixture;
 
 use compare_variant::run_compare_variant;
-use experiment::{collect_trace_experiment_artifacts_for_plan, run_trace_experiment_setup_for_plan, run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args, trace_experiment_settings};
+use experiment::{
+    collect_trace_experiment_artifacts_for_plan, run_trace_experiment_setup_for_plan,
+    run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args,
+    trace_experiment_settings,
+};
 use guardrails::run_trace_guardrails_for_args;
 use metadata::trace_span_metadata_for_args;
 use observations::record_trace_artifacts;
 
-use output::{aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown, render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample};
+use output::{
+    aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
+    render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
+};
 use probes::trace_probes_for_args;
 use schedule::{TraceSchedule, TraceVariantMatrixMode};
 
@@ -47,29 +56,22 @@ use matrix::{expand_variant_matrix, TraceVariantStackItem};
 pub struct TraceArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
-
     /// Target component for command-shaped trace modes like `compare-variant`.
     #[arg(long = "component", value_name = "COMPONENT_ID")]
     pub component_arg: Option<String>,
-
     /// Scenario ID to run, or `list` to discover available scenarios.
     pub scenario: Option<String>,
-
     /// Scenario ID for command-shaped trace modes like `compare-variant`.
     #[arg(long = "scenario", value_name = "SCENARIO_ID")]
     pub scenario_arg: Option<String>,
-
     /// After aggregate JSON when running `homeboy trace compare before.json after.json`.
     #[arg(value_name = "AFTER_JSON")]
     pub compare_after: Option<PathBuf>,
-
     /// Run trace against a rig-pinned component path after `rig check` passes.
     #[arg(long, value_name = "RIG_ID")]
     pub rig: Option<String>,
-
     #[command(flatten)]
     pub setting_args: SettingArgs,
-
     #[command(flatten)]
     pub _json: HiddenJsonArgs,
 

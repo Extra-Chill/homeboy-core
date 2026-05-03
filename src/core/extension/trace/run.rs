@@ -890,7 +890,6 @@ fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> Tr
     }
 }
 
-
 #[cfg(test)]
 mod run_tests {
     include!("run_tests.inc");
@@ -905,8 +904,14 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let component = test_component(temp.path());
         let run_dir = RunDir::create().unwrap();
-        let output = build_trace_runner(None, &component, &test_run_args(temp.path()), &run_dir, false)
-            .unwrap();
+        let output = build_trace_runner(
+            None,
+            &component,
+            &test_run_args(temp.path()),
+            &run_dir,
+            false,
+        )
+        .unwrap();
         assert!(!output.success);
         assert_eq!(output.exit_code, 3);
         run_dir.cleanup();
@@ -939,7 +944,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let component = test_component(temp.path());
         let run_dir = RunDir::create().unwrap();
-        let result = run_trace_workflow(&component, test_run_args(temp.path()), &run_dir, None).unwrap();
+        let result =
+            run_trace_workflow(&component, test_run_args(temp.path()), &run_dir, None).unwrap();
         assert_eq!(result.status, "error");
         assert_eq!(result.exit_code, 3);
         run_dir.cleanup();
@@ -981,7 +987,8 @@ mod tests {
                 ignore_baseline: true,
                 ratchet: false,
             },
-            regression_threshold_percent: super::super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_threshold_percent:
+                super::super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
             regression_min_delta_ms: super::super::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         }
     }

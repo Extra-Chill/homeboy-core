@@ -294,8 +294,8 @@ pub(super) fn append_attach_observations(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::parsing::TraceStatus;
+    use super::*;
 
     #[test]
     fn test_parse_all() {
@@ -346,7 +346,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let log_path = temp.path().join("service.log");
         std::fs::write(&log_path, "before\n").unwrap();
-        let attachment = TraceAttachment::parse(&format!("logfile:{}", log_path.display())).unwrap();
+        let attachment =
+            TraceAttachment::parse(&format!("logfile:{}", log_path.display())).unwrap();
 
         let observations = observe_trace_attachments(&[attachment], "before", Instant::now());
 
@@ -392,7 +393,10 @@ mod tests {
             .artifacts
             .iter()
             .any(|artifact| artifact.path == "artifacts/trace-attachments.json"));
-        assert!(run_dir.path().join("artifacts/trace-attachments.json").exists());
+        assert!(run_dir
+            .path()
+            .join("artifacts/trace-attachments.json")
+            .exists());
         run_dir.cleanup();
     }
 }
