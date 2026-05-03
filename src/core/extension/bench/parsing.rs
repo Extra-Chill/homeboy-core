@@ -178,6 +178,13 @@ pub struct BenchScenario {
     /// parsed and aggregated.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gate_results: Vec<BenchGateResult>,
+    /// Scenario-level categorical metadata emitted by benchmark workloads.
+    ///
+    /// Numeric values belong in `metrics`; this freeform object is for
+    /// labels and feature flags that are useful when aggregating persisted
+    /// observation runs, such as design fingerprints or workload choices.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, serde_json::Value>,
     /// Scenario pass/fail status after semantic gates are evaluated.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub passed: bool,
@@ -574,7 +581,40 @@ mod tests {
         assert_eq!(scenario.tags, vec!["cold", "cli"]);
         assert_eq!(scenario.metrics.get("p95_ms"), Some(145.0));
         assert_eq!(scenario.memory.as_ref().unwrap().peak_bytes, 41943040);
+        assert!(scenario.metadata.is_empty());
         assert!(scenario.artifacts.is_empty());
+    }
+
+    #[test]
+    fn parses_scenario_metadata() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 1,
+            "scenarios": [
+                {
+                    "id": "site_build",
+                    "iterations": 1,
+                    "metrics": { "success_rate": 1.0 },
+                    "metadata": {
+                        "design": {
+                            "dominant_font_family": "Space Grotesk",
+                            "motifs": ["terminal_window", "glow_overlay"]
+                        }
+                    }
+                }
+            ]
+        }"#;
+
+        let parsed = parse_bench_results_str(raw).unwrap();
+        let metadata = &parsed.scenarios[0].metadata;
+        assert_eq!(
+            metadata["design"]["dominant_font_family"].as_str(),
+            Some("Space Grotesk")
+        );
+        assert_eq!(
+            metadata["design"]["motifs"][0].as_str(),
+            Some("terminal_window")
+        );
     }
 
     #[test]
