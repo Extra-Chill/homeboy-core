@@ -892,8 +892,9 @@ fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> Tr
 
 
 #[cfg(test)]
-#[path = "run_tests.rs"]
-mod run_tests;
+mod run_tests {
+    include!("run_tests.inc");
+}
 
 #[cfg(test)]
 mod tests {
