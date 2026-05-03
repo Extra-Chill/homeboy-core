@@ -464,6 +464,8 @@ fn render_bench_section(out: &mut String, output_dir: &Path, run_url: &str) {
         let _ = writeln!(out, "- {}\n", message);
     }
 
+    render_bench_summary(out, &data);
+
     let artifacts = collect_bench_artifacts(&data);
     if !artifacts.is_empty() {
         out.push_str("**Artifacts**\n");
@@ -476,6 +478,80 @@ fn render_bench_section(out: &mut String, output_dir: &Path, run_url: &str) {
 
     render_full_log(out, "bench", run_url);
     out.push('\n');
+}
+
+fn render_bench_summary(out: &mut String, data: &Map<String, Value>) {
+    let summaries = array_value(data, "summary");
+    if summaries.is_empty() {
+        return;
+    }
+
+    out.push_str("**Summary**\n");
+    for summary in summaries {
+        let Some(summary) = summary.as_object() else {
+            continue;
+        };
+        let scenario = string_value(summary, "scenario").unwrap_or_else(|| "unknown".to_string());
+        let metric = string_value(summary, "metric").unwrap_or_else(|| "metric".to_string());
+        let rows = array_value(summary, "rows")
+            .into_iter()
+            .filter_map(format_bench_summary_row)
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "- `{}` (`{}`): {}", scenario, metric, rows.join("; "));
+    }
+    out.push('\n');
+}
+
+fn format_bench_summary_row(row: &Value) -> Option<String> {
+    let row = row.as_object()?;
+    let rig_id = string_value(row, "rig_id")?;
+    let mut parts = vec![format!("{}", rig_id)];
+    push_number_part(&mut parts, row, "n", "n", None);
+    push_number_part(&mut parts, row, "p50_ms", "p50", Some("ms"));
+    push_number_part(&mut parts, row, "p95_ms", "p95", Some("ms"));
+    push_number_part(&mut parts, row, "mean_ms", "mean", Some("ms"));
+    push_number_part(&mut parts, row, "cv_pct", "cv", Some("%"));
+    push_signed_number_part(&mut parts, row, "delta_p50_pct", "delta_p50", "%");
+    Some(parts.join(" "))
+}
+
+fn push_number_part(
+    parts: &mut Vec<String>,
+    row: &Map<String, Value>,
+    key: &str,
+    label: &str,
+    suffix: Option<&str>,
+) {
+    if let Some(value) = number_value(row, key) {
+        parts.push(format_number_part(label, value, suffix));
+    }
+}
+
+fn push_signed_number_part(
+    parts: &mut Vec<String>,
+    row: &Map<String, Value>,
+    key: &str,
+    label: &str,
+    suffix: &str,
+) {
+    if let Some(value) = number_value(row, key) {
+        parts.push(format!("{}={:+.1}{}", label, value, suffix));
+    }
+}
+
+fn format_number_part(label: &str, value: f64, suffix: Option<&str>) -> String {
+    match suffix {
+        Some(suffix) => format!("{}={:.1}{}", label, value, suffix),
+        None if value.fract().abs() < f64::EPSILON => format!("{}={:.0}", label, value),
+        None => format!("{}={:.1}", label, value),
+    }
+}
+
+fn number_value(map: &Map<String, Value>, key: &str) -> Option<f64> {
+    map.get(key).and_then(Value::as_f64)
 }
 
 fn render_error_details(out: &mut String, error: &Map<String, Value>) {
@@ -735,7 +811,7 @@ fn push_bench_artifact(
         .or_else(|| string_value(obj, "name"))
         .unwrap_or_else(|| "artifact".to_string());
     let scenario = string_value(obj, "scenario_id");
-    let run_index = string_value(obj, "run_index");
+    let run_index = display_value(obj, "run_index");
     let kind = string_value(obj, "kind");
 
     let mut prefix = Vec::new();
@@ -759,6 +835,14 @@ fn push_bench_artifact(
     }
     let _ = write!(line, ": {}", path);
     rendered.push(line);
+}
+
+fn display_value(map: &Map<String, Value>, key: &str) -> Option<String> {
+    map.get(key).and_then(|value| match value {
+        Value::String(value) if !value.is_empty() => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    })
 }
 
 fn string_array(map: &Map<String, Value>, key: &str) -> Vec<String> {
@@ -897,4 +981,71 @@ fn append_details_block(out: &mut String, summary: &str, lines: &[String], limit
         out.push('\n');
     }
     out.push_str("```\n\n</details>\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn bench_digest_renders_summary_percentiles() {
+        let context = FailureDigestContext {
+            output_dir: PathBuf::from("/tmp/missing-homeboy-report-tests"),
+            results: Map::from_iter([("bench".to_string(), Value::String("pass".to_string()))]),
+            run_url: String::new(),
+            tooling: Map::new(),
+            commands_csv: String::new(),
+            autofix_enabled: false,
+            autofix_attempted: false,
+            autofix_commands_csv: String::new(),
+        };
+        let mut data = Map::new();
+        data.insert("component".to_string(), Value::String("studio".to_string()));
+        data.insert(
+            "summary".to_string(),
+            json!([{
+                "scenario": "create-site",
+                "metric": "elapsed_ms",
+                "rows": [
+                    {"rig_id": "baseline", "n": 3, "p50_ms": 100.0, "p95_ms": 180.0, "mean_ms": 120.0, "cv_pct": 10.0},
+                    {"rig_id": "candidate", "n": 3, "p50_ms": 110.0, "p95_ms": 200.0, "mean_ms": 130.0, "cv_pct": 12.0, "delta_p50_pct": 10.0}
+                ]
+            }]),
+        );
+
+        let mut out = String::new();
+        render_bench_summary(&mut out, &data);
+
+        assert!(out.contains("**Summary**"));
+        assert!(out.contains("`create-site` (`elapsed_ms`)"));
+        assert!(out.contains("baseline n=3 p50=100.0ms p95=180.0ms"));
+        assert!(out.contains("candidate n=3 p50=110.0ms p95=200.0ms"));
+        assert!(out.contains("delta_p50=+10.0%"));
+        assert!(render_failure_digest(&context).contains("### Bench: unknown"));
+    }
+
+    #[test]
+    fn bench_artifact_digest_renders_numeric_run_index() {
+        let data = json!({
+            "rigs": [{
+                "rig_id": "candidate",
+                "artifacts": [{
+                    "scenario_id": "create-site",
+                    "run_index": 2,
+                    "name": "raw_result",
+                    "kind": "json",
+                    "path": "artifacts/run-2/raw-result.json"
+                }]
+            }]
+        });
+        let data = data.as_object().expect("object");
+
+        let artifacts = collect_bench_artifacts(data);
+
+        assert_eq!(
+            artifacts,
+            vec!["rig `candidate` / scenario `create-site` / run 2 — raw_result (json): artifacts/run-2/raw-result.json"]
+        );
+    }
 }
