@@ -9,6 +9,7 @@
 //! milestones.
 
 pub mod assertions;
+mod attach;
 pub mod baseline;
 mod overlay;
 mod overlay_lock;
@@ -21,6 +22,7 @@ pub mod spans;
 use crate::component::Component;
 use crate::extension::{ExtensionCapability, ExtensionExecutionContext};
 
+pub use attach::TraceAttachment;
 pub use overlay::TraceOverlayRequest;
 pub use overlay_lock::{cleanup_stale_trace_overlay_locks, list_trace_overlay_locks};
 pub use overlay_lock::{
@@ -44,7 +46,7 @@ pub use report::{push_overlay_markdown, render_markdown};
 pub use run::{
     run_trace_list_workflow, run_trace_workflow, trace_is_unclaimed, TraceListWorkflowArgs,
 };
-pub use run::{TraceAttachment, TraceRunWorkflowArgs, TraceRunWorkflowResult, TraceRunnerInputs};
+pub use run::{TraceRunWorkflowArgs, TraceRunWorkflowResult, TraceRunnerInputs};
 
 pub fn resolve_trace_command(
     component: &Component,

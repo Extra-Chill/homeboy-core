@@ -538,7 +538,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
     let experiment_env = trace_experiment_env(experiment_plan.as_ref())?;
     let trace_probes =
         trace_probes_for_args(&args, rig_context.as_ref(), ctx.extension_id.as_deref())?;
-    let attachments = trace_attachments_for_args(&args)?;
+    let attachments = TraceAttachment::parse_all(&args.attachments)?;
     let mut json_settings = experiment_settings;
     json_settings.extend(settings_as_json(&ctx.settings));
     json_settings.extend(
@@ -1058,13 +1058,6 @@ fn resolve_trace_execution_context(
         }
         Err(error) => Err(error),
     }
-}
-
-fn trace_attachments_for_args(args: &TraceArgs) -> homeboy::Result<Vec<TraceAttachment>> {
-    args.attachments
-        .iter()
-        .map(|attachment| TraceAttachment::parse(attachment))
-        .collect()
 }
 
 fn trace_overlays_for_args(
