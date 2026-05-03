@@ -73,6 +73,12 @@ fn execute_action(action: &ReconcileAction, tracker: &dyn Tracker) -> ReconcileE
             Ok(()) => ExecutionOutcome::Closed { number: *number },
             Err(e) => ExecutionOutcome::failed(&e),
         },
+        ReconcileAction::CloseReviewOnly {
+            number, comment, ..
+        } => match tracker.close_issue(*number, CloseReason::NotPlanned, Some(comment)) {
+            Ok(()) => ExecutionOutcome::Closed { number: *number },
+            Err(e) => ExecutionOutcome::failed(&e),
+        },
         ReconcileAction::CloseDuplicate {
             number,
             keep,
@@ -121,6 +127,9 @@ fn summary_for(action: &ReconcileAction) -> String {
         ReconcileAction::Close {
             number, category, ..
         } => format!("close         {} → #{}", category, number),
+        ReconcileAction::CloseReviewOnly {
+            number, category, ..
+        } => format!("close_review  {} → #{} [not planned]", category, number),
         ReconcileAction::CloseDuplicate {
             number,
             keep,
