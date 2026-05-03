@@ -77,6 +77,9 @@ pub(crate) fn analyze_test_coverage(
                 .as_deref()
                 .map(|p| root.join(p).exists())
                 .unwrap_or(false);
+        let behavior_test_references_source = test_fps
+            .iter()
+            .any(|test_fp| references_source_file(test_fp, source_fp));
 
         // For inline test languages (Rust), check for #[cfg(test)] in the source file itself
         if config.inline_tests {
@@ -89,7 +92,7 @@ pub(crate) fn analyze_test_coverage(
             // — see Extra-Chill/homeboy#1471.
             let has_inline_tests = !source_fp.test_methods.is_empty();
 
-            if !test_file_exists && !has_inline_tests {
+            if !test_file_exists && !has_inline_tests && !behavior_test_references_source {
                 if let Some(ref test_path) = expected_test_path {
                     findings.push(Finding {
                         convention: "test_coverage".to_string(),
@@ -107,6 +110,10 @@ pub(crate) fn analyze_test_coverage(
                     });
                 }
                 continue; // No tests at all — skip method-level checks
+            }
+
+            if !test_file_exists && !has_inline_tests && behavior_test_references_source {
+                continue; // Covered by a behavior/integration test that is not path-mirrored.
             }
 
             // Methods from dedicated test file — for Rust, these are also
@@ -225,7 +232,7 @@ pub(crate) fn analyze_test_coverage(
             }
         } else {
             // Non-inline test languages (PHP, JS, etc.)
-            if !test_file_exists {
+            if !test_file_exists && !behavior_test_references_source {
                 if let Some(ref test_path) = expected_test_path {
                     findings.push(Finding {
                         convention: "test_coverage".to_string(),
@@ -237,6 +244,10 @@ pub(crate) fn analyze_test_coverage(
                     });
                 }
                 continue; // No test file — skip method-level checks
+            }
+
+            if !test_file_exists && behavior_test_references_source {
+                continue; // Covered by a behavior/integration test that is not path-mirrored.
             }
 
             // Check method coverage from the test file
@@ -437,6 +448,48 @@ fn references_multiple_source_symbols(
     }
 
     false
+}
+
+fn references_source_file(test_fp: &FileFingerprint, source_fp: &FileFingerprint) -> bool {
+    let symbols = collect_source_file_symbols(source_fp);
+    if symbols.is_empty() {
+        return false;
+    }
+
+    let mut haystacks = Vec::new();
+    haystacks.push(test_fp.content.as_str());
+    haystacks.extend(test_fp.imports.iter().map(|s| s.as_str()));
+
+    symbols.iter().any(|symbol| {
+        haystacks
+            .iter()
+            .any(|haystack| contains_symbol(haystack, symbol))
+    })
+}
+
+fn collect_source_file_symbols(source_fp: &FileFingerprint) -> HashSet<String> {
+    let mut symbols = HashSet::new();
+
+    if let Some(type_name) = &source_fp.type_name {
+        if is_meaningful_symbol_name(type_name) {
+            symbols.insert(type_name.clone());
+        }
+    }
+    for type_name in &source_fp.type_names {
+        if is_meaningful_symbol_name(type_name) {
+            symbols.insert(type_name.clone());
+        }
+    }
+    if let Some(stem) = Path::new(&source_fp.relative_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+    {
+        if is_meaningful_symbol_name(stem) {
+            symbols.insert(stem.to_string());
+        }
+    }
+
+    symbols
 }
 
 fn is_meaningful_symbol_name(name: &str) -> bool {
@@ -882,11 +935,20 @@ fn test_chat_tools() {
             .iter()
             .filter(|f| f.kind == AuditFinding::OrphanedTest)
             .collect();
+        let missing_files: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::MissingTestFile)
+            .collect();
 
         assert!(
             orphaned.is_empty(),
             "behavior/integration test files that reference multiple source symbols should not be marked orphaned: {:?}",
             orphaned
+        );
+        assert!(
+            missing_files.is_empty(),
+            "source files covered by behavior/integration tests should not require exact mirrored test files: {:?}",
+            missing_files
         );
 
         let _ = std::fs::remove_dir_all(&dir);
