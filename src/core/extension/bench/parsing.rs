@@ -441,6 +441,13 @@ pub struct BenchMemory {
 
 /// Read and parse a `$HOMEBOY_BENCH_RESULTS_FILE` written by an extension.
 pub fn parse_bench_results_file(path: &Path) -> Result<BenchResults> {
+    parse_bench_results_file_with_artifact_context(path, None)
+}
+
+pub fn parse_bench_results_file_with_artifact_context(
+    path: &Path,
+    rig_id: Option<&str>,
+) -> Result<BenchResults> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         Error::internal_io(
             format!(
@@ -451,11 +458,18 @@ pub fn parse_bench_results_file(path: &Path) -> Result<BenchResults> {
             Some("bench.parsing.read".to_string()),
         )
     })?;
-    parse_bench_results_str(&content)
+    parse_bench_results_str_with_artifact_context(&content, rig_id)
 }
 
 /// Parse a raw JSON string into a `BenchResults`.
 pub fn parse_bench_results_str(raw: &str) -> Result<BenchResults> {
+    parse_bench_results_str_with_artifact_context(raw, None)
+}
+
+fn parse_bench_results_str_with_artifact_context(
+    raw: &str,
+    rig_id: Option<&str>,
+) -> Result<BenchResults> {
     let parsed: BenchResults = serde_json::from_str(raw).map_err(|e| {
         Error::internal_json(
             format!("Failed to parse bench results JSON: {}", e),
@@ -464,7 +478,91 @@ pub fn parse_bench_results_str(raw: &str) -> Result<BenchResults> {
     })?;
     validate_unique_scenario_ids(&parsed)?;
     validate_variance_policies(&parsed)?;
+    validate_artifact_paths(&parsed, rig_id)?;
     Ok(parsed)
+}
+
+/// Validate artifact pointers after deserialization so bad paths fail with
+/// bench-domain context instead of a generic JSON or runner error.
+pub fn validate_artifact_paths(results: &BenchResults, rig_id: Option<&str>) -> Result<()> {
+    for scenario in &results.scenarios {
+        for (artifact_key, artifact) in &scenario.artifacts {
+            if artifact
+                .path
+                .as_deref()
+                .is_some_and(|path| path.trim().is_empty())
+            {
+                return Err(empty_artifact_path_error(
+                    rig_id,
+                    &results.component_id,
+                    &scenario.id,
+                    scenario.file.as_deref(),
+                    "scenario",
+                    None,
+                    artifact_key,
+                ));
+            }
+        }
+
+        if let Some(runs) = &scenario.runs {
+            for (run_index, run) in runs.iter().enumerate() {
+                for (artifact_key, artifact) in &run.artifacts {
+                    if artifact
+                        .path
+                        .as_deref()
+                        .is_some_and(|path| path.trim().is_empty())
+                    {
+                        return Err(empty_artifact_path_error(
+                            rig_id,
+                            &results.component_id,
+                            &scenario.id,
+                            scenario.file.as_deref(),
+                            "iteration",
+                            Some(run_index + 1),
+                            artifact_key,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn empty_artifact_path_error(
+    rig_id: Option<&str>,
+    component_id: &str,
+    scenario_id: &str,
+    workload_id: Option<&str>,
+    phase: &str,
+    iteration: Option<usize>,
+    artifact_key: &str,
+) -> Error {
+    let mut context = Vec::new();
+    if let Some(rig_id) = rig_id {
+        context.push(format!("rig id `{}`", rig_id));
+    }
+    context.push(format!("component id `{}`", component_id));
+    if let Some(workload_id) = workload_id {
+        context.push(format!("workload id `{}`", workload_id));
+    }
+    context.push(format!("scenario id `{}`", scenario_id));
+    context.push(format!("phase `{}`", phase));
+    if let Some(iteration) = iteration {
+        context.push(format!("iteration {}", iteration));
+    }
+    context.push(format!("artifact key `{}`", artifact_key));
+
+    Error::validation_invalid_argument(
+        "artifacts.path",
+        format!(
+            "bench artifact path is empty for {}; artifact paths must be non-empty. Omit optional artifacts, or provide a real diagnostics file/directory when evidence is available.",
+            context.join(", ")
+        ),
+        Some(artifact_key.to_string()),
+        None,
+    )
 }
 
 fn validate_unique_scenario_ids(results: &BenchResults) -> Result<()> {
@@ -676,6 +774,98 @@ mod tests {
         assert!(serialized.contains("\"artifacts\""));
         assert!(serialized.contains("artifacts/agent-loop/transcript.json"));
         assert!(serialized.contains("https://example.test/"));
+    }
+
+    #[test]
+    fn rejects_empty_scenario_artifact_path_with_contract_guidance() {
+        let err = parse_bench_results_str(
+            r#"{
+                "component_id": "studio",
+                "iterations": 1,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "file": "bench/site-build.bench.mjs",
+                        "iterations": 1,
+                        "metrics": { "success_rate": 1.0 },
+                        "artifacts": {
+                            "visual_comparison_dir": { "path": "" }
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .expect_err("empty artifact path should fail validation");
+
+        let message = err.to_string();
+        assert!(message.contains("component id `studio`"));
+        assert!(message.contains("workload id `bench/site-build.bench.mjs`"));
+        assert!(message.contains("scenario id `site_build`"));
+        assert!(message.contains("phase `scenario`"));
+        assert!(message.contains("artifact key `visual_comparison_dir`"));
+        assert!(message.contains("Omit optional artifacts"));
+        assert!(message.contains("real diagnostics file/directory"));
+    }
+
+    #[test]
+    fn rejects_empty_measured_iteration_artifact_path_with_iteration_context() {
+        let err = parse_bench_results_str(
+            r#"{
+                "component_id": "studio",
+                "iterations": 2,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "file": "bench/site-build.bench.mjs",
+                        "iterations": 2,
+                        "metrics": { "success_rate": 1.0 },
+                        "runs": [
+                            { "metrics": { "success_rate": 1.0 } },
+                            {
+                                "metrics": { "success_rate": 1.0 },
+                                "artifacts": {
+                                    "visual_comparison_dir": { "path": "   " }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .expect_err("empty measured iteration artifact path should fail validation");
+
+        let message = err.to_string();
+        assert!(message.contains("component id `studio`"));
+        assert!(message.contains("workload id `bench/site-build.bench.mjs`"));
+        assert!(message.contains("scenario id `site_build`"));
+        assert!(message.contains("phase `iteration`"));
+        assert!(message.contains("iteration 2"));
+        assert!(message.contains("artifact key `visual_comparison_dir`"));
+        assert!(message.contains("Omit optional artifacts"));
+    }
+
+    #[test]
+    fn empty_artifact_path_diagnostic_includes_rig_when_available() {
+        let err = parse_bench_results_str_with_artifact_context(
+            r#"{
+                "component_id": "studio",
+                "iterations": 1,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "iterations": 1,
+                        "metrics": { "success_rate": 1.0 },
+                        "artifacts": {
+                            "visual_comparison_dir": { "path": "" }
+                        }
+                    }
+                ]
+            }"#,
+            Some("studio-bfb"),
+        )
+        .expect_err("empty artifact path should include rig context");
+
+        assert!(err.to_string().contains("rig id `studio-bfb`"));
     }
 
     #[test]

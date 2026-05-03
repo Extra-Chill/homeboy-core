@@ -323,6 +323,7 @@ fn parse_execution_results_file(
     results_file: &Path,
     scenario_ids: &[String],
     runner_success: bool,
+    rig_id: Option<&str>,
 ) -> Result<Option<BenchResults>> {
     if !results_file.exists() {
         return Ok(None);
@@ -330,12 +331,12 @@ fn parse_execution_results_file(
 
     if runner_success {
         return Ok(Some(apply_scenario_filter(
-            parsing::parse_bench_results_file(results_file)?,
+            parsing::parse_bench_results_file_with_artifact_context(results_file, rig_id)?,
             scenario_ids,
         )?));
     }
 
-    Ok(parsing::parse_bench_results_file(results_file).ok())
+    Ok(parsing::parse_bench_results_file_with_artifact_context(results_file, rig_id).ok())
 }
 
 fn failure_scenario_id(scenario_ids: &[String]) -> Option<String> {
@@ -491,7 +492,12 @@ pub fn run_main_bench_workflow(
         )?;
         let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
         let mut parsed = if results_file.exists() {
-            parse_execution_results_file(&results_file, &args.scenario_ids, script_output.success)?
+            parse_execution_results_file(
+                &results_file,
+                &args.scenario_ids,
+                script_output.success,
+                args.rig_id.as_deref(),
+            )?
         } else {
             None
         };
@@ -527,7 +533,7 @@ pub fn run_main_bench_workflow(
             component_path: Some(source_path.to_string_lossy().to_string()),
             scenario_id: failure_scenario_id(&args.scenario_ids),
             exit_code: script_output.exit_code,
-            stderr_tail: stderr_tail(&script_output.stderr),
+            stderr_tail: bench_failure_stderr_tail(&script_output.stderr, &args),
             diagnostics: Vec::new(),
         });
         return Ok(BenchRunWorkflowResult {
@@ -571,9 +577,13 @@ pub fn run_main_bench_workflow(
                 &results_file,
                 &execution_args.scenario_ids,
                 runner_output.success,
+                execution_args.rig_id.as_deref(),
             )?;
             let failure_stderr_tail = if !runner_output.success {
-                Some(stderr_tail(&runner_output.stderr))
+                Some(bench_failure_stderr_tail(
+                    &runner_output.stderr,
+                    &execution_args,
+                ))
             } else {
                 None
             };
@@ -721,6 +731,62 @@ fn format_diagnostic_hint(diagnostic: &BenchDiagnostic) -> String {
         Some(message) => format!("Diagnostic `{}`: {}", diagnostic.class, message),
         None => format!("Diagnostic `{}`", diagnostic.class),
     }
+}
+
+fn bench_failure_stderr_tail(stderr: &str, args: &BenchRunWorkflowArgs) -> String {
+    enrich_empty_artifact_path_error(stderr_tail(stderr), args)
+}
+
+fn enrich_empty_artifact_path_error(tail: String, args: &BenchRunWorkflowArgs) -> String {
+    if !tail.contains("returned artifact") || !tail.contains("with empty path") {
+        return tail;
+    }
+
+    let artifact_key =
+        text_between(&tail, "returned artifact \"", "\" with empty path").unwrap_or("<unknown>");
+    let workload_id = text_between(&tail, "WORKLOAD_ERROR: ", " - ")
+        .or_else(|| text_between(&tail, "WORKLOAD_ERROR: ", " — "));
+    let scenario_id = failure_scenario_id(&args.scenario_ids)
+        .or_else(|| workload_id.map(str::to_string))
+        .unwrap_or_else(|| "<unknown>".to_string());
+    let phase = if tail.contains("warmup iteration") {
+        "warmup"
+    } else {
+        "iteration"
+    };
+    let iteration = text_after(&tail, &format!("{} iteration ", phase))
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or("<unknown>");
+
+    let mut context = Vec::new();
+    if let Some(rig_id) = args.rig_id.as_deref() {
+        context.push(format!("rig id `{}`", rig_id));
+    }
+    context.push(format!("component id `{}`", args.component_id));
+    if let Some(workload_id) = workload_id {
+        context.push(format!("workload id `{}`", workload_id));
+    }
+    context.push(format!("scenario id `{}`", scenario_id));
+    context.push(format!("phase `{}`", phase));
+    context.push(format!("iteration {}", iteration));
+    context.push(format!("artifact key `{}`", artifact_key));
+
+    format!(
+        "{}\n\nBench artifact path validation context: {}.\nBench artifact contract: artifact paths must be non-empty. Omit optional artifacts, or provide a real diagnostics file/directory when evidence is available.",
+        tail,
+        context.join(", ")
+    )
+}
+
+fn text_between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let after_start = text_after(text, start)?;
+    let end_index = after_start.find(end)?;
+    Some(&after_start[..end_index])
+}
+
+fn text_after<'a>(text: &'a str, start: &str) -> Option<&'a str> {
+    let start_index = text.find(start)?;
+    Some(&text[start_index + start.len()..])
 }
 
 fn stamp_run_metadata(
@@ -937,10 +1003,14 @@ fn run_single_dispatcher(
     }
 
     let runner_output = build_runner(execution_context, component, args, run_dir, None)?.run()?;
-    let parsed =
-        parse_execution_results_file(&results_file, &args.scenario_ids, runner_output.success)?;
+    let parsed = parse_execution_results_file(
+        &results_file,
+        &args.scenario_ids,
+        runner_output.success,
+        args.rig_id.as_deref(),
+    )?;
     let failure_stderr_tail = if !runner_output.success {
-        Some(stderr_tail(&runner_output.stderr))
+        Some(bench_failure_stderr_tail(&runner_output.stderr, args))
     } else {
         None
     };
@@ -1111,7 +1181,7 @@ fn run_concurrent_instances(
                 first_failure_exit = Some(output.exit_code);
             }
             if first_failure_stderr_tail.is_none() {
-                first_failure_stderr_tail = Some(stderr_tail(&output.stderr));
+                first_failure_stderr_tail = Some(bench_failure_stderr_tail(&output.stderr, args));
             }
         }
     }
@@ -1133,8 +1203,11 @@ fn run_concurrent_instances(
         if !path.exists() {
             continue;
         }
-        let parsed = match parsing::parse_bench_results_file(&path)
-            .and_then(|results| apply_scenario_filter(results, &args.scenario_ids))
+        let parsed = match parsing::parse_bench_results_file_with_artifact_context(
+            &path,
+            args.rig_id.as_deref(),
+        )
+        .and_then(|results| apply_scenario_filter(results, &args.scenario_ids))
         {
             Ok(p) => p,
             Err(_) => continue,
@@ -1193,6 +1266,50 @@ mod tests {
             extra_workloads_env_value(&paths).unwrap(),
             "/tmp/bench-one.php:/tmp/bench-two.php"
         );
+    }
+
+    #[test]
+    fn enriches_empty_artifact_path_failure_with_bench_context() {
+        let args = BenchRunWorkflowArgs {
+            component_label: "Studio".to_string(),
+            component_id: "studio".to_string(),
+            path_override: None,
+            settings: Vec::new(),
+            settings_json: Vec::new(),
+            iterations: 1,
+            warmup_iterations: Some(1),
+            execution: BenchRunExecution {
+                runs: 1,
+                concurrency: 1,
+            },
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent: 5.0,
+            json_summary: false,
+            passthrough_args: Vec::new(),
+            scenario_ids: vec!["studio-agent-site-build".to_string()],
+            rig_id: Some("studio-bfb".to_string()),
+            shared_state: None,
+            extra_workloads: Vec::new(),
+        };
+
+        let enriched = enrich_empty_artifact_path_error(
+            "WORKLOAD_ERROR: studio-agent-site-build - warmup iteration 1/1 returned artifact \"visual_comparison_dir\" with empty path".to_string(),
+            &args,
+        );
+
+        assert!(enriched.contains("rig id `studio-bfb`"));
+        assert!(enriched.contains("component id `studio`"));
+        assert!(enriched.contains("workload id `studio-agent-site-build`"));
+        assert!(enriched.contains("scenario id `studio-agent-site-build`"));
+        assert!(enriched.contains("phase `warmup`"));
+        assert!(enriched.contains("iteration 1/1"));
+        assert!(enriched.contains("artifact key `visual_comparison_dir`"));
+        assert!(enriched.contains("Omit optional artifacts"));
+        assert!(enriched.contains("real diagnostics file/directory"));
     }
 
     #[test]
