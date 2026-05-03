@@ -79,10 +79,12 @@ fn test_expand_vars_unterminated_braces() {
 }
 
 #[test]
-fn test_expand_resources_expands_path_entries_only() {
+fn test_expand_resources_expands_string_entries() {
     with_isolated_home(|home| {
         let previous_resource_path = std::env::var("RIG_RESOURCE_PATH").ok();
+        let previous_resource_namespace = std::env::var("RIG_RESOURCE_NAMESPACE").ok();
         std::env::set_var("RIG_RESOURCE_PATH", "studio@resources");
+        std::env::set_var("RIG_RESOURCE_NAMESPACE", "bench-a");
 
         let mut components = HashMap::new();
         components.insert(
@@ -97,7 +99,10 @@ fn test_expand_resources_expands_path_entries_only() {
             },
         );
         let mut rig = rig_with("t", components);
-        rig.resources.exclusive = vec!["studio-runtime".to_string()];
+        rig.resources.exclusive = vec![
+            "studio-runtime".to_string(),
+            "studio-runtime:${env.RIG_RESOURCE_NAMESPACE}".to_string(),
+        ];
         rig.resources.paths = vec![
             "~/Developer/${env.RIG_RESOURCE_PATH}".to_string(),
             "${components.studio.path}/apps/cli".to_string(),
@@ -121,8 +126,15 @@ fn test_expand_resources_expands_path_entries_only() {
             Some(value) => std::env::set_var("RIG_RESOURCE_PATH", value),
             None => std::env::remove_var("RIG_RESOURCE_PATH"),
         }
+        match previous_resource_namespace {
+            Some(value) => std::env::set_var("RIG_RESOURCE_NAMESPACE", value),
+            None => std::env::remove_var("RIG_RESOURCE_NAMESPACE"),
+        }
 
-        assert_eq!(resources.exclusive, vec!["studio-runtime"]);
+        assert_eq!(
+            resources.exclusive,
+            vec!["studio-runtime", "studio-runtime:bench-a"]
+        );
         assert_eq!(resources.ports, vec![9724]);
         assert_eq!(
             resources.process_patterns,
@@ -130,6 +142,30 @@ fn test_expand_resources_expands_path_entries_only() {
         );
         assert_eq!(resources.paths, expected_paths);
     });
+}
+
+#[test]
+fn test_expand_resources_unset_env_in_exclusive_becomes_empty() {
+    let previous = std::env::var("RIG_RESOURCE_NAMESPACE_NEVER_SET_XYZ").ok();
+    std::env::remove_var("RIG_RESOURCE_NAMESPACE_NEVER_SET_XYZ");
+
+    let mut rig = rig_with("t", HashMap::new());
+    rig.resources.exclusive = vec![
+        "studio-runtime".to_string(),
+        "studio-runtime:${env.RIG_RESOURCE_NAMESPACE_NEVER_SET_XYZ}".to_string(),
+    ];
+
+    let resources = expand_resources(&rig);
+
+    match previous {
+        Some(value) => std::env::set_var("RIG_RESOURCE_NAMESPACE_NEVER_SET_XYZ", value),
+        None => std::env::remove_var("RIG_RESOURCE_NAMESPACE_NEVER_SET_XYZ"),
+    }
+
+    assert_eq!(
+        resources.exclusive,
+        vec!["studio-runtime", "studio-runtime:"]
+    );
 }
 
 #[test]

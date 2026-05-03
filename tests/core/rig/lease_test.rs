@@ -36,6 +36,15 @@ fn resources() -> RigResourcesSpec {
     }
 }
 
+fn namespaced_resources(namespace_env: &str) -> RigResourcesSpec {
+    RigResourcesSpec {
+        exclusive: vec![format!("studio-runtime:${{env.{}}}", namespace_env)],
+        paths: Vec::new(),
+        ports: Vec::new(),
+        process_patterns: Vec::new(),
+    }
+}
+
 #[test]
 fn test_acquire_active_run_lease_blocks_overlapping_resources_until_drop() {
     with_isolated_home(|_| {
@@ -55,6 +64,33 @@ fn test_acquire_active_run_lease_blocks_overlapping_resources_until_drop() {
         assert!(acquire_active_run_lease(&studio_bfb, "up")
             .expect("lease after drop")
             .is_some());
+    });
+}
+
+#[test]
+fn test_acquire_active_run_lease_blocks_env_expanded_exclusive_resources() {
+    with_isolated_home(|_| {
+        let previous = std::env::var("RIG_LEASE_NAMESPACE").ok();
+        std::env::set_var("RIG_LEASE_NAMESPACE", "bench-a");
+
+        let studio = rig("studio", namespaced_resources("RIG_LEASE_NAMESPACE"));
+        let studio_bfb = rig("studio-bfb", namespaced_resources("RIG_LEASE_NAMESPACE"));
+
+        let lease = acquire_active_run_lease(&studio, "up")
+            .expect("first lease")
+            .expect("resourceful rig leases");
+        let conflict =
+            acquire_active_run_lease(&studio_bfb, "up").expect_err("expanded token conflicts");
+
+        match previous {
+            Some(value) => std::env::set_var("RIG_LEASE_NAMESPACE", value),
+            None => std::env::remove_var("RIG_LEASE_NAMESPACE"),
+        }
+
+        assert_eq!(conflict.code, ErrorCode::RigResourceConflict);
+        assert!(conflict.message.contains("studio-runtime:bench-a"));
+
+        drop(lease);
     });
 }
 
