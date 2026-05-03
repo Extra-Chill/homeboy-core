@@ -11,6 +11,7 @@ use homeboy::extension::bench::{
     BenchRunWorkflowResult,
 };
 use homeboy::extension::ExtensionCapability;
+use homeboy::rig::lease::ActiveRigRunLease;
 use homeboy::rig::{self, BenchSpec, RigSpec, RigStateSnapshot};
 
 use super::observation::{self, BenchObservationStart};
@@ -21,10 +22,12 @@ struct RigBenchContext {
     spec: RigSpec,
     package_root: Option<PathBuf>,
     snapshot: RigStateSnapshot,
+    _lease: Option<ActiveRigRunLease>,
 }
 
 fn prepare_rig_bench_context(rig_id: &str) -> homeboy::Result<RigBenchContext> {
     let spec = rig::load(rig_id)?;
+    let lease = rig::lease::acquire_active_run_lease(&spec, "bench")?;
     let snapshot = rig::snapshot_state(&spec);
     let package_root =
         rig::read_source_metadata(&spec.id).map(|metadata| PathBuf::from(metadata.package_path));
@@ -33,6 +36,7 @@ fn prepare_rig_bench_context(rig_id: &str) -> homeboy::Result<RigBenchContext> {
         spec,
         package_root,
         snapshot,
+        _lease: lease,
     })
 }
 
