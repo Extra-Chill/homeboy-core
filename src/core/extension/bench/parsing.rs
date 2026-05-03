@@ -54,6 +54,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 
 use super::artifact::BenchArtifact;
+use super::artifact_validation;
 use super::diagnostic::BenchDiagnostic;
 use super::distribution::BenchRunDistribution;
 
@@ -478,91 +479,8 @@ fn parse_bench_results_str_with_artifact_context(
     })?;
     validate_unique_scenario_ids(&parsed)?;
     validate_variance_policies(&parsed)?;
-    validate_artifact_paths(&parsed, rig_id)?;
+    artifact_validation::validate_artifact_paths(&parsed, rig_id)?;
     Ok(parsed)
-}
-
-/// Validate artifact pointers after deserialization so bad paths fail with
-/// bench-domain context instead of a generic JSON or runner error.
-pub fn validate_artifact_paths(results: &BenchResults, rig_id: Option<&str>) -> Result<()> {
-    for scenario in &results.scenarios {
-        for (artifact_key, artifact) in &scenario.artifacts {
-            if artifact
-                .path
-                .as_deref()
-                .is_some_and(|path| path.trim().is_empty())
-            {
-                return Err(empty_artifact_path_error(
-                    rig_id,
-                    &results.component_id,
-                    &scenario.id,
-                    scenario.file.as_deref(),
-                    "scenario",
-                    None,
-                    artifact_key,
-                ));
-            }
-        }
-
-        if let Some(runs) = &scenario.runs {
-            for (run_index, run) in runs.iter().enumerate() {
-                for (artifact_key, artifact) in &run.artifacts {
-                    if artifact
-                        .path
-                        .as_deref()
-                        .is_some_and(|path| path.trim().is_empty())
-                    {
-                        return Err(empty_artifact_path_error(
-                            rig_id,
-                            &results.component_id,
-                            &scenario.id,
-                            scenario.file.as_deref(),
-                            "iteration",
-                            Some(run_index + 1),
-                            artifact_key,
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn empty_artifact_path_error(
-    rig_id: Option<&str>,
-    component_id: &str,
-    scenario_id: &str,
-    workload_id: Option<&str>,
-    phase: &str,
-    iteration: Option<usize>,
-    artifact_key: &str,
-) -> Error {
-    let mut context = Vec::new();
-    if let Some(rig_id) = rig_id {
-        context.push(format!("rig id `{}`", rig_id));
-    }
-    context.push(format!("component id `{}`", component_id));
-    if let Some(workload_id) = workload_id {
-        context.push(format!("workload id `{}`", workload_id));
-    }
-    context.push(format!("scenario id `{}`", scenario_id));
-    context.push(format!("phase `{}`", phase));
-    if let Some(iteration) = iteration {
-        context.push(format!("iteration {}", iteration));
-    }
-    context.push(format!("artifact key `{}`", artifact_key));
-
-    Error::validation_invalid_argument(
-        "artifacts.path",
-        format!(
-            "bench artifact path is empty for {}; artifact paths must be non-empty. Omit optional artifacts, or provide a real diagnostics file/directory when evidence is available.",
-            context.join(", ")
-        ),
-        Some(artifact_key.to_string()),
-        None,
-    )
 }
 
 fn validate_unique_scenario_ids(results: &BenchResults) -> Result<()> {
@@ -904,6 +822,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_bench_results_file_with_artifact_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bench-results.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "component_id": "studio",
+                "iterations": 1,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "iterations": 1,
+                        "metrics": { "success_rate": 1.0 },
+                        "artifacts": {
+                            "visual_comparison_dir": { "path": "" }
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let err = parse_bench_results_file_with_artifact_context(&path, Some("studio-bfb"))
+            .expect_err("empty artifact path should include rig context");
+
+        assert!(err.to_string().contains("rig id `studio-bfb`"));
+    }
+
+    #[test]
     fn parses_arbitrary_numeric_metrics_and_policies() {
         let raw = r#"{
             "component_id": "example",
@@ -1017,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_gate_pass_leaves_scenario_passed() {
+    fn test_evaluate_gates() {
         let raw = r#"{
             "component_id": "example",
             "iterations": 10,
