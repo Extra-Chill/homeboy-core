@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 
 use super::CmdResult;
 
-mod resources;
+pub mod resources;
 
 #[derive(Args)]
 pub struct DoctorArgs {

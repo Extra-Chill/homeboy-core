@@ -20,6 +20,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub output: Option<PathBuf>,
 
+    /// Suppress resource policy warnings for intentionally hot commands.
+    #[arg(long, global = true)]
+    pub force_hot: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }

@@ -80,6 +80,15 @@ the other capabilities.
 Arguments after `--` are passed verbatim to the extension's bench runner
 script.
 
+`homeboy bench` is resource-policy aware. If the current machine is already warm
+or hot according to `homeboy doctor resources`, Homeboy prints a stderr warning
+before running because the extra load can skew benchmark results. Use global
+`--force-hot` when running under load is intentional:
+
+```bash
+homeboy --force-hot bench my-component
+```
+
 ## Observation History
 
 Every `homeboy bench` run is persisted to the local observation store. The

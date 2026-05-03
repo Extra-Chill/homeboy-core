@@ -72,6 +72,10 @@ homeboy rig up studio
 
 Runs the `up` pipeline. Mutating rig commands acquire a resource lease first when the rig declares `resources`, so two active rig commands cannot mutate the same declared paths, ports, process patterns, or exclusive tokens at once.
 
+`rig up` also participates in resource-policy warnings. If the machine is
+already warm or hot, Homeboy warns on stderr before adding more load. The warning
+is advisory only; use global `--force-hot` when the extra pressure is expected.
+
 The pipeline can start services, run typed `git` / `build` / `extension` / `stack` steps, apply idempotent local patches, create symlinks/shared paths, and run checks.
 
 ### `check`

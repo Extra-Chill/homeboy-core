@@ -17,7 +17,7 @@ enum RawOutputMode {
 }
 
 use homeboy::commands;
-use homeboy::commands::utils::{args, entity_suggest, response as output, tty};
+use homeboy::commands::utils::{args, entity_suggest, resource_policy, response as output, tty};
 use homeboy::commands::{changelog, cli, file, logs, report, review, trace};
 use homeboy::extension::load_all_extensions;
 
@@ -207,6 +207,18 @@ fn main() -> std::process::ExitCode {
 
     if matches!(&cli.command, Commands::Runs(args) if args.is_bundle_export()) {
         output_file = None;
+    }
+
+    if !cli.force_hot {
+        if let Some(hot_command) = resource_policy::hot_command(&cli.command) {
+            if let Ok((resources, _)) = homeboy::commands::doctor::resources::run(
+                homeboy::commands::doctor::resources::ResourcesArgs {},
+            ) {
+                if let Some(warning) = resource_policy::evaluate(hot_command, &resources) {
+                    eprintln!("{}", warning.message);
+                }
+            }
+        }
     }
 
     // Startup update checks — skip for upgrade (it handles this itself)
