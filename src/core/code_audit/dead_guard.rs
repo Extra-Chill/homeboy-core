@@ -10,6 +10,7 @@
 //!
 //! The symbol-availability table is built by [`super::requirements`].
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -100,16 +101,94 @@ fn symbol_is_known(known: &KnownSymbols, guard: &Guard) -> bool {
 
 fn guard_is_contextual(fp: &FileFingerprint, guard: &Guard, audit_config: &AuditConfig) -> bool {
     is_lifecycle_or_test_path(&fp.relative_path, audit_config)
+        || guard_is_inside_registered_lifecycle_callback(&fp.content, guard)
         || guard_defines_stub(&fp.content, guard)
         || guard_loads_symbol_provider(&fp.content, guard)
 }
 
 fn is_lifecycle_or_test_path(path: &str, audit_config: &AuditConfig) -> bool {
     let normalized = path.replace('\\', "/");
+    if is_default_contextual_path(&normalized) {
+        return true;
+    }
     audit_config
         .lifecycle_path_globs
         .iter()
         .any(|pattern| glob_match::glob_match(pattern, &normalized))
+}
+
+fn is_default_contextual_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let basename = lower.rsplit('/').next().unwrap_or(lower.as_str());
+    basename == "uninstall.php"
+        || basename == "activation.php"
+        || basename == "deactivation.php"
+        || lower.starts_with("migrations/")
+        || lower.contains("/migrations/")
+        || lower.starts_with("migration/")
+        || lower.contains("/migration/")
+        || lower.starts_with("tests/")
+        || lower.contains("/tests/")
+        || lower.starts_with("test/")
+        || lower.contains("/test/")
+        || lower.starts_with("fixtures/")
+        || lower.contains("/fixtures/")
+        || lower.starts_with("smoke/")
+        || lower.contains("/smoke/")
+        || basename == "smoke.php"
+        || basename.ends_with("-smoke.php")
+        || basename.ends_with("_smoke.php")
+}
+
+fn guard_is_inside_registered_lifecycle_callback(content: &str, guard: &Guard) -> bool {
+    let callbacks = lifecycle_callbacks(content);
+    if callbacks.is_empty() {
+        return false;
+    }
+    let guard_offset = line_start_offset(content, guard.line);
+    function_name_at_offset(content, guard_offset)
+        .as_deref()
+        .is_some_and(|name| callbacks.contains(name))
+}
+
+fn lifecycle_callbacks(content: &str) -> HashSet<String> {
+    lifecycle_hook_regex()
+        .captures_iter(content)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+        .collect()
+}
+
+fn function_name_at_offset(content: &str, offset: usize) -> Option<String> {
+    for cap in function_declaration_regex().captures_iter(content) {
+        let name = cap.get(1)?.as_str();
+        let body_start = cap.get(0)?.end().saturating_sub(1);
+        let body_end = matching_brace_offset(content, body_start)?;
+        if body_start <= offset && offset <= body_end {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn matching_brace_offset(content: &str, open_offset: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    if bytes.get(open_offset) != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (idx, byte) in bytes.iter().enumerate().skip(open_offset) {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn guard_defines_stub(content: &str, guard: &Guard) -> bool {
@@ -168,6 +247,24 @@ fn guards_regex() -> &'static Regex {
     })
 }
 
+fn lifecycle_hook_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?is)\bregister_(?:activation|deactivation|uninstall)_hook\s*\([^;]*?["']([A-Za-z_][A-Za-z0-9_]*)["']"#,
+        )
+        .expect("lifecycle callback regex compiles")
+    })
+}
+
+fn function_declaration_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?m)\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{"#)
+            .expect("function declaration regex compiles")
+    })
+}
+
 fn extract_guards(content: &str) -> Vec<Guard> {
     let re = guards_regex();
     let mut out = Vec::new();
@@ -199,6 +296,22 @@ fn line_of_offset(content: &str, offset: usize) -> usize {
         .filter(|b| *b == b'\n')
         .count()
         + 1
+}
+
+fn line_start_offset(content: &str, line: usize) -> usize {
+    if line <= 1 {
+        return 0;
+    }
+    let mut current_line = 1usize;
+    for (idx, byte) in content.bytes().enumerate() {
+        if byte == b'\n' {
+            current_line += 1;
+            if current_line == line {
+                return idx + 1;
+            }
+        }
+    }
+    content.len()
 }
 
 #[cfg(test)]
@@ -418,6 +531,96 @@ if ( function_exists('runtime_unschedule_all') ) {
             findings.is_empty(),
             "uninstall context is not normal runtime"
         );
+    }
+
+    #[test]
+    fn default_lifecycle_paths_are_not_production_dead_guards() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin_main(tmp.path(), Some("6.0"), "");
+
+        let migration = make_fp(
+            "inc/migrations/flows.php",
+            r#"<?php
+if ( function_exists('runtime_unschedule_all') ) {
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+        let uninstall = make_fp(
+            "uninstall.php",
+            r#"<?php
+if ( function_exists('runtime_unschedule_all') ) {
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+        let smoke = make_fp(
+            "tests/runtime-smoke.php",
+            r#"<?php
+if ( function_exists('runtime_unschedule_all') ) {
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+
+        let findings = run(&[&migration, &uninstall, &smoke], tmp.path());
+        assert!(
+            findings.is_empty(),
+            "migration, uninstall, and smoke contexts are not normal runtime: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn registered_deactivation_callback_is_not_a_production_dead_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let body = r#"
+function runtime_deactivate_plugin() {
+    if ( function_exists('runtime_unschedule_all') ) {
+        runtime_unschedule_all('demo');
+    }
+}
+
+function runtime_normal_request() {
+    if ( function_exists('runtime_unschedule_all') ) {
+        runtime_unschedule_all('demo');
+    }
+}
+
+register_deactivation_hook( __FILE__, 'runtime_deactivate_plugin' );
+"#;
+        write_plugin_main(tmp.path(), Some("6.0"), body);
+        let content = fs::read_to_string(tmp.path().join("plugin.php")).unwrap();
+        let fp = make_fp("plugin.php", &content);
+
+        let findings = run(&[&fp], tmp.path());
+        assert_eq!(
+            findings.len(),
+            1,
+            "only the normal request guard should remain reportable: {:?}",
+            findings
+        );
+        assert!(findings[0].description.contains("runtime_unschedule_all"));
+    }
+
+    #[test]
+    fn production_guard_on_known_symbol_still_reports() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin_main(tmp.path(), Some("6.0"), "");
+        let fp = make_fp(
+            "inc/RuntimeScheduler.php",
+            r#"<?php
+function runtime_normal_request() {
+    if ( function_exists('runtime_unschedule_all') ) {
+        runtime_unschedule_all('demo');
+    }
+}
+"#,
+        );
+
+        let findings = run(&[&fp], tmp.path());
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].description.contains("runtime_unschedule_all"));
     }
 
     #[test]
