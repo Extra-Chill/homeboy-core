@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, TcpStream};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use crate::engine::run_dir::RunDir;
 use crate::error::{Error, Result};
@@ -39,7 +39,7 @@ impl TraceAttachment {
             return Err(invalid_attachment(raw, "attachment target cannot be empty"));
         }
         match kind {
-            "logfile" => Ok(Self {
+            "logfile" | "fswatch" => Ok(Self {
                 kind: kind.to_string(),
                 target: target.to_string(),
             }),
@@ -87,7 +87,7 @@ impl TraceAttachment {
             }
             _ => Err(invalid_attachment(
                 raw,
-                "supported attachment kinds are logfile, pid, port, and http",
+                "supported attachment kinds are logfile, fswatch, pid, port, and http",
             )),
         }
     }
@@ -141,6 +141,7 @@ fn observe_trace_attachment(
 ) -> (String, BTreeMap<String, serde_json::Value>) {
     match attachment.kind.as_str() {
         "logfile" => observe_logfile(&attachment.target),
+        "fswatch" => observe_fswatch(&attachment.target),
         "pid" => observe_pid(&attachment.target),
         "port" => observe_port(&attachment.target),
         "http" => observe_http(&attachment.target),
@@ -149,6 +150,14 @@ fn observe_trace_attachment(
 }
 
 fn observe_logfile(path: &str) -> (String, BTreeMap<String, serde_json::Value>) {
+    observe_file_state(path)
+}
+
+fn observe_fswatch(path: &str) -> (String, BTreeMap<String, serde_json::Value>) {
+    observe_file_state(path)
+}
+
+fn observe_file_state(path: &str) -> (String, BTreeMap<String, serde_json::Value>) {
     let mut data = BTreeMap::new();
     data.insert(
         "path".to_string(),
@@ -157,6 +166,16 @@ fn observe_logfile(path: &str) -> (String, BTreeMap<String, serde_json::Value>) 
     match std::fs::metadata(path) {
         Ok(metadata) => {
             data.insert("bytes".to_string(), serde_json::json!(metadata.len()));
+            if let Ok(modified) = metadata.modified() {
+                let modified_ms = modified
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_millis())
+                    .unwrap_or_default();
+                data.insert(
+                    "modified_unix_ms".to_string(),
+                    serde_json::json!(modified_ms),
+                );
+            }
             ("present".to_string(), data)
         }
         Err(error) => {
@@ -301,17 +320,19 @@ mod tests {
     fn test_parse_all() {
         let attachments = TraceAttachment::parse_all(&[
             "logfile:/tmp/service.log".to_string(),
+            "fswatch:/tmp/auth.json".to_string(),
             "pid:1234".to_string(),
             "port:8080".to_string(),
             "http://127.0.0.1:8080/health".to_string(),
         ])
         .unwrap();
 
-        assert_eq!(attachments.len(), 4);
+        assert_eq!(attachments.len(), 5);
         assert_eq!(attachments[0].kind, "logfile");
-        assert_eq!(attachments[1].target, "1234");
-        assert_eq!(attachments[2].target, "8080");
-        assert_eq!(attachments[3].kind, "http");
+        assert_eq!(attachments[1].kind, "fswatch");
+        assert_eq!(attachments[2].target, "1234");
+        assert_eq!(attachments[3].target, "8080");
+        assert_eq!(attachments[4].kind, "http");
         assert!(TraceAttachment::parse_all(&["systemd:kimaki.service".to_string()]).is_err());
     }
 
@@ -322,6 +343,13 @@ mod tests {
             TraceAttachment {
                 kind: "logfile".to_string(),
                 target: "/tmp/service.log".to_string(),
+            }
+        );
+        assert_eq!(
+            TraceAttachment::parse("fswatch:/tmp/auth.json").unwrap(),
+            TraceAttachment {
+                kind: "fswatch".to_string(),
+                target: "/tmp/auth.json".to_string(),
             }
         );
         assert_eq!(TraceAttachment::parse("pid:1234").unwrap().target, "1234");
@@ -355,6 +383,27 @@ mod tests {
         assert_eq!(observations[0].phase, "before");
         assert_eq!(observations[0].attachment.kind, "logfile");
         assert_eq!(observations[0].status, "present");
+    }
+
+    #[test]
+    fn test_observe_fswatch_attachment_snapshots_file_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let watched_path = temp.path().join("auth.json");
+        std::fs::write(&watched_path, "before\n").unwrap();
+        let attachment =
+            TraceAttachment::parse(&format!("fswatch:{}", watched_path.display())).unwrap();
+
+        let observations = observe_trace_attachments(&[attachment], "before", Instant::now());
+
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].phase, "before");
+        assert_eq!(observations[0].attachment.kind, "fswatch");
+        assert_eq!(observations[0].status, "present");
+        assert_eq!(
+            observations[0].data.get("bytes"),
+            Some(&serde_json::json!(7))
+        );
+        assert!(observations[0].data.contains_key("modified_unix_ms"));
     }
 
     #[test]
