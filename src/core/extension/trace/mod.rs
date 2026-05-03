@@ -38,7 +38,9 @@ pub use report::{
     TraceVariantMatrixRunOutput,
 };
 pub use report::{push_overlay_markdown, render_markdown};
-pub use run::{run_trace_list_workflow, run_trace_workflow, TraceListWorkflowArgs};
+pub use run::{
+    run_trace_list_workflow, run_trace_workflow, trace_is_unclaimed, TraceListWorkflowArgs,
+};
 pub use run::{TraceRunWorkflowArgs, TraceRunWorkflowResult, TraceRunnerInputs};
 
 pub fn resolve_trace_command(

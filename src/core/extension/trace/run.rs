@@ -2,11 +2,12 @@
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorCode, Result};
 use crate::extension::trace::baseline::TraceBaselineComparison;
 use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
@@ -103,12 +104,22 @@ pub fn run_trace_workflow(
     run_dir: &RunDir,
     rig_state: Option<RigStateSnapshot>,
 ) -> Result<TraceRunWorkflowResult> {
-    let execution_context = resolve_execution_context(component, ExtensionCapability::Trace)?;
-    run_trace_workflow_with_context(&execution_context, component, args, run_dir, rig_state)
+    let execution_context = match resolve_execution_context(component, ExtensionCapability::Trace) {
+        Ok(execution_context) => Some(execution_context),
+        Err(error) if trace_is_unclaimed(&error) => None,
+        Err(error) => return Err(error),
+    };
+    run_trace_workflow_with_context(
+        execution_context.as_ref(),
+        component,
+        args,
+        run_dir,
+        rig_state,
+    )
 }
 
 fn run_trace_workflow_with_context(
-    execution_context: &ExtensionExecutionContext,
+    execution_context: Option<&ExtensionExecutionContext>,
     component: &Component,
     args: TraceRunWorkflowArgs,
     run_dir: &RunDir,
@@ -124,17 +135,16 @@ fn run_trace_workflow_with_context(
         Some(acquire_trace_overlay_locks(&args.overlays, run_dir)?)
     };
     let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
-    let runner = match build_trace_runner(execution_context, component, &args, run_dir, false) {
-        Ok(runner) => runner,
-        Err(error) => {
-            return cleanup_after_overlay_error(&applied_overlays, args.keep_overlay, error)
-        }
-    };
-    let runner_output = runner.run();
+    let runner_output =
+        match build_trace_runner(execution_context, component, &args, run_dir, false) {
+            Ok(runner) => runner,
+            Err(error) => {
+                return cleanup_after_overlay_error(&applied_overlays, args.keep_overlay, error)
+            }
+        };
     if !args.keep_overlay {
         cleanup_trace_overlays(&applied_overlays)?
     }
-    let runner_output = runner_output?;
     let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
     let mut results = if results_path.exists() {
         let mut parsed = parse_trace_results_file(&results_path)?;
@@ -266,7 +276,11 @@ pub fn run_trace_list_workflow(
     args: TraceListWorkflowArgs,
     run_dir: &RunDir,
 ) -> Result<TraceList> {
-    let execution_context = resolve_execution_context(component, ExtensionCapability::Trace)?;
+    let execution_context = match resolve_execution_context(component, ExtensionCapability::Trace) {
+        Ok(execution_context) => Some(execution_context),
+        Err(error) if trace_is_unclaimed(&error) => None,
+        Err(error) => return Err(error),
+    };
     let runner_args = TraceRunWorkflowArgs {
         component_label: args.component_label.clone(),
         component_id: args.component_id,
@@ -287,8 +301,13 @@ pub fn run_trace_list_workflow(
         regression_threshold_percent: super::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
         regression_min_delta_ms: super::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
     };
-    let output =
-        build_trace_runner(&execution_context, component, &runner_args, run_dir, true)?.run()?;
+    let output = build_trace_runner(
+        execution_context.as_ref(),
+        component,
+        &runner_args,
+        run_dir,
+        true,
+    )?;
     if !output.success {
         return Err(Error::validation_invalid_argument(
             "trace_list",
@@ -323,12 +342,12 @@ pub fn run_trace_list_workflow(
 }
 
 pub(crate) fn build_trace_runner(
-    execution_context: &ExtensionExecutionContext,
+    execution_context: Option<&ExtensionExecutionContext>,
     component: &Component,
     args: &TraceRunWorkflowArgs,
     run_dir: &RunDir,
     list_only: bool,
-) -> Result<ExtensionRunner> {
+) -> Result<RunnerOutput> {
     let artifact_dir = run_dir.path().join("artifacts");
     std::fs::create_dir_all(&artifact_dir).map_err(|e| {
         Error::internal_io(
@@ -340,6 +359,10 @@ pub(crate) fn build_trace_runner(
             Some("trace.artifacts.create".to_string()),
         )
     })?;
+
+    let Some(execution_context) = execution_context else {
+        return run_generic_trace_runner(component, args, run_dir, &artifact_dir, list_only);
+    };
 
     let mut runner = ExtensionRunner::for_context(execution_context.clone())
         .component(component.clone())
@@ -377,7 +400,247 @@ pub(crate) fn build_trace_runner(
         runner = runner.env(key, value);
     }
 
-    Ok(runner)
+    runner.run()
+}
+
+pub fn trace_is_unclaimed(error: &Error) -> bool {
+    error.code == ErrorCode::ExtensionUnsupported
+        || (error.code == ErrorCode::ValidationInvalidArgument
+            && error
+                .message
+                .contains("has no linked extensions that provide trace support"))
+}
+
+fn run_generic_trace_runner(
+    component: &Component,
+    args: &TraceRunWorkflowArgs,
+    run_dir: &RunDir,
+    artifact_dir: &Path,
+    list_only: bool,
+) -> Result<RunnerOutput> {
+    let component_path = args
+        .path_override
+        .as_deref()
+        .unwrap_or(component.local_path.as_str());
+    let workloads =
+        discover_generic_trace_workloads(Path::new(component_path), &args.runner_inputs)?;
+
+    if list_only {
+        let scenarios = workloads
+            .iter()
+            .map(|path| {
+                serde_json::json!({
+                    "id": trace_workload_scenario_id(path),
+                    "source": path.to_string_lossy()
+                })
+            })
+            .collect::<Vec<_>>();
+        let stdout = serde_json::json!({
+            "component_id": args.component_id,
+            "scenarios": scenarios
+        })
+        .to_string();
+        return Ok(RunnerOutput {
+            exit_code: 0,
+            success: true,
+            stdout,
+            stderr: String::new(),
+        });
+    }
+
+    let Some(workload) = workloads
+        .iter()
+        .find(|path| trace_workload_scenario_id(path) == args.scenario_id)
+    else {
+        return Ok(RunnerOutput {
+            exit_code: 3,
+            success: false,
+            stdout: String::new(),
+            stderr: format!("unknown trace scenario {}", args.scenario_id),
+        });
+    };
+
+    let mut command = generic_trace_workload_command(workload);
+    command.current_dir(component_path);
+    command.envs(generic_trace_env(
+        component,
+        args,
+        run_dir,
+        artifact_dir,
+        &workloads,
+        list_only,
+    )?);
+    let output = command.output().map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to run generic trace workload {}: {}",
+                workload.display(),
+                e
+            ),
+            Some("trace.generic.run".to_string()),
+        )
+    })?;
+
+    Ok(RunnerOutput {
+        exit_code: output.status.code().unwrap_or(1),
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn discover_generic_trace_workloads(
+    component_path: &Path,
+    runner_inputs: &TraceRunnerInputs,
+) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for dir in [
+        component_path.join("traces"),
+        component_path.join("scripts/trace"),
+    ] {
+        if !dir.is_dir() {
+            continue;
+        }
+        let entries = std::fs::read_dir(&dir).map_err(|e| {
+            Error::internal_io(
+                format!("Failed to read trace workload dir {}: {}", dir.display(), e),
+                Some("trace.generic.discover".to_string()),
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|e| {
+                Error::internal_io(
+                    format!(
+                        "Failed to read trace workload entry in {}: {}",
+                        dir.display(),
+                        e
+                    ),
+                    Some("trace.generic.discover".to_string()),
+                )
+            })?;
+            let path = entry.path();
+            if is_generic_trace_workload(&path) {
+                paths.push(path);
+            }
+        }
+    }
+
+    paths.extend(runner_inputs.workload_paths.iter().cloned());
+    if let Some(extra) = std::env::var_os("HOMEBOY_TRACE_EXTRA_WORKLOADS") {
+        paths.extend(std::env::split_paths(&extra));
+    }
+
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn is_generic_trace_workload(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    (name.ends_with(".trace.mjs") || name.ends_with(".trace.sh") || name.ends_with(".trace.py"))
+        || matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("mjs" | "sh" | "py")
+        ) && path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            == Some("trace")
+}
+
+fn trace_workload_scenario_id(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    for suffix in [".trace.mjs", ".trace.sh", ".trace.py", ".mjs", ".sh", ".py"] {
+        if let Some(stripped) = name.strip_suffix(suffix) {
+            return stripped.to_string();
+        }
+    }
+    name.to_string()
+}
+
+fn generic_trace_workload_command(workload: &Path) -> Command {
+    match workload.extension().and_then(|ext| ext.to_str()) {
+        Some("mjs") => {
+            let mut command = Command::new("node");
+            command.arg(workload);
+            command
+        }
+        Some("py") => {
+            let mut command = Command::new("python3");
+            command.arg(workload);
+            command
+        }
+        Some("sh") => {
+            let mut command = Command::new("sh");
+            command.arg(workload);
+            command
+        }
+        _ => Command::new(workload),
+    }
+}
+
+fn generic_trace_env(
+    component: &Component,
+    args: &TraceRunWorkflowArgs,
+    run_dir: &RunDir,
+    artifact_dir: &Path,
+    workloads: &[PathBuf],
+    list_only: bool,
+) -> Result<Vec<(String, String)>> {
+    let component_path = args
+        .path_override
+        .as_deref()
+        .unwrap_or(component.local_path.as_str());
+    let mut env = run_dir.legacy_env_vars();
+    env.extend([
+        (
+            "HOMEBOY_EXTENSION_ID".to_string(),
+            "generic-shell".to_string(),
+        ),
+        (
+            "HOMEBOY_COMPONENT_ID".to_string(),
+            args.component_id.clone(),
+        ),
+        (
+            "HOMEBOY_COMPONENT_PATH".to_string(),
+            component_path.to_string(),
+        ),
+        (
+            "HOMEBOY_TRACE_RESULTS_FILE".to_string(),
+            run_dir
+                .step_file(run_dir::files::TRACE_RESULTS)
+                .to_string_lossy()
+                .to_string(),
+        ),
+        (
+            "HOMEBOY_TRACE_SCENARIO".to_string(),
+            args.scenario_id.clone(),
+        ),
+        (
+            "HOMEBOY_TRACE_ARTIFACT_DIR".to_string(),
+            artifact_dir.to_string_lossy().to_string(),
+        ),
+        (
+            "HOMEBOY_TRACE_LIST_ONLY".to_string(),
+            if list_only { "1" } else { "0" }.to_string(),
+        ),
+        (
+            "HOMEBOY_TRACE_EXTRA_WORKLOADS".to_string(),
+            extra_workloads_env_value(workloads)?,
+        ),
+    ]);
+    if let Some(rig_id) = &args.rig_id {
+        env.push(("HOMEBOY_TRACE_RIG_ID".to_string(), rig_id.clone()));
+    }
+    for (key, value) in &args.runner_inputs.env {
+        env.push((key.clone(), value.clone()));
+    }
+    Ok(env)
 }
 
 fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
@@ -408,12 +671,33 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::process::Command;
+    use std::sync::{Mutex, OnceLock};
 
     use crate::component::{Component, ScopedExtensionConfig};
     use crate::extension::{ExtensionCapability, ExtensionExecutionContext};
     use crate::test_support::with_isolated_home;
 
     use super::*;
+
+    static TRACE_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn with_extra_workloads<T>(value: Option<String>, f: impl FnOnce() -> T) -> T {
+        let _guard = TRACE_ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("trace env lock");
+        let prior = std::env::var_os("HOMEBOY_TRACE_EXTRA_WORKLOADS");
+        match value {
+            Some(value) => std::env::set_var("HOMEBOY_TRACE_EXTRA_WORKLOADS", value),
+            None => std::env::remove_var("HOMEBOY_TRACE_EXTRA_WORKLOADS"),
+        }
+        let result = f();
+        match prior {
+            Some(value) => std::env::set_var("HOMEBOY_TRACE_EXTRA_WORKLOADS", value),
+            None => std::env::remove_var("HOMEBOY_TRACE_EXTRA_WORKLOADS"),
+        }
+        result
+    }
 
     #[test]
     fn test_build_trace_runner() {
@@ -483,10 +767,8 @@ JSON
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
 
-        let output = build_trace_runner(&context, &component, &args, &run_dir, false)
-            .unwrap()
-            .run()
-            .unwrap();
+        let output =
+            build_trace_runner(Some(&context), &component, &args, &run_dir, false).unwrap();
         assert!(output.success);
 
         let env_dump = fs::read_to_string(run_dir.path().join("artifacts/env.txt")).unwrap();
@@ -556,16 +838,73 @@ JSON
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
 
-        let output = build_trace_runner(&context, &component, &args, &run_dir, true)
-            .unwrap()
-            .run()
-            .unwrap();
+        let output = build_trace_runner(Some(&context), &component, &args, &run_dir, true).unwrap();
         assert!(output.success);
         assert_eq!(
             fs::read_to_string(run_dir.path().join("artifacts/list.txt")).unwrap(),
             "1"
         );
         run_dir.cleanup();
+    }
+
+    #[test]
+    fn generic_trace_discovery_includes_conventions_and_extra_workloads() {
+        let temp = tempfile::tempdir().unwrap();
+        let component_dir = temp.path().join("component");
+        let traces_dir = component_dir.join("traces");
+        let scripts_trace_dir = component_dir.join("scripts/trace");
+        fs::create_dir_all(&traces_dir).unwrap();
+        fs::create_dir_all(&scripts_trace_dir).unwrap();
+        fs::write(traces_dir.join("startup.trace.mjs"), "").unwrap();
+        fs::write(scripts_trace_dir.join("smoke.py"), "").unwrap();
+        let extra = temp.path().join("external.trace.sh");
+        fs::write(&extra, "").unwrap();
+        let extra_env = std::env::join_paths([extra.as_path()])
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        with_extra_workloads(Some(extra_env), || {
+            let workloads = discover_generic_trace_workloads(
+                &component_dir,
+                &TraceRunnerInputs {
+                    workload_paths: vec![temp.path().join("rig.trace.mjs")],
+                    ..TraceRunnerInputs::default()
+                },
+            )
+            .unwrap();
+            let scenario_ids = workloads
+                .iter()
+                .map(|path| trace_workload_scenario_id(path))
+                .collect::<Vec<_>>();
+
+            assert!(scenario_ids.contains(&"startup".to_string()));
+            assert!(scenario_ids.contains(&"smoke".to_string()));
+            assert!(scenario_ids.contains(&"external".to_string()));
+            assert!(scenario_ids.contains(&"rig".to_string()));
+        });
+    }
+
+    #[test]
+    fn test_trace_is_unclaimed() {
+        let unsupported = Error::new(
+            ErrorCode::ExtensionUnsupported,
+            "No extension provider configured for component 'example'",
+            serde_json::json!({}),
+        );
+        assert!(trace_is_unclaimed(&unsupported));
+
+        let missing_trace = Error::validation_invalid_argument(
+            "extension",
+            "Component 'example' has no linked extensions that provide trace support",
+            None,
+            None,
+        );
+        assert!(trace_is_unclaimed(&missing_trace));
+
+        let other =
+            Error::validation_invalid_argument("extension", "different problem", None, None);
+        assert!(!trace_is_unclaimed(&other));
     }
 
     #[test]
@@ -619,7 +958,7 @@ JSON
             let context = trace_context(&fixture.component, &fixture.extension_dir);
 
             let result = run_trace_workflow_with_context(
-                &context,
+                Some(&context),
                 &fixture.component,
                 fixture.args,
                 &run_dir,
@@ -670,7 +1009,7 @@ JSON
             let context = trace_context(&fixture.component, &fixture.extension_dir);
 
             let result = run_trace_workflow_with_context(
-                &context,
+                Some(&context),
                 &fixture.component,
                 fixture.args,
                 &run_dir,
@@ -697,7 +1036,7 @@ JSON
             let run_dir = RunDir::create().unwrap();
             let context = trace_context(&fixture.component, &fixture.extension_dir);
             let result = run_trace_workflow_with_context(
-                &context,
+                Some(&context),
                 &fixture.component,
                 fixture.args,
                 &run_dir,
