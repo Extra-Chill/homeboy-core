@@ -819,6 +819,8 @@ fn is_branch_separator(trimmed: &str) -> bool {
         || trimmed.starts_with("else ")
         || trimmed.starts_with("elseif ")
         || trimmed.starts_with("} elseif")
+        || trimmed.ends_with("=> {")
+        || trimmed.starts_with("} => {")
 }
 
 /// Suppress low-information literal/envelope repeats: DTO tails full of
@@ -862,7 +864,39 @@ fn is_low_information_literal_or_error_line(normalized: &str) -> bool {
         return true;
     }
 
+    if is_simple_argument_line(t) {
+        return true;
+    }
+
     false
+}
+
+fn is_simple_argument_line(line: &str) -> bool {
+    let mut value = line.trim();
+    value = value.strip_prefix("&mut ").unwrap_or(value);
+    value = value.strip_prefix('&').unwrap_or(value).trim();
+
+    if is_simple_identifier_path(value) {
+        return true;
+    }
+
+    if value.ends_with(".clone()") || value.ends_with(".to_string()") {
+        return true;
+    }
+
+    if let Some((left, right)) = value.split_once(" + ") {
+        return is_simple_identifier_path(left.trim()) && right.trim().parse::<u64>().is_ok();
+    }
+
+    false
+}
+
+fn is_simple_identifier_path(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.'))
+        && value.chars().any(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 fn is_neutral_struct_field(line: &str) -> bool {
@@ -878,6 +912,7 @@ fn is_neutral_struct_field(line: &str) -> bool {
         || value.ends_with(".clone()")
         || value.ends_with(".to_string()")
         || value.starts_with("some(")
+        || is_simple_argument_line(value)
 }
 
 fn is_error_envelope_line(line: &str) -> bool {
@@ -2152,6 +2187,90 @@ fn resolve_effective_glob(args: &Args, component: &Component) -> Result<Option<S
         assert!(
             findings.is_empty(),
             "Short sibling-branch repetition should not be flagged: {:?}",
+            findings
+                .iter()
+                .map(|f| f.description.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn intra_method_ignores_repeated_multiline_call_argument_tails() {
+        let content = r#"
+fn env(extension: &Extension, local_path: &Path) -> Result<()> {
+    if let Some(detected) = run_component_env_detector(extension, local_path)? {
+        apply_component_env_detector_output(
+            detected,
+            &mut node_version,
+            &mut node_source,
+            &mut php_version,
+            &mut php_source,
+        );
+    }
+
+    if let Some(runtime) = extension.runtime.as_ref() {
+        apply_extension_runtime_requirements(
+            ext_id,
+            runtime,
+            &mut node_version,
+            &mut node_source,
+            &mut php_version,
+            &mut php_source,
+        );
+    }
+}
+"#;
+        let mut fp = make_fingerprint("src/commands/component.rs", &["env"], &[]);
+        fp.content = content.to_string();
+
+        let findings = detect_intra_method_duplicates(&[&fp]);
+        assert!(
+            findings.is_empty(),
+            "Repeated argument tails on different calls should not be flagged: {:?}",
+            findings
+                .iter()
+                .map(|f| f.description.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn intra_method_ignores_repeated_match_arm_result_shapes() {
+        let content = r#"
+fn search(mode: SearchMode, line: &str, term: &str) {
+    match mode {
+        SearchMode::Boundary => {
+            for pos in find_boundary_matches(line, term) {
+                results.push(Match {
+                    file: relative.clone(),
+                    line: line_num + 1,
+                    column: pos + 1,
+                    matched: term.to_string(),
+                    context: line.to_string(),
+                });
+            }
+        }
+        SearchMode::Literal => {
+            for pos in find_literal_matches(line, term) {
+                results.push(Match {
+                    file: relative.clone(),
+                    line: line_num + 1,
+                    column: pos + 1,
+                    matched: term.to_string(),
+                    context: line.to_string(),
+                });
+            }
+        }
+    }
+}
+"#;
+        let mut fp = make_fingerprint("src/core/engine/codebase_scan.rs", &["search"], &[]);
+        fp.content = content.to_string();
+
+        let findings = detect_intra_method_duplicates(&[&fp]);
+        assert!(
+            findings.is_empty(),
+            "Repeated match-arm result shapes should not be flagged: {:?}",
             findings
                 .iter()
                 .map(|f| f.description.as_str())
