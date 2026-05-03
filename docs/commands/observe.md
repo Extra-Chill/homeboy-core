@@ -1,0 +1,52 @@
+# homeboy observe
+
+Passively observe a running system and persist evidence in the observation store as run kind `observe`.
+
+## Usage
+
+```sh
+homeboy observe <component> --duration 30s --tail-log /path/to/app.log --grep 'invalid_grant'
+homeboy observe <component> --duration 5m --watch-process 'opencode-ai/bin/.*serve'
+homeboy observe <component> --duration 5m --tail-log /path/to/app.log --watch-process 'node .*serve'
+```
+
+## V1 Scope
+
+`observe` is a passive producer. It does not drive a scenario, attach to privileged OS probes, or implement the full future probe library.
+
+V1 supports:
+
+- `--duration <duration>` using `ms`, `s`, `m`, or `h`
+- `--tail-log <path>` for one or more log files
+- `--grep <regex>` to filter tailed log lines
+- `--watch-process <regex>` for process command-line snapshots
+
+## Output
+
+The command writes a trace-compatible JSON envelope to a run directory and records it as an artifact on an observation-store run:
+
+```json
+{
+  "component_id": "wp-coding-agents",
+  "scenario_id": "observe",
+  "status": "pass",
+  "summary": "Passive observation timeline",
+  "timeline": [
+    { "t_ms": 0, "source": "observe", "event": "started" },
+    { "t_ms": 251, "source": "log", "event": "line", "data": { "path": "/root/.kimaki/kimaki.log", "line": "HTTP 400 invalid_grant" } },
+    { "t_ms": 502, "source": "process", "event": "matched", "data": { "pattern": "opencode-ai/bin/.*serve", "pid": "1234", "command": "node opencode-ai/bin/opencode serve" } }
+  ],
+  "assertions": [],
+  "artifacts": []
+}
+```
+
+Inspect persisted evidence with:
+
+```sh
+homeboy runs list --kind observe
+homeboy runs show <run-id>
+homeboy runs artifacts <run-id>
+```
+
+Use `observe` to gather live evidence before encoding a deterministic `homeboy trace` workload with assertions.
