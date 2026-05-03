@@ -1376,8 +1376,8 @@ fn aggregate_markdown_includes_percentile_columns() {
     assert!(markdown.contains(
         "| `boot_to_ready` | 20 | 10ms | 105ms | 105.0ms | 150ms | 180ms | 190ms | 200ms | 0 |"
     ));
-    assert!(markdown
-        .contains("- `boot_to_ready`: run 20, max=200ms, artifact=`/tmp/trace-run-20.json`"));
+    assert!(markdown.contains("| Span | max | max run | max artifact |"));
+    assert!(markdown.contains("| `boot_to_ready` | 200ms | 20 | `/tmp/trace-run-20.json` |"));
 }
 
 #[test]
