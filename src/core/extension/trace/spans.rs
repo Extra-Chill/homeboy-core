@@ -111,7 +111,7 @@ pub(crate) fn apply_span_definitions(
     results.span_results = summarize_spans(&reporting_timeline, &definitions);
 }
 
-fn reporting_timeline(timeline: &[TraceEvent]) -> Vec<TraceEvent> {
+pub(crate) fn reporting_timeline(timeline: &[TraceEvent]) -> Vec<TraceEvent> {
     let mut events = Vec::new();
     for event in timeline {
         push_reporting_event(&mut events, event.clone());
@@ -203,7 +203,7 @@ fn merge_definitions(
     merged
 }
 
-fn event_matches_key(event: &TraceEvent, key: &str) -> bool {
+pub(crate) fn event_matches_key(event: &TraceEvent, key: &str) -> bool {
     event.source.len() + 1 + event.event.len() == key.len()
         && key.starts_with(&event.source)
         && key.as_bytes().get(event.source.len()) == Some(&b'.')
@@ -342,6 +342,49 @@ mod tests {
             event: event.to_string(),
             data: data.into_iter().collect(),
         }
+    }
+
+    #[test]
+    fn test_reporting_timeline() {
+        let timeline = reporting_timeline(&[
+            event(50, "runner", "later"),
+            event_with_data(
+                10,
+                "runner",
+                "details",
+                serde_json::json!({
+                    "events": [
+                        {"source": "nested", "event": "first", "t": 5, "data": {"ok": true}},
+                        {"source": "nested", "event": "second", "t": 20}
+                    ]
+                }),
+            ),
+        ]);
+
+        let keys = timeline
+            .iter()
+            .map(|event| format!("{}:{}.{}", event.t_ms, event.source, event.event))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            vec![
+                "10:runner.details",
+                "15:nested.first",
+                "30:nested.second",
+                "50:runner.later"
+            ]
+        );
+        assert_eq!(timeline[1].data.get("ok"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_event_matches_key() {
+        let event = event(0, "desktop", "window.closed");
+
+        assert!(event_matches_key(&event, "desktop.window.closed"));
+        assert!(!event_matches_key(&event, "desktop.window"));
+        assert!(!event_matches_key(&event, "runner.window.closed"));
+        assert!(!event_matches_key(&event, "desktop.window.closed.extra"));
     }
 
     #[test]
@@ -521,6 +564,7 @@ mod tests {
             span_definitions: Vec::new(),
             span_results: Vec::new(),
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
 
@@ -569,6 +613,7 @@ mod tests {
             span_definitions: Vec::new(),
             span_results: Vec::new(),
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
 
@@ -612,6 +657,7 @@ mod tests {
             span_definitions: Vec::new(),
             span_results: Vec::new(),
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
         let phases = phase_span_definitions(&[

@@ -30,6 +30,23 @@ homeboy trace <component> <scenario> --ratchet
 }
 ```
 
+## Generic Shell Runner
+
+When a component has no trace-capable extension, `homeboy trace` falls back to a built-in generic runner. This is intentionally in core rather than a separate `shell` extension so shell-only or JSON-config components can run trace workloads without installing an extension or adding a fake language marker such as `package.json`. Components that already have a trace extension, including the Node.js extension, continue to use that extension first.
+
+The generic runner discovers workloads in:
+
+- `<component>/traces/*.trace.{mjs,sh,py}`
+- `<component>/scripts/trace/*.{mjs,sh,py}`
+
+It also honors `HOMEBOY_TRACE_EXTRA_WORKLOADS` using the platform path separator, matching the existing rig-owned workload handoff pattern. Workloads run from the component directory with the standard trace environment below and are responsible for writing `HOMEBOY_TRACE_RESULTS_FILE`.
+
+Generic workloads are dispatched by extension:
+
+- `.mjs` via `node`
+- `.sh` via `sh`
+- `.py` via `python3`
+
 ## Runner Environment
 
 - `HOMEBOY_TRACE_RESULTS_FILE`
@@ -90,6 +107,64 @@ Runners can emit `span_definitions`, or callers can pass repeatable `--span id:f
 If an endpoint is missing, Homeboy emits a skipped result with `missing` keys instead of panicking.
 
 When a timeline contains repeated events with the same key, Homeboy resolves the span to the nearest valid `from`/`to` pair where the `to` event occurs at or after the `from` event. This keeps simple `source.event` span definitions stable for common lifecycle events that naturally repeat.
+
+## Temporal Assertions
+
+Runners can declare `temporal_assertions` for timeline-level checks. Homeboy evaluates them after the runner exits, appends the evaluated result to the existing `assertions` list, and marks the trace failed when any evaluated assertion fails. Existing simple runner-emitted assertions still work unchanged.
+
+V1 supports three assertion kinds:
+
+- `count`: count matching timeline keys and enforce optional `min` / `max` bounds.
+- `forbidden-event`: fail when a timeline key appears at least once.
+- `max-concurrent`: track a start/end event pair and fail when live concurrency exceeds `max`.
+
+Timeline keys use the same `source.event` format as spans. Failed assertions include a structured `details` object with the observed counts and matching events.
+
+```json
+{
+  "timeline": [
+    { "t_ms": 0, "source": "proc", "event": "spawn" },
+    { "t_ms": 5, "source": "proc", "event": "spawn" },
+    { "t_ms": 10, "source": "proc", "event": "exit" }
+  ],
+  "temporal_assertions": [
+    {
+      "id": "no-invalid-grant",
+      "kind": "count",
+      "events": ["log.invalid_grant"],
+      "max": 0
+    },
+    {
+      "id": "no-window-reopen",
+      "kind": "forbidden-event",
+      "pattern": "desktop.window.reopened"
+    },
+    {
+      "id": "max-one-proc",
+      "kind": "max-concurrent",
+      "track": ["proc.spawn", "proc.exit"],
+      "max": 1
+    }
+  ]
+}
+```
+
+The evaluated assertion list keeps the normal assertion shape and adds `details` when Homeboy has structured evidence:
+
+```json
+{
+  "id": "max-one-proc",
+  "status": "fail",
+  "message": "max concurrency for `proc.spawn` exceeded 1: observed 2",
+  "details": {
+    "kind": "max-concurrent",
+    "track": ["proc.spawn", "proc.exit"],
+    "max": 1,
+    "max_observed": 2,
+    "at_t_ms": 5
+  }
+}
+```
 
 ## Phases
 

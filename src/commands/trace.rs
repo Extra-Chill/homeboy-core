@@ -427,14 +427,11 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         .as_ref()
         .and_then(|context| rig_component_for_trace(&context.rig_spec, &effective_id));
 
-    let ctx = execution_context::resolve_with_component(
-        &ResolveOptions::with_capability_and_json(
-            &effective_id,
-            path_override.clone(),
-            ExtensionCapability::Trace,
-            args.setting_args.setting.clone(),
-            args.setting_args.setting_json.clone(),
-        ),
+    let ctx = resolve_trace_execution_context(
+        &effective_id,
+        path_override.clone(),
+        args.setting_args.setting.clone(),
+        args.setting_args.setting_json.clone(),
         component_override,
     )?;
     if let Some(context) = rig_context.as_ref() {
@@ -950,14 +947,11 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
         .as_ref()
         .and_then(|context| rig_component_for_trace(&context.rig_spec, &effective_id));
 
-    let ctx = execution_context::resolve_with_component(
-        &ResolveOptions::with_capability_and_json(
-            &effective_id,
-            path_override.clone(),
-            ExtensionCapability::Trace,
-            args.setting_args.setting.clone(),
-            args.setting_args.setting_json.clone(),
-        ),
+    let ctx = resolve_trace_execution_context(
+        &effective_id,
+        path_override.clone(),
+        args.setting_args.setting.clone(),
+        args.setting_args.setting_json.clone(),
         component_override,
     )?;
     if let Some(context) = rig_context.as_ref() {
@@ -1023,6 +1017,34 @@ fn load_rig_context(rig_id: Option<&str>) -> homeboy::Result<Option<TraceRigCont
         rig_package_root: package_root,
         rig_config_root: config_root,
     }))
+}
+
+fn resolve_trace_execution_context(
+    effective_id: &str,
+    path_override: Option<String>,
+    settings: Vec<(String, String)>,
+    settings_json: Vec<(String, serde_json::Value)>,
+    component_override: Option<Component>,
+) -> homeboy::Result<execution_context::ExecutionContext> {
+    match execution_context::resolve_with_component(
+        &ResolveOptions::with_capability_and_json(
+            effective_id,
+            path_override.clone(),
+            ExtensionCapability::Trace,
+            settings,
+            settings_json,
+        ),
+        component_override.clone(),
+    ) {
+        Ok(ctx) => Ok(ctx),
+        Err(error) if extension_trace::trace_is_unclaimed(&error) => {
+            execution_context::resolve_with_component(
+                &ResolveOptions::source_only(effective_id, path_override),
+                component_override,
+            )
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn trace_overlays_for_args(
@@ -1460,6 +1482,8 @@ mod compare_tests;
 mod compare_variant_tests;
 #[cfg(test)]
 mod experiment_tests;
+#[cfg(test)]
+mod generic_tests;
 #[cfg(test)]
 mod guardrail_tests;
 #[cfg(test)]

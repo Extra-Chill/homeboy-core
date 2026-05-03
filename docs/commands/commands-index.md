@@ -24,6 +24,7 @@
 - [lint](lint.md)
 - [list](list.md)
 - [logs](logs.md)
+- [observe](observe.md) — passive live observation into trace timeline evidence
 - [project](project.md)
 - [report](report.md) — render reports from structured output artifacts
 - [refactor](refactor.md)

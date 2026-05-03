@@ -4,6 +4,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.148.0] - 2026-05-03
+
+### Added
+- add passive observe command
+
+## [0.147.0] - 2026-05-03
+
+### Added
+- add trace experiment guardrails
+
+### Changed
+- format trace rig exports
+- keep trace guardrail modules audit-clean
+- keep trace guardrail coverage focused
+
 ## [0.146.0] - 2026-05-02
 
 ### Added
