@@ -175,6 +175,17 @@ fn reconcile_with_scope(
         }
 
         if !open_matches.is_empty() {
+            if review_only {
+                for issue in &open_matches {
+                    actions.push(ReconcileAction::CloseReviewOnly {
+                        number: issue.number,
+                        category: group.category.clone(),
+                        comment: close_review_only_comment(&group.label_or_category()),
+                    });
+                }
+                continue;
+            }
+
             // Update the lowest-numbered open match.
             let keep = open_matches[0].number;
             actions.push(ReconcileAction::Update {
@@ -462,6 +473,17 @@ fn close_resolved_comment(label: &str) -> String {
     )
 }
 
+fn close_review_only_comment(label: &str) -> String {
+    format!(
+        "**{}** findings are still present, but this category is review-only in the current \
+         reconcile policy. Closing as not planned so advisory heuristic findings do not keep \
+         tracker issues open indefinitely.\n\n\
+         The findings remain visible in `homeboy audit`; reopen or file a focused issue if a \
+         specific refactor becomes actionable.",
+        label
+    )
+}
+
 fn close_dedupe_comment(keep: u64) -> String {
     format!(
         "Closing as duplicate of #{} — consolidated by `homeboy issues reconcile`.\n\n\
@@ -737,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn review_only_category_still_updates_existing_open_issue() {
+    fn review_only_category_closes_existing_open_issue_not_planned() {
         let mut config = cfg();
         config.review_only_categories = vec!["god_file".into()];
         let groups = vec![group("god_file", 23)];
@@ -746,9 +768,16 @@ mod tests {
         let plan = reconcile(&groups, &existing, &config);
 
         assert_eq!(plan.actions.len(), 1);
-        assert!(
-            matches!(&plan.actions[0], ReconcileAction::Update { number, .. } if *number == 675)
-        );
+        match &plan.actions[0] {
+            ReconcileAction::CloseReviewOnly {
+                number, comment, ..
+            } => {
+                assert_eq!(*number, 675);
+                assert!(comment.contains("review-only"));
+                assert!(comment.contains("not planned"));
+            }
+            other => panic!("expected CloseReviewOnly, got {:?}", other),
+        }
     }
 
     #[test]

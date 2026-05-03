@@ -600,6 +600,9 @@ fn render_plan_lines(plan: &ReconcilePlan) -> Vec<String> {
             homeboy::issues::ReconcileAction::Close {
                 number, category, ..
             } => format!("close         {} → #{}", category, number),
+            homeboy::issues::ReconcileAction::CloseReviewOnly {
+                number, category, ..
+            } => format!("close_review  {} → #{} (not planned)", category, number),
             homeboy::issues::ReconcileAction::CloseDuplicate {
                 number,
                 keep,

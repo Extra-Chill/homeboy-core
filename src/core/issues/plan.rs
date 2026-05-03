@@ -179,6 +179,14 @@ pub enum ReconcileAction {
         category: String,
         comment: String,
     },
+    /// Close an advisory/review-only issue that was filed by an older policy.
+    /// Reason is always `not_planned` because findings still exist, but the
+    /// category is intentionally not tracker-actionable.
+    CloseReviewOnly {
+        number: u64,
+        category: String,
+        comment: String,
+    },
     /// Close a duplicate of another open issue for the same category.
     /// Reason is always `not_planned` — caller intent is "this is the same
     /// thing as #N." Caller keeps the lowest-numbered match.
@@ -233,6 +241,7 @@ impl ReconcilePlan {
                 ReconcileAction::Update { .. } => c.update += 1,
                 ReconcileAction::UpdateClosed { .. } => c.update_closed += 1,
                 ReconcileAction::Close { .. } => c.close += 1,
+                ReconcileAction::CloseReviewOnly { .. } => c.close += 1,
                 ReconcileAction::CloseDuplicate { .. } => c.close_duplicate += 1,
                 ReconcileAction::Skip { .. } => c.skip += 1,
             }
