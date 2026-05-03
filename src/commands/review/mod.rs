@@ -933,7 +933,7 @@ mod tests {
                 "details": {
                     "query": "homeboy runs show run-123",
                     "artifacts": "homeboy runs artifacts run-123",
-                    "export_bundle": "homeboy runs export --run run-123 --output homeboy-observations"
+                    "export_bundle": "homeboy runs export --run run-123 --output ~/.local/share/homeboy/exports/run-123"
                 }
             },
             "artifact": {
@@ -950,7 +950,7 @@ mod tests {
                     "details": {
                         "query": "homeboy runs show run-123",
                         "artifacts": "homeboy runs artifacts run-123",
-                        "export_bundle": "homeboy runs export --run run-123 --output homeboy-observations"
+                        "export_bundle": "homeboy runs export --run run-123 --output ~/.local/share/homeboy/exports/run-123"
                     }
                 },
                 "commands": []

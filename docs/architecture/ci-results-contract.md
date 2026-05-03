@@ -217,7 +217,7 @@ for this artifact. The intended workflow shape is:
 
 ```sh
 homeboy bench studio --rig studio-dev --scenario admin-first-load
-# Wave 4A dependency: homeboy runs export --since 1h --output homeboy-observations
+# Wave 4A dependency: homeboy runs export --since 1h --output "$RUNNER_TEMP/homeboy-observations"
 ```
 
 Once `homeboy runs export` exists, CI wrappers should upload the generated

@@ -43,7 +43,7 @@ impl ObservationOutputMetadata {
                 query: format!("homeboy runs show {run_id}"),
                 artifacts: format!("homeboy runs artifacts {run_id}"),
                 export_bundle: format!(
-                    "homeboy runs export --run {run_id} --output homeboy-observations"
+                    "homeboy runs export --run {run_id} --output ~/.local/share/homeboy/exports/{run_id}"
                 ),
             },
         }
@@ -69,7 +69,7 @@ mod tests {
         );
         assert_eq!(
             json["details"]["export_bundle"],
-            "homeboy runs export --run run-123 --output homeboy-observations"
+            "homeboy runs export --run run-123 --output ~/.local/share/homeboy/exports/run-123"
         );
     }
 
