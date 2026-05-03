@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.151.1] - 2026-05-03
+
+### Changed
+- Expose read-only daemon API contract
+- Guard lower release bump overrides
+
+### Fixed
+- fix lint autofix release-owned files
+- update linked extensions on current branch
+- reduce audit false positives
+- summarize bench report artifacts
+
 ## [0.151.0] - 2026-05-03
 
 ### Added
