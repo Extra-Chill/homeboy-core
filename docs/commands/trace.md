@@ -90,7 +90,7 @@ V1 statuses are `pass`, `fail`, and `error`.
 
 ## Attachments
 
-Use repeatable `--attach KIND:TARGET` flags to observe already-running local systems while the selected trace scenario still runs normally. Attachments do not start, stop, restart, or kill the target; they only add before/after observation events to the trace timeline and write `artifacts/trace-attachments.json`.
+Use repeatable `--attach KIND:TARGET` flags to observe already-running local systems while the selected trace scenario still runs normally. Attachments do not start, stop, restart, or kill the target; they only add before/after observation events to the trace timeline and write an attachment observation artifact in the run directory.
 
 Supported v1 attachment kinds:
 

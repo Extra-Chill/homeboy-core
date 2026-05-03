@@ -16,6 +16,7 @@ use crate::extension::{
     resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
 };
 use crate::extension::{ExtensionRunner, RunnerOutput};
+use crate::http_probe;
 use crate::rig::RigStateSnapshot;
 
 use super::overlay::{
@@ -1069,31 +1070,15 @@ fn observe_http(url: &str) -> (String, BTreeMap<String, serde_json::Value>) {
         "url".to_string(),
         serde_json::Value::String(url.to_string()),
     );
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(1))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            data.insert(
-                "error".to_string(),
-                serde_json::Value::String(error.to_string()),
-            );
-            return ("error".to_string(), data);
-        }
-    };
-    match client.get(url).send() {
-        Ok(response) => {
-            data.insert(
-                "status_code".to_string(),
-                serde_json::json!(response.status().as_u16()),
-            );
+    match http_probe::get_status(url, Duration::from_secs(1)) {
+        Ok(status) => {
+            data.insert("status_code".to_string(), serde_json::json!(status));
             ("reachable".to_string(), data)
         }
         Err(error) => {
             data.insert(
                 "error".to_string(),
-                serde_json::Value::String(error.to_string()),
+                serde_json::Value::String(error.message),
             );
             ("unreachable".to_string(), data)
         }

@@ -15,6 +15,7 @@ use super::expand::expand_vars;
 use super::service::discover_newest_for_spec;
 use super::spec::{CheckSpec, NewerThanSpec, RigSpec, TimeSource};
 use crate::error::{Error, Result};
+use crate::http_probe;
 
 /// Run a check against the current rig state. Err on fail.
 pub fn evaluate(rig: &RigSpec, check: &CheckSpec) -> Result<()> {
@@ -84,17 +85,11 @@ const HTTP_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
 fn http_check(rig: &RigSpec, url: &str, expect_status: u16) -> Result<()> {
     let resolved = expand_vars(rig, url);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|e| Error::internal_unexpected(format!("build http client: {}", e)))?;
-
     let deadline = std::time::Instant::now() + HTTP_WAIT_READY_BUDGET;
 
     loop {
-        match client.get(&resolved).send() {
-            Ok(response) => {
-                let actual = response.status().as_u16();
+        match http_probe::get_status(&resolved, Duration::from_secs(5)) {
+            Ok(actual) => {
                 if actual != expect_status {
                     return Err(Error::validation_invalid_argument(
                         "check.http",
@@ -108,7 +103,7 @@ fn http_check(rig: &RigSpec, url: &str, expect_status: u16) -> Result<()> {
                 }
                 return Ok(());
             }
-            Err(e) if e.is_connect() && std::time::Instant::now() < deadline => {
+            Err(e) if e.is_connect && std::time::Instant::now() < deadline => {
                 // Listener not up yet — keep waiting until the budget runs out.
                 // We deliberately do NOT retry on DNS, TLS, or read-timeout
                 // errors: those aren't startup races, they're real problems
@@ -122,7 +117,7 @@ fn http_check(rig: &RigSpec, url: &str, expect_status: u16) -> Result<()> {
                 // is the most accurate diagnostic.
                 return Err(Error::validation_invalid_argument(
                     "check.http",
-                    format!("HTTP GET {} failed: {}", resolved, e),
+                    e.message,
                     None,
                     None,
                 ));
