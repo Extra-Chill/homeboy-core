@@ -73,9 +73,10 @@ homeboy component create --local-path /path/to/repo --changelog-target "CHANGELO
 | `extract_command` | Post-upload command (supports `{artifact}`, `{targetDir}`) |
 | `version_targets` | Version detection patterns |
 | `changelog_target` | Path to changelog file |
+| `scripts` | Optional component-owned `lint`, `test`, `build`, `bench`, and `trace` shell commands |
 | `extensions` | Extension configuration (e.g., `{"wordpress": {}}`) |
 
-Build, lint, test, bench, and review behavior comes from linked extensions. For one-off shell commands, use a rig `command` step; component-level `build_command` is not supported.
+Build, lint, test, bench, and trace behavior resolves from `scripts.<capability>` first, then linked extensions. Use `scripts.build` for component-owned shell builds; component-level `build_command` is not supported.
 
 ## Precedence
 

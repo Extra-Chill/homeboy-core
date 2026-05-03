@@ -106,6 +106,10 @@ pub fn run_trace_workflow(
     run_dir: &RunDir,
     rig_state: Option<RigStateSnapshot>,
 ) -> Result<TraceRunWorkflowResult> {
+    if component.has_script(ExtensionCapability::Trace) {
+        return run_trace_workflow_with_component_script(component, args, run_dir, rig_state);
+    }
+
     let execution_context = match resolve_execution_context(component, ExtensionCapability::Trace) {
         Ok(execution_context) => Some(execution_context),
         Err(error) if trace_is_unclaimed(&error) => None,
@@ -118,6 +122,110 @@ pub fn run_trace_workflow(
         run_dir,
         rig_state,
     )
+}
+
+fn run_trace_workflow_with_component_script(
+    component: &Component,
+    args: TraceRunWorkflowArgs,
+    run_dir: &RunDir,
+    rig_state: Option<RigStateSnapshot>,
+) -> Result<TraceRunWorkflowResult> {
+    let component_path = args
+        .path_override
+        .as_deref()
+        .unwrap_or(component.local_path.as_str());
+    let source_path = Path::new(component_path);
+    let _overlay_locks = if args.overlays.is_empty() {
+        None
+    } else {
+        Some(acquire_trace_overlay_locks(&args.overlays, run_dir)?)
+    };
+    let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
+    let script_output = crate::extension::component_script::run_component_scripts_with_run_dir(
+        component,
+        ExtensionCapability::Trace,
+        source_path,
+        run_dir,
+        true,
+        &[
+            (
+                "HOMEBOY_TRACE_SCENARIO".to_string(),
+                args.scenario_id.clone(),
+            ),
+            ("HOMEBOY_TRACE_LIST_ONLY".to_string(), "0".to_string()),
+        ],
+        &[],
+    );
+    if !args.keep_overlay {
+        cleanup_trace_overlays(&applied_overlays)?
+    }
+    let script_output = script_output?;
+    let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
+    let mut results = if results_path.exists() {
+        let mut parsed = parse_trace_results_file(&results_path)?;
+        if parsed.rig.is_none() {
+            parsed.rig = rig_state;
+        }
+        Some(parsed)
+    } else {
+        None
+    };
+    if let Some(parsed) = results.as_mut() {
+        super::spans::apply_span_definitions(parsed, &args.span_definitions);
+        super::assertions::apply_temporal_assertions(parsed);
+        persist_trace_results(&results_path, parsed)?;
+    }
+    let status = results
+        .as_ref()
+        .map(|r| r.status.as_str().to_string())
+        .unwrap_or_else(|| {
+            if script_output.success {
+                "pass"
+            } else {
+                "error"
+            }
+            .to_string()
+        });
+    let exit_code = if script_output.success {
+        if status == "pass" {
+            0
+        } else {
+            1
+        }
+    } else {
+        script_output.exit_code
+    };
+    let failure = (!script_output.success).then(|| TraceRunFailure {
+        component_id: args.component_id.clone(),
+        path_override: args.path_override.clone(),
+        scenario_id: args.scenario_id.clone(),
+        exit_code: script_output.exit_code,
+        stderr_excerpt: stderr_tail(&script_output.stderr),
+    });
+
+    Ok(TraceRunWorkflowResult {
+        status,
+        component: args.component_label,
+        exit_code,
+        results,
+        failure,
+        overlays: applied_overlays
+            .into_iter()
+            .map(|overlay| TraceOverlay {
+                variant: overlay.variant,
+                component_id: overlay.component_id,
+                path: overlay.patch_path.to_string_lossy().to_string(),
+                component_path: overlay.component_path.to_string_lossy().to_string(),
+                touched_files: overlay.touched_files,
+                kept: overlay.keep,
+            })
+            .collect(),
+        baseline_comparison: None,
+        hints: Some(vec![
+            "Component scripts use the extension runner env contract without extension resolution."
+                .to_string(),
+        ]),
+    })
 }
 
 fn run_trace_workflow_with_context(
@@ -303,6 +411,23 @@ pub fn run_trace_list_workflow(
     args: TraceListWorkflowArgs,
     run_dir: &RunDir,
 ) -> Result<TraceList> {
+    if component.has_script(ExtensionCapability::Trace) {
+        let source_path = crate::extension::component_script::source_path(
+            component,
+            args.path_override.as_deref(),
+        );
+        let output = crate::extension::component_script::run_component_scripts_with_run_dir(
+            component,
+            ExtensionCapability::Trace,
+            &source_path,
+            run_dir,
+            true,
+            &[("HOMEBOY_TRACE_LIST_ONLY".to_string(), "1".to_string())],
+            &[],
+        )?;
+        return trace_list_from_output(run_dir, TraceListOutput::from(output));
+    }
+
     let execution_context = match resolve_execution_context(component, ExtensionCapability::Trace) {
         Ok(execution_context) => Some(execution_context),
         Err(error) if trace_is_unclaimed(&error) => None,
@@ -335,21 +460,60 @@ pub fn run_trace_list_workflow(
         run_dir,
         true,
     )?;
-    if !output.success {
-        return Err(Error::validation_invalid_argument(
-            "trace_list",
-            format!(
-                "trace scenario discovery failed with exit code {}",
-                output.exit_code
-            ),
-            Some(format!(
-                "stdout:\n{}\n\nstderr:\n{}",
-                output.stdout, output.stderr
-            )),
-            None,
-        ));
+    trace_list_from_output(run_dir, TraceListOutput::from(output))
+}
+
+struct TraceListOutput {
+    exit_code: i32,
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl From<crate::extension::component_script::ComponentScriptOutput> for TraceListOutput {
+    fn from(output: crate::extension::component_script::ComponentScriptOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
+    }
+}
+
+impl From<RunnerOutput> for TraceListOutput {
+    fn from(output: RunnerOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
+    }
+}
+
+fn trace_list_from_output(run_dir: &RunDir, output: TraceListOutput) -> Result<TraceList> {
+    if output.success {
+        return parse_trace_list_output(run_dir, &output.stdout);
     }
 
+    Err(trace_list_error(
+        output.exit_code,
+        &output.stdout,
+        &output.stderr,
+    ))
+}
+
+fn trace_list_error(exit_code: i32, stdout: &str, stderr: &str) -> Error {
+    Error::validation_invalid_argument(
+        "trace_list",
+        format!("trace scenario discovery failed with exit code {exit_code}"),
+        Some(format!("stdout:\n{stdout}\n\nstderr:\n{stderr}")),
+        None,
+    )
+}
+
+fn parse_trace_list_output(run_dir: &RunDir, stdout: &str) -> Result<TraceList> {
     let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
     if results_path.exists() {
         let content = std::fs::read_to_string(&results_path).map_err(|e| {
@@ -365,7 +529,7 @@ pub fn run_trace_list_workflow(
         return parse_trace_list_str(&content);
     }
 
-    parse_trace_list_str(&output.stdout)
+    parse_trace_list_str(stdout)
 }
 
 pub(crate) fn build_trace_runner(

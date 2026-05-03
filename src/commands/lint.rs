@@ -92,12 +92,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
         extension_overrides: args.extension_override.extensions.clone(),
     })?;
 
-    if args.extension_override.extensions.is_empty()
-        && !args.fix
-        && source_ctx
-            .component
-            .has_self_check(ExtensionCapability::Lint)
-    {
+    if !args.fix && source_ctx.component.has_script(ExtensionCapability::Lint) {
         let observation = LintObservation::start(
             source_ctx.component_id.clone(),
             &source_ctx.source_path,

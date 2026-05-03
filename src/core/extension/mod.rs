@@ -1,5 +1,6 @@
 pub mod bench;
 pub mod build;
+pub mod component_script;
 mod execution;
 pub mod grammar;
 pub mod grammar_items;

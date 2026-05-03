@@ -128,6 +128,20 @@ pub struct SelfCheckConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ComponentScriptsConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lint: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub build: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bench: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(from = "RawComponent", into = "RawComponent")]
 pub struct Component {
     pub id: String,
@@ -162,6 +176,11 @@ pub struct Component {
     pub scopes: Option<ScopeConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_checks: Option<SelfCheckConfig>,
+    /// Component-owned shell scripts that satisfy Homeboy command capabilities
+    /// without requiring an extension. Resolution order is `scripts.*` first,
+    /// then extension-claimed behavior, then not-applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<ComponentScriptsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit: Option<AuditConfig>,
     /// Override the CLI path used by extension deploy install steps.
@@ -231,6 +250,8 @@ struct RawComponent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     self_checks: Option<SelfCheckConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    scripts: Option<ComponentScriptsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     audit: Option<AuditConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cli_path: Option<String>,
@@ -282,6 +303,7 @@ impl From<RawComponent> for Component {
             docs_dirs: raw.docs_dirs,
             scopes: raw.scopes,
             self_checks: raw.self_checks,
+            scripts: raw.scripts,
             audit: raw.audit,
             cli_path: raw.cli_path,
         }
@@ -317,6 +339,7 @@ impl From<Component> for RawComponent {
             docs_dirs: c.docs_dirs,
             scopes: c.scopes,
             self_checks: c.self_checks,
+            scripts: c.scripts,
             audit: c.audit,
             cli_path: c.cli_path,
         }
@@ -389,6 +412,7 @@ impl Component {
             docs_dirs: Vec::new(),
             scopes: None,
             self_checks: None,
+            scripts: None,
             audit: None,
             cli_path: None,
         }
@@ -491,6 +515,28 @@ impl Component {
 
     pub fn has_self_check(&self, capability: crate::extension::ExtensionCapability) -> bool {
         !self.self_check_commands(capability).is_empty()
+    }
+
+    pub fn script_commands(&self, capability: crate::extension::ExtensionCapability) -> &[String] {
+        if let Some(scripts) = self.scripts.as_ref() {
+            let commands = match capability {
+                crate::extension::ExtensionCapability::Lint => &scripts.lint,
+                crate::extension::ExtensionCapability::Test => &scripts.test,
+                crate::extension::ExtensionCapability::Build => &scripts.build,
+                crate::extension::ExtensionCapability::Bench => &scripts.bench,
+                crate::extension::ExtensionCapability::Trace => &scripts.trace,
+            };
+            if !commands.is_empty() {
+                return commands;
+            }
+        }
+
+        // Existing `self_checks` remains a lint/test compatibility source.
+        self.self_check_commands(capability)
+    }
+
+    pub fn has_script(&self, capability: crate::extension::ExtensionCapability) -> bool {
+        !self.script_commands(capability).is_empty()
     }
 
     /// Ensure `remote_path` is populated. If empty, attempt auto-resolution.

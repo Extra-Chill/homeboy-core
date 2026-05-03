@@ -1,8 +1,8 @@
-# Extension runner contract
+# Runner contract
 
-The contract between Homeboy core and extension runner scripts: what
-capabilities exist, what env vars flow in, what sidecar files extensions
-are expected to write, and what exit codes mean.
+The contract between Homeboy core and runner scripts: what capabilities
+exist, what env vars flow in, what sidecar files scripts are expected to
+write, and what exit codes mean.
 
 This is the authoritative reference for extension authors wiring a new
 runner and for core maintainers improving the cross-extension surface.
@@ -13,8 +13,13 @@ For the cross-command verification phase model (`syntax`, `lint`, `typecheck`,
 
 ## Capability model
 
-Each extension declares scripts per-capability in its manifest
-(`<extension-id>.json`). Four capabilities are first-class in core:
+Each extension can declare scripts per-capability in its manifest
+(`<extension-id>.json`). Components can also declare self-hosted scripts
+directly in `homeboy.json` under `scripts.<capability>`. Component scripts
+resolve first, linked extension behavior resolves second, and missing support
+is not-applicable.
+
+Four capabilities are first-class in core:
 
 | Capability | Manifest field | Typical script | Invoked by |
 |------------|---------------|----------------|------------|
@@ -27,6 +32,11 @@ Each extension declares scripts per-capability in its manifest
 the runtime. `audit` is a core-owned framework (pattern detectors, shared
 scaffolding checks, orphaned-test detection, etc.) — extensions don't
 implement it directly.
+
+Component-owned scripts use the same capability contract without extension
+claiming. They run sequentially in the component root and set
+`HOMEBOY_EXTENSION_ID=component-script` plus `HOMEBOY_EXTENSION_PATH` to the
+component path so existing runner helpers can identify the source.
 
 Extensions may omit any capability. Detection uses `has_lint()` /
 `has_test()` / `has_build()` accessors on the manifest (see

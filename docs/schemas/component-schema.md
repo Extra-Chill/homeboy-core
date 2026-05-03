@@ -19,6 +19,13 @@ Component configuration defines buildable and deployable units stored in `compon
     }
   ],
   "changelog_target": "string",
+  "scripts": {
+    "lint": ["shell command"],
+    "test": ["shell command"],
+    "build": ["shell command"],
+    "bench": ["shell command"],
+    "trace": ["shell command"]
+  },
   "extensions": {},
   "release": {}
 }
@@ -47,7 +54,12 @@ Component configuration defines buildable and deployable units stored in `compon
 - **`extensions`** (object): Extension-specific settings
   - Keys are extension IDs (e.g., `"wordpress"`, `"rust"`)
   - Values are extension setting objects
-  - Build, lint, test, bench, and review support comes from linked extensions; component-level `build_command` is not supported.
+- **`scripts`** (object): Component-owned shell commands for extension-shaped capabilities
+  - Supported keys: `lint`, `test`, `build`, `bench`, `trace`
+  - Each value is an array of shell commands run sequentially in `local_path`
+  - Resolution order is `scripts.<capability>` first, then linked extension support, then not-applicable
+  - Scripts receive the same runner env paths (`HOMEBOY_COMPONENT_ID`, `HOMEBOY_COMPONENT_PATH`, `HOMEBOY_RUN_DIR` and sidecar file vars when relevant) as extension runners, with `HOMEBOY_EXTENSION_ID=component-script`
+  - Use `scripts.build`, not `build_command`; `build_command` is still only a diagnostic output field.
 - **`release`** (object): Component-scoped release configuration
   - **`enabled`** (boolean): Whether release pipeline is enabled
   - **`steps`** (array): Release step definitions

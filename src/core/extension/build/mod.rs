@@ -20,6 +20,9 @@ pub use artifact::{resolve_artifact_path, resolve_artifact_path_from_root};
 
 #[derive(Debug, Clone)]
 pub enum ResolvedBuildCommand {
+    ComponentScript {
+        command: String,
+    },
     ExtensionProvided {
         context: ExtensionExecutionContext,
         command: String,
@@ -34,6 +37,7 @@ pub enum ResolvedBuildCommand {
 impl ResolvedBuildCommand {
     pub fn command(&self) -> &str {
         match self {
+            ResolvedBuildCommand::ComponentScript { command } => command,
             ResolvedBuildCommand::ExtensionProvided { command, .. } => command,
             ResolvedBuildCommand::LocalScript { command, .. } => command,
         }
@@ -43,9 +47,17 @@ impl ResolvedBuildCommand {
 /// Resolve build command for a component using extension-managed build configuration.
 ///
 /// Priority:
-/// 1. Extension's bundled script (`extension.build.extension_script`)
-/// 2. Local script matching the extension's `script_names` pattern
+/// 1. Component-owned `scripts.build`
+/// 2. Extension's bundled script (`extension.build.extension_script`)
+/// 3. Local script matching the extension's `script_names` pattern
 pub(crate) fn resolve_build_command(component: &Component) -> Result<ResolvedBuildCommand> {
+    let component_scripts = component.script_commands(ExtensionCapability::Build);
+    if !component_scripts.is_empty() {
+        return Ok(ResolvedBuildCommand::ComponentScript {
+            command: component_scripts.join(" && "),
+        });
+    }
+
     // 1. Check exactly one build-capable extension for bundled script or local script patterns
     if let Ok(context) = extension::resolve_execution_context(component, ExtensionCapability::Build)
     {
@@ -381,6 +393,7 @@ fn execute_build_component(comp: &Component) -> Result<(BuildOutput, i32)> {
     let resolved = resolve_build_command(comp)?;
     let build_cmd = resolved.command().to_string();
     let build_context = match &resolved {
+        ResolvedBuildCommand::ComponentScript { .. } => None,
         ResolvedBuildCommand::ExtensionProvided { context, .. } => Some(context),
         _ => None,
     };
@@ -406,7 +419,15 @@ fn execute_build_component(comp: &Component) -> Result<(BuildOutput, i32)> {
 
     // Execute via ExtensionRunner — uses the full exec context protocol (settings,
     // project info, context version) instead of the minimal env var set.
-    let runner_output = if let Some(context) = build_context {
+    let runner_output = if let ResolvedBuildCommand::ComponentScript { .. } = &resolved {
+        crate::extension::component_script::run_component_scripts(
+            comp,
+            extension::ExtensionCapability::Build,
+            &validated_path,
+            true,
+        )?
+        .into()
+    } else if let Some(context) = build_context {
         extension::ExtensionRunner::for_context(context.clone())
             .component(comp.clone())
             .working_dir(&local_path_str)

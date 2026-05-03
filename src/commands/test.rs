@@ -158,12 +158,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
         extension_overrides: args.extension_override.extensions.clone(),
     })?;
 
-    if args.extension_override.extensions.is_empty()
-        && !args.drift
-        && source_ctx
-            .component
-            .has_self_check(ExtensionCapability::Test)
-    {
+    if !args.drift && source_ctx.component.has_script(ExtensionCapability::Test) {
         let observation = start_test_observation(
             &source_ctx.component_id,
             &source_ctx.source_path,
