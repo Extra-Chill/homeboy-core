@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -20,6 +20,7 @@ use homeboy::Error;
 use super::{CmdResult, GlobalArgs};
 
 const DEFAULT_DURATION: &str = "30s";
+const DEFAULT_PROCESS_WATCH_INTERVAL: &str = "1s";
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Args, Clone)]
@@ -42,6 +43,14 @@ pub struct ObserveArgs {
     /// Regex matched against process command lines during snapshots. Repeatable.
     #[arg(long = "watch-process", value_name = "REGEX")]
     pub watch_processes: Vec<String>,
+
+    /// Poll interval for --watch-process probes, e.g. 500ms, 1s, 5s.
+    #[arg(
+        long = "watch-process-interval",
+        default_value = DEFAULT_PROCESS_WATCH_INTERVAL,
+        value_parser = parse_duration
+    )]
+    pub watch_process_interval: Duration,
 }
 
 #[derive(Serialize)]
@@ -65,7 +74,15 @@ struct TailLogState {
 struct ProcessWatchState {
     pattern: String,
     regex: Regex,
-    seen: BTreeSet<u32>,
+    seen: BTreeMap<u32, ProcessInfo>,
+    initialized: bool,
+    last_poll: Option<Instant>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProcessInfo {
+    ppid: u32,
+    command: String,
 }
 
 pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> {
@@ -81,6 +98,7 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
         "tail_logs": args.tail_logs,
         "grep": args.grep,
         "watch_processes": args.watch_processes,
+        "watch_process_interval_ms": duration_millis(args.watch_process_interval),
         "run_dir": run_dir.path(),
     });
 
@@ -191,7 +209,9 @@ fn collect_timeline(args: &ObserveArgs) -> homeboy::Result<Vec<TraceEvent>> {
             timeline.extend(poll_tail_log(tail, t_ms)?);
         }
         for watch in &mut process_watches {
-            timeline.extend(poll_process_watch(watch, t_ms)?);
+            if watch_process_is_due(watch, start, args.watch_process_interval) {
+                timeline.extend(poll_process_watch(watch, t_ms)?);
+            }
         }
 
         if start.elapsed() >= args.duration {
@@ -235,10 +255,25 @@ fn build_process_watch_states(args: &ObserveArgs) -> homeboy::Result<Vec<Process
                 pattern: pattern.clone(),
                 regex: Regex::new(pattern)
                     .map_err(|e| invalid_regex("watch-process", pattern, e))?,
-                seen: BTreeSet::new(),
+                seen: BTreeMap::new(),
+                initialized: false,
+                last_poll: None,
             })
         })
         .collect()
+}
+
+fn watch_process_is_due(state: &mut ProcessWatchState, start: Instant, interval: Duration) -> bool {
+    let now = Instant::now();
+    if state.last_poll.is_none()
+        || now
+            .duration_since(state.last_poll.unwrap_or(start))
+            .ge(&interval)
+    {
+        state.last_poll = Some(now);
+        return true;
+    }
+    false
 }
 
 fn poll_tail_log(state: &mut TailLogState, t_ms: u64) -> homeboy::Result<Vec<TraceEvent>> {
@@ -303,7 +338,7 @@ fn poll_process_watch(
     t_ms: u64,
 ) -> homeboy::Result<Vec<TraceEvent>> {
     let output = Command::new("ps")
-        .args(["-axo", "pid=,command="])
+        .args(["-axo", "pid=,ppid=,command="])
         .output()
         .map_err(|e| Error::internal_io(e.to_string(), Some("observe.process.ps".to_string())))?;
     if !output.status.success() {
@@ -314,46 +349,86 @@ fn poll_process_watch(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut current = BTreeSet::new();
+    Ok(poll_process_watch_from_snapshot(state, t_ms, &stdout))
+}
+
+fn poll_process_watch_from_snapshot(
+    state: &mut ProcessWatchState,
+    t_ms: u64,
+    stdout: &str,
+) -> Vec<TraceEvent> {
+    let mut current = BTreeMap::new();
     let mut events = Vec::new();
-    for line in stdout.lines() {
-        let trimmed = line.trim_start();
-        let Some((pid_raw, command)) = trimmed.split_once(char::is_whitespace) else {
-            continue;
-        };
-        let Ok(pid) = pid_raw.trim().parse::<u32>() else {
-            continue;
-        };
-        let command = command.trim();
+
+    for (pid, info) in parse_process_snapshot(stdout) {
+        let command = info.command.as_str();
         if state.regex.is_match(command) {
-            current.insert(pid);
-            if state.seen.insert(pid) {
-                events.push(event(
-                    t_ms,
-                    "process",
-                    "matched",
-                    [
-                        ("pattern", state.pattern.clone()),
-                        ("pid", pid.to_string()),
-                        ("command", command.to_string()),
-                    ],
-                ));
+            if !state.seen.contains_key(&pid) {
+                if state.initialized {
+                    events.push(event(
+                        t_ms,
+                        "process",
+                        "spawn",
+                        [
+                            ("pattern", state.pattern.clone()),
+                            ("pid", pid.to_string()),
+                            ("ppid", info.ppid.to_string()),
+                            ("command", command.to_string()),
+                        ],
+                    ));
+                } else {
+                    events.push(event(
+                        t_ms,
+                        "process",
+                        "matched",
+                        [
+                            ("pattern", state.pattern.clone()),
+                            ("pid", pid.to_string()),
+                            ("command", command.to_string()),
+                        ],
+                    ));
+                }
             }
+            current.insert(pid, info);
         }
     }
 
-    let stopped: Vec<u32> = state.seen.difference(&current).copied().collect();
-    for pid in stopped {
-        state.seen.remove(&pid);
+    for (pid, info) in &state.seen {
+        if current.contains_key(pid) {
+            continue;
+        }
         events.push(event(
             t_ms,
             "process",
-            "exited",
-            [("pattern", state.pattern.clone()), ("pid", pid.to_string())],
+            "exit",
+            [
+                ("pattern", state.pattern.clone()),
+                ("pid", pid.to_string()),
+                ("was_command", info.command.clone()),
+            ],
         ));
     }
 
-    Ok(events)
+    state.seen = current;
+    state.initialized = true;
+    events
+}
+
+fn parse_process_snapshot(stdout: &str) -> Vec<(u32, ProcessInfo)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            let mut parts = trimmed.split_whitespace();
+            let pid = parts.next()?.trim().parse::<u32>().ok()?;
+            let ppid = parts.next()?.trim().parse::<u32>().ok()?;
+            let command = parts.collect::<Vec<_>>().join(" ");
+            if command.is_empty() {
+                return None;
+            }
+            Some((pid, ProcessInfo { ppid, command }))
+        })
+        .collect()
 }
 
 fn write_trace_results(path: &Path, results: &TraceResults) -> homeboy::Result<()> {
@@ -395,6 +470,10 @@ fn observe_command(args: &ObserveArgs) -> String {
     for pattern in &args.watch_processes {
         parts.push("--watch-process".to_string());
         parts.push(pattern.clone());
+    }
+    if !args.watch_processes.is_empty() {
+        parts.push("--watch-process-interval".to_string());
+        parts.push(format_duration(args.watch_process_interval));
     }
     parts.join(" ")
 }
@@ -509,6 +588,88 @@ mod tests {
         assert_eq!(
             events[0].data.get("line").and_then(|value| value.as_str()),
             Some("HTTP 400 invalid_grant from oauth")
+        );
+    }
+
+    #[test]
+    fn process_watch_emits_initial_matches_then_spawn_and_exit_deltas() {
+        let mut state = ProcessWatchState {
+            pattern: "sleep".to_string(),
+            regex: Regex::new("sleep").unwrap(),
+            seen: BTreeMap::new(),
+            initialized: false,
+            last_poll: None,
+        };
+
+        let initial = poll_process_watch_from_snapshot(&mut state, 0, " 10 1 sleep 30\n");
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].event, "matched");
+        assert_eq!(
+            initial[0].data.get("pid").and_then(|value| value.as_str()),
+            Some("10")
+        );
+
+        let spawned = poll_process_watch_from_snapshot(
+            &mut state,
+            1000,
+            " 10 1 sleep 30\n 11 10 /bin/sleep 5\n",
+        );
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(spawned[0].event, "spawn");
+        assert_eq!(
+            spawned[0].data.get("pid").and_then(|value| value.as_str()),
+            Some("11")
+        );
+        assert_eq!(
+            spawned[0].data.get("ppid").and_then(|value| value.as_str()),
+            Some("10")
+        );
+
+        let exited = poll_process_watch_from_snapshot(&mut state, 2000, " 10 1 sleep 30\n");
+        assert_eq!(exited.len(), 1);
+        assert_eq!(exited[0].event, "exit");
+        assert_eq!(
+            exited[0].data.get("pid").and_then(|value| value.as_str()),
+            Some("11")
+        );
+        assert_eq!(
+            exited[0]
+                .data
+                .get("was_command")
+                .and_then(|value| value.as_str()),
+            Some("/bin/sleep 5")
+        );
+    }
+
+    #[test]
+    fn process_watch_interval_defaults_to_one_second() {
+        let command = <ObserveArgs as clap::Args>::augment_args(clap::Command::new("homeboy"));
+        let matches = command
+            .try_get_matches_from(["homeboy", "demo", "--watch-process", "sleep"])
+            .unwrap();
+        assert_eq!(
+            <ObserveArgs as clap::FromArgMatches>::from_arg_matches(&matches)
+                .unwrap()
+                .watch_process_interval,
+            Duration::from_secs(1)
+        );
+
+        let command = <ObserveArgs as clap::Args>::augment_args(clap::Command::new("homeboy"));
+        let matches = command
+            .try_get_matches_from([
+                "homeboy",
+                "demo",
+                "--watch-process",
+                "sleep",
+                "--watch-process-interval",
+                "250ms",
+            ])
+            .unwrap();
+        assert_eq!(
+            <ObserveArgs as clap::FromArgMatches>::from_arg_matches(&matches)
+                .unwrap()
+                .watch_process_interval,
+            Duration::from_millis(250)
         );
     }
 }
