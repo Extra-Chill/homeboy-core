@@ -154,4 +154,21 @@ mod tests {
         assert!(!suffix_matches("BlockSanitizer", "Ability"));
         assert!(!suffix_matches("EngineHelpers", "Tool"));
     }
+
+    #[test]
+    fn test_pluralize() {
+        assert_eq!(pluralize("Ability"), "Abilities");
+        assert_eq!(pluralize("Box"), "Boxes");
+        assert_eq!(pluralize("Branch"), "Branches");
+        assert_eq!(pluralize("Provider"), "Providers");
+    }
+
+    #[test]
+    fn test_singularize() {
+        assert_eq!(singularize("Abilities"), Some("Ability".to_string()));
+        assert_eq!(singularize("Boxes"), Some("Box".to_string()));
+        assert_eq!(singularize("Branches"), Some("Branch".to_string()));
+        assert_eq!(singularize("Providers"), Some("Provider".to_string()));
+        assert_eq!(singularize("Class"), None);
+    }
 }
