@@ -7,28 +7,22 @@ use super::parsing::{BenchResults, BenchScenario};
 
 pub(crate) fn validate_artifact_paths(results: &BenchResults, rig_id: Option<&str>) -> Result<()> {
     for scenario in &results.scenarios {
-        validate_artifacts(
-            &results.component_id,
-            scenario,
-            ArtifactPathContext {
-                rig_id,
-                phase: "scenario",
-                iteration: None,
-            },
-            scenario.artifacts.iter(),
+        validate_artifacts_for_context(
+            ArtifactPathScope::new(&results.component_id, scenario, rig_id, "scenario", None),
+            &scenario.artifacts,
         )?;
 
         if let Some(runs) = &scenario.runs {
             for (run_index, run) in runs.iter().enumerate() {
-                validate_artifacts(
-                    &results.component_id,
-                    scenario,
-                    ArtifactPathContext {
+                validate_artifacts_for_context(
+                    ArtifactPathScope::new(
+                        &results.component_id,
+                        scenario,
                         rig_id,
-                        phase: "iteration",
-                        iteration: Some(run_index + 1),
-                    },
-                    run.artifacts.iter(),
+                        "iteration",
+                        Some(run_index + 1),
+                    ),
+                    &run.artifacts,
                 )?;
             }
         }
@@ -37,11 +31,9 @@ pub(crate) fn validate_artifact_paths(results: &BenchResults, rig_id: Option<&st
     Ok(())
 }
 
-fn validate_artifacts<'a>(
-    component_id: &str,
-    scenario: &BenchScenario,
-    context: ArtifactPathContext<'_>,
-    artifacts: impl Iterator<Item = (&'a String, &'a BenchArtifact)>,
+fn validate_artifacts_for_context(
+    scope: ArtifactPathScope<'_>,
+    artifacts: &std::collections::BTreeMap<String, BenchArtifact>,
 ) -> Result<()> {
     for (artifact_key, artifact) in artifacts {
         if artifact
@@ -50,16 +42,42 @@ fn validate_artifacts<'a>(
             .is_some_and(|path| path.trim().is_empty())
         {
             return Err(empty_artifact_path_error(
-                context,
-                component_id,
-                &scenario.id,
-                scenario.file.as_deref(),
+                scope.context,
+                scope.component_id,
+                &scope.scenario.id,
+                scope.scenario.file.as_deref(),
                 artifact_key,
             ));
         }
     }
 
     Ok(())
+}
+
+struct ArtifactPathScope<'a> {
+    component_id: &'a str,
+    scenario: &'a BenchScenario,
+    context: ArtifactPathContext<'a>,
+}
+
+impl<'a> ArtifactPathScope<'a> {
+    fn new(
+        component_id: &'a str,
+        scenario: &'a BenchScenario,
+        rig_id: Option<&'a str>,
+        phase: &'a str,
+        iteration: Option<usize>,
+    ) -> Self {
+        Self {
+            component_id,
+            scenario,
+            context: ArtifactPathContext {
+                rig_id,
+                phase,
+                iteration,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -89,8 +89,39 @@ mod tests {
     use crate::extension::bench::parsing::BenchRunExecution;
 
     #[test]
+    fn test_bench_failure_stderr_tail() {
+        let args = bench_args();
+        let tail = bench_failure_stderr_tail(
+            "WORKLOAD_ERROR: studio-agent-site-build - warmup iteration 1/1 returned artifact \"visual_comparison_dir\" with empty path\n",
+            &args,
+        );
+
+        assert!(tail.contains("Bench artifact path validation context"));
+        assert!(tail.contains("component id `studio`"));
+    }
+
+    #[test]
     fn enriches_empty_artifact_path_failure_with_bench_context() {
-        let args = BenchRunWorkflowArgs {
+        let args = bench_args();
+
+        let enriched = enrich_empty_artifact_path_error(
+            "WORKLOAD_ERROR: studio-agent-site-build - warmup iteration 1/1 returned artifact \"visual_comparison_dir\" with empty path".to_string(),
+            &args,
+        );
+
+        assert!(enriched.contains("rig id `studio-bfb`"));
+        assert!(enriched.contains("component id `studio`"));
+        assert!(enriched.contains("workload id `studio-agent-site-build`"));
+        assert!(enriched.contains("scenario id `studio-agent-site-build`"));
+        assert!(enriched.contains("phase `warmup`"));
+        assert!(enriched.contains("iteration 1/1"));
+        assert!(enriched.contains("artifact key `visual_comparison_dir`"));
+        assert!(enriched.contains("Omit optional artifacts"));
+        assert!(enriched.contains("real diagnostics file/directory"));
+    }
+
+    fn bench_args() -> BenchRunWorkflowArgs {
+        BenchRunWorkflowArgs {
             component_label: "Studio".to_string(),
             component_id: "studio".to_string(),
             path_override: None,
@@ -114,21 +145,6 @@ mod tests {
             rig_id: Some("studio-bfb".to_string()),
             shared_state: None,
             extra_workloads: Vec::new(),
-        };
-
-        let enriched = enrich_empty_artifact_path_error(
-            "WORKLOAD_ERROR: studio-agent-site-build - warmup iteration 1/1 returned artifact \"visual_comparison_dir\" with empty path".to_string(),
-            &args,
-        );
-
-        assert!(enriched.contains("rig id `studio-bfb`"));
-        assert!(enriched.contains("component id `studio`"));
-        assert!(enriched.contains("workload id `studio-agent-site-build`"));
-        assert!(enriched.contains("scenario id `studio-agent-site-build`"));
-        assert!(enriched.contains("phase `warmup`"));
-        assert!(enriched.contains("iteration 1/1"));
-        assert!(enriched.contains("artifact key `visual_comparison_dir`"));
-        assert!(enriched.contains("Omit optional artifacts"));
-        assert!(enriched.contains("real diagnostics file/directory"));
+        }
     }
 }
