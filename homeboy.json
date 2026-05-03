@@ -3,8 +3,8 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-02T22:51:25Z",
-      "item_count": 701,
+      "created_at": "2026-05-03T17:37:38Z",
+      "item_count": 695,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
         "Rust test discovery::tests/commands/test_scope_test.rs::UnwiredNestedRustTest",
@@ -80,7 +80,6 @@
         "field_patterns::src/core/extension/mod.rs::RepeatedFieldPattern",
         "field_patterns::src/core/extension/mod.rs::RepeatedFieldPattern",
         "field_patterns::src/core/git/operations.rs::RepeatedFieldPattern",
-        "field_patterns::src/core/observation/records.rs::RepeatedFieldPattern",
         "field_patterns::src/core/project/mod.rs::RepeatedFieldPattern",
         "field_patterns::src/core/project/mod.rs::RepeatedFieldPattern",
         "field_patterns::src/core/project/mod.rs::RepeatedFieldPattern",
@@ -112,6 +111,7 @@
         "intra-method-duplication::src/core/db/operations.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/cli_tool.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/codebase_scan.rs::IntraMethodDuplicate",
@@ -337,7 +337,6 @@
         "test_coverage::src/core/engine/shell.rs::MissingTestFile",
         "test_coverage::src/core/engine/symbol_graph.rs::MissingTestMethod",
         "test_coverage::src/core/engine/symbol_graph.rs::MissingTestMethod",
-        "test_coverage::src/core/engine/symbol_graph.rs::OrphanedTest",
         "test_coverage::src/core/engine/template.rs::MissingTestFile",
         "test_coverage::src/core/engine/text.rs::MissingTestMethod",
         "test_coverage::src/core/engine/text.rs::MissingTestMethod",
@@ -430,10 +429,6 @@
         "test_coverage::src/core/extension/test/workflow.rs::MissingTestFile",
         "test_coverage::src/core/extension/update_check.rs::MissingTestMethod",
         "test_coverage::src/core/extension/update_check.rs::OrphanedTest",
-        "test_coverage::src/core/extension/version.rs::OrphanedTest",
-        "test_coverage::src/core/extension/version.rs::OrphanedTest",
-        "test_coverage::src/core/extension/version.rs::OrphanedTest",
-        "test_coverage::src/core/extension/version.rs::OrphanedTest",
         "test_coverage::src/core/extension/version.rs::OrphanedTest",
         "test_coverage::src/core/fleet/check.rs::MissingTestFile",
         "test_coverage::src/core/fleet/exec.rs::MissingTestFile",
@@ -612,7 +607,6 @@
         "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
         "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
         "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
-        "test_coverage::src/core/release/types.rs::MissingTestFile",
         "test_coverage::src/core/release/utils.rs::MissingTestFile",
         "test_coverage::src/core/release/version.rs::MissingTestMethod",
         "test_coverage::src/core/release/version.rs::MissingTestMethod",
@@ -709,7 +703,7 @@
         "test_quality::tests/core/refactor/decompose_test.rs::VacuousTest"
       ],
       "metadata": {
-        "alignment_score": 0.9285714030265808,
+        "alignment_score": 0.930232584476471,
         "known_outliers": [
           "src/core/engine/undo/entry.rs",
           "src/core/engine/undo/snapshot.rs",
