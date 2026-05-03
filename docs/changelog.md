@@ -4,6 +4,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.154.0] - 2026-05-03
+
+### Added
+- add temporal assertion shapes
+- add standard probe library
+- support fswatch attachments
+
+### Changed
+- cover weighted audit scoring
+- cover aggregate percentile serialization
+
+### Fixed
+- ignore lifecycle dead guard contexts
+- disambiguate repeated span events
+
 ## [0.153.0] - 2026-05-03
 
 ### Added
