@@ -9,6 +9,7 @@ deltas against a stored baseline.
 homeboy bench <component> [options] [-- <runner-args>]
 homeboy bench list <component> [options] [-- <runner-args>]
 homeboy bench history <component> [--scenario <id>] [--rig <id>] [--limit 20]
+homeboy bench distribution <component> --field <metadata.path> [--scenario <id>] [--rig <id>] [--status <status>] [--limit 20]
 homeboy bench compare --from-run <run-id> --to-run <run-id>
 ```
 
@@ -93,6 +94,8 @@ homeboy runs list --kind bench --component <component> --rig <rig>
 Omit `--rig <rig>` from the list command for unpinned bench runs.
 
 `homeboy bench history <component>` lists persisted benchmark runs from the local observation store. `--scenario` filters to runs whose stored metadata includes the scenario, and `--rig` narrows to rig-pinned runs.
+
+`homeboy bench distribution <component> --field <metadata.path>` summarizes repeated categorical values from persisted benchmark run metadata. It is generic over metadata shape: scalar string, number, and boolean values are counted directly, and arrays are flattened. Use `--scenario`, `--rig`, `--status`, and `--limit` to narrow the persisted run window before aggregation.
 
 `homeboy bench compare --from-run <run-id> --to-run <run-id>` compares numeric metrics recorded in two persisted benchmark runs. It matches scenario + metric rows, reports absolute deltas and percent changes, and lists metrics that exist in only one run. The command is read-only and exits successfully for a valid comparison even when the numbers regress.
 
