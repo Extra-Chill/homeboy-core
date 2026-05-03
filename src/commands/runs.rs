@@ -1,5 +1,6 @@
 mod bundle;
 mod compare;
+mod distribution;
 mod findings;
 mod latest;
 mod reconcile;
@@ -18,6 +19,7 @@ use bundle::{
     export_runs, import_runs, RunsExportArgs, RunsExportOutput, RunsImportArgs, RunsImportOutput,
 };
 use compare::{compare_runs, RunsCompareArgs, RunsCompareOutput};
+pub use distribution::{runs_distribution, RunsDistributionArgs, RunsDistributionOutput};
 use findings::{RunsFindingOutput, RunsFindingsOutput};
 use latest::{RunsLatestFindingOutput, RunsLatestRunArgs, RunsLatestRunOutput};
 use reconcile::{reconcile_runs, RunsReconcileArgs, RunsReconcileOutput};
@@ -34,6 +36,8 @@ pub struct RunsArgs {
 enum RunsCommand {
     /// List persisted observation runs
     List(RunsListArgs),
+    /// Aggregate categorical values from persisted run metadata
+    Distribution(RunsDistributionArgs),
     /// Show the latest persisted observation run matching filters
     LatestRun(RunsLatestRunArgs),
     /// Compare selected metrics across persisted run history
@@ -79,6 +83,7 @@ pub struct RunsListArgs {
 #[serde(untagged)]
 pub enum RunsOutput {
     List(RunsListOutput),
+    Distribution(RunsDistributionOutput),
     LatestRun(RunsLatestRunOutput),
     Compare(RunsCompareOutput),
     Show(RunsShowOutput),
@@ -177,6 +182,9 @@ pub struct BenchMissingMetric {
 pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
     match args.command {
         RunsCommand::List(args) => list_runs(args, "runs.list"),
+        RunsCommand::Distribution(args) => {
+            distribution::runs_distribution(args, "runs.distribution")
+        }
         RunsCommand::LatestRun(args) => latest::latest_run(args),
         RunsCommand::Compare(args) => compare_runs(args),
         RunsCommand::Reconcile(args) => reconcile_runs(args),
@@ -398,7 +406,7 @@ pub(crate) fn run_summary(run: RunRecord) -> RunSummary {
     }
 }
 
-fn run_contains_scenario(run: &RunRecord, scenario_id: &str) -> bool {
+pub(super) fn run_contains_scenario(run: &RunRecord, scenario_id: &str) -> bool {
     if run.metadata_json["selected_scenarios"]
         .as_array()
         .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(scenario_id)))

@@ -38,6 +38,8 @@ enum BenchCommand {
     List(BenchListArgs),
     /// List persisted benchmark runs for a component
     History(BenchHistoryArgs),
+    /// Aggregate categorical values from persisted benchmark metadata
+    Distribution(BenchDistributionArgs),
     /// Compare two persisted benchmark runs
     Compare(BenchCompareArgs),
 }
@@ -53,6 +55,27 @@ struct BenchHistoryArgs {
     #[arg(long)]
     rig: Option<String>,
     /// Maximum runs to return
+    #[arg(long, default_value_t = 20)]
+    limit: i64,
+}
+
+#[derive(Args)]
+struct BenchDistributionArgs {
+    /// Component ID
+    component: String,
+    /// Scenario ID
+    #[arg(long = "scenario")]
+    scenario_id: Option<String>,
+    /// Rig ID
+    #[arg(long)]
+    rig: Option<String>,
+    /// Run status
+    #[arg(long)]
+    status: Option<String>,
+    /// Dot-separated metadata path to aggregate
+    #[arg(long = "field", required = true)]
+    fields: Vec<String>,
+    /// Maximum runs to inspect before scenario filtering
     #[arg(long, default_value_t = 20)]
     limit: i64,
 }
@@ -323,6 +346,21 @@ pub fn run(mut args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> 
                     history_args.scenario_id.as_deref(),
                     history_args.rig.as_deref(),
                     history_args.limit,
+                )?;
+                Ok((BenchOutput::Observation(output), exit_code))
+            }
+            BenchCommand::Distribution(distribution_args) => {
+                let (output, exit_code) = runs::runs_distribution(
+                    runs::RunsDistributionArgs {
+                        kind: Some("bench".to_string()),
+                        component_id: Some(distribution_args.component.clone()),
+                        rig: distribution_args.rig.clone(),
+                        scenario_id: distribution_args.scenario_id.clone(),
+                        status: distribution_args.status.clone(),
+                        fields: distribution_args.fields.clone(),
+                        limit: distribution_args.limit,
+                    },
+                    "bench.distribution",
                 )?;
                 Ok((BenchOutput::Observation(output), exit_code))
             }
