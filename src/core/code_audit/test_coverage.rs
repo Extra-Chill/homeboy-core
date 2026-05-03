@@ -619,6 +619,15 @@ fn find_orphaned_test_methods(
             continue;
         }
 
+        if config.inline_tests
+            && source_methods.iter().any(|source_method| {
+                test_covers_method(test_method, source_method, &config.method_prefix)
+                    || source_method.starts_with(&format!("{expected_source}_"))
+            })
+        {
+            continue;
+        }
+
         // Behavior-driven test names: test_detects_exact_duplicate describes a
         // behavior, not a method reference. Short names (1-2 segments like
         // "old_function" or "pause") are likely real method references. But
@@ -1435,6 +1444,43 @@ fn test_chat_tools() {
             "Behavioral test name should NOT be flagged as orphaned. Orphaned: {:?}",
             orphaned_names
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn short_rust_behavior_test_names_not_flagged_as_orphaned() {
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_short_behavioral");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/core/extension")).unwrap();
+
+        let source = make_fp_split(
+            "src/core/extension/version.rs",
+            vec!["matches", "parse_php_import_path"],
+            vec![
+                "test_gt_matches",
+                "test_lt_matches",
+                "test_parse_php_import",
+                "test_old_function",
+            ],
+        );
+
+        let findings = analyze_test_coverage(&dir, &[&source], &config);
+        let orphaned: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| {
+                f.kind == AuditFinding::OrphanedTest && f.description.contains("no longer exists")
+            })
+            .collect();
+
+        assert_eq!(
+            orphaned.len(),
+            1,
+            "short behavior names that cover live Rust source methods should not be orphaned: {:?}",
+            orphaned.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+        assert!(orphaned[0].description.contains("old_function"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
