@@ -6,8 +6,8 @@ use homeboy::Error;
 
 use crate::commands::{
     runs::{
-        latest::require_latest_run, latest::run_filter_from_latest_args,
-        latest::RunsLatestFindingOutput, latest::RunsLatestRunArgs, run_summary, RunsOutput,
+        latest::latest_run_context, latest::RunsLatestFindingOutput, latest::RunsLatestRunArgs,
+        run_summary, RunsOutput,
     },
     CmdResult,
 };
@@ -107,16 +107,12 @@ pub fn finding(finding_id: &str) -> CmdResult<RunsOutput> {
 }
 
 pub fn latest_finding(args: RunsLatestFindingArgs) -> CmdResult<RunsOutput> {
-    let store = ObservationStore::open_initialized()?;
-    let run = require_latest_run(
-        &store,
-        run_filter_from_latest_args(RunsLatestRunArgs {
-            kind: args.kind,
-            component_id: args.component_id,
-            rig: args.rig,
-            status: args.status,
-        }),
-    )?;
+    let (store, run) = latest_run_context(RunsLatestRunArgs {
+        kind: args.kind,
+        component_id: args.component_id,
+        rig: args.rig,
+        status: args.status,
+    })?;
     let finding = store
         .latest_finding(FindingListFilter {
             run_id: Some(run.id.clone()),
