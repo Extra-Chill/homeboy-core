@@ -115,7 +115,7 @@ Managed services are detached, tracked by PID in rig state, and logged under `~/
 
 | Field | Type | Description |
 |---|---|---|
-| `exclusive` | array | Logical tokens that must not overlap with another active rig. |
+| `exclusive` | array | Logical tokens that must not overlap with another active rig. Supports variable expansion. |
 | `paths` | array | Filesystem paths the rig mutates or requires exclusively. |
 | `ports` | array | TCP ports the rig binds or assumes ownership of. |
 | `process_patterns` | array | Process command-line substrings the rig may stop or inspect. |
@@ -123,13 +123,15 @@ Managed services are detached, tracked by PID in rig state, and logged under `~/
 ```jsonc
 {
   "resources": {
-    "exclusive": ["studio-dev"],
+    "exclusive": ["studio-dev:${env.STUDIO_BENCH_NAMESPACE}"],
     "paths": ["~/Studio/intelligence-chubes4/wp-content/plugins"],
     "ports": [9724],
     "process_patterns": ["wordpress-server-child.mjs"]
   }
 }
 ```
+
+Use `${env.NAME}` in `exclusive` tokens when a rig needs a namespace-scoped logical lock for parallel-safe runs. Unset environment variables expand to an empty string, matching other rig string expansion fields, and unknown token families remain literal.
 
 Leases guard concurrent active commands; they are not long-lived ownership records after the command exits.
 

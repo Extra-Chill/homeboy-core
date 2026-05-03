@@ -19,9 +19,15 @@ pub fn expand_vars(rig: &RigSpec, input: &str) -> String {
     expand::expand_with_tilde(input, |token| resolve_token(rig, token))
 }
 
-/// Return a copy of the rig resource declarations with path entries expanded.
+/// Return a copy of the rig resource declarations with expandable string entries expanded.
 pub fn expand_resources(rig: &RigSpec) -> RigResourcesSpec {
     let mut resources = rig.resources.clone();
+    resources.exclusive = merge_expanded_strings(
+        rig,
+        resources.exclusive.iter().map(String::as_str),
+        std::iter::empty(),
+    );
+
     let derived_paths = rig.symlinks.iter().map(|symlink| symlink.link.as_str());
     resources.paths = merge_expanded_strings(
         rig,
