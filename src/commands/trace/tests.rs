@@ -111,6 +111,7 @@ fn rig_trace_list_uses_rig_default_component_and_workloads() {
             focus_spans: Vec::new(),
             spans: Vec::new(),
             phases: Vec::new(),
+            attachments: Vec::new(),
             phase_preset: None,
             baseline_args: BaselineArgs::default(),
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -209,6 +210,7 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
             focus_spans: Vec::new(),
             spans: Vec::new(),
             phases: Vec::new(),
+            attachments: Vec::new(),
             phase_preset: None,
             baseline_args: BaselineArgs::default(),
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -264,6 +266,7 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -326,6 +329,7 @@ fn trace_run_persists_observation_history() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -411,6 +415,7 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
                 focus_spans: vec!["boot_to_ready".to_string()],
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -498,6 +503,7 @@ fn trace_repeat_loads_span_metadata_and_reports_unknown_ids() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -674,6 +680,7 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -751,6 +758,7 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
             focus_spans: Vec::new(),
             spans: Vec::new(),
             phases: Vec::new(),
+            attachments: Vec::new(),
             phase_preset: None,
             baseline_args: BaselineArgs::default(),
             regression_threshold: extension_trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
@@ -860,6 +868,7 @@ fn trace_compare_variant_writes_experiment_bundle() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -935,6 +944,7 @@ fn trace_compare_variant_resolves_named_variants() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -1025,6 +1035,7 @@ fn trace_compare_variant_reports_unknown_named_variants() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -1093,6 +1104,7 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
                         key: "runner.ready".to_string(),
                     },
                 ],
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -1162,6 +1174,7 @@ fn trace_run_expands_named_workload_phase_preset() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: Some("startup".to_string()),
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -1231,6 +1244,7 @@ fn trace_aggregate_spans_uses_workload_default_phase_preset() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
@@ -1396,6 +1410,7 @@ fn failed_trace_run_persists_observation_history() {
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:

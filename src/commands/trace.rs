@@ -8,8 +8,8 @@ use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::{
-    TraceCommandOutput, TraceListWorkflowArgs, TraceOverlayRequest, TraceRunWorkflowArgs,
-    TraceRunnerInputs, TraceSpanDefinition,
+    TraceAttachment, TraceCommandOutput, TraceListWorkflowArgs, TraceOverlayRequest,
+    TraceRunWorkflowArgs, TraceRunnerInputs, TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::observation::{
@@ -56,29 +56,22 @@ use matrix::{expand_variant_matrix, TraceVariantStackItem};
 pub struct TraceArgs {
     #[command(flatten)]
     comp: PositionalComponentArgs,
-
     /// Target component for command-shaped trace modes like `compare-variant`.
     #[arg(long = "component", value_name = "COMPONENT_ID")]
     pub component_arg: Option<String>,
-
     /// Scenario ID to run, or `list` to discover available scenarios.
     pub scenario: Option<String>,
-
     /// Scenario ID for command-shaped trace modes like `compare-variant`.
     #[arg(long = "scenario", value_name = "SCENARIO_ID")]
     pub scenario_arg: Option<String>,
-
     /// After aggregate JSON when running `homeboy trace compare before.json after.json`.
     #[arg(value_name = "AFTER_JSON")]
     pub compare_after: Option<PathBuf>,
-
     /// Run trace against a rig-pinned component path after `rig check` passes.
     #[arg(long, value_name = "RIG_ID")]
     pub rig: Option<String>,
-
     #[command(flatten)]
     pub setting_args: SettingArgs,
-
     #[command(flatten)]
     pub _json: HiddenJsonArgs,
 
@@ -117,6 +110,10 @@ pub struct TraceArgs {
     /// Add an ordered phase milestone as `[label:]source.event`.
     #[arg(long = "phase", value_name = "[LABEL:]SOURCE.EVENT", value_parser = extension_trace::spans::parse_phase_milestone)]
     pub phases: Vec<extension_trace::spans::TracePhaseMilestone>,
+
+    /// Observe an already-running local target without managing its lifecycle. Repeatable.
+    #[arg(long = "attach", value_name = "KIND:TARGET")]
+    pub attachments: Vec<String>,
 
     /// Use a named phase preset declared by the selected rig/workload.
     #[arg(long = "phase-preset", value_name = "NAME")]
@@ -534,6 +531,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
     let experiment_env = trace_experiment_env(experiment_plan.as_ref())?;
     let trace_probes =
         trace_probes_for_args(&args, rig_context.as_ref(), ctx.extension_id.as_deref())?;
+    let attachments = TraceAttachment::parse_all(&args.attachments)?;
     let mut json_settings = experiment_settings;
     json_settings.extend(settings_as_json(&ctx.settings));
     json_settings.extend(
@@ -553,6 +551,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
                 env: experiment_env.clone(),
                 workload_paths: extra_workloads,
                 probes: trace_probes,
+                attachments,
             },
             scenario_id,
             json_summary: args.json_summary,
@@ -993,6 +992,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
                 env: Vec::new(),
                 workload_paths: extra_workloads,
                 probes: Vec::new(),
+                attachments: Vec::new(),
             },
             rig_id: args.rig,
         },

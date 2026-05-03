@@ -43,6 +43,7 @@ JSON
                 focus_spans: Vec::new(),
                 spans: Vec::new(),
                 phases: Vec::new(),
+                attachments: Vec::new(),
                 phase_preset: None,
                 baseline_args: BaselineArgs::default(),
                 regression_threshold:
