@@ -15,7 +15,20 @@ use crate::error::{Error, Result};
 
 use super::parsing::TraceEvent;
 
+mod cmd_run;
+mod file_watch;
+mod http_poll;
+mod port_snapshot;
+
+use cmd_run::run_cmd_run;
+use file_watch::{file_state, run_file_watch, FileState};
+use http_poll::run_http_poll;
+use port_snapshot::{ports_for_snapshot, run_port_snapshot};
+
 const DEFAULT_PROCESS_INTERVAL_MS: u64 = 1_000;
+const DEFAULT_FILE_INTERVAL_MS: u64 = 250;
+const DEFAULT_PORT_INTERVAL_MS: u64 = 500;
+const DEFAULT_HTTP_INTERVAL_MS: u64 = 1_000;
 const LOG_POLL_INTERVAL_MS: u64 = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +47,45 @@ pub enum TraceProbeConfig {
         pattern: String,
         #[serde(default, alias = "interval", skip_serializing_if = "Option::is_none")]
         interval_ms: Option<u64>,
+    },
+    #[serde(rename = "file.watch")]
+    FileWatch {
+        path: String,
+        #[serde(default, alias = "interval", skip_serializing_if = "Option::is_none")]
+        interval_ms: Option<u64>,
+    },
+    #[serde(rename = "port.snapshot")]
+    PortSnapshot {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
+        #[serde(
+            default,
+            rename = "port-range",
+            alias = "port_range",
+            skip_serializing_if = "Option::is_none"
+        )]
+        port_range: Option<String>,
+        #[serde(default, alias = "interval", skip_serializing_if = "Option::is_none")]
+        interval_ms: Option<u64>,
+    },
+    #[serde(rename = "http.poll")]
+    HttpPoll {
+        url: String,
+        #[serde(default, alias = "interval", skip_serializing_if = "Option::is_none")]
+        interval_ms: Option<u64>,
+        #[serde(
+            default,
+            rename = "assert-status",
+            alias = "assert_status",
+            skip_serializing_if = "Option::is_none"
+        )]
+        assert_status: Option<u16>,
+    },
+    #[serde(rename = "cmd.run")]
+    CmdRun {
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
     },
 }
 
@@ -54,6 +106,24 @@ enum RunningTraceProbeConfig {
     ProcessSnapshot {
         pattern: String,
         interval_ms: Option<u64>,
+    },
+    FileWatch {
+        path: String,
+        interval_ms: Option<u64>,
+        initial_state: FileState,
+    },
+    PortSnapshot {
+        ports: Vec<u16>,
+        interval_ms: Option<u64>,
+    },
+    HttpPoll {
+        url: String,
+        interval_ms: Option<u64>,
+        assert_status: Option<u16>,
+    },
+    CmdRun {
+        command: String,
+        args: Vec<String>,
     },
 }
 
@@ -120,6 +190,32 @@ fn running_probe_config(config: &TraceProbeConfig) -> RunningTraceProbeConfig {
             pattern: pattern.clone(),
             interval_ms: *interval_ms,
         },
+        TraceProbeConfig::FileWatch { path, interval_ms } => RunningTraceProbeConfig::FileWatch {
+            path: path.clone(),
+            interval_ms: *interval_ms,
+            initial_state: file_state(&PathBuf::from(path)),
+        },
+        TraceProbeConfig::PortSnapshot {
+            port,
+            port_range,
+            interval_ms,
+        } => RunningTraceProbeConfig::PortSnapshot {
+            ports: ports_for_snapshot(*port, port_range.as_deref()).unwrap_or_default(),
+            interval_ms: *interval_ms,
+        },
+        TraceProbeConfig::HttpPoll {
+            url,
+            interval_ms,
+            assert_status,
+        } => RunningTraceProbeConfig::HttpPoll {
+            url: url.clone(),
+            interval_ms: *interval_ms,
+            assert_status: *assert_status,
+        },
+        TraceProbeConfig::CmdRun { command, args } => RunningTraceProbeConfig::CmdRun {
+            command: command.clone(),
+            args: args.clone(),
+        },
     }
 }
 
@@ -150,6 +246,41 @@ fn validate_probe(config: &TraceProbeConfig) -> Result<()> {
                     None,
                 )
             })?;
+        }
+        TraceProbeConfig::FileWatch { path, .. } => {
+            if path.trim().is_empty() {
+                return Err(Error::validation_invalid_argument(
+                    "trace_probes.path",
+                    "file.watch path cannot be empty".to_string(),
+                    None,
+                    None,
+                ));
+            }
+        }
+        TraceProbeConfig::PortSnapshot {
+            port, port_range, ..
+        } => {
+            ports_for_snapshot(*port, port_range.as_deref())?;
+        }
+        TraceProbeConfig::HttpPoll { url, .. } => {
+            reqwest::Url::parse(url).map_err(|e| {
+                Error::validation_invalid_argument(
+                    "trace_probes.url",
+                    format!("invalid http.poll url: {}", e),
+                    None,
+                    None,
+                )
+            })?;
+        }
+        TraceProbeConfig::CmdRun { command, .. } => {
+            if command.trim().is_empty() {
+                return Err(Error::validation_invalid_argument(
+                    "trace_probes.command",
+                    "cmd.run command cannot be empty".to_string(),
+                    None,
+                    None,
+                ));
+            }
         }
     }
     Ok(())
@@ -185,6 +316,40 @@ fn run_probe(
             events,
             stop,
         ),
+        RunningTraceProbeConfig::FileWatch {
+            path,
+            interval_ms,
+            initial_state,
+        } => run_file_watch(
+            path,
+            interval_ms.unwrap_or(DEFAULT_FILE_INTERVAL_MS),
+            initial_state,
+            started_at,
+            events,
+            stop,
+        ),
+        RunningTraceProbeConfig::PortSnapshot { ports, interval_ms } => run_port_snapshot(
+            ports,
+            interval_ms.unwrap_or(DEFAULT_PORT_INTERVAL_MS),
+            started_at,
+            events,
+            stop,
+        ),
+        RunningTraceProbeConfig::HttpPoll {
+            url,
+            interval_ms,
+            assert_status,
+        } => run_http_poll(
+            url,
+            interval_ms.unwrap_or(DEFAULT_HTTP_INTERVAL_MS),
+            assert_status,
+            started_at,
+            events,
+            stop,
+        ),
+        RunningTraceProbeConfig::CmdRun { command, args } => {
+            run_cmd_run(command, args, started_at, events, stop)
+        }
     }
 }
 

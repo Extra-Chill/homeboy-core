@@ -563,13 +563,17 @@ mod tests {
                 "path": "/tmp/scoped.trace.mjs",
                 "trace_probes": [
                     { "type": "log.tail", "path": "/tmp/app.log", "grep": "ready" },
-                    { "type": "process.snapshot", "pattern": "node.*serve", "interval_ms": 250 }
+                    { "type": "process.snapshot", "pattern": "node.*serve", "interval_ms": 250 },
+                    { "type": "file.watch", "path": "/tmp/auth.json", "interval_ms": 100 },
+                    { "type": "port.snapshot", "port": 3000 },
+                    { "type": "http.poll", "url": "http://127.0.0.1:3000/health", "assert-status": 200 },
+                    { "type": "cmd.run", "command": "kimaki", "args": ["--help"] }
                 ]
             }"#,
         )
         .expect("parse detailed workload probes");
 
-        assert_eq!(workload.trace_probes().len(), 2);
+        assert_eq!(workload.trace_probes().len(), 6);
         assert!(matches!(
             &workload.trace_probes()[0],
             TraceProbeConfig::LogTail { path, grep, .. }
@@ -579,6 +583,26 @@ mod tests {
             &workload.trace_probes()[1],
             TraceProbeConfig::ProcessSnapshot { pattern, interval_ms }
                 if pattern == "node.*serve" && *interval_ms == Some(250)
+        ));
+        assert!(matches!(
+            &workload.trace_probes()[2],
+            TraceProbeConfig::FileWatch { path, interval_ms }
+                if path == "/tmp/auth.json" && *interval_ms == Some(100)
+        ));
+        assert!(matches!(
+            &workload.trace_probes()[3],
+            TraceProbeConfig::PortSnapshot { port, .. }
+                if *port == Some(3000)
+        ));
+        assert!(matches!(
+            &workload.trace_probes()[4],
+            TraceProbeConfig::HttpPoll { url, assert_status, .. }
+                if url == "http://127.0.0.1:3000/health" && *assert_status == Some(200)
+        ));
+        assert!(matches!(
+            &workload.trace_probes()[5],
+            TraceProbeConfig::CmdRun { command, args }
+                if command == "kimaki" && args == &vec!["--help".to_string()]
         ));
         assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
             .trace_probes()
