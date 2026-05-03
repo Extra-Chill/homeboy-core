@@ -2,7 +2,7 @@ use std::fs;
 
 use crate::test_support::with_isolated_home;
 
-use super::test_fixture::{write_trace_extension, write_trace_rig, XdgGuard};
+use super::test_fixture::{write_trace_extension, write_trace_rig};
 use super::*;
 
 fn trace_args_for_rig(rig_id: &str) -> TraceArgs {
@@ -45,7 +45,6 @@ fn trace_args_for_rig(rig_id: &str) -> TraceArgs {
 #[test]
 fn trace_aggregate_runs_passing_guardrails() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());
@@ -88,7 +87,6 @@ fn trace_aggregate_runs_passing_guardrails() {
 #[test]
 fn trace_aggregate_fails_guardrails_without_losing_timing_artifacts() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());

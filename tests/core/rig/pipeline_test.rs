@@ -511,6 +511,7 @@ mod command_env {
     use crate::rig::pipeline::run_pipeline;
     use crate::rig::spec::{PipelineStep, RigSpec};
     use crate::rig::toolchain;
+    use crate::test_support::home_env_guard;
 
     fn rig_with_command(cmd: String, env: HashMap<String, String>) -> RigSpec {
         let mut pipeline = HashMap::new();
@@ -568,6 +569,7 @@ mod command_env {
 
     #[test]
     fn test_command_step_uses_bootstrapped_toolchain_path() {
+        let _guard = home_env_guard();
         let expected = toolchain::command_step_path().expect("toolchain path");
         let tmp = tempfile::tempdir().expect("tmpdir");
         let path_file = tmp.path().join("path.txt");

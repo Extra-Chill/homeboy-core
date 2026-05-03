@@ -954,14 +954,19 @@ const MIN_SHARED_CALLS: usize = 3;
 const PLUMBING_CALLS: &[&str] = &[
     "args",
     "current_dir",
+    "execute",
+    "failure",
+    "fix_deployed_permissions",
     "from_utf8_lossy",
     "is_dir",
     "is_terminal",
     "max",
     "output",
     "path",
+    "quote_path",
     "read_dir",
     "read_to_string",
+    "render_map",
     "run_git",
     "stderr",
     "success",
@@ -990,6 +995,9 @@ const TRIVIAL_CALLS: &[&str] = &[
     "unwrap_or_default",
     "unwrap_or_else",
     "expect",
+    "lines",
+    "next",
+    "ok_or_else",
     "as_str",
     "as_ref",
     "as_deref",
@@ -1011,6 +1019,7 @@ const TRIVIAL_CALLS: &[&str] = &[
     "extend",
     "join",
     "split",
+    "split_whitespace",
     "trim",
     "starts_with",
     "ends_with",
@@ -2548,6 +2557,54 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         assert!(
             findings.is_empty(),
             "Shared Command setup/result checks are plumbing, not a workflow"
+        );
+    }
+
+    #[test]
+    fn no_parallel_for_text_parsing_plumbing() {
+        let http_handler = make_fingerprint_with_content(
+            "src/core/daemon.rs",
+            &["handle_connection"],
+            "fn handle_connection() {\n    request.lines().next().split_whitespace();\n    route();\n    write_response();\n}",
+        );
+        let process_probe = make_fingerprint_with_content(
+            "src/core/server/client.rs",
+            &["probe_child_resources"],
+            "fn probe_child_resources() {\n    stdout.lines().next().split_whitespace();\n    parse_rss();\n    parse_cpu();\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&http_handler, &process_probe],
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Shared line tokenization is parsing plumbing, not a reusable workflow"
+        );
+    }
+
+    #[test]
+    fn no_parallel_for_deploy_plumbing_only_patterns() {
+        let artifact_deploy = make_fingerprint_with_content(
+            "src/core/deploy/safety_and_artifact.rs",
+            &["deploy_artifact"],
+            "fn deploy_artifact() {\n    quote_path();\n    execute();\n    failure();\n    render_map();\n    fix_deployed_permissions();\n}",
+        );
+        let override_deploy = make_fingerprint_with_content(
+            "src/core/deploy/version_overrides.rs",
+            &["deploy_with_override"],
+            "fn deploy_with_override() {\n    quote_path();\n    execute();\n    failure();\n    render_map();\n    fix_deployed_permissions();\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&artifact_deploy, &override_deploy],
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Shared SSH/deploy epilogue calls should not imply an extractable workflow"
         );
     }
 

@@ -39,8 +39,7 @@ pub struct RunsLatestFindingOutput {
 }
 
 pub fn latest_run(args: RunsLatestRunArgs) -> CmdResult<RunsOutput> {
-    let store = ObservationStore::open_initialized()?;
-    let run = require_latest_run(&store, run_filter_from_latest_args(args))?;
+    let (_, run) = latest_run_context(args)?;
 
     Ok((
         RunsOutput::LatestRun(RunsLatestRunOutput {
@@ -49,6 +48,14 @@ pub fn latest_run(args: RunsLatestRunArgs) -> CmdResult<RunsOutput> {
         }),
         0,
     ))
+}
+
+pub(crate) fn latest_run_context(
+    args: RunsLatestRunArgs,
+) -> homeboy::Result<(ObservationStore, RunRecord)> {
+    let store = ObservationStore::open_initialized()?;
+    let run = require_latest_run(&store, run_filter_from_latest_args(args))?;
+    Ok((store, run))
 }
 
 pub(crate) fn require_latest_run(

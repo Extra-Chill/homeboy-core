@@ -4,6 +4,7 @@ use tempfile::TempDir;
 
 pub(crate) struct HomeGuard {
     prior: Option<String>,
+    prior_xdg_data_home: Option<String>,
     dir: TempDir,
     _guard: MutexGuard<'static, ()>,
 }
@@ -28,10 +29,13 @@ impl HomeGuard {
     pub(crate) fn new() -> Self {
         let guard = home_lock().lock().unwrap_or_else(|e| e.into_inner());
         let prior = std::env::var("HOME").ok();
+        let prior_xdg_data_home = std::env::var("XDG_DATA_HOME").ok();
         let dir = TempDir::new().expect("home tempdir");
         std::env::set_var("HOME", dir.path());
+        std::env::set_var("XDG_DATA_HOME", dir.path().join(".local").join("share"));
         Self {
             prior,
+            prior_xdg_data_home,
             dir,
             _guard: guard,
         }
@@ -43,6 +47,10 @@ impl Drop for HomeGuard {
         match &self.prior {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
+        }
+        match &self.prior_xdg_data_home {
+            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+            None => std::env::remove_var("XDG_DATA_HOME"),
         }
     }
 }

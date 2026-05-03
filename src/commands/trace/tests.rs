@@ -9,7 +9,7 @@ use homeboy::rig::ComponentSpec;
 use super::test_fixture::{
     init_overlay_component, write_trace_extension, write_trace_rig,
     write_trace_rig_with_phase_preset, write_trace_rig_with_span_metadata,
-    write_trace_rig_with_variant, XdgGuard,
+    write_trace_rig_with_variant,
 };
 use super::*;
 
@@ -239,7 +239,6 @@ fn rig_trace_list_uses_scoped_workload_preflight() {
 #[test]
 fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());
@@ -302,7 +301,6 @@ fn rig_trace_run_uses_rig_owned_workload_extension_without_component_link() {
 #[test]
 fn trace_run_persists_observation_history() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());
@@ -388,7 +386,6 @@ fn trace_run_persists_observation_history() {
 #[test]
 fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());
@@ -476,7 +473,6 @@ fn trace_repeat_aggregates_span_timings_and_preserves_artifacts() {
 #[test]
 fn trace_repeat_loads_span_metadata_and_reports_unknown_ids() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig_with_span_metadata(home, "studio-rig", "studio", component_dir.path());
@@ -640,7 +636,6 @@ fn trace_run_order_planner_supports_grouped_and_interleaved_variants() {
 #[test]
 fn trace_repeat_reports_overlay_touched_files_at_top_level() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
@@ -724,7 +719,6 @@ fn trace_repeat_reports_overlay_touched_files_at_top_level() {
 #[test]
 fn trace_run_resolves_named_variants_and_reports_unknown_names() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
@@ -827,7 +821,6 @@ fn trace_run_resolves_named_variants_and_reports_unknown_names() {
 #[test]
 fn trace_compare_variant_writes_experiment_bundle() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
@@ -908,7 +901,6 @@ fn trace_compare_variant_writes_experiment_bundle() {
 #[test]
 fn trace_compare_variant_resolves_named_variants() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
@@ -999,7 +991,6 @@ fn trace_compare_variant_resolves_named_variants() {
 #[test]
 fn trace_compare_variant_reports_unknown_named_variants() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
@@ -1068,7 +1059,6 @@ fn trace_compare_variant_reports_unknown_named_variants() {
 #[test]
 fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());
@@ -1147,7 +1137,6 @@ fn trace_run_expands_phase_chain_into_adjacent_and_total_spans() {
 #[test]
 fn trace_run_expands_named_workload_phase_preset() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig_with_phase_preset(home, "preset-rig", "studio", component_dir.path());
@@ -1217,7 +1206,6 @@ fn trace_run_expands_named_workload_phase_preset() {
 #[test]
 fn trace_aggregate_spans_uses_workload_default_phase_preset() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig_with_phase_preset(home, "preset-rig", "studio", component_dir.path());
@@ -1409,7 +1397,6 @@ fn aggregate_json_omits_unavailable_percentiles() {
 #[test]
 fn failed_trace_run_persists_observation_history() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_rig(home, "studio-rig", "studio", component_dir.path());

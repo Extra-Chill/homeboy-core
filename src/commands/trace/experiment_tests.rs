@@ -7,7 +7,6 @@ use crate::test_support::with_isolated_home;
 
 use homeboy::extension::trace as extension_trace;
 
-use super::test_fixture::XdgGuard;
 use super::{execute_trace_run, TraceArgs, TraceSchedule, TraceVariantMatrixMode};
 
 fn trace_args_for_rig(rig_id: &str, scenario: &str) -> TraceArgs {
@@ -145,7 +144,6 @@ fn write_trace_experiment_rig(home: &tempfile::TempDir, component_path: &std::pa
 #[test]
 fn trace_experiment_runs_setup_settings_artifacts_and_teardown() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_experiment_extension(home, false);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_experiment_rig(home, component_dir.path());
@@ -196,7 +194,6 @@ fn trace_experiment_runs_setup_settings_artifacts_and_teardown() {
 #[test]
 fn trace_experiment_runs_teardown_when_trace_fails() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_experiment_extension(home, true);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         write_trace_experiment_rig(home, component_dir.path());
