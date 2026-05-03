@@ -156,6 +156,9 @@ fn detect_repeated_field_patterns(root: &Path) -> Vec<Finding> {
         if is_low_value_boundary_coordinate_group(&sorted_fields, locations) {
             continue;
         }
+        if is_low_value_data_contract_group(&sorted_fields, locations) {
+            continue;
+        }
         if is_low_value_generic_group(&sorted_fields, locations) {
             continue;
         }
@@ -552,6 +555,97 @@ fn is_low_value_boundary_coordinate_group(
     locations
         .iter()
         .all(|(file, name)| file == first_file && is_boundary_dto_name(name))
+}
+
+fn is_low_value_data_contract_group(
+    fields: &[FieldSignature],
+    locations: &[(String, String)],
+) -> bool {
+    if fields.len() < MIN_GROUP_SIZE || fields.len() > 4 || locations.len() < MIN_OCCURRENCES {
+        return false;
+    }
+
+    if !locations
+        .iter()
+        .all(|(_, name)| is_data_contract_type_name(name))
+    {
+        return false;
+    }
+
+    fields
+        .iter()
+        .all(|field| is_low_value_data_contract_field(&field.name))
+}
+
+fn is_data_contract_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Component"
+            | "Convention"
+            | "DirectoryConvention"
+            | "FileFingerprint"
+            | "Insertion"
+            | "MapClass"
+            | "NewFile"
+            | "Project"
+            | "RawComponent"
+    ) || name.ends_with("Args")
+        || name.ends_with("Buckets")
+        || name.ends_with("CommandInput")
+        || name.ends_with("Detail")
+        || name.ends_with("Drift")
+        || name.ends_with("EditOp")
+        || name.ends_with("Entry")
+        || name.ends_with("Flags")
+        || name.ends_with("Group")
+        || name.ends_with("Options")
+        || name.ends_with("Output")
+        || name.ends_with("Overrides")
+        || name.ends_with("Report")
+        || name.ends_with("Result")
+        || name.ends_with("SeverityCounts")
+        || name.ends_with("Snapshot")
+        || name.ends_with("Status")
+        || name.ends_with("Summary")
+}
+
+fn is_low_value_data_contract_field(name: &str) -> bool {
+    matches!(
+        name,
+        "ahead"
+            | "behind"
+            | "build_artifact"
+            | "changelog_next_section_aliases"
+            | "changelog_next_section_label"
+            | "confidence"
+            | "deploy"
+            | "deploy_strategy"
+            | "docs_only"
+            | "expected_methods"
+            | "expected_registrations"
+            | "extends"
+            | "extract_command"
+            | "failure"
+            | "implements"
+            | "info"
+            | "manual_only"
+            | "namespace"
+            | "needs_release"
+            | "picked_count"
+            | "primitive"
+            | "properties"
+            | "ready_detail"
+            | "ready_reason"
+            | "ready_to_deploy"
+            | "remote_owner"
+            | "results"
+            | "runtime"
+            | "skip_checks"
+            | "skip_publish"
+            | "skipped_count"
+            | "summary"
+            | "warnings"
+    )
 }
 
 fn boundary_layer(file: &str) -> Option<&'static str> {
@@ -1257,6 +1351,55 @@ struct ReviewArgs {
         assert!(
             findings.is_empty(),
             "generic DTO field pairs across unrelated modules should not become extraction work: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn suppresses_low_value_data_contract_field_overlap() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for (path, name, fields) in [
+            (
+                "src/commands/deploy.rs",
+                "DeployOutput",
+                "results: Vec<String>,\n    summary: String,",
+            ),
+            (
+                "src/core/deploy/types.rs",
+                "DeployOrchestrationResult",
+                "results: Vec<String>,\n    summary: String,",
+            ),
+            (
+                "src/core/deploy/result.rs",
+                "ProjectDeployResult",
+                "results: Vec<String>,\n    summary: String,",
+            ),
+            (
+                "src/commands/status.rs",
+                "UpstreamDrift",
+                "ahead: usize,\n    behind: usize,",
+            ),
+            (
+                "src/core/context/report.rs",
+                "GitSnapshot",
+                "ahead: usize,\n    behind: usize,",
+            ),
+            (
+                "src/core/git/operations.rs",
+                "RepoSnapshot",
+                "ahead: usize,\n    behind: usize,",
+            ),
+        ] {
+            let file = dir.path().join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, format!("struct {name} {{\n    {fields}\n}}\n")).unwrap();
+        }
+
+        let findings = detect_repeated_field_patterns(dir.path());
+        assert!(
+            findings.is_empty(),
+            "boundary data contract field overlaps should not suggest extraction: {:?}",
             findings
         );
     }
