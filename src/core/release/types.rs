@@ -192,6 +192,9 @@ pub struct ReleaseCommandInput {
     /// When set, overrides auto-detection from commit history.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bump_override: Option<String>,
+    /// Permit a keyword bump lower than the commit-derived recommendation.
+    #[serde(default)]
+    pub force_lower_bump: bool,
     #[serde(default)]
     pub skip_publish: bool,
     /// Skip the GitHub Release creation step (tag + notes on github.com).
