@@ -5,8 +5,10 @@ Produce a read-only attention report for components, projects, fleets, rigs, or 
 ## Synopsis
 
 ```sh
-homeboy triage [OPTIONS] <COMMAND>
+homeboy triage [OPTIONS] [COMMAND]
 ```
+
+When no command is provided, `homeboy triage` defaults to `homeboy triage workspace`.
 
 ## Subcommands
 
@@ -25,6 +27,14 @@ homeboy triage [OPTIONS] <COMMAND>
 - `--needs-review` — restrict PRs to review-required items
 - `--failing-checks` — restrict PRs to failing-check items
 - `--drilldown` — include compact failing check names and URLs
+
+## Examples
+
+```sh
+homeboy triage
+homeboy triage --mine --drilldown
+homeboy triage component homeboy --failing-checks --drilldown
+```
 
 ## Related
 

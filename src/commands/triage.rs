@@ -7,7 +7,7 @@ use super::CmdResult;
 #[derive(Args)]
 pub struct TriageArgs {
     #[command(subcommand)]
-    command: TriageCommand,
+    command: Option<TriageCommand>,
 
     /// Include issues in the report. Defaults to issues + PRs when neither is set.
     #[arg(long, global = true)]
@@ -99,7 +99,7 @@ pub fn run(args: TriageArgs, _global: &super::GlobalArgs) -> CmdResult<TriageOut
         limit: args.limit,
     };
 
-    let target = match args.command {
+    let target = match args.command.unwrap_or(TriageCommand::Workspace) {
         TriageCommand::Component { component_id } => TriageTarget::Component(component_id),
         TriageCommand::Project { project_id } => TriageTarget::Project(project_id),
         TriageCommand::Fleet { fleet_id } => TriageTarget::Fleet(fleet_id),
@@ -108,4 +108,30 @@ pub fn run(args: TriageArgs, _global: &super::GlobalArgs) -> CmdResult<TriageOut
     };
 
     Ok((triage::run(target, options)?, 0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TriageArgs, TriageCommand};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        args: TriageArgs,
+    }
+
+    #[test]
+    fn bare_triage_defaults_to_workspace() {
+        let cli = TestCli::parse_from(["triage"]);
+
+        assert!(matches!(cli.args.command, None));
+    }
+
+    #[test]
+    fn explicit_triage_subcommand_still_parses() {
+        let cli = TestCli::parse_from(["triage", "workspace"]);
+
+        assert!(matches!(cli.args.command, Some(TriageCommand::Workspace)));
+    }
 }
