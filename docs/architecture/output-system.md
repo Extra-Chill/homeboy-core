@@ -173,8 +173,9 @@ Rules:
 - Existing command payload fields stay intact for backward compatibility.
 - Heavy evidence should live in observation records when available; command
   output should keep summary/counts/status and include exact drill-down commands.
-- Export examples should point outside the source checkout. Repo-root
-  `homeboy-observations/` is reserved for explicit CI artifact staging only.
+- Export examples should point outside the source checkout. CI wrappers should
+  stage observation bundles under runner temp storage before uploading them as
+  the `homeboy-observations` artifact.
 - Observation store failures must not fail an otherwise successful command.
 
 ## Command payload conventions
