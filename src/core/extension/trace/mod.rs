@@ -13,6 +13,7 @@ pub mod baseline;
 mod overlay;
 mod overlay_lock;
 pub mod parsing;
+pub mod probes;
 pub mod report;
 pub mod run;
 pub mod spans;
@@ -30,6 +31,7 @@ pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,
 };
 pub use parsing::{TraceAssertionStatus, TraceResults, TraceSpanDefinition, TraceSpanResult};
+pub use probes::TraceProbeConfig;
 pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
     TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceClassificationSummaryOutput,

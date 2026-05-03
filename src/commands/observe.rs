@@ -124,6 +124,7 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
         span_definitions: Vec::new(),
         span_results: Vec::new(),
         assertions: Vec::new(),
+        temporal_assertions: Vec::new(),
         artifacts: vec![TraceArtifact {
             label: "observe timeline".to_string(),
             path: trace_path.to_string_lossy().to_string(),

@@ -23,6 +23,7 @@ use super::overlay::{
 use super::parsing::{
     parse_trace_list_str, parse_trace_results_file, TraceList, TraceResults, TraceSpanDefinition,
 };
+use super::probes::{ActiveTraceProbes, TraceProbeConfig};
 
 #[derive(Debug, Clone)]
 pub struct TraceRunWorkflowArgs {
@@ -57,6 +58,7 @@ pub struct TraceRunnerInputs {
     pub json_settings: Vec<(String, serde_json::Value)>,
     pub env: Vec<(String, String)>,
     pub workload_paths: Vec<PathBuf>,
+    pub probes: Vec<TraceProbeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,13 +137,15 @@ fn run_trace_workflow_with_context(
         Some(acquire_trace_overlay_locks(&args.overlays, run_dir)?)
     };
     let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
+    let active_probes = ActiveTraceProbes::start(&args.runner_inputs.probes)?;
     let runner_output =
         match build_trace_runner(execution_context, component, &args, run_dir, false) {
-            Ok(runner) => runner,
+            Ok(output) => output,
             Err(error) => {
                 return cleanup_after_overlay_error(&applied_overlays, args.keep_overlay, error)
             }
         };
+    let probe_events = active_probes.stop();
     if !args.keep_overlay {
         cleanup_trace_overlays(&applied_overlays)?
     }
@@ -157,6 +161,8 @@ fn run_trace_workflow_with_context(
     };
     let failure = (!runner_output.success).then(|| failure_from_output(&args, &runner_output));
     if let Some(parsed) = results.as_mut() {
+        parsed.timeline.extend(probe_events);
+        parsed.timeline.sort_by_key(|event| event.t_ms);
         super::spans::apply_span_definitions(parsed, &args.span_definitions);
         super::assertions::apply_temporal_assertions(parsed);
         persist_trace_results(&results_path, parsed)?;
@@ -182,7 +188,6 @@ fn run_trace_workflow_with_context(
     } else {
         runner_output.exit_code
     };
-
     let rig_id = args.rig_id.as_deref();
     let source_path = Path::new(component_path);
     let mut baseline_comparison = None;
@@ -771,6 +776,7 @@ JSON
                 json_settings: Vec::new(),
                 env: Vec::new(),
                 workload_paths: vec![component_dir.join("trace-fixture.trace.mjs")],
+                probes: Vec::new(),
             },
             scenario_id: "close-window".to_string(),
             json_summary: false,
@@ -970,6 +976,84 @@ JSON
         assert_eq!(failure.exit_code, 2);
         assert!(failure.stderr_excerpt.contains("line 24"));
         assert!(!failure.stderr_excerpt.contains("line 0"));
+    }
+
+    #[test]
+    fn run_trace_workflow_merges_probe_events_into_results() {
+        let _home_env_guard = crate::test_support::home_env_guard();
+        let temp = tempfile::tempdir().unwrap();
+        let extension_dir = temp.path().join("extension");
+        let component_dir = temp.path().join("component");
+        let log_path = temp.path().join("probe.log");
+        fs::create_dir_all(&extension_dir).unwrap();
+        fs::create_dir_all(&component_dir).unwrap();
+        fs::write(&log_path, "before\n").unwrap();
+        write_extension_manifest(&extension_dir);
+        let script = extension_dir.join("trace-runner.sh");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env bash
+set -euo pipefail
+printf 'probe needle\n' >> '{}'
+cat > "$HOMEBOY_TRACE_RESULTS_FILE" <<JSON
+{{"component_id":"example","scenario_id":"probes","status":"pass","timeline":[],"assertions":[],"artifacts":[]}}
+JSON
+"#,
+                log_path.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&script).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script, perms).unwrap();
+        }
+
+        let component = component_with_extension("example", &component_dir);
+        let context = trace_context(&component, &extension_dir);
+        let run_dir = RunDir::create().unwrap();
+        let args = TraceRunWorkflowArgs {
+            component_label: "example".to_string(),
+            component_id: "example".to_string(),
+            path_override: Some(component_dir.to_string_lossy().to_string()),
+            settings: Vec::new(),
+            runner_inputs: TraceRunnerInputs {
+                probes: vec![TraceProbeConfig::LogTail {
+                    path: log_path.to_string_lossy().to_string(),
+                    grep: Some("needle".to_string()),
+                    match_pattern: None,
+                }],
+                ..TraceRunnerInputs::default()
+            },
+            scenario_id: "probes".to_string(),
+            json_summary: false,
+            rig_id: None,
+            overlays: Vec::new(),
+            keep_overlay: false,
+            span_definitions: Vec::new(),
+            baseline_flags: BaselineFlags {
+                baseline: false,
+                ignore_baseline: true,
+                ratchet: false,
+            },
+            regression_threshold_percent:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_THRESHOLD_PERCENT,
+            regression_min_delta_ms:
+                crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
+        };
+
+        let output =
+            run_trace_workflow_with_context(Some(&context), &component, args, &run_dir, None)
+                .expect("trace workflow");
+        let results = output.results.expect("results");
+        assert!(results
+            .timeline
+            .iter()
+            .any(|event| event.event == "log.match"));
+        run_dir.cleanup();
     }
 
     #[test]

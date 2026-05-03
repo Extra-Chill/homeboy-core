@@ -28,6 +28,7 @@ mod matrix;
 mod metadata;
 mod observations;
 mod output;
+mod probes;
 mod schedule;
 #[cfg(test)]
 mod test_fixture;
@@ -46,6 +47,7 @@ use output::{
     aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
     render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
 };
+use probes::trace_probes_for_args;
 use schedule::{TraceSchedule, TraceVariantMatrixMode};
 
 #[cfg(test)]
@@ -530,6 +532,8 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
         .unwrap_or_default();
     let experiment_settings = trace_experiment_settings(experiment_plan.as_ref())?;
     let experiment_env = trace_experiment_env(experiment_plan.as_ref())?;
+    let trace_probes =
+        trace_probes_for_args(&args, rig_context.as_ref(), ctx.extension_id.as_deref())?;
     let mut json_settings = experiment_settings;
     json_settings.extend(settings_as_json(&ctx.settings));
     json_settings.extend(
@@ -548,6 +552,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
                 json_settings,
                 env: experiment_env.clone(),
                 workload_paths: extra_workloads,
+                probes: trace_probes,
             },
             scenario_id,
             json_summary: args.json_summary,
@@ -987,6 +992,7 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
                 json_settings: settings_as_json(&ctx.settings),
                 env: Vec::new(),
                 workload_paths: extra_workloads,
+                probes: Vec::new(),
             },
             rig_id: args.rig,
         },

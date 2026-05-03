@@ -351,6 +351,7 @@ fn workload_with_trace_metadata() -> WorkloadSpec {
             },
         )]),
         trace_guardrails: Vec::new(),
+        trace_probes: Vec::new(),
     })
 }
 

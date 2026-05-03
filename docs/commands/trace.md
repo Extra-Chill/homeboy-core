@@ -57,6 +57,10 @@ Generic workloads are dispatched by extension:
 - `HOMEBOY_TRACE_COMPONENT_PATH` when Homeboy resolves a path override
 - `HOMEBOY_RUN_DIR`
 
+## Probes
+
+Rig-owned trace workloads can declare passive `trace_probes` that Homeboy runs beside the trace runner and merges into the final `timeline`. See [Trace Probes](../architecture/trace-probes.md).
+
 ## Results Envelope
 
 ```json

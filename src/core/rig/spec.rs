@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::extension::trace::TraceProbeConfig;
 use crate::extension::trace::TraceSpanMetadata;
 use std::collections::{BTreeMap, HashMap};
 
@@ -322,6 +323,9 @@ pub struct WorkloadEntry {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trace_guardrails: Vec<TraceGuardrailSpec>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace_probes: Vec<TraceProbeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -442,6 +446,13 @@ impl WorkloadSpec {
             WorkloadSpec::Detailed(entry) => &entry.trace_guardrails,
         }
     }
+
+    pub fn trace_probes(&self) -> &[TraceProbeConfig] {
+        match self {
+            WorkloadSpec::Path(_) => &[],
+            WorkloadSpec::Detailed(entry) => &entry.trace_probes,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -496,6 +507,7 @@ mod tests {
             trace_default_phase_preset: None,
             trace_variants: HashMap::new(),
             trace_guardrails: Vec::new(),
+            trace_probes: Vec::new(),
         });
 
         assert_eq!(workload.trace_phase_preset("missing"), None);
@@ -545,6 +557,35 @@ mod tests {
     }
 
     #[test]
+    fn test_trace_probes() {
+        let workload: WorkloadSpec = serde_json::from_str(
+            r#"{
+                "path": "/tmp/scoped.trace.mjs",
+                "trace_probes": [
+                    { "type": "log.tail", "path": "/tmp/app.log", "grep": "ready" },
+                    { "type": "process.snapshot", "pattern": "node.*serve", "interval_ms": 250 }
+                ]
+            }"#,
+        )
+        .expect("parse detailed workload probes");
+
+        assert_eq!(workload.trace_probes().len(), 2);
+        assert!(matches!(
+            &workload.trace_probes()[0],
+            TraceProbeConfig::LogTail { path, grep, .. }
+                if path == "/tmp/app.log" && grep.as_deref() == Some("ready")
+        ));
+        assert!(matches!(
+            &workload.trace_probes()[1],
+            TraceProbeConfig::ProcessSnapshot { pattern, interval_ms }
+                if pattern == "node.*serve" && *interval_ms == Some(250)
+        ));
+        assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
+            .trace_probes()
+            .is_empty());
+    }
+
+    #[test]
     fn test_trace_default_phase_preset() {
         let workload = WorkloadSpec::Detailed(WorkloadEntry {
             path: "trace.mjs".to_string(),
@@ -554,6 +595,7 @@ mod tests {
             trace_default_phase_preset: Some("startup".to_string()),
             trace_variants: HashMap::new(),
             trace_guardrails: Vec::new(),
+            trace_probes: Vec::new(),
         });
 
         assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
