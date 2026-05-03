@@ -5,7 +5,9 @@ use std::time::Duration;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
-use homeboy::observation::{ArtifactRecord, ObservationStore, RunRecord, TraceSpanRecord};
+use homeboy::observation::{
+    ArtifactRecord, FindingRecord, ObservationStore, RunRecord, TraceSpanRecord,
+};
 use homeboy::Error;
 
 use super::{require_run, CmdResult, RunsOutput};
@@ -41,6 +43,10 @@ pub struct ObservationBundleManifest {
     pub run_count: usize,
     pub artifact_count: usize,
     pub trace_span_count: usize,
+    #[serde(default)]
+    pub finding_count: usize,
+    #[serde(default)]
+    pub test_failure_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -49,6 +55,8 @@ struct ObservationBundle {
     runs: Vec<RunRecord>,
     artifacts: Vec<ArtifactRecord>,
     trace_spans: Vec<TraceSpanRecord>,
+    findings: Vec<FindingRecord>,
+    test_failures: Vec<FindingRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -56,6 +64,8 @@ pub struct ObservationBundleImportSummary {
     pub runs: usize,
     pub artifacts: usize,
     pub trace_spans: usize,
+    pub findings: usize,
+    pub test_failures: usize,
 }
 
 #[derive(Serialize)]
@@ -66,6 +76,8 @@ pub struct RunsExportOutput {
     pub run_count: usize,
     pub artifact_count: usize,
     pub trace_span_count: usize,
+    pub finding_count: usize,
+    pub test_failure_count: usize,
 }
 
 #[derive(Serialize)]
@@ -112,6 +124,8 @@ pub(super) fn export_runs(args: RunsExportArgs) -> CmdResult<RunsOutput> {
             run_count: bundle.runs.len(),
             artifact_count: bundle.artifacts.len(),
             trace_span_count: bundle.trace_spans.len(),
+            finding_count: bundle.findings.len(),
+            test_failure_count: bundle.test_failures.len(),
             manifest: bundle.manifest,
         }),
         0,
@@ -130,6 +144,9 @@ pub(super) fn import_runs(args: RunsImportArgs) -> CmdResult<RunsOutput> {
     for span in &bundle.trace_spans {
         store.import_trace_span(span)?;
     }
+    for finding in bundle.findings.iter().chain(bundle.test_failures.iter()) {
+        store.import_finding(finding)?;
+    }
 
     Ok((
         RunsOutput::Import(RunsImportOutput {
@@ -139,6 +156,8 @@ pub(super) fn import_runs(args: RunsImportArgs) -> CmdResult<RunsOutput> {
                 runs: bundle.runs.len(),
                 artifacts: bundle.artifacts.len(),
                 trace_spans: bundle.trace_spans.len(),
+                findings: bundle.findings.len(),
+                test_failures: bundle.test_failures.len(),
             },
         }),
         0,
@@ -151,10 +170,17 @@ fn build_bundle(
 ) -> homeboy::Result<ObservationBundle> {
     let mut artifacts = Vec::new();
     let mut trace_spans = Vec::new();
+    let mut findings = Vec::new();
     for run in &runs {
         artifacts.extend(store.list_artifacts(&run.id)?);
         trace_spans.extend(store.list_trace_spans(&run.id)?);
+        findings.extend(store.list_findings_for_run(&run.id)?);
     }
+    let test_failures = findings
+        .iter()
+        .filter(|finding| is_test_failure_finding(finding))
+        .cloned()
+        .collect::<Vec<_>>();
     let manifest = ObservationBundleManifest {
         format: BUNDLE_FORMAT.to_string(),
         version: BUNDLE_VERSION,
@@ -163,12 +189,16 @@ fn build_bundle(
         run_count: runs.len(),
         artifact_count: artifacts.len(),
         trace_span_count: trace_spans.len(),
+        finding_count: findings.len(),
+        test_failure_count: test_failures.len(),
     };
     Ok(ObservationBundle {
         manifest,
         runs,
         artifacts,
         trace_spans,
+        findings,
+        test_failures,
     })
 }
 
@@ -191,6 +221,8 @@ fn write_bundle_dir(path: &Path, bundle: &ObservationBundle) -> homeboy::Result<
     write_json(path.join("runs.json"), &bundle.runs)?;
     write_json(path.join("artifacts.json"), &bundle.artifacts)?;
     write_json(path.join("trace_spans.json"), &bundle.trace_spans)?;
+    write_json(path.join("findings.json"), &bundle.findings)?;
+    write_json(path.join("test_failures.json"), &bundle.test_failures)?;
     Ok(())
 }
 
@@ -227,9 +259,18 @@ fn read_bundle_dir(path: &Path) -> homeboy::Result<ObservationBundle> {
     let runs: Vec<RunRecord> = read_json(path.join("runs.json"))?;
     let artifacts: Vec<ArtifactRecord> = read_json(path.join("artifacts.json"))?;
     let trace_spans: Vec<TraceSpanRecord> = read_json(path.join("trace_spans.json"))?;
+    let mut findings: Vec<FindingRecord> = read_optional_json(path.join("findings.json"))?;
+    let test_failures: Vec<FindingRecord> = read_optional_json(path.join("test_failures.json"))?;
+    for test_failure in &test_failures {
+        if !findings.iter().any(|finding| finding.id == test_failure.id) {
+            findings.push(test_failure.clone());
+        }
+    }
     if manifest.run_count != runs.len()
         || manifest.artifact_count != artifacts.len()
         || manifest.trace_span_count != trace_spans.len()
+        || manifest.finding_count != findings.len()
+        || manifest.test_failure_count != test_failures.len()
     {
         return Err(Error::validation_invalid_argument(
             "manifest",
@@ -243,7 +284,23 @@ fn read_bundle_dir(path: &Path) -> homeboy::Result<ObservationBundle> {
         runs,
         artifacts,
         trace_spans,
+        findings,
+        test_failures,
     })
+}
+
+fn is_test_failure_finding(finding: &FindingRecord) -> bool {
+    finding.tool == "test"
+        && (finding
+            .metadata_json
+            .get("record_kind")
+            .and_then(|value| value.as_str())
+            == Some("failure")
+            || finding
+                .metadata_json
+                .get("source_sidecar")
+                .and_then(|value| value.as_str())
+                == Some("test-failures"))
 }
 
 fn write_json(path: PathBuf, value: &impl Serialize) -> homeboy::Result<()> {
@@ -272,6 +329,13 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: PathBuf) -> homeboy::Result<T> 
             Some(raw),
         )
     })
+}
+
+fn read_optional_json<T: for<'de> Deserialize<'de> + Default>(path: PathBuf) -> homeboy::Result<T> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    read_json(path)
 }
 
 fn since_threshold(raw: &str) -> homeboy::Result<String> {
