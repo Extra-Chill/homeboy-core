@@ -478,7 +478,8 @@ mod tests {
     use std::path::Path;
 
     use homeboy::observation::{
-        NewFindingRecord, NewRunRecord, NewTraceSpanRecord, RunRecord, RunStatus, TraceSpanRecord,
+        FindingListFilter, FindingRecord, NewFindingRecord, NewRunRecord, NewTraceSpanRecord,
+        RunRecord, RunStatus, TraceSpanRecord,
     };
     use homeboy::test_support::with_isolated_home;
     use serde::Deserialize;
@@ -991,9 +992,72 @@ mod tests {
             assert!(output.join("runs.json").exists());
             assert!(output.join("artifacts.json").exists());
             assert!(output.join("trace_spans.json").exists());
+            assert!(output.join("findings.json").exists());
+            assert!(output.join("test_failures.json").exists());
             let runs: Vec<RunRecord> = read_bundle_test_json(&output.join("runs.json"));
             assert_eq!(runs.len(), 1);
             assert_eq!(runs[0].id, run.id);
+        });
+    }
+
+    #[test]
+    fn export_includes_findings_and_test_failures() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("test", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let lint = store
+                .record_finding(&NewFindingRecord {
+                    run_id: run.id.clone(),
+                    tool: "lint".to_string(),
+                    rule: Some("style".to_string()),
+                    file: Some("src/lib.rs".to_string()),
+                    line: Some(3),
+                    severity: Some("warning".to_string()),
+                    fingerprint: Some("lint::src/lib.rs".to_string()),
+                    message: "style drift".to_string(),
+                    fixable: Some(true),
+                    metadata_json: serde_json::json!({ "record_kind": "lint" }),
+                })
+                .expect("lint finding");
+            let failure = store
+                .record_finding(&NewFindingRecord {
+                    run_id: run.id.clone(),
+                    tool: "test".to_string(),
+                    rule: Some("assertion".to_string()),
+                    file: Some("tests/fail.rs".to_string()),
+                    line: Some(42),
+                    severity: Some("error".to_string()),
+                    fingerprint: Some("test::fails".to_string()),
+                    message: "assertion failed".to_string(),
+                    fixable: None,
+                    metadata_json: serde_json::json!({
+                        "record_kind": "failure",
+                        "source_sidecar": "test-failures",
+                    }),
+                })
+                .expect("test failure");
+            let output = home.path().join("findings-bundle");
+
+            let (result, _) = export_runs(RunsExportArgs {
+                run: Some(run.id),
+                since: None,
+                output: output.clone(),
+            })
+            .expect("export");
+
+            let RunsOutput::Export(result) = result else {
+                panic!("expected export output");
+            };
+            assert_eq!(result.finding_count, 2);
+            assert_eq!(result.test_failure_count, 1);
+            let findings: Vec<FindingRecord> = read_bundle_test_json(&output.join("findings.json"));
+            let test_failures: Vec<FindingRecord> =
+                read_bundle_test_json(&output.join("test_failures.json"));
+            assert_eq!(findings, vec![lint, failure.clone()]);
+            assert_eq!(test_failures, vec![failure]);
         });
     }
 
@@ -1115,6 +1179,20 @@ mod tests {
                         metadata_json: serde_json::json!({}),
                     })
                     .expect("span");
+                store
+                    .record_finding(&NewFindingRecord {
+                        run_id: run.id.clone(),
+                        tool: "test".to_string(),
+                        rule: Some("assertion".to_string()),
+                        file: Some("tests/fail.rs".to_string()),
+                        line: Some(42),
+                        severity: Some("error".to_string()),
+                        fingerprint: Some("test::fails".to_string()),
+                        message: "assertion failed".to_string(),
+                        fixable: None,
+                        metadata_json: serde_json::json!({ "record_kind": "failure" }),
+                    })
+                    .expect("finding");
                 export_runs(RunsExportArgs {
                     run: Some(run.id.clone()),
                     since: None,
@@ -1139,6 +1217,16 @@ mod tests {
             assert!(store.get_run(&run_id).expect("get").is_some());
             assert_eq!(store.list_artifacts(&run_id).expect("artifacts").len(), 1);
             assert_eq!(store.list_trace_spans(&run_id).expect("spans").len(), 1);
+            assert_eq!(
+                store
+                    .list_findings(FindingListFilter {
+                        run_id: Some(run_id),
+                        ..FindingListFilter::default()
+                    })
+                    .expect("findings")
+                    .len(),
+                1
+            );
         });
     }
 

@@ -61,8 +61,10 @@ homeboy-observations/
   runs.json
   artifacts.json
   trace_spans.json
+  findings.json
+  test_failures.json
 ```
 
-The v1 bundle is metadata-only: artifact records are exported, but artifact file bytes are not copied. Zip output is intentionally out of scope for v1; pass a directory path to `--output`.
+The v1 bundle is metadata-only: artifact records are exported, but artifact file bytes are not copied. `findings.json` contains normalized observation findings, and `test_failures.json` is an additive subset of findings where test commands recorded individual failures. Zip output is intentionally out of scope for v1; pass a directory path to `--output`.
 
 `homeboy runs import` is idempotent. Existing identical records are accepted, while conflicting records with the same primary key fail clearly.
