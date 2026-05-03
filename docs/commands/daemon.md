@@ -15,6 +15,44 @@ homeboy daemon <COMMAND>
 - `stop` — stop the background daemon recorded in the state file
 - `status` — show daemon state and selected local address
 
+## Local HTTP API
+
+The daemon binds to loopback only. `homeboy daemon start` writes the selected
+address and PID to the daemon state file so headless clients can discover it via
+`homeboy daemon status`.
+
+Always treat the API as a local UI contract. It is not a hosted or remote
+multi-user service.
+
+### Built-in Endpoints
+
+- `GET /health` — daemon health and Homeboy version
+- `GET /version` — Homeboy version
+- `GET /config/paths` — local Homeboy config paths
+
+### Read-Only Contract Endpoints
+
+These endpoints dispatch through Homeboy's transport-free read-only HTTP API
+contract and return the same JSON envelope shape as other daemon responses.
+
+- `GET /components`
+- `GET /components/:id`
+- `GET /components/:id/status`
+- `GET /components/:id/changes`
+- `GET /rigs`
+- `GET /rigs/:id`
+- `POST /rigs/:id/check`
+- `GET /stacks`
+- `GET /stacks/:id`
+- `POST /stacks/:id/status`
+
+The analysis entry points `POST /audit`, `POST /lint`, `POST /test`, and
+`POST /bench` are reserved by the contract, but intentionally return a job-model
+blocker until the long-running job/event API lands.
+
+Mutating operations such as deploy, release, rig up/down, stack apply, git
+writes, and SSH execution are not exposed by this daemon slice.
+
 ## Related
 
 - [self](self.md)

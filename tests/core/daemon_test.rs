@@ -41,9 +41,28 @@ fn routes_health_version_and_config_paths() {
 }
 
 #[test]
+fn routes_read_only_http_api_contract() {
+    let _home = HomeGuard::new();
+
+    let components = route("GET", "/components");
+    assert_eq!(components.status_code, 200);
+    assert_eq!(components.body["endpoint"], "components.list");
+    assert!(components.body["body"]["components"].is_array());
+
+    let job_ready = route("POST", "/audit");
+    assert_eq!(job_ready.status_code, 404);
+    assert_eq!(job_ready.body["error"], "validation.invalid_argument");
+    assert!(job_ready.body["message"]
+        .as_str()
+        .unwrap()
+        .contains("#1764"));
+}
+
+#[test]
 fn route_rejects_unknown_paths_and_methods() {
     assert_eq!(route("GET", "/missing").status_code, 404);
     assert_eq!(route("POST", "/health").status_code, 405);
+    assert_eq!(route("POST", "/release").status_code, 404);
 }
 
 #[test]
