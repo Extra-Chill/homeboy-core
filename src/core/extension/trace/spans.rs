@@ -111,7 +111,7 @@ pub(crate) fn apply_span_definitions(
     results.span_results = summarize_spans(&reporting_timeline, &definitions);
 }
 
-fn reporting_timeline(timeline: &[TraceEvent]) -> Vec<TraceEvent> {
+pub(crate) fn reporting_timeline(timeline: &[TraceEvent]) -> Vec<TraceEvent> {
     let mut events = Vec::new();
     for event in timeline {
         push_reporting_event(&mut events, event.clone());
@@ -203,7 +203,7 @@ fn merge_definitions(
     merged
 }
 
-fn event_matches_key(event: &TraceEvent, key: &str) -> bool {
+pub(crate) fn event_matches_key(event: &TraceEvent, key: &str) -> bool {
     event.source.len() + 1 + event.event.len() == key.len()
         && key.starts_with(&event.source)
         && key.as_bytes().get(event.source.len()) == Some(&b'.')
@@ -521,6 +521,7 @@ mod tests {
             span_definitions: Vec::new(),
             span_results: Vec::new(),
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
 
@@ -569,6 +570,7 @@ mod tests {
             span_definitions: Vec::new(),
             span_results: Vec::new(),
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
 
@@ -612,6 +614,7 @@ mod tests {
             span_definitions: Vec::new(),
             span_results: Vec::new(),
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
         let phases = phase_span_definitions(&[

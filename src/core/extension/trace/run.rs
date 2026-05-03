@@ -145,6 +145,13 @@ fn run_trace_workflow_with_context(
     } else {
         None
     };
+    let failure = (!runner_output.success).then(|| failure_from_output(&args, &runner_output));
+    if let Some(parsed) = results.as_mut() {
+        super::spans::apply_span_definitions(parsed, &args.span_definitions);
+        super::assertions::apply_temporal_assertions(parsed);
+        persist_trace_results(&results_path, parsed)?;
+    }
+
     let status = results
         .as_ref()
         .map(|r| r.status.as_str().to_string())
@@ -165,10 +172,6 @@ fn run_trace_workflow_with_context(
     } else {
         runner_output.exit_code
     };
-    let failure = (!runner_output.success).then(|| failure_from_output(&args, &runner_output));
-    if let Some(parsed) = results.as_mut() {
-        super::spans::apply_span_definitions(parsed, &args.span_definitions);
-    }
 
     let rig_id = args.rig_id.as_deref();
     let source_path = Path::new(component_path);
@@ -258,6 +261,25 @@ fn run_trace_workflow_with_context(
             .collect(),
         baseline_comparison,
         hints: if hints.is_empty() { None } else { Some(hints) },
+    })
+}
+
+fn persist_trace_results(path: &Path, results: &TraceResults) -> Result<()> {
+    let content = serde_json::to_string_pretty(results).map_err(|e| {
+        Error::internal_json(
+            format!("Failed to serialize trace results JSON: {}", e),
+            Some("trace.results.serialize".to_string()),
+        )
+    })?;
+    std::fs::write(path, content).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to write trace results file {}: {}",
+                path.display(),
+                e
+            ),
+            Some("trace.results.write".to_string()),
+        )
     })
 }
 
