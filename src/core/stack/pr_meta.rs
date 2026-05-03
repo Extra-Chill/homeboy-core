@@ -142,6 +142,7 @@ fn nested_string_field(parsed: &serde_json::Value, key: &str, child: &str) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::home_env_guard;
     use crate::ErrorCode;
     use std::fs;
 
@@ -171,6 +172,7 @@ mod tests {
 
     #[test]
     fn test_fetch_pr_meta() {
+        let _guard = home_env_guard();
         let dir = tempfile::TempDir::new().expect("tempdir");
         let gh = dir.path().join("gh");
         fs::write(

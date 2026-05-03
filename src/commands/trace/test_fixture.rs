@@ -1,25 +1,6 @@
 use std::fs;
 use std::process::Command;
 
-pub(super) struct XdgGuard(Option<String>);
-
-impl XdgGuard {
-    pub(super) fn without_xdg_data_home() -> Self {
-        let prior = std::env::var("XDG_DATA_HOME").ok();
-        std::env::remove_var("XDG_DATA_HOME");
-        Self(prior)
-    }
-}
-
-impl Drop for XdgGuard {
-    fn drop(&mut self) {
-        match &self.0 {
-            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
-            None => std::env::remove_var("XDG_DATA_HOME"),
-        }
-    }
-}
-
 pub(super) fn write_trace_extension(home: &tempfile::TempDir) {
     let extension_dir = home
         .path()

@@ -9,13 +9,12 @@ use crate::test_support::with_isolated_home;
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::TraceCommandOutput;
 
-use super::test_fixture::{init_overlay_component, write_trace_extension, XdgGuard};
+use super::test_fixture::{init_overlay_component, write_trace_extension};
 use super::{run, TraceArgs, TraceSchedule, TraceVariantMatrixMode};
 
 #[test]
 fn trace_compare_variant_interleaves_run_order_and_reports_focus_spans() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let component_dir = tempfile::TempDir::new().expect("component dir");
         init_overlay_component(component_dir.path());
@@ -146,7 +145,6 @@ fn trace_compare_variant_interleaves_run_order_and_reports_focus_spans() {
 #[test]
 fn trace_compare_variant_uses_component_arg_for_multi_component_named_variants() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let studio_dir = tempfile::TempDir::new().expect("studio dir");
         init_overlay_component(studio_dir.path());
@@ -242,7 +240,6 @@ fn trace_compare_variant_uses_component_arg_for_multi_component_named_variants()
 #[test]
 fn trace_compare_variant_reports_unknown_named_variant_for_component_arg() {
     with_isolated_home(|home| {
-        let _xdg = XdgGuard::without_xdg_data_home();
         write_trace_extension(home);
         let studio_dir = tempfile::TempDir::new().expect("studio dir");
         init_overlay_component(studio_dir.path());
