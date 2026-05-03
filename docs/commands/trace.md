@@ -10,6 +10,7 @@ homeboy trace <component> list
 homeboy trace <component> <scenario> --rig <rig-id>
 homeboy trace <component> <scenario> --json-summary
 homeboy trace <component> <scenario> --span submit_to_cli:ui.submit:cli.start
+homeboy trace <component> <scenario> --span running:renderer.site_event_received[data.running=true]:renderer.dom_status_running_seen
 homeboy trace <component> <scenario> --phase submit:ui.submit --phase cli:cli.start --phase ready:server.ready
 homeboy trace <component> <scenario> --rig <rig-id> --phase-preset create-site
 homeboy trace <component> <scenario> --repeat 5 --aggregate spans --schedule interleaved
@@ -137,6 +138,25 @@ Runners can emit `span_definitions`, or callers can pass repeatable `--span id:f
 If an endpoint is missing, Homeboy emits a skipped result with `missing` keys instead of panicking.
 
 When a timeline contains repeated events with the same key, Homeboy resolves the span to the nearest valid `from`/`to` pair where the `to` event occurs at or after the `from` event. This keeps simple `source.event` span definitions stable for common lifecycle events that naturally repeat.
+
+Span endpoints can add a bracketed selector to disambiguate repeated events without inventing extra one-off event names:
+
+```sh
+homeboy trace studio create-site \
+  --span running:renderer.site_event_received[data.running=true,data.name=site-updated]:renderer.dom_status_running_seen
+homeboy trace studio create-site \
+  --span second_ready:runner.state[data.phase=ready,occurrence=2]:runner.done
+homeboy trace studio create-site \
+  --span final_tick:runner.tick[last]:runner.done
+```
+
+Supported endpoint selector terms:
+
+- `data.FIELD=value` filters by an event `data` field. Dot paths are supported, for example `data.payload.running=true`.
+- `occurrence=N` selects the 1-based Nth event after field filters are applied.
+- `last` or `occurrence=last` selects the last event after field filters are applied.
+
+Selector values are parsed as JSON when possible, so `true`, `false`, `42`, and quoted strings use JSON semantics. Unquoted strings such as `site-updated` are treated as string values. The unbracketed `source.event` syntax remains unchanged.
 
 ## Temporal Assertions
 
