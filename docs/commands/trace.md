@@ -140,11 +140,15 @@ When a timeline contains repeated events with the same key, Homeboy resolves the
 
 Runners can declare `temporal_assertions` for timeline-level checks. Homeboy evaluates them after the runner exits, appends the evaluated result to the existing `assertions` list, and marks the trace failed when any evaluated assertion fails. Existing simple runner-emitted assertions still work unchanged.
 
-V1 supports three assertion kinds:
+V1 supports these assertion kinds:
 
 - `count`: count matching timeline keys and enforce optional `min` / `max` bounds.
 - `forbidden-event`: fail when a timeline key appears at least once.
 - `max-concurrent`: track a start/end event pair and fail when live concurrency exceeds `max`.
+- `no-overlap`: fail when two matching events with different `by` data values occur within `window_ms`.
+- `ordering`: for each `before` event, require a later `after` event, optionally `within_ms` and with the same `by` data value.
+- `latency-bound`: pair each `from` event with the first later `to` event and enforce optional `p50_ms`, `p95_ms`, and `p99_ms` bounds using the same R-7 percentile calculation as `homeboy bench`.
+- `required-sequence`: require the listed `source.event` keys to occur as an ordered subsequence in the timeline.
 
 Timeline keys use the same `source.event` format as spans. Failed assertions include a structured `details` object with the observed counts and matching events.
 
@@ -172,6 +176,33 @@ Timeline keys use the same `source.event` format as spans. Failed assertions inc
       "kind": "max-concurrent",
       "track": ["proc.spawn", "proc.exit"],
       "max": 1
+    },
+    {
+      "id": "no-auth-write-race",
+      "kind": "no-overlap",
+      "events": ["fs.write"],
+      "by": "pid",
+      "window_ms": 100
+    },
+    {
+      "id": "response-before-write",
+      "kind": "ordering",
+      "before": "http.response",
+      "after": "fs.write",
+      "within_ms": 100,
+      "by": "request_id"
+    },
+    {
+      "id": "request-latency",
+      "kind": "latency-bound",
+      "from": "request.start",
+      "to": "request.end",
+      "p95_ms": 250
+    },
+    {
+      "id": "boot-flow",
+      "kind": "required-sequence",
+      "sequence": ["app.boot", "auth.login", "app.ready"]
     }
   ]
 }
