@@ -249,6 +249,7 @@ fn scenario_metric_summaries(results: &BenchResults) -> Vec<serde_json::Value> {
                 "passed": scenario.passed,
                 "metrics": scenario.metrics,
                 "metric_groups": scenario.metric_groups,
+                "metadata": scenario.metadata,
                 "memory": scenario.memory,
                 "artifact_count": scenario.artifacts.len(),
                 "run_count": scenario.runs.as_ref().map(Vec::len),

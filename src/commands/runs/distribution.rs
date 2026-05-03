@@ -170,17 +170,33 @@ fn distribution_for_field(field: &str, runs: &[RunRecord]) -> FieldDistributionO
 }
 
 fn metadata_path_values(metadata: &Value, field: &str) -> Vec<String> {
-    let Some(value) = field
+    let parts = field
         .split('.')
         .filter(|part| !part.is_empty())
-        .try_fold(metadata, |value, part| value.get(part))
-    else {
-        return Vec::new();
-    };
+        .collect::<Vec<_>>();
+    let mut values = Vec::new();
+    collect_metadata_path_values(metadata, &parts, &mut values);
+    values
+}
 
-    match value.as_array() {
-        Some(items) => items.iter().filter_map(scalar_metadata_label).collect(),
-        None => scalar_metadata_label(value).into_iter().collect(),
+fn collect_metadata_path_values(value: &Value, parts: &[&str], values: &mut Vec<String>) {
+    if parts.is_empty() {
+        match value.as_array() {
+            Some(items) => values.extend(items.iter().filter_map(scalar_metadata_label)),
+            None => values.extend(scalar_metadata_label(value)),
+        }
+        return;
+    }
+
+    if let Some(items) = value.as_array() {
+        for item in items {
+            collect_metadata_path_values(item, parts, values);
+        }
+        return;
+    }
+
+    if let Some(next) = value.get(parts[0]) {
+        collect_metadata_path_values(next, &parts[1..], values);
     }
 }
 
@@ -419,6 +435,53 @@ mod tests {
             assert_eq!(output.filters.inspected_run_count, 1);
             assert_eq!(field.values.len(), 1);
             assert_eq!(field.values[0].value, "kept");
+        });
+    }
+
+    #[test]
+    fn distribution_traverses_nested_arrays_in_metadata_paths() {
+        with_isolated_home(|_home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            for motifs in [
+                serde_json::json!(["terminal_window", "glow_overlay"]),
+                serde_json::json!(["terminal_window", "cards_grid"]),
+            ] {
+                let run = store
+                    .start_run(sample_run(
+                        "bench",
+                        "studio",
+                        "rig-a",
+                        serde_json::json!({
+                            "selected_scenarios": ["site-build"],
+                            "scenario_metrics": [{
+                                "scenario_id": "site-build",
+                                "metadata": { "design": { "motifs": motifs } }
+                            }]
+                        }),
+                    ))
+                    .expect("run");
+                store
+                    .finish_run(&run.id, RunStatus::Pass, None)
+                    .expect("finish");
+            }
+
+            let output = distribution_output(RunsDistributionArgs {
+                kind: Some("bench".to_string()),
+                component_id: Some("studio".to_string()),
+                scenario_id: Some("site-build".to_string()),
+                fields: vec!["scenario_metrics.metadata.design.motifs".to_string()],
+                limit: 20,
+                ..RunsDistributionArgs::default()
+            });
+
+            let field = &output.fields[0];
+            assert_eq!(field.matched_run_count, 2);
+            assert_eq!(field.total_value_count, 4);
+            assert_eq!(field.unique_value_count, 3);
+            assert_eq!(field.values[0].value, "terminal_window");
+            assert_eq!(field.values[0].count, 2);
+            assert_eq!(field.values[0].run_count, 2);
         });
     }
 

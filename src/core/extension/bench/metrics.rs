@@ -355,6 +355,7 @@ mod tests {
                 metric_groups: BTreeMap::new(),
                 gates: Vec::new(),
                 gate_results: Vec::new(),
+                metadata: BTreeMap::new(),
                 passed: true,
                 memory: None,
                 artifacts: BTreeMap::new(),
