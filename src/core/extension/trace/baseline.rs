@@ -212,6 +212,7 @@ mod tests {
                 message: None,
             }],
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         }
     }

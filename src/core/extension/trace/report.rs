@@ -573,6 +573,7 @@ mod tests {
                 span_definitions: Vec::new(),
                 span_results: Vec::new(),
                 assertions: Vec::new(),
+                temporal_assertions: Vec::new(),
                 artifacts: vec![TraceArtifact {
                     label: "main log".to_string(),
                     path: "artifacts/main.log".to_string(),
@@ -640,6 +641,7 @@ mod tests {
                     message: None,
                 }],
                 assertions: Vec::new(),
+                temporal_assertions: Vec::new(),
                 artifacts: Vec::new(),
             }),
             failure: None,
@@ -720,6 +722,7 @@ mod tests {
                 message: None,
             }],
             assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
             artifacts: Vec::new(),
         };
 

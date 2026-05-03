@@ -108,6 +108,64 @@ If an endpoint is missing, Homeboy emits a skipped result with `missing` keys in
 
 When a timeline contains repeated events with the same key, Homeboy resolves the span to the nearest valid `from`/`to` pair where the `to` event occurs at or after the `from` event. This keeps simple `source.event` span definitions stable for common lifecycle events that naturally repeat.
 
+## Temporal Assertions
+
+Runners can declare `temporal_assertions` for timeline-level checks. Homeboy evaluates them after the runner exits, appends the evaluated result to the existing `assertions` list, and marks the trace failed when any evaluated assertion fails. Existing simple runner-emitted assertions still work unchanged.
+
+V1 supports three assertion kinds:
+
+- `count`: count matching timeline keys and enforce optional `min` / `max` bounds.
+- `forbidden-event`: fail when a timeline key appears at least once.
+- `max-concurrent`: track a start/end event pair and fail when live concurrency exceeds `max`.
+
+Timeline keys use the same `source.event` format as spans. Failed assertions include a structured `details` object with the observed counts and matching events.
+
+```json
+{
+  "timeline": [
+    { "t_ms": 0, "source": "proc", "event": "spawn" },
+    { "t_ms": 5, "source": "proc", "event": "spawn" },
+    { "t_ms": 10, "source": "proc", "event": "exit" }
+  ],
+  "temporal_assertions": [
+    {
+      "id": "no-invalid-grant",
+      "kind": "count",
+      "events": ["log.invalid_grant"],
+      "max": 0
+    },
+    {
+      "id": "no-window-reopen",
+      "kind": "forbidden-event",
+      "pattern": "desktop.window.reopened"
+    },
+    {
+      "id": "max-one-proc",
+      "kind": "max-concurrent",
+      "track": ["proc.spawn", "proc.exit"],
+      "max": 1
+    }
+  ]
+}
+```
+
+The evaluated assertion list keeps the normal assertion shape and adds `details` when Homeboy has structured evidence:
+
+```json
+{
+  "id": "max-one-proc",
+  "status": "fail",
+  "message": "max concurrency for `proc.spawn` exceeded 1: observed 2",
+  "details": {
+    "kind": "max-concurrent",
+    "track": ["proc.spawn", "proc.exit"],
+    "max": 1,
+    "max_observed": 2,
+    "at_t_ms": 5
+  }
+}
+```
+
 ## Phases
 
 Use repeatable `--phase [label:]source.event` flags to provide an ordered milestone chain. Homeboy expands the chain into adjacent span results plus a `phase.total` span from the first milestone to the last milestone:

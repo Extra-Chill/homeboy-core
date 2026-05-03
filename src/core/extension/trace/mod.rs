@@ -8,6 +8,7 @@
 //! `source.event` intervals without teaching core about product-specific
 //! milestones.
 
+pub mod assertions;
 pub mod baseline;
 mod overlay;
 mod overlay_lock;

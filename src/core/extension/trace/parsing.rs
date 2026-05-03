@@ -54,6 +54,8 @@ pub struct TraceResults {
     pub span_results: Vec<TraceSpanResult>,
     #[serde(default)]
     pub assertions: Vec<TraceAssertion>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub temporal_assertions: Vec<TraceTemporalAssertionDefinition>,
     #[serde(default)]
     pub artifacts: Vec<TraceArtifact>,
 }
@@ -108,13 +110,43 @@ pub struct TraceEvent {
     pub data: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TraceAssertion {
     pub id: String,
     pub status: TraceAssertionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TraceTemporalAssertionDefinition {
+    Count {
+        id: String,
+        events: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    ForbiddenEvent {
+        id: String,
+        pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    MaxConcurrent {
+        id: String,
+        track: Vec<String>,
+        max: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
