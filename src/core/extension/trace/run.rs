@@ -138,12 +138,13 @@ fn run_trace_workflow_with_context(
     };
     let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
     let active_probes = ActiveTraceProbes::start(&args.runner_inputs.probes)?;
-    let runner_output = match build_trace_runner(execution_context, component, &args, run_dir, false) {
-        Ok(output) => output,
-        Err(error) => {
-            return cleanup_after_overlay_error(&applied_overlays, args.keep_overlay, error)
-        }
-    };
+    let runner_output =
+        match build_trace_runner(execution_context, component, &args, run_dir, false) {
+            Ok(output) => output,
+            Err(error) => {
+                return cleanup_after_overlay_error(&applied_overlays, args.keep_overlay, error)
+            }
+        };
     let probe_events = active_probes.stop();
     if !args.keep_overlay {
         cleanup_trace_overlays(&applied_overlays)?
@@ -1044,8 +1045,9 @@ JSON
                 crate::extension::trace::baseline::DEFAULT_REGRESSION_MIN_DELTA_MS,
         };
 
-        let output = run_trace_workflow_with_context(&context, &component, args, &run_dir, None)
-            .expect("trace workflow");
+        let output =
+            run_trace_workflow_with_context(Some(&context), &component, args, &run_dir, None)
+                .expect("trace workflow");
         let results = output.results.expect("results");
         assert!(results
             .timeline
