@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::extension::trace::TraceProbeConfig;
 use crate::extension::trace::TraceSpanMetadata;
 use std::collections::{BTreeMap, HashMap};
 
@@ -322,6 +323,9 @@ pub struct WorkloadEntry {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trace_guardrails: Vec<TraceGuardrailSpec>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trace_probes: Vec<TraceProbeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -442,6 +446,13 @@ impl WorkloadSpec {
             WorkloadSpec::Detailed(entry) => &entry.trace_guardrails,
         }
     }
+
+    pub fn trace_probes(&self) -> &[TraceProbeConfig] {
+        match self {
+            WorkloadSpec::Path(_) => &[],
+            WorkloadSpec::Detailed(entry) => &entry.trace_probes,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -496,6 +507,7 @@ mod tests {
             trace_default_phase_preset: None,
             trace_variants: HashMap::new(),
             trace_guardrails: Vec::new(),
+            trace_probes: Vec::new(),
         });
 
         assert_eq!(workload.trace_phase_preset("missing"), None);
@@ -554,6 +566,7 @@ mod tests {
             trace_default_phase_preset: Some("startup".to_string()),
             trace_variants: HashMap::new(),
             trace_guardrails: Vec::new(),
+            trace_probes: Vec::new(),
         });
 
         assert_eq!(workload.trace_default_phase_preset(), Some("startup"));
