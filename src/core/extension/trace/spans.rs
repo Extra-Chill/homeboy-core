@@ -210,24 +210,176 @@ pub(crate) fn event_matches_key(event: &TraceEvent, key: &str) -> bool {
         && key[event.source.len() + 1..] == event.event
 }
 
-fn first_event_time(timeline: &[TraceEvent], key: &str) -> Option<u64> {
-    timeline
-        .iter()
-        .find(|event| event_matches_key(event, key))
-        .map(|event| event.t_ms)
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EventSelector {
+    key: String,
+    filters: Vec<EventFieldFilter>,
+    occurrence: EventOccurrence,
 }
 
-fn nearest_valid_pair(timeline: &[TraceEvent], from_key: &str, to_key: &str) -> Option<(u64, u64)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EventFieldFilter {
+    path: Vec<String>,
+    value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventOccurrence {
+    Any,
+    Nth(usize),
+    Last,
+}
+
+impl EventSelector {
+    fn parse(raw: &str) -> Result<Self, String> {
+        let raw = raw.trim();
+        let Some((key, selector)) = raw.split_once('[') else {
+            return Ok(Self {
+                key: raw.to_string(),
+                filters: Vec::new(),
+                occurrence: EventOccurrence::Any,
+            });
+        };
+        let Some(selector) = selector.strip_suffix(']') else {
+            return Err(format!(
+                "invalid span endpoint selector `{raw}`: missing closing `]`"
+            ));
+        };
+
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(format!(
+                "invalid span endpoint selector `{raw}`: missing event key"
+            ));
+        }
+
+        let mut filters = Vec::new();
+        let mut occurrence = EventOccurrence::Any;
+        for part in selector.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                return Err(format!(
+                    "invalid span endpoint selector `{raw}`: empty selector term"
+                ));
+            }
+            if part == "last" || part == "occurrence=last" {
+                if occurrence != EventOccurrence::Any {
+                    return Err(format!(
+                        "invalid span endpoint selector `{raw}`: occurrence specified more than once"
+                    ));
+                }
+                occurrence = EventOccurrence::Last;
+                continue;
+            }
+            if let Some(value) = part.strip_prefix("occurrence=") {
+                if occurrence != EventOccurrence::Any {
+                    return Err(format!(
+                        "invalid span endpoint selector `{raw}`: occurrence specified more than once"
+                    ));
+                }
+                let occurrence_number = value.parse::<usize>().map_err(|_| {
+                    format!(
+                        "invalid span endpoint selector `{raw}`: occurrence must be a positive integer or `last`"
+                    )
+                })?;
+                if occurrence_number == 0 {
+                    return Err(format!(
+                        "invalid span endpoint selector `{raw}`: occurrence must be 1 or greater"
+                    ));
+                }
+                occurrence = EventOccurrence::Nth(occurrence_number);
+                continue;
+            }
+
+            let Some((path, value)) = part.split_once('=') else {
+                return Err(format!(
+                    "invalid span endpoint selector `{raw}`: expected `data.FIELD=value`, `occurrence=N`, or `last`"
+                ));
+            };
+            let Some(path) = path.trim().strip_prefix("data.") else {
+                return Err(format!(
+                    "invalid span endpoint selector `{raw}`: field filters must start with `data.`"
+                ));
+            };
+            let path = path
+                .split('.')
+                .map(str::trim)
+                .filter(|segment| !segment.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if path.is_empty() {
+                return Err(format!(
+                    "invalid span endpoint selector `{raw}`: data field path must be non-empty"
+                ));
+            }
+            filters.push(EventFieldFilter {
+                path,
+                value: parse_selector_value(value.trim()),
+            });
+        }
+
+        Ok(Self {
+            key: key.to_string(),
+            filters,
+            occurrence,
+        })
+    }
+
+    fn select<'a>(&self, timeline: &'a [TraceEvent]) -> Vec<&'a TraceEvent> {
+        let matches = timeline
+            .iter()
+            .filter(|event| event_matches_key(event, &self.key))
+            .filter(|event| self.filters.iter().all(|filter| filter.matches(event)))
+            .collect::<Vec<_>>();
+
+        match self.occurrence {
+            EventOccurrence::Any => matches,
+            EventOccurrence::Nth(n) => matches
+                .get(n - 1)
+                .map(|event| vec![*event])
+                .unwrap_or_default(),
+            EventOccurrence::Last => matches.last().map(|event| vec![*event]).unwrap_or_default(),
+        }
+    }
+}
+
+impl EventFieldFilter {
+    fn matches(&self, event: &TraceEvent) -> bool {
+        let Some((first, rest)) = self.path.split_first() else {
+            return false;
+        };
+        let Some(mut current) = event.data.get(first) else {
+            return false;
+        };
+        for segment in rest {
+            let Some(next) = current.get(segment) else {
+                return false;
+            };
+            current = next;
+        }
+        current == &self.value
+    }
+}
+
+fn parse_selector_value(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
+}
+
+fn first_event_time(timeline: &[TraceEvent], selector: &EventSelector) -> Option<u64> {
+    selector.select(timeline).first().map(|event| event.t_ms)
+}
+
+fn nearest_valid_pair(
+    timeline: &[TraceEvent],
+    from_selector: &EventSelector,
+    to_selector: &EventSelector,
+) -> Option<(u64, u64)> {
     let mut best: Option<(u64, u64)> = None;
 
-    for from in timeline
-        .iter()
-        .filter(|event| event_matches_key(event, from_key))
-    {
-        for to in timeline
-            .iter()
-            .filter(|event| event_matches_key(event, to_key) && event.t_ms >= from.t_ms)
-        {
+    let from_events = from_selector.select(timeline);
+    let to_events = to_selector.select(timeline);
+    for from in from_events {
+        for to in to_events.iter().filter(|event| event.t_ms >= from.t_ms) {
             match best {
                 Some((best_from, best_to))
                     if to.t_ms - from.t_ms >= best_to.saturating_sub(best_from) => {}
@@ -255,8 +407,17 @@ fn out_of_order_span_message(
 }
 
 fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> TraceSpanResult {
-    let from_t_ms = first_event_time(timeline, &definition.from);
-    let to_t_ms = first_event_time(timeline, &definition.to);
+    let from_selector = match EventSelector::parse(&definition.from) {
+        Ok(selector) => selector,
+        Err(message) => return skipped_span_result(definition, None, None, Vec::new(), message),
+    };
+    let to_selector = match EventSelector::parse(&definition.to) {
+        Ok(selector) => selector,
+        Err(message) => return skipped_span_result(definition, None, None, Vec::new(), message),
+    };
+
+    let from_t_ms = first_event_time(timeline, &from_selector);
+    let to_t_ms = first_event_time(timeline, &to_selector);
     let mut missing = Vec::new();
     if from_t_ms.is_none() {
         missing.push(definition.from.clone());
@@ -265,21 +426,16 @@ fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> 
         missing.push(definition.to.clone());
     }
     if !missing.is_empty() {
-        return TraceSpanResult {
-            id: definition.id.clone(),
-            from: definition.from.clone(),
-            to: definition.to.clone(),
-            status: TraceSpanStatus::Skipped,
-            duration_ms: None,
+        return skipped_span_result(
+            definition,
             from_t_ms,
             to_t_ms,
             missing,
-            message: Some("span endpoint missing from timeline".to_string()),
-        };
+            "span endpoint missing from timeline".to_string(),
+        );
     }
 
-    let Some((from_value, to_value)) =
-        nearest_valid_pair(timeline, &definition.from, &definition.to)
+    let Some((from_value, to_value)) = nearest_valid_pair(timeline, &from_selector, &to_selector)
     else {
         let message = match (from_t_ms, to_t_ms) {
             (Some(from_value), Some(to_value)) => {
@@ -287,17 +443,7 @@ fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> 
             }
             _ => "span end occurred before span start".to_string(),
         };
-        return TraceSpanResult {
-            id: definition.id.clone(),
-            from: definition.from.clone(),
-            to: definition.to.clone(),
-            status: TraceSpanStatus::Skipped,
-            duration_ms: None,
-            from_t_ms,
-            to_t_ms,
-            missing: Vec::new(),
-            message: Some(message),
-        };
+        return skipped_span_result(definition, from_t_ms, to_t_ms, Vec::new(), message);
     };
 
     TraceSpanResult {
@@ -310,6 +456,26 @@ fn summarize_span(definition: &TraceSpanDefinition, timeline: &[TraceEvent]) -> 
         to_t_ms: Some(to_value),
         missing: Vec::new(),
         message: None,
+    }
+}
+
+fn skipped_span_result(
+    definition: &TraceSpanDefinition,
+    from_t_ms: Option<u64>,
+    to_t_ms: Option<u64>,
+    missing: Vec<String>,
+    message: String,
+) -> TraceSpanResult {
+    TraceSpanResult {
+        id: definition.id.clone(),
+        from: definition.from.clone(),
+        to: definition.to.clone(),
+        status: TraceSpanStatus::Skipped,
+        duration_ms: None,
+        from_t_ms,
+        to_t_ms,
+        missing,
+        message: Some(message),
     }
 }
 
@@ -501,6 +667,148 @@ mod tests {
         assert_eq!(results[0].from_t_ms, Some(50));
         assert_eq!(results[0].to_t_ms, Some(80));
         assert_eq!(results[0].duration_ms, Some(30));
+    }
+
+    #[test]
+    fn span_endpoint_filters_by_data_fields() {
+        let results = summarize_spans(
+            &[
+                event_with_data(
+                    10,
+                    "renderer",
+                    "site_event_received",
+                    serde_json::json!({"name": "site-created", "running": false}),
+                ),
+                event_with_data(
+                    50,
+                    "renderer",
+                    "site_event_received",
+                    serde_json::json!({"name": "site-updated", "running": true}),
+                ),
+                event(80, "renderer", "dom_status_running_seen"),
+            ],
+            &[TraceSpanDefinition {
+                id: "site_running".to_string(),
+                from: "renderer.site_event_received[data.running=true,data.name=site-updated]"
+                    .to_string(),
+                to: "renderer.dom_status_running_seen".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Ok);
+        assert_eq!(results[0].from_t_ms, Some(50));
+        assert_eq!(results[0].duration_ms, Some(30));
+    }
+
+    #[test]
+    fn span_endpoint_filters_nested_data_fields() {
+        let results = summarize_spans(
+            &[
+                event_with_data(
+                    10,
+                    "probe",
+                    "status",
+                    serde_json::json!({"payload": {"running": false}}),
+                ),
+                event_with_data(
+                    40,
+                    "probe",
+                    "status",
+                    serde_json::json!({"payload": {"running": true}}),
+                ),
+                event(60, "probe", "ready"),
+            ],
+            &[TraceSpanDefinition {
+                id: "nested".to_string(),
+                from: "probe.status[data.payload.running=true]".to_string(),
+                to: "probe.ready".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Ok);
+        assert_eq!(results[0].from_t_ms, Some(40));
+        assert_eq!(results[0].duration_ms, Some(20));
+    }
+
+    #[test]
+    fn span_endpoint_selects_nth_occurrence_after_filters() {
+        let results = summarize_spans(
+            &[
+                event_with_data(10, "runner", "state", serde_json::json!({"phase": "boot"})),
+                event_with_data(20, "runner", "state", serde_json::json!({"phase": "ready"})),
+                event_with_data(30, "runner", "state", serde_json::json!({"phase": "ready"})),
+                event(45, "runner", "done"),
+            ],
+            &[TraceSpanDefinition {
+                id: "second_ready".to_string(),
+                from: "runner.state[data.phase=ready,occurrence=2]".to_string(),
+                to: "runner.done".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Ok);
+        assert_eq!(results[0].from_t_ms, Some(30));
+        assert_eq!(results[0].duration_ms, Some(15));
+    }
+
+    #[test]
+    fn span_endpoint_selects_last_occurrence() {
+        let results = summarize_spans(
+            &[
+                event(10, "runner", "tick"),
+                event(20, "runner", "tick"),
+                event(30, "runner", "tick"),
+                event(55, "runner", "done"),
+            ],
+            &[TraceSpanDefinition {
+                id: "last_tick".to_string(),
+                from: "runner.tick[last]".to_string(),
+                to: "runner.done".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Ok);
+        assert_eq!(results[0].from_t_ms, Some(30));
+        assert_eq!(results[0].duration_ms, Some(25));
+    }
+
+    #[test]
+    fn span_endpoint_occurrence_missing_is_skipped() {
+        let results = summarize_spans(
+            &[event(10, "runner", "tick"), event(20, "runner", "done")],
+            &[TraceSpanDefinition {
+                id: "third_tick".to_string(),
+                from: "runner.tick[occurrence=3]".to_string(),
+                to: "runner.done".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Skipped);
+        assert_eq!(results[0].missing, vec!["runner.tick[occurrence=3]"]);
+        assert_eq!(
+            results[0].message.as_deref(),
+            Some("span endpoint missing from timeline")
+        );
+    }
+
+    #[test]
+    fn invalid_span_endpoint_selector_is_skipped() {
+        let results = summarize_spans(
+            &[event(10, "runner", "tick"), event(20, "runner", "done")],
+            &[TraceSpanDefinition {
+                id: "invalid".to_string(),
+                from: "runner.tick[occurrence=0]".to_string(),
+                to: "runner.done".to_string(),
+            }],
+        );
+
+        assert_eq!(results[0].status, TraceSpanStatus::Skipped);
+        assert_eq!(
+            results[0].message.as_deref(),
+            Some(
+                "invalid span endpoint selector `runner.tick[occurrence=0]`: occurrence must be 1 or greater"
+            )
+        );
     }
 
     #[test]
