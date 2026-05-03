@@ -386,35 +386,7 @@ pub fn run_trace_list_workflow(
             &[("HOMEBOY_TRACE_LIST_ONLY".to_string(), "1".to_string())],
             &[],
         )?;
-        if !output.success {
-            return Err(Error::validation_invalid_argument(
-                "trace_list",
-                format!(
-                    "trace scenario discovery failed with exit code {}",
-                    output.exit_code
-                ),
-                Some(format!(
-                    "stdout:\n{}\n\nstderr:\n{}",
-                    output.stdout, output.stderr
-                )),
-                None,
-            ));
-        }
-        let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
-        if results_path.exists() {
-            let content = std::fs::read_to_string(&results_path).map_err(|e| {
-                Error::internal_io(
-                    format!(
-                        "Failed to read trace list file {}: {}",
-                        results_path.display(),
-                        e
-                    ),
-                    Some("trace.list.read".to_string()),
-                )
-            })?;
-            return parse_trace_list_str(&content);
-        }
-        return parse_trace_list_str(&output.stdout);
+        return trace_list_from_output(run_dir, TraceListOutput::from(output));
     }
 
     let execution_context = resolve_execution_context(component, ExtensionCapability::Trace)?;
@@ -440,21 +412,60 @@ pub fn run_trace_list_workflow(
     };
     let output =
         build_trace_runner(&execution_context, component, &runner_args, run_dir, true)?.run()?;
-    if !output.success {
-        return Err(Error::validation_invalid_argument(
-            "trace_list",
-            format!(
-                "trace scenario discovery failed with exit code {}",
-                output.exit_code
-            ),
-            Some(format!(
-                "stdout:\n{}\n\nstderr:\n{}",
-                output.stdout, output.stderr
-            )),
-            None,
-        ));
+    trace_list_from_output(run_dir, TraceListOutput::from(output))
+}
+
+struct TraceListOutput {
+    exit_code: i32,
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl From<crate::extension::component_script::ComponentScriptOutput> for TraceListOutput {
+    fn from(output: crate::extension::component_script::ComponentScriptOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
+    }
+}
+
+impl From<RunnerOutput> for TraceListOutput {
+    fn from(output: RunnerOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
+    }
+}
+
+fn trace_list_from_output(run_dir: &RunDir, output: TraceListOutput) -> Result<TraceList> {
+    if output.success {
+        return parse_trace_list_output(run_dir, &output.stdout);
     }
 
+    Err(trace_list_error(
+        output.exit_code,
+        &output.stdout,
+        &output.stderr,
+    ))
+}
+
+fn trace_list_error(exit_code: i32, stdout: &str, stderr: &str) -> Error {
+    Error::validation_invalid_argument(
+        "trace_list",
+        format!("trace scenario discovery failed with exit code {exit_code}"),
+        Some(format!("stdout:\n{stdout}\n\nstderr:\n{stderr}")),
+        None,
+    )
+}
+
+fn parse_trace_list_output(run_dir: &RunDir, stdout: &str) -> Result<TraceList> {
     let results_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
     if results_path.exists() {
         let content = std::fs::read_to_string(&results_path).map_err(|e| {
@@ -470,7 +481,7 @@ pub fn run_trace_list_workflow(
         return parse_trace_list_str(&content);
     }
 
-    parse_trace_list_str(&output.stdout)
+    parse_trace_list_str(stdout)
 }
 
 pub(crate) fn build_trace_runner(

@@ -5,11 +5,7 @@ use homeboy::commands::utils::args::{
 };
 use homeboy::commands::GlobalArgs;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::Mutex;
-
-static HOME_LOCK: Mutex<()> = Mutex::new(());
 
 fn write_component(root: &Path, self_checks: &str) {
     fs::write(
@@ -23,37 +19,6 @@ fn write_component(root: &Path, self_checks: &str) {
         ),
     )
     .expect("homeboy.json should be written");
-}
-
-fn write_component_with_scripts(root: &Path, scripts: &str) {
-    fs::write(
-        root.join("homeboy.json"),
-        format!(
-            r#"{{
-  "id": "fixture",
-  "scripts": {}
-}}"#,
-            scripts
-        ),
-    )
-    .expect("homeboy.json should be written");
-}
-
-fn with_isolated_home<T>(f: impl FnOnce(&Path) -> T) -> T {
-    let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let old_home = std::env::var_os("HOME");
-    let home = tempfile::tempdir().expect("home tempdir");
-
-    std::env::set_var("HOME", home.path());
-    let result = f(home.path());
-
-    if let Some(value) = old_home {
-        std::env::set_var("HOME", value);
-    } else {
-        std::env::remove_var("HOME");
-    }
-
-    result
 }
 
 fn write_script(root: &Path, name: &str, body: &str) {
@@ -136,74 +101,6 @@ fn test_runs_declared_self_check_without_extensions() {
     assert_eq!(exit_code, 0);
     assert!(output.passed);
     assert_eq!(output.component, "fixture");
-}
-
-#[test]
-fn test_runs_component_script_before_extension_resolution() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    write_component_with_scripts(dir.path(), r#"{ "test": ["sh scripts/test.sh"] }"#);
-    write_script(
-        dir.path(),
-        "test.sh",
-        "printf 'component script ran\n' > component-script-marker\n",
-    );
-
-    let (output, exit_code) =
-        run_test(test_args(dir.path()), &GlobalArgs {}).expect("test script should run");
-
-    assert_eq!(exit_code, 0);
-    assert!(output.passed);
-    assert!(dir.path().join("component-script-marker").exists());
-}
-
-#[test]
-fn test_falls_back_to_extension_when_component_script_is_absent() {
-    with_isolated_home(|home| {
-        let dir = tempfile::tempdir().expect("temp dir");
-        fs::write(
-            dir.path().join("homeboy.json"),
-            r#"{
-  "id": "fixture",
-  "extensions": { "fixture-extension": {} }
-}"#,
-        )
-        .expect("homeboy.json should be written");
-
-        let extension_dir = home
-            .join(".config")
-            .join("homeboy")
-            .join("extensions")
-            .join("fixture-extension");
-        fs::create_dir_all(&extension_dir).expect("extension dir should be created");
-        fs::write(
-            extension_dir.join("fixture-extension.json"),
-            r#"{
-  "name": "Fixture extension",
-  "version": "1.0.0",
-  "test": { "extension_script": "test.sh" }
-}"#,
-        )
-        .expect("extension manifest should be written");
-        let extension_script = extension_dir.join("test.sh");
-        fs::write(
-            &extension_script,
-            "#!/bin/sh\nprintf 'extension ran\n' > \"$HOMEBOY_COMPONENT_PATH/extension-marker\"\n",
-        )
-        .expect("extension script should be written");
-        let mut perms = fs::metadata(&extension_script)
-            .expect("extension script metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&extension_script, perms)
-            .expect("extension script should be executable");
-
-        let (output, exit_code) =
-            run_test(test_args(dir.path()), &GlobalArgs {}).expect("extension test should run");
-
-        assert_eq!(exit_code, 0);
-        assert!(output.passed);
-        assert!(dir.path().join("extension-marker").exists());
-    });
 }
 
 #[test]

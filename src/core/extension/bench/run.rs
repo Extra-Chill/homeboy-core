@@ -122,12 +122,12 @@ pub fn run_bench_list_workflow(
     args: BenchListWorkflowArgs,
     run_dir: &RunDir,
 ) -> Result<BenchListWorkflowResult> {
+    let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
     if component.has_script(ExtensionCapability::Bench) {
         let source_path = crate::extension::component_script::source_path(
             component,
             args.path_override.as_deref(),
         );
-        let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
         let output = crate::extension::component_script::run_component_scripts_with_run_dir(
             component,
             ExtensionCapability::Bench,
@@ -137,36 +137,16 @@ pub fn run_bench_list_workflow(
             &[("HOMEBOY_BENCH_LIST_ONLY".to_string(), "1".to_string())],
             &args.passthrough_args,
         )?;
-        if !output.success {
-            return Err(Error::validation_invalid_argument(
-                "bench_list",
-                format!(
-                    "bench scenario discovery failed with exit code {}",
-                    output.exit_code
-                ),
-                Some(format!(
-                    "stdout:\n{}\n\nstderr:\n{}",
-                    output.stdout, output.stderr
-                )),
-                None,
-            ));
-        }
-        let parsed = apply_scenario_filter(
-            parsing::parse_bench_results_file(&results_file)?,
-            &args.scenario_ids,
+        ensure_bench_list_success(
+            output.exit_code,
+            output.success,
+            &output.stdout,
+            &output.stderr,
         )?;
-        let count = parsed.scenarios.len();
-        return Ok(BenchListWorkflowResult {
-            component: args.component_label,
-            component_id: parsed.component_id,
-            scenarios: parsed.scenarios,
-            count,
-        });
+        return bench_list_result(args.component_label, results_file, &args.scenario_ids);
     }
 
     let execution_context = resolve_execution_context(component, ExtensionCapability::Bench)?;
-    let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
-
     let runner_output = build_runner(
         &execution_context,
         component,
@@ -201,29 +181,46 @@ pub fn run_bench_list_workflow(
     .env("HOMEBOY_BENCH_LIST_ONLY", "1")
     .run()?;
 
-    if !runner_output.success {
-        return Err(Error::validation_invalid_argument(
-            "bench_list",
-            format!(
-                "bench scenario discovery failed with exit code {}",
-                runner_output.exit_code
-            ),
-            Some(format!(
-                "stdout:\n{}\n\nstderr:\n{}",
-                runner_output.stdout, runner_output.stderr
-            )),
-            None,
-        ));
+    ensure_bench_list_success(
+        runner_output.exit_code,
+        runner_output.success,
+        &runner_output.stdout,
+        &runner_output.stderr,
+    )?;
+    bench_list_result(args.component_label, results_file, &args.scenario_ids)
+}
+
+fn ensure_bench_list_success(
+    exit_code: i32,
+    success: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Result<()> {
+    if success {
+        return Ok(());
     }
 
+    Err(Error::validation_invalid_argument(
+        "bench_list",
+        format!("bench scenario discovery failed with exit code {exit_code}"),
+        Some(format!("stdout:\n{stdout}\n\nstderr:\n{stderr}")),
+        None,
+    ))
+}
+
+fn bench_list_result(
+    component_label: String,
+    results_file: PathBuf,
+    scenario_ids: &[String],
+) -> Result<BenchListWorkflowResult> {
     let parsed = apply_scenario_filter(
         parsing::parse_bench_results_file(&results_file)?,
-        &args.scenario_ids,
+        scenario_ids,
     )?;
     let count = parsed.scenarios.len();
 
     Ok(BenchListWorkflowResult {
-        component: args.component_label,
+        component: component_label,
         component_id: parsed.component_id,
         scenarios: parsed.scenarios,
         count,
