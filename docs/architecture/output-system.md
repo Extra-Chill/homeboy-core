@@ -160,7 +160,7 @@ Observation-backed commands may add an optional `observation` field using the
     "details": {
       "query": "homeboy runs show abc123",
       "artifacts": "homeboy runs artifacts abc123",
-      "export_bundle": "homeboy runs export --run abc123 --output homeboy-observations"
+      "export_bundle": "homeboy runs export --run abc123 --output ~/.local/share/homeboy/exports/abc123"
     }
   }
 }
@@ -173,6 +173,9 @@ Rules:
 - Existing command payload fields stay intact for backward compatibility.
 - Heavy evidence should live in observation records when available; command
   output should keep summary/counts/status and include exact drill-down commands.
+- Export examples should point outside the source checkout. CI wrappers should
+  stage observation bundles under runner temp storage before uploading them as
+  the `homeboy-observations` artifact.
 - Observation store failures must not fail an otherwise successful command.
 
 ## Command payload conventions
