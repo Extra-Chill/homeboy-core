@@ -403,7 +403,7 @@ pub(crate) fn build_trace_runner(
     runner.run()
 }
 
-fn trace_is_unclaimed(error: &Error) -> bool {
+pub fn trace_is_unclaimed(error: &Error) -> bool {
     error.code == ErrorCode::ExtensionUnsupported
         || (error.code == ErrorCode::ValidationInvalidArgument
             && error
@@ -883,6 +883,28 @@ JSON
             assert!(scenario_ids.contains(&"external".to_string()));
             assert!(scenario_ids.contains(&"rig".to_string()));
         });
+    }
+
+    #[test]
+    fn test_trace_is_unclaimed() {
+        let unsupported = Error::new(
+            ErrorCode::ExtensionUnsupported,
+            "No extension provider configured for component 'example'",
+            serde_json::json!({}),
+        );
+        assert!(trace_is_unclaimed(&unsupported));
+
+        let missing_trace = Error::validation_invalid_argument(
+            "extension",
+            "Component 'example' has no linked extensions that provide trace support",
+            None,
+            None,
+        );
+        assert!(trace_is_unclaimed(&missing_trace));
+
+        let other =
+            Error::validation_invalid_argument("extension", "different problem", None, None);
+        assert!(!trace_is_unclaimed(&other));
     }
 
     #[test]

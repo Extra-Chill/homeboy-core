@@ -6,7 +6,6 @@ use homeboy::component::{Component, ScopedExtensionConfig};
 use homeboy::engine::baseline::BaselineFlags;
 use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::RunDir;
-use homeboy::error::{Error, ErrorCode};
 use homeboy::extension::trace as extension_trace;
 use homeboy::extension::trace::{
     TraceCommandOutput, TraceListWorkflowArgs, TraceOverlayRequest, TraceRunWorkflowArgs,
@@ -1038,20 +1037,14 @@ fn resolve_trace_execution_context(
         component_override.clone(),
     ) {
         Ok(ctx) => Ok(ctx),
-        Err(error) if trace_is_unclaimed(&error) => execution_context::resolve_with_component(
-            &ResolveOptions::source_only(effective_id, path_override),
-            component_override,
-        ),
+        Err(error) if extension_trace::trace_is_unclaimed(&error) => {
+            execution_context::resolve_with_component(
+                &ResolveOptions::source_only(effective_id, path_override),
+                component_override,
+            )
+        }
         Err(error) => Err(error),
     }
-}
-
-fn trace_is_unclaimed(error: &Error) -> bool {
-    error.code == ErrorCode::ExtensionUnsupported
-        || (error.code == ErrorCode::ValidationInvalidArgument
-            && error
-                .message
-                .contains("has no linked extensions that provide trace support"))
 }
 
 fn trace_overlays_for_args(
@@ -1489,6 +1482,8 @@ mod compare_tests;
 mod compare_variant_tests;
 #[cfg(test)]
 mod experiment_tests;
+#[cfg(test)]
+mod generic_tests;
 #[cfg(test)]
 mod guardrail_tests;
 #[cfg(test)]
