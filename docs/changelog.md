@@ -4,6 +4,21 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.155.1] - 2026-05-03
+
+### Changed
+- cover audit naming inflection helpers
+
+### Fixed
+- suppress low-value repeated data contracts
+- filter parallel implementation plumbing
+- close legacy review-only audit issues
+- suppress orphaned test false positives
+- suppress duplicate argument-tail noise
+- accept behavior tests for file coverage
+- identify implicit default baseline failures
+- expand env tokens in exclusive resources
+
 ## [0.155.0] - 2026-05-03
 
 ### Added
