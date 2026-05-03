@@ -30,6 +30,23 @@ homeboy trace <component> <scenario> --ratchet
 }
 ```
 
+## Generic Shell Runner
+
+When a component has no trace-capable extension, `homeboy trace` falls back to a built-in generic runner. This is intentionally in core rather than a separate `shell` extension so shell-only or JSON-config components can run trace workloads without installing an extension or adding a fake language marker such as `package.json`. Components that already have a trace extension, including the Node.js extension, continue to use that extension first.
+
+The generic runner discovers workloads in:
+
+- `<component>/traces/*.trace.{mjs,sh,py}`
+- `<component>/scripts/trace/*.{mjs,sh,py}`
+
+It also honors `HOMEBOY_TRACE_EXTRA_WORKLOADS` using the platform path separator, matching the existing rig-owned workload handoff pattern. Workloads run from the component directory with the standard trace environment below and are responsible for writing `HOMEBOY_TRACE_RESULTS_FILE`.
+
+Generic workloads are dispatched by extension:
+
+- `.mjs` via `node`
+- `.sh` via `sh`
+- `.py` via `python3`
+
 ## Runner Environment
 
 - `HOMEBOY_TRACE_RESULTS_FILE`
