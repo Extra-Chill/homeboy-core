@@ -295,6 +295,28 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_temporal_assertions() {
+        let mut results = results(
+            vec![event(10, "runner", "ready")],
+            vec![TraceTemporalAssertionDefinition::Count {
+                id: "ready-once".to_string(),
+                events: vec!["runner.ready".to_string()],
+                min: Some(1),
+                max: Some(1),
+                message: None,
+            }],
+        );
+
+        assert!(!apply_temporal_assertions(&mut results));
+        assert_eq!(results.status, TraceStatus::Pass);
+        assert!(results.temporal_assertions.is_empty());
+        assert_eq!(results.assertions.len(), 1);
+        assert_eq!(results.assertions[0].id, "ready-once");
+        assert_eq!(results.assertions[0].status, TraceAssertionStatus::Pass);
+        assert_eq!(results.assertions[0].details.as_ref().unwrap()["actual"], 1);
+    }
+
+    #[test]
     fn count_assertion_fails_when_count_exceeds_max() {
         let mut results = results(
             vec![

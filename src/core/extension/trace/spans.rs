@@ -345,6 +345,49 @@ mod tests {
     }
 
     #[test]
+    fn test_reporting_timeline() {
+        let timeline = reporting_timeline(&[
+            event(50, "runner", "later"),
+            event_with_data(
+                10,
+                "runner",
+                "details",
+                serde_json::json!({
+                    "events": [
+                        {"source": "nested", "event": "first", "t": 5, "data": {"ok": true}},
+                        {"source": "nested", "event": "second", "t": 20}
+                    ]
+                }),
+            ),
+        ]);
+
+        let keys = timeline
+            .iter()
+            .map(|event| format!("{}:{}.{}", event.t_ms, event.source, event.event))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            vec![
+                "10:runner.details",
+                "15:nested.first",
+                "30:nested.second",
+                "50:runner.later"
+            ]
+        );
+        assert_eq!(timeline[1].data.get("ok"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_event_matches_key() {
+        let event = event(0, "desktop", "window.closed");
+
+        assert!(event_matches_key(&event, "desktop.window.closed"));
+        assert!(!event_matches_key(&event, "desktop.window"));
+        assert!(!event_matches_key(&event, "runner.window.closed"));
+        assert!(!event_matches_key(&event, "desktop.window.closed.extra"));
+    }
+
+    #[test]
     fn test_parse_span_definition() {
         let definition = parse_span_definition("submit:ui.clicked:cli.started").unwrap();
 
