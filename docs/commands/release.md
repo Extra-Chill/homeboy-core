@@ -20,6 +20,7 @@ Legacy positional bump syntax is still accepted for compatibility: `homeboy rele
 - `--recover`: Recover from an interrupted release
 - `--skip-checks`: Skip pre-release lint/test checks
 - `--bump <BUMP>`: Force `major`, `minor`, `patch`, or an explicit version like `2.0.0`
+- `--force-lower-bump`: Allow a forced bump lower than the commit-derived recommendation
 - `--skip-publish`: Skip publish/package steps; useful when CI publishes after the tag is pushed
 - `--no-github-release`: Skip GitHub Release creation while still tagging and pushing
 - `--git-identity <IDENTITY>`: Configure git identity for release commits/tags; use `bot` or `Name <email>`
@@ -27,6 +28,8 @@ Legacy positional bump syntax is still accepted for compatibility: `homeboy rele
 ## Description
 
 `homeboy release` executes component releases: detects or applies a version bump, finalizes generated changelog entries, commits, tags, pushes, and optionally publishes release artifacts. Use `--dry-run` to preview the release plan without making changes.
+
+When `--bump` requests a lower keyword bump than Homeboy detects from releasable commits, release execution requires confirmation in an interactive terminal. Non-interactive runs must pass `--force-lower-bump`; otherwise Homeboy refuses before creating release artifacts, commits, tags, or pushes. Dry-run still returns the plan and semver recommendation for review.
 
 ## Recommended Workflow
 
@@ -190,7 +193,7 @@ Example payload:
 }
 ```
 
-Use this in CI to inspect Homeboy's commit-derived recommendation before tagging/publish. Pass `--bump` when automation or a maintainer needs to override the detected bump.
+Use this in CI to inspect Homeboy's commit-derived recommendation before tagging/publish. Pass `--bump` when automation or a maintainer needs to override the detected bump. If automation intentionally publishes a lower keyword bump than `recommended_bump`, pass `--force-lower-bump` with the release command.
 
 Without `--dry-run`:
 

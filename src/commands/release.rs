@@ -49,6 +49,10 @@ pub struct ReleaseArgs {
     #[arg(long)]
     bump: Option<String>,
 
+    /// Allow an explicit bump lower than Homeboy's commit-derived recommendation.
+    #[arg(long)]
+    force_lower_bump: bool,
+
     /// Skip publish/package steps (version bump + tag + push only).
     /// Use when CI handles publishing after the tag is pushed.
     #[arg(long)]
@@ -111,6 +115,7 @@ impl ReleaseArgs {
             recover,
             skip_checks,
             bump,
+            force_lower_bump: false,
             skip_publish,
             no_github_release: false,
             git_identity: None,
@@ -138,6 +143,7 @@ pub fn run(
             recover: args.recover,
             skip_checks: args.skip_checks,
             bump_override: bump_override.clone(),
+            force_lower_bump: args.force_lower_bump,
             skip_publish: args.skip_publish,
             skip_github_release: args.no_github_release,
             git_identity: args.git_identity.clone(),
@@ -175,6 +181,7 @@ pub fn run(
         recover: false,
         skip_checks: args.skip_checks,
         bump_override,
+        force_lower_bump: args.force_lower_bump,
         skip_publish: args.skip_publish,
         skip_github_release: args.no_github_release,
         git_identity: args.git_identity.clone(),
