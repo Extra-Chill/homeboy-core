@@ -350,6 +350,14 @@ pub(crate) fn analyze_test_coverage(
                     let correct_test_path =
                         source_to_test_path(actual_source_path, config).unwrap_or_default();
 
+                    if is_include_wrapper_for_test_path(
+                        &test_fp.relative_path,
+                        &test_fp.content,
+                        &correct_test_path,
+                    ) {
+                        continue;
+                    }
+
                     findings.push(Finding {
                         convention: "test_coverage".to_string(),
                         severity: Severity::Info,
@@ -628,6 +636,10 @@ fn find_orphaned_test_methods(
             continue;
         }
 
+        if config.inline_tests && is_rust_behavior_scenario_name(expected_source) {
+            continue;
+        }
+
         // Behavior-driven test names: test_detects_exact_duplicate describes a
         // behavior, not a method reference. Short names (1-2 segments like
         // "old_function" or "pause") are likely real method references. But
@@ -668,6 +680,55 @@ fn find_orphaned_test_methods(
             kind: AuditFinding::OrphanedTest,
         });
     }
+}
+
+fn is_include_wrapper_for_test_path(
+    wrapper_path: &str,
+    wrapper_content: &str,
+    target_test_path: &str,
+) -> bool {
+    if !wrapper_path.ends_with(".rs") || !target_test_path.ends_with(".rs") {
+        return false;
+    }
+
+    let wrapper_dir = Path::new(wrapper_path)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let target_path = Path::new(target_test_path);
+    let Ok(relative_target) = target_path.strip_prefix(wrapper_dir) else {
+        return false;
+    };
+
+    let relative_target = relative_target.to_string_lossy().replace('\\', "/");
+    let normalized_content: String = wrapper_content
+        .trim()
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    let expected = format!("include!(\"{}\");", relative_target);
+
+    normalized_content == expected
+}
+
+fn is_rust_behavior_scenario_name(name: &str) -> bool {
+    let behavior_prefixes = [
+        "accepts_",
+        "detects_",
+        "emits_",
+        "handles_",
+        "ignores_",
+        "rejects_",
+        "skips_",
+        "translates_",
+    ];
+    let behavior_suffixes = ["_roundtrip", "_roundtrips"];
+
+    behavior_prefixes
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || behavior_suffixes
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
 }
 
 // ============================================================================
@@ -1481,6 +1542,68 @@ fn test_chat_tools() {
             orphaned.iter().map(|f| &f.description).collect::<Vec<_>>()
         );
         assert!(orphaned[0].description.contains("old_function"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn common_behavior_scenario_names_not_flagged_as_orphaned() {
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_common_behavior_names");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/core")).unwrap();
+
+        let source = make_fp_split(
+            "src/core/update_check.rs",
+            vec!["read_cache", "write_cache", "github_to_tracked"],
+            vec![
+                "test_cache_roundtrip",
+                "test_display_roundtrip",
+                "test_ignores_subscripts",
+                "test_translates_open",
+            ],
+        );
+
+        let findings = analyze_test_coverage(&dir, &[&source], &config);
+        let orphaned: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| {
+                f.kind == AuditFinding::OrphanedTest && f.description.contains("no longer exists")
+            })
+            .collect();
+
+        assert!(
+            orphaned.is_empty(),
+            "common behavior/scenario names should not be orphaned: {:?}",
+            orphaned.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rust_include_wrapper_for_nested_test_path_is_not_misplaced() {
+        let config = make_rust_config();
+        let dir = std::env::temp_dir().join("homeboy_test_coverage_include_wrapper");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/core")).unwrap();
+        std::fs::create_dir_all(dir.join("tests/core")).unwrap();
+
+        let source = make_fp("src/core/deps.rs", vec!["status"]);
+        let mut wrapper = make_fp("tests/deps_test.rs", vec!["status_reads_manifest"]);
+        wrapper.content = "include!(\"core/deps_test.rs\");".to_string();
+
+        let findings = analyze_test_coverage(&dir, &[&source, &wrapper], &config);
+        let misplaced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::OrphanedTest && f.description.contains("misplaced"))
+            .collect();
+
+        assert!(
+            misplaced.is_empty(),
+            "include wrappers keep nested Cargo tests discoverable: {:?}",
+            misplaced.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -594,6 +594,59 @@ pub fn find_unclosed_raw_string_on_line(line: &str) -> Option<String> {
     None
 }
 
+fn line_has_unclosed_regular_string(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut pos = 0;
+    let mut in_string = false;
+
+    while pos < bytes.len() {
+        let byte = bytes[pos];
+
+        if byte == b'"' && !is_escaped(bytes, pos) {
+            // Raw string openers are handled separately. Treat the opening
+            // delimiter as non-regular so `r#"..."#` does not toggle us.
+            if !in_string && pos > 0 && bytes[pos - 1] == b'r' {
+                pos += 1;
+                continue;
+            }
+            in_string = !in_string;
+        }
+
+        pos += 1;
+    }
+
+    in_string
+}
+
+fn line_closes_regular_string(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() {
+        if bytes[pos] == b'"' && !is_escaped(bytes, pos) {
+            return true;
+        }
+        pos += 1;
+    }
+
+    false
+}
+
+fn is_escaped(bytes: &[u8], pos: usize) -> bool {
+    if pos == 0 {
+        return false;
+    }
+
+    let mut backslashes = 0;
+    let mut i = pos;
+    while i > 0 && bytes[i - 1] == b'\\' {
+        backslashes += 1;
+        i -= 1;
+    }
+
+    backslashes % 2 == 1
+}
+
 /// Iterate lines with structural context, tracking brace depth and regions.
 ///
 /// This is the core primitive — it walks the file line-by-line, tracking
@@ -606,6 +659,7 @@ pub(crate) fn walk_lines<'a>(content: &'a str, grammar: &Grammar) -> Vec<Context
     let mut block_comment_end = String::new();
     let mut in_raw_string = false;
     let mut raw_string_close = String::new();
+    let mut in_regular_string = false;
 
     for (i, line) in content.lines().enumerate() {
         let trimmed = line.trim();
@@ -616,6 +670,14 @@ pub(crate) fn walk_lines<'a>(content: &'a str, grammar: &Grammar) -> Vec<Context
             // Inside a multi-line raw string — check if closing delimiter appears
             if line.contains(&raw_string_close) {
                 in_raw_string = false;
+            }
+            Region::StringLiteral
+        } else if in_regular_string {
+            // Inside a multi-line regular string. Rust permits newline escapes
+            // in ordinary strings (`let s = "\ ...`), and fixture source in
+            // tests commonly uses that form.
+            if line_closes_regular_string(line) {
+                in_regular_string = false;
             }
             Region::StringLiteral
         } else if in_block_comment {
@@ -652,6 +714,8 @@ pub(crate) fn walk_lines<'a>(content: &'a str, grammar: &Grammar) -> Vec<Context
                 if let Some(close) = find_unclosed_raw_string_on_line(line) {
                     in_raw_string = true;
                     raw_string_close = close;
+                } else if line_has_unclosed_regular_string(line) {
+                    in_regular_string = true;
                 }
                 // The opening line itself is Code (it has real code on it);
                 // subsequent lines inside the string are StringLiteral.
@@ -1433,6 +1497,28 @@ mod tests {
     }
 
     #[test]
+    fn walk_lines_detects_multiline_regular_string_regions() {
+        let content = "fn real() {}\nlet s = \"\\\nfn fake_inside_string() {}\nanother line\n\";\nfn also_real() {}\n";
+        let grammar = rust_grammar();
+        let lines = walk_lines(content, &grammar);
+
+        assert_eq!(lines[0].region, Region::Code, "fn real()");
+        assert_eq!(lines[1].region, Region::Code, "opening line has real code");
+        assert_eq!(
+            lines[2].region,
+            Region::StringLiteral,
+            "inside regular string"
+        );
+        assert_eq!(
+            lines[3].region,
+            Region::StringLiteral,
+            "inside regular string"
+        );
+        assert_eq!(lines[4].region, Region::StringLiteral, "closing delimiter");
+        assert_eq!(lines[5].region, Region::Code, "fn also_real()");
+    }
+
+    #[test]
     fn extract_skips_functions_inside_raw_strings() {
         // Regression: the grammar extracted fn declarations from inside raw
         // strings used as test fixtures, polluting the fingerprint with fake
@@ -1459,6 +1545,34 @@ mod tests {
         assert!(
             !fn_names.contains(&"another_fake"),
             "Should NOT find another_fake inside raw string. Found: {:?}",
+            fn_names
+        );
+    }
+
+    #[test]
+    fn extract_skips_functions_inside_multiline_regular_strings() {
+        let content = "pub fn real_function() -> bool {\n    true\n}\nlet fixture = \"\\\npub fn fake_function() -> bool {\n    false\n}\nfn another_fake() {}\n\";\n";
+        let grammar = rust_grammar();
+        let symbols = extract(content, &grammar);
+        let fn_names: Vec<&str> = symbols
+            .iter()
+            .filter(|s| s.concept == "function")
+            .filter_map(|s| s.name())
+            .collect();
+
+        assert!(
+            fn_names.contains(&"real_function"),
+            "Should find real_function. Found: {:?}",
+            fn_names
+        );
+        assert!(
+            !fn_names.contains(&"fake_function"),
+            "Should NOT find fake_function inside regular string. Found: {:?}",
+            fn_names
+        );
+        assert!(
+            !fn_names.contains(&"another_fake"),
+            "Should NOT find another_fake inside regular string. Found: {:?}",
             fn_names
         );
     }
