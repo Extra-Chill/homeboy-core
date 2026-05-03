@@ -3,18 +3,27 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{File, Metadata};
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
 
 use super::parsing::TraceEvent;
+
+mod cmd_run;
+mod file_watch;
+mod http_poll;
+mod port_snapshot;
+
+use cmd_run::run_cmd_run;
+use file_watch::{file_state, run_file_watch, FileState};
+use http_poll::run_http_poll;
+use port_snapshot::{ports_for_snapshot, run_port_snapshot};
 
 const DEFAULT_PROCESS_INTERVAL_MS: u64 = 1_000;
 const DEFAULT_FILE_INTERVAL_MS: u64 = 250;
@@ -116,13 +125,6 @@ enum RunningTraceProbeConfig {
         command: String,
         args: Vec<String>,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FileState {
-    exists: bool,
-    len: u64,
-    modified_ms: Option<u128>,
 }
 
 impl ActiveTraceProbes {
@@ -632,370 +634,6 @@ fn process_delta_event(
     event(started_at, "process.snapshot", event_name, data)
 }
 
-fn run_file_watch(
-    path: String,
-    interval_ms: u64,
-    mut previous: FileState,
-    started_at: Instant,
-    events: Arc<Mutex<Vec<TraceEvent>>>,
-    stop: mpsc::Receiver<()>,
-) {
-    let path_buf = PathBuf::from(&path);
-    let interval = Duration::from_millis(interval_ms.max(1));
-
-    loop {
-        let current = file_state(&path_buf);
-        emit_file_watch_events(&path, &previous, &current, started_at, &events);
-        previous = current;
-        if stop.recv_timeout(interval).is_ok() {
-            let current = file_state(&path_buf);
-            emit_file_watch_events(&path, &previous, &current, started_at, &events);
-            break;
-        }
-    }
-}
-
-fn file_state(path: &PathBuf) -> FileState {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return FileState {
-            exists: false,
-            len: 0,
-            modified_ms: None,
-        };
-    };
-    file_state_from_metadata(&metadata)
-}
-
-fn file_state_from_metadata(metadata: &Metadata) -> FileState {
-    FileState {
-        exists: true,
-        len: metadata.len(),
-        modified_ms: metadata
-            .modified()
-            .ok()
-            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-            .map(|modified| modified.as_millis()),
-    }
-}
-
-fn emit_file_watch_events(
-    path: &str,
-    previous: &FileState,
-    current: &FileState,
-    started_at: Instant,
-    events: &Arc<Mutex<Vec<TraceEvent>>>,
-) {
-    let event_name = if !previous.exists && current.exists {
-        Some("fs.create")
-    } else if previous.exists && !current.exists {
-        Some("fs.delete")
-    } else if previous.exists
-        && current.exists
-        && (previous.len != current.len || previous.modified_ms != current.modified_ms)
-    {
-        Some("fs.write")
-    } else {
-        None
-    };
-
-    let Some(event_name) = event_name else {
-        return;
-    };
-    let mut data = BTreeMap::new();
-    data.insert(
-        "path".to_string(),
-        serde_json::Value::String(path.to_string()),
-    );
-    data.insert("exists".to_string(), serde_json::json!(current.exists));
-    if current.exists {
-        data.insert("len".to_string(), serde_json::json!(current.len));
-    }
-    push_event(events, event(started_at, "file.watch", event_name, data));
-}
-
-fn run_port_snapshot(
-    ports: Vec<u16>,
-    interval_ms: u64,
-    started_at: Instant,
-    events: Arc<Mutex<Vec<TraceEvent>>>,
-    stop: mpsc::Receiver<()>,
-) {
-    let interval = Duration::from_millis(interval_ms.max(1));
-    let mut previous: Option<BTreeSet<u16>> = None;
-
-    loop {
-        let current = listening_ports(&ports);
-        emit_port_events(previous.as_ref(), &current, started_at, &events);
-        previous = Some(current);
-        if stop.recv_timeout(interval).is_ok() {
-            let current = listening_ports(&ports);
-            emit_port_events(previous.as_ref(), &current, started_at, &events);
-            break;
-        }
-    }
-}
-
-fn listening_ports(ports: &[u16]) -> BTreeSet<u16> {
-    ports
-        .iter()
-        .copied()
-        .filter(|port| TcpListener::bind(("127.0.0.1", *port)).is_err())
-        .collect()
-}
-
-fn emit_port_events(
-    previous: Option<&BTreeSet<u16>>,
-    current: &BTreeSet<u16>,
-    started_at: Instant,
-    events: &Arc<Mutex<Vec<TraceEvent>>>,
-) {
-    let mut data = BTreeMap::new();
-    data.insert(
-        "ports".to_string(),
-        serde_json::Value::Array(current.iter().map(|port| serde_json::json!(port)).collect()),
-    );
-    push_event(
-        events,
-        event(started_at, "port.snapshot", "net.listening", data),
-    );
-
-    let Some(previous) = previous else {
-        return;
-    };
-    for port in current.difference(previous) {
-        push_event(events, port_delta_event(started_at, "net.bind", *port));
-    }
-    for port in previous.difference(current) {
-        push_event(events, port_delta_event(started_at, "net.unbind", *port));
-    }
-}
-
-fn port_delta_event(started_at: Instant, event_name: &str, port: u16) -> TraceEvent {
-    let mut data = BTreeMap::new();
-    data.insert("port".to_string(), serde_json::json!(port));
-    event(started_at, "port.snapshot", event_name, data)
-}
-
-fn ports_for_snapshot(port: Option<u16>, port_range: Option<&str>) -> Result<Vec<u16>> {
-    let mut ports = BTreeSet::new();
-    if let Some(port) = port {
-        ports.insert(port);
-    }
-    if let Some(port_range) = port_range {
-        let Some((start, end)) = port_range.split_once('-') else {
-            return Err(Error::validation_invalid_argument(
-                "trace_probes.port-range",
-                "port.snapshot port-range must be formatted as start-end".to_string(),
-                None,
-                None,
-            ));
-        };
-        let start: u16 = start.trim().parse().map_err(|_| {
-            Error::validation_invalid_argument(
-                "trace_probes.port-range",
-                "port.snapshot port-range start must be a port number".to_string(),
-                None,
-                None,
-            )
-        })?;
-        let end: u16 = end.trim().parse().map_err(|_| {
-            Error::validation_invalid_argument(
-                "trace_probes.port-range",
-                "port.snapshot port-range end must be a port number".to_string(),
-                None,
-                None,
-            )
-        })?;
-        if start > end {
-            return Err(Error::validation_invalid_argument(
-                "trace_probes.port-range",
-                "port.snapshot port-range start must be <= end".to_string(),
-                None,
-                None,
-            ));
-        }
-        ports.extend(start..=end);
-    }
-    if ports.is_empty() {
-        return Err(Error::validation_invalid_argument(
-            "trace_probes.port",
-            "port.snapshot requires port or port-range".to_string(),
-            None,
-            None,
-        ));
-    }
-    Ok(ports.into_iter().collect())
-}
-
-fn run_http_poll(
-    url: String,
-    interval_ms: u64,
-    assert_status: Option<u16>,
-    started_at: Instant,
-    events: Arc<Mutex<Vec<TraceEvent>>>,
-    stop: mpsc::Receiver<()>,
-) {
-    let interval = Duration::from_millis(interval_ms.max(1));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .ok();
-
-    loop {
-        emit_http_poll_event(client.as_ref(), &url, assert_status, started_at, &events);
-        if stop.recv_timeout(interval).is_ok() {
-            emit_http_poll_event(client.as_ref(), &url, assert_status, started_at, &events);
-            break;
-        }
-    }
-}
-
-fn emit_http_poll_event(
-    client: Option<&reqwest::blocking::Client>,
-    url: &str,
-    assert_status: Option<u16>,
-    started_at: Instant,
-    events: &Arc<Mutex<Vec<TraceEvent>>>,
-) {
-    let Some(client) = client else {
-        push_http_error(url, "failed to build HTTP client", started_at, events);
-        return;
-    };
-    let request_started = Instant::now();
-    match client.get(url).send() {
-        Ok(response) => {
-            let status = response.status().as_u16();
-            let mut data = BTreeMap::new();
-            data.insert(
-                "url".to_string(),
-                serde_json::Value::String(url.to_string()),
-            );
-            data.insert("status".to_string(), serde_json::json!(status));
-            data.insert(
-                "latency_ms".to_string(),
-                serde_json::json!(request_started.elapsed().as_millis() as u64),
-            );
-            if let Some(assert_status) = assert_status {
-                data.insert(
-                    "assert_status".to_string(),
-                    serde_json::json!(assert_status),
-                );
-                data.insert("ok".to_string(), serde_json::json!(status == assert_status));
-            }
-            push_event(
-                events,
-                event(started_at, "http.poll", "http.response", data),
-            );
-        }
-        Err(error) => push_http_error(url, &error.to_string(), started_at, events),
-    }
-}
-
-fn push_http_error(
-    url: &str,
-    error: &str,
-    started_at: Instant,
-    events: &Arc<Mutex<Vec<TraceEvent>>>,
-) {
-    let mut data = BTreeMap::new();
-    data.insert(
-        "url".to_string(),
-        serde_json::Value::String(url.to_string()),
-    );
-    data.insert(
-        "error".to_string(),
-        serde_json::Value::String(error.to_string()),
-    );
-    push_event(events, event(started_at, "http.poll", "http.error", data));
-}
-
-fn run_cmd_run(
-    command: String,
-    args: Vec<String>,
-    started_at: Instant,
-    events: Arc<Mutex<Vec<TraceEvent>>>,
-    stop: mpsc::Receiver<()>,
-) {
-    let mut start_data = BTreeMap::new();
-    start_data.insert(
-        "command".to_string(),
-        serde_json::Value::String(command.clone()),
-    );
-    start_data.insert(
-        "args".to_string(),
-        serde_json::Value::Array(
-            args.iter()
-                .map(|arg| serde_json::Value::String(arg.clone()))
-                .collect(),
-        ),
-    );
-    push_event(
-        &events,
-        event(started_at, "cmd.run", "cmd.start", start_data),
-    );
-
-    let command_started = Instant::now();
-    match Command::new(&command).args(&args).output() {
-        Ok(output) => {
-            emit_cmd_lines(
-                "cmd.stdout",
-                &String::from_utf8_lossy(&output.stdout),
-                started_at,
-                &events,
-            );
-            emit_cmd_lines(
-                "cmd.stderr",
-                &String::from_utf8_lossy(&output.stderr),
-                started_at,
-                &events,
-            );
-            let mut data = BTreeMap::new();
-            data.insert(
-                "exit_code".to_string(),
-                serde_json::json!(output.status.code()),
-            );
-            data.insert(
-                "success".to_string(),
-                serde_json::json!(output.status.success()),
-            );
-            data.insert(
-                "duration_ms".to_string(),
-                serde_json::json!(command_started.elapsed().as_millis() as u64),
-            );
-            push_event(&events, event(started_at, "cmd.run", "cmd.exit", data));
-        }
-        Err(error) => {
-            let mut data = BTreeMap::new();
-            data.insert(
-                "error".to_string(),
-                serde_json::Value::String(error.to_string()),
-            );
-            data.insert(
-                "duration_ms".to_string(),
-                serde_json::json!(command_started.elapsed().as_millis() as u64),
-            );
-            push_event(&events, event(started_at, "cmd.run", "cmd.error", data));
-        }
-    }
-    let _ = stop.recv_timeout(Duration::from_millis(1));
-}
-
-fn emit_cmd_lines(
-    event_name: &str,
-    output: &str,
-    started_at: Instant,
-    events: &Arc<Mutex<Vec<TraceEvent>>>,
-) {
-    for line in output.lines() {
-        let mut data = BTreeMap::new();
-        data.insert(
-            "line".to_string(),
-            serde_json::Value::String(line.to_string()),
-        );
-        push_event(events, event(started_at, "cmd.run", event_name, data));
-    }
-}
-
 fn event(
     started_at: Instant,
     source: &str,
@@ -1020,8 +658,6 @@ fn push_event(events: &Arc<Mutex<Vec<TraceEvent>>>, event: TraceEvent) {
 mod tests {
     use super::*;
     use std::fs;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
 
     #[test]
     fn active_trace_probes_start_rejects_invalid_regex() {
@@ -1117,123 +753,5 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event.source == "process.snapshot" && event.event == "proc.list"));
-    }
-
-    #[test]
-    fn file_watch_emits_create_write_and_delete_events() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("watched.txt");
-        let probes = ActiveTraceProbes::start(&[TraceProbeConfig::FileWatch {
-            path: path.to_string_lossy().to_string(),
-            interval_ms: Some(25),
-        }])
-        .expect("start probes");
-
-        fs::write(&path, "created").expect("create file");
-        thread::sleep(Duration::from_millis(60));
-        fs::write(&path, "updated with a different length").expect("update file");
-        thread::sleep(Duration::from_millis(60));
-        fs::remove_file(&path).expect("delete file");
-        thread::sleep(Duration::from_millis(60));
-
-        let events = probes.stop();
-        assert!(events
-            .iter()
-            .any(|event| event.source == "file.watch" && event.event == "fs.create"));
-        assert!(events
-            .iter()
-            .any(|event| event.source == "file.watch" && event.event == "fs.write"));
-        assert!(events
-            .iter()
-            .any(|event| event.source == "file.watch" && event.event == "fs.delete"));
-    }
-
-    #[test]
-    fn port_snapshot_emits_listening_events() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
-        let port = listener.local_addr().expect("local addr").port();
-        let probes = ActiveTraceProbes::start(&[TraceProbeConfig::PortSnapshot {
-            port: Some(port),
-            port_range: None,
-            interval_ms: Some(25),
-        }])
-        .expect("start probes");
-        thread::sleep(Duration::from_millis(60));
-
-        let events = probes.stop();
-        assert!(events.iter().any(|event| event.source == "port.snapshot"
-            && event.event == "net.listening"
-            && event
-                .data
-                .get("ports")
-                .and_then(|value| value.as_array())
-                .is_some_and(|ports| ports
-                    .iter()
-                    .any(|value| value.as_u64() == Some(u64::from(port))))));
-    }
-
-    #[test]
-    fn http_poll_emits_response_events() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test server");
-        let url = format!("http://{}", listener.local_addr().expect("local addr"));
-        let server = thread::spawn(move || {
-            for stream in listener.incoming().take(1) {
-                let mut stream = stream.expect("accept connection");
-                let mut buffer = [0; 512];
-                let _ = stream.read(&mut buffer);
-                stream
-                    .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
-                    .expect("write response");
-            }
-        });
-        let probes = ActiveTraceProbes::start(&[TraceProbeConfig::HttpPoll {
-            url,
-            interval_ms: Some(25),
-            assert_status: Some(204),
-        }])
-        .expect("start probes");
-        thread::sleep(Duration::from_millis(80));
-
-        let events = probes.stop();
-        let _ = server.join();
-        assert!(events.iter().any(|event| event.source == "http.poll"
-            && event.event == "http.response"
-            && event.data.get("status").and_then(|value| value.as_u64()) == Some(204)
-            && event.data.get("ok").and_then(|value| value.as_bool()) == Some(true)));
-    }
-
-    #[test]
-    fn cmd_run_emits_command_lifecycle_events() {
-        let probes = ActiveTraceProbes::start(&[TraceProbeConfig::CmdRun {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), "printf probe-output".to_string()],
-        }])
-        .expect("start probes");
-        thread::sleep(Duration::from_millis(60));
-
-        let events = probes.stop();
-        assert!(events
-            .iter()
-            .any(|event| event.source == "cmd.run" && event.event == "cmd.start"));
-        assert!(events.iter().any(|event| event.source == "cmd.run"
-            && event.event == "cmd.stdout"
-            && event.data.get("line").and_then(|value| value.as_str()) == Some("probe-output")));
-        assert!(events.iter().any(|event| event.source == "cmd.run"
-            && event.event == "cmd.exit"
-            && event.data.get("success").and_then(|value| value.as_bool()) == Some(true)));
-    }
-
-    #[test]
-    fn port_range_parser_rejects_invalid_ranges() {
-        let result = ActiveTraceProbes::start(&[TraceProbeConfig::PortSnapshot {
-            port: None,
-            port_range: Some("9002-9001".to_string()),
-            interval_ms: Some(25),
-        }]);
-        let error = result.err().expect("invalid range should fail start");
-
-        assert!(error
-            .to_string()
-            .contains("port-range start must be <= end"));
     }
 }
