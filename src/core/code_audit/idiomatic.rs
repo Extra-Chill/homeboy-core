@@ -119,10 +119,8 @@ pub(super) fn is_trivial_method(name: &str) -> bool {
 /// on the right) or `foobar_test` covering `foo` (alphanumeric `b` on the
 /// right).
 ///
-/// Used only by MissingTestMethod / coverage-presence checks. Orphaned-test
-/// detection (`find_orphaned_test_methods`) intentionally keeps the strict
-/// prefix match — it needs to know which test was supposed to map to which
-/// source method by name.
+/// Used by MissingTestMethod / coverage-presence checks and by Rust
+/// orphaned-test suppression for behavior-style test names.
 pub(super) fn test_covers_method(test_name: &str, source_method: &str, prefix: &str) -> bool {
     // Literal-prefix path
     if let Some(stripped) = test_name.strip_prefix(prefix) {

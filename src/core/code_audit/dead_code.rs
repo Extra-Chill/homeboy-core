@@ -334,10 +334,11 @@ fn is_framework_entry_point(name: &str, fp: &FileFingerprint, audit_config: &Aud
 
 fn is_runtime_entrypoint_file(fp: &FileFingerprint, audit_config: &AuditConfig) -> bool {
     let extends = fp.extends.as_deref().unwrap_or("");
-    audit_config
-        .runtime_entrypoint_extends
-        .iter()
-        .any(|expected| extends.ends_with(expected))
+    extends.ends_with("WP_CLI_Command")
+        || audit_config
+            .runtime_entrypoint_extends
+            .iter()
+            .any(|expected| extends.ends_with(expected))
         || audit_config
             .runtime_entrypoint_markers
             .iter()
@@ -1099,5 +1100,45 @@ class EmailCommand {
             "docblock-only @subcommand must not imply runtime registration"
         );
         assert!(unreferenced[0].description.contains("test_connection"));
+    }
+
+    #[test]
+    fn wp_cli_command_base_suppresses_public_subcommand_methods() {
+        let mut command_fp = make_fingerprint(
+            "inc/Cli/Commands/EmailCommand.php",
+            vec!["test_connection"],
+            vec!["test_connection"],
+            vec![],
+            vec![],
+        );
+        command_fp.language = Language::Php;
+        command_fp.extends = Some("WP_CLI_Command".to_string());
+        command_fp.content = r#"<?php
+class EmailCommand extends WP_CLI_Command {
+    /**
+     * ## EXAMPLES
+     *
+     *     wp datamachine email test-connection
+     *
+     * @subcommand test-connection
+     */
+    public function test_connection( array $args, array $assoc_args ): void {}
+}
+"#
+        .to_string();
+
+        let findings = analyze_dead_code(&[&command_fp], &[]);
+        let unreferenced: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::UnreferencedExport)
+            .collect();
+        assert!(
+            unreferenced.is_empty(),
+            "WP-CLI command methods are runtime subcommands, got: {:?}",
+            unreferenced
+                .iter()
+                .map(|f| &f.description)
+                .collect::<Vec<_>>()
+        );
     }
 }

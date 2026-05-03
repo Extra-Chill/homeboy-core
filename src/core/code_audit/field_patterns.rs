@@ -153,6 +153,9 @@ fn detect_repeated_field_patterns(root: &Path) -> Vec<Finding> {
         if is_boundary_dto_group_across_layers(locations) {
             continue;
         }
+        if is_low_value_boundary_coordinate_group(&sorted_fields, locations) {
+            continue;
+        }
         if is_low_value_generic_group(&sorted_fields, locations) {
             continue;
         }
@@ -520,11 +523,35 @@ fn is_boundary_dto_group_across_layers(locations: &[(String, String)]) -> bool {
 fn is_boundary_dto_name(name: &str) -> bool {
     matches!(
         name,
-        "Args" | "Options" | "WorkflowArgs" | "WorkflowOptions"
+        "Args" | "Options" | "Record" | "WorkflowArgs" | "WorkflowOptions"
     ) || name.ends_with("Args")
         || name.ends_with("Options")
+        || name.ends_with("Record")
         || name.ends_with("WorkflowArgs")
         || name.ends_with("WorkflowOptions")
+}
+
+fn is_low_value_boundary_coordinate_group(
+    fields: &[FieldSignature],
+    locations: &[(String, String)],
+) -> bool {
+    if fields.len() != 2 || locations.len() < MIN_OCCURRENCES {
+        return false;
+    }
+
+    let mut names: Vec<&str> = fields.iter().map(|field| field.name.as_str()).collect();
+    names.sort_unstable();
+    if names != ["fixable", "line"] {
+        return false;
+    }
+
+    let Some((first_file, _)) = locations.first() else {
+        return false;
+    };
+
+    locations
+        .iter()
+        .all(|(file, name)| file == first_file && is_boundary_dto_name(name))
 }
 
 fn boundary_layer(file: &str) -> Option<&'static str> {
@@ -871,6 +898,44 @@ class {} {{
         assert!(
             findings.is_empty(),
             "PHP self::class registration arguments should not be reported as fields"
+        );
+    }
+
+    #[test]
+    fn does_not_report_repeated_boundary_record_coordinates() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src/core/observation");
+        std::fs::create_dir_all(&src).unwrap();
+
+        std::fs::write(
+            src.join("records.rs"),
+            r#"
+struct AnnotationFindingRecord {
+    line: Option<u32>,
+    fixable: bool,
+    annotation_id: String,
+}
+
+struct NewFindingRecord {
+    line: Option<u32>,
+    fixable: bool,
+    run_id: String,
+}
+
+struct FindingRecord {
+    line: Option<u32>,
+    fixable: bool,
+    id: String,
+}
+"#,
+        )
+        .unwrap();
+
+        let findings = detect_repeated_field_patterns(dir.path());
+        assert!(
+            findings.is_empty(),
+            "small scalar coordinate overlaps across boundary records are not extractable: {:?}",
+            findings
         );
     }
 
