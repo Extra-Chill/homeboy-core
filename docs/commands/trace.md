@@ -95,6 +95,7 @@ Use repeatable `--attach KIND:TARGET` flags to observe already-running local sys
 Supported v1 attachment kinds:
 
 - `logfile:<path>` records whether the file exists and its byte length before and after the scenario.
+- `fswatch:<path>` records whether a watched file exists, its byte length, and its last-modified timestamp before and after the scenario. V1 is a safe snapshot, not a streaming filesystem event probe.
 - `pid:<n>` records whether a local process exists before and after the scenario.
 - `port:<n>` checks whether `127.0.0.1:<n>` accepts TCP connections before and after the scenario.
 - `http:<url>` or a direct `http://` / `https://` URL performs a local HTTP GET before and after the scenario and records the response status or connection error.
@@ -104,6 +105,7 @@ Example:
 ```sh
 homeboy trace wp-coding-agents auth-multi-session-race \
   --attach logfile:/root/.kimaki/kimaki.log \
+  --attach fswatch:/home/opencode/.local/share/opencode/auth.json \
   --attach pid:3679661 \
   --attach http://127.0.0.1:46227/health
 ```
