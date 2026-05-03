@@ -32,6 +32,12 @@ pub struct BenchArgs {
     run: BenchRunArgs,
 }
 
+impl BenchArgs {
+    pub fn is_run_command(&self) -> bool {
+        self.command.is_none()
+    }
+}
+
 #[derive(Subcommand)]
 enum BenchCommand {
     /// List declared benchmark scenarios without executing them

@@ -22,6 +22,12 @@ pub struct RigArgs {
     command: RigCommand,
 }
 
+impl RigArgs {
+    pub fn is_hot_resource_command(&self) -> bool {
+        matches!(self.command, RigCommand::Up { .. })
+    }
+}
+
 #[derive(Subcommand)]
 enum RigCommand {
     /// List all declared rigs

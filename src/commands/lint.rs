@@ -82,6 +82,15 @@ pub struct LintArgs {
     pub json_summary: bool,
 }
 
+impl LintArgs {
+    pub fn is_full_workspace_run(&self) -> bool {
+        self.changed_since.is_none()
+            && !self.changed_only
+            && self.file.is_none()
+            && self.glob.is_none()
+    }
+}
+
 pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput> {
     let source_ctx = execution_context::resolve(&ResolveOptions {
         component_id: args.comp.component.clone(),

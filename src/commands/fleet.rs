@@ -13,6 +13,12 @@ pub struct FleetArgs {
     command: FleetCommand,
 }
 
+impl FleetArgs {
+    pub fn is_hot_resource_command(&self) -> bool {
+        matches!(self.command, FleetCommand::Exec { check: false, .. })
+    }
+}
+
 #[derive(Subcommand)]
 enum FleetCommand {
     /// Create a new fleet
