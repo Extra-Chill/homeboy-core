@@ -28,7 +28,7 @@ pub(crate) fn run_self_checks_with_passthrough(
     source_path: &Path,
     passthrough: bool,
 ) -> Result<SelfCheckOutput> {
-    let commands = component.self_check_commands(capability);
+    let commands = component.script_commands(capability);
     if commands.is_empty() {
         return Err(Error::validation_invalid_argument(
             "self_checks",

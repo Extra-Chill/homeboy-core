@@ -30,13 +30,14 @@ This is useful for:
 
 The override is transient — it does not modify the stored component config.
 
-Requires exactly one linked extension with build support. Component-level `build_command` is not supported as configuration; the `build_command` field in command output is the command Homeboy resolved from the linked extension for this run.
+Build resolution checks component-owned `scripts.build` first. If absent, it requires exactly one linked extension with build support. Component-level `build_command` is not supported as configuration; the `build_command` field in command output is the command Homeboy resolved for this run.
 
 Useful remediation paths when a component is not buildable:
 
 - Link a build-capable extension: `homeboy component set <id> --extension <extension_id>`
+- Add a component-owned shell build: `"scripts": { "build": ["npm run build"] }`
 - Inspect installed extensions: `homeboy extension list`
-- Use a rig `command` step for local or private build workflows that do not belong in an extension.
+- Use a rig `command` step for workflows that are environment orchestration rather than component build behavior.
 
 ## Pre-Build Validation
 
@@ -65,14 +66,14 @@ Example extension configuration:
 {
   "command": "build.run",
   "component_id": "<component_id>",
-  "build_command": "<extension-resolved command string>",
+  "build_command": "<resolved command string>",
   "stdout": "<stdout>",
   "stderr": "<stderr>",
   "success": true
 }
 ```
 
-`stdout` and `stderr` are omitted when empty. `build_command` is diagnostic output from extension resolution, not a component-level config field.
+`stdout` and `stderr` are omitted when empty. `build_command` is diagnostic output from command resolution, not a component-level config field.
 
 ### Bulk (`--json`)
 

@@ -1,0 +1,187 @@
+use std::path::{Path, PathBuf};
+
+use crate::component::Component;
+use crate::engine::run_dir::RunDir;
+use crate::error::{Error, Result};
+use crate::extension::{exec_context, ExtensionCapability, RunnerOutput};
+
+#[derive(Debug, Clone)]
+pub struct ComponentScriptOutput {
+    pub exit_code: i32,
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl From<RunnerOutput> for ComponentScriptOutput {
+    fn from(output: RunnerOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
+    }
+}
+
+impl From<ComponentScriptOutput> for RunnerOutput {
+    fn from(output: ComponentScriptOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            success: output.success,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
+    }
+}
+
+pub fn run_component_scripts(
+    component: &Component,
+    capability: ExtensionCapability,
+    source_path: &Path,
+    passthrough: bool,
+) -> Result<ComponentScriptOutput> {
+    run_component_scripts_with_env(component, capability, source_path, passthrough, &[], &[])
+}
+
+pub(crate) fn run_component_scripts_with_env(
+    component: &Component,
+    capability: ExtensionCapability,
+    source_path: &Path,
+    passthrough: bool,
+    extra_env: &[(String, String)],
+    script_args: &[String],
+) -> Result<ComponentScriptOutput> {
+    let commands = component.script_commands(capability);
+    if commands.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "scripts",
+            format!(
+                "Component '{}' has no scripts.{} commands configured",
+                component.id,
+                capability.label()
+            ),
+            None,
+            None,
+        ));
+    }
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    let env = component_script_env(component, source_path, extra_env);
+
+    for command in commands {
+        if passthrough {
+            crate::log_status!(
+                "component-script",
+                "running {} script for {}: {}",
+                capability.label(),
+                component.id,
+                command
+            );
+        }
+
+        let command = command_with_args(command, script_args);
+        let output = super::execution::execute_capability_script(
+            source_path,
+            "",
+            &[],
+            &env,
+            Some(&source_path.to_string_lossy()),
+            Some(&command),
+            super::execution::CapabilityScriptOptions {
+                passthrough,
+                stderr_passthrough: false,
+                cleanup_process_group: matches!(
+                    capability,
+                    ExtensionCapability::Bench | ExtensionCapability::Trace
+                ),
+            },
+        )?;
+
+        stdout.push_str(&output.stdout);
+        stderr.push_str(&output.stderr);
+
+        if !output.success {
+            return Ok(ComponentScriptOutput {
+                exit_code: output.exit_code,
+                success: false,
+                stdout,
+                stderr,
+            });
+        }
+    }
+
+    Ok(ComponentScriptOutput {
+        exit_code: 0,
+        success: true,
+        stdout,
+        stderr,
+    })
+}
+
+pub(crate) fn run_component_scripts_with_run_dir(
+    component: &Component,
+    capability: ExtensionCapability,
+    source_path: &Path,
+    run_dir: &RunDir,
+    passthrough: bool,
+    extra_env: &[(String, String)],
+    script_args: &[String],
+) -> Result<ComponentScriptOutput> {
+    let mut env = run_dir.legacy_env_vars();
+    env.extend(extra_env.iter().cloned());
+    run_component_scripts_with_env(
+        component,
+        capability,
+        source_path,
+        passthrough,
+        &env,
+        script_args,
+    )
+}
+
+fn component_script_env(
+    component: &Component,
+    source_path: &Path,
+    extra_env: &[(String, String)],
+) -> Vec<(String, String)> {
+    let source_path = source_path.to_string_lossy().to_string();
+    let mut env = vec![
+        (
+            exec_context::VERSION.to_string(),
+            exec_context::CURRENT_VERSION.to_string(),
+        ),
+        (
+            exec_context::EXTENSION_ID.to_string(),
+            "component-script".to_string(),
+        ),
+        (
+            exec_context::EXTENSION_PATH.to_string(),
+            source_path.clone(),
+        ),
+        (exec_context::COMPONENT_ID.to_string(), component.id.clone()),
+        (exec_context::COMPONENT_PATH.to_string(), source_path),
+        (exec_context::SETTINGS_JSON.to_string(), "{}".to_string()),
+    ];
+    env.extend(extra_env.iter().cloned());
+    env
+}
+
+fn command_with_args(command: &str, script_args: &[String]) -> String {
+    if script_args.is_empty() {
+        return command.to_string();
+    }
+
+    format!(
+        "{} {}",
+        command,
+        crate::engine::shell::quote_args(script_args)
+    )
+}
+
+pub(crate) fn source_path(component: &Component, path_override: Option<&str>) -> PathBuf {
+    path_override
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&component.local_path))
+}

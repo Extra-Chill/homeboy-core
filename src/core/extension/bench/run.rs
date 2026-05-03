@@ -122,6 +122,48 @@ pub fn run_bench_list_workflow(
     args: BenchListWorkflowArgs,
     run_dir: &RunDir,
 ) -> Result<BenchListWorkflowResult> {
+    if component.has_script(ExtensionCapability::Bench) {
+        let source_path = crate::extension::component_script::source_path(
+            component,
+            args.path_override.as_deref(),
+        );
+        let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
+        let output = crate::extension::component_script::run_component_scripts_with_run_dir(
+            component,
+            ExtensionCapability::Bench,
+            &source_path,
+            run_dir,
+            true,
+            &[("HOMEBOY_BENCH_LIST_ONLY".to_string(), "1".to_string())],
+            &args.passthrough_args,
+        )?;
+        if !output.success {
+            return Err(Error::validation_invalid_argument(
+                "bench_list",
+                format!(
+                    "bench scenario discovery failed with exit code {}",
+                    output.exit_code
+                ),
+                Some(format!(
+                    "stdout:\n{}\n\nstderr:\n{}",
+                    output.stdout, output.stderr
+                )),
+                None,
+            ));
+        }
+        let parsed = apply_scenario_filter(
+            parsing::parse_bench_results_file(&results_file)?,
+            &args.scenario_ids,
+        )?;
+        let count = parsed.scenarios.len();
+        return Ok(BenchListWorkflowResult {
+            component: args.component_label,
+            component_id: parsed.component_id,
+            scenarios: parsed.scenarios,
+            count,
+        });
+    }
+
     let execution_context = resolve_execution_context(component, ExtensionCapability::Bench)?;
     let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
 
@@ -425,6 +467,84 @@ pub fn run_main_bench_workflow(
                 Some("bench.run.shared_state".to_string()),
             )
         })?;
+    }
+
+    if component.has_script(ExtensionCapability::Bench) {
+        let script_output = crate::extension::component_script::run_component_scripts_with_run_dir(
+            component,
+            ExtensionCapability::Bench,
+            source_path,
+            run_dir,
+            true,
+            &[
+                (
+                    "HOMEBOY_BENCH_ITERATIONS".to_string(),
+                    args.iterations.to_string(),
+                ),
+                (
+                    "HOMEBOY_BENCH_WARMUP_ITERATIONS".to_string(),
+                    args.warmup_iterations.unwrap_or(0).to_string(),
+                ),
+                (
+                    "HOMEBOY_BENCH_SCENARIOS".to_string(),
+                    args.scenario_ids.join(","),
+                ),
+            ],
+            &args.passthrough_args,
+        )?;
+        let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
+        let mut parsed = if results_file.exists() {
+            parse_execution_results_file(&results_file, &args.scenario_ids, script_output.success)?
+        } else {
+            None
+        };
+        if let Some(results) = parsed.as_mut() {
+            results.run_metadata = Some(BenchRunMetadata {
+                homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                started_at: started_at.clone(),
+                shared_state: args
+                    .shared_state
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
+                iterations: args.iterations,
+                execution: args.execution,
+                warmup_iterations: args.warmup_iterations,
+                selected_scenarios: args.scenario_ids.clone(),
+                env_overrides: BTreeMap::new(),
+                workloads: Vec::new(),
+                runner: Some(BenchRunnerMetadata {
+                    extension: "component-script".to_string(),
+                    path: source_path.to_string_lossy().to_string(),
+                    source_revision: None,
+                }),
+                diagnostics: Vec::new(),
+            });
+        }
+        let status = if script_output.success {
+            "passed"
+        } else {
+            "failed"
+        };
+        let failure = (!script_output.success).then(|| BenchRunFailure {
+            component_id: args.component_id.clone(),
+            component_path: Some(source_path.to_string_lossy().to_string()),
+            scenario_id: failure_scenario_id(&args.scenario_ids),
+            exit_code: script_output.exit_code,
+            stderr_tail: stderr_tail(&script_output.stderr),
+            diagnostics: Vec::new(),
+        });
+        return Ok(BenchRunWorkflowResult {
+            status: status.to_string(),
+            component: args.component_label,
+            exit_code: script_output.exit_code,
+            iterations: args.iterations,
+            results: parsed,
+            gate_failures: Vec::new(),
+            baseline_comparison: None,
+            hints: Some(vec!["Component scripts use the extension runner env contract without extension resolution.".to_string()]),
+            failure,
+            diagnostics: Vec::new(),
+        });
     }
 
     let execution_context = resolve_execution_context(component, ExtensionCapability::Bench)?;
