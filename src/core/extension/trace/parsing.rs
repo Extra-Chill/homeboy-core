@@ -147,6 +147,44 @@ pub enum TraceTemporalAssertionDefinition {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+    NoOverlap {
+        id: String,
+        events: Vec<String>,
+        by: String,
+        window_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    Ordering {
+        id: String,
+        before: String,
+        after: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        within_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    LatencyBound {
+        id: String,
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        p50_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        p95_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        p99_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    RequiredSequence {
+        id: String,
+        sequence: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
