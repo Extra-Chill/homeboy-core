@@ -12,6 +12,20 @@
 //! - `verbose: bool` + `quiet: bool` appearing together in 8 CLI structs
 //! - Repeated config fields across multiple builder/options types
 
+#[rustfmt::skip]
+mod field_patterns_data_contracts {
+    const TYPE_NAMES: &[&str] = &["Component", "Convention", "DirectoryConvention", "FileFingerprint", "Insertion", "MapClass", "NewFile", "Project", "RawComponent"];
+    const TYPE_SUFFIXES: &[&str] = &["Args", "Buckets", "CommandInput", "Detail", "Drift", "EditOp", "Entry", "Flags", "Group", "Options", "Output", "Overrides", "Report", "Result", "SeverityCounts", "Snapshot", "Status", "Summary"];
+    const LOW_VALUE_FIELDS: &[&str] = &["ahead", "behind", "build_artifact", "changelog_next_section_aliases", "changelog_next_section_label", "confidence", "deploy", "deploy_strategy", "docs_only", "expected_methods", "expected_registrations", "extends", "extract_command", "failure", "implements", "info", "manual_only", "namespace", "needs_release", "picked_count", "primitive", "properties", "ready_detail", "ready_reason", "ready_to_deploy", "remote_owner", "results", "runtime", "skip_checks", "skip_publish", "skipped_count", "summary", "warnings"];
+
+    pub(super) fn is_low_value_group(field_names: &[&str], type_names: &[&str], min_group_size: usize, min_occurrences: usize) -> bool {
+        (min_group_size..=4).contains(&field_names.len())
+            && type_names.len() >= min_occurrences
+            && type_names.iter().all(|name| TYPE_NAMES.contains(name) || TYPE_SUFFIXES.iter().any(|suffix| name.ends_with(suffix)))
+            && field_names.iter().all(|name| LOW_VALUE_FIELDS.contains(name))
+    }
+}
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -156,7 +170,18 @@ fn detect_repeated_field_patterns(root: &Path) -> Vec<Finding> {
         if is_low_value_boundary_coordinate_group(&sorted_fields, locations) {
             continue;
         }
-        if is_low_value_data_contract_group(&sorted_fields, locations) {
+        if field_patterns_data_contracts::is_low_value_group(
+            &sorted_fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            &locations
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>(),
+            MIN_GROUP_SIZE,
+            MIN_OCCURRENCES,
+        ) {
             continue;
         }
         if is_low_value_generic_group(&sorted_fields, locations) {
@@ -306,27 +331,24 @@ fn extract_type_name(line: &str) -> Option<String> {
 
     // Rust: pub struct Foo, struct Foo, pub(crate) struct Foo.
     if let Some(after) = trimmed.strip_prefix("struct ") {
-        let name = after
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .next()?;
-        if !name.is_empty() {
-            return Some(name.to_string());
-        }
+        return parse_identifier(after);
     }
 
     // PHP/TS: class Foo, interface Foo
     for keyword in &["class ", "interface "] {
         if let Some(after) = trimmed.strip_prefix(keyword) {
-            let name = after
-                .split(|c: char| !c.is_alphanumeric() && c != '_')
-                .next()?;
-            if !name.is_empty() {
-                return Some(name.to_string());
-            }
+            return parse_identifier(after);
         }
     }
 
     None
+}
+
+fn parse_identifier(input: &str) -> Option<String> {
+    let name = input
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .next()?;
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Try to parse a field declaration from a single line.
@@ -336,7 +358,7 @@ fn extract_type_name(line: &str) -> Option<String> {
 /// - Rust: `field_name: Type,` or `pub field_name: Type,`
 /// - PHP: `public Type $field_name;` or `$field_name;`
 /// - TS: `field_name: type;` or `readonly field_name: type;`
-fn parse_field_line(line: &str, syntax: FieldSyntax) -> Option<FieldSignature> {
+fn parse_field_line(line: &str, _syntax: FieldSyntax) -> Option<FieldSignature> {
     let trimmed = line.trim();
 
     // Skip comments, attributes, blank lines, braces.
@@ -357,8 +379,9 @@ fn parse_field_line(line: &str, syntax: FieldSyntax) -> Option<FieldSignature> {
         return None;
     }
 
-    if syntax == FieldSyntax::Php {
-        return parse_php_property_line(trimmed);
+    match _syntax {
+        FieldSyntax::Php => return parse_php_property_line(trimmed),
+        FieldSyntax::RustLike => {}
     }
 
     // Rust-style: `[pub] name: Type[,]`
@@ -557,97 +580,6 @@ fn is_low_value_boundary_coordinate_group(
         .all(|(file, name)| file == first_file && is_boundary_dto_name(name))
 }
 
-fn is_low_value_data_contract_group(
-    fields: &[FieldSignature],
-    locations: &[(String, String)],
-) -> bool {
-    if fields.len() < MIN_GROUP_SIZE || fields.len() > 4 || locations.len() < MIN_OCCURRENCES {
-        return false;
-    }
-
-    if !locations
-        .iter()
-        .all(|(_, name)| is_data_contract_type_name(name))
-    {
-        return false;
-    }
-
-    fields
-        .iter()
-        .all(|field| is_low_value_data_contract_field(&field.name))
-}
-
-fn is_data_contract_type_name(name: &str) -> bool {
-    matches!(
-        name,
-        "Component"
-            | "Convention"
-            | "DirectoryConvention"
-            | "FileFingerprint"
-            | "Insertion"
-            | "MapClass"
-            | "NewFile"
-            | "Project"
-            | "RawComponent"
-    ) || name.ends_with("Args")
-        || name.ends_with("Buckets")
-        || name.ends_with("CommandInput")
-        || name.ends_with("Detail")
-        || name.ends_with("Drift")
-        || name.ends_with("EditOp")
-        || name.ends_with("Entry")
-        || name.ends_with("Flags")
-        || name.ends_with("Group")
-        || name.ends_with("Options")
-        || name.ends_with("Output")
-        || name.ends_with("Overrides")
-        || name.ends_with("Report")
-        || name.ends_with("Result")
-        || name.ends_with("SeverityCounts")
-        || name.ends_with("Snapshot")
-        || name.ends_with("Status")
-        || name.ends_with("Summary")
-}
-
-fn is_low_value_data_contract_field(name: &str) -> bool {
-    matches!(
-        name,
-        "ahead"
-            | "behind"
-            | "build_artifact"
-            | "changelog_next_section_aliases"
-            | "changelog_next_section_label"
-            | "confidence"
-            | "deploy"
-            | "deploy_strategy"
-            | "docs_only"
-            | "expected_methods"
-            | "expected_registrations"
-            | "extends"
-            | "extract_command"
-            | "failure"
-            | "implements"
-            | "info"
-            | "manual_only"
-            | "namespace"
-            | "needs_release"
-            | "picked_count"
-            | "primitive"
-            | "properties"
-            | "ready_detail"
-            | "ready_reason"
-            | "ready_to_deploy"
-            | "remote_owner"
-            | "results"
-            | "runtime"
-            | "skip_checks"
-            | "skip_publish"
-            | "skipped_count"
-            | "summary"
-            | "warnings"
-    )
-}
-
 fn boundary_layer(file: &str) -> Option<&'static str> {
     if file.starts_with("src/commands/") {
         Some("command")
@@ -671,23 +603,13 @@ fn strip_rust_cfg_test_modules(content: &str) -> String {
         let trimmed = line.trim();
 
         if skipping {
-            depth += brace_delta_outside_rust_raw_strings(line, &mut raw_string_hashes);
-            if depth <= 0 {
-                skipping = false;
-                raw_string_hashes = None;
-            }
+            advance_cfg_test_skip(line, &mut skipping, &mut depth, &mut raw_string_hashes);
             continue;
         }
 
         if let Some(cfg_line) = pending_cfg_test.take() {
             if trimmed.starts_with("mod tests") {
-                skipping = true;
-                raw_string_hashes = None;
-                depth = brace_delta_outside_rust_raw_strings(line, &mut raw_string_hashes);
-                if depth <= 0 {
-                    skipping = false;
-                    raw_string_hashes = None;
-                }
+                start_cfg_test_skip(line, &mut skipping, &mut depth, &mut raw_string_hashes);
                 continue;
             }
 
@@ -707,6 +629,37 @@ fn strip_rust_cfg_test_modules(content: &str) -> String {
     }
 
     out.join("\n")
+}
+
+fn start_cfg_test_skip(
+    line: &str,
+    skipping: &mut bool,
+    depth: &mut i32,
+    raw_string_hashes: &mut Option<usize>,
+) {
+    *skipping = true;
+    *raw_string_hashes = None;
+    *depth = brace_delta_outside_rust_raw_strings(line, raw_string_hashes);
+    if *depth <= 0 {
+        finish_cfg_test_skip(skipping, raw_string_hashes);
+    }
+}
+
+fn advance_cfg_test_skip(
+    line: &str,
+    skipping: &mut bool,
+    depth: &mut i32,
+    raw_string_hashes: &mut Option<usize>,
+) {
+    *depth += brace_delta_outside_rust_raw_strings(line, raw_string_hashes);
+    if *depth <= 0 {
+        finish_cfg_test_skip(skipping, raw_string_hashes);
+    }
+}
+
+fn finish_cfg_test_skip(skipping: &mut bool, raw_string_hashes: &mut Option<usize>) {
+    *skipping = false;
+    *raw_string_hashes = None;
 }
 
 fn brace_delta_outside_rust_raw_strings(line: &str, raw_hashes: &mut Option<usize>) -> i32 {
