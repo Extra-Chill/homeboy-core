@@ -56,6 +56,16 @@ fn routes_read_only_http_api_contract() {
         .as_str()
         .unwrap()
         .contains("#1764"));
+
+    let runs = route("GET", "/runs?kind=bench&limit=1");
+    assert_eq!(runs.status_code, 200);
+    assert_eq!(runs.body["endpoint"], "runs.list");
+    assert!(runs.body["body"]["runs"].is_array());
+
+    let bench_runs = route("GET", "/bench/runs?component=homeboy");
+    assert_eq!(bench_runs.status_code, 200);
+    assert_eq!(bench_runs.body["endpoint"], "bench.runs");
+    assert!(bench_runs.body["body"]["runs"].is_array());
 }
 
 #[test]
