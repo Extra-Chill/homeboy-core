@@ -6,6 +6,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 
 use crate::error::{Error, Result};
+use crate::http_api::{self, HttpMethod};
 use crate::paths;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1:0";
@@ -153,41 +154,70 @@ pub fn serve(addr: SocketAddr) -> Result<DaemonState> {
 }
 
 pub fn route(method: &str, path: &str) -> HttpResponse {
-    if method != "GET" {
-        return HttpResponse {
-            status_code: 405,
-            body: json!({ "error": "method_not_allowed" }),
-        };
-    }
-
-    match path {
-        "/health" => HttpResponse {
+    match (method, path) {
+        ("GET", "/health") => HttpResponse {
             status_code: 200,
             body: json!({
                 "status": "ok",
                 "version": env!("CARGO_PKG_VERSION"),
             }),
         },
-        "/version" => HttpResponse {
+        ("GET", "/version") => HttpResponse {
             status_code: 200,
             body: json!({
                 "version": env!("CARGO_PKG_VERSION"),
             }),
         },
-        "/config/paths" => match config_paths_body() {
+        ("GET", "/config/paths") => match config_paths_body() {
             Ok(body) => HttpResponse {
                 status_code: 200,
                 body,
             },
-            Err(err) => HttpResponse {
-                status_code: 500,
-                body: json!({ "error": err.message }),
-            },
+            Err(err) => error_response(500, err),
         },
-        _ => HttpResponse {
-            status_code: 404,
-            body: json!({ "error": "not_found" }),
+        ("POST", "/health") | ("POST", "/version") | ("POST", "/config/paths") => HttpResponse {
+            status_code: 405,
+            body: json!({ "error": "method_not_allowed" }),
         },
+        _ => route_read_only_api(method, path),
+    }
+}
+
+fn route_read_only_api(method: &str, path: &str) -> HttpResponse {
+    let method = match method {
+        "GET" => HttpMethod::Get,
+        "POST" => HttpMethod::Post,
+        _ => {
+            return HttpResponse {
+                status_code: 405,
+                body: json!({ "error": "method_not_allowed" }),
+            };
+        }
+    };
+
+    match http_api::handle(http_api::HttpApiRequest {
+        method,
+        path: path.to_string(),
+        body: None,
+    }) {
+        Ok(response) => HttpResponse {
+            status_code: response.status,
+            body: serde_json::to_value(response)
+                .unwrap_or_else(|_| json!({ "error": "internal_json" })),
+        },
+        Err(err) => error_response(404, err),
+    }
+}
+
+fn error_response(status_code: u16, err: Error) -> HttpResponse {
+    HttpResponse {
+        status_code,
+        body: json!({
+            "error": err.code.as_str(),
+            "message": err.message,
+            "details": err.details,
+            "hints": err.hints,
+        }),
     }
 }
 
