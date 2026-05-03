@@ -48,34 +48,35 @@ fn test_build_audit_summary_groups_findings_for_drilldown() {
     let mut result = empty_result();
     result.component_id = "homeboy".to_string();
     result.findings.push(Finding {
-        convention: "test_coverage".to_string(),
+        convention: "structural".to_string(),
         severity: Severity::Warning,
         file: "src/a.rs".to_string(),
-        description: "Missing test file".to_string(),
-        suggestion: "Add a focused test file".to_string(),
-        kind: AuditFinding::MissingTestFile,
+        description: "File exceeds the size threshold".to_string(),
+        suggestion: "Split the module into focused pieces".to_string(),
+        kind: AuditFinding::GodFile,
     });
     result.findings.push(Finding {
-        convention: "test_coverage".to_string(),
+        convention: "structural".to_string(),
         severity: Severity::Info,
         file: "src/b.rs".to_string(),
-        description: "Missing test file".to_string(),
-        suggestion: "Add a focused test file".to_string(),
-        kind: AuditFinding::MissingTestFile,
+        description: "File exceeds the size threshold".to_string(),
+        suggestion: "Split the module into focused pieces".to_string(),
+        kind: AuditFinding::GodFile,
     });
     result.findings.push(Finding {
         convention: "structural".to_string(),
         severity: Severity::Warning,
         file: "src/large.rs".to_string(),
-        description: "File is large".to_string(),
-        suggestion: "Consider decomposing it".to_string(),
-        kind: AuditFinding::GodFile,
+        description: "Module has too many items".to_string(),
+        suggestion: "Move related items into submodules".to_string(),
+        kind: AuditFinding::HighItemCount,
     });
 
     let summary = build_audit_summary(&result, 1);
+    let grouped_json = serde_json::to_value(&summary.finding_groups).expect("groups serialize");
 
     assert_eq!(summary.finding_groups.len(), 2);
-    assert_eq!(summary.finding_groups[0].kind, "missing_test_file");
+    assert_eq!(summary.finding_groups[0].kind, "god_file");
     assert_eq!(summary.finding_groups[0].count, 2);
     assert_eq!(summary.finding_groups[0].warnings, 1);
     assert_eq!(summary.finding_groups[0].info, 1);
@@ -89,9 +90,14 @@ fn test_build_audit_summary_groups_findings_for_drilldown() {
     );
     assert_eq!(
         summary.finding_groups[0].drilldown_command,
-        "homeboy audit homeboy --only missing_test_file"
+        "homeboy audit homeboy --only god_file"
     );
-    assert_eq!(summary.finding_groups[1].kind, "god_file");
+    assert_eq!(summary.finding_groups[1].kind, "high_item_count");
+    assert_eq!(grouped_json[0]["sample_files"][1], "src/b.rs");
+    assert_eq!(
+        grouped_json[1]["drilldown_command"],
+        "homeboy audit homeboy --only high_item_count"
+    );
 }
 
 #[test]

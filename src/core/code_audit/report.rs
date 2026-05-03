@@ -47,11 +47,16 @@ pub struct AuditSummaryGroup {
     pub drilldown_command: String,
 }
 
+#[derive(Default)]
+struct AuditSummarySeverityCounts {
+    warnings: usize,
+    info: usize,
+}
+
 struct AuditSummaryGroupAccumulator {
     kind: AuditFinding,
     count: usize,
-    warnings: usize,
-    info: usize,
+    severities: AuditSummarySeverityCounts,
     sample_files: Vec<String>,
 }
 
@@ -207,15 +212,14 @@ fn build_finding_groups(result: &CodeAuditResult) -> Vec<AuditSummaryGroup> {
             .or_insert_with(|| AuditSummaryGroupAccumulator {
                 kind: finding.kind.clone(),
                 count: 0,
-                warnings: 0,
-                info: 0,
+                severities: AuditSummarySeverityCounts::default(),
                 sample_files: Vec::new(),
             });
 
         group.count += 1;
         match finding.severity {
-            Severity::Warning => group.warnings += 1,
-            Severity::Info => group.info += 1,
+            Severity::Warning => group.severities.warnings += 1,
+            Severity::Info => group.severities.info += 1,
         }
         if group.sample_files.len() < 5 && !group.sample_files.contains(&finding.file) {
             group.sample_files.push(finding.file.clone());
@@ -229,8 +233,8 @@ fn build_finding_groups(result: &CodeAuditResult) -> Vec<AuditSummaryGroup> {
             confidence: group.kind.confidence(),
             kind,
             count: group.count,
-            warnings: group.warnings,
-            info: group.info,
+            warnings: group.severities.warnings,
+            info: group.severities.info,
             sample_files: group.sample_files,
         })
         .collect();
