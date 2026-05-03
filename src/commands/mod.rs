@@ -302,7 +302,6 @@ pub mod project;
 pub mod refactor;
 pub mod release;
 pub mod report;
-pub mod resource_policy;
 pub mod review;
 pub mod rig;
 pub mod runs;

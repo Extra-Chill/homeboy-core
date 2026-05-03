@@ -106,10 +106,6 @@ pub struct RigLeaseRow {
 }
 
 pub fn run(_args: ResourcesArgs) -> CmdResult<DoctorOutput> {
-    Ok((collect_resource_summary(), 0))
-}
-
-pub fn collect_resource_summary() -> DoctorOutput {
     let mut notes = Vec::new();
     let load = collect_load_summary();
 
@@ -156,15 +152,18 @@ pub fn collect_resource_summary() -> DoctorOutput {
         rig_leases.recommendation,
     ]);
 
-    DoctorOutput {
-        command: "doctor.resources",
-        recommendation,
-        load,
-        memory,
-        processes,
-        rig_leases,
-        notes,
-    }
+    Ok((
+        DoctorOutput {
+            command: "doctor.resources",
+            recommendation,
+            load,
+            memory,
+            processes,
+            rig_leases,
+            notes,
+        },
+        0,
+    ))
 }
 
 fn collect_load_summary() -> LoadSummary {

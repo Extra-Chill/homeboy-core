@@ -17,8 +17,8 @@ enum RawOutputMode {
 }
 
 use homeboy::commands;
-use homeboy::commands::utils::{args, entity_suggest, response as output, tty};
-use homeboy::commands::{changelog, cli, file, logs, report, resource_policy, review, trace};
+use homeboy::commands::utils::{args, entity_suggest, resource_policy, response as output, tty};
+use homeboy::commands::{changelog, cli, file, logs, report, review, trace};
 use homeboy::extension::load_all_extensions;
 
 fn response_mode(command: &Commands, has_output_file: bool) -> ResponseMode {
@@ -211,9 +211,12 @@ fn main() -> std::process::ExitCode {
 
     if !cli.force_hot {
         if let Some(hot_command) = resource_policy::hot_command(&cli.command) {
-            let resources = homeboy::commands::doctor::resources::collect_resource_summary();
-            if let Some(warning) = resource_policy::evaluate(hot_command, &resources) {
-                eprintln!("{}", warning.message);
+            if let Ok((resources, _)) = homeboy::commands::doctor::resources::run(
+                homeboy::commands::doctor::resources::ResourcesArgs {},
+            ) {
+                if let Some(warning) = resource_policy::evaluate(hot_command, &resources) {
+                    eprintln!("{}", warning.message);
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 use crate::cli_surface::Commands;
 
-use super::doctor::resources::{DoctorOutput, ResourceRecommendation};
+use crate::commands::doctor::resources::{DoctorOutput, ResourceRecommendation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HotCommand {
@@ -41,13 +41,6 @@ pub fn evaluate(command: HotCommand, resources: &DoctorOutput) -> Option<Resourc
             message: warning_message(command.label, recommendation, resources),
         }),
     }
-}
-
-pub fn warning_for_command(
-    command: &Commands,
-    resources: &DoctorOutput,
-) -> Option<ResourcePolicyWarning> {
-    evaluate(hot_command(command)?, resources)
 }
 
 fn warning_message(
