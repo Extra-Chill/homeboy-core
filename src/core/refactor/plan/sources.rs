@@ -10,6 +10,7 @@ use crate::refactor::auto::{self, FixApplied, FixResultsSummary};
 use crate::Error;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::verify::AuditConvergenceScoring;
@@ -213,6 +214,12 @@ struct PlannedStage {
     source: String,
     summary: SourceStageSummary,
     fix_results: Vec<FixApplied>,
+}
+
+struct ReleaseOwnedFileSnapshot {
+    relative: String,
+    existed: bool,
+    bytes: Vec<u8>,
 }
 
 pub fn collect_refactor_sources(
@@ -826,6 +833,108 @@ fn plan_audit_stage(
     })
 }
 
+fn capture_release_owned_files(
+    component: &Component,
+    root: &Path,
+) -> crate::Result<Vec<ReleaseOwnedFileSnapshot>> {
+    release_owned_file_paths(component)
+        .into_iter()
+        .map(|relative| {
+            let path = root.join(&relative);
+            let existed = path.exists();
+            let bytes = if existed {
+                fs::read(&path).map_err(|error| {
+                    Error::internal_io(
+                        error.to_string(),
+                        Some(format!(
+                            "Failed to snapshot release-owned file {}",
+                            path.display()
+                        )),
+                    )
+                })?
+            } else {
+                Vec::new()
+            };
+
+            Ok(ReleaseOwnedFileSnapshot {
+                relative,
+                existed,
+                bytes,
+            })
+        })
+        .collect()
+}
+
+fn restore_release_owned_files(
+    root: &Path,
+    snapshots: &[ReleaseOwnedFileSnapshot],
+) -> crate::Result<()> {
+    for snapshot in snapshots {
+        let path = root.join(&snapshot.relative);
+        if snapshot.existed {
+            fs::write(&path, &snapshot.bytes).map_err(|error| {
+                Error::internal_io(
+                    error.to_string(),
+                    Some(format!(
+                        "Failed to restore release-owned file {}",
+                        path.display()
+                    )),
+                )
+            })?;
+        } else if path.exists() {
+            fs::remove_file(&path).map_err(|error| {
+                Error::internal_io(
+                    error.to_string(),
+                    Some(format!(
+                        "Failed to remove generated release-owned file {}",
+                        path.display()
+                    )),
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn release_owned_file_paths(component: &Component) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+
+    if let Some(changelog) = component.changelog_target.as_deref() {
+        if let Some(path) = normalize_relative_release_path(changelog) {
+            paths.insert(path);
+        }
+    }
+
+    if let Some(targets) = component.version_targets.as_deref() {
+        for target in targets {
+            if let Some(path) = normalize_relative_release_path(&target.file) {
+                paths.insert(path);
+            }
+        }
+    }
+
+    paths
+}
+
+fn normalize_relative_release_path(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
 fn run_lint_stage(
     component: &Component,
     root: &Path,
@@ -934,19 +1043,27 @@ fn run_lint_stage(
             crate::log_status!("undo", "Warning: failed to save undo snapshot: {}", error);
         }
 
+        let release_owned = capture_release_owned_files(component, root)?;
+
         // Invoke the extension in fix-only mode.
         //
         // HOMEBOY_FIX_ONLY=1 is the single contract: the extension runs its
         // fixers and skips its own validation pass (the engine validates
         // separately via the diagnose phase). Auto-fixing lives exclusively
         // under `homeboy refactor` — there is no other entry point.
-        build_lint_runner()?.env("HOMEBOY_FIX_ONLY", "1").run()?;
+        let fix_output = build_lint_runner()?.env("HOMEBOY_FIX_ONLY", "1").run();
+        restore_release_owned_files(root, &release_owned)?;
+        fix_output?;
 
         let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
         let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
+        let release_owned_set: HashSet<&str> = release_owned
+            .iter()
+            .map(|snapshot| snapshot.relative.as_str())
+            .collect();
         let changed: Vec<String> = after_dirty
             .into_iter()
-            .filter(|f| !before_set.contains(f.as_str()))
+            .filter(|f| !before_set.contains(f.as_str()) && !release_owned_set.contains(f.as_str()))
             .collect();
 
         let fix_results = fix_sidecars.consume_fix_results();
@@ -1243,7 +1360,7 @@ pub fn summarize_source_totals(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::Component;
+    use crate::component::{Component, VersionTarget};
     use std::fs;
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1431,6 +1548,58 @@ mod tests {
 
         assert_eq!(request.sources, vec!["lint".to_string()]);
         assert!(request.write);
+    }
+
+    #[test]
+    fn release_owned_file_paths_include_changelog_and_version_targets() {
+        let root = PathBuf::from("/tmp/homeboy-release-owned-files");
+        let mut component = test_component(&root);
+        component.changelog_target = Some("./CHANGELOG.md".to_string());
+        component.version_targets = Some(vec![
+            VersionTarget {
+                file: "Cargo.toml".to_string(),
+                pattern: None,
+            },
+            VersionTarget {
+                file: "nested/package.json".to_string(),
+                pattern: None,
+            },
+        ]);
+
+        let paths = release_owned_file_paths(&component);
+
+        assert_eq!(
+            paths.into_iter().collect::<Vec<_>>(),
+            vec!["CHANGELOG.md", "Cargo.toml", "nested/package.json"]
+        );
+    }
+
+    #[test]
+    fn release_owned_snapshots_restore_existing_and_remove_generated_files() {
+        let root = tmp_dir("release-owned-snapshot");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("CHANGELOG.md"), "before\n").unwrap();
+
+        let mut component = test_component(&root);
+        component.changelog_target = Some("CHANGELOG.md".to_string());
+        component.version_targets = Some(vec![VersionTarget {
+            file: "Cargo.toml".to_string(),
+            pattern: None,
+        }]);
+
+        let snapshots = capture_release_owned_files(&component, &root).unwrap();
+        fs::write(root.join("CHANGELOG.md"), "after\n").unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nversion = \"1.0.0\"\n").unwrap();
+
+        restore_release_owned_files(&root, &snapshots).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.join("CHANGELOG.md")).unwrap(),
+            "before\n"
+        );
+        assert!(!root.join("Cargo.toml").exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
