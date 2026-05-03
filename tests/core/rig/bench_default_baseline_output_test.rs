@@ -150,3 +150,81 @@ fn default_baseline_expansion_notice_names_order_and_opt_out() {
         "got: {notice}"
     );
 }
+
+#[test]
+fn default_baseline_failure_summary_marks_implicit_baseline() {
+    let metadata = BenchDefaultBaselineExpansion {
+        baseline_rig: "studio-agent-sdk".to_string(),
+        candidate_rig: "studio-bfb".to_string(),
+        execution_order: vec!["studio-agent-sdk".to_string(), "studio-bfb".to_string()],
+        opt_out_flag: "--ignore-default-baseline",
+    };
+    let entries = vec![
+        RigBenchEntry {
+            rig_id: "studio-agent-sdk".to_string(),
+            passed: false,
+            status: "failed".to_string(),
+            exit_code: 7,
+            artifacts: Vec::new(),
+            results: None,
+            rig_state: None,
+            failure: Some(homeboy::extension::bench::run::BenchRunFailure {
+                component_id: "studio".to_string(),
+                component_path: None,
+                scenario_id: None,
+                exit_code: 7,
+                stderr_tail: "baseline setup failed".to_string(),
+                diagnostics: Vec::new(),
+            }),
+            diagnostics: Vec::new(),
+        },
+        RigBenchEntry {
+            rig_id: "studio-bfb".to_string(),
+            passed: true,
+            status: "passed".to_string(),
+            exit_code: 0,
+            artifacts: Vec::new(),
+            results: None,
+            rig_state: None,
+            failure: None,
+            diagnostics: Vec::new(),
+        },
+    ];
+    let (mut output, _) = aggregate_comparison("studio".to_string(), 10, entries);
+
+    apply_default_baseline_failure_context(&mut output, &metadata);
+
+    assert!(output.failures[0].implicit_default_baseline);
+    let hints = output.hints.as_ref().expect("hints");
+    assert!(hints[0].contains("Implicit default baseline rig 'studio-agent-sdk'"));
+    assert!(hints[0].contains("requested rig 'studio-bfb'"));
+
+    let value = serde_json::to_value(&output).expect("serialize output");
+    assert_eq!(
+        value["failures"][0]["implicit_default_baseline"],
+        serde_json::Value::Bool(true)
+    );
+}
+
+#[test]
+fn default_baseline_early_error_hint_names_requested_rig() {
+    let metadata = BenchDefaultBaselineExpansion {
+        baseline_rig: "studio-agent-sdk".to_string(),
+        candidate_rig: "studio-bfb".to_string(),
+        execution_order: vec!["studio-agent-sdk".to_string(), "studio-bfb".to_string()],
+        opt_out_flag: "--ignore-default-baseline",
+    };
+    let error = homeboy::Error::rig_pipeline_failed(
+        "studio-agent-sdk",
+        "check",
+        "rig check failed; refusing to run bench against an unhealthy rig",
+    );
+
+    let error = add_default_baseline_failure_hint(error, Some(&metadata));
+
+    assert_eq!(error.hints.len(), 1);
+    assert!(error.hints[0]
+        .message
+        .contains("failed before requested rig 'studio-bfb'"));
+    assert!(error.hints[0].message.contains("--ignore-default-baseline"));
+}

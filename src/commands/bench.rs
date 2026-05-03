@@ -442,7 +442,15 @@ pub fn run(mut args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> 
     }
 
     let ordered_rigs = ordered_rig_ids(run_args);
-    let rig_outputs = run_cross_rig_benches(run_args, &passthrough_args, ordered_rigs)?;
+    let rig_outputs = match run_cross_rig_benches(run_args, &passthrough_args, ordered_rigs) {
+        Ok(outputs) => outputs,
+        Err(error) => {
+            return Err(add_default_baseline_failure_hint(
+                error,
+                default_baseline_expansion.as_ref(),
+            ));
+        }
+    };
 
     let mut entries = Vec::with_capacity(rig_outputs.len());
     let mut effective_component_label: Option<String> = None;
@@ -475,7 +483,10 @@ pub fn run(mut args: BenchArgs, _global: &GlobalArgs) -> CmdResult<BenchOutput> 
 
     let (mut output, exit) =
         aggregate_comparison_with_axes(component, run_args.iterations, entries, &axes_by_rig);
-    output.default_baseline_expansion = default_baseline_expansion;
+    if let Some(metadata) = default_baseline_expansion {
+        apply_default_baseline_failure_context(&mut output, &metadata);
+        output.default_baseline_expansion = Some(metadata);
+    }
     if run_args.json_summary {
         return Ok((BenchOutput::ComparisonSummary(output.into()), exit));
     }
@@ -486,6 +497,56 @@ struct CrossRigBenchOutput {
     rig_id: String,
     axes: Option<BTreeMap<String, String>>,
     output: BenchCommandOutput,
+}
+
+fn add_default_baseline_failure_hint(
+    error: homeboy::Error,
+    metadata: Option<&BenchDefaultBaselineExpansion>,
+) -> homeboy::Error {
+    let Some(metadata) = metadata else {
+        return error;
+    };
+    if error.details.get("rig_id").and_then(|value| value.as_str())
+        != Some(metadata.baseline_rig.as_str())
+    {
+        return error;
+    }
+
+    error.with_hint(format!(
+        "Implicit default baseline rig '{}' failed before requested rig '{}' could complete. The run plan was injected by bench.default_baseline_rig; pass {} to run only '{}'.",
+        metadata.baseline_rig,
+        metadata.candidate_rig,
+        metadata.opt_out_flag,
+        metadata.candidate_rig,
+    ))
+}
+
+fn apply_default_baseline_failure_context(
+    output: &mut BenchComparisonOutput,
+    metadata: &BenchDefaultBaselineExpansion,
+) {
+    let mut baseline_failed = false;
+    for failure in &mut output.failures {
+        if failure.rig_id == metadata.baseline_rig {
+            failure.implicit_default_baseline = true;
+            baseline_failed = true;
+        }
+    }
+    if !baseline_failed {
+        return;
+    }
+
+    let hints = output.hints.get_or_insert_with(Vec::new);
+    hints.insert(
+        0,
+        format!(
+            "Implicit default baseline rig '{}' failed while preparing comparison for requested rig '{}'. The baseline was injected by bench.default_baseline_rig; pass {} to run only '{}'.",
+            metadata.baseline_rig,
+            metadata.candidate_rig,
+            metadata.opt_out_flag,
+            metadata.candidate_rig,
+        ),
+    );
 }
 
 fn run_cross_rig_benches(

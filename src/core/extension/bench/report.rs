@@ -242,6 +242,8 @@ pub struct BenchDiagnosticClassSummary {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct BenchComparisonFailure {
     pub rig_id: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub implicit_default_baseline: bool,
     pub component_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_path: Option<String>,
@@ -251,6 +253,10 @@ pub struct BenchComparisonFailure {
     pub stderr_tail: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<BenchDiagnostic>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Serialize)]
@@ -826,6 +832,7 @@ pub fn aggregate_comparison_with_axes(
                 .as_ref()
                 .map(|failure| BenchComparisonFailure {
                     rig_id: entry.rig_id.clone(),
+                    implicit_default_baseline: false,
                     component_id: failure.component_id.clone(),
                     component_path: failure.component_path.clone(),
                     scenario_id: failure.scenario_id.clone(),
