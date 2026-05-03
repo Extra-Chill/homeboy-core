@@ -557,6 +557,35 @@ mod tests {
     }
 
     #[test]
+    fn test_trace_probes() {
+        let workload: WorkloadSpec = serde_json::from_str(
+            r#"{
+                "path": "/tmp/scoped.trace.mjs",
+                "trace_probes": [
+                    { "type": "log.tail", "path": "/tmp/app.log", "grep": "ready" },
+                    { "type": "process.snapshot", "pattern": "node.*serve", "interval_ms": 250 }
+                ]
+            }"#,
+        )
+        .expect("parse detailed workload probes");
+
+        assert_eq!(workload.trace_probes().len(), 2);
+        assert!(matches!(
+            &workload.trace_probes()[0],
+            TraceProbeConfig::LogTail { path, grep, .. }
+                if path == "/tmp/app.log" && grep.as_deref() == Some("ready")
+        ));
+        assert!(matches!(
+            &workload.trace_probes()[1],
+            TraceProbeConfig::ProcessSnapshot { pattern, interval_ms }
+                if pattern == "node.*serve" && *interval_ms == Some(250)
+        ));
+        assert!(WorkloadSpec::Path("/tmp/legacy.trace.mjs".to_string())
+            .trace_probes()
+            .is_empty());
+    }
+
+    #[test]
     fn test_trace_default_phase_preset() {
         let workload = WorkloadSpec::Detailed(WorkloadEntry {
             path: "trace.mjs".to_string(),

@@ -202,41 +202,58 @@ fn run_log_tail(
     let path_buf = PathBuf::from(&path);
     let mut position = initial_position;
     let mut partial = String::new();
+    let drain = LogTailDrain {
+        path_buf: &path_buf,
+        path: &path,
+        matcher: matcher.as_ref(),
+        started_at,
+        events: &events,
+    };
 
     loop {
-        read_new_log_lines(
-            &path_buf,
-            &path,
-            &mut position,
-            &mut partial,
-            matcher.as_ref(),
-            started_at,
-            &events,
-        );
+        drain_log_tail_once(drain, &mut position, &mut partial, false);
         if stop
             .recv_timeout(Duration::from_millis(LOG_POLL_INTERVAL_MS))
             .is_ok()
         {
-            read_new_log_lines(
-                &path_buf,
-                &path,
-                &mut position,
-                &mut partial,
-                matcher.as_ref(),
-                started_at,
-                &events,
-            );
-            if !partial.is_empty() {
-                emit_log_line(
-                    &path,
-                    std::mem::take(&mut partial),
-                    matcher.as_ref(),
-                    started_at,
-                    &events,
-                );
-            }
+            drain_log_tail_once(drain, &mut position, &mut partial, true);
             break;
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LogTailDrain<'a> {
+    path_buf: &'a PathBuf,
+    path: &'a str,
+    matcher: Option<&'a Regex>,
+    started_at: Instant,
+    events: &'a Arc<Mutex<Vec<TraceEvent>>>,
+}
+
+fn drain_log_tail_once(
+    drain: LogTailDrain<'_>,
+    position: &mut u64,
+    partial: &mut String,
+    flush_partial: bool,
+) {
+    read_new_log_lines(
+        drain.path_buf,
+        drain.path,
+        position,
+        partial,
+        drain.matcher,
+        drain.started_at,
+        drain.events,
+    );
+    if flush_partial && !partial.is_empty() {
+        emit_log_line(
+            drain.path,
+            std::mem::take(partial),
+            drain.matcher,
+            drain.started_at,
+            drain.events,
+        );
     }
 }
 
@@ -285,27 +302,53 @@ fn emit_log_line(
     started_at: Instant,
     events: &Arc<Mutex<Vec<TraceEvent>>>,
 ) {
+    push_log_event(
+        events,
+        started_at,
+        "log.line",
+        log_line_data(path, &line, None),
+    );
+
+    if let Some(matcher) = matcher.filter(|matcher| matcher.is_match(&line)) {
+        push_log_event(
+            events,
+            started_at,
+            "log.match",
+            log_line_data(path, &line, Some(matcher.as_str())),
+        );
+    }
+}
+
+fn push_log_event(
+    events: &Arc<Mutex<Vec<TraceEvent>>>,
+    started_at: Instant,
+    event_name: &str,
+    data: BTreeMap<String, serde_json::Value>,
+) {
+    push_event(events, event(started_at, "log.tail", event_name, data));
+}
+
+fn log_line_data(
+    path: &str,
+    line: &str,
+    pattern: Option<&str>,
+) -> BTreeMap<String, serde_json::Value> {
     let mut data = BTreeMap::new();
     data.insert(
         "path".to_string(),
         serde_json::Value::String(path.to_string()),
     );
-    data.insert("line".to_string(), serde_json::Value::String(line.clone()));
-    push_event(events, event(started_at, "log.tail", "log.line", data));
-
-    if let Some(matcher) = matcher.filter(|matcher| matcher.is_match(&line)) {
-        let mut data = BTreeMap::new();
-        data.insert(
-            "path".to_string(),
-            serde_json::Value::String(path.to_string()),
-        );
-        data.insert("line".to_string(), serde_json::Value::String(line));
+    data.insert(
+        "line".to_string(),
+        serde_json::Value::String(line.to_string()),
+    );
+    if let Some(pattern) = pattern {
         data.insert(
             "pattern".to_string(),
-            serde_json::Value::String(matcher.as_str().to_string()),
+            serde_json::Value::String(pattern.to_string()),
         );
-        push_event(events, event(started_at, "log.tail", "log.match", data));
     }
+    data
 }
 
 fn run_process_snapshot(
@@ -450,6 +493,47 @@ fn push_event(events: &Arc<Mutex<Vec<TraceEvent>>>, event: TraceEvent) {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn active_trace_probes_start_rejects_invalid_regex() {
+        let result = ActiveTraceProbes::start(&[TraceProbeConfig::ProcessSnapshot {
+            pattern: "(".to_string(),
+            interval_ms: Some(25),
+        }]);
+        let error = result.err().expect("invalid regex should fail start");
+
+        assert!(error.to_string().contains("invalid process.snapshot regex"));
+    }
+
+    #[test]
+    fn active_trace_probes_stop_returns_sorted_events() {
+        let events = Arc::new(Mutex::new(vec![
+            TraceEvent {
+                t_ms: 20,
+                source: "test".to_string(),
+                event: "later".to_string(),
+                data: BTreeMap::new(),
+            },
+            TraceEvent {
+                t_ms: 10,
+                source: "test".to_string(),
+                event: "earlier".to_string(),
+                data: BTreeMap::new(),
+            },
+        ]));
+        let probes = ActiveTraceProbes {
+            events,
+            stops: Vec::new(),
+            handles: Vec::new(),
+        };
+
+        let events = probes.stop();
+
+        assert_eq!(
+            events.iter().map(|event| event.t_ms).collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+    }
 
     #[test]
     fn log_tail_emits_line_and_match_events() {

@@ -28,6 +28,7 @@ mod matrix;
 mod metadata;
 mod observations;
 mod output;
+mod probes;
 mod schedule;
 #[cfg(test)]
 mod test_fixture;
@@ -46,6 +47,7 @@ use output::{
     aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
     render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
 };
+use probes::trace_probes_for_args;
 use schedule::{TraceSchedule, TraceVariantMatrixMode};
 
 #[cfg(test)]
@@ -864,70 +866,6 @@ fn default_trace_phase_preset_for_args<'a>(
             .trace_phase_preset(DEFAULT_TRACE_PHASE_PRESET)
             .map(|_| DEFAULT_TRACE_PHASE_PRESET)
     })
-}
-
-fn trace_probes_for_args(
-    args: &TraceArgs,
-    rig_context: Option<&TraceRigContext>,
-    extension_id: Option<&str>,
-) -> homeboy::Result<Vec<extension_trace::TraceProbeConfig>> {
-    let Some(context) = rig_context else {
-        return Ok(Vec::new());
-    };
-    let Some(extension_id) = extension_id else {
-        return Ok(Vec::new());
-    };
-    let scenario = trace_scenario(args)?;
-    let workloads = context
-        .rig_spec
-        .trace_workloads
-        .get(extension_id)
-        .map(|workloads| workloads.as_slice())
-        .unwrap_or(&[]);
-    let Some(workload) = workloads
-        .iter()
-        .find(|workload| trace_workload_scenario_id(workload.path()) == scenario)
-    else {
-        return Ok(Vec::new());
-    };
-
-    workload
-        .trace_probes()
-        .iter()
-        .map(|probe| expand_trace_probe(context, probe))
-        .collect()
-}
-
-fn expand_trace_probe(
-    context: &TraceRigContext,
-    probe: &extension_trace::TraceProbeConfig,
-) -> homeboy::Result<extension_trace::TraceProbeConfig> {
-    Ok(match probe {
-        extension_trace::TraceProbeConfig::LogTail {
-            path,
-            grep,
-            match_pattern,
-        } => extension_trace::TraceProbeConfig::LogTail {
-            path: expand_trace_probe_value(context, path),
-            grep: grep.clone(),
-            match_pattern: match_pattern.clone(),
-        },
-        extension_trace::TraceProbeConfig::ProcessSnapshot {
-            pattern,
-            interval_ms,
-        } => extension_trace::TraceProbeConfig::ProcessSnapshot {
-            pattern: expand_trace_probe_value(context, pattern),
-            interval_ms: *interval_ms,
-        },
-    })
-}
-
-fn expand_trace_probe_value(context: &TraceRigContext, value: &str) -> String {
-    let expanded = rig::expand::expand_vars(&context.rig_spec, value);
-    match context.rig_package_root.as_ref() {
-        Some(root) => expanded.replace("${package.root}", &root.to_string_lossy()),
-        None => expanded,
-    }
 }
 
 fn trace_phase_preset_for_args(
