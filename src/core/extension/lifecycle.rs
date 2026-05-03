@@ -776,35 +776,6 @@ fn update_linked_extension(
                     ));
                 }
 
-                let default_branch =
-                    detect_default_branch(&git_root).unwrap_or_else(|| "main".to_string());
-                let current_branch = git_silent(&git_root, &["branch", "--show-current"])
-                    .and_then(|output| {
-                        if output.status.success() {
-                            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            if !branch.is_empty() {
-                                return Some(branch);
-                            }
-                        }
-
-                        None
-                    })
-                    .unwrap_or_else(|| "DETACHED".to_string());
-                if current_branch != default_branch {
-                    return Err(Error::validation_invalid_argument(
-                        "extension_id",
-                        format!(
-                            "Linked extension '{}' points at {} on branch '{}', but updates require the default branch '{}'. Relink the extension to a stable checkout before upgrading.",
-                            extension_id,
-                            source_dir.display(),
-                            current_branch,
-                            default_branch,
-                        ),
-                        Some(extension_id.to_string()),
-                        None,
-                    ));
-                }
-
                 git::pull_repo(&git_root)?;
 
                 Ok(())
@@ -824,34 +795,6 @@ fn update_linked_extension(
         path: source_dir,
         repaired_source_metadata: None,
     })
-}
-
-fn detect_default_branch(repo_dir: &Path) -> Option<String> {
-    let output = git_silent(repo_dir, &["symbolic-ref", "refs/remotes/origin/HEAD"])?;
-    if output.status.success() {
-        let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return refname.rsplit('/').next().map(|s| s.to_string());
-    }
-
-    for branch in &["main", "master"] {
-        let check = git_silent(repo_dir, &["rev-parse", "--verify", branch])?;
-        if check.status.success() {
-            return Some(branch.to_string());
-        }
-    }
-
-    None
-}
-
-/// Run a git command silently (no stdin/stderr) and return the output.
-fn git_silent(dir: &Path, args: &[&str]) -> Option<std::process::Output> {
-    Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
 }
 
 /// Uninstall a extension. Automatically detects symlinks vs cloned directories.
@@ -1404,7 +1347,7 @@ exec '{}' "$@"
     }
 
     #[test]
-    fn linked_update_fails_instead_of_checking_out_default_branch_in_feature_worktree() {
+    fn linked_update_pulls_current_worktree_branch_without_switching_to_default_branch() {
         with_isolated_home(|home| {
             let home = home.path();
             let source = home.join("source-repo");
@@ -1422,6 +1365,15 @@ exec '{}' "$@"
             assert!(run_git(
                 &source,
                 &["checkout", "-b", "feature-linked-extension"]
+            ));
+            assert!(run_git(
+                &source,
+                &[
+                    "push",
+                    "--set-upstream",
+                    "origin",
+                    "feature-linked-extension"
+                ]
             ));
             let stable_checkout = home.join("stable-checkout");
             assert!(run_git(
@@ -1441,12 +1393,7 @@ exec '{}' "$@"
             )
             .expect("install linked extension");
 
-            let err = update("wordpress", false).expect_err("feature worktree update must fail");
-            let message = err.to_string();
-            assert!(message.contains("Linked extension 'wordpress' points at"));
-            assert!(message.contains("feature-linked-extension"));
-            assert!(message.contains(default_branch));
-            assert!(message.contains("Relink the extension to a stable checkout"));
+            update("wordpress", false).expect("feature worktree update should pull current branch");
 
             let branch_output = Command::new("git")
                 .args(["branch", "--show-current"])
