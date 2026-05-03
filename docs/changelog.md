@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.152.0] - 2026-05-03
+
+### Added
+- emit process lifecycle deltas
+
+### Fixed
+- default to workspace view
+
 ## [0.151.1] - 2026-05-03
 
 ### Changed
