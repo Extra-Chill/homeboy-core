@@ -295,6 +295,25 @@ pub(super) fn append_attach_observations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::parsing::TraceStatus;
+
+    #[test]
+    fn test_parse_all() {
+        let attachments = TraceAttachment::parse_all(&[
+            "logfile:/tmp/service.log".to_string(),
+            "pid:1234".to_string(),
+            "port:8080".to_string(),
+            "http://127.0.0.1:8080/health".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(attachments.len(), 4);
+        assert_eq!(attachments[0].kind, "logfile");
+        assert_eq!(attachments[1].target, "1234");
+        assert_eq!(attachments[2].target, "8080");
+        assert_eq!(attachments[3].kind, "http");
+        assert!(TraceAttachment::parse_all(&["systemd:kimaki.service".to_string()]).is_err());
+    }
 
     #[test]
     fn trace_attachment_parse_supports_v1_kinds() {
@@ -320,5 +339,60 @@ mod tests {
             "http://127.0.0.1:8080/health"
         );
         assert!(TraceAttachment::parse("systemd:kimaki.service").is_err());
+    }
+
+    #[test]
+    fn test_observe_trace_attachments() {
+        let temp = tempfile::tempdir().unwrap();
+        let log_path = temp.path().join("service.log");
+        std::fs::write(&log_path, "before\n").unwrap();
+        let attachment = TraceAttachment::parse(&format!("logfile:{}", log_path.display())).unwrap();
+
+        let observations = observe_trace_attachments(&[attachment], "before", Instant::now());
+
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].phase, "before");
+        assert_eq!(observations[0].attachment.kind, "logfile");
+        assert_eq!(observations[0].status, "present");
+    }
+
+    #[test]
+    fn test_append_attach_observations() {
+        let run_dir = RunDir::create().unwrap();
+        std::fs::create_dir_all(run_dir.path().join("artifacts")).unwrap();
+        let attachment = TraceAttachment::parse("logfile:/tmp/service.log").unwrap();
+        let observations = vec![TraceAttachmentObservation {
+            phase: "after",
+            elapsed_ms: 7,
+            attachment,
+            status: "present".to_string(),
+            data: BTreeMap::new(),
+        }];
+        let mut results = TraceResults {
+            component_id: "example".to_string(),
+            scenario_id: "attach".to_string(),
+            status: TraceStatus::Pass,
+            summary: None,
+            failure: None,
+            rig: None,
+            timeline: Vec::new(),
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
+            assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        append_attach_observations(&mut results, &run_dir, &observations).unwrap();
+
+        assert_eq!(results.timeline.len(), 1);
+        assert_eq!(results.timeline[0].source, "attach.logfile");
+        assert_eq!(results.timeline[0].event, "after.present");
+        assert!(results
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path == "artifacts/trace-attachments.json"));
+        assert!(run_dir.path().join("artifacts/trace-attachments.json").exists());
+        run_dir.cleanup();
     }
 }

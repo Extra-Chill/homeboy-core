@@ -12,9 +12,7 @@ use homeboy::extension::trace::{
     TraceRunWorkflowArgs, TraceRunnerInputs, TraceSpanDefinition,
 };
 use homeboy::extension::ExtensionCapability;
-use homeboy::observation::{
-    NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, ObservationStore, RunStatus,
-};
+use homeboy::observation::{NewRunRecord, NewTraceRunRecord, NewTraceSpanRecord, ObservationStore, RunStatus};
 use homeboy::rig::{self, RigSpec};
 
 use super::utils::args::{BaselineArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs};
@@ -34,19 +32,12 @@ mod schedule;
 mod test_fixture;
 
 use compare_variant::run_compare_variant;
-use experiment::{
-    collect_trace_experiment_artifacts_for_plan, run_trace_experiment_setup_for_plan,
-    run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args,
-    trace_experiment_settings,
-};
+use experiment::{collect_trace_experiment_artifacts_for_plan, run_trace_experiment_setup_for_plan, run_trace_experiment_teardown_for_plan, trace_experiment_env, trace_experiment_plan_for_args, trace_experiment_settings};
 use guardrails::run_trace_guardrails_for_args;
 use metadata::trace_span_metadata_for_args;
 use observations::record_trace_artifacts;
 
-use output::{
-    aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown,
-    render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
-};
+use output::{aggregate_span, attach_span_metadata, classification_summaries, render_aggregate_markdown, render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample};
 use probes::trace_probes_for_args;
 use schedule::{TraceSchedule, TraceVariantMatrixMode};
 
