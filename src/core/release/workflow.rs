@@ -3,6 +3,7 @@ use crate::deploy::{self, DeployConfig};
 use crate::engine::command;
 use crate::error::{Error, Result};
 use crate::git;
+use std::io::{self, BufRead, IsTerminal, Write};
 
 use super::pipeline::load_component;
 use super::types::{
@@ -104,13 +105,25 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
                 ));
             }
 
-            // Warn if overriding to a lower bump than auto-detected
-            if has_breaking_commits && bump != "major" {
+            let mut forced_lower_bump = false;
+            if let Some(under_bump) =
+                detect_lower_bump_override(&bump, &auto_bump_type, releasable_count)?
+            {
+                guard_lower_bump_override(
+                    &input.component_id,
+                    &under_bump,
+                    input.force_lower_bump,
+                    input.dry_run,
+                )?;
+                forced_lower_bump = input.force_lower_bump && !input.dry_run;
+            }
+
+            if forced_lower_bump {
                 log_status!(
                     "release",
-                    "⚠ Breaking changes detected in commits, but --bump {} overrides to {} bump",
+                    "Forced lower bump: requested {} while commits indicate {}",
                     bump,
-                    bump
+                    auto_bump_type
                 );
             }
 
@@ -704,6 +717,7 @@ pub fn run_batch(
             recover: input_template.recover,
             skip_checks: input_template.skip_checks,
             bump_override: input_template.bump_override.clone(),
+            force_lower_bump: input_template.force_lower_bump,
             skip_publish: input_template.skip_publish,
             skip_github_release: input_template.skip_github_release,
             git_identity: input_template.git_identity.clone(),
@@ -766,11 +780,163 @@ pub fn run_batch(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LowerBumpOverride {
+    requested: String,
+    detected: String,
+    releasable_count: usize,
+}
+
+impl LowerBumpOverride {
+    fn commit_suffix(&self) -> &'static str {
+        if self.releasable_count == 1 {
+            ""
+        } else {
+            "s"
+        }
+    }
+
+    fn message(&self) -> String {
+        format!(
+            "Requested {} bump is lower than detected {} impact from {} releasable commit{}",
+            self.requested,
+            self.detected,
+            self.releasable_count,
+            self.commit_suffix()
+        )
+    }
+}
+
+fn detect_lower_bump_override(
+    requested_bump: &str,
+    detected_bump: &str,
+    releasable_count: usize,
+) -> Result<Option<LowerBumpOverride>> {
+    let Some(requested) = git::SemverBump::parse(requested_bump) else {
+        return Ok(None);
+    };
+    let Some(detected) = git::SemverBump::parse(detected_bump) else {
+        return Ok(None);
+    };
+
+    if requested.rank() >= detected.rank() {
+        return Ok(None);
+    }
+
+    Ok(Some(LowerBumpOverride {
+        requested: requested.as_str().to_string(),
+        detected: detected.as_str().to_string(),
+        releasable_count,
+    }))
+}
+
+fn guard_lower_bump_override(
+    component_id: &str,
+    under_bump: &LowerBumpOverride,
+    force_lower_bump: bool,
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        log_status!("release", "{}", under_bump.message());
+        return Ok(());
+    }
+
+    if force_lower_bump {
+        return Ok(());
+    }
+
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        log_status!("release", "{}.", under_bump.message());
+        eprint!("Continue with lower bump? [y/N] ");
+        io::stderr().flush().ok();
+
+        let mut answer = String::new();
+        io::stdin().lock().read_line(&mut answer).map_err(|e| {
+            Error::internal_unexpected(format!("Failed to read confirmation: {}", e))
+        })?;
+
+        if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+            return Ok(());
+        }
+    }
+
+    Err(lower_bump_error(component_id, under_bump))
+}
+
+fn lower_bump_error(component_id: &str, under_bump: &LowerBumpOverride) -> Error {
+    Error::validation_invalid_argument(
+        "bump",
+        under_bump.message(),
+        Some(under_bump.requested.clone()),
+        None,
+    )
+    .with_hint(format!(
+        "Use the detected bump: homeboy release {} --bump {}",
+        component_id, under_bump.detected
+    ))
+    .with_hint("If the lower release is intentional, re-run with --force-lower-bump")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::release::{ReleaseRunResult, ReleaseStepResult, ReleaseStepStatus};
     use std::collections::HashMap;
+
+    #[test]
+    fn detects_keyword_under_bump_override() {
+        let under_bump = detect_lower_bump_override("patch", "minor", 3)
+            .expect("valid bump comparison")
+            .expect("patch should under-bump minor");
+
+        assert_eq!(under_bump.requested, "patch");
+        assert_eq!(under_bump.detected, "minor");
+        assert_eq!(under_bump.releasable_count, 3);
+    }
+
+    #[test]
+    fn lower_bump_detection_allows_equal_or_higher_bump() {
+        assert!(detect_lower_bump_override("minor", "minor", 1)
+            .unwrap()
+            .is_none());
+        assert!(detect_lower_bump_override("major", "minor", 1)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn lower_bump_detection_ignores_explicit_versions_and_none() {
+        assert!(detect_lower_bump_override("2.0.0", "minor", 1)
+            .unwrap()
+            .is_none());
+        assert!(detect_lower_bump_override("patch", "none", 0)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn lower_bump_error_points_to_detected_bump_and_force_flag() {
+        let under_bump = LowerBumpOverride {
+            requested: "patch".to_string(),
+            detected: "minor".to_string(),
+            releasable_count: 2,
+        };
+
+        let err = lower_bump_error("demo", &under_bump);
+
+        assert_eq!(err.code.as_str(), "validation.invalid_argument");
+        assert!(err
+            .message
+            .contains("Requested patch bump is lower than detected minor impact"));
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("homeboy release demo --bump minor")));
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("--force-lower-bump")));
+    }
 
     #[test]
     fn extracts_new_version_from_plan() {

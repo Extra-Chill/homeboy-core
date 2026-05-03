@@ -192,6 +192,9 @@ pub struct ReleaseCommandInput {
     /// When set, overrides auto-detection from commit history.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bump_override: Option<String>,
+    /// Permit a keyword bump lower than the commit-derived recommendation.
+    #[serde(default)]
+    pub force_lower_bump: bool,
     #[serde(default)]
     pub skip_publish: bool,
     /// Skip the GitHub Release creation step (tag + notes on github.com).
@@ -274,4 +277,16 @@ pub struct BatchReleaseSummary {
     pub released: u32,
     pub skipped: u32,
     pub failed: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_command_input_defaults_do_not_force_lower_bumps() {
+        let input = ReleaseCommandInput::default();
+
+        assert!(!input.force_lower_bump);
+    }
 }
