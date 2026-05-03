@@ -278,3 +278,15 @@ pub struct BatchReleaseSummary {
     pub skipped: u32,
     pub failed: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_command_input_defaults_do_not_force_lower_bumps() {
+        let input = ReleaseCommandInput::default();
+
+        assert!(!input.force_lower_bump);
+    }
+}

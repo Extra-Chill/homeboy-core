@@ -787,6 +787,26 @@ struct LowerBumpOverride {
     releasable_count: usize,
 }
 
+impl LowerBumpOverride {
+    fn commit_suffix(&self) -> &'static str {
+        if self.releasable_count == 1 {
+            ""
+        } else {
+            "s"
+        }
+    }
+
+    fn message(&self) -> String {
+        format!(
+            "Requested {} bump is lower than detected {} impact from {} releasable commit{}",
+            self.requested,
+            self.detected,
+            self.releasable_count,
+            self.commit_suffix()
+        )
+    }
+}
+
 fn detect_lower_bump_override(
     requested_bump: &str,
     detected_bump: &str,
@@ -817,18 +837,7 @@ fn guard_lower_bump_override(
     dry_run: bool,
 ) -> Result<()> {
     if dry_run {
-        log_status!(
-            "release",
-            "Requested {} bump is lower than detected {} impact from {} releasable commit{}",
-            under_bump.requested,
-            under_bump.detected,
-            under_bump.releasable_count,
-            if under_bump.releasable_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        );
+        log_status!("release", "{}", under_bump.message());
         return Ok(());
     }
 
@@ -837,18 +846,7 @@ fn guard_lower_bump_override(
     }
 
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        log_status!(
-            "release",
-            "Requested {} bump is lower than detected {} impact from {} releasable commit{}.",
-            under_bump.requested,
-            under_bump.detected,
-            under_bump.releasable_count,
-            if under_bump.releasable_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        );
+        log_status!("release", "{}.", under_bump.message());
         eprint!("Continue with lower bump? [y/N] ");
         io::stderr().flush().ok();
 
@@ -868,17 +866,7 @@ fn guard_lower_bump_override(
 fn lower_bump_error(component_id: &str, under_bump: &LowerBumpOverride) -> Error {
     Error::validation_invalid_argument(
         "bump",
-        format!(
-            "Requested {} bump is lower than detected {} impact from {} releasable commit{}",
-            under_bump.requested,
-            under_bump.detected,
-            under_bump.releasable_count,
-            if under_bump.releasable_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ),
+        under_bump.message(),
         Some(under_bump.requested.clone()),
         None,
     )
