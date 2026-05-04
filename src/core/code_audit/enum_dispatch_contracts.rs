@@ -71,7 +71,7 @@ enum BodyShape {
 }
 
 impl BodyShape {
-    fn label(self) -> &'static str {
+    fn display_name(self) -> &'static str {
         match self {
             BodyShape::Primitive => "primitive values",
             BodyShape::GetterCall => "parallel getter calls",
@@ -87,11 +87,13 @@ struct GroupKey {
 }
 
 fn detect_repeated_enum_dispatch_contracts(files: &[&SourceFile]) -> Vec<Finding> {
-    let enum_defs = collect_local_enums(files);
+    let enum_defs = SourceFile::collect_local_enums(files);
     let mut groups: BTreeMap<GroupKey, Vec<MatchContract>> = BTreeMap::new();
 
     for file in files {
-        for contract in extract_match_contracts(&file.content, &file.relative_path, &enum_defs) {
+        for contract in
+            SourceFile::extract_match_contracts(&file.content, &file.relative_path, &enum_defs)
+        {
             let key = GroupKey {
                 enum_name: contract.enum_name.clone(),
                 variants: contract.variants.iter().cloned().collect(),
@@ -118,7 +120,7 @@ fn detect_repeated_enum_dispatch_contracts(files: &[&SourceFile]) -> Vec<Finding
             .collect::<Vec<_>>();
         let shapes = contracts
             .iter()
-            .map(|contract| contract.body_shape.label())
+            .map(|contract| contract.body_shape.display_name())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -151,444 +153,463 @@ fn detect_repeated_enum_dispatch_contracts(files: &[&SourceFile]) -> Vec<Finding
     findings
 }
 
-fn collect_local_enums(files: &[&SourceFile]) -> HashMap<String, EnumDef> {
-    let mut enums = HashMap::new();
+impl SourceFile {
+    fn collect_local_enums(files: &[&SourceFile]) -> HashMap<String, EnumDef> {
+        let mut enums = HashMap::new();
 
-    for file in files {
-        for (name, variants) in extract_enum_defs(&file.content) {
-            enums.insert(name, EnumDef { variants });
-        }
-    }
-
-    enums
-}
-
-fn extract_enum_defs(content: &str) -> Vec<(String, BTreeSet<String>)> {
-    let mut enums = Vec::new();
-    let bytes = content.as_bytes();
-    let mut i = 0;
-
-    while let Some(enum_pos) = find_keyword(bytes, i, b"enum") {
-        let mut cursor = enum_pos + "enum".len();
-        skip_ws(bytes, &mut cursor);
-        let Some((name, after_name)) = parse_ident(bytes, cursor) else {
-            i = enum_pos + 4;
-            continue;
-        };
-        cursor = after_name;
-        skip_ws(bytes, &mut cursor);
-        if cursor >= bytes.len() || bytes[cursor] != b'{' {
-            i = cursor;
-            continue;
-        }
-        let Some(end) = matching_brace(bytes, cursor) else {
-            break;
-        };
-        let variants = extract_enum_variants(&content[cursor + 1..end]);
-        if !variants.is_empty() {
-            enums.push((name, variants));
-        }
-        i = end + 1;
-    }
-
-    enums
-}
-
-fn extract_enum_variants(body: &str) -> BTreeSet<String> {
-    split_top_level(body, b',')
-        .into_iter()
-        .filter_map(|segment| {
-            let trimmed = segment.trim();
-            if trimmed.is_empty() {
-                return None;
+        for file in files {
+            for (name, variants) in Self::extract_enum_defs(&file.content) {
+                enums.insert(name, EnumDef { variants });
             }
-            let first = trimmed
-                .split(|ch: char| !is_ident_char(ch as u8))
-                .find(|part| !part.is_empty())?;
-            if first.chars().next()?.is_ascii_uppercase() {
-                Some(first.to_string())
+        }
+
+        enums
+    }
+
+    fn extract_enum_defs(content: &str) -> Vec<(String, BTreeSet<String>)> {
+        let mut enums = Vec::new();
+        let bytes = content.as_bytes();
+        let mut i = 0;
+
+        while let Some(enum_pos) = Self::find_keyword(bytes, i, b"enum") {
+            let mut cursor = enum_pos + "enum".len();
+            Self::skip_ws(bytes, &mut cursor);
+            let Some((name, after_name)) = Self::parse_ident(bytes, cursor) else {
+                i = enum_pos + 4;
+                continue;
+            };
+            cursor = after_name;
+            Self::skip_ws(bytes, &mut cursor);
+            if cursor >= bytes.len() || bytes[cursor] != b'{' {
+                i = cursor;
+                continue;
+            }
+            let Some(end) = Self::matching_brace(bytes, cursor) else {
+                break;
+            };
+            let variants = Self::extract_enum_variants(&content[cursor + 1..end]);
+            if !variants.is_empty() {
+                enums.push((name, variants));
+            }
+            i = end + 1;
+        }
+
+        enums
+    }
+
+    fn extract_enum_variants(body: &str) -> BTreeSet<String> {
+        Self::split_top_level(body, b',')
+            .into_iter()
+            .filter_map(|segment| {
+                let trimmed = segment.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                let first = trimmed
+                    .split(|ch: char| !Self::is_ident_char(ch as u8))
+                    .find(|part| !part.is_empty())?;
+                if first.chars().next()?.is_ascii_uppercase() {
+                    Some(first.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn extract_match_contracts(
+        content: &str,
+        file: &str,
+        enum_defs: &HashMap<String, EnumDef>,
+    ) -> Vec<MatchContract> {
+        let bytes = content.as_bytes();
+        let mut contracts = Vec::new();
+        let mut i = 0;
+
+        while let Some(match_pos) = Self::find_keyword(bytes, i, b"match") {
+            let Some(open_brace) =
+                Self::find_next_top_level_byte(bytes, match_pos + "match".len(), b'{')
+            else {
+                break;
+            };
+            let Some(close_brace) = Self::matching_brace(bytes, open_brace) else {
+                break;
+            };
+
+            let function = Self::enclosing_function_name(&content[..match_pos]);
+            let body = &content[open_brace + 1..close_brace];
+            if let Some(contract) = Self::parse_match_body(body, file, &function, enum_defs) {
+                contracts.push(contract);
+            }
+
+            i = close_brace + 1;
+        }
+
+        contracts
+    }
+
+    fn parse_match_body(
+        body: &str,
+        file: &str,
+        function: &str,
+        enum_defs: &HashMap<String, EnumDef>,
+    ) -> Option<MatchContract> {
+        let arms = Self::split_top_level(body, b',');
+        let mut enum_name: Option<String> = None;
+        let mut variants = BTreeSet::new();
+        let mut shapes = Vec::new();
+
+        for arm in arms {
+            let arm = arm.trim();
+            if arm.is_empty() {
+                continue;
+            }
+            let Some(arrow) = Self::find_top_level_arrow(arm.as_bytes()) else {
+                return None;
+            };
+            let pattern = arm[..arrow].trim();
+            let expression = arm[arrow + 2..].trim();
+            let (arm_enum, variant) = Self::parse_enum_variant_pattern(pattern)?;
+            if let Some(existing) = &enum_name {
+                if existing != &arm_enum {
+                    return None;
+                }
             } else {
-                None
+                enum_name = Some(arm_enum);
             }
-        })
-        .collect()
-}
-
-fn extract_match_contracts(
-    content: &str,
-    file: &str,
-    enum_defs: &HashMap<String, EnumDef>,
-) -> Vec<MatchContract> {
-    let bytes = content.as_bytes();
-    let mut contracts = Vec::new();
-    let mut i = 0;
-
-    while let Some(match_pos) = find_keyword(bytes, i, b"match") {
-        let Some(open_brace) = find_next_top_level_byte(bytes, match_pos + "match".len(), b'{')
-        else {
-            break;
-        };
-        let Some(close_brace) = matching_brace(bytes, open_brace) else {
-            break;
-        };
-
-        let function = enclosing_function_name(&content[..match_pos]);
-        let body = &content[open_brace + 1..close_brace];
-        if let Some(contract) = parse_match_body(body, file, &function, enum_defs) {
-            contracts.push(contract);
+            variants.insert(variant);
+            shapes.push(Self::classify_body(expression)?);
         }
 
-        i = close_brace + 1;
-    }
-
-    contracts
-}
-
-fn parse_match_body(
-    body: &str,
-    file: &str,
-    function: &str,
-    enum_defs: &HashMap<String, EnumDef>,
-) -> Option<MatchContract> {
-    let arms = split_top_level(body, b',');
-    let mut enum_name: Option<String> = None;
-    let mut variants = BTreeSet::new();
-    let mut shapes = Vec::new();
-
-    for arm in arms {
-        let arm = arm.trim();
-        if arm.is_empty() {
-            continue;
-        }
-        let Some(arrow) = find_top_level_arrow(arm.as_bytes()) else {
+        let enum_name = enum_name?;
+        let enum_def = enum_defs.get(&enum_name)?;
+        if variants != enum_def.variants {
             return None;
-        };
-        let pattern = arm[..arrow].trim();
-        let expression = arm[arrow + 2..].trim();
-        let (arm_enum, variant) = parse_enum_variant_pattern(pattern)?;
-        if let Some(existing) = &enum_name {
-            if existing != &arm_enum {
-                return None;
-            }
-        } else {
-            enum_name = Some(arm_enum);
         }
-        variants.insert(variant);
-        shapes.push(classify_body(expression)?);
+        if variants.len() < 2 || shapes.is_empty() {
+            return None;
+        }
+
+        Some(MatchContract {
+            enum_name,
+            variants,
+            file: file.to_string(),
+            function: function.to_string(),
+            body_shape: Self::dominant_shape(&shapes)?,
+        })
     }
 
-    let enum_name = enum_name?;
-    let enum_def = enum_defs.get(&enum_name)?;
-    if variants != enum_def.variants {
-        return None;
-    }
-    if variants.len() < 2 || shapes.is_empty() {
-        return None;
+    fn parse_enum_variant_pattern(pattern: &str) -> Option<(String, String)> {
+        let pattern = pattern.split(" if ").next()?.trim();
+        if pattern == "_" || pattern.contains('|') {
+            return None;
+        }
+        let path = pattern.split('(').next()?.trim();
+        let mut parts = path.rsplitn(2, "::");
+        let variant = parts.next()?.trim();
+        let enum_path = parts.next()?.trim();
+        let enum_name = enum_path.rsplit("::").next()?.trim();
+        if !Self::is_upper_ident(variant) || !Self::is_upper_ident(enum_name) {
+            return None;
+        }
+        Some((enum_name.to_string(), variant.to_string()))
     }
 
-    Some(MatchContract {
-        enum_name,
-        variants,
-        file: file.to_string(),
-        function: function.to_string(),
-        body_shape: dominant_shape(&shapes)?,
-    })
-}
-
-fn parse_enum_variant_pattern(pattern: &str) -> Option<(String, String)> {
-    let pattern = pattern.split(" if ").next()?.trim();
-    if pattern == "_" || pattern.contains('|') {
-        return None;
-    }
-    let path = pattern.split('(').next()?.trim();
-    let mut parts = path.rsplitn(2, "::");
-    let variant = parts.next()?.trim();
-    let enum_path = parts.next()?.trim();
-    let enum_name = enum_path.rsplit("::").next()?.trim();
-    if !is_upper_ident(variant) || !is_upper_ident(enum_name) {
-        return None;
-    }
-    Some((enum_name.to_string(), variant.to_string()))
-}
-
-fn classify_body(expression: &str) -> Option<BodyShape> {
-    let expression = expression.trim().trim_end_matches(',').trim();
-    if expression.is_empty() || expression.contains("=>") {
-        return None;
-    }
-    if is_primitive_expression(expression) {
-        return Some(BodyShape::Primitive);
-    }
-    if is_getter_call(expression) {
-        return Some(BodyShape::GetterCall);
-    }
-    if is_constructor_shape(expression) {
-        return Some(BodyShape::Constructor);
-    }
-    None
-}
-
-fn dominant_shape(shapes: &[BodyShape]) -> Option<BodyShape> {
-    let first = *shapes.first()?;
-    if shapes.iter().all(|shape| *shape == first) {
-        Some(first)
-    } else {
+    fn classify_body(expression: &str) -> Option<BodyShape> {
+        let expression = expression.trim().trim_end_matches(',').trim();
+        if expression.is_empty() || expression.contains("=>") {
+            return None;
+        }
+        if Self::is_primitive_expression(expression) {
+            return Some(BodyShape::Primitive);
+        }
+        if Self::is_getter_call(expression) {
+            return Some(BodyShape::GetterCall);
+        }
+        if Self::is_constructor_shape(expression) {
+            return Some(BodyShape::Constructor);
+        }
         None
     }
-}
 
-fn is_primitive_expression(expression: &str) -> bool {
-    expression.starts_with('"')
-        || expression.starts_with('\'')
-        || matches!(expression, "true" | "false" | "None")
-        || expression.parse::<i64>().is_ok()
-}
-
-fn is_getter_call(expression: &str) -> bool {
-    if !expression.ends_with(')') || expression.contains('{') || expression.contains(';') {
-        return false;
+    fn dominant_shape(shapes: &[BodyShape]) -> Option<BodyShape> {
+        let first = *shapes.first()?;
+        if shapes.iter().all(|shape| *shape == first) {
+            Some(first)
+        } else {
+            None
+        }
     }
-    let Some(open) = expression.find('(') else {
-        return false;
-    };
-    let callee = expression[..open].trim();
-    callee.contains('.') && callee.rsplit('.').next().is_some_and(is_lower_ident)
-}
 
-fn is_constructor_shape(expression: &str) -> bool {
-    let Some(open) = expression.find('{') else {
-        return false;
-    };
-    expression.ends_with('}') && is_upper_ident(expression[..open].trim())
-}
+    fn is_primitive_expression(expression: &str) -> bool {
+        expression.starts_with('"')
+            || expression.starts_with('\'')
+            || matches!(expression, "true" | "false" | "None")
+            || expression.parse::<i64>().is_ok()
+    }
 
-fn enclosing_function_name(prefix: &str) -> String {
-    let bytes = prefix.as_bytes();
-    let mut cursor = bytes.len();
-    while cursor > 0 {
-        let search = &bytes[..cursor];
-        let Some(pos) = find_keyword_rev(search, b"fn") else {
-            break;
+    fn is_getter_call(expression: &str) -> bool {
+        if !expression.ends_with(')') || expression.contains('{') || expression.contains(';') {
+            return false;
+        }
+        let Some(open) = expression.find('(') else {
+            return false;
         };
-        let mut name_start = pos + 2;
-        skip_ws(bytes, &mut name_start);
-        if let Some((name, _)) = parse_ident(bytes, name_start) {
-            return name;
-        }
-        cursor = pos;
+        let callee = expression[..open].trim();
+        callee.contains('.') && callee.rsplit('.').next().is_some_and(Self::is_lower_ident)
     }
-    "<unknown>".to_string()
-}
 
-fn find_keyword(bytes: &[u8], mut start: usize, keyword: &[u8]) -> Option<usize> {
-    while start + keyword.len() <= bytes.len() {
-        let rel = bytes[start..]
-            .windows(keyword.len())
-            .position(|w| w == keyword)?;
-        let pos = start + rel;
-        let before_ok = pos == 0 || !is_ident_char(bytes[pos - 1]);
-        let after = pos + keyword.len();
-        let after_ok = after >= bytes.len() || !is_ident_char(bytes[after]);
-        if before_ok && after_ok {
-            return Some(pos);
-        }
-        start = pos + keyword.len();
+    fn is_constructor_shape(expression: &str) -> bool {
+        let Some(open) = expression.find('{') else {
+            return false;
+        };
+        expression.ends_with('}') && Self::is_upper_ident(expression[..open].trim())
     }
-    None
-}
 
-fn find_keyword_rev(bytes: &[u8], keyword: &[u8]) -> Option<usize> {
-    if bytes.len() < keyword.len() {
-        return None;
+    fn enclosing_function_name(prefix: &str) -> String {
+        let bytes = prefix.as_bytes();
+        let mut cursor = bytes.len();
+        while cursor > 0 {
+            let search = &bytes[..cursor];
+            let Some(pos) = Self::find_keyword_rev(search, b"fn") else {
+                break;
+            };
+            let mut name_start = pos + 2;
+            Self::skip_ws(bytes, &mut name_start);
+            if let Some((name, _)) = Self::parse_ident(bytes, name_start) {
+                return name;
+            }
+            cursor = pos;
+        }
+        "<unknown>".to_string()
     }
-    let mut pos = bytes.len() - keyword.len();
-    loop {
-        if &bytes[pos..pos + keyword.len()] == keyword {
-            let before_ok = pos == 0 || !is_ident_char(bytes[pos - 1]);
-            let after = pos + keyword.len();
-            let after_ok = after >= bytes.len() || !is_ident_char(bytes[after]);
-            if before_ok && after_ok {
+
+    fn find_keyword(bytes: &[u8], mut start: usize, keyword: &[u8]) -> Option<usize> {
+        while start + keyword.len() <= bytes.len() {
+            let rel = bytes[start..]
+                .windows(keyword.len())
+                .position(|w| w == keyword)?;
+            let pos = start + rel;
+            if Self::keyword_at(bytes, pos, keyword) {
                 return Some(pos);
             }
+            start = pos + keyword.len();
         }
-        if pos == 0 {
-            break;
-        }
-        pos -= 1;
+        None
     }
-    None
-}
 
-fn find_next_top_level_byte(bytes: &[u8], start: usize, needle: u8) -> Option<usize> {
-    let mut paren = 0i32;
-    let mut bracket = 0i32;
-    let mut angle = 0i32;
-    let mut i = start;
-    while i < bytes.len() {
-        if let Some(next) = skip_string_or_comment(bytes, i) {
-            i = next;
-            continue;
+    fn find_keyword_rev(bytes: &[u8], keyword: &[u8]) -> Option<usize> {
+        if bytes.len() < keyword.len() {
+            return None;
         }
-        match bytes[i] {
-            b'(' => paren += 1,
-            b')' => paren -= 1,
-            b'[' => bracket += 1,
-            b']' => bracket -= 1,
-            b'<' => angle += 1,
-            b'>' => angle -= 1,
-            b if b == needle && paren == 0 && bracket == 0 && angle == 0 => return Some(i),
-            _ => {}
+        let mut pos = bytes.len() - keyword.len();
+        loop {
+            if Self::keyword_at(bytes, pos, keyword) {
+                return Some(pos);
+            }
+            if pos == 0 {
+                break;
+            }
+            pos -= 1;
         }
-        i += 1;
+        None
     }
-    None
-}
 
-fn matching_brace(bytes: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut i = open;
-    while i < bytes.len() {
-        if let Some(next) = skip_string_or_comment(bytes, i) {
-            i = next;
-            continue;
+    fn keyword_at(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+        if pos + keyword.len() > bytes.len() || &bytes[pos..pos + keyword.len()] != keyword {
+            return false;
         }
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
+        let before_ok = pos == 0 || !Self::is_ident_char(bytes[pos - 1]);
+        let after = pos + keyword.len();
+        let after_ok = after >= bytes.len() || !Self::is_ident_char(bytes[after]);
+        before_ok && after_ok
+    }
+
+    fn find_next_top_level_byte(bytes: &[u8], start: usize, needle: u8) -> Option<usize> {
+        let mut paren = 0i32;
+        let mut bracket = 0i32;
+        let mut angle = 0i32;
+        let mut i = start;
+        while i < bytes.len() {
+            if Self::advance_past_string_or_comment(bytes, &mut i) {
+                continue;
+            }
+            match bytes[i] {
+                b'(' => paren += 1,
+                b')' => paren -= 1,
+                b'[' => bracket += 1,
+                b']' => bracket -= 1,
+                b'<' => angle += 1,
+                b'>' => angle -= 1,
+                b if b == needle && paren == 0 && bracket == 0 && angle == 0 => return Some(i),
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn matching_brace(bytes: &[u8], open: usize) -> Option<usize> {
+        let mut depth = 0i32;
+        let mut i = open;
+        loop {
+            if i >= bytes.len() {
+                return None;
+            }
+            if Self::advance_past_string_or_comment(bytes, &mut i) {
+                continue;
+            }
+            match bytes[i] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
                 }
+                _ => {}
             }
-            _ => {}
+            i += 1;
         }
-        i += 1;
     }
-    None
-}
 
-fn split_top_level(content: &str, separator: u8) -> Vec<&str> {
-    let bytes = content.as_bytes();
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0i32;
-    let mut i = 0;
-    while i < bytes.len() {
-        if let Some(next) = skip_string_or_comment(bytes, i) {
-            i = next;
-            continue;
+    fn split_top_level(content: &str, separator: u8) -> Vec<&str> {
+        let bytes = content.as_bytes();
+        let mut parts = Vec::new();
+        let mut start = 0;
+        let mut depth = 0i32;
+        let mut i = 0;
+        while i < bytes.len() {
+            if Self::advance_past_string_or_comment(bytes, &mut i) {
+                continue;
+            }
+            match bytes[i] {
+                b'{' | b'(' | b'[' => depth += 1,
+                b'}' | b')' | b']' => depth -= 1,
+                b if b == separator && depth == 0 => {
+                    parts.push(&content[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if start < content.len() {
+            parts.push(&content[start..]);
+        }
+        parts
+    }
+
+    fn find_top_level_arrow(bytes: &[u8]) -> Option<usize> {
+        let mut depth = 0i32;
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            if Self::advance_past_string_or_comment(bytes, &mut i) {
+                continue;
+            }
+            match bytes[i] {
+                b'{' | b'(' | b'[' => depth += 1,
+                b'}' | b')' | b']' => depth -= 1,
+                b'=' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn advance_past_string_or_comment(bytes: &[u8], index: &mut usize) -> bool {
+        if let Some(next) = Self::skip_string_or_comment(bytes, *index) {
+            *index = next;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_string_or_comment(bytes: &[u8], i: usize) -> Option<usize> {
+        if i >= bytes.len() {
+            return None;
         }
         match bytes[i] {
-            b'{' | b'(' | b'[' => depth += 1,
-            b'}' | b')' | b']' => depth -= 1,
-            b if b == separator && depth == 0 => {
-                parts.push(&content[start..i]);
-                start = i + 1;
+            b'"' | b'\'' => Self::skip_quoted(bytes, i, bytes[i]),
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => Some(
+                bytes[i..]
+                    .iter()
+                    .position(|b| *b == b'\n')
+                    .map_or(bytes.len(), |p| i + p + 1),
+            ),
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => bytes[i + 2..]
+                .windows(2)
+                .position(|w| w == b"*/")
+                .map(|p| i + 2 + p + 2)
+                .or(Some(bytes.len())),
+            _ => None,
+        }
+    }
+
+    fn skip_quoted(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
+        let mut i = start + 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' {
+                i += 2;
+                continue;
             }
-            _ => {}
+            if bytes[i] == quote {
+                return Some(i + 1);
+            }
+            i += 1;
         }
-        i += 1;
+        Some(bytes.len())
     }
-    if start < content.len() {
-        parts.push(&content[start..]);
-    }
-    parts
-}
 
-fn find_top_level_arrow(bytes: &[u8]) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if let Some(next) = skip_string_or_comment(bytes, i) {
-            i = next;
-            continue;
+    fn skip_ws(bytes: &[u8], cursor: &mut usize) {
+        while *cursor < bytes.len() && bytes[*cursor].is_ascii_whitespace() {
+            *cursor += 1;
         }
-        match bytes[i] {
-            b'{' | b'(' | b'[' => depth += 1,
-            b'}' | b')' | b']' => depth -= 1,
-            b'=' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
-            _ => {}
+    }
+
+    fn parse_ident(bytes: &[u8], start: usize) -> Option<(String, usize)> {
+        if start >= bytes.len() || !Self::is_ident_start(bytes[start]) {
+            return None;
         }
-        i += 1;
-    }
-    None
-}
-
-fn skip_string_or_comment(bytes: &[u8], i: usize) -> Option<usize> {
-    if i >= bytes.len() {
-        return None;
-    }
-    match bytes[i] {
-        b'"' | b'\'' => skip_quoted(bytes, i, bytes[i]),
-        b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => Some(
-            bytes[i..]
-                .iter()
-                .position(|b| *b == b'\n')
-                .map_or(bytes.len(), |p| i + p + 1),
-        ),
-        b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => bytes[i + 2..]
-            .windows(2)
-            .position(|w| w == b"*/")
-            .map(|p| i + 2 + p + 2)
-            .or(Some(bytes.len())),
-        _ => None,
-    }
-}
-
-fn skip_quoted(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
-    let mut i = start + 1;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2;
-            continue;
+        let mut end = start + 1;
+        while end < bytes.len() && Self::is_ident_char(bytes[end]) {
+            end += 1;
         }
-        if bytes[i] == quote {
-            return Some(i + 1);
-        }
-        i += 1;
+        Some((String::from_utf8_lossy(&bytes[start..end]).to_string(), end))
     }
-    Some(bytes.len())
-}
 
-fn skip_ws(bytes: &[u8], cursor: &mut usize) {
-    while *cursor < bytes.len() && bytes[*cursor].is_ascii_whitespace() {
-        *cursor += 1;
+    fn is_upper_ident(value: &str) -> bool {
+        value
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_uppercase())
+            && Self::is_ident(value)
     }
-}
 
-fn parse_ident(bytes: &[u8], start: usize) -> Option<(String, usize)> {
-    if start >= bytes.len() || !is_ident_start(bytes[start]) {
-        return None;
+    fn is_lower_ident(value: &str) -> bool {
+        value
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || *byte == b'_')
+            && Self::is_ident(value)
     }
-    let mut end = start + 1;
-    while end < bytes.len() && is_ident_char(bytes[end]) {
-        end += 1;
+
+    fn is_ident(value: &str) -> bool {
+        value
+            .as_bytes()
+            .iter()
+            .all(|byte| Self::is_ident_char(*byte))
     }
-    Some((String::from_utf8_lossy(&bytes[start..end]).to_string(), end))
-}
 
-fn is_upper_ident(value: &str) -> bool {
-    value
-        .as_bytes()
-        .first()
-        .is_some_and(|byte| byte.is_ascii_uppercase())
-        && value.as_bytes().iter().all(|byte| is_ident_char(*byte))
-}
+    fn is_ident_start(byte: u8) -> bool {
+        byte.is_ascii_alphabetic() || byte == b'_'
+    }
 
-fn is_lower_ident(value: &str) -> bool {
-    value
-        .as_bytes()
-        .first()
-        .is_some_and(|byte| byte.is_ascii_lowercase() || *byte == b'_')
-        && value.as_bytes().iter().all(|byte| is_ident_char(*byte))
-}
-
-fn is_ident_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_'
-}
-
-fn is_ident_char(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
+    fn is_ident_char(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || byte == b'_'
+    }
 }
 
 #[cfg(test)]
@@ -600,6 +621,42 @@ mod tests {
             relative_path: path.to_string(),
             content: content.to_string(),
         }
+    }
+
+    #[test]
+    fn test_run() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).expect("src dir");
+        std::fs::write(
+            src.join("capability.rs"),
+            r#"
+            enum Capability {
+                Lint,
+                Test,
+            }
+
+            fn label(capability: Capability) -> &'static str {
+                match capability {
+                    Capability::Lint => "lint",
+                    Capability::Test => "test",
+                }
+            }
+
+            fn has_support(capability: Capability, manifest: Manifest) -> bool {
+                match capability {
+                    Capability::Lint => manifest.has_lint(),
+                    Capability::Test => manifest.has_test(),
+                }
+            }
+            "#,
+        )
+        .expect("write fixture");
+
+        let findings = run(dir.path());
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].kind, AuditFinding::RepeatedEnumDispatchContract);
     }
 
     #[test]
