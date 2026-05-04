@@ -17,7 +17,7 @@ homeboy component [OPTIONS] <COMMAND>
 homeboy component create [OPTIONS] --local-path <path> --remote-path <path> --build-artifact <path>
 ```
 
-The component ID is derived from the `--local-path` directory name (lowercased). For example, `--local-path /path/to/extrachill-api` creates a component with ID `extrachill-api`.
+The component ID comes from an existing `homeboy.json` `id` when present; otherwise it is derived from the `--local-path` directory name (lowercased). For example, `--local-path /path/to/extrachill-api` creates a component with ID `extrachill-api`.
 
 Options:
 
@@ -80,6 +80,7 @@ homeboy component set my-plugin --json '{"type":"plugin"}' --docs_dir "docs"
 Notes:
 
 - If the JSON contains an `id` field that differs from `<id>`, the component is automatically renamed first (equivalent to calling `rename`), then the remaining fields are merged. Project references are updated automatically.
+- `remote_url` and `triage_remote_url` must be GitHub remotes (`https://github.com/<owner>/<repo>.git` or `git@github.com:<owner>/<repo>.git`). Local filesystem paths and unsupported providers are rejected when writing component config.
 - Use `null` in JSON to clear a field (for example, `{"post_version_bump_commands": null}`).
 
 #### Release configuration

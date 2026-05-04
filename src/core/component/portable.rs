@@ -134,12 +134,53 @@ pub fn write_portable_config(dir: &Path, component: &Component) -> Result<()> {
         portable
     };
 
+    validate_component_remote_urls(&merged)?;
+
     let content = crate::config::to_string_pretty(&merged)?;
     crate::engine::local_files::write_file_atomic(
         &path,
         &content,
         &format!("write {}", path.display()),
     )
+}
+
+pub(crate) fn validate_component_remote_urls(component: &Value) -> Result<()> {
+    validate_github_remote_url_field(component, "remote_url")?;
+    validate_github_remote_url_field(component, "triage_remote_url")
+}
+
+fn validate_github_remote_url_field(component: &Value, field: &str) -> Result<()> {
+    let Some(value) = component.get(field) else {
+        return Ok(());
+    };
+    if value.is_null() {
+        return Ok(());
+    }
+
+    let Some(url) = value.as_str() else {
+        return Err(Error::validation_invalid_argument(
+            field,
+            format!("Component {} must be a GitHub remote URL string", field),
+            Some(value.to_string()),
+            None,
+        ));
+    };
+    if url.trim().is_empty() {
+        return Ok(());
+    }
+    if crate::deploy::release_download::parse_github_url(url).is_some() {
+        return Ok(());
+    }
+
+    Err(Error::validation_invalid_argument(
+        field,
+        format!("Component {} must be a GitHub remote URL", field),
+        Some(url.to_string()),
+        Some(vec![
+            "Use https://github.com/<owner>/<repo>.git".to_string(),
+            "Or use git@github.com:<owner>/<repo>.git".to_string(),
+        ]),
+    ))
 }
 
 /// Merge component fields into existing JSON, preserving keys the Component struct doesn't know about.
@@ -417,6 +458,115 @@ mod tests {
         assert_eq!(
             merged.get("auto_cleanup").and_then(|v| v.as_bool()),
             Some(false)
+        );
+    }
+
+    #[test]
+    fn write_rejects_invalid_remote_url() {
+        let dir = TempDir::new().expect("temp dir");
+        let mut component = Component::new(
+            "test-comp".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            String::new(),
+            None,
+        );
+        component.remote_url = Some("/Users/chubes/Developer/homeboy".to_string());
+
+        let result = write_portable_config(dir.path(), &component);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code.as_str(),
+            "validation.invalid_argument"
+        );
+        assert!(!dir.path().join("homeboy.json").exists());
+    }
+
+    #[test]
+    fn write_rejects_invalid_triage_remote_url() {
+        let dir = TempDir::new().expect("temp dir");
+        let mut component = Component::new(
+            "test-comp".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            String::new(),
+            None,
+        );
+        component.triage_remote_url = Some("https://gitlab.com/foo/bar.git".to_string());
+
+        let result = write_portable_config(dir.path(), &component);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code.as_str(),
+            "validation.invalid_argument"
+        );
+        assert!(!dir.path().join("homeboy.json").exists());
+    }
+
+    #[test]
+    fn test_validate_component_remote_urls_rejects_invalid_merge_without_rewriting_homeboy_json() {
+        crate::test_support::with_isolated_home(|home| {
+            let repo = home.path().join("my-comp");
+            fs::create_dir_all(&repo).unwrap();
+            let original = serde_json::json!({
+                "id": "my-comp",
+                "remote_url": "https://github.com/Extra-Chill/homeboy.git"
+            });
+            fs::write(
+                repo.join("homeboy.json"),
+                serde_json::to_string_pretty(&original).unwrap(),
+            )
+            .unwrap();
+
+            let standalone_dir = home.path().join(".config/homeboy/components");
+            fs::create_dir_all(&standalone_dir).unwrap();
+            fs::write(
+                standalone_dir.join("my-comp.json"),
+                serde_json::json!({ "local_path": repo.to_string_lossy() }).to_string(),
+            )
+            .unwrap();
+
+            let patch = r#"{"remote_url":"/Users/chubes/Developer/homeboy"}"#;
+            let result = crate::component::mutations::merge(Some("my-comp"), patch, &[]);
+
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err().code.as_str(),
+                "validation.invalid_argument"
+            );
+
+            let content = fs::read_to_string(repo.join("homeboy.json")).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(
+                json.get("remote_url").and_then(|v| v.as_str()),
+                Some("https://github.com/Extra-Chill/homeboy.git")
+            );
+        });
+    }
+
+    #[test]
+    fn write_accepts_github_remote_urls() {
+        let dir = TempDir::new().expect("temp dir");
+        let mut component = Component::new(
+            "test-comp".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            String::new(),
+            None,
+        );
+        component.remote_url = Some("https://github.com/Extra-Chill/homeboy.git".to_string());
+        component.triage_remote_url = Some("git@github.com:Extra-Chill/homeboy.git".to_string());
+
+        write_portable_config(dir.path(), &component).expect("GitHub remotes should be valid");
+
+        let content = fs::read_to_string(dir.path().join("homeboy.json")).unwrap();
+        let json: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(
+            json.get("remote_url").and_then(|v| v.as_str()),
+            Some("https://github.com/Extra-Chill/homeboy.git")
+        );
+        assert_eq!(
+            json.get("triage_remote_url").and_then(|v| v.as_str()),
+            Some("git@github.com:Extra-Chill/homeboy.git")
         );
     }
 }
