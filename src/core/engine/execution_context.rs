@@ -703,6 +703,54 @@ mod tests {
         assert_eq!(ctx.working_dir(), dir.path().to_str().unwrap());
     }
 
+    fn resolved_settings_entries() -> Vec<(String, serde_json::Value)> {
+        vec![
+            ("string".to_string(), serde_json::json!("value")),
+            ("object".to_string(), serde_json::json!({ "enabled": true })),
+            ("number".to_string(), serde_json::json!(3)),
+        ]
+    }
+
+    #[test]
+    fn test_string_overrides() {
+        let entries = resolved_settings_entries();
+        let settings = ResolvedSettings::new(&entries);
+
+        assert_eq!(
+            settings.string_overrides(),
+            vec![("string".to_string(), "value".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_json_overrides() {
+        let entries = resolved_settings_entries();
+        let settings = ResolvedSettings::new(&entries);
+
+        assert_eq!(
+            settings.json_overrides(),
+            vec![
+                ("object".to_string(), serde_json::json!({ "enabled": true })),
+                ("number".to_string(), serde_json::json!(3)),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_string_lossy_overrides() {
+        let entries = resolved_settings_entries();
+        let settings = ResolvedSettings::new(&entries);
+
+        assert_eq!(
+            settings.string_lossy_overrides(),
+            vec![
+                ("string".to_string(), "value".to_string()),
+                ("object".to_string(), r#"{"enabled":true}"#.to_string()),
+                ("number".to_string(), "3".to_string()),
+            ]
+        );
+    }
+
     #[test]
     fn resolved_settings_split_string_json_and_lossy_views() {
         let entries = [

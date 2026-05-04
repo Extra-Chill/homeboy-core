@@ -49,16 +49,8 @@ impl ActiveObservation {
         &self.initial_metadata
     }
 
-    pub fn merged_metadata(&self, finish: serde_json::Value) -> serde_json::Value {
-        merge_metadata(self.initial_metadata.clone(), finish)
-    }
-
     pub fn finish(&self, status: RunStatus, metadata: Option<serde_json::Value>) {
         let _ = self.store.finish_run(self.run_id(), status, metadata);
-    }
-
-    pub fn finish_merged(&self, status: RunStatus, finish_metadata: serde_json::Value) {
-        self.finish(status, Some(self.merged_metadata(finish_metadata)));
     }
 
     pub fn finish_error(&self, metadata: Option<serde_json::Value>) {
@@ -98,6 +90,26 @@ pub fn merge_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observation::FindingListFilter;
+    use crate::test_support::with_isolated_home;
+    use std::fs;
+
+    fn run_record() -> NewRunRecord {
+        NewRunRecord {
+            kind: "test".to_string(),
+            component_id: Some("homeboy".to_string()),
+            command: Some("homeboy test homeboy".to_string()),
+            cwd: Some("/tmp/homeboy".to_string()),
+            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some("studio".to_string()),
+            metadata_json: serde_json::json!({ "status": "running" }),
+        }
+    }
+
+    fn active_observation() -> ActiveObservation {
+        ActiveObservation::start(run_record()).expect("active observation")
+    }
 
     #[test]
     fn merge_metadata_preserves_initial_and_overwrites_finish_keys() {
@@ -109,5 +121,165 @@ mod tests {
         assert_eq!(merged["component"], "homeboy");
         assert_eq!(merged["status"], "pass");
         assert_eq!(merged["exit_code"], 0);
+    }
+
+    #[test]
+    fn test_start() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert_eq!(observation.run().kind, "test");
+            assert_eq!(observation.run().status, "running");
+        });
+    }
+
+    #[test]
+    fn test_start_best_effort() {
+        with_isolated_home(|_| {
+            assert!(ActiveObservation::start_best_effort(run_record()).is_some());
+        });
+    }
+
+    #[test]
+    fn test_store() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert!(observation.store().status().expect("status").exists);
+        });
+    }
+
+    #[test]
+    fn test_run() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert_eq!(observation.run().component_id.as_deref(), Some("homeboy"));
+        });
+    }
+
+    #[test]
+    fn test_run_id() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert!(!observation.run_id().is_empty());
+        });
+    }
+
+    #[test]
+    fn test_component_id() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert_eq!(observation.component_id(), Some("homeboy"));
+        });
+    }
+
+    #[test]
+    fn test_rig_id() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert_eq!(observation.rig_id(), Some("studio"));
+        });
+    }
+
+    #[test]
+    fn test_initial_metadata() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert_eq!(observation.initial_metadata()["status"], "running");
+        });
+    }
+
+    #[test]
+    fn test_finish() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+            let run_id = observation.run_id().to_string();
+            observation.finish(RunStatus::Pass, Some(serde_json::json!({ "exit_code": 0 })));
+
+            let run = observation
+                .store()
+                .get_run(&run_id)
+                .expect("read run")
+                .expect("run");
+            assert_eq!(run.status, "pass");
+            assert_eq!(run.metadata_json["exit_code"], 0);
+        });
+    }
+
+    #[test]
+    fn test_finish_error() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+            let run_id = observation.run_id().to_string();
+            observation.finish_error(Some(serde_json::json!({ "error": "boom" })));
+
+            let run = observation
+                .store()
+                .get_run(&run_id)
+                .expect("read run")
+                .expect("run");
+            assert_eq!(run.status, "error");
+            assert_eq!(run.metadata_json["error"], "boom");
+        });
+    }
+
+    #[test]
+    fn test_record_findings() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+            observation.record_findings(&[NewFindingRecord {
+                run_id: observation.run_id().to_string(),
+                tool: "test".to_string(),
+                rule: Some("rule".to_string()),
+                file: Some("src/lib.rs".to_string()),
+                line: Some(1),
+                severity: Some("error".to_string()),
+                fingerprint: Some("fingerprint".to_string()),
+                message: "message".to_string(),
+                fixable: Some(false),
+                metadata_json: serde_json::json!({}),
+            }]);
+
+            let findings = observation
+                .store()
+                .list_findings(FindingListFilter {
+                    run_id: Some(observation.run_id().to_string()),
+                    ..FindingListFilter::default()
+                })
+                .expect("findings");
+            assert_eq!(findings.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_record_artifact_if_file() {
+        with_isolated_home(|home| {
+            let observation = active_observation();
+            let artifact = home.path().join("artifact.json");
+            fs::write(&artifact, b"{}").expect("write artifact");
+
+            observation.record_artifact_if_file("artifact", &artifact);
+
+            let artifacts = observation
+                .store()
+                .list_artifacts(observation.run_id())
+                .expect("artifacts");
+            assert_eq!(artifacts.len(), 1);
+            assert_eq!(artifacts[0].kind, "artifact");
+        });
+    }
+
+    #[test]
+    fn test_store_path() {
+        with_isolated_home(|_| {
+            let observation = active_observation();
+
+            assert!(observation.store_path().ends_with("homeboy.sqlite"));
+        });
     }
 }
