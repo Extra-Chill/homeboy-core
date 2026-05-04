@@ -267,6 +267,7 @@ fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
         "--ignore-baseline",
         "--ignore-default-baseline",
         "--ratchet",
+        "--force-hot",
         "--json-summary",
         "--json",
     ];

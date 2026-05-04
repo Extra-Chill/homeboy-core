@@ -49,7 +49,7 @@ pub(crate) fn normalize_version_show(args: Vec<String>) -> Vec<String> {
 ///
 /// Adding a new global flag to `Cli` requires adding the long form here
 /// and the equals-form lookup happens automatically.
-const GLOBAL_FLAGS: &[&str] = &["--output", "-h", "--help"];
+const GLOBAL_FLAGS: &[&str] = &["--output", "--force-hot", "-h", "--help"];
 const COMPONENT_SET_MERGE_FLAGS: &[&str] = &[
     "--json",
     "--base64",
@@ -511,6 +511,23 @@ mod normalize_tests {
             "--profile",
             "smoke",
             "--iterations=1",
+        ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn bench_force_hot_after_subcommand_is_not_separated() {
+        let input = argv(&[
+            "homeboy",
+            "bench",
+            "--rig",
+            "studio-bfb",
+            "--iterations",
+            "1",
+            "--force-hot",
+            "--setting",
+            "studio_site_build_prompt_variant=astro-docs-content-collection",
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);
