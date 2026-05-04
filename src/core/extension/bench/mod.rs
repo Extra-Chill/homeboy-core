@@ -21,9 +21,11 @@
 
 pub mod aggregation;
 pub mod artifact;
+pub(crate) mod artifact_validation;
 pub mod baseline;
 pub mod diagnostic;
 pub mod distribution;
+pub(crate) mod failure_diagnostic;
 pub mod metrics;
 pub mod parsing;
 pub mod report;

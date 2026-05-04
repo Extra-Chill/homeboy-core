@@ -15,13 +15,13 @@ use crate::error::{Error, Result};
 use crate::extension::bench::aggregate_runs;
 use crate::extension::bench::baseline::{self, BenchBaselineComparison};
 use crate::extension::bench::diagnostic::{self, BenchDiagnostic};
+use crate::extension::bench::failure_diagnostic::bench_failure_stderr_tail;
 use crate::extension::bench::parsing::{
     self, BenchResults, BenchRunExecution, BenchRunMetadata, BenchRunnerMetadata, BenchScenario,
     BenchWorkloadMetadata,
 };
 use crate::extension::{
-    resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
-    ExtensionRunner,
+    resolve_execution_context, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner,
 };
 
 #[derive(Debug, Clone)]
@@ -323,6 +323,7 @@ fn parse_execution_results_file(
     results_file: &Path,
     scenario_ids: &[String],
     runner_success: bool,
+    rig_id: Option<&str>,
 ) -> Result<Option<BenchResults>> {
     if !results_file.exists() {
         return Ok(None);
@@ -330,12 +331,12 @@ fn parse_execution_results_file(
 
     if runner_success {
         return Ok(Some(apply_scenario_filter(
-            parsing::parse_bench_results_file(results_file)?,
+            parsing::parse_bench_results_file_with_artifact_context(results_file, rig_id)?,
             scenario_ids,
         )?));
     }
 
-    Ok(parsing::parse_bench_results_file(results_file).ok())
+    Ok(parsing::parse_bench_results_file_with_artifact_context(results_file, rig_id).ok())
 }
 
 fn failure_scenario_id(scenario_ids: &[String]) -> Option<String> {
@@ -491,7 +492,12 @@ pub fn run_main_bench_workflow(
         )?;
         let results_file = run_dir.step_file(run_dir::files::BENCH_RESULTS);
         let mut parsed = if results_file.exists() {
-            parse_execution_results_file(&results_file, &args.scenario_ids, script_output.success)?
+            parse_execution_results_file(
+                &results_file,
+                &args.scenario_ids,
+                script_output.success,
+                args.rig_id.as_deref(),
+            )?
         } else {
             None
         };
@@ -527,7 +533,7 @@ pub fn run_main_bench_workflow(
             component_path: Some(source_path.to_string_lossy().to_string()),
             scenario_id: failure_scenario_id(&args.scenario_ids),
             exit_code: script_output.exit_code,
-            stderr_tail: stderr_tail(&script_output.stderr),
+            stderr_tail: bench_failure_stderr_tail(&script_output.stderr, &args),
             diagnostics: Vec::new(),
         });
         return Ok(BenchRunWorkflowResult {
@@ -571,9 +577,13 @@ pub fn run_main_bench_workflow(
                 &results_file,
                 &execution_args.scenario_ids,
                 runner_output.success,
+                execution_args.rig_id.as_deref(),
             )?;
             let failure_stderr_tail = if !runner_output.success {
-                Some(stderr_tail(&runner_output.stderr))
+                Some(bench_failure_stderr_tail(
+                    &runner_output.stderr,
+                    &execution_args,
+                ))
             } else {
                 None
             };
@@ -937,10 +947,14 @@ fn run_single_dispatcher(
     }
 
     let runner_output = build_runner(execution_context, component, args, run_dir, None)?.run()?;
-    let parsed =
-        parse_execution_results_file(&results_file, &args.scenario_ids, runner_output.success)?;
+    let parsed = parse_execution_results_file(
+        &results_file,
+        &args.scenario_ids,
+        runner_output.success,
+        args.rig_id.as_deref(),
+    )?;
     let failure_stderr_tail = if !runner_output.success {
-        Some(stderr_tail(&runner_output.stderr))
+        Some(bench_failure_stderr_tail(&runner_output.stderr, args))
     } else {
         None
     };
@@ -1111,7 +1125,7 @@ fn run_concurrent_instances(
                 first_failure_exit = Some(output.exit_code);
             }
             if first_failure_stderr_tail.is_none() {
-                first_failure_stderr_tail = Some(stderr_tail(&output.stderr));
+                first_failure_stderr_tail = Some(bench_failure_stderr_tail(&output.stderr, args));
             }
         }
     }
@@ -1133,8 +1147,11 @@ fn run_concurrent_instances(
         if !path.exists() {
             continue;
         }
-        let parsed = match parsing::parse_bench_results_file(&path)
-            .and_then(|results| apply_scenario_filter(results, &args.scenario_ids))
+        let parsed = match parsing::parse_bench_results_file_with_artifact_context(
+            &path,
+            args.rig_id.as_deref(),
+        )
+        .and_then(|results| apply_scenario_filter(results, &args.scenario_ids))
         {
             Ok(p) => p,
             Err(_) => continue,

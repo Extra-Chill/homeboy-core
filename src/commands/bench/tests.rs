@@ -142,7 +142,7 @@ cat > "$HOMEBOY_BENCH_RESULTS_FILE" <<JSON
   "scenarios": []
 }
 JSON
-printf 'WORKLOAD_ERROR: studio-agent-site-build - warmup iteration threw: Studio site-build eval failed\n' >&2
+printf 'WORKLOAD_ERROR: studio-agent-site-build - warmup iteration 1/1 returned artifact "visual_comparison_dir" with empty path\n' >&2
 exit 7
 "#,
     )
@@ -482,7 +482,20 @@ fn selected_scenario_workload_failure_preserves_runner_error() {
                     Some("studio-agent-site-build")
                 );
                 assert!(failure.stderr_tail.contains("WORKLOAD_ERROR"));
-                assert!(failure.stderr_tail.contains("warmup iteration threw"));
+                assert!(failure.stderr_tail.contains("warmup iteration 1/1"));
+                assert!(failure.stderr_tail.contains("component id `studio`"));
+                assert!(failure
+                    .stderr_tail
+                    .contains("workload id `studio-agent-site-build`"));
+                assert!(failure
+                    .stderr_tail
+                    .contains("scenario id `studio-agent-site-build`"));
+                assert!(failure.stderr_tail.contains("phase `warmup`"));
+                assert!(failure.stderr_tail.contains("iteration 1/1"));
+                assert!(failure
+                    .stderr_tail
+                    .contains("artifact key `visual_comparison_dir`"));
+                assert!(failure.stderr_tail.contains("Omit optional artifacts"));
             }
             _ => panic!("expected single output"),
         }

@@ -54,6 +54,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 
 use super::artifact::BenchArtifact;
+use super::artifact_validation;
 use super::diagnostic::BenchDiagnostic;
 use super::distribution::BenchRunDistribution;
 
@@ -441,6 +442,13 @@ pub struct BenchMemory {
 
 /// Read and parse a `$HOMEBOY_BENCH_RESULTS_FILE` written by an extension.
 pub fn parse_bench_results_file(path: &Path) -> Result<BenchResults> {
+    parse_bench_results_file_with_artifact_context(path, None)
+}
+
+pub fn parse_bench_results_file_with_artifact_context(
+    path: &Path,
+    rig_id: Option<&str>,
+) -> Result<BenchResults> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         Error::internal_io(
             format!(
@@ -451,11 +459,18 @@ pub fn parse_bench_results_file(path: &Path) -> Result<BenchResults> {
             Some("bench.parsing.read".to_string()),
         )
     })?;
-    parse_bench_results_str(&content)
+    parse_bench_results_str_with_artifact_context(&content, rig_id)
 }
 
 /// Parse a raw JSON string into a `BenchResults`.
 pub fn parse_bench_results_str(raw: &str) -> Result<BenchResults> {
+    parse_bench_results_str_with_artifact_context(raw, None)
+}
+
+fn parse_bench_results_str_with_artifact_context(
+    raw: &str,
+    rig_id: Option<&str>,
+) -> Result<BenchResults> {
     let parsed: BenchResults = serde_json::from_str(raw).map_err(|e| {
         Error::internal_json(
             format!("Failed to parse bench results JSON: {}", e),
@@ -464,6 +479,7 @@ pub fn parse_bench_results_str(raw: &str) -> Result<BenchResults> {
     })?;
     validate_unique_scenario_ids(&parsed)?;
     validate_variance_policies(&parsed)?;
+    artifact_validation::validate_artifact_paths(&parsed, rig_id)?;
     Ok(parsed)
 }
 
@@ -679,6 +695,98 @@ mod tests {
     }
 
     #[test]
+    fn rejects_empty_scenario_artifact_path_with_contract_guidance() {
+        let err = parse_bench_results_str(
+            r#"{
+                "component_id": "studio",
+                "iterations": 1,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "file": "bench/site-build.bench.mjs",
+                        "iterations": 1,
+                        "metrics": { "success_rate": 1.0 },
+                        "artifacts": {
+                            "visual_comparison_dir": { "path": "" }
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .expect_err("empty artifact path should fail validation");
+
+        let message = err.to_string();
+        assert!(message.contains("component id `studio`"));
+        assert!(message.contains("workload id `bench/site-build.bench.mjs`"));
+        assert!(message.contains("scenario id `site_build`"));
+        assert!(message.contains("phase `scenario`"));
+        assert!(message.contains("artifact key `visual_comparison_dir`"));
+        assert!(message.contains("Omit optional artifacts"));
+        assert!(message.contains("real diagnostics file/directory"));
+    }
+
+    #[test]
+    fn rejects_empty_measured_iteration_artifact_path_with_iteration_context() {
+        let err = parse_bench_results_str(
+            r#"{
+                "component_id": "studio",
+                "iterations": 2,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "file": "bench/site-build.bench.mjs",
+                        "iterations": 2,
+                        "metrics": { "success_rate": 1.0 },
+                        "runs": [
+                            { "metrics": { "success_rate": 1.0 } },
+                            {
+                                "metrics": { "success_rate": 1.0 },
+                                "artifacts": {
+                                    "visual_comparison_dir": { "path": "   " }
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .expect_err("empty measured iteration artifact path should fail validation");
+
+        let message = err.to_string();
+        assert!(message.contains("component id `studio`"));
+        assert!(message.contains("workload id `bench/site-build.bench.mjs`"));
+        assert!(message.contains("scenario id `site_build`"));
+        assert!(message.contains("phase `iteration`"));
+        assert!(message.contains("iteration 2"));
+        assert!(message.contains("artifact key `visual_comparison_dir`"));
+        assert!(message.contains("Omit optional artifacts"));
+    }
+
+    #[test]
+    fn empty_artifact_path_diagnostic_includes_rig_when_available() {
+        let err = parse_bench_results_str_with_artifact_context(
+            r#"{
+                "component_id": "studio",
+                "iterations": 1,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "iterations": 1,
+                        "metrics": { "success_rate": 1.0 },
+                        "artifacts": {
+                            "visual_comparison_dir": { "path": "" }
+                        }
+                    }
+                ]
+            }"#,
+            Some("studio-bfb"),
+        )
+        .expect_err("empty artifact path should include rig context");
+
+        assert!(err.to_string().contains("rig id `studio-bfb`"));
+    }
+
+    #[test]
     fn omits_empty_scenario_artifacts() {
         let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
         let raw = serde_json::to_string(&parsed.scenarios[0]).unwrap();
@@ -711,6 +819,35 @@ mod tests {
         let parsed = parse_bench_results_file(&path).unwrap();
 
         assert_eq!(parsed.scenarios.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_bench_results_file_with_artifact_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bench-results.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "component_id": "studio",
+                "iterations": 1,
+                "scenarios": [
+                    {
+                        "id": "site_build",
+                        "iterations": 1,
+                        "metrics": { "success_rate": 1.0 },
+                        "artifacts": {
+                            "visual_comparison_dir": { "path": "" }
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let err = parse_bench_results_file_with_artifact_context(&path, Some("studio-bfb"))
+            .expect_err("empty artifact path should include rig context");
+
+        assert!(err.to_string().contains("rig id `studio-bfb`"));
     }
 
     #[test]
@@ -827,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_gate_pass_leaves_scenario_passed() {
+    fn test_evaluate_gates() {
         let raw = r#"{
             "component_id": "example",
             "iterations": 10,
