@@ -186,7 +186,7 @@ mod tests {
     fn bare_triage_defaults_to_workspace() {
         let cli = TestCli::parse_from(["triage"]);
 
-        assert!(matches!(cli.args.command, None));
+        assert!(cli.args.command.is_none());
     }
 
     #[test]
