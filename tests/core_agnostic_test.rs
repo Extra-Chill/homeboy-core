@@ -703,6 +703,16 @@ fn core_owned_source_stays_language_and_framework_agnostic() {
         occurrence_count, BASELINE_OCCURRENCES,
         "core-owned source ecosystem baseline occurrence count changed"
     );
+
+    let term_distribution = homeboy::core::top_n::top_n_by(
+        found.keys().map(|(_, term)| term.as_str()),
+        |term| *term,
+        3,
+    );
+    assert!(
+        !term_distribution.is_empty(),
+        "baseline should stay explicit until the #2240 cleanup removes existing core leaks"
+    );
 }
 
 fn scan_dir(root: &Path, dir: &Path, found: &mut BTreeMap<(String, String), Vec<usize>>) {
