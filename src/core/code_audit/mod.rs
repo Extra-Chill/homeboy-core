@@ -39,6 +39,7 @@ pub(crate) mod impact;
 pub(crate) mod import_matching;
 mod layer_ownership;
 pub(crate) mod naming;
+mod observation_lifecycle;
 mod parallel_runner_setup;
 mod repeated_literal_shape;
 pub mod report;
@@ -155,6 +156,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_shared_scaffolding: bool,
     pub(crate) run_parallel_runner_setup: bool,
     pub(crate) run_command_output_policy: bool,
+    pub(crate) run_observation_lifecycle: bool,
 }
 
 impl AuditExecutionPlan {
@@ -186,6 +188,7 @@ impl AuditExecutionPlan {
             run_shared_scaffolding: true,
             run_parallel_runner_setup: true,
             run_command_output_policy: true,
+            run_observation_lifecycle: true,
         }
     }
 
@@ -358,6 +361,11 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::CommandOutputPolicy],
             ),
+            run_observation_lifecycle: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::ObservationLifecycleScaffolding],
+            ),
         }
     }
 
@@ -390,6 +398,7 @@ impl AuditExecutionPlan {
             || self.run_shared_scaffolding
             || self.run_parallel_runner_setup
             || self.run_command_output_policy
+            || self.run_observation_lifecycle
     }
 }
 
@@ -1161,7 +1170,6 @@ fn audit_internal(
     }
 
     // Phase 4w: Parallel runner setup detection — command-family files that
-    // Phase 4w: Parallel runner setup detection — command-family files that
     // assemble the same generic execution contract independently.
     let parallel_runner_findings = if plan.run_parallel_runner_setup {
         parallel_runner_setup::run(&all_fingerprints)
@@ -1177,7 +1185,7 @@ fn audit_internal(
         all_findings.extend(parallel_runner_findings);
     }
 
-    // Phase 4w: Scattered command response/output policy ownership.
+    // Phase 4x: Scattered command response/output policy ownership.
     let command_output_findings = if plan.run_command_output_policy {
         command_output_policy::run(&all_fingerprints)
     } else {
@@ -1190,6 +1198,23 @@ fn audit_internal(
             command_output_findings.len()
         );
         all_findings.extend(command_output_findings);
+    }
+
+    // Phase 4y: Observation lifecycle scaffolding duplication. This is intentionally
+    // agnostic: it looks for repeated ownership of start/metadata/finalize/artifact/failure
+    // phases around observations, not specific command names.
+    let observation_lifecycle_findings = if plan.run_observation_lifecycle {
+        observation_lifecycle::run(&all_fingerprints)
+    } else {
+        Vec::new()
+    };
+    if !observation_lifecycle_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Observation lifecycle: {} finding(s) (repeated lifecycle scaffolding)",
+            observation_lifecycle_findings.len()
+        );
+        all_findings.extend(observation_lifecycle_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,
