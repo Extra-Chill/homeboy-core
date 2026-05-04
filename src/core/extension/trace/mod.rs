@@ -33,7 +33,7 @@ pub use parsing::{
     TraceArtifact, TraceAssertion, TraceEvent, TraceList, TraceScenario, TraceStatus,
 };
 pub use parsing::{TraceAssertionStatus, TraceResults, TraceSpanDefinition, TraceSpanResult};
-pub use probes::TraceProbeConfig;
+pub use probes::{ActiveTraceProbes, TraceProbeConfig};
 pub use report::{
     from_list_workflow, from_main_workflow, from_main_workflow_outputs, TraceAggregateOutput,
     TraceAggregateRunOutput, TraceAggregateSpanOutput, TraceClassificationSummaryOutput,

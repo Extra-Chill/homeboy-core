@@ -9,11 +9,12 @@ homeboy observe <component> --duration 30s --tail-log /path/to/app.log --grep 'i
 homeboy observe <component> --duration 5m --watch-process 'opencode-ai/bin/.*serve'
 homeboy observe <component> --duration 5m --watch-process 'node .*serve' --watch-process-interval 1s
 homeboy observe <component> --duration 5m --tail-log /path/to/app.log --watch-process 'node .*serve'
+homeboy observe <component> --duration 30s --probe '{"type":"http.poll","url":"http://127.0.0.1:3000/health","assert-status":200}'
 ```
 
 ## V1 Scope
 
-`observe` is a passive producer. It does not drive a scenario, attach to privileged OS probes, or implement the full future probe library.
+`observe` is a passive producer. It does not drive a scenario, attach to privileged OS probes, or own target lifecycle.
 
 V1 supports:
 
@@ -22,6 +23,7 @@ V1 supports:
 - `--grep <regex>` to filter tailed log lines
 - `--watch-process <regex>` for process command-line polling
 - `--watch-process-interval <duration>` for process polling cadence; defaults to `1s`
+- `--probe <json>` for repeatable portable trace probe configs (`log.tail`, `process.snapshot`, `file.watch`, `port.snapshot`, `http.poll`, and `cmd.run`)
 
 ## Output
 
