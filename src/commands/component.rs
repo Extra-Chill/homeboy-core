@@ -1,6 +1,7 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use homeboy::component::{self, Component};
@@ -128,9 +129,9 @@ enum ComponentCommand {
     },
     /// Detect runtime environment requirements from the component's source files.
     ///
-    /// Reads extension-specific metadata (e.g., WordPress "Requires PHP" header)
-    /// to determine what runtime versions the component needs. Outputs JSON
-    /// suitable for CI environment setup.
+    /// Reads extension-specific metadata to determine what runtime versions the
+    /// component needs. Outputs generic runtime requirement JSON suitable for CI
+    /// environment setup.
     Env {
         /// Component ID (optional when --path is provided)
         id: Option<String>,
@@ -431,14 +432,14 @@ struct ComponentEnvOutput {
     command: String,
     id: String,
     extension: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    php: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    php_source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    node: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    node_source: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    runtimes: BTreeMap<String, ComponentRuntimeRequirement>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ComponentRuntimeRequirement {
+    version: String,
+    source: String,
 }
 
 fn env(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
@@ -479,26 +480,25 @@ fn env(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
         .as_ref()
         .and_then(|exts| exts.keys().next().cloned());
 
-    let mut php_version: Option<String> = None;
-    let mut node_version: Option<String> = None;
-    let mut php_source: Option<String> = None;
-    let mut node_source: Option<String> = None;
+    let mut runtimes: BTreeMap<String, ComponentRuntimeRequirement> = BTreeMap::new();
 
-    // Read node version from raw homeboy.json (the Rust struct drops unknown
-    // fields like "php" and "node" from the extension config during deserialization).
+    // Read component-scoped runtime requirements from raw homeboy.json; the typed
+    // extension settings intentionally preserve extension-owned unknown fields.
     if let Some(ref ext_id) = extension_id {
         let config_path = local_path.join("homeboy.json");
         if let Ok(raw) = std::fs::read_to_string(&config_path) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(ext_obj) = json.get("extensions").and_then(|e| e.get(ext_id.as_str())) {
-                    if let Some(v) = ext_obj.get("node").and_then(|v| v.as_str()) {
-                        node_version = Some(v.to_string());
-                        node_source = Some("component".to_string());
-                    }
-                    // Read php from homeboy.json as fallback (overridden below by header detection)
-                    if let Some(v) = ext_obj.get("php").and_then(|v| v.as_str()) {
-                        php_version = Some(v.to_string());
-                        php_source = Some("component".to_string());
+                    if let Ok(requirements) = serde_json::from_value::<
+                        homeboy::extension::RuntimeRequirementsConfig,
+                    >(ext_obj.clone())
+                    {
+                        apply_component_runtime_requirements(
+                            requirements,
+                            &mut runtimes,
+                            "component",
+                            true,
+                        );
                     }
                 }
             }
@@ -513,26 +513,13 @@ fn env(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
 
     if let Some(ref extension) = extension {
         if let Some(detected) = run_component_env_detector(extension, local_path)? {
-            apply_component_env_detector_output(
-                detected,
-                &mut node_version,
-                &mut node_source,
-                &mut php_version,
-                &mut php_source,
-            );
+            apply_component_env_detector_output(detected, &mut runtimes);
         }
     }
 
     if let (Some(ext_id), Some(extension)) = (extension_id.as_ref(), extension.as_ref()) {
         if let Some(runtime) = extension.runtime.as_ref() {
-            apply_extension_runtime_requirements(
-                ext_id,
-                runtime,
-                &mut node_version,
-                &mut node_source,
-                &mut php_version,
-                &mut php_source,
-            );
+            apply_extension_runtime_requirements(ext_id, runtime, &mut runtimes);
         }
     }
 
@@ -540,10 +527,7 @@ fn env(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
         command: "component.env".to_string(),
         id: comp_id.clone(),
         extension: extension_id,
-        php: php_version,
-        php_source,
-        node: node_version,
-        node_source,
+        runtimes,
     };
 
     let entity = serde_json::to_value(&env_output).map_err(|error| {
@@ -635,39 +619,35 @@ fn run_component_env_detector(
 
 fn apply_component_env_detector_output(
     detected: homeboy::extension::RuntimeRequirementsConfig,
-    node_version: &mut Option<String>,
-    node_source: &mut Option<String>,
-    php_version: &mut Option<String>,
-    php_source: &mut Option<String>,
+    runtimes: &mut BTreeMap<String, ComponentRuntimeRequirement>,
 ) {
-    if let Some(php) = detected.php {
-        *php_version = Some(php);
-        *php_source = Some("component".to_string());
-    }
-    if let Some(node) = detected.node {
-        *node_version = Some(node);
-        *node_source = Some("component".to_string());
-    }
+    apply_component_runtime_requirements(detected, runtimes, "component", true);
 }
 
 fn apply_extension_runtime_requirements(
     extension_id: &str,
     runtime: &homeboy::extension::RuntimeRequirementsConfig,
-    node_version: &mut Option<String>,
-    node_source: &mut Option<String>,
-    php_version: &mut Option<String>,
-    php_source: &mut Option<String>,
+    runtimes: &mut BTreeMap<String, ComponentRuntimeRequirement>,
 ) {
-    if node_version.is_none() {
-        if let Some(node) = runtime.node.as_ref() {
-            *node_version = Some(node.clone());
-            *node_source = Some(format!("extension:{}", extension_id));
-        }
-    }
-    if php_version.is_none() {
-        if let Some(php) = runtime.php.as_ref() {
-            *php_version = Some(php.clone());
-            *php_source = Some(format!("extension:{}", extension_id));
+    let source = format!("extension:{}", extension_id);
+    apply_component_runtime_requirements(runtime.clone(), runtimes, &source, false);
+}
+
+fn apply_component_runtime_requirements(
+    requirements: homeboy::extension::RuntimeRequirementsConfig,
+    runtimes: &mut BTreeMap<String, ComponentRuntimeRequirement>,
+    source: &str,
+    overwrite: bool,
+) {
+    for (id, requirement) in requirements.runtimes {
+        if overwrite || !runtimes.contains_key(&id) {
+            runtimes.insert(
+                id,
+                ComponentRuntimeRequirement {
+                    version: requirement.version,
+                    source: source.to_string(),
+                },
+            );
         }
     }
 }
@@ -1086,28 +1066,22 @@ mod tests {
 
     #[test]
     fn extension_runtime_requirements_fill_missing_component_versions() {
-        let runtime = homeboy::extension::RuntimeRequirementsConfig {
-            node: Some("24".to_string()),
-            php: Some("8.3".to_string()),
-        };
-        let mut node = None;
-        let mut node_source = None;
-        let mut php = None;
-        let mut php_source = None;
+        let runtime: homeboy::extension::RuntimeRequirementsConfig =
+            serde_json::from_value(serde_json::json!({
+                "runtimes": {
+                    "node": { "version": "24" },
+                    "php": { "version": "8.3" }
+                }
+            }))
+            .expect("runtime requirements");
+        let mut runtimes = BTreeMap::new();
 
-        apply_extension_runtime_requirements(
-            "nodejs",
-            &runtime,
-            &mut node,
-            &mut node_source,
-            &mut php,
-            &mut php_source,
-        );
+        apply_extension_runtime_requirements("nodejs", &runtime, &mut runtimes);
 
-        assert_eq!(node.as_deref(), Some("24"));
-        assert_eq!(node_source.as_deref(), Some("extension:nodejs"));
-        assert_eq!(php.as_deref(), Some("8.3"));
-        assert_eq!(php_source.as_deref(), Some("extension:nodejs"));
+        assert_eq!(runtimes["node"].version, "24");
+        assert_eq!(runtimes["node"].source, "extension:nodejs");
+        assert_eq!(runtimes["php"].version, "8.3");
+        assert_eq!(runtimes["php"].source, "extension:nodejs");
     }
 
     #[test]
@@ -1121,7 +1095,7 @@ mod tests {
         let script = extension_dir.join("scripts/env/detect.sh");
         fs::write(
             &script,
-            "#!/bin/sh\nprintf '{\"php\":\"8.2\",\"node\":\"22\"}'\n",
+            "#!/bin/sh\nprintf '{\"runtimes\":{\"php\":{\"version\":\"8.2\"},\"node\":{\"version\":\"22\"}}}'\n",
         )
         .expect("write detector");
         let mut perms = fs::metadata(&script)
@@ -1144,69 +1118,106 @@ mod tests {
             .expect("detector should run")
             .expect("detector output");
 
-        assert_eq!(detected.php.as_deref(), Some("8.2"));
-        assert_eq!(detected.node.as_deref(), Some("22"));
+        assert_eq!(detected.runtimes["php"].version, "8.2");
+        assert_eq!(detected.runtimes["node"].version, "22");
+    }
+
+    #[test]
+    fn runtime_requirements_accept_generic_and_legacy_shapes() {
+        let generic: homeboy::extension::RuntimeRequirementsConfig =
+            serde_json::from_value(serde_json::json!({
+                "runtimes": {
+                    "python": { "version": "3.12" },
+                    "ruby": "3.3"
+                }
+            }))
+            .expect("generic requirements");
+
+        assert_eq!(generic.runtimes["python"].version, "3.12");
+        assert_eq!(generic.runtimes["ruby"].version, "3.3");
+
+        let legacy: homeboy::extension::RuntimeRequirementsConfig =
+            serde_json::from_value(serde_json::json!({ "php": "8.2", "node": "22" }))
+                .expect("legacy requirements");
+
+        assert_eq!(legacy.runtimes["php"].version, "8.2");
+        assert_eq!(legacy.runtimes["node"].version, "22");
     }
 
     #[test]
     fn component_env_detector_output_overrides_component_values_before_runtime_defaults() {
-        let runtime = homeboy::extension::RuntimeRequirementsConfig {
-            node: Some("24".to_string()),
-            php: Some("8.4".to_string()),
-        };
-        let mut node = Some("20".to_string());
-        let mut node_source = Some("component".to_string());
-        let mut php = Some("8.0".to_string());
-        let mut php_source = Some("component".to_string());
+        let runtime: homeboy::extension::RuntimeRequirementsConfig =
+            serde_json::from_value(serde_json::json!({
+                "runtimes": {
+                    "node": { "version": "24" },
+                    "php": { "version": "8.4" }
+                }
+            }))
+            .expect("runtime requirements");
+        let mut runtimes = BTreeMap::from([
+            (
+                "node".to_string(),
+                ComponentRuntimeRequirement {
+                    version: "20".to_string(),
+                    source: "component".to_string(),
+                },
+            ),
+            (
+                "php".to_string(),
+                ComponentRuntimeRequirement {
+                    version: "8.0".to_string(),
+                    source: "component".to_string(),
+                },
+            ),
+        ]);
 
         apply_component_env_detector_output(
-            homeboy::extension::RuntimeRequirementsConfig {
-                php: Some("8.2".to_string()),
-                node: None,
-            },
-            &mut node,
-            &mut node_source,
-            &mut php,
-            &mut php_source,
+            serde_json::from_value(serde_json::json!({
+                "runtimes": { "php": { "version": "8.2" } }
+            }))
+            .expect("detected requirements"),
+            &mut runtimes,
         );
-        apply_extension_runtime_requirements(
-            "demo",
-            &runtime,
-            &mut node,
-            &mut node_source,
-            &mut php,
-            &mut php_source,
-        );
+        apply_extension_runtime_requirements("demo", &runtime, &mut runtimes);
 
-        assert_eq!(php.as_deref(), Some("8.2"));
-        assert_eq!(php_source.as_deref(), Some("component"));
-        assert_eq!(node.as_deref(), Some("20"));
-        assert_eq!(node_source.as_deref(), Some("component"));
+        assert_eq!(runtimes["php"].version, "8.2");
+        assert_eq!(runtimes["php"].source, "component");
+        assert_eq!(runtimes["node"].version, "20");
+        assert_eq!(runtimes["node"].source, "component");
     }
 
     #[test]
     fn component_versions_win_over_extension_runtime_requirements() {
-        let runtime = homeboy::extension::RuntimeRequirementsConfig {
-            node: Some("24".to_string()),
-            php: Some("8.3".to_string()),
-        };
-        let mut node = Some("22".to_string());
-        let mut node_source = Some("component".to_string());
-        let mut php = Some("8.2".to_string());
-        let mut php_source = Some("component".to_string());
+        let runtime: homeboy::extension::RuntimeRequirementsConfig =
+            serde_json::from_value(serde_json::json!({
+                "runtimes": {
+                    "node": { "version": "24" },
+                    "php": { "version": "8.3" }
+                }
+            }))
+            .expect("runtime requirements");
+        let mut runtimes = BTreeMap::from([
+            (
+                "node".to_string(),
+                ComponentRuntimeRequirement {
+                    version: "22".to_string(),
+                    source: "component".to_string(),
+                },
+            ),
+            (
+                "php".to_string(),
+                ComponentRuntimeRequirement {
+                    version: "8.2".to_string(),
+                    source: "component".to_string(),
+                },
+            ),
+        ]);
 
-        apply_extension_runtime_requirements(
-            "nodejs",
-            &runtime,
-            &mut node,
-            &mut node_source,
-            &mut php,
-            &mut php_source,
-        );
+        apply_extension_runtime_requirements("nodejs", &runtime, &mut runtimes);
 
-        assert_eq!(node.as_deref(), Some("22"));
-        assert_eq!(node_source.as_deref(), Some("component"));
-        assert_eq!(php.as_deref(), Some("8.2"));
-        assert_eq!(php_source.as_deref(), Some("component"));
+        assert_eq!(runtimes["node"].version, "22");
+        assert_eq!(runtimes["node"].source, "component");
+        assert_eq!(runtimes["php"].version, "8.2");
+        assert_eq!(runtimes["php"].source, "component");
     }
 }

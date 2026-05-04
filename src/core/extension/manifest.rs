@@ -4,7 +4,7 @@ use crate::engine::output_parse::ParseSpec;
 use crate::engine::run_dir;
 use crate::error::{Error, Result};
 use crate::paths;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -932,12 +932,66 @@ pub struct StructuredSidecarDeclaration {
     pub schema_version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
 pub struct RuntimeRequirementsConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub php: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub runtimes: HashMap<String, RuntimeRequirementConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeRequirementConfig {
+    pub version: String,
+}
+
+impl<'de> Deserialize<'de> for RuntimeRequirementsConfig {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RuntimeRequirementsWire {
+            #[serde(default)]
+            runtimes: HashMap<String, RuntimeRequirementWire>,
+            #[serde(default)]
+            node: Option<RuntimeRequirementWire>,
+            #[serde(default)]
+            php: Option<RuntimeRequirementWire>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RuntimeRequirementWire {
+            Version(String),
+            Object { version: String },
+        }
+
+        impl RuntimeRequirementWire {
+            fn into_config(self) -> RuntimeRequirementConfig {
+                match self {
+                    RuntimeRequirementWire::Version(version) => {
+                        RuntimeRequirementConfig { version }
+                    }
+                    RuntimeRequirementWire::Object { version } => {
+                        RuntimeRequirementConfig { version }
+                    }
+                }
+            }
+        }
+
+        let wire = RuntimeRequirementsWire::deserialize(deserializer)?;
+        let mut runtimes = HashMap::new();
+        if let Some(requirement) = wire.node {
+            runtimes.insert("node".to_string(), requirement.into_config());
+        }
+        if let Some(requirement) = wire.php {
+            runtimes.insert("php".to_string(), requirement.into_config());
+        }
+        for (id, requirement) in wire.runtimes {
+            runtimes.insert(id, requirement.into_config());
+        }
+
+        Ok(Self { runtimes })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
