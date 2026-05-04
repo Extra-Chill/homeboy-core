@@ -785,16 +785,16 @@ fn plan_audit_stage(
         let policy_summary = fixer::apply_fix_policy(&mut fix_result, false, &policy);
         let changed_files = collect_audit_changed_files(&fix_result);
 
-        // Surface findings whose collected edits are all manual/review-only — these
+        // Surface findings whose collected edits are all manual-only — these
         // are visible in preview but `--write` will decline to apply them.
         // Without this hint the divergence between dry-run and --write is
         // invisible (homeboy#1159).
-        let review_only_count = count_review_only_fixes(&fix_result);
-        let stage_warnings = if review_only_count > 0 {
+        let manual_only_count = count_manual_only_fixes(&fix_result);
+        let stage_warnings = if manual_only_count > 0 {
             vec![format!(
-                "{} finding(s) produced manual/review-only edits — visible in preview but will NOT be applied by --write. \
+                "{} finding(s) produced manual-only edits — visible in preview but will NOT be applied by --write. \
                  Resolve manually or acknowledge via baseline.",
-                review_only_count
+                manual_only_count
             )]
         } else {
             Vec::new()
@@ -1227,20 +1227,20 @@ fn run_test_stage(
 /// dropped entirely by `apply_fix_policy(write=true)`. Used to surface a warning
 /// when dry-run previews edits that `--write` will silently decline.
 /// (homeboy#1159, homeboy#1478)
-fn count_review_only_fixes(fix_result: &fixer::FixResult) -> usize {
-    let review_only_fixes = fix_result
+fn count_manual_only_fixes(fix_result: &fixer::FixResult) -> usize {
+    let manual_only_fixes = fix_result
         .fixes
         .iter()
         .filter(|fix| {
             !fix.insertions.is_empty() && fix.insertions.iter().all(|ins| !ins.auto_apply)
         })
         .count();
-    let review_only_new_files = fix_result
+    let manual_only_new_files = fix_result
         .new_files
         .iter()
         .filter(|nf| !nf.auto_apply)
         .count();
-    review_only_fixes + review_only_new_files
+    manual_only_fixes + manual_only_new_files
 }
 
 /// Count only files that `--write` mode would actually modify.
@@ -1868,7 +1868,7 @@ mod tests {
         }
     }
 
-    fn review_only_insertion() -> Insertion {
+    fn heuristic_manual_only_insertion() -> Insertion {
         Insertion {
             primitive: None,
             kind: InsertionKind::MethodStub,
@@ -1880,7 +1880,7 @@ mod tests {
                     .to_string(),
             ),
             code: String::new(),
-            description: "review-only orphaned test flag".to_string(),
+            description: "manual-only orphaned test flag".to_string(),
         }
     }
 
@@ -1920,18 +1920,18 @@ mod tests {
     }
 
     #[test]
-    fn collect_audit_changed_files_excludes_review_only_only_fixes() {
+    fn collect_audit_changed_files_excludes_heuristic_manual_only_fixes() {
         let fix = Fix {
             file: "tests/core/process_test.rs".to_string(),
             required_methods: Vec::new(),
             required_registrations: Vec::new(),
-            insertions: vec![review_only_insertion()],
+            insertions: vec![heuristic_manual_only_insertion()],
             applied: false,
         };
         let result = fix_result_with(vec![fix], Vec::new());
         assert!(
             collect_audit_changed_files(&result).is_empty(),
-            "Review-only heuristic fixes should not count as would-modify"
+            "Manual-only heuristic fixes should not count as would-modify"
         );
     }
 
@@ -2047,6 +2047,6 @@ mod tests {
         let result = fix_result_with(vec![manual_fix, mixed_fix, auto_fix], vec![manual_nf]);
         // Only the entirely-manual-only fix + the manual-only new file count.
         // The mixed fix survives --write, the fully-auto fix is normal.
-        assert_eq!(count_review_only_fixes(&result), 2);
+        assert_eq!(count_manual_only_fixes(&result), 2);
     }
 }

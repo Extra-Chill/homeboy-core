@@ -42,8 +42,8 @@ pub mod tracker;
 
 pub use apply::{apply_plan, ReconcileExecution, ReconcileResult};
 pub use plan::{
-    default_review_only_categories, IssueGroup, ReconcileAction, ReconcileConfig, ReconcilePlan,
-    ReconcileSkipReason, TrackedIssue, TrackedIssueState,
+    IssueGroup, ReconcileAction, ReconcileConfig, ReconcilePlan, ReconcileSkipReason, TrackedIssue,
+    TrackedIssueState,
 };
 pub use reconcile::{reconcile, reconcile_scoped};
 pub use render::{

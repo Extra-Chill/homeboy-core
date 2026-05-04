@@ -6,8 +6,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::code_audit::FindingConfidence;
-
 use super::plan::{
     IssueGroup, ReconcileAction, ReconcileConfig, ReconcilePlan, ReconcileSkipReason, TrackedIssue,
     TrackedIssueState,
@@ -67,21 +65,6 @@ fn reconcile_with_scope(
     let mut seen_keys: Vec<(String, String, String)> = Vec::new();
 
     for group in groups {
-        // Phase 1: suppression by config (highest precedence — short-circuits
-        // every other consideration).
-        if config
-            .suppressed_categories
-            .iter()
-            .any(|c| c == &group.category)
-        {
-            actions.push(ReconcileAction::Skip {
-                category: group.category.clone(),
-                component_id: group.component_id.clone(),
-                reason: ReconcileSkipReason::SuppressedByConfig,
-            });
-            continue;
-        }
-
         let key = (
             group.command.clone(),
             group.component_id.clone(),
@@ -89,7 +72,6 @@ fn reconcile_with_scope(
         );
         seen_keys.push(key.clone());
         let matches = collect_matches(&by_category, group, &key);
-        let review_only = is_review_only(group, config);
 
         // Phase 2: dispatch on (existing-issue-shape, count).
         let (open_matches, closed_matches): (Vec<_>, Vec<_>) =
@@ -141,8 +123,7 @@ fn reconcile_with_scope(
             // A human closing the category as not_planned is stronger than any
             // open duplicate left behind by an older action run. Keep the
             // closed issue as the canonical record and fold open dupes into it.
-            let suppressed_by_label = has_suppression_label(closed, config);
-            if !suppressed_by_label && config.refresh_closed_not_planned {
+            if config.refresh_closed_not_planned {
                 actions.push(ReconcileAction::UpdateClosed {
                     number: closed.number,
                     body: body_with_issue_key(group),
@@ -158,13 +139,7 @@ fn reconcile_with_scope(
                     comment: close_dedupe_comment(closed.number),
                 });
             }
-            if suppressed_by_label {
-                actions.push(ReconcileAction::Skip {
-                    category: group.category.clone(),
-                    component_id: group.component_id.clone(),
-                    reason: ReconcileSkipReason::SuppressedByLabel,
-                });
-            } else if !config.refresh_closed_not_planned {
+            if !config.refresh_closed_not_planned {
                 actions.push(ReconcileAction::Skip {
                     category: group.category.clone(),
                     component_id: group.component_id.clone(),
@@ -175,17 +150,6 @@ fn reconcile_with_scope(
         }
 
         if !open_matches.is_empty() {
-            if review_only {
-                for issue in &open_matches {
-                    actions.push(ReconcileAction::CloseReviewOnly {
-                        number: issue.number,
-                        category: group.category.clone(),
-                        comment: close_review_only_comment(&group.label_or_category()),
-                    });
-                }
-                continue;
-            }
-
             // Update the lowest-numbered open match.
             let keep = open_matches[0].number;
             actions.push(ReconcileAction::Update {
@@ -207,21 +171,10 @@ fn reconcile_with_scope(
             continue;
         }
 
-        // No open match. Check the closed issues for suppression / refresh.
+        // No open match. Check closed issue history before filing a fresh one.
         if let Some(closed) = preferred_closed {
             match closed.state {
                 TrackedIssueState::ClosedNotPlanned => {
-                    let suppressed_by_label = has_suppression_label(closed, config);
-                    if suppressed_by_label {
-                        // Phase 3 suppression — a label on a closed-not_planned
-                        // issue mutes re-filing.
-                        actions.push(ReconcileAction::Skip {
-                            category: group.category.clone(),
-                            component_id: group.component_id.clone(),
-                            reason: ReconcileSkipReason::SuppressedByLabel,
-                        });
-                        continue;
-                    }
                     if !config.refresh_closed_not_planned {
                         actions.push(ReconcileAction::Skip {
                             category: group.category.clone(),
@@ -240,15 +193,6 @@ fn reconcile_with_scope(
                 }
                 TrackedIssueState::ClosedCompleted => {
                     // Resolved-then-returned: file a fresh issue.
-                    if review_only {
-                        actions.push(ReconcileAction::Skip {
-                            category: group.category.clone(),
-                            component_id: group.component_id.clone(),
-                            reason: ReconcileSkipReason::ReviewOnlyCategory,
-                        });
-                        continue;
-                    }
-
                     actions.push(ReconcileAction::FileNew {
                         command: group.command.clone(),
                         component_id: group.component_id.clone(),
@@ -265,15 +209,6 @@ fn reconcile_with_scope(
         }
 
         // No issue ever existed (open or closed) for this category.
-        if review_only {
-            actions.push(ReconcileAction::Skip {
-                category: group.category.clone(),
-                component_id: group.component_id.clone(),
-                reason: ReconcileSkipReason::ReviewOnlyCategory,
-            });
-            continue;
-        }
-
         actions.push(ReconcileAction::FileNew {
             command: group.command.clone(),
             component_id: group.component_id.clone(),
@@ -290,7 +225,6 @@ fn reconcile_with_scope(
             &mut actions,
             &by_category,
             &seen_keys,
-            config,
             command,
             component_id,
         );
@@ -303,7 +237,6 @@ fn close_absent_open_issues(
     actions: &mut Vec<ReconcileAction>,
     by_category: &BTreeMap<(String, String, String), Vec<&TrackedIssue>>,
     seen_keys: &[(String, String, String)],
-    config: &ReconcileConfig,
     command: &str,
     component_id: &str,
 ) {
@@ -318,14 +251,6 @@ fn close_absent_open_issues(
         )) {
             continue;
         }
-        if config
-            .suppressed_categories
-            .iter()
-            .any(|suppressed| suppressed == category)
-        {
-            continue;
-        }
-
         let mut open_matches: Vec<_> = matches
             .iter()
             .copied()
@@ -384,23 +309,6 @@ fn collect_matches<'a>(
     }
 
     matches
-}
-
-fn is_review_only(group: &IssueGroup, config: &ReconcileConfig) -> bool {
-    config
-        .review_only_categories
-        .iter()
-        .any(|category| category == &group.category)
-        || matches!(group.confidence, Some(FindingConfidence::Heuristic))
-}
-
-fn has_suppression_label(issue: &TrackedIssue, config: &ReconcileConfig) -> bool {
-    issue.labels.iter().any(|label| {
-        config
-            .suppression_labels
-            .iter()
-            .any(|suppressed| suppressed == label)
-    })
 }
 
 fn pick_preferred_closed<'a>(closed: &[&'a TrackedIssue]) -> Option<&'a TrackedIssue> {
@@ -473,17 +381,6 @@ fn close_resolved_comment(label: &str) -> String {
     )
 }
 
-fn close_review_only_comment(label: &str) -> String {
-    format!(
-        "**{}** findings are still present, but this category is review-only in the current \
-         reconcile policy. Closing as not planned so advisory heuristic findings do not keep \
-         tracker issues open indefinitely.\n\n\
-         The findings remain visible in `homeboy audit`; reopen or file a focused issue if a \
-         specific refactor becomes actionable.",
-        label
-    )
-}
-
 fn close_dedupe_comment(keep: u64) -> String {
     format!(
         "Closing as duplicate of #{} — consolidated by `homeboy issues reconcile`.\n\n\
@@ -534,12 +431,13 @@ impl IssueGroup {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — the 8-row behavior table + suppression precedence
+// Tests — the 8-row behavior table and edge cases
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::code_audit::FindingConfidence;
 
     fn group(category: &str, count: usize) -> IssueGroup {
         IssueGroup {
@@ -583,9 +481,6 @@ mod tests {
 
     fn cfg() -> ReconcileConfig {
         ReconcileConfig {
-            suppressed_categories: vec![],
-            suppression_labels: vec!["wontfix".into(), "upstream-bug".into()],
-            review_only_categories: vec![],
             refresh_closed_not_planned: true,
         }
     }
@@ -703,7 +598,7 @@ mod tests {
     // --------------------------------------------------------------- ROW 6
 
     #[test]
-    fn row6_closed_not_planned_with_suppression_label_skips() {
+    fn row6_closed_not_planned_with_labels_still_refreshes_body() {
         let groups = vec![group("missing_test_method", 334)];
         let existing = vec![issue_with_labels(
             802,
@@ -715,110 +610,40 @@ mod tests {
         let plan = reconcile(&groups, &existing, &cfg());
         assert_eq!(plan.actions.len(), 1);
         match &plan.actions[0] {
-            ReconcileAction::Skip { reason, .. } => {
-                assert_eq!(*reason, ReconcileSkipReason::SuppressedByLabel);
+            ReconcileAction::UpdateClosed { number, count, .. } => {
+                assert_eq!(*number, 802);
+                assert_eq!(*count, 334);
             }
-            other => panic!("expected Skip(SuppressedByLabel), got {:?}", other),
+            other => panic!("expected UpdateClosed, got {:?}", other),
         }
     }
 
     // --------------------------------------------------------------- ROW 7
 
     #[test]
-    fn row7_suppressed_categories_in_config_skips() {
-        let mut config = cfg();
-        config.suppressed_categories = vec!["god_file".into()];
+    fn row7_open_issue_with_findings_updates_even_for_noisy_categories() {
         let groups = vec![group("god_file", 99)];
-        // Even with an open issue present, config-level suppression wins.
         let existing = vec![issue(675, "god file", TrackedIssueState::Open, 17)];
-        let plan = reconcile(&groups, &existing, &config);
+        let plan = reconcile(&groups, &existing, &cfg());
         assert_eq!(plan.actions.len(), 1);
         match &plan.actions[0] {
-            ReconcileAction::Skip { reason, .. } => {
-                assert_eq!(*reason, ReconcileSkipReason::SuppressedByConfig);
-            }
-            other => panic!("expected Skip(SuppressedByConfig), got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn review_only_category_skips_brand_new_issue() {
-        let mut config = cfg();
-        config.review_only_categories = vec!["god_file".into()];
-        let groups = vec![group("god_file", 23)];
-
-        let plan = reconcile(&groups, &[], &config);
-
-        assert_eq!(plan.actions.len(), 1);
-        match &plan.actions[0] {
-            ReconcileAction::Skip { reason, .. } => {
-                assert_eq!(*reason, ReconcileSkipReason::ReviewOnlyCategory);
-            }
-            other => panic!("expected Skip(ReviewOnlyCategory), got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn review_only_category_closes_existing_open_issue_not_planned() {
-        let mut config = cfg();
-        config.review_only_categories = vec!["god_file".into()];
-        let groups = vec![group("god_file", 23)];
-        let existing = vec![issue(675, "god file", TrackedIssueState::Open, 17)];
-
-        let plan = reconcile(&groups, &existing, &config);
-
-        assert_eq!(plan.actions.len(), 1);
-        match &plan.actions[0] {
-            ReconcileAction::CloseReviewOnly {
-                number, comment, ..
-            } => {
+            ReconcileAction::Update { number, count, .. } => {
                 assert_eq!(*number, 675);
-                assert!(comment.contains("review-only"));
-                assert!(comment.contains("not planned"));
+                assert_eq!(*count, 99);
             }
-            other => panic!("expected CloseReviewOnly, got {:?}", other),
+            other => panic!("expected Update, got {:?}", other),
         }
     }
 
     #[test]
-    fn review_only_category_does_not_refile_closed_completed_issue() {
-        let mut config = cfg();
-        config.review_only_categories = vec!["god_file".into()];
-        let groups = vec![group("god_file", 23)];
-        let existing = vec![issue(
-            675,
-            "god file",
-            TrackedIssueState::ClosedCompleted,
-            0,
-        )];
-
-        let plan = reconcile(&groups, &existing, &config);
-
-        assert_eq!(plan.actions.len(), 1);
-        assert!(matches!(
-            &plan.actions[0],
-            ReconcileAction::Skip {
-                reason: ReconcileSkipReason::ReviewOnlyCategory,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn heuristic_confidence_group_is_review_only_even_when_category_is_unknown() {
+    fn heuristic_confidence_group_files_issue() {
         let mut heuristic = group("extension_specific_hint", 3);
         heuristic.confidence = Some(FindingConfidence::Heuristic);
 
         let plan = reconcile(&[heuristic], &[], &cfg());
 
         assert_eq!(plan.actions.len(), 1);
-        assert!(matches!(
-            &plan.actions[0],
-            ReconcileAction::Skip {
-                reason: ReconcileSkipReason::ReviewOnlyCategory,
-                ..
-            }
-        ));
+        assert!(matches!(&plan.actions[0], ReconcileAction::FileNew { count, .. } if *count == 3));
     }
 
     // --------------------------------------------------------------- ROW 8
@@ -850,27 +675,15 @@ mod tests {
     // ----------------------------------------------- precedence ladder
 
     #[test]
-    fn precedence_config_beats_open_issue() {
-        // Already covered by row7, but keeps the precedence story explicit.
-        let mut config = cfg();
-        config.suppressed_categories = vec!["x".into()];
+    fn open_issue_with_findings_updates_for_any_category() {
         let groups = vec![group("x", 5)];
         let existing = vec![issue(1, "x", TrackedIssueState::Open, 5)];
-        let plan = reconcile(&groups, &existing, &config);
-        assert!(matches!(
-            &plan.actions[0],
-            ReconcileAction::Skip {
-                reason: ReconcileSkipReason::SuppressedByConfig,
-                ..
-            }
-        ));
+        let plan = reconcile(&groups, &existing, &cfg());
+        assert!(matches!(&plan.actions[0], ReconcileAction::Update { .. }));
     }
 
     #[test]
-    fn precedence_label_only_applies_when_closed_not_planned() {
-        // A `wontfix` label on an OPEN issue should NOT suppress — the
-        // label-precedence rule is gated on closed-not_planned per #1551
-        // (option 2). Open + label = update normally.
+    fn labels_do_not_mute_open_issue_updates() {
         let groups = vec![group("x", 5)];
         let existing = vec![issue_with_labels(
             1,
@@ -962,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn closed_not_planned_with_suppression_label_closes_later_open_duplicate() {
+    fn closed_not_planned_with_labels_updates_and_closes_later_open_duplicate() {
         let groups = vec![group("unreferenced_export", 1)];
         let existing = vec![
             issue_with_labels(
@@ -980,19 +793,16 @@ mod tests {
         assert_eq!(plan.actions.len(), 2);
         assert!(matches!(
             &plan.actions[0],
+            ReconcileAction::UpdateClosed { number: 1366, .. }
+        ));
+        assert!(matches!(
+            &plan.actions[1],
             ReconcileAction::CloseDuplicate {
                 number: 1400,
                 keep: 1366,
                 category,
                 ..
             } if category == "unreferenced_export"
-        ));
-        assert!(matches!(
-            &plan.actions[1],
-            ReconcileAction::Skip {
-                reason: ReconcileSkipReason::SuppressedByLabel,
-                ..
-            }
         ));
     }
 
@@ -1205,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn scoped_absent_issue_honors_component_and_suppression_scope() {
+    fn scoped_absent_issue_honors_component_scope() {
         let mut other_component = issue(10, "dead guard", TrackedIssueState::Open, 4);
         other_component.title = "audit: dead guard in other-component (4)".into();
         let existing = vec![
@@ -1213,14 +1023,19 @@ mod tests {
             issue(20, "god file", TrackedIssueState::Open, 9),
             issue(30, "unreferenced export", TrackedIssueState::Open, 2),
         ];
-        let mut config = cfg();
-        config.suppressed_categories = vec!["god_file".into()];
+        let plan = reconcile_scoped(&[], &existing, &cfg(), "audit", "data-machine");
 
-        let plan = reconcile_scoped(&[], &existing, &config, "audit", "data-machine");
-
-        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(plan.actions.len(), 2);
         assert!(matches!(
             &plan.actions[0],
+            ReconcileAction::Close {
+                number: 20,
+                category,
+                ..
+            } if category == "god_file"
+        ));
+        assert!(matches!(
+            &plan.actions[1],
             ReconcileAction::Close {
                 number: 30,
                 category,
