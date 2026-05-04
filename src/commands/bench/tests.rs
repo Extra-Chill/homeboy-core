@@ -343,6 +343,45 @@ fn parses_profile_flag() {
 }
 
 #[test]
+fn parses_force_hot_after_bench_without_losing_settings() {
+    let normalized = crate::commands::utils::args::normalize(
+        [
+            "homeboy",
+            "bench",
+            "--rig",
+            "studio-bfb",
+            "--iterations",
+            "1",
+            "--force-hot",
+            "--setting",
+            "studio_site_build_prompt_variant=astro-docs-content-collection",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
+    );
+
+    let cli = crate::cli_surface::Cli::try_parse_from(normalized)
+        .expect("bench --force-hot --setting should parse");
+
+    assert!(cli.force_hot);
+    let crate::cli_surface::Commands::Bench(args) = cli.command else {
+        panic!("expected bench command");
+    };
+    assert_eq!(
+        args.run.setting_args.setting,
+        vec![(
+            "studio_site_build_prompt_variant".to_string(),
+            "astro-docs-content-collection".to_string()
+        )]
+    );
+    assert!(
+        !args.run.args.iter().any(|arg| arg == "--force-hot"),
+        "--force-hot must not be forwarded to bench workloads"
+    );
+}
+
+#[test]
 fn scenario_and_profile_conflict() {
     let err = match TestCli::try_parse_from([
         "bench",
