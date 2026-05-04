@@ -239,7 +239,8 @@ fn scrub_comments(content: &str) -> String {
     let block_comments = Regex::new(r#"(?s)/\*.*?\*/"#).expect("regex compiles");
     strip_cfg_test_tail(
         block_comments
-            .replace_all(&line_comments.replace_all(content, ""), "").as_ref(),
+            .replace_all(&line_comments.replace_all(content, ""), "")
+            .as_ref(),
     )
 }
 

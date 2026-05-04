@@ -97,7 +97,7 @@ fn emit_file_watch_events(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    
+
     use std::thread;
     use std::time::Duration;
 
