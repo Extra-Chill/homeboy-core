@@ -4,15 +4,17 @@ use homeboy::engine::run_dir::{self, RunDir};
 use homeboy::extension::bench::report::collect_artifacts;
 use homeboy::extension::bench::{BenchResults, BenchRunWorkflowResult};
 use homeboy::git::short_head_revision_at;
-use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
+use homeboy::observation::{merge_metadata, ActiveObservation, NewRunRecord, RunStatus};
 use homeboy::rig::RigStateSnapshot;
 
 use super::BenchRunArgs;
 
-pub(super) struct BenchObservation {
-    store: ObservationStore,
-    run: RunRecord,
-    initial_metadata: serde_json::Value,
+pub(super) struct BenchObservation(ActiveObservation);
+
+impl BenchObservation {
+    fn run_id(&self) -> &str {
+        self.0.run_id()
+    }
 }
 
 pub(super) struct BenchObservationSummary {
@@ -34,7 +36,6 @@ pub(super) struct BenchObservationStart<'a> {
 }
 
 pub(super) fn start(start: BenchObservationStart<'_>) -> Option<BenchObservation> {
-    let store = ObservationStore::open_initialized().ok()?;
     let metadata = bench_observation_initial_metadata(
         start.component_label,
         start.args,
@@ -42,28 +43,21 @@ pub(super) fn start(start: BenchObservationStart<'_>) -> Option<BenchObservation
         start.rig_snapshot,
         start.run_dir,
     );
-    let run = store
-        .start_run(NewRunRecord {
-            kind: "bench".to_string(),
-            component_id: Some(start.component_id.to_string()),
-            command: Some(bench_observation_command(
-                start.component_id,
-                start.args,
-                start.rig_id,
-            )),
-            cwd: Some(start.source_path.to_string_lossy().to_string()),
-            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            git_sha: short_head_revision_at(start.source_path),
-            rig_id: start.rig_id.map(str::to_string),
-            metadata_json: metadata.clone(),
-        })
-        .ok()?;
-
-    Some(BenchObservation {
-        store,
-        run,
-        initial_metadata: metadata,
+    ActiveObservation::start_best_effort(NewRunRecord {
+        kind: "bench".to_string(),
+        component_id: Some(start.component_id.to_string()),
+        command: Some(bench_observation_command(
+            start.component_id,
+            start.args,
+            start.rig_id,
+        )),
+        cwd: Some(start.source_path.to_string_lossy().to_string()),
+        homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        git_sha: short_head_revision_at(start.source_path),
+        rig_id: start.rig_id.map(str::to_string),
+        metadata_json: metadata.clone(),
     })
+    .map(BenchObservation)
 }
 
 pub(super) fn finish_success(
@@ -74,25 +68,20 @@ pub(super) fn finish_success(
     let observation = observation?;
 
     record_bench_observation_artifacts(&observation, workflow, run_dir);
-    let metadata = bench_observation_finish_metadata(observation.initial_metadata, workflow);
+    let metadata =
+        bench_observation_finish_metadata(observation.0.initial_metadata().clone(), workflow);
     let status = if workflow.exit_code == 0 {
         RunStatus::Pass
     } else {
         RunStatus::Fail
     };
     let summary = BenchObservationSummary {
-        run_id: observation.run.id.clone(),
-        component_id: observation.run.component_id.clone().unwrap_or_default(),
-        rig_id: observation.run.rig_id.clone(),
-        store_path: observation
-            .store
-            .status()
-            .map(|status| status.path)
-            .unwrap_or_else(|_| "<unavailable>".to_string()),
+        run_id: observation.run_id().to_string(),
+        component_id: observation.0.component_id().unwrap_or_default().to_string(),
+        rig_id: observation.0.rig_id().map(str::to_string),
+        store_path: observation.0.store_path(),
     };
-    let _ = observation
-        .store
-        .finish_run(&observation.run.id, status, Some(metadata));
+    observation.0.finish(status, Some(metadata));
     Some(summary)
 }
 
@@ -132,16 +121,14 @@ pub(super) fn finish_error(
         "resource_summary",
         run_dir.step_file(run_dir::files::RESOURCE_SUMMARY),
     );
-    let metadata = merge_observation_metadata(
-        observation.initial_metadata,
+    let metadata = merge_metadata(
+        observation.0.initial_metadata().clone(),
         serde_json::json!({
             "observation_status": "error",
             "error": error.to_string(),
         }),
     );
-    let _ = observation
-        .store
-        .finish_run(&observation.run.id, RunStatus::Error, Some(metadata));
+    observation.0.finish_error(Some(metadata));
 }
 
 fn bench_observation_command(
@@ -200,7 +187,7 @@ fn bench_observation_finish_metadata(
     initial_metadata: serde_json::Value,
     workflow: &BenchRunWorkflowResult,
 ) -> serde_json::Value {
-    merge_observation_metadata(
+    merge_metadata(
         initial_metadata,
         serde_json::json!({
             "observation_status": workflow.status,
@@ -212,18 +199,6 @@ fn bench_observation_finish_metadata(
             "scenario_metrics": workflow.results.as_ref().map(scenario_metric_summaries).unwrap_or_default(),
         }),
     )
-}
-
-fn merge_observation_metadata(
-    mut initial: serde_json::Value,
-    finish: serde_json::Value,
-) -> serde_json::Value {
-    if let (Some(initial), Some(finish)) = (initial.as_object_mut(), finish.as_object()) {
-        for (key, value) in finish {
-            initial.insert(key.clone(), value.clone());
-        }
-    }
-    initial
 }
 
 fn baseline_status(workflow: &BenchRunWorkflowResult) -> Option<&'static str> {
@@ -282,8 +257,9 @@ fn record_bench_observation_artifacts(
         if let Some(url) = artifact.url.as_deref() {
             let kind = artifact.kind.as_deref().unwrap_or(&artifact.name);
             let _ = observation
-                .store
-                .record_url_artifact(&observation.run.id, kind, url);
+                .0
+                .store()
+                .record_url_artifact(observation.run_id(), kind, url);
         }
         if let Some(path) = artifact.path.as_deref() {
             let path = resolve_bench_artifact_path(path, run_dir);
@@ -293,11 +269,7 @@ fn record_bench_observation_artifacts(
 }
 
 fn record_if_exists(observation: &BenchObservation, kind: &str, path: PathBuf) {
-    if path.is_file() {
-        let _ = observation
-            .store
-            .record_artifact(&observation.run.id, kind, path);
-    }
+    observation.0.record_artifact_if_file(kind, &path);
 }
 
 fn resolve_bench_artifact_path(path: &str, run_dir: &RunDir) -> PathBuf {
@@ -452,7 +424,7 @@ mod tests {
                 run_dir: &run_dir,
             })
             .expect("start observation");
-            let run_id = observation.run.id.clone();
+            let run_id = observation.run_id().to_string();
             let summary = finish_success(Some(observation), &workflow, &run_dir)
                 .expect("observation summary");
             assert_eq!(summary.run_id, run_id);
@@ -520,7 +492,7 @@ mod tests {
                 run_dir: &run_dir,
             })
             .expect("start observation");
-            let run_id = observation.run.id.clone();
+            let run_id = observation.run_id().to_string();
             let error = homeboy::Error::validation_invalid_argument(
                 "bench",
                 "synthetic bench error",

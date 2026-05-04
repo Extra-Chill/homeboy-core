@@ -255,6 +255,11 @@ pub fn resolve_with_component(
 }
 
 impl ExecutionContext {
+    /// Return an explicit view over resolved extension settings.
+    pub fn resolved_settings(&self) -> ResolvedSettings<'_> {
+        ResolvedSettings::new(&self.settings)
+    }
+
     /// Get the effective working directory for command execution.
     ///
     /// Returns the source path as a string reference.
@@ -301,6 +306,58 @@ impl ExecutionContext {
                     .join(", ")
             );
         }
+    }
+}
+
+/// Explicit conversions for resolved extension settings.
+///
+/// Resolved settings are stored as typed JSON so command callers must choose
+/// whether they need string-only settings, typed JSON settings, or intentionally
+/// lossy stringification for legacy runner contracts.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedSettings<'a> {
+    settings: &'a [(String, serde_json::Value)],
+}
+
+impl<'a> ResolvedSettings<'a> {
+    pub fn new(settings: &'a [(String, serde_json::Value)]) -> Self {
+        Self { settings }
+    }
+
+    /// Return only settings that are already strings.
+    pub fn string_overrides(&self) -> Vec<(String, String)> {
+        self.settings
+            .iter()
+            .filter_map(|(key, value)| match value {
+                serde_json::Value::String(value) => Some((key.clone(), value.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Return only settings that must stay typed JSON.
+    pub fn json_overrides(&self) -> Vec<(String, serde_json::Value)> {
+        self.settings
+            .iter()
+            .filter_map(|(key, value)| match value {
+                serde_json::Value::String(_) => None,
+                value => Some((key.clone(), value.clone())),
+            })
+            .collect()
+    }
+
+    /// Return every setting as a string, stringifying non-string JSON values.
+    pub fn string_lossy_overrides(&self) -> Vec<(String, String)> {
+        self.settings
+            .iter()
+            .map(|(key, value)| {
+                let value = match value {
+                    serde_json::Value::String(value) => value.clone(),
+                    value => value.to_string(),
+                };
+                (key.clone(), value)
+            })
+            .collect()
     }
 }
 
@@ -644,6 +701,36 @@ mod tests {
         };
 
         assert_eq!(ctx.working_dir(), dir.path().to_str().unwrap());
+    }
+
+    #[test]
+    fn resolved_settings_split_string_json_and_lossy_views() {
+        let entries = [
+            ("string".to_string(), serde_json::json!("value")),
+            ("object".to_string(), serde_json::json!({ "enabled": true })),
+            ("number".to_string(), serde_json::json!(3)),
+        ];
+        let settings = ResolvedSettings::new(&entries);
+
+        assert_eq!(
+            settings.string_overrides(),
+            vec![("string".to_string(), "value".to_string())]
+        );
+        assert_eq!(
+            settings.json_overrides(),
+            vec![
+                ("object".to_string(), serde_json::json!({ "enabled": true })),
+                ("number".to_string(), serde_json::json!(3)),
+            ]
+        );
+        assert_eq!(
+            settings.string_lossy_overrides(),
+            vec![
+                ("string".to_string(), "value".to_string()),
+                ("object".to_string(), r#"{"enabled":true}"#.to_string()),
+                ("number".to_string(), "3".to_string()),
+            ]
+        );
     }
 
     #[test]

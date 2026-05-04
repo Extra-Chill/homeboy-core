@@ -8,7 +8,7 @@ use homeboy::extension::lint::{
 };
 use homeboy::extension::ExtensionCapability;
 use homeboy::git;
-use homeboy::observation::{finding_records_from_lint, NewRunRecord, ObservationStore, RunStatus};
+use homeboy::observation::{finding_records_from_lint, ActiveObservation, NewRunRecord, RunStatus};
 use homeboy::refactor::plan::{collect_refactor_sources, lint_refactor_request, LintSourceOptions};
 
 use super::utils::args::{
@@ -130,19 +130,7 @@ pub fn run(args: LintArgs, _global: &GlobalArgs) -> CmdResult<LintCommandOutput>
     })?;
     let effective_id = ctx.component_id.clone();
 
-    let stringified_settings: Vec<(String, String)> = ctx
-        .settings
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.clone(),
-                match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                },
-            )
-        })
-        .collect();
+    let stringified_settings = ctx.resolved_settings().string_lossy_overrides();
 
     // --fix dispatches to the canonical refactor sources pipeline.
     // The fixer pipeline already exists; this flag connects the existing wire
@@ -215,37 +203,27 @@ fn finish_lint_workflow(
     }
 }
 
-struct LintObservation {
-    store: ObservationStore,
-    run_id: String,
-}
+struct LintObservation(ActiveObservation);
 
 impl LintObservation {
     fn start(component_id: String, source_path: &std::path::Path, command: String) -> Option<Self> {
-        let store = ObservationStore::open_initialized().ok()?;
-        let run = store
-            .start_run(NewRunRecord {
-                kind: "lint".to_string(),
-                component_id: Some(component_id),
-                command: Some(command),
-                cwd: Some(source_path.to_string_lossy().to_string()),
-                homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-                git_sha: None,
-                rig_id: None,
-                metadata_json: serde_json::json!({ "source": "homeboy lint" }),
-            })
-            .ok()?;
-
-        Some(Self {
-            store,
-            run_id: run.id,
+        ActiveObservation::start_best_effort(NewRunRecord {
+            kind: "lint".to_string(),
+            component_id: Some(component_id),
+            command: Some(command),
+            cwd: Some(source_path.to_string_lossy().to_string()),
+            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            git_sha: None,
+            rig_id: None,
+            metadata_json: serde_json::json!({ "source": "homeboy lint" }),
         })
+        .map(Self)
     }
 
     fn finish_workflow(self, workflow: &homeboy::extension::lint::LintRunWorkflowResult) {
         if let Some(findings) = &workflow.lint_findings {
-            let records = finding_records_from_lint(&self.run_id, findings);
-            let _ = self.store.record_findings(&records);
+            let records = finding_records_from_lint(self.0.run_id(), findings);
+            self.0.record_findings(&records);
         }
 
         let status = if workflow.status == "passed" {
@@ -253,8 +231,7 @@ impl LintObservation {
         } else {
             RunStatus::Fail
         };
-        let _ = self.store.finish_run(
-            &self.run_id,
+        self.0.finish(
             status,
             Some(serde_json::json!({
                 "exit_code": workflow.exit_code,
@@ -264,7 +241,7 @@ impl LintObservation {
     }
 
     fn finish_error(self) {
-        let _ = self.store.finish_run(&self.run_id, RunStatus::Error, None);
+        self.0.finish_error(None);
     }
 }
 

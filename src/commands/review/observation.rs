@@ -1,20 +1,16 @@
 use std::path::Path;
 
 use homeboy::git::short_head_revision_at;
-use homeboy::observation::{NewRunRecord, ObservationStore, RunRecord, RunStatus};
+use homeboy::observation::{merge_metadata, ActiveObservation, NewRunRecord, RunStatus};
 use homeboy::ObservationOutputMetadata;
 
 use super::{artifact_command, ReviewArgs, ReviewCommandOutput, ReviewStage};
 
-pub(super) struct ReviewObservation {
-    store: ObservationStore,
-    run: RunRecord,
-    initial_metadata: serde_json::Value,
-}
+pub(super) struct ReviewObservation(ActiveObservation);
 
 impl ReviewObservation {
     pub(super) fn output_metadata(&self) -> ObservationOutputMetadata {
-        ObservationOutputMetadata::for_run(&self.run.kind, &self.run.id)
+        ObservationOutputMetadata::for_run(&self.0.run().kind, self.0.run_id())
     }
 }
 
@@ -28,31 +24,23 @@ pub(super) struct ReviewObservationStart<'a> {
 }
 
 pub(super) fn start(start: ReviewObservationStart<'_>) -> Option<ReviewObservation> {
-    let store = ObservationStore::open_initialized().ok()?;
     let metadata = review_observation_initial_metadata(
         start.component_label,
         start.args,
         start.scope,
         start.changed_file_count,
     );
-    let run = store
-        .start_run(NewRunRecord {
-            kind: "review".to_string(),
-            component_id: Some(start.component_id.to_string()),
-            command: Some(review_observation_command(start.component_id, start.args)),
-            cwd: Some(start.source_path.to_string_lossy().to_string()),
-            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            git_sha: short_head_revision_at(start.source_path),
-            rig_id: None,
-            metadata_json: metadata.clone(),
-        })
-        .ok()?;
-
-    Some(ReviewObservation {
-        store,
-        run,
-        initial_metadata: metadata,
+    ActiveObservation::start_best_effort(NewRunRecord {
+        kind: "review".to_string(),
+        component_id: Some(start.component_id.to_string()),
+        command: Some(review_observation_command(start.component_id, start.args)),
+        cwd: Some(start.source_path.to_string_lossy().to_string()),
+        homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        git_sha: short_head_revision_at(start.source_path),
+        rig_id: None,
+        metadata_json: metadata.clone(),
     })
+    .map(ReviewObservation)
 }
 
 pub(super) fn finish_success(
@@ -71,11 +59,13 @@ pub(super) fn finish_success(
     } else {
         RunStatus::Fail
     };
-    let metadata =
-        review_observation_finish_metadata(observation.initial_metadata, output, exit_code, None);
-    let _ = observation
-        .store
-        .finish_run(&observation.run.id, status, Some(metadata));
+    let metadata = review_observation_finish_metadata(
+        observation.0.initial_metadata().clone(),
+        output,
+        exit_code,
+        None,
+    );
+    observation.0.finish(status, Some(metadata));
 }
 
 pub(super) fn finish_error(observation: Option<ReviewObservation>, error: &homeboy::Error) {
@@ -83,16 +73,14 @@ pub(super) fn finish_error(observation: Option<ReviewObservation>, error: &homeb
         return;
     };
 
-    let metadata = merge_observation_metadata(
-        observation.initial_metadata,
+    let metadata = merge_metadata(
+        observation.0.initial_metadata().clone(),
         serde_json::json!({
             "observation_status": "error",
             "error": error.to_string(),
         }),
     );
-    let _ = observation
-        .store
-        .finish_run(&observation.run.id, RunStatus::Error, Some(metadata));
+    observation.0.finish_error(Some(metadata));
 }
 
 fn review_observation_command(component_id: &str, args: &ReviewArgs) -> String {
@@ -141,7 +129,7 @@ pub(super) fn review_observation_finish_metadata(
     exit_code: i32,
     error: Option<&str>,
 ) -> serde_json::Value {
-    merge_observation_metadata(
+    merge_metadata(
         initial_metadata,
         serde_json::json!({
             "observation_status": output.artifact.status,
@@ -176,18 +164,6 @@ fn stage_observation<T: serde::Serialize>(stage: &ReviewStage<T>) -> serde_json:
         "skipped_reason": stage.skipped_reason,
         "run_id": null,
     })
-}
-
-fn merge_observation_metadata(
-    mut initial: serde_json::Value,
-    finish: serde_json::Value,
-) -> serde_json::Value {
-    if let (Some(initial), Some(finish)) = (initial.as_object_mut(), finish.as_object()) {
-        for (key, value) in finish {
-            initial.insert(key.clone(), value.clone());
-        }
-    }
-    initial
 }
 
 #[cfg(test)]
