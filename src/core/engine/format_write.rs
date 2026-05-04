@@ -2,16 +2,13 @@
 //!
 //! Any command that writes source code (`refactor --write`) should
 //! call `format_after_write()` after writing files. This runs the project's
-//! language-specific formatter (e.g., `cargo fmt` for Rust, `prettier --write`
-//! for TypeScript) to ensure generated code matches project style.
+//! extension-owned formatter to ensure generated code matches project style.
 //!
 //! Unlike `validate_write`, formatting failure is non-fatal — it logs a warning
 //! but never rolls back. Generated code that compiles but isn't formatted is
 //! better than no code at all.
 //!
-//! The format command is resolved via:
-//! 1. Extension manifest `scripts.format` (if an extension provides one)
-//! 2. Builtin fallbacks based on project marker files (Cargo.toml, tsconfig.json, etc.)
+//! The format command is resolved via extension manifest `scripts.format`.
 
 use std::path::{Path, PathBuf};
 
@@ -99,47 +96,6 @@ pub fn format_after_write(root: &Path, changed_files: &[PathBuf]) -> Result<Form
         return Ok(FormatResult::passed(format_command, changed_files.len()));
     }
 
-    // cargo fmt failed — try rustfmt directly on individual files.
-    // This handles environments where cargo fmt needs target/ for module
-    // resolution but it may not be available.
-    if format_command.starts_with("cargo fmt") {
-        let rust_files: Vec<&PathBuf> = changed_files
-            .iter()
-            .filter(|f| f.extension().and_then(|e| e.to_str()) == Some("rs"))
-            .collect();
-
-        if !rust_files.is_empty() {
-            crate::log_status!(
-                "format",
-                "cargo fmt failed, falling back to rustfmt on {} file(s)",
-                rust_files.len()
-            );
-
-            let mut all_succeeded = true;
-            for file in &rust_files {
-                let rustfmt_output = std::process::Command::new("rustfmt")
-                    .arg(file)
-                    .current_dir(root)
-                    .output();
-
-                match rustfmt_output {
-                    Ok(o) if o.status.success() => {}
-                    _ => {
-                        all_succeeded = false;
-                    }
-                }
-            }
-
-            if all_succeeded {
-                crate::log_status!("format", "rustfmt fallback complete");
-                return Ok(FormatResult::passed(
-                    "rustfmt (fallback)".to_string(),
-                    changed_files.len(),
-                ));
-            }
-        }
-    }
-
     // Formatting failed — log warning but do NOT rollback
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -163,9 +119,8 @@ pub fn format_after_write(root: &Path, changed_files: &[PathBuf]) -> Result<Form
 
 /// Resolve the format command for a set of changed files.
 ///
-/// Checks installed extensions first (via `scripts.format`), then falls back
-/// to builtin project-level formatters.
-fn resolve_format_command(root: &Path, changed_files: &[PathBuf]) -> Option<String> {
+/// Checks installed extensions for `scripts.format`.
+fn resolve_format_command(_root: &Path, changed_files: &[PathBuf]) -> Option<String> {
     // Collect unique file extensions
     let extensions: Vec<String> = changed_files
         .iter()
@@ -196,8 +151,7 @@ fn resolve_format_command(root: &Path, changed_files: &[PathBuf]) -> Option<Stri
         }
     }
 
-    // Fallback: builtin project-level formatters
-    resolve_builtin_format_command(root)
+    None
 }
 
 /// Find an installed extension that handles a file extension and has scripts.format.
@@ -207,34 +161,6 @@ fn find_extension_with_format(file_ext: &str) -> Option<extension::ExtensionMani
             .into_iter()
             .find(|m| m.handles_file_extension(file_ext) && m.format_script().is_some())
     })
-}
-
-/// Fallback formatting using well-known project-level commands.
-fn resolve_builtin_format_command(root: &Path) -> Option<String> {
-    // Rust: Cargo.toml → cargo fmt
-    if root.join("Cargo.toml").exists() {
-        return Some("cargo fmt 2>&1".to_string());
-    }
-
-    // TypeScript/JavaScript: package.json + prettier → npx prettier --write
-    if root.join("tsconfig.json").exists() || root.join("package.json").exists() {
-        // Only use prettier if it's available in the project
-        if root.join("node_modules/.bin/prettier").exists() {
-            return Some("npx prettier --write . 2>&1".to_string());
-        }
-    }
-
-    // Go: go.mod → gofmt
-    if root.join("go.mod").exists() {
-        return Some("gofmt -w . 2>&1".to_string());
-    }
-
-    // PHP: composer.json + phpcbf
-    if root.join("composer.json").exists() && root.join("vendor/bin/phpcbf").exists() {
-        return Some("vendor/bin/phpcbf 2>&1".to_string());
-    }
-
-    None
 }
 
 #[cfg(test)]
