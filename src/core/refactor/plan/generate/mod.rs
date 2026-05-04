@@ -11,7 +11,7 @@ mod orphaned_test_fixes;
 mod parameter_fixes;
 mod signatures;
 
-use crate::code_audit::{AuditFinding, CodeAuditResult};
+use crate::code_audit::{fingerprint::FileFingerprint, AuditFinding, CodeAuditResult};
 use crate::core::refactor::auto::{DecomposeFixPlan, Fix, FixPolicy, FixResult, SkippedFile};
 use crate::core::refactor::decompose;
 use crate::core::refactor::plan::file_intent::{FileIntent, FileIntentMap};
@@ -40,7 +40,16 @@ pub fn generate_audit_fixes(
     root: &Path,
     policy: &FixPolicy,
 ) -> FixResult {
-    generate_fixes_impl(result, root, policy)
+    generate_fixes_impl(result, root, policy, None)
+}
+
+pub fn generate_audit_fixes_with_fingerprints(
+    result: &CodeAuditResult,
+    root: &Path,
+    policy: &FixPolicy,
+    fingerprints: &[FileFingerprint],
+) -> FixResult {
+    generate_fixes_impl(result, root, policy, Some(fingerprints))
 }
 
 pub(crate) fn merge_fixes_per_file(fixes: Vec<Fix>) -> Vec<Fix> {
@@ -76,10 +85,13 @@ pub(crate) fn generate_fixes_impl(
     result: &CodeAuditResult,
     root: &Path,
     policy: &FixPolicy,
+    fingerprints: Option<&[FileFingerprint]>,
 ) -> FixResult {
     let mut fixes = Vec::new();
     let mut skipped = Vec::new();
-    let module_surfaces = ModuleSurfaceIndex::build(root);
+    let module_surfaces = fingerprints
+        .map(|fps| ModuleSurfaceIndex::from_fingerprints(root, fps))
+        .unwrap_or_else(|| ModuleSurfaceIndex::build(root));
     let finding_enabled = |finding: &AuditFinding| {
         policy
             .only

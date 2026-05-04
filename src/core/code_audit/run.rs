@@ -3,7 +3,7 @@
 //! Mirrors `core/extension/lint/run.rs` and `core/extension/test/run.rs` — the command
 //! layer provides CLI args, this module owns all business logic and returns structured results.
 
-use crate::code_audit::{self, baseline, CodeAuditResult};
+use crate::code_audit::{self, baseline, AuditWithAnalysis, CodeAuditResult};
 use crate::git;
 use std::collections::HashSet;
 use std::path::Path;
@@ -44,8 +44,8 @@ pub fn run_main_audit_workflow(
     let result = run_audit(&args)?;
 
     // Early return: no-change shortcut already handled by run_audit returning None
-    let mut result = match result {
-        Some(r) => r,
+    let audit = match result {
+        Some(audit) => audit,
         None => {
             return Ok(audit_run_workflow_result(
                 AuditCommandOutput::Full {
@@ -73,6 +73,8 @@ pub fn run_main_audit_workflow(
             ));
         }
     };
+    let mut result = audit.result;
+    let analysis = audit.analysis;
 
     // --conventions: just show conventions
     if args.conventions {
@@ -107,7 +109,7 @@ pub fn run_main_audit_workflow(
     }
 
     // Default: compare against baseline or return full result
-    run_comparison_workflow(result, &args)
+    run_comparison_workflow(result, &analysis, &args)
 }
 
 fn audit_run_workflow_result(
@@ -187,7 +189,7 @@ fn scope_convention_outliers_to_findings(result: &mut CodeAuditResult) {
 }
 
 /// Run the audit scan (scoped or full). Returns None if changed-since found no files.
-fn run_audit(args: &AuditRunWorkflowArgs) -> crate::Result<Option<CodeAuditResult>> {
+fn run_audit(args: &AuditRunWorkflowArgs) -> crate::Result<Option<AuditWithAnalysis>> {
     let plan = if args.baseline_flags.baseline {
         code_audit::AuditExecutionPlan::full()
     } else {
@@ -200,7 +202,7 @@ fn run_audit(args: &AuditRunWorkflowArgs) -> crate::Result<Option<CodeAuditResul
             crate::log_status!("audit", "No files changed since {}", git_ref);
             return Ok(None);
         }
-        Ok(Some(code_audit::audit_path_scoped_with_plan(
+        Ok(Some(code_audit::audit_path_scoped_with_plan_and_analysis(
             &args.component_id,
             &args.source_path,
             &changed,
@@ -208,7 +210,7 @@ fn run_audit(args: &AuditRunWorkflowArgs) -> crate::Result<Option<CodeAuditResul
             &plan,
         )?))
     } else {
-        Ok(Some(code_audit::audit_path_with_id_with_plan(
+        Ok(Some(code_audit::audit_path_with_id_with_plan_and_analysis(
             &args.component_id,
             &args.source_path,
             &plan,
@@ -277,19 +279,20 @@ fn run_baseline_save(
 /// Comparison workflow — compare against file baseline, git-ref baseline, or return full.
 fn run_comparison_workflow(
     result: CodeAuditResult,
+    analysis: &code_audit::AuditAnalysisContext,
     args: &AuditRunWorkflowArgs,
 ) -> crate::Result<AuditRunWorkflowResult> {
     // Try file-based baseline
     if !args.baseline_flags.ignore_baseline {
         if let Some(existing_baseline) = baseline::load_baseline(Path::new(&result.source_path)) {
-            return build_comparison_output(result, existing_baseline, args);
+            return build_comparison_output(result, analysis, existing_baseline, args);
         }
     }
 
     // Try git-ref differential
     if let Some(ref git_ref) = args.changed_since {
         if let Some(ref_baseline) = baseline::load_baseline_from_ref(&result.source_path, git_ref) {
-            return build_comparison_output(result, ref_baseline, args);
+            return build_comparison_output(result, analysis, ref_baseline, args);
         }
     }
 
@@ -309,14 +312,14 @@ fn run_comparison_workflow(
     if args.json_summary {
         let findings = result.findings.clone();
         let mut summary = report::build_audit_summary(&result, exit_code);
-        summary.fixability = compute_fixability_if_requested(&result, args);
+        summary.fixability = compute_fixability_if_requested(&result, analysis, args);
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Summary(summary),
             exit_code,
             findings,
         })
     } else {
-        let fixability = compute_fixability_if_requested(&result, args);
+        let fixability = compute_fixability_if_requested(&result, analysis, args);
         let findings = result.findings.clone();
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Full {
@@ -333,6 +336,7 @@ fn run_comparison_workflow(
 /// Build comparison output from a result and baseline.
 fn build_comparison_output(
     result: CodeAuditResult,
+    analysis: &code_audit::AuditAnalysisContext,
     existing_baseline: baseline::AuditBaseline,
     args: &AuditRunWorkflowArgs,
 ) -> crate::Result<AuditRunWorkflowResult> {
@@ -375,7 +379,7 @@ fn build_comparison_output(
     if args.json_summary {
         let findings = result.findings.clone();
         let mut summary = report::build_audit_summary(&result, exit_code);
-        summary.fixability = compute_fixability_if_requested(&result, args);
+        summary.fixability = compute_fixability_if_requested(&result, analysis, args);
         summary.changed_since = changed_since_summary;
         Ok(AuditRunWorkflowResult {
             output: AuditCommandOutput::Summary(summary),
@@ -383,7 +387,7 @@ fn build_comparison_output(
             findings,
         })
     } else {
-        let fixability = compute_fixability_if_requested(&result, args);
+        let fixability = compute_fixability_if_requested(&result, analysis, args);
         let findings = result.findings.clone();
 
         Ok(AuditRunWorkflowResult {
@@ -403,10 +407,11 @@ fn build_comparison_output(
 
 fn compute_fixability_if_requested(
     result: &CodeAuditResult,
+    analysis: &code_audit::AuditAnalysisContext,
     args: &AuditRunWorkflowArgs,
 ) -> Option<report::AuditFixability> {
     args.include_fixability
-        .then(|| report::compute_fixability(result))
+        .then(|| report::compute_fixability_with_analysis(result, analysis))
         .flatten()
 }
 

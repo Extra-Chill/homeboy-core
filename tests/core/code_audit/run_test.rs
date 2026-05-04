@@ -10,7 +10,8 @@ use crate::code_audit::checks::CheckStatus;
 use crate::code_audit::conventions::{Deviation, Outlier};
 use crate::code_audit::findings::{Finding, Severity};
 use crate::code_audit::{
-    AuditExecutionPlan, AuditFinding, AuditSummary, CodeAuditResult, ConventionReport,
+    AuditAnalysisContext, AuditExecutionPlan, AuditFinding, AuditSummary, CodeAuditResult,
+    ConventionReport,
 };
 
 fn make_finding(kind: AuditFinding, file: &str) -> Finding {
@@ -42,6 +43,10 @@ fn make_result(findings: Vec<Finding>) -> CodeAuditResult {
         findings,
         duplicate_groups: vec![],
     }
+}
+
+fn make_analysis() -> AuditAnalysisContext {
+    AuditAnalysisContext::default()
 }
 
 fn make_convention_report(name: &str, outliers: Vec<Outlier>) -> ConventionReport {
@@ -240,8 +245,13 @@ fn changed_since_comparison_marks_existing_touched_findings_as_contextual() {
         },
     };
 
-    let workflow = build_comparison_output(result, baseline, &make_changed_since_args())
-        .expect("comparison output builds");
+    let workflow = build_comparison_output(
+        result,
+        &make_analysis(),
+        baseline,
+        &make_changed_since_args(),
+    )
+    .expect("comparison output builds");
 
     assert_eq!(workflow.exit_code, 0);
     match workflow.output {
@@ -285,8 +295,13 @@ fn changed_since_comparison_counts_new_findings_as_introduced() {
         },
     };
 
-    let workflow = build_comparison_output(result, baseline, &make_changed_since_args())
-        .expect("comparison output builds");
+    let workflow = build_comparison_output(
+        result,
+        &make_analysis(),
+        baseline,
+        &make_changed_since_args(),
+    )
+    .expect("comparison output builds");
 
     assert_eq!(workflow.exit_code, 1);
     match workflow.output {
@@ -352,7 +367,7 @@ fn fixability_is_skipped_unless_requested() {
     let result = make_result(vec![make_finding(AuditFinding::TodoMarker, "a.rs")]);
     let args = make_args(false);
 
-    let fixability = compute_fixability_if_requested(&result, &args);
+    let fixability = compute_fixability_if_requested(&result, &make_analysis(), &args);
 
     assert!(fixability.is_none());
 }
@@ -362,7 +377,7 @@ fn fixability_flag_allows_planning_path() {
     let result = make_result(vec![make_finding(AuditFinding::TodoMarker, "a.rs")]);
     let args = make_args(true);
 
-    let fixability = compute_fixability_if_requested(&result, &args);
+    let fixability = compute_fixability_if_requested(&result, &make_analysis(), &args);
 
     // The fixture path does not exist, so the planner returns None. The test
     // still pins the flag contract: true is the only path that reaches the

@@ -113,6 +113,19 @@ pub struct CodeAuditResult {
     pub duplicate_groups: Vec<duplication::DuplicateGroup>,
 }
 
+/// Shared analysis state built during an audit run and reused by downstream
+/// consumers that would otherwise re-walk and re-fingerprint the codebase.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AuditAnalysisContext {
+    pub(crate) fingerprints: Vec<fingerprint::FileFingerprint>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AuditWithAnalysis {
+    pub(crate) result: CodeAuditResult,
+    pub(crate) analysis: AuditAnalysisContext,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuditExecutionPlan {
     pub(crate) run_conventions: bool,
@@ -486,13 +499,14 @@ pub fn audit_path_with_id(component_id: &str, source_path: &str) -> Result<CodeA
         &ref_paths,
         &AuditExecutionPlan::full(),
     )
+    .map(|audit| audit.result)
 }
 
-pub(crate) fn audit_path_with_id_with_plan(
+pub(crate) fn audit_path_with_id_with_plan_and_analysis(
     component_id: &str,
     source_path: &str,
     plan: &AuditExecutionPlan,
-) -> Result<CodeAuditResult> {
+) -> Result<AuditWithAnalysis> {
     let ref_paths = read_reference_paths_from_env();
     audit_internal(component_id, source_path, None, None, &ref_paths, plan)
 }
@@ -522,15 +536,16 @@ pub fn audit_path_scoped(
         &ref_paths,
         &AuditExecutionPlan::full(),
     )
+    .map(|audit| audit.result)
 }
 
-pub(crate) fn audit_path_scoped_with_plan(
+pub(crate) fn audit_path_scoped_with_plan_and_analysis(
     component_id: &str,
     source_path: &str,
     file_filter: &[String],
     git_ref: Option<&str>,
     plan: &AuditExecutionPlan,
-) -> Result<CodeAuditResult> {
+) -> Result<AuditWithAnalysis> {
     let ref_paths = read_reference_paths_from_env();
     audit_internal(
         component_id,
@@ -578,7 +593,7 @@ fn audit_internal(
     git_ref: Option<&str>,
     reference_paths: &[String],
     plan: &AuditExecutionPlan,
-) -> Result<CodeAuditResult> {
+) -> Result<AuditWithAnalysis> {
     let root = Path::new(source_path);
     let audit_config = audit_config_for(component_id, root);
 
@@ -594,7 +609,10 @@ fn audit_internal(
     }
 
     if !plan.requires_discovery() {
-        return Ok(audit_root_only(component_id, source_path, root, plan));
+        return Ok(AuditWithAnalysis {
+            result: audit_root_only(component_id, source_path, root, plan),
+            analysis: AuditAnalysisContext::default(),
+        });
     }
 
     // Phase 1: Auto-discover file groups (always full codebase for convention detection)
@@ -649,21 +667,24 @@ fn audit_internal(
             );
         }
 
-        return Ok(CodeAuditResult {
-            component_id: component_id.to_string(),
-            source_path: source_path.to_string(),
-            summary: AuditSummary {
-                files_scanned: 0,
-                conventions_detected: 0,
-                outliers_found: stale_cli_findings.len() + cli_argument_findings.len(),
-                alignment_score: None,
-                files_skipped: total_skipped,
-                warnings,
+        return Ok(AuditWithAnalysis {
+            result: CodeAuditResult {
+                component_id: component_id.to_string(),
+                source_path: source_path.to_string(),
+                summary: AuditSummary {
+                    files_scanned: 0,
+                    conventions_detected: 0,
+                    outliers_found: stale_cli_findings.len() + cli_argument_findings.len(),
+                    alignment_score: None,
+                    files_skipped: total_skipped,
+                    warnings,
+                },
+                conventions: vec![],
+                directory_conventions: vec![],
+                findings: [stale_cli_findings, cli_argument_findings].concat(),
+                duplicate_groups: vec![],
             },
-            conventions: vec![],
-            directory_conventions: vec![],
-            findings: [stale_cli_findings, cli_argument_findings].concat(),
-            duplicate_groups: vec![],
+            analysis: AuditAnalysisContext::default(),
         });
     }
 
@@ -729,6 +750,9 @@ fn audit_internal(
         .iter()
         .flat_map(|(_, _, fps)| fps.iter())
         .collect();
+    let analysis = AuditAnalysisContext {
+        fingerprints: all_fingerprints.iter().map(|fp| (*fp).clone()).collect(),
+    };
 
     // Build convention method set ONCE — used by duplication, near-duplicate, and parallel detectors.
     // Convention-expected methods are excluded from duplication/parallel findings because identical
@@ -1266,21 +1290,24 @@ fn audit_internal(
         );
     }
 
-    Ok(CodeAuditResult {
-        component_id: component_id.to_string(),
-        source_path: source_path.to_string(),
-        summary: AuditSummary {
-            files_scanned: total_files,
-            conventions_detected: convention_reports.len(),
-            outliers_found: total_outliers,
-            alignment_score,
-            files_skipped,
-            warnings,
+    Ok(AuditWithAnalysis {
+        result: CodeAuditResult {
+            component_id: component_id.to_string(),
+            source_path: source_path.to_string(),
+            summary: AuditSummary {
+                files_scanned: total_files,
+                conventions_detected: convention_reports.len(),
+                outliers_found: total_outliers,
+                alignment_score,
+                files_skipped,
+                warnings,
+            },
+            conventions: convention_reports,
+            directory_conventions,
+            findings: all_findings,
+            duplicate_groups,
         },
-        conventions: convention_reports,
-        directory_conventions,
-        findings: all_findings,
-        duplicate_groups,
+        analysis,
     })
 }
 

@@ -273,6 +273,20 @@ pub(crate) fn finding_kind_key(finding: &AuditFinding) -> String {
 /// have automated fixes at each safety tier. This is cheap — no writes,
 /// no convergence loop, just planning + policy annotation.
 pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
+    compute_fixability_impl(result, None)
+}
+
+pub(crate) fn compute_fixability_with_analysis(
+    result: &CodeAuditResult,
+    analysis: &crate::code_audit::AuditAnalysisContext,
+) -> Option<AuditFixability> {
+    compute_fixability_impl(result, Some(analysis))
+}
+
+fn compute_fixability_impl(
+    result: &CodeAuditResult,
+    analysis: Option<&crate::code_audit::AuditAnalysisContext>,
+) -> Option<AuditFixability> {
     let source_path = Path::new(&result.source_path);
     if !source_path.is_dir() {
         return None;
@@ -293,11 +307,20 @@ pub fn compute_fixability(result: &CodeAuditResult) -> Option<AuditFixability> {
     }
 
     // Generate fix plan (dry-run — never writes)
-    let mut fix_result = crate::refactor::plan::generate::generate_audit_fixes(
-        result,
-        source_path,
-        &crate::refactor::auto::FixPolicy::default(),
-    );
+    let fix_policy = crate::refactor::auto::FixPolicy::default();
+    let mut fix_result = match analysis {
+        Some(analysis) if !analysis.fingerprints.is_empty() => {
+            crate::refactor::plan::generate::generate_audit_fixes_with_fingerprints(
+                result,
+                source_path,
+                &fix_policy,
+                &analysis.fingerprints,
+            )
+        }
+        _ => {
+            crate::refactor::plan::generate::generate_audit_fixes(result, source_path, &fix_policy)
+        }
+    };
 
     if fix_result.fixes.is_empty() && fix_result.new_files.is_empty() {
         return None;
