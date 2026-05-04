@@ -55,17 +55,76 @@ pub(super) fn run(root: &Path) -> Vec<Finding> {
 struct TestFunction {
     name: String,
     body: String,
+    line: usize,
+    nested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ProductImport {
+    symbol: String,
 }
 
 fn detect_vacuous_tests(file: &str, content: &str) -> Vec<Finding> {
     let file_path = file.to_string();
-    let mut product_symbols = BTreeSet::new();
+    let product_imports = collect_product_imports(content);
+    let product_symbols = product_imports
+        .iter()
+        .map(|import| import.symbol.clone())
+        .collect::<BTreeSet<_>>();
+    let tests = extract_test_functions(content);
+
+    let mut findings = tests
+        .iter()
+        .filter(|test| test.nested)
+        .map(|test| Finding {
+            convention: "test_quality".to_string(),
+            severity: Severity::Info,
+            file: file_path.clone(),
+            description: format!(
+                "Unreachable test `{}` is nested inside another item near line {}; Rust's test harness will not discover it",
+                test.name, test.line
+            ),
+            suggestion: format!(
+                "Move `{}` to module scope so the test harness can execute it",
+                test.name
+            ),
+            kind: AuditFinding::VacuousTest,
+        })
+        .collect::<Vec<_>>();
+
+    findings.extend(detect_duplicate_test_names(&file_path, &tests));
+    findings.extend(detect_unused_product_imports(
+        &file_path,
+        &tests,
+        &product_imports,
+    ));
+
+    findings.extend(tests.into_iter().filter_map(|test| {
+        vacuous_reason(&test, &product_symbols).map(|reason| Finding {
+            convention: "test_quality".to_string(),
+            severity: Severity::Info,
+            file: file_path.clone(),
+            description: format!("Vacuous test `{}`: {}", test.name, reason),
+            suggestion:
+                "Delete the placeholder or replace it with a behavior test that calls product code"
+                    .to_string(),
+            kind: AuditFinding::VacuousTest,
+        })
+    }));
+
+    findings
+}
+
+fn collect_product_imports(content: &str) -> Vec<ProductImport> {
+    let mut imports = BTreeSet::new();
     let simple = regex::Regex::new(
         r"(?m)^\s*use\s+(?:homeboy|crate|super)::[^;]*::([A-Za-z_][A-Za-z0-9_]*)\s*;",
     )
     .unwrap();
     for cap in simple.captures_iter(content) {
-        product_symbols.insert(cap[1].to_string());
+        imports.insert(ProductImport {
+            symbol: cap[1].to_string(),
+        });
     }
 
     let grouped =
@@ -75,26 +134,85 @@ fn detect_vacuous_tests(file: &str, content: &str) -> Vec<Finding> {
             let symbol = raw.trim().trim_start_matches("self::");
             let symbol = symbol.split_whitespace().next().unwrap_or("");
             if !symbol.is_empty()
+                && symbol != "self"
                 && symbol
                     .chars()
                     .all(|c| c == '_' || c.is_ascii_alphanumeric())
             {
-                product_symbols.insert(symbol.to_string());
+                imports.insert(ProductImport {
+                    symbol: symbol.to_string(),
+                });
             }
         }
     }
 
-    extract_test_functions(content)
-        .into_iter()
-        .filter_map(|test| vacuous_reason(&test, &product_symbols).map(|reason| (test, reason)))
-        .map(|(test, reason)| Finding {
+    imports.into_iter().collect()
+}
+
+fn detect_duplicate_test_names(file: &str, tests: &[TestFunction]) -> Vec<Finding> {
+    let mut seen = BTreeMap::<&str, usize>::new();
+    let mut findings = Vec::new();
+
+    for test in tests {
+        if let Some(first_line) = seen.insert(&test.name, test.line) {
+            findings.push(Finding {
+                convention: "test_quality".to_string(),
+                severity: Severity::Info,
+                file: file.to_string(),
+                description: format!(
+                    "Duplicate test name `{}` at line {} shadows earlier coverage from line {}",
+                    test.name, test.line, first_line
+                ),
+                suggestion: format!(
+                    "Rename one `{}` test so each behavior has distinct coverage",
+                    test.name
+                ),
+                kind: AuditFinding::VacuousTest,
+            });
+        }
+    }
+
+    findings
+}
+
+fn detect_unused_product_imports(
+    file: &str,
+    tests: &[TestFunction],
+    imports: &[ProductImport],
+) -> Vec<Finding> {
+    if imports.is_empty() || tests.is_empty() {
+        return Vec::new();
+    }
+
+    let test_body = tests
+        .iter()
+        .map(|test| test.body.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let stripped_body = strip_comments(&test_body);
+
+    imports
+        .iter()
+        .filter(|import| {
+            import
+                .symbol
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_lowercase())
+        })
+        .filter(|import| !contains_symbol_reference(&stripped_body, &import.symbol))
+        .map(|import| Finding {
             convention: "test_quality".to_string(),
             severity: Severity::Info,
-            file: file_path.clone(),
-            description: format!("Vacuous test `{}`: {}", test.name, reason),
-            suggestion:
-                "Delete the placeholder or replace it with a behavior test that calls product code"
-                    .to_string(),
+            file: file.to_string(),
+            description: format!(
+                "Imported product symbol `{}` is never exercised by any test body",
+                import.symbol
+            ),
+            suggestion: format!(
+                "Call `{}` in a behavior assertion, or remove the misleading import",
+                import.symbol
+            ),
             kind: AuditFinding::VacuousTest,
         })
         .collect()
@@ -142,12 +260,20 @@ fn contains_product_reference(body: &str, product_symbols: &BTreeSet<String>) ->
         || body.contains("crate::")
         || body.contains("super::")
         || body.contains("Command::cargo_bin")
-        || product_symbols.iter().any(|symbol| {
-            let pattern = format!(r"\b{}\s*\(", regex::escape(symbol));
-            regex::Regex::new(&pattern)
-                .ok()
-                .is_some_and(|re| re.is_match(body))
-        })
+        || product_symbols
+            .iter()
+            .any(|symbol| contains_symbol_reference(body, symbol))
+}
+
+fn contains_symbol_reference(body: &str, symbol: &str) -> bool {
+    let call_pattern = format!(r"\b{}\s*\(", regex::escape(symbol));
+    let path_pattern = format!(r"\b{}::", regex::escape(symbol));
+    regex::Regex::new(&call_pattern)
+        .ok()
+        .is_some_and(|re| re.is_match(body))
+        || regex::Regex::new(&path_pattern)
+            .ok()
+            .is_some_and(|re| re.is_match(body))
 }
 
 fn only_std_fixture_behavior(body: &str) -> bool {
@@ -204,13 +330,17 @@ fn extract_test_functions(content: &str) -> Vec<TestFunction> {
     let lines: Vec<&str> = content.lines().collect();
     let mut tests = Vec::new();
     let mut i = 0;
+    let mut enclosing_depth = 0i32;
+    let mut function_end_depths = Vec::new();
 
     while i < lines.len() {
         if !lines[i].trim().starts_with("#[test]") {
+            update_enclosing_context(lines[i], &mut enclosing_depth, &mut function_end_depths);
             i += 1;
             continue;
         }
 
+        let nested = !function_end_depths.is_empty();
         let mut fn_line = i + 1;
         while fn_line < lines.len() && !lines[fn_line].contains("fn ") {
             fn_line += 1;
@@ -259,11 +389,46 @@ fn extract_test_functions(content: &str) -> Vec<TestFunction> {
         tests.push(TestFunction {
             name,
             body: body_lines.join("\n"),
+            line: fn_line + 1,
+            nested,
         });
+        for line in &lines[i..=j.min(lines.len().saturating_sub(1))] {
+            enclosing_depth += brace_delta(line);
+        }
+        pop_closed_functions(enclosing_depth, &mut function_end_depths);
         i = j + 1;
     }
 
     tests
+}
+
+fn update_enclosing_context(line: &str, depth: &mut i32, function_end_depths: &mut Vec<i32>) {
+    let code = line.split_once("//").map(|(code, _)| code).unwrap_or(line);
+    let opens = code.chars().filter(|ch| *ch == '{').count() as i32;
+    let closes = code.chars().filter(|ch| *ch == '}').count() as i32;
+    if code.contains("fn ") && opens > closes {
+        function_end_depths.push(*depth + 1);
+    }
+    *depth += opens - closes;
+    pop_closed_functions(*depth, function_end_depths);
+}
+
+fn pop_closed_functions(depth: i32, function_end_depths: &mut Vec<i32>) {
+    while function_end_depths
+        .last()
+        .is_some_and(|end_depth| depth < *end_depth)
+    {
+        function_end_depths.pop();
+    }
+}
+
+fn brace_delta(line: &str) -> i32 {
+    let code = line.split_once("//").map(|(code, _)| code).unwrap_or(line);
+    code.chars().fold(0, |delta, ch| match ch {
+        '{' => delta + 1,
+        '}' => delta - 1,
+        _ => delta,
+    })
 }
 
 fn extract_fn_name(line: &str) -> Option<String> {
@@ -438,6 +603,126 @@ fn test_evaluate_file_exists() {
     let rig = minimal_rig();
     let spec = CheckSpec::default();
     evaluate(&rig, &spec).expect("existing file passes");
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn flags_nested_tests_that_runner_will_not_execute() {
+        let findings = detect_vacuous_tests(
+            "tests/core/wiring_test.rs",
+            r#"
+fn helper() {
+    #[test]
+    fn nested_test() {
+        assert!(true);
+    }
+}
+"#,
+        );
+
+        assert!(findings.iter().any(|finding| finding
+            .description
+            .contains("Unreachable test `nested_test`")));
+    }
+
+    #[test]
+    fn keeps_module_scoped_tests_as_reachable() {
+        let findings = detect_vacuous_tests(
+            "tests/core/wiring_test.rs",
+            r#"
+mod behavior {
+    #[test]
+    fn module_test() {
+        crate::thing::run();
+    }
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn flags_duplicate_test_names_as_shadowed_coverage() {
+        let findings = detect_vacuous_tests(
+            "tests/core/wiring_test.rs",
+            r#"
+#[test]
+fn duplicate_behavior() {
+    crate::thing::run();
+}
+
+#[test]
+fn duplicate_behavior() {
+    crate::thing::run_again();
+}
+"#,
+        );
+
+        assert!(findings.iter().any(|finding| finding
+            .description
+            .contains("Duplicate test name `duplicate_behavior`")));
+    }
+
+    #[test]
+    fn flags_product_imports_never_exercised_by_test_body() {
+        let content = r#"
+use crate::core::target::run_target;
+
+#[test]
+fn fixture_only() {
+    let values = std::collections::HashSet::from(["a", "b"]);
+    assert_eq!(values.len(), 2);
+}
+"#;
+        let imports = collect_product_imports(content);
+        assert_eq!(imports[0].symbol, "run_target");
+        let tests = extract_test_functions(content);
+        assert_eq!(tests.len(), 1);
+        let import_findings =
+            detect_unused_product_imports("tests/core/wiring_test.rs", &tests, &imports);
+        assert_eq!(import_findings.len(), 1);
+
+        let findings = detect_vacuous_tests("tests/core/wiring_test.rs", content);
+
+        assert!(findings.iter().any(|finding| finding
+            .description
+            .contains("Imported product symbol `run_target`")));
+    }
+
+    #[test]
+    fn ignores_grouped_self_product_imports() {
+        let findings = detect_vacuous_tests(
+            "tests/core/wiring_test.rs",
+            r#"
+use crate::core::target::{self, run_target};
+
+#[test]
+fn calls_product() {
+    let value = run_target();
+    assert_eq!(value, 1);
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn keeps_product_imports_exercised_by_test_body() {
+        let findings = detect_vacuous_tests(
+            "tests/core/wiring_test.rs",
+            r#"
+use crate::core::target::run_target;
+
+#[test]
+fn calls_product() {
+    let value = run_target();
+    assert_eq!(value, 1);
 }
 "#,
         );
