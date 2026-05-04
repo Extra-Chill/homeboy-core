@@ -3,8 +3,8 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-04T01:38:02Z",
-      "item_count": 588,
+      "created_at": "2026-05-04T02:32:05Z",
+      "item_count": 590,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
         "Rust test discovery::tests/commands/test_scope_test.rs::UnwiredNestedRustTest",
@@ -67,12 +67,14 @@
         "intra-method-duplication::src/core/component/inventory.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/db/operations.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/deploy/execution.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/deploy/planning.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/engine/cli_tool.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/extension/grammar.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/extension/test/drift.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/fleet/exec.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/git/operations.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/issues/reconcile.rs::IntraMethodDuplicate",
+        "intra-method-duplication::src/core/refactor/auto/apply.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/refactor/plan/generate/duplicate_fixes.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/refactor/plan/generate/duplicate_fixes.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/refactor/plan/generate/duplicate_fixes.rs::IntraMethodDuplicate",
