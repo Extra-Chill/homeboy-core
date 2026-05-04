@@ -242,6 +242,8 @@ pub enum AuditFinding {
     /// Repeated exhaustive match blocks over the same enum duplicate a
     /// label/getter/policy contract that should likely live on the enum.
     RepeatedEnumDispatchContract,
+    /// Configured ecosystem/language/framework term appears in core-owned source.
+    CoreBoundaryLeak,
 }
 
 impl AuditFinding {
@@ -303,6 +305,7 @@ impl AuditFinding {
             "command_output_policy",
             "observation_lifecycle_scaffolding",
             "repeated_enum_dispatch_contract",
+            "core_boundary_leak",
         ]
     }
 }
