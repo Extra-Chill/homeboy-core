@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.156.0] - 2026-05-04
+
+### Added
+- accept --path to bypass component registry
+
 ## [0.155.2] - 2026-05-04
 
 ### Changed
