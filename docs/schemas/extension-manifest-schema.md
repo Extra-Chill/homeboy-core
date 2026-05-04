@@ -399,6 +399,25 @@ Release actions define steps for release pipelines.
 - **`extension.run`**: Execute extension runtime command
 - **`extension.action`**: Execute extension action
 
+### Release Action Output Contract
+
+Release actions should return JSON that is generic to the action outcome, not to a language or package manager. Core release rendering understands these status values:
+
+- **`success: true`**: The action completed successfully.
+- **`status: "skipped"`** with `success: false`: The action intentionally did nothing.
+- **`status: "missing_secret"`** with `success: false`: A required token or credential is not configured.
+- **`status: "auth_required"`** with `success: false`: The user must authenticate before the action can run.
+
+For skipped or authentication-related results, include **`reason`** or **`message`** with the human-readable explanation. Core surfaces that explanation in the release step warning without parsing ecosystem-specific command output.
+
+```json
+{
+  "success": false,
+  "status": "missing_secret",
+  "reason": "Registry token is not configured"
+}
+```
+
 #### Example
 
 ```json
@@ -424,7 +443,7 @@ Extensions can declare lifecycle hooks that run at named events. Extension hooks
 ```json
 {
   "hooks": {
-    "pre:version:bump": ["cargo generate-lockfile"],
+    "post:version:bump": ["package-manager refresh-lockfile"],
     "post:deploy": [
       "wp cache flush --path={{base_path}} --allow-root 2>/dev/null || true"
     ]
@@ -437,6 +456,8 @@ Extensions can declare lifecycle hooks that run at named events. Extension hooks
 - **`hooks`** (object): Map of event names to command arrays
   - Keys: event name (e.g., `pre:version:bump`, `post:version:bump`, `post:release`, `post:deploy`)
   - Values: array of shell command strings
+
+Use `post:version:bump` for generated artifacts that must reflect the new version before the release commit, such as lockfiles, generated manifests, or version-derived build metadata.
 
 Most hooks execute locally in the component's directory. `post:deploy` hooks execute **remotely via SSH** with template variable expansion:
 

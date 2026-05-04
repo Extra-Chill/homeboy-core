@@ -1184,7 +1184,7 @@ fn build_release_steps(
     if !publish_targets.is_empty() && !has_package_capability(extensions) {
         warnings.push(
             "Publish targets derived from extensions but no extension provides 'release.package'. \
-             Add a extension like 'rust' that provides packaging."
+             Add an extension that provides packaging."
                 .to_string(),
         );
     }
@@ -1575,13 +1575,6 @@ fn get_release_allowed_files(
         if let Ok(relative) = std::path::Path::new(target).strip_prefix(repo_root) {
             let rel_str = relative.to_string_lossy().to_string();
             allowed.push(rel_str.clone());
-
-            // If a Cargo.toml is a version target, also allow Cargo.lock
-            // (version bump regenerates the lockfile to keep it in sync)
-            if rel_str.ends_with("Cargo.toml") {
-                let lock_path = relative.with_file_name("Cargo.lock");
-                allowed.push(lock_path.to_string_lossy().to_string());
-            }
         }
     }
 
@@ -1615,7 +1608,7 @@ fn get_unexpected_uncommitted_files(
 mod tests {
     use super::{
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
-        get_unexpected_uncommitted_files, is_homeboy_managed_path,
+        get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
         is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
         validate_release_version_floor,
     };
@@ -1779,10 +1772,10 @@ mod tests {
             ".homeboy-build/artifact.zip".to_string(),
             "src/main.rs".to_string(),
             ".homeboy-bin/homeboy".to_string(),
-            "Cargo.toml".to_string(),
+            "manifest.toml".to_string(),
         ];
         let filtered = filter_homeboy_managed(files);
-        assert_eq!(filtered, vec!["src/main.rs", "Cargo.toml"]);
+        assert_eq!(filtered, vec!["src/main.rs", "manifest.toml"]);
     }
 
     fn uncommitted(staged: &[&str], unstaged: &[&str], untracked: &[&str]) -> UncommittedChanges {
@@ -1818,17 +1811,53 @@ mod tests {
     #[test]
     fn unexpected_files_honor_allowed_list_alongside_homeboy_filter() {
         let changes = uncommitted(
-            &["docs/changelog.md", "Cargo.toml"],
+            &["docs/changelog.md", "manifest.toml"],
             &[],
             &[".homeboy-build/foo"],
         );
-        let allowed = vec!["docs/changelog.md".to_string(), "Cargo.toml".to_string()];
+        let allowed = vec!["docs/changelog.md".to_string(), "manifest.toml".to_string()];
         let unexpected = get_unexpected_uncommitted_files(&changes, &allowed);
         assert!(
             unexpected.is_empty(),
             "allowed files + homeboy scratch should yield clean result, got: {:?}",
             unexpected
         );
+    }
+
+    #[test]
+    fn release_allowed_files_are_only_declared_targets() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_root = temp_dir.path();
+        let changelog = repo_root.join("docs/changelog.md");
+        let manifest = repo_root.join("manifest.toml");
+
+        let allowed = get_release_allowed_files(
+            &changelog,
+            &[manifest.to_string_lossy().to_string()],
+            repo_root,
+        );
+
+        assert_eq!(allowed, vec!["docs/changelog.md", "manifest.toml"]);
+    }
+
+    #[test]
+    fn release_runtime_core_stays_ecosystem_agnostic() {
+        let files = [
+            ("executor.rs", include_str!("executor.rs")),
+            ("pipeline.rs", include_str!("pipeline.rs")),
+            ("version.rs", include_str!("version.rs")),
+        ];
+        let forbidden_terms = ["Cargo", "cargo", "Rust", "rust"];
+
+        for (file, source) in files {
+            let runtime_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+            for term in forbidden_terms {
+                assert!(
+                    !runtime_source.contains(term),
+                    "release runtime core must not branch on ecosystem-specific term {term:?} in {file}"
+                );
+            }
+        }
     }
 
     fn component_with_changelog_target(
