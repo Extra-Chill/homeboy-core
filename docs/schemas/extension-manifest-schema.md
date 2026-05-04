@@ -241,6 +241,33 @@ Runtime configuration defines how executable extensions are executed.
   - Values can use template variables
   - Example: `{"MY_VAR": "{{extensionPath}}/data"}`
 
+## Runtime Requirements
+
+Extension manifests and `component_env.detect_script` output can declare runtime requirements with a generic `runtimes` map:
+
+```json
+{
+  "runtime": {
+    "runtimes": {
+      "php": { "version": "8.2" },
+      "node": { "version": "22" }
+    }
+  }
+}
+```
+
+Detector output uses the same shape without the outer `runtime` field:
+
+```json
+{
+  "runtimes": {
+    "python": { "version": "3.12" }
+  }
+}
+```
+
+Runtime IDs are extension-owned strings. Legacy detector or manifest requirement objects with top-level `php` or `node` string fields are still accepted for compatibility; new manifests should use `runtimes`.
+
 ## Platform Configuration
 
 Platform configuration defines database, deployment, and version detection behaviors.

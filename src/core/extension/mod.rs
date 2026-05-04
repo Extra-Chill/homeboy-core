@@ -1172,7 +1172,7 @@ mod tests {
         let manifest: ExtensionManifest = serde_json::from_value(serde_json::json!({
             "name": "Example",
             "version": "0.0.0",
-            "runtime": { "node": "24" },
+            "runtime": { "runtimes": { "node": { "version": "24" } } },
             "lint": { "extension_script": "lint.sh" },
             "test": {
                 "extension_script": "test.sh",
@@ -1190,7 +1190,8 @@ mod tests {
             manifest
                 .runtime
                 .as_ref()
-                .and_then(|runtime| runtime.node.as_deref()),
+                .and_then(|runtime| runtime.runtimes.get("node"))
+                .map(|runtime| runtime.version.as_str()),
             Some("24")
         );
         assert_eq!(

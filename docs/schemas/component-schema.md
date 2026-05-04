@@ -65,6 +65,24 @@ Component configuration defines buildable and deployable units stored in `compon
   - **`steps`** (array): Release step definitions
   - **`settings`** (object): Release pipeline settings
 
+### Runtime Requirements
+
+`homeboy component env` reports runtime requirements in a generic `runtimes` map:
+
+```json
+{
+  "command": "component.env",
+  "id": "example",
+  "extension": "example-extension",
+  "runtimes": {
+    "php": { "version": "8.2", "source": "component" },
+    "node": { "version": "22", "source": "extension:example-extension" }
+  }
+}
+```
+
+Runtime IDs are extension-owned strings. `source` is `component` for component config or detector output and `extension:<id>` for extension-provided defaults. Legacy component extension settings such as `{ "php": "8.2", "node": "22" }` are still parsed for compatibility; new config should use `runtimes`.
+
 ### Hook Fields
 
 - **`pre_version_bump_commands`** (array of strings): Commands to run BEFORE version targets are updated
