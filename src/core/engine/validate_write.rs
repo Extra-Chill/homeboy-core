@@ -5,9 +5,8 @@
 //! after writing files and before reporting success. If validation fails,
 //! the changed files are rolled back to their pre-write state.
 //!
-//! The validation command is determined by the project's extension — each language
-//! extension can provide a `scripts.validate` command (e.g., `cargo check` for Rust,
-//! `php -l` for PHP, `tsc --noEmit` for TypeScript).
+//! The validation command is determined by the project's extension. Language
+//! extensions can provide a `scripts.validate` command for their own checker.
 //!
 //! When no extension provides a validate script, validation is skipped (no-op success).
 //!
@@ -222,7 +221,7 @@ pub fn validate_only(root: &Path, changed_files: &[PathBuf]) -> Result<Validatio
 /// For project-level validators (Rust, TypeScript), the validate script
 /// is run from the project root. For file-level validators (PHP), individual
 /// files could be checked — but we run the project-level command for simplicity.
-fn resolve_validate_command(root: &Path, changed_files: &[PathBuf]) -> Option<String> {
+fn resolve_validate_command(_root: &Path, changed_files: &[PathBuf]) -> Option<String> {
     // Collect unique file extensions from changed files
     let extensions: Vec<String> = changed_files
         .iter()
@@ -254,8 +253,7 @@ fn resolve_validate_command(root: &Path, changed_files: &[PathBuf]) -> Option<St
         }
     }
 
-    // Fallback: check for well-known project-level validators
-    resolve_builtin_validate_command(root)
+    None
 }
 
 /// Find an installed extension that handles a file extension and has scripts.validate.
@@ -267,32 +265,6 @@ fn find_extension_with_validate(file_ext: &str) -> Option<extension::ExtensionMa
     })
 }
 
-/// Fallback validation using well-known project-level commands.
-///
-/// If no extension provides a validate script, we check for common build tools
-/// that can validate without a full build.
-fn resolve_builtin_validate_command(root: &Path) -> Option<String> {
-    // Rust: Cargo.toml → cargo check --tests
-    // --tests includes #[cfg(test)] modules so auto-generated test code
-    // is validated before committing. Without it, broken test signatures,
-    // duplicate names, and bad format strings slip through.
-    if root.join("Cargo.toml").exists() {
-        return Some("cargo check --tests 2>&1".to_string());
-    }
-
-    // TypeScript: tsconfig.json → tsc --noEmit
-    if root.join("tsconfig.json").exists() {
-        return Some("npx tsc --noEmit 2>&1".to_string());
-    }
-
-    // Go: go.mod → go vet
-    if root.join("go.mod").exists() {
-        return Some("go vet ./... 2>&1".to_string());
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,34 +272,12 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn resolve_builtin_for_rust_project() {
+    fn validation_skips_unknown_project_without_extension_validator() {
         let dir = TempDir::new().expect("temp dir");
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"").unwrap();
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert_eq!(cmd, Some("cargo check --tests 2>&1".to_string()));
-    }
-
-    #[test]
-    fn resolve_builtin_for_typescript_project() {
-        let dir = TempDir::new().expect("temp dir");
-        fs::write(dir.path().join("tsconfig.json"), "{}").unwrap();
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert_eq!(cmd, Some("npx tsc --noEmit 2>&1".to_string()));
-    }
-
-    #[test]
-    fn resolve_builtin_for_go_project() {
-        let dir = TempDir::new().expect("temp dir");
-        fs::write(dir.path().join("go.mod"), "module example.com/t").unwrap();
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert_eq!(cmd, Some("go vet ./... 2>&1".to_string()));
-    }
-
-    #[test]
-    fn resolve_builtin_returns_none_for_unknown() {
-        let dir = TempDir::new().expect("temp dir");
-        let cmd = resolve_builtin_validate_command(dir.path());
-        assert!(cmd.is_none());
+        let files = vec![dir.path().join("unknown.xyz")];
+        let result = validate_only(dir.path(), &files).unwrap();
+        assert!(result.success);
+        assert!(result.command.is_none());
     }
 
     #[test]
@@ -403,36 +353,29 @@ mod tests {
     }
 
     #[test]
-    fn validate_write_rolls_back_on_failure() {
+    fn validate_write_without_extension_validator_is_success() {
         let dir = TempDir::new().expect("temp dir");
         let root = dir.path();
-
-        // Create a Rust project with intentionally broken code
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname = \"validate-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src/lib.rs"), "pub fn good() {}\n").unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn broken( {}\n").unwrap();
 
-        // Capture good state
         let mut rollback = InMemoryRollback::new();
         let lib_path = root.join("src/lib.rs");
         rollback.capture(&lib_path);
 
-        // Write broken code
-        fs::write(&lib_path, "pub fn broken( {}\n").unwrap();
-
         let changed = vec![lib_path.clone()];
         let result = validate_write(root, &changed, &rollback).expect("should not error");
 
-        assert!(!result.success, "validation should fail for broken code");
-        assert!(result.rolled_back, "should have rolled back");
-        assert!(result.output.is_some(), "should have compiler output");
-
-        // Verify rollback happened — file should be restored
+        assert!(
+            result.success,
+            "validation should skip without extension contract"
+        );
+        assert!(
+            !result.rolled_back,
+            "skipped validation should not roll back"
+        );
+        assert!(result.command.is_none());
         let content = fs::read_to_string(&lib_path).unwrap();
-        assert_eq!(content, "pub fn good() {}\n", "file should be restored");
+        assert_eq!(content, "pub fn broken( {}\n");
     }
 }
