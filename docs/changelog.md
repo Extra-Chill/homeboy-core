@@ -4,6 +4,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.155.2] - 2026-05-04
+
+### Changed
+- isolate rig lease coverage
+
+### Fixed
+- consume standard trace probes
+- collect file watch events for fswatch attachments
+- baseline temporal assertions
+- clear artifact diagnostics audit drift
+- address artifact diagnostics audit
+- improve empty artifact path diagnostics
+- lease rig resources during benchmark runs
+
 ## [0.155.1] - 2026-05-03
 
 ### Changed
