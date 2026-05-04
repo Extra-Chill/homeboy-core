@@ -1431,5 +1431,8 @@ mod bench_default_baseline_dispatch_test;
 #[path = "../../../tests/core/rig/bench_default_baseline_output_test.rs"]
 mod bench_default_baseline_output_test;
 #[cfg(test)]
+#[path = "../../../tests/core/rig/bench_resource_lease_test.rs"]
+mod bench_resource_lease_test;
+#[cfg(test)]
 #[path = "../../../tests/core/rig/bench_rig_concurrency_dispatch_test.rs"]
 mod bench_rig_concurrency_dispatch_test;
