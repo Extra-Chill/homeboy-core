@@ -88,7 +88,7 @@ Runtime IDs are extension-owned strings. `source` is `component` for component c
 - **`pre_version_bump_commands`** (array of strings): Commands to run BEFORE version targets are updated
   - Execution: Sequential, runs in `local_path` directory
   - Failure behavior: **Fatal** - stops version bump on non-zero exit code
-  - Use case: Stage build artifacts (e.g., `cargo build --release` to update Cargo.lock)
+  - Use case: Validate generated sources before changing version files
 
 - **`post_version_bump_commands`** (array of strings): Commands to run AFTER version files are updated
   - Execution: Sequential, runs in `local_path` directory
@@ -134,10 +134,10 @@ Setting `local_path` to the same directory as the deploy target is a misconfigur
   ],
   "changelog_target": "CHANGELOG.md",
   "pre_version_bump_commands": [
-    "cargo build --release"
+    "./scripts/verify-generated-sources"
   ],
   "post_version_bump_commands": [
-    "git add Cargo.lock"
+    "./scripts/refresh-versioned-artifacts"
   ],
   "post_release_commands": [
     "echo 'Release complete!'"

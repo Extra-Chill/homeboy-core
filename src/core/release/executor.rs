@@ -518,8 +518,7 @@ pub(crate) fn run_package(
                 "No extension provides release.package action",
                 None,
                 Some(vec![
-                    "Add a extension with release.package action to the component".to_string(),
-                    "For Rust projects, add: \"extensions\": { \"rust\": {} }".to_string(),
+                    "Add an extension with a release.package action to the component".to_string(),
                 ]),
             )
         })?;
@@ -611,12 +610,15 @@ fn publish_step_result(
         return step_success(step_id, step_id, data, Vec::new());
     }
 
-    if is_missing_cargo_token_publish_response(target, extension_id, response) {
+    if let Some(reason) = extension_skip_reason(response) {
         return step_skipped(
             step_id,
             step_id,
             data,
-            "Skipped Rust publish: no Cargo registry token is configured",
+            format!(
+                "Skipped publish to {} via {}: {}",
+                target, extension_id, reason
+            ),
         );
     }
 
@@ -629,18 +631,25 @@ fn publish_step_result(
     )
 }
 
-fn is_missing_cargo_token_publish_response(
-    target: &str,
-    extension_id: &str,
-    response: &serde_json::Value,
-) -> bool {
-    if target != "rust" && extension_id != "rust" {
-        return false;
+fn extension_skip_reason(response: &serde_json::Value) -> Option<String> {
+    let status = response.get("status").and_then(|v| v.as_str())?;
+    if !matches!(status, "skipped" | "missing_secret" | "auth_required") {
+        return None;
     }
 
-    let output = publish_response_output(response).to_ascii_lowercase();
-    output.contains("no token found")
-        && (output.contains("cargo login") || output.contains("cargo_registry_token"))
+    response
+        .get("reason")
+        .or_else(|| response.get("message"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            let output = publish_response_output(response);
+            let detail = output.trim();
+            (!detail.is_empty()).then(|| detail.to_string())
+        })
+        .or_else(|| Some(status.replace('_', " ")))
 }
 
 fn publish_response_output(response: &serde_json::Value) -> String {
@@ -1053,7 +1062,7 @@ fn store_artifacts_from_output(
         } else if exit_code != 0 {
             format!(
                 "Package command failed (exit {}) with no output. \
-                 Check that the required packaging tool is installed (e.g., cargo-dist)",
+                 Check that the required packaging tool is installed and configured.",
                 exit_code
             )
         } else {
@@ -1114,6 +1123,7 @@ fn sanitize_tag_for_filename(tag: &str) -> String {
 mod tests {
     use super::{
         fallback_gh_command, publish_step_result, run_git_push, sanitize_tag_for_filename,
+        store_artifacts_from_output,
     };
     use crate::component::Component;
     use crate::release::ReleaseStepStatus;
@@ -1171,49 +1181,75 @@ mod tests {
     }
 
     #[test]
-    fn publish_step_skips_rust_when_cargo_token_is_missing() {
+    fn publish_step_skips_when_extension_reports_missing_secret() {
         let response = serde_json::json!({
             "success": false,
-            "exitCode": 101,
+            "status": "missing_secret",
+            "reason": "registry token is not configured",
             "stdout": "",
-            "stderr": "error: no token found, please run cargo login\nor use environment variable CARGO_REGISTRY_TOKEN",
+            "stderr": "",
         });
         let data = serde_json::json!({ "response": response.clone() });
 
-        let result = publish_step_result("publish.rust", "rust", "rust", Some(data), &response);
+        let result = publish_step_result(
+            "publish.registry",
+            "registry",
+            "registry",
+            Some(data),
+            &response,
+        );
 
         assert_eq!(result.status, ReleaseStepStatus::Skipped);
         assert!(result.error.is_none());
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("no Cargo registry token"));
+        assert!(result.warnings[0].contains("registry token is not configured"));
     }
 
     #[test]
-    fn publish_step_fails_rust_when_error_is_not_missing_token() {
+    fn publish_step_skips_when_extension_reports_auth_required() {
         let response = serde_json::json!({
             "success": false,
-            "exitCode": 101,
-            "stdout": "",
+            "status": "auth_required",
+            "message": "run the extension login command",
+        });
+
+        let result =
+            publish_step_result("publish.registry", "registry", "registry", None, &response);
+
+        assert_eq!(result.status, ReleaseStepStatus::Skipped);
+        assert!(result.warnings[0].contains("run the extension login command"));
+    }
+
+    #[test]
+    fn publish_step_fails_when_extension_error_has_no_skip_status() {
+        let response = serde_json::json!({
+            "success": false,
+            "exitCode": 1,
             "stderr": "error: failed to upload package: 500 server error",
         });
 
-        let result = publish_step_result("publish.rust", "rust", "rust", None, &response);
+        let result =
+            publish_step_result("publish.registry", "registry", "registry", None, &response);
 
         assert_eq!(result.status, ReleaseStepStatus::Failed);
         assert!(result.error.unwrap().contains("500 server error"));
     }
 
     #[test]
-    fn publish_step_fails_non_rust_missing_token_text() {
+    fn package_error_message_is_extension_generic() {
         let response = serde_json::json!({
             "success": false,
             "exitCode": 1,
-            "stderr": "error: no token found, please run cargo login",
+            "stdout": "",
+            "stderr": "",
         });
+        let mut state = crate::release::types::ReleaseState::default();
 
-        let result = publish_step_result("publish.npm", "npm", "npm", None, &response);
+        let err = store_artifacts_from_output(&mut state, &response)
+            .expect_err("empty failing package output should fail");
 
-        assert_eq!(result.status, ReleaseStepStatus::Failed);
+        assert!(err.message.contains("required packaging tool"));
+        assert!(!err.message.contains("example-package-manager"));
     }
 
     // ----- Orphan-tag regression coverage (issue #2234) -----

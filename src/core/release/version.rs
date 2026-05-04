@@ -440,24 +440,6 @@ pub(crate) fn bump_component_version(
         }
     }
 
-    // If any version target is Cargo.toml, regenerate Cargo.lock so it stays in sync.
-    // Without this, the release commit only includes Cargo.toml and post-release hooks
-    // like `cargo publish` fail because Cargo.lock is dirty.
-    let has_cargo_target = target_infos.iter().any(|t| t.file.ends_with("Cargo.toml"));
-    if has_cargo_target {
-        log_status!(
-            "version",
-            "Regenerating Cargo.lock after Cargo.toml version bump"
-        );
-        let lockfile_result = std::process::Command::new("cargo")
-            .args(["generate-lockfile"])
-            .current_dir(&component.local_path)
-            .output();
-        if let Err(e) = lockfile_result {
-            log_status!("warning", "Failed to regenerate Cargo.lock: {}", e);
-        }
-    }
-
     // Replace @since placeholder tags with the new version (extension-driven).
     let since_tags_replaced = replace_since_tag_placeholders(component, &new_version)?;
 
@@ -591,5 +573,44 @@ mod tests {
             "expected first version section, got: {}",
             finalized
         );
+    }
+
+    #[test]
+    fn bump_component_version_runs_post_version_hook_after_version_file_update() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("package.json"),
+            "{\n  \"version\": \"0.1.0\"\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            temp_dir.path().join("CHANGELOG.md"),
+            "# Changelog\n\n## Unreleased\n\n",
+        )
+        .unwrap();
+
+        let mut component = make_test_component(&temp_dir);
+        component.version_targets = Some(vec![VersionTarget {
+            file: "package.json".to_string(),
+            pattern: Some(r#""version"\s*:\s*"([^"]+)""#.to_string()),
+        }]);
+        component.hooks.insert(
+            hooks::events::POST_VERSION_BUMP.to_string(),
+            vec!["sh -c 'grep 0.1.1 package.json > generated.lock'".to_string()],
+        );
+
+        let mut entries: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        entries.insert(
+            "fixed".to_string(),
+            vec!["release hook contract".to_string()],
+        );
+
+        let result = bump_component_version(&component, "patch", Some(&entries))
+            .expect("post-version hook should run after version write");
+
+        assert_eq!(result.new_version, "0.1.1");
+        let generated = fs::read_to_string(temp_dir.path().join("generated.lock")).unwrap();
+        assert!(generated.contains("0.1.1"));
     }
 }
