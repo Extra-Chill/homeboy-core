@@ -365,16 +365,18 @@ The bundle contains `baseline.json`, `variant.json`, `compare.json`, and `summar
 
 Use `--report=markdown` to render a skim-friendly report from the same trace run. The report includes status, span table, assertions, artifacts, and timeline events.
 
-## Span Baselines
+## Trace Baselines
 
-Trace spans can use the same lifecycle flags as other baseline-aware commands:
+Trace spans and evaluated assertions can use the same lifecycle flags as other baseline-aware commands:
 
-- `--baseline` stores the current span durations in `homeboy.json` under `baselines.trace`.
-- `--ratchet` updates the stored baseline when spans improve.
+- `--baseline` stores the current span durations and evaluated assertion snapshots in `homeboy.json` under `baselines.trace`.
+- `--ratchet` updates the stored baseline when spans or assertion metrics improve.
 - `--ignore-baseline` skips comparison.
 - `--regression-threshold=<PCT>` controls the allowed duration slowdown. Default is `5`.
 - `--regression-min-delta-ms=<MS>` controls the minimum absolute slowdown before a regression can fail. Default is `50`.
 
 Both regression thresholds must trip before Homeboy fails the run. For example, `9ms -> 15ms` exceeds the default percentage threshold but stays below the default `50ms` minimum delta, so it does not fail as a trace baseline regression.
+
+Assertion baselines compare evaluated assertion status plus lower-is-better metrics when a temporal assertion exposes one, such as `count.actual`, `forbidden-event.actual`, `max-concurrent.max_observed`, `no-overlap.overlap_count`, `ordering.violation_count`, and `latency-bound` percentile values. This supports assertion-only race checks, for example stderr event counts, without requiring synthetic spans.
 
 Rig-pinned traces store separate baselines under `trace.rig.<rig-id>` so bare and rig-owned traces do not collide.

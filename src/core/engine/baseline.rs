@@ -132,12 +132,24 @@ pub fn save<M: Serialize + for<'de> Deserialize<'de>>(
 ) -> Result<PathBuf> {
     let mut known_fingerprints: Vec<String> = items.iter().map(|item| item.fingerprint()).collect();
     known_fingerprints.sort();
+    let metadata_value = serde_json::to_value(&metadata).map_err(|error| {
+        Error::internal_io(
+            format!("Failed to serialize baseline metadata: {}", error),
+            Some("baseline.save".to_string()),
+        )
+    })?;
 
     if !known_fingerprints.is_empty() {
         if let Ok(Some(existing)) = load::<M>(config) {
             let mut existing_sorted = existing.known_fingerprints.clone();
             existing_sorted.sort();
-            if existing_sorted == known_fingerprints {
+            let existing_metadata = serde_json::to_value(&existing.metadata).map_err(|error| {
+                Error::internal_io(
+                    format!("Failed to serialize existing baseline metadata: {}", error),
+                    Some("baseline.save".to_string()),
+                )
+            })?;
+            if existing_sorted == known_fingerprints && existing_metadata == metadata_value {
                 return Ok(config.json_path());
             }
         }
