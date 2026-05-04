@@ -1,15 +1,4 @@
 use homeboy::commands::supports::{run, SupportsArgs};
-use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn tmp_dir(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!("homeboy-supports-{name}-{nanos}"))
-}
 
 #[test]
 fn test_run() {
@@ -85,16 +74,4 @@ fn test_normalize_command() {
     .expect("supports command should run");
 
     assert_eq!(output.command, "docs audit");
-}
-
-#[test]
-fn test_tmp_dir() {
-    let one = tmp_dir("a");
-    let two = tmp_dir("b");
-    assert_ne!(one, two);
-
-    // ensure helper can produce a path that is creatable/cleanable
-    fs::create_dir_all(&one).expect("tmp dir should be creatable");
-    assert!(one.exists());
-    let _ = fs::remove_dir_all(&one);
 }

@@ -163,6 +163,45 @@ pub struct ReviewArtifactCommand {
     pub artifacts: Vec<Value>,
 }
 
+struct ReviewStageDescriptor<Args, Output: Serialize> {
+    name: &'static str,
+    include_changed_only_scope: bool,
+    build_args: fn(&ReviewArgs) -> Args,
+    run: fn(Args, &GlobalArgs) -> CmdResult<Output>,
+    finding_count: fn(&Output) -> usize,
+}
+
+impl<Args, Output: Serialize> ReviewStageDescriptor<Args, Output> {
+    fn execute(
+        &self,
+        review_args: &ReviewArgs,
+        global: &GlobalArgs,
+        component_label: &str,
+    ) -> CmdResult<ReviewStage<Output>> {
+        let (output, exit_code) = (self.run)((self.build_args)(review_args), global)?;
+        let finding_count = (self.finding_count)(&output);
+
+        Ok((
+            ReviewStage {
+                stage: self.name.to_string(),
+                ran: true,
+                passed: exit_code == 0,
+                exit_code,
+                finding_count,
+                hint: format!(
+                    "Deep dive: homeboy {} {}{}",
+                    self.name,
+                    component_label,
+                    scope_flag_suffix(review_args, self.include_changed_only_scope),
+                ),
+                skipped_reason: None,
+                output: Some(output),
+            },
+            exit_code,
+        ))
+    }
+}
+
 pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutput> {
     // Resolve component ID (auto-discovers from CWD when omitted) and source
     // path so we can probe git for the changed-file set ourselves.
@@ -255,135 +294,56 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
         changed_file_count,
     });
 
-    // ── Stage 1: audit ──────────────────────────────────────────────────────
-    // Audit scopes via --changed-since only (no --changed-only support today).
-    // When the user asked for --changed-only, audit runs against the full
-    // component; we surface that limitation in `summary.hints`.
     let mut top_hints: Vec<String> = Vec::new();
 
-    let audit_args = audit::AuditArgs {
-        comp: args.comp.clone(),
-        conventions: false,
-        only: Vec::new(),
-        exclude: Vec::new(),
-        baseline_args: args.baseline_args.clone(),
-        changed_since: args.changed_since.clone(),
-        json_summary: args.summary,
-        fixability: false,
+    let audit_descriptor = ReviewStageDescriptor {
+        name: "audit",
+        include_changed_only_scope: false,
+        build_args: build_audit_args,
+        run: audit::run,
+        finding_count: audit_finding_count,
     };
-    let (audit_output, audit_exit) = match audit::run(audit_args, global) {
+    let (audit_stage, audit_exit) = match audit_descriptor.execute(&args, global, &component_label)
+    {
         Ok(result) => result,
         Err(error) => {
             observation::finish_error(review_observation, &error);
             return Err(error);
         }
-    };
-    let audit_passed = audit_exit == 0;
-    let audit_findings = audit_finding_count(&audit_output);
-    let audit_stage = ReviewStage {
-        stage: "audit".to_string(),
-        ran: true,
-        passed: audit_passed,
-        exit_code: audit_exit,
-        finding_count: audit_findings,
-        hint: format!(
-            "Deep dive: homeboy audit {}{}",
-            component_label,
-            scope_flag_suffix(&args, /*include_changed_only=*/ false),
-        ),
-        skipped_reason: None,
-        output: Some(audit_output),
     };
 
-    // ── Stage 2: lint ───────────────────────────────────────────────────────
-    let lint_args = lint::LintArgs {
-        comp: args.comp.clone(),
-        summary: args.summary,
-        file: None,
-        glob: None,
-        changed_only: args.changed_only,
-        changed_since: args.changed_since.clone(),
-        errors_only: false,
-        sniffs: None,
-        exclude_sniffs: None,
-        category: None,
-        fix: false,
-        extension_override: args.extension_override.clone(),
-        setting_args: Default::default(),
-        baseline_args: args.baseline_args.clone(),
-        _json: Default::default(),
-        json_summary: args.summary,
+    let lint_descriptor = ReviewStageDescriptor {
+        name: "lint",
+        include_changed_only_scope: true,
+        build_args: build_lint_args,
+        run: lint::run,
+        finding_count: lint_finding_count,
     };
-    let (lint_output, lint_exit) = match lint::run(lint_args, global) {
+    let (lint_stage, lint_exit) = match lint_descriptor.execute(&args, global, &component_label) {
         Ok(result) => result,
         Err(error) => {
             observation::finish_error(review_observation, &error);
             return Err(error);
         }
-    };
-    let lint_passed = lint_exit == 0;
-    let lint_findings = lint_finding_count(&lint_output);
-    let lint_stage = ReviewStage {
-        stage: "lint".to_string(),
-        ran: true,
-        passed: lint_passed,
-        exit_code: lint_exit,
-        finding_count: lint_findings,
-        hint: format!(
-            "Deep dive: homeboy lint {}{}",
-            component_label,
-            scope_flag_suffix(&args, /*include_changed_only=*/ true),
-        ),
-        skipped_reason: None,
-        output: Some(lint_output),
     };
 
-    // ── Stage 3: test ───────────────────────────────────────────────────────
-    // Test scopes via --changed-since only (same as audit). When the user
-    // passed --changed-only, test runs the full suite — surface as a hint.
-    let test_args = test::TestArgs {
-        comp: args.comp.clone(),
-        extension_override: args.extension_override.clone(),
-        skip_lint: true, // lint already ran above; avoid double work
-        coverage: false,
-        coverage_min: None,
-        baseline_args: args.baseline_args.clone(),
-        analyze: false,
-        drift: false,
-        write: false,
-        since: "HEAD~10".to_string(),
-        changed_since: args.changed_since.clone(),
-        setting_args: Default::default(),
-        args: Vec::new(),
-        _json: Default::default(),
-        json_summary: args.summary,
+    let test_descriptor = ReviewStageDescriptor {
+        name: "test",
+        include_changed_only_scope: false,
+        build_args: build_test_args,
+        run: test::run,
+        finding_count: test_finding_count,
     };
-    let (test_output, test_exit) = match test::run(test_args, global) {
+    let (test_stage, test_exit) = match test_descriptor.execute(&args, global, &component_label) {
         Ok(result) => result,
         Err(error) => {
             observation::finish_error(review_observation, &error);
             return Err(error);
         }
-    };
-    let test_passed = test_exit == 0;
-    let test_findings = test_finding_count(&test_output);
-    let test_stage = ReviewStage {
-        stage: "test".to_string(),
-        ran: true,
-        passed: test_passed,
-        exit_code: test_exit,
-        finding_count: test_findings,
-        hint: format!(
-            "Deep dive: homeboy test {}{}",
-            component_label,
-            scope_flag_suffix(&args, /*include_changed_only=*/ false),
-        ),
-        skipped_reason: None,
-        output: Some(test_output),
     };
 
     // Aggregate
-    let overall_passed = audit_passed && lint_passed && test_passed;
+    let overall_passed = audit_stage.passed && lint_stage.passed && test_stage.passed;
     let overall_exit = if overall_passed {
         0
     } else if [audit_exit, lint_exit, test_exit].iter().any(|&c| c >= 2) {
@@ -391,7 +351,8 @@ pub fn run(args: ReviewArgs, global: &GlobalArgs) -> CmdResult<ReviewCommandOutp
     } else {
         1
     };
-    let total_findings = audit_findings + lint_findings + test_findings;
+    let total_findings =
+        audit_stage.finding_count + lint_stage.finding_count + test_stage.finding_count;
 
     if args.changed_only {
         top_hints.push(
@@ -602,6 +563,60 @@ fn git_ref(path: &str, git_ref: &str) -> Option<String> {
         return None;
     }
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn build_audit_args(args: &ReviewArgs) -> audit::AuditArgs {
+    audit::AuditArgs {
+        comp: args.comp.clone(),
+        conventions: false,
+        only: Vec::new(),
+        exclude: Vec::new(),
+        baseline_args: args.baseline_args.clone(),
+        changed_since: args.changed_since.clone(),
+        json_summary: args.summary,
+        fixability: false,
+    }
+}
+
+fn build_lint_args(args: &ReviewArgs) -> lint::LintArgs {
+    lint::LintArgs {
+        comp: args.comp.clone(),
+        summary: args.summary,
+        file: None,
+        glob: None,
+        changed_only: args.changed_only,
+        changed_since: args.changed_since.clone(),
+        errors_only: false,
+        sniffs: None,
+        exclude_sniffs: None,
+        category: None,
+        fix: false,
+        extension_override: args.extension_override.clone(),
+        setting_args: Default::default(),
+        baseline_args: args.baseline_args.clone(),
+        _json: Default::default(),
+        json_summary: args.summary,
+    }
+}
+
+fn build_test_args(args: &ReviewArgs) -> test::TestArgs {
+    test::TestArgs {
+        comp: args.comp.clone(),
+        extension_override: args.extension_override.clone(),
+        skip_lint: true,
+        coverage: false,
+        coverage_min: None,
+        baseline_args: args.baseline_args.clone(),
+        analyze: false,
+        drift: false,
+        write: false,
+        since: "HEAD~10".to_string(),
+        changed_since: args.changed_since.clone(),
+        setting_args: Default::default(),
+        args: Vec::new(),
+        _json: Default::default(),
+        json_summary: args.summary,
+    }
 }
 
 fn audit_finding_count(output: &AuditCommandOutput) -> usize {
