@@ -79,6 +79,27 @@ const TEST_FLAGS: &[&str] = &[
     "--help",
     "-h",
 ];
+const TEST_PASSTHROUGH_BOOL_FLAGS: &[&str] = &[
+    "--skip-lint",
+    "--coverage",
+    "--baseline",
+    "--ignore-baseline",
+    "--ratchet",
+    "--analyze",
+    "--drift",
+    "--write",
+    "--force-hot",
+    "--json-summary",
+    "--json",
+];
+const TEST_PASSTHROUGH_VALUE_FLAGS: &[&str] = &[
+    "--coverage-min",
+    "--since",
+    "--changed-since",
+    "--setting",
+    "--path",
+    "--extension",
+];
 const BENCH_FLAGS: &[&str] = &[
     "--iterations",
     "--warmup",
@@ -101,6 +122,32 @@ const BENCH_FLAGS: &[&str] = &[
     "--json",
     "--help",
     "-h",
+];
+const BENCH_PASSTHROUGH_BOOL_FLAGS: &[&str] = &[
+    "--baseline",
+    "--ignore-baseline",
+    "--ignore-default-baseline",
+    "--ratchet",
+    "--force-hot",
+    "--json-summary",
+    "--json",
+];
+const BENCH_PASSTHROUGH_VALUE_FLAGS: &[&str] = &[
+    "--iterations",
+    "--warmup",
+    "--runs",
+    "--shared-state",
+    "--concurrency",
+    "--regression-threshold",
+    "--rig-concurrency",
+    "--scenario",
+    "--profile",
+    "--rig-order",
+    "--report",
+    "--rig",
+    "--setting",
+    "--path",
+    "--extension",
 ];
 const DOCS_AUDIT_FLAGS: &[&str] = &[
     "--path",
@@ -132,6 +179,71 @@ const LINT_FLAGS: &[&str] = &[
     "--help",
     "-h",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PassthroughCommand {
+    Bench,
+    Test,
+}
+
+impl PassthroughCommand {
+    fn owned_bool_flags(self) -> &'static [&'static str] {
+        match self {
+            PassthroughCommand::Bench => BENCH_PASSTHROUGH_BOOL_FLAGS,
+            PassthroughCommand::Test => TEST_PASSTHROUGH_BOOL_FLAGS,
+        }
+    }
+
+    fn owned_value_flags(self) -> &'static [&'static str] {
+        match self {
+            PassthroughCommand::Bench => BENCH_PASSTHROUGH_VALUE_FLAGS,
+            PassthroughCommand::Test => TEST_PASSTHROUGH_VALUE_FLAGS,
+        }
+    }
+}
+
+/// Strip Homeboy-owned flags from runner passthrough args.
+///
+/// Clap's `last = true` capture can include flags that also parsed into named
+/// Homeboy fields when those flags appear after a positional. Keeping this
+/// policy next to the trailing-arg normalizer makes command-owned flags easier
+/// to update without drifting separate bench/test filters.
+pub(crate) fn filter_passthrough_args(command: PassthroughCommand, args: &[String]) -> Vec<String> {
+    let bool_flags = command.owned_bool_flags();
+    let value_flags = command.owned_value_flags();
+    let mut filtered = Vec::new();
+    let mut skip_next = false;
+
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        if bool_flags.contains(&arg.as_str()) {
+            continue;
+        }
+
+        let is_value_flag = value_flags.iter().any(|flag| {
+            if arg.starts_with(&format!("{}=", flag)) {
+                return true;
+            }
+            if arg == *flag {
+                skip_next = true;
+                return true;
+            }
+            false
+        });
+
+        if is_value_flag {
+            continue;
+        }
+
+        filtered.push(arg.clone());
+    }
+
+    filtered
+}
 
 /// Auto-insert '--' separator before unknown flags for trailing_var_arg commands.
 pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
@@ -634,6 +746,36 @@ mod normalize_tests {
             "--output",
             "/tmp/y.json",
             "--ratchet",
+        ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn test_owned_flag_after_component_and_explicit_passthrough_stay_distinct() {
+        let input = argv(&[
+            "homeboy",
+            "test",
+            "my-comp",
+            "--changed-since",
+            "origin/main",
+            "--",
+            "--filter=SmokeTest",
+        ]);
+        let expected = input.clone();
+        assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn bench_owned_flag_after_component_and_explicit_passthrough_stay_distinct() {
+        let input = argv(&[
+            "homeboy",
+            "bench",
+            "my-comp",
+            "--iterations",
+            "1",
+            "--",
+            "--filter=Scenario",
         ]);
         let expected = input.clone();
         assert_eq!(normalize_trailing_flags(input), expected);

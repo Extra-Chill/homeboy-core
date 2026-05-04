@@ -1,58 +1,14 @@
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
 
-use homeboy::cli_surface::{Cli, Commands};
+use homeboy::cli_surface::{
+    Cli, CommandOutputArtifactPolicy, CommandRawOutputMode, CommandResponseMode, Commands,
+};
 use homeboy::commands::GlobalArgs;
-
-#[derive(Debug, Clone, Copy)]
-enum ResponseMode {
-    Json,
-    Raw(RawOutputMode),
-}
-
-#[derive(Debug, Clone, Copy)]
-enum RawOutputMode {
-    InteractivePassthrough,
-    Markdown,
-    PlainText,
-}
 
 use homeboy::commands;
 use homeboy::commands::utils::{args, entity_suggest, resource_policy, response as output, tty};
-use homeboy::commands::{changelog, cli, file, logs, report, review, trace};
+use homeboy::commands::{cli, review, trace};
 use homeboy::extension::load_all_extensions;
-
-fn response_mode(command: &Commands, has_output_file: bool) -> ResponseMode {
-    match command {
-        Commands::Ssh(args) if args.subcommand.is_none() && args.command.is_empty() => {
-            ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
-        }
-        Commands::Logs(args) if logs::is_interactive(args) => {
-            ResponseMode::Raw(RawOutputMode::InteractivePassthrough)
-        }
-        Commands::File(args) if file::is_raw_read(args) => {
-            ResponseMode::Raw(RawOutputMode::PlainText)
-        }
-        Commands::Docs(args) if homeboy::commands::docs::is_json_mode(args) => ResponseMode::Json,
-        Commands::Docs(_) => ResponseMode::Raw(RawOutputMode::Markdown),
-        Commands::Changelog(args) if changelog::is_show_markdown(args) => {
-            ResponseMode::Raw(RawOutputMode::Markdown)
-        }
-        Commands::Review(args) if review::is_markdown_mode(args) => {
-            ResponseMode::Raw(RawOutputMode::Markdown)
-        }
-        Commands::Trace(args) if trace::is_markdown_mode(args) => {
-            ResponseMode::Raw(RawOutputMode::Markdown)
-        }
-        Commands::Runs(args) if !has_output_file && args.is_markdown_mode() => {
-            ResponseMode::Raw(RawOutputMode::Markdown)
-        }
-        Commands::Report(args) if report::is_markdown_mode(args) => {
-            ResponseMode::Raw(RawOutputMode::Markdown)
-        }
-        Commands::List => ResponseMode::Raw(RawOutputMode::Markdown),
-        _ => ResponseMode::Json,
-    }
-}
 
 struct ExtensionCliCommand {
     tool: String,
@@ -230,12 +186,12 @@ fn main() -> std::process::ExitCode {
         homeboy::extension::update_check::run_startup_check();
     }
 
-    let mode = response_mode(&cli.command, output_file.is_some());
-    let is_review_command = matches!(cli.command, Commands::Review(_));
+    let mode = cli.command.response_mode(output_file.is_some());
+    let output_artifact_policy = cli.command.output_artifact_policy(output_file.is_some());
 
     match mode {
-        ResponseMode::Json => {}
-        ResponseMode::Raw(RawOutputMode::InteractivePassthrough) => {
+        CommandResponseMode::Json => {}
+        CommandResponseMode::Raw(CommandRawOutputMode::InteractivePassthrough) => {
             if !tty::require_tty_for_interactive() {
                 let err = homeboy::Error::validation_invalid_argument(
                     "tty",
@@ -247,8 +203,8 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::from(exit_code_to_u8(2));
             }
         }
-        ResponseMode::Raw(RawOutputMode::Markdown) => {}
-        ResponseMode::Raw(RawOutputMode::PlainText) => {}
+        CommandResponseMode::Raw(CommandRawOutputMode::Markdown) => {}
+        CommandResponseMode::Raw(CommandRawOutputMode::PlainText) => {}
     }
 
     if matches!(cli.command, Commands::List) {
@@ -270,7 +226,7 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    if let ResponseMode::Raw(RawOutputMode::Markdown) = mode {
+    if let CommandResponseMode::Raw(CommandRawOutputMode::Markdown) = mode {
         let markdown_result = commands::run_markdown(cli.command, &global);
 
         match markdown_result {
@@ -285,60 +241,59 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    if let ResponseMode::Raw(RawOutputMode::PlainText) = mode {
-        if let Commands::File(args) = cli.command {
-            let result = file::run(args, &global);
-            match result {
-                Ok((file::FileCommandOutput::Raw(content), exit_code)) => {
-                    print!("{}", content);
-                    return std::process::ExitCode::from(exit_code_to_u8(exit_code));
-                }
-                Ok(_) => {
-                    let err =
-                        homeboy::Error::internal_unexpected("Unexpected output type for raw mode");
-                    output::print_result::<serde_json::Value>(Err(err)).ok();
-                    return std::process::ExitCode::from(exit_code_to_u8(1));
-                }
-                Err(err) => {
-                    output::print_result::<serde_json::Value>(Err(err)).ok();
-                    return std::process::ExitCode::from(exit_code_to_u8(1));
-                }
+    if let CommandResponseMode::Raw(CommandRawOutputMode::PlainText) = mode {
+        match commands::run_plain_text(cli.command, &global) {
+            Ok((content, exit_code)) => {
+                print!("{}", content);
+                return std::process::ExitCode::from(exit_code_to_u8(exit_code));
+            }
+            Err(err) => {
+                output::print_result::<serde_json::Value>(Err(err)).ok();
+                return std::process::ExitCode::from(exit_code_to_u8(1));
             }
         }
     }
 
-    let (json_result, exit_code, output_json_result) = match cli.command {
-        Commands::Trace(args) if output_file.is_some() && args.json_summary => {
+    let (json_result, exit_code, output_json_result) = match (output_artifact_policy, cli.command) {
+        (CommandOutputArtifactPolicy::TraceJsonSummaryArtifact, Commands::Trace(args)) => {
             let (json_result, exit_code, output_json_result) =
                 trace::run_json_with_output_artifact(args, &global);
             (json_result, exit_code, output_json_result)
         }
-        command => {
+        (_, command) => {
             let (json_result, exit_code) = commands::run_json(command, &global);
             (json_result, exit_code, None)
         }
     };
 
     // Write JSON to --output file if specified (before printing to stdout).
-    // Review writes its stable machine-readable artifact directly; other
-    // commands retain the generic CLI envelope.
     if let Some(ref path) = output_file {
-        if !is_review_command || !review::write_artifact_to_file(&json_result, path, exit_code) {
-            output::write_json_to_file(
-                output_json_result.as_ref().unwrap_or(&json_result),
-                path,
-                exit_code,
-            );
+        match output_artifact_policy {
+            CommandOutputArtifactPolicy::ReviewStableArtifact => {
+                if !review::write_artifact_to_file(&json_result, path, exit_code) {
+                    output::write_json_to_file(&json_result, path, exit_code);
+                }
+            }
+            CommandOutputArtifactPolicy::TraceJsonSummaryArtifact => {
+                output::write_json_to_file(
+                    output_json_result.as_ref().unwrap_or(&json_result),
+                    path,
+                    exit_code,
+                );
+            }
+            CommandOutputArtifactPolicy::GenericEnvelope => {
+                output::write_json_to_file(&json_result, path, exit_code);
+            }
         }
     }
 
     match mode {
-        ResponseMode::Json => {
+        CommandResponseMode::Json => {
             output::print_json_result(json_result, exit_code).ok();
         }
-        ResponseMode::Raw(RawOutputMode::InteractivePassthrough) => {}
-        ResponseMode::Raw(RawOutputMode::Markdown) => {}
-        ResponseMode::Raw(RawOutputMode::PlainText) => {}
+        CommandResponseMode::Raw(CommandRawOutputMode::InteractivePassthrough) => {}
+        CommandResponseMode::Raw(CommandRawOutputMode::Markdown) => {}
+        CommandResponseMode::Raw(CommandRawOutputMode::PlainText) => {}
     }
 
     std::process::ExitCode::from(exit_code_to_u8(exit_code))
