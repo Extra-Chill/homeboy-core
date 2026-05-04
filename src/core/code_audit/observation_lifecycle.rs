@@ -238,7 +238,7 @@ fn {name}() {{
     }
 
     #[test]
-    fn flags_repeated_observation_lifecycle_scaffolding() {
+    fn test_run() {
         let bench = rust_fp(
             "src/commands/bench.rs",
             &["run_bench"],
