@@ -177,6 +177,10 @@ pub enum AuditFinding {
     /// many times across the codebase — candidate for extraction into a helper
     /// constructor (e.g. `error_envelope($error, $message)`).
     RepeatedLiteralShape,
+    /// Multiple command functions independently parse, serialize, or normalize
+    /// the same extension setting key instead of delegating to the shared
+    /// extension settings contract.
+    ExtensionSettingPlumbing,
     /// Docblock `@deprecated X.Y.Z` tag is older than the configured age
     /// threshold relative to the component's current version.
     DeprecationAge,
@@ -269,6 +273,7 @@ impl AuditFinding {
             "shadow_module",
             "repeated_field_pattern",
             "repeated_literal_shape",
+            "extension_setting_plumbing",
             "deprecation_age",
             "dead_guard",
             "upstream_workaround",
