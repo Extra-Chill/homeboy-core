@@ -172,7 +172,7 @@ pub fn fingerprint_from_grammar(
     let implements = extract_implements(&symbols);
 
     // --- Namespace ---
-    let namespace = extract_namespace(&symbols, relative_path, lang_id);
+    let namespace = extract_namespace(&symbols, relative_path, grammar);
 
     // --- Imports ---
     let imports = extract_imports(&symbols);
@@ -779,8 +779,8 @@ fn extract_implements(symbols: &[Symbol]) -> Vec<String> {
     implements
 }
 
-/// Extract namespace from symbols or derive from path.
-fn extract_namespace(symbols: &[Symbol], relative_path: &str, lang_id: &str) -> Option<String> {
+/// Extract namespace from symbols or derive from grammar-owned path metadata.
+fn extract_namespace(symbols: &[Symbol], relative_path: &str, grammar: &Grammar) -> Option<String> {
     // Direct namespace symbol (PHP: namespace DataMachine\Abilities;)
     for s in symbols.iter().filter(|s| s.concept == "namespace") {
         if let Some(name) = s.name() {
@@ -788,19 +788,38 @@ fn extract_namespace(symbols: &[Symbol], relative_path: &str, lang_id: &str) -> 
         }
     }
 
-    // Rust module namespace is determined by file location. `crate::...`
-    // imports are cross-module references, not declarations of this file's module.
-    if lang_id == "rust" {
-        let parts: Vec<&str> = relative_path.trim_end_matches(".rs").split('/').collect();
-        if parts.len() > 2 {
-            let ns = parts[1..parts.len() - 1].join("::");
-            return Some(format!("crate::{}", ns));
-        } else if parts.len() == 2 {
-            return Some(format!("crate::{}", parts.last().unwrap_or(&"")));
-        }
+    derive_namespace_from_path(relative_path, grammar)
+}
+
+fn derive_namespace_from_path(relative_path: &str, grammar: &Grammar) -> Option<String> {
+    let rule = grammar.fingerprint.namespace_derivation.as_ref()?;
+    let path_without_extension = Path::new(relative_path)
+        .with_extension("")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let parts: Vec<&str> = path_without_extension
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let stripped = parts.get(rule.strip_leading_segments..)?;
+
+    let namespace_parts = if stripped.len() > 1 {
+        &stripped[..stripped.len() - 1]
+    } else if rule.include_file_stem_when_root {
+        stripped
+    } else {
+        &[]
+    };
+
+    if namespace_parts.is_empty() {
+        return None;
     }
 
-    None
+    Some(format!(
+        "{}{}",
+        rule.prefix.as_deref().unwrap_or(""),
+        namespace_parts.join(&rule.separator)
+    ))
 }
 
 /// Extract imports from symbols.
@@ -1268,6 +1287,11 @@ mod tests {
                 registration_concepts = ["macro_invocation"]
                 registration_skip_names = ["println", "assert", "write"]
                 registration_skip_prefixes = ["test"]
+                [fingerprint.namespace_derivation]
+                prefix = "crate::"
+                strip_leading_segments = 1
+                separator = "::"
+                include_file_stem_when_root = true
                 [patterns.function]
                 regex = '^\s*(pub(?:\(crate\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?fn\s+(\w+)\s*\(([^)]*)\)'
                 context = "any"
@@ -1311,7 +1335,13 @@ mod tests {
 
     #[test]
     fn rust_namespace_comes_from_file_path_not_crate_imports() {
-        let grammar = rust_grammar();
+        let mut grammar = rust_grammar();
+        grammar.fingerprint.namespace_derivation = Some(grammar::NamespaceDerivationConfig {
+            prefix: Some("crate::".to_string()),
+            strip_leading_segments: 1,
+            separator: "::".to_string(),
+            include_file_stem_when_root: true,
+        });
 
         let command_content = r#"
 use crate::help_topics;

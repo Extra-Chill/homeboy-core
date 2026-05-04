@@ -106,6 +106,28 @@ pub struct FingerprintGrammar {
     /// Registration name prefixes to suppress.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub registration_skip_prefixes: Vec<String>,
+
+    /// Optional grammar-owned namespace derivation rule. Use this for languages
+    /// where the declaring namespace/module is implied by the file path rather
+    /// than a parsed source symbol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace_derivation: Option<NamespaceDerivationConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamespaceDerivationConfig {
+    /// Prefix prepended to the derived namespace, e.g. `crate::`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+    /// Path segments to drop before deriving a namespace, e.g. `1` to drop `src`.
+    #[serde(default)]
+    pub strip_leading_segments: usize,
+    /// Separator used between remaining path segments.
+    #[serde(default = "default_namespace_separator")]
+    pub separator: String,
+    /// Whether a root-level file contributes its file stem as the namespace.
+    #[serde(default)]
+    pub include_file_stem_when_root: bool,
 }
 
 impl FingerprintGrammar {
@@ -118,7 +140,12 @@ impl FingerprintGrammar {
             && self.registration_concepts.is_empty()
             && self.registration_skip_names.is_empty()
             && self.registration_skip_prefixes.is_empty()
+            && self.namespace_derivation.is_none()
     }
+}
+
+fn default_namespace_separator() -> String {
+    "::".to_string()
 }
 
 /// Grammar section for function contract extraction.
@@ -1106,6 +1133,13 @@ pub(crate) fn extract_block_body<'a>(
 mod tests {
     use super::*;
 
+    fn captures(entries: &[(&str, usize)]) -> HashMap<String, usize> {
+        entries
+            .iter()
+            .map(|(name, index)| ((*name).to_string(), *index))
+            .collect()
+    }
+
     fn rust_grammar() -> Grammar {
         Grammar {
             language: LanguageMeta {
@@ -1133,12 +1167,7 @@ mod tests {
                     ConceptPattern {
                         regex: r"(?:pub(?:\(crate\))?\s+)?(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)"
                             .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c.insert("params".to_string(), 2);
-                            c
-                        },
+                        captures: captures(&[("name", 1), ("params", 2)]),
                         context: "any".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1150,11 +1179,7 @@ mod tests {
                     ConceptPattern {
                         regex: r"(?:pub(?:\(crate\))?\s+)?(?:struct|enum|trait)\s+(\w+)"
                             .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c
-                        },
+                        captures: captures(&[("name", 1)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1165,11 +1190,7 @@ mod tests {
                     "import".to_string(),
                     ConceptPattern {
                         regex: r"use\s+([\w:]+(?:::\{[^}]+\})?);".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("path".to_string(), 1);
-                            c
-                        },
+                        captures: captures(&[("path", 1)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1207,12 +1228,7 @@ mod tests {
                     "method".to_string(),
                     ConceptPattern {
                         regex: r"(?:(?:public|protected|private|static|abstract|final)\s+)*function\s+(\w+)\s*\(([^)]*)\)".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c.insert("params".to_string(), 2);
-                            c
-                        },
+                        captures: captures(&[("name", 1), ("params", 2)]),
                         context: "any".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1224,12 +1240,7 @@ mod tests {
                     ConceptPattern {
                         regex: r"(?:abstract\s+)?(?:final\s+)?(class|trait|interface)\s+(\w+)"
                             .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("kind".to_string(), 1);
-                            c.insert("name".to_string(), 2);
-                            c
-                        },
+                        captures: captures(&[("kind", 1), ("name", 2)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1240,11 +1251,7 @@ mod tests {
                     "namespace".to_string(),
                     ConceptPattern {
                         regex: r"namespace\s+([\w\\]+);".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c
-                        },
+                        captures: captures(&[("name", 1)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,

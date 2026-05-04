@@ -33,12 +33,12 @@ pub use manifest::{
     ActionConfig, ActionType, AuditCapability, AutofixVerifyConfig, BenchConfig, BuildConfig,
     CliAutoFlag, CliAutoFlagCondition, CliConfig, CliHelpConfig, ComponentEnvConfig,
     DatabaseCliConfig, DatabaseConfig, DeployCapability, DeployOverride, DeployVerification,
-    DiscoveryConfig, DocTarget, ExecutableCapability, ExtensionManifest, FeatureContextRule,
-    FileContainsCondition, HttpMethod, InputConfig, LintChangedFileRoute, LintConfig, OutputConfig,
-    OutputSchema, PlatformCapability, ProvidesConfig, RemotePathInferenceRule, RequirementsConfig,
-    RuntimeConfig, RuntimeRequirementsConfig, ScriptsConfig, SelectOption, SettingConfig,
-    SinceTagConfig, StructuredSidecarDeclaration, TestConfig, TestDriftConfig, TestMappingConfig,
-    TraceConfig, VersionPatternConfig,
+    DiscoveryConfig, DiscoveryMarkerConfig, DocTarget, ExecutableCapability, ExtensionManifest,
+    FeatureContextRule, FileContainsCondition, HttpMethod, InputConfig, LintChangedFileRoute,
+    LintConfig, OutputConfig, OutputSchema, PlatformCapability, ProvidesConfig,
+    RemotePathInferenceRule, RequirementsConfig, RuntimeConfig, RuntimeRequirementsConfig,
+    ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig, StructuredSidecarDeclaration,
+    TestConfig, TestDriftConfig, TestMappingConfig, TraceConfig, VersionPatternConfig,
 };
 
 // Re-export version types

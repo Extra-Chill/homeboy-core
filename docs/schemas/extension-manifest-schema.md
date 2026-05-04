@@ -61,7 +61,11 @@ Declares what file types and capabilities this extension handles. Used by the au
 {
   "provides": {
     "file_extensions": ["php", "inc"],
-    "capabilities": ["fingerprint", "refactor"]
+    "capabilities": ["fingerprint", "refactor"],
+    "discovery_markers": [
+      { "all": ["style.css", "functions.php"] },
+      { "all": ["package.json"], "any": ["src/**/*.ts", "*.ts"] }
+    ]
   }
 }
 ```
@@ -70,6 +74,37 @@ Declares what file types and capabilities this extension handles. Used by the au
 
 - **`file_extensions`** (array): File extensions this extension can process (e.g., `["php", "inc"]`, `["rs"]`)
 - **`capabilities`** (array): Capabilities this extension supports (e.g., `["fingerprint", "refactor"]`)
+- **`discovery_markers`** (array): Component-root marker rules used by `homeboy context` gap reporting to suggest an extension without core knowing ecosystem-specific files.
+
+Each `discovery_markers` rule supports:
+
+- **`all`** (array): Relative marker paths/globs that must all exist.
+- **`any`** (array): Relative marker paths/globs where at least one must exist when supplied.
+
+Core treats marker strings generically. Exact strings are checked as paths relative to the component root; strings containing `*`, `?`, or `[` are evaluated as globs relative to the component root.
+
+## Grammar Fingerprint Metadata Contract
+
+Extension-owned `grammar.toml` files may declare fingerprint metadata consumed by Homeboy's generic fingerprint engine. Language and framework semantics belong here, not in core.
+
+Path-derived namespaces are declared with `fingerprint.namespace_derivation`:
+
+```toml
+[fingerprint.namespace_derivation]
+prefix = "crate::"
+strip_leading_segments = 1
+separator = "::"
+include_file_stem_when_root = true
+```
+
+### Namespace Derivation Fields
+
+- **`prefix`** (string): Optional prefix prepended to the derived namespace.
+- **`strip_leading_segments`** (integer): Number of leading path segments to remove before deriving the namespace.
+- **`separator`** (string): Separator used to join remaining namespace segments. Defaults to `::`.
+- **`include_file_stem_when_root`** (boolean): Whether a root-level source file contributes its file stem as the namespace.
+
+If an extension needs path-derived namespaces, it must ship this grammar metadata. Core does not provide language-specific fallbacks.
 
 ## Scripts Configuration
 
