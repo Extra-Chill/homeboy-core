@@ -261,6 +261,12 @@ fn visible_subcommands(command: &Command, remaining_depth: usize) -> Vec<Command
 mod tests {
     use super::*;
 
+    fn parsed_command(args: &[&str]) -> Commands {
+        Cli::try_parse_from(args)
+            .expect("CLI args should parse")
+            .command
+    }
+
     #[test]
     fn test_current_command_surface() {
         let surface = current_command_surface();
@@ -287,5 +293,45 @@ mod tests {
 
         assert!(surface.contains_path(&["self"]));
         assert!(!surface.contains_path(&["self", "missing"]));
+    }
+
+    #[test]
+    fn test_response_mode() {
+        assert_eq!(
+            parsed_command(&["homeboy", "status"]).response_mode(false),
+            CommandResponseMode::Json
+        );
+        assert_eq!(
+            parsed_command(&["homeboy", "review", "--report", "pr-comment"]).response_mode(false),
+            CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+        );
+        assert_eq!(
+            parsed_command(&["homeboy", "trace", "--report", "markdown"]).response_mode(false),
+            CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+        );
+        assert_eq!(
+            Commands::List.response_mode(false),
+            CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+        );
+    }
+
+    #[test]
+    fn test_output_artifact_policy() {
+        assert_eq!(
+            parsed_command(&["homeboy", "status"]).output_artifact_policy(true),
+            CommandOutputArtifactPolicy::GenericEnvelope
+        );
+        assert_eq!(
+            parsed_command(&["homeboy", "review"]).output_artifact_policy(true),
+            CommandOutputArtifactPolicy::ReviewStableArtifact
+        );
+        assert_eq!(
+            parsed_command(&["homeboy", "trace", "--json-summary"]).output_artifact_policy(true),
+            CommandOutputArtifactPolicy::TraceJsonSummaryArtifact
+        );
+        assert_eq!(
+            parsed_command(&["homeboy", "trace", "--json-summary"]).output_artifact_policy(false),
+            CommandOutputArtifactPolicy::GenericEnvelope
+        );
     }
 }
