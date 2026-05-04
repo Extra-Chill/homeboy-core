@@ -239,6 +239,8 @@ pub enum AuditFinding {
     /// Multiple files hand-roll the same observation lifecycle scaffolding
     /// instead of delegating lifecycle ownership to a shared wrapper/helper.
     ObservationLifecycleScaffolding,
+    /// Configured ecosystem/language/framework term appears in core-owned source.
+    CoreBoundaryLeak,
 }
 
 impl AuditFinding {
@@ -299,6 +301,7 @@ impl AuditFinding {
             "parallel_runner_setup",
             "command_output_policy",
             "observation_lifecycle_scaffolding",
+            "core_boundary_leak",
         ]
     }
 }

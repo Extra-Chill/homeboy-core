@@ -21,6 +21,7 @@ mod comment_hygiene;
 pub mod compare;
 mod compiler_warnings;
 pub(crate) mod conventions;
+mod core_boundary_leak;
 pub(crate) mod core_fingerprint;
 mod dead_code;
 mod dead_guard;
@@ -152,6 +153,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_deprecation_age: bool,
     pub(crate) run_dead_guard: bool,
     pub(crate) run_requested_detectors: bool,
+    pub(crate) run_core_boundary_leaks: bool,
     pub(crate) run_global_env_guard: bool,
     pub(crate) run_shared_scaffolding: bool,
     pub(crate) run_parallel_runner_setup: bool,
@@ -184,6 +186,7 @@ impl AuditExecutionPlan {
             run_deprecation_age: true,
             run_dead_guard: true,
             run_requested_detectors: true,
+            run_core_boundary_leaks: true,
             run_global_env_guard: true,
             run_shared_scaffolding: true,
             run_parallel_runner_setup: true,
@@ -341,6 +344,11 @@ impl AuditExecutionPlan {
                     AuditFinding::OptionScopeDrift,
                 ],
             ),
+            run_core_boundary_leaks: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::CoreBoundaryLeak],
+            ),
             run_global_env_guard: Self::family_enabled(
                 only,
                 exclude,
@@ -394,6 +402,7 @@ impl AuditExecutionPlan {
             || self.run_deprecation_age
             || self.run_dead_guard
             || self.run_requested_detectors
+            || self.run_core_boundary_leaks
             || self.run_global_env_guard
             || self.run_shared_scaffolding
             || self.run_parallel_runner_setup
@@ -1136,6 +1145,21 @@ fn audit_internal(
             requested_findings.len()
         );
         all_findings.extend(requested_findings);
+    }
+
+    // Phase 4t2: Configured core-boundary ecosystem leak detection.
+    let core_boundary_findings = if plan.run_core_boundary_leaks {
+        core_boundary_leak::run(&all_fingerprints, &audit_config.core_boundary_leaks)
+    } else {
+        Vec::new()
+    };
+    if !core_boundary_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Core boundary leaks: {} finding(s) (configured ecosystem terms in core source)",
+            core_boundary_findings.len()
+        );
+        all_findings.extend(core_boundary_findings);
     }
 
     // Phase 4v: Process-global environment mutation guard consistency in tests.

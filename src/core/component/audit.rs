@@ -24,6 +24,50 @@ pub struct AuditConfig {
     /// Extension-owned text detector rules that emit audit findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requested_detectors: Vec<RequestedDetectorRule>,
+    /// Configurable ecosystem-term checks for core-owned source boundaries.
+    #[serde(default, skip_serializing_if = "CoreBoundaryLeakConfig::is_empty")]
+    pub core_boundary_leaks: CoreBoundaryLeakConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct CoreBoundaryLeakConfig {
+    /// Language, framework, runtime, tool, or extension identifiers that should
+    /// not become first-class concepts in the configured core source paths.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terms: Vec<String>,
+    /// Path substrings that identify core-owned source to scan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scan_path_contains: Vec<String>,
+    /// Path substrings that are intentionally exempt, such as generated data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_path_contains: Vec<String>,
+    /// Line substrings that explicitly mark a local example as allowed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_line_contains: Vec<String>,
+    /// Path substrings treated as example-only when not otherwise allowlisted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub example_path_contains: Vec<String>,
+}
+
+impl CoreBoundaryLeakConfig {
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+            && self.scan_path_contains.is_empty()
+            && self.allow_path_contains.is_empty()
+            && self.allow_line_contains.is_empty()
+            && self.example_path_contains.is_empty()
+    }
+
+    fn merge(&mut self, other: &CoreBoundaryLeakConfig) {
+        extend_unique(&mut self.terms, &other.terms);
+        extend_unique(&mut self.scan_path_contains, &other.scan_path_contains);
+        extend_unique(&mut self.allow_path_contains, &other.allow_path_contains);
+        extend_unique(&mut self.allow_line_contains, &other.allow_line_contains);
+        extend_unique(
+            &mut self.example_path_contains,
+            &other.example_path_contains,
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -171,6 +215,7 @@ impl AuditConfig {
             && self.convention_exception_globs.is_empty()
             && self.known_symbols.is_empty()
             && self.requested_detectors.is_empty()
+            && self.core_boundary_leaks.is_empty()
     }
 
     pub fn merge(&mut self, other: &AuditConfig) {
@@ -189,6 +234,7 @@ impl AuditConfig {
             &other.convention_exception_globs,
         );
         self.known_symbols.merge(&other.known_symbols);
+        self.core_boundary_leaks.merge(&other.core_boundary_leaks);
         for rule in &other.requested_detectors {
             if !self
                 .requested_detectors
@@ -206,5 +252,59 @@ fn extend_unique<T: Clone + PartialEq>(target: &mut Vec<T>, source: &[T]) {
         if !target.contains(value) {
             target.push(value.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn core_boundary_leak_config_marks_audit_config_non_empty() {
+        let config = AuditConfig {
+            core_boundary_leaks: CoreBoundaryLeakConfig {
+                terms: vec!["florpstack".to_string()],
+                scan_path_contains: vec!["src/core/".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn merge_dedupes_core_boundary_leak_config() {
+        let mut config = AuditConfig {
+            core_boundary_leaks: CoreBoundaryLeakConfig {
+                terms: vec!["florpstack".to_string()],
+                scan_path_contains: vec!["src/core/".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        config.merge(&AuditConfig {
+            core_boundary_leaks: CoreBoundaryLeakConfig {
+                terms: vec!["florpstack".to_string(), "widgetlang".to_string()],
+                scan_path_contains: vec!["src/core/".to_string(), "src/commands/".to_string()],
+                allow_line_contains: vec!["allow-core-boundary-example".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        assert_eq!(
+            config.core_boundary_leaks.terms,
+            vec!["florpstack", "widgetlang"]
+        );
+        assert_eq!(
+            config.core_boundary_leaks.scan_path_contains,
+            vec!["src/core/", "src/commands/"]
+        );
+        assert_eq!(
+            config.core_boundary_leaks.allow_line_contains,
+            vec!["allow-core-boundary-example"]
+        );
     }
 }
