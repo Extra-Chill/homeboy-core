@@ -232,6 +232,10 @@ pub enum AuditFinding {
     /// Command-family files independently assemble the same generic execution
     /// contract phases and contract-call shape.
     ParallelRunnerSetup,
+    /// Multiple command modules independently own response mode, artifact,
+    /// output routing, or response wrapping policy that should live in the
+    /// shared command output layer.
+    CommandOutputPolicy,
 }
 
 impl AuditFinding {
@@ -290,6 +294,7 @@ impl AuditFinding {
             "stale_cli_argument_shape",
             "unwired_nested_rust_test",
             "parallel_runner_setup",
+            "command_output_policy",
         ]
     }
 }

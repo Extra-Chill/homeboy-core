@@ -15,6 +15,7 @@ pub mod baseline;
 mod checks;
 mod cli_invocation_arguments;
 pub mod codebase_map;
+mod command_output_policy;
 mod comment_blocks;
 mod comment_hygiene;
 pub mod compare;
@@ -153,6 +154,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_global_env_guard: bool,
     pub(crate) run_shared_scaffolding: bool,
     pub(crate) run_parallel_runner_setup: bool,
+    pub(crate) run_command_output_policy: bool,
 }
 
 impl AuditExecutionPlan {
@@ -183,6 +185,7 @@ impl AuditExecutionPlan {
             run_global_env_guard: true,
             run_shared_scaffolding: true,
             run_parallel_runner_setup: true,
+            run_command_output_policy: true,
         }
     }
 
@@ -350,6 +353,11 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::ParallelRunnerSetup],
             ),
+            run_command_output_policy: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::CommandOutputPolicy],
+            ),
         }
     }
 
@@ -381,6 +389,7 @@ impl AuditExecutionPlan {
             || self.run_global_env_guard
             || self.run_shared_scaffolding
             || self.run_parallel_runner_setup
+            || self.run_command_output_policy
     }
 }
 
@@ -1152,6 +1161,7 @@ fn audit_internal(
     }
 
     // Phase 4w: Parallel runner setup detection — command-family files that
+    // Phase 4w: Parallel runner setup detection — command-family files that
     // assemble the same generic execution contract independently.
     let parallel_runner_findings = if plan.run_parallel_runner_setup {
         parallel_runner_setup::run(&all_fingerprints)
@@ -1165,6 +1175,21 @@ fn audit_internal(
             parallel_runner_findings.len()
         );
         all_findings.extend(parallel_runner_findings);
+    }
+
+    // Phase 4w: Scattered command response/output policy ownership.
+    let command_output_findings = if plan.run_command_output_policy {
+        command_output_policy::run(&all_fingerprints)
+    } else {
+        Vec::new()
+    };
+    if !command_output_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Command output policy: {} finding(s) (scattered command response/output contracts)",
+            command_output_findings.len()
+        );
+        all_findings.extend(command_output_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,
