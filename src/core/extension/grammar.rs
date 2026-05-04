@@ -83,6 +83,15 @@ pub struct FingerprintGrammar {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skip_calls: Vec<String>,
 
+    /// Identifier prefixes that denote variables before bare identifier
+    /// normalization, e.g. `$` for dollar-prefixed languages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variable_prefixes: Vec<String>,
+
+    /// Prefixed variable names preserved during structural normalization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preserved_variables: Vec<String>,
+
     /// Method names whose parameters are fixed by a framework/language contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contract_method_names: Vec<String>,
@@ -134,6 +143,8 @@ impl FingerprintGrammar {
     pub fn is_empty(&self) -> bool {
         self.keywords.is_empty()
             && self.skip_calls.is_empty()
+            && self.variable_prefixes.is_empty()
+            && self.preserved_variables.is_empty()
             && self.contract_method_names.is_empty()
             && self.contract_type_hints.is_empty()
             && self.hook_concepts.is_empty()
