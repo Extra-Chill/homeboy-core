@@ -728,6 +728,43 @@ pub(crate) trait ConfigEntity: Serialize + DeserializeOwned {
     }
 }
 
+pub(crate) struct ConfigEntityMetadata {
+    entity_type: &'static str,
+    exists: fn(&str) -> bool,
+    aliases: fn() -> Vec<(String, String)>,
+}
+
+fn entity_metadata<T: ConfigEntity>() -> ConfigEntityMetadata {
+    ConfigEntityMetadata {
+        entity_type: T::ENTITY_TYPE,
+        exists: exists::<T>,
+        aliases: alias_entries::<T>,
+    }
+}
+
+fn config_entity_registry() -> [ConfigEntityMetadata; 4] {
+    [
+        entity_metadata::<crate::project::Project>(),
+        entity_metadata::<crate::server::Server>(),
+        entity_metadata::<crate::extension::ExtensionManifest>(),
+        entity_metadata::<crate::fleet::Fleet>(),
+    ]
+}
+
+fn alias_entries<T: ConfigEntity>() -> Vec<(String, String)> {
+    list::<T>()
+        .unwrap_or_default()
+        .into_iter()
+        .flat_map(|entity| {
+            let entity_id = entity.id().to_string();
+            let aliases = entity.aliases().to_vec();
+            aliases
+                .into_iter()
+                .map(move |alias| (entity_id.clone(), alias))
+        })
+        .collect()
+}
+
 pub(crate) fn load<T: ConfigEntity>(id: &str) -> Result<T> {
     let path = T::config_path(id)?;
     if !path.exists() {
@@ -822,22 +859,19 @@ pub(crate) fn list<T: ConfigEntity>() -> Result<Vec<T>> {
 }
 
 pub(crate) fn check_id_collision(id: &str, saving_type: &str) -> Result<()> {
-    // Check each entity type using exists::<T>() which handles custom config_path
-    // (e.g., extensions use {dir}/{id}/{id}.json instead of {dir}/{id}.json)
-    fn check<T: ConfigEntity>(id: &str, saving_type: &str) -> Result<()> {
-        if T::ENTITY_TYPE == saving_type {
-            return Ok(());
+    for metadata in config_entity_registry() {
+        if metadata.entity_type == saving_type {
+            continue;
         }
-        if exists::<T>(id) {
-            return Err(Error::config_id_collision(id, saving_type, T::ENTITY_TYPE));
-        }
-        Ok(())
-    }
 
-    check::<crate::project::Project>(id, saving_type)?;
-    check::<crate::server::Server>(id, saving_type)?;
-    check::<crate::extension::ExtensionManifest>(id, saving_type)?;
-    check::<crate::fleet::Fleet>(id, saving_type)?;
+        if (metadata.exists)(id) {
+            return Err(Error::config_id_collision(
+                id,
+                saving_type,
+                metadata.entity_type,
+            ));
+        }
+    }
 
     // Check if the ID collides with any existing alias
     check_alias_collision_all(id, saving_type)?;
@@ -849,32 +883,20 @@ pub(crate) fn check_id_collision(id: &str, saving_type: &str) -> Result<()> {
 fn check_alias_collision_all(id: &str, saving_type: &str) -> Result<()> {
     let id_lower = id.to_lowercase();
 
-    // Helper macro to avoid repeating for each entity type
-    fn check_aliases_in<T: ConfigEntity>(id_lower: &str, saving_type: &str) -> Result<()> {
-        if T::ENTITY_TYPE == saving_type {
-            return Ok(());
+    for metadata in config_entity_registry() {
+        if metadata.entity_type == saving_type {
+            continue;
         }
-        if let Ok(entities) = list::<T>() {
-            for entity in &entities {
-                for alias in entity.aliases() {
-                    if alias.to_lowercase() == *id_lower {
-                        return Err(Error::config(format!(
-                            "ID '{}' conflicts with an alias on {} '{}'",
-                            id_lower,
-                            T::ENTITY_TYPE,
-                            entity.id()
-                        )));
-                    }
-                }
+
+        for (entity_id, alias) in (metadata.aliases)() {
+            if alias.to_lowercase() == id_lower {
+                return Err(Error::config(format!(
+                    "ID '{}' conflicts with an alias on {} '{}'",
+                    id_lower, metadata.entity_type, entity_id
+                )));
             }
         }
-        Ok(())
     }
-
-    check_aliases_in::<crate::project::Project>(&id_lower, saving_type)?;
-    check_aliases_in::<crate::server::Server>(&id_lower, saving_type)?;
-    check_aliases_in::<crate::extension::ExtensionManifest>(&id_lower, saving_type)?;
-    check_aliases_in::<crate::fleet::Fleet>(&id_lower, saving_type)?;
 
     Ok(())
 }
