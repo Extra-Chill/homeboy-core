@@ -56,7 +56,7 @@ pub(super) fn run(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
             .iter()
             .flat_map(|site| site.operations.iter().copied())
             .collect();
-        if !operations.contains("parse") && !operations.contains("serialize") {
+        if !operations.contains("parse") {
             continue;
         }
 
@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_repeated_typed_string_setting_plumbing_across_commands() {
+    fn test_run() {
         let first = fp(
             "src/commands/bench.rs",
             r#"
