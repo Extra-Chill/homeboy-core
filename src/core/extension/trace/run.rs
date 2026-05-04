@@ -10,10 +10,11 @@ use crate::engine::baseline::BaselineFlags;
 use crate::engine::run_dir::{self, RunDir};
 use crate::error::{Error, ErrorCode, Result};
 use crate::extension::trace::baseline::TraceBaselineComparison;
+use crate::extension::RunnerOutput;
 use crate::extension::{
-    resolve_execution_context, stderr_tail, ExtensionCapability, ExtensionExecutionContext,
+    build_scenario_runner, path_list_env_value, resolve_execution_context, stderr_tail,
+    ExtensionCapability, ExtensionExecutionContext, ScenarioRunnerOptions,
 };
-use crate::extension::{ExtensionRunner, RunnerOutput};
 use crate::rig::RigStateSnapshot;
 
 use super::attach::{append_attach_observations, observe_trace_attachments, TraceAttachment};
@@ -571,37 +572,33 @@ pub(crate) fn build_trace_runner(
         return run_generic_trace_runner(component, args, run_dir, &artifact_dir, list_only);
     };
 
-    let mut runner = ExtensionRunner::for_context(execution_context.clone())
-        .component(component.clone())
-        .path_override(args.path_override.clone())
-        .settings(&args.settings)
-        .settings_json(&args.runner_inputs.json_settings)
-        .with_run_dir(run_dir)
-        .cleanup_process_group(true)
-        .env(
+    let mut runner = build_scenario_runner(ScenarioRunnerOptions {
+        execution_context,
+        component,
+        path_override: args.path_override.clone(),
+        settings: &args.settings,
+        settings_json: &args.runner_inputs.json_settings,
+        run_dir,
+        cleanup_process_group: true,
+        results_env: Some((
             "HOMEBOY_TRACE_RESULTS_FILE",
-            &run_dir
-                .step_file(run_dir::files::TRACE_RESULTS)
-                .to_string_lossy(),
-        )
-        .env("HOMEBOY_TRACE_SCENARIO", &args.scenario_id)
-        .env(
-            "HOMEBOY_TRACE_ARTIFACT_DIR",
-            &artifact_dir.to_string_lossy(),
-        )
-        .env("HOMEBOY_TRACE_LIST_ONLY", if list_only { "1" } else { "0" });
+            run_dir.step_file(run_dir::files::TRACE_RESULTS),
+        )),
+        scenario_env: Some(("HOMEBOY_TRACE_SCENARIO", &args.scenario_id)),
+        artifact_env: Some(("HOMEBOY_TRACE_ARTIFACT_DIR", &artifact_dir)),
+        list_only_env: Some(("HOMEBOY_TRACE_LIST_ONLY", list_only)),
+        extra_workloads_env: Some((
+            "HOMEBOY_TRACE_EXTRA_WORKLOADS",
+            &args.runner_inputs.workload_paths,
+            "trace_workloads",
+        )),
+    })?;
 
     if let Some(rig_id) = &args.rig_id {
         runner = runner.env("HOMEBOY_TRACE_RIG_ID", rig_id);
     }
     if let Some(path) = &args.path_override {
         runner = runner.env("HOMEBOY_TRACE_COMPONENT_PATH", path);
-    }
-    if !args.runner_inputs.workload_paths.is_empty() {
-        runner = runner.env(
-            "HOMEBOY_TRACE_EXTRA_WORKLOADS",
-            &extra_workloads_env_value(&args.runner_inputs.workload_paths)?,
-        );
     }
     if !args.runner_inputs.attachments.is_empty() {
         let attachments_json =
@@ -895,16 +892,7 @@ fn generic_trace_env(
 }
 
 fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
-    std::env::join_paths(paths)
-        .map_err(|e| {
-            Error::validation_invalid_argument(
-                "trace_workloads",
-                format!("trace workload path cannot be exported: {}", e),
-                None,
-                None,
-            )
-        })
-        .map(|joined| joined.to_string_lossy().to_string())
+    path_list_env_value("trace_workloads", paths)
 }
 
 fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> TraceRunFailure {

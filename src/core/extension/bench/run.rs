@@ -21,7 +21,8 @@ use crate::extension::bench::parsing::{
     BenchWorkloadMetadata,
 };
 use crate::extension::{
-    resolve_execution_context, ExtensionCapability, ExtensionExecutionContext, ExtensionRunner,
+    build_scenario_runner, resolve_execution_context, ExtensionCapability,
+    ExtensionExecutionContext, ExtensionRunner, ScenarioRunnerOptions,
 };
 
 #[derive(Debug, Clone)]
@@ -988,30 +989,35 @@ fn build_runner(
     run_dir: &RunDir,
     instance: Option<(u32, u32)>,
 ) -> Result<ExtensionRunner> {
-    let mut runner = ExtensionRunner::for_context(execution_context.clone())
-        .component(component.clone())
-        .path_override(args.path_override.clone())
-        .settings(&args.settings)
-        .settings_json(&args.settings_json)
-        .with_run_dir(run_dir)
-        .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
-        .env("HOMEBOY_BENCH_PROGRESS", bench_progress_env_value())
-        .env("HOMEBOY_BENCH_PROGRESS_STREAM", "stderr")
-        .script_args(&args.passthrough_args)
-        .passthrough(false)
-        .stderr_passthrough(bench_progress_enabled());
+    let mut runner = build_scenario_runner(ScenarioRunnerOptions {
+        execution_context,
+        component,
+        path_override: args.path_override.clone(),
+        settings: &args.settings,
+        settings_json: &args.settings_json,
+        run_dir,
+        cleanup_process_group: false,
+        results_env: None,
+        scenario_env: None,
+        artifact_env: None,
+        list_only_env: None,
+        extra_workloads_env: Some((
+            "HOMEBOY_BENCH_EXTRA_WORKLOADS",
+            &args.extra_workloads,
+            "bench_workloads",
+        )),
+    })?
+    .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
+    .env("HOMEBOY_BENCH_PROGRESS", bench_progress_env_value())
+    .env("HOMEBOY_BENCH_PROGRESS_STREAM", "stderr")
+    .script_args(&args.passthrough_args)
+    .passthrough(false)
+    .stderr_passthrough(bench_progress_enabled());
 
     if let Some(warmup_iterations) = args.warmup_iterations {
         runner = runner.env(
             "HOMEBOY_BENCH_WARMUP_ITERATIONS",
             &warmup_iterations.to_string(),
-        );
-    }
-
-    if !args.extra_workloads.is_empty() {
-        runner = runner.env(
-            "HOMEBOY_BENCH_EXTRA_WORKLOADS",
-            &extra_workloads_env_value(&args.extra_workloads)?,
         );
     }
 
@@ -1053,21 +1059,6 @@ fn bench_progress_env_value() -> &'static str {
     } else {
         "0"
     }
-}
-
-fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
-    let joined = std::env::join_paths(paths)
-        .map_err(|e| {
-            Error::validation_invalid_argument(
-                "bench_workloads",
-                format!("bench workload path cannot be exported: {}", e),
-                None,
-                None,
-            )
-        })?
-        .to_string_lossy()
-        .to_string();
-    Ok(joined)
 }
 
 /// Spawn N runner instances in parallel, wait for all, aggregate.
@@ -1190,6 +1181,7 @@ fn run_concurrent_instances(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extension::path_list_env_value;
     use std::collections::BTreeMap;
 
     #[test]
@@ -1207,7 +1199,7 @@ mod tests {
         ];
 
         assert_eq!(
-            extra_workloads_env_value(&paths).unwrap(),
+            path_list_env_value("bench_workloads", &paths).unwrap(),
             "/tmp/bench-one.php:/tmp/bench-two.php"
         );
     }

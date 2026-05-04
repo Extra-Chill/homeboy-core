@@ -10,7 +10,7 @@ use homeboy::extension::test::{FailureCategory, FailureCluster, TestAnalysisInpu
 use homeboy::extension::ExtensionCapability;
 use homeboy::git::short_head_revision_at;
 use homeboy::observation::{
-    NewFindingRecord, NewRunRecord, ObservationStore, RunRecord, RunStatus,
+    merge_metadata, ActiveObservation, NewFindingRecord, NewRunRecord, RunStatus,
 };
 use std::path::Path;
 
@@ -228,19 +228,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
             component_label: effective_id.clone(),
             component_id: ctx.component_id.clone(),
             path_override: args.comp.path.clone(),
-            settings: ctx
-                .settings
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        k.clone(),
-                        match v {
-                            serde_json::Value::String(s) => s.clone(),
-                            other => other.to_string(),
-                        },
-                    )
-                })
-                .collect(),
+            settings: ctx.resolved_settings().string_lossy_overrides(),
             skip_lint: args.skip_lint,
             coverage: args.coverage,
             coverage_min: args.coverage_min,
@@ -262,11 +250,7 @@ pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput>
     Ok(report::from_main_workflow(workflow))
 }
 
-struct TestObservation {
-    store: ObservationStore,
-    test_run: RunRecord,
-    test_metadata: serde_json::Value,
-}
+struct TestObservation(ActiveObservation);
 
 fn start_test_observation(
     component_id: &str,
@@ -275,26 +259,18 @@ fn start_test_observation(
     mode: &str,
     run_dir: Option<&RunDir>,
 ) -> Option<TestObservation> {
-    let store = ObservationStore::open_initialized().ok()?;
     let metadata = test_observation_initial_metadata(source_path, args, mode, run_dir);
-    let run = store
-        .start_run(NewRunRecord {
-            kind: "test".to_string(),
-            component_id: Some(component_id.to_string()),
-            command: Some(test_observation_command(component_id, args)),
-            cwd: Some(source_path.to_string_lossy().to_string()),
-            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            git_sha: short_head_revision_at(source_path),
-            rig_id: None,
-            metadata_json: metadata.clone(),
-        })
-        .ok()?;
-
-    Some(TestObservation {
-        store,
-        test_run: run,
-        test_metadata: metadata,
+    ActiveObservation::start_best_effort(NewRunRecord {
+        kind: "test".to_string(),
+        component_id: Some(component_id.to_string()),
+        command: Some(test_observation_command(component_id, args)),
+        cwd: Some(source_path.to_string_lossy().to_string()),
+        homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        git_sha: short_head_revision_at(source_path),
+        rig_id: None,
+        metadata_json: metadata.clone(),
     })
+    .map(TestObservation)
 }
 
 fn finish_test_workflow_observation(
@@ -321,8 +297,8 @@ fn finish_test_observation(
         return;
     };
 
-    let metadata = merge_test_observation_metadata(
-        observation.test_metadata.clone(),
+    let metadata = merge_metadata(
+        observation.0.initial_metadata().clone(),
         serde_json::json!({
             "observation_status": workflow.status,
             "exit_code": workflow.exit_code,
@@ -341,9 +317,7 @@ fn finish_test_observation(
         RunStatus::Fail
     };
     persist_test_findings(&observation, workflow);
-    let _ = observation
-        .store
-        .finish_run(&observation.test_run.id, status, Some(metadata));
+    observation.0.finish(status, Some(metadata));
 }
 
 fn persist_test_findings(
@@ -352,20 +326,17 @@ fn persist_test_findings(
 ) {
     let mut records = Vec::new();
     if let Some(input) = &workflow.failure_analysis_input {
-        records.extend(test_failure_finding_records(
-            &observation.test_run.id,
-            input,
-        ));
+        records.extend(test_failure_finding_records(observation.0.run_id(), input));
     }
     if let Some(analysis) = &workflow.analysis {
         records.extend(
             analysis
                 .clusters
                 .iter()
-                .map(|cluster| test_cluster_finding_record(&observation.test_run.id, cluster)),
+                .map(|cluster| test_cluster_finding_record(observation.0.run_id(), cluster)),
         );
     }
-    let _ = observation.store.record_findings(&records);
+    observation.0.record_findings(&records);
 }
 
 fn test_failure_finding_records(run_id: &str, input: &TestAnalysisInput) -> Vec<NewFindingRecord> {
@@ -473,8 +444,8 @@ fn finish_test_drift_observation(
         return;
     };
 
-    let metadata = merge_test_observation_metadata(
-        observation.test_metadata,
+    let metadata = merge_metadata(
+        observation.0.initial_metadata().clone(),
         serde_json::json!({
             "observation_status": if workflow.exit_code == 0 { "pass" } else { "fail" },
             "exit_code": workflow.exit_code,
@@ -486,9 +457,7 @@ fn finish_test_drift_observation(
     } else {
         RunStatus::Fail
     };
-    let _ = observation
-        .store
-        .finish_run(&observation.test_run.id, status, Some(metadata));
+    observation.0.finish(status, Some(metadata));
 }
 
 fn finish_test_observation_error(observation: Option<TestObservation>, error: &homeboy::Error) {
@@ -496,17 +465,14 @@ fn finish_test_observation_error(observation: Option<TestObservation>, error: &h
         return;
     };
 
-    let metadata = merge_test_observation_metadata(
-        observation.test_metadata,
+    let metadata = merge_metadata(
+        observation.0.initial_metadata().clone(),
         serde_json::json!({
             "observation_status": "error",
             "error": error.to_string(),
         }),
     );
-    let _ =
-        observation
-            .store
-            .finish_run(&observation.test_run.id, RunStatus::Error, Some(metadata));
+    observation.0.finish_error(Some(metadata));
 }
 
 fn test_observation_command(component_id: &str, args: &TestArgs) -> String {
@@ -569,18 +535,6 @@ fn test_observation_initial_metadata(
         "passthrough_args": filter_homeboy_flags(&args.args),
         "run_dir": run_dir.map(|run_dir| run_dir.path().to_string_lossy().to_string()),
     })
-}
-
-fn merge_test_observation_metadata(
-    mut initial: serde_json::Value,
-    extra: serde_json::Value,
-) -> serde_json::Value {
-    if let (Some(initial), Some(extra)) = (initial.as_object_mut(), extra.as_object()) {
-        for (key, value) in extra {
-            initial.insert(key.clone(), value.clone());
-        }
-    }
-    initial
 }
 
 #[cfg(test)]
@@ -650,7 +604,7 @@ mod tests {
 
             let observation = start_test_observation("homeboy", home.path(), &args, "test", None)
                 .expect("observation should start");
-            let run_id = observation.test_run.id.clone();
+            let run_id = observation.0.run_id().to_string();
 
             finish_test_observation_error(
                 Some(observation),
@@ -687,7 +641,7 @@ mod tests {
             let args = sample_args();
             let observation = start_test_observation("homeboy", home.path(), &args, "test", None)
                 .expect("observation should start");
-            let run_id = observation.test_run.id.clone();
+            let run_id = observation.0.run_id().to_string();
             let input = TestAnalysisInput {
                 failures: vec![TestFailure {
                     test_name: "tests::fails".to_string(),

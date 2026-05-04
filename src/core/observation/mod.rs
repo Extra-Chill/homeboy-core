@@ -4,8 +4,11 @@
 //! stack specs, baselines). SQLite stores observed state from command runs and
 //! generated artifacts. This module only provides the storage substrate.
 
+mod lifecycle;
 pub mod records;
 pub mod store;
+
+pub use lifecycle::{merge_metadata, ActiveObservation};
 
 pub use records::{
     finding_record_from_annotation, finding_record_from_audit, finding_record_from_lint,

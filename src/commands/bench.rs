@@ -692,22 +692,8 @@ fn run_list(args: &BenchListArgs) -> CmdResult<BenchOutput> {
             component_label: effective_id,
             component_id: ctx.component_id.clone(),
             path_override,
-            settings: ctx
-                .settings
-                .iter()
-                .filter_map(|(k, v)| match v {
-                    serde_json::Value::String(s) => Some((k.clone(), s.clone())),
-                    _ => None,
-                })
-                .collect(),
-            settings_json: ctx
-                .settings
-                .iter()
-                .filter_map(|(k, v)| match v {
-                    serde_json::Value::String(_) => None,
-                    other => Some((k.clone(), other.clone())),
-                })
-                .collect(),
+            settings: ctx.resolved_settings().string_overrides(),
+            settings_json: ctx.resolved_settings().json_overrides(),
             passthrough_args,
             scenario_ids: args.scenario_ids.clone(),
             extra_workloads,

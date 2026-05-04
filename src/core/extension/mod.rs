@@ -78,12 +78,13 @@ pub(crate) fn stderr_tail(stderr: &str) -> String {
 
 use crate::component::Component;
 use crate::config;
+use crate::engine::run_dir::RunDir;
 use crate::error::Result;
 use crate::error::{Error, ErrorCode};
 use crate::output::MergeOutput;
 use crate::paths;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn load_extension(id: &str) -> Result<ExtensionManifest> {
     let mut manifest = config::load::<ExtensionManifest>(id)?;
@@ -186,6 +187,71 @@ pub struct ExtensionExecutionContext {
     pub extension_path: PathBuf,
     pub script_path: String,
     pub settings: Vec<(String, serde_json::Value)>,
+}
+
+pub struct ScenarioRunnerOptions<'a> {
+    pub execution_context: &'a ExtensionExecutionContext,
+    pub component: &'a Component,
+    pub path_override: Option<String>,
+    pub settings: &'a [(String, String)],
+    pub settings_json: &'a [(String, serde_json::Value)],
+    pub run_dir: &'a RunDir,
+    pub cleanup_process_group: bool,
+    pub results_env: Option<(&'a str, PathBuf)>,
+    pub scenario_env: Option<(&'a str, &'a str)>,
+    pub artifact_env: Option<(&'a str, &'a Path)>,
+    pub list_only_env: Option<(&'a str, bool)>,
+    pub extra_workloads_env: Option<(&'a str, &'a [PathBuf], &'a str)>,
+}
+
+pub fn build_scenario_runner(options: ScenarioRunnerOptions<'_>) -> Result<ExtensionRunner> {
+    let mut runner = ExtensionRunner::for_context(options.execution_context.clone())
+        .component(options.component.clone())
+        .path_override(options.path_override)
+        .settings(options.settings)
+        .settings_json(options.settings_json)
+        .with_run_dir(options.run_dir);
+
+    if options.cleanup_process_group {
+        runner = runner.cleanup_process_group(true);
+    }
+    if let Some((key, path)) = options.results_env {
+        runner = runner.env(key, &path.to_string_lossy());
+    }
+    if let Some((key, value)) = options.scenario_env {
+        runner = runner.env(key, value);
+    }
+    if let Some((key, path)) = options.artifact_env {
+        runner = runner.env(key, &path.to_string_lossy());
+    }
+    if let Some((key, list_only)) = options.list_only_env {
+        runner = runner.env(key, if list_only { "1" } else { "0" });
+    }
+    if let Some((key, paths, error_field)) = options.extra_workloads_env {
+        if !paths.is_empty() {
+            runner = runner.env(key, &path_list_env_value(error_field, paths)?);
+        }
+    }
+
+    Ok(runner)
+}
+
+pub fn path_list_env_value(error_field: &str, paths: &[PathBuf]) -> Result<String> {
+    let path_description = error_field
+        .strip_suffix("_workloads")
+        .map(|prefix| format!("{prefix} workload path"))
+        .unwrap_or_else(|| "workload path".to_string());
+
+    std::env::join_paths(paths)
+        .map_err(|e| {
+            Error::validation_invalid_argument(
+                error_field,
+                format!("{path_description} cannot be exported: {e}"),
+                None,
+                None,
+            )
+        })
+        .map(|joined| joined.to_string_lossy().to_string())
 }
 
 fn no_extensions_error(component: &Component) -> Error {

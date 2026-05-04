@@ -532,10 +532,12 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
     let trace_probes =
         trace_probes_for_args(&args, rig_context.as_ref(), ctx.extension_id.as_deref())?;
     let attachments = TraceAttachment::parse_all(&args.attachments)?;
+    let resolved_settings = ctx.resolved_settings();
     let mut json_settings = experiment_settings;
-    json_settings.extend(settings_as_json(&ctx.settings));
+    json_settings.extend(resolved_settings.json_overrides());
     json_settings.extend(
-        settings_as_strings(&ctx.settings)
+        resolved_settings
+            .string_overrides()
             .into_iter()
             .map(|(key, value)| (key, serde_json::Value::String(value))),
     );
@@ -545,7 +547,7 @@ fn execute_trace_run(args: TraceArgs) -> homeboy::Result<TraceRunExecution> {
             component_label: effective_id.clone(),
             component_id: ctx.component_id.clone(),
             path_override,
-            settings: settings_as_strings(&ctx.settings),
+            settings: resolved_settings.string_overrides(),
             runner_inputs: TraceRunnerInputs {
                 json_settings,
                 env: experiment_env.clone(),
@@ -986,9 +988,9 @@ fn run_list(args: TraceArgs) -> CmdResult<TraceCommandOutput> {
             component_label: effective_id.clone(),
             component_id: ctx.component_id.clone(),
             path_override,
-            settings: settings_as_strings(&ctx.settings),
+            settings: ctx.resolved_settings().string_overrides(),
             runner_inputs: TraceRunnerInputs {
-                json_settings: settings_as_json(&ctx.settings),
+                json_settings: ctx.resolved_settings().json_overrides(),
                 env: Vec::new(),
                 workload_paths: extra_workloads,
                 probes: Vec::new(),
@@ -1326,26 +1328,6 @@ fn rig_component_for_trace(spec: &RigSpec, component_id: &str) -> Option<Compone
         },
         ..Default::default()
     })
-}
-
-fn settings_as_strings(settings: &[(String, serde_json::Value)]) -> Vec<(String, String)> {
-    settings
-        .iter()
-        .filter_map(|(key, value)| match value {
-            serde_json::Value::String(s) => Some((key.clone(), s.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
-fn settings_as_json(settings: &[(String, serde_json::Value)]) -> Vec<(String, serde_json::Value)> {
-    settings
-        .iter()
-        .filter_map(|(key, value)| match value {
-            serde_json::Value::String(_) => None,
-            other => Some((key.clone(), other.clone())),
-        })
-        .collect()
 }
 
 struct ActiveTraceObservation {
