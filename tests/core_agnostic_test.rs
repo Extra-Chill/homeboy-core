@@ -1,0 +1,798 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+
+#[derive(Clone, Copy)]
+struct Term {
+    name: &'static str,
+    kind: MatchKind,
+}
+
+#[derive(Clone, Copy)]
+enum MatchKind {
+    Literal,
+    Token,
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct ViolationKey {
+    path: &'static str,
+    term: &'static str,
+}
+
+const CORE_OWNED_SOURCE_ROOTS: &[&str] = &[
+    "src/core",
+    "src/commands/component.rs",
+    "src/commands/doctor/resources.rs",
+    "src/commands/extension.rs",
+    "src/commands/lint.rs",
+    "src/commands/report.rs",
+    "src/commands/review/mod.rs",
+    "src/commands/test.rs",
+];
+
+const TERMS: &[Term] = &[
+    Term {
+        name: "wordpress",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "nodejs",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "rust",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "php",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "cargo",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "npm",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "npx",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "composer",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "phpcbf",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "phpcs",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "phpstan",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "gofmt",
+        kind: MatchKind::Token,
+    },
+    Term {
+        name: "Cargo.toml",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "Cargo.lock",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "package.json",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "composer.json",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "tsconfig.json",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "go vet",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "wp-content",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "style.css",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "functions.php",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "WP_CLI",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "WooCommerce",
+        kind: MatchKind::Literal,
+    },
+    Term {
+        name: "Action Scheduler",
+        kind: MatchKind::Literal,
+    },
+];
+
+// Baseline mode for issue #2241 while the cleanup wave in #2240 lands.
+// Each entry is a known production-code leak in core-owned source. Fixtures and
+// examples are not listed here: the scanner skips Rust test modules and source
+// test helpers instead of allowing broad paths like `tests/**`.
+const BASELINE: &[ViolationKey] = &[
+    ViolationKey {
+        path: "src/commands/component.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/commands/component.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/commands/doctor/resources.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/commands/doctor/resources.rs",
+        term: "npm",
+    },
+    ViolationKey {
+        path: "src/commands/doctor/resources.rs",
+        term: "phpcs",
+    },
+    ViolationKey {
+        path: "src/commands/doctor/resources.rs",
+        term: "phpstan",
+    },
+    ViolationKey {
+        path: "src/commands/doctor/resources.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/commands/extension.rs",
+        term: "phpcs",
+    },
+    ViolationKey {
+        path: "src/commands/extension.rs",
+        term: "phpstan",
+    },
+    ViolationKey {
+        path: "src/commands/lint.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/commands/test.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/codebase_map.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/compiler_warnings.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/compiler_warnings.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/compiler_warnings.rs",
+        term: "go vet",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/conventions.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/conventions.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/core_fingerprint.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/core_fingerprint.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/dead_code.rs",
+        term: "WP_CLI",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/dead_guard.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/dead_guard.rs",
+        term: "composer.json",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/dead_guard.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/deprecation_age.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/deprecation_age.rs",
+        term: "composer.json",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/deprecation_age.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/docs_audit/claims.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/docs_audit/claims.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/docs_audit/verify.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/field_patterns.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/repeated_literal_shape.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/requested_detectors.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/requested_detectors.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/requirements.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/requirements.rs",
+        term: "composer.json",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/requirements.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/shared_scaffolding.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/structural.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/upstream_workaround.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/walker.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/code_audit/wrapper_inference.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/component/mod.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/component/mod.rs",
+        term: "npm",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "functions.php",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "nodejs",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "package.json",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "style.css",
+    },
+    ViolationKey {
+        path: "src/core/context/mod.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/defaults.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/defaults.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/defaults.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/defaults.rs",
+        term: "composer.json",
+    },
+    ViolationKey {
+        path: "src/core/defaults.rs",
+        term: "package.json",
+    },
+    ViolationKey {
+        path: "src/core/defaults.rs",
+        term: "style.css",
+    },
+    ViolationKey {
+        path: "src/core/deploy/permissions.rs",
+        term: "wp-content",
+    },
+    ViolationKey {
+        path: "src/core/deps.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/deps.rs",
+        term: "composer.json",
+    },
+    ViolationKey {
+        path: "src/core/deps.rs",
+        term: "npm",
+    },
+    ViolationKey {
+        path: "src/core/deps.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/engine/codebase_scan.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/engine/edit_op_apply.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/engine/executor.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/engine/executor.rs",
+        term: "npm",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "composer.json",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "gofmt",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "npx",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "package.json",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "phpcbf",
+    },
+    ViolationKey {
+        path: "src/core/engine/format_write.rs",
+        term: "tsconfig.json",
+    },
+    ViolationKey {
+        path: "src/core/engine/symbol_graph.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/engine/symbol_graph.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/engine/validate_write.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/engine/validate_write.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/engine/validate_write.rs",
+        term: "go vet",
+    },
+    ViolationKey {
+        path: "src/core/engine/validate_write.rs",
+        term: "npx",
+    },
+    ViolationKey {
+        path: "src/core/engine/validate_write.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/engine/validate_write.rs",
+        term: "tsconfig.json",
+    },
+    ViolationKey {
+        path: "src/core/extension/grammar.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/grammar.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/extension/grammar.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/extension/lifecycle.rs",
+        term: "nodejs",
+    },
+    ViolationKey {
+        path: "src/core/extension/lifecycle.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/lifecycle.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/extension/lifecycle.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "npx",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "phpcbf",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "phpcs",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "phpstan",
+    },
+    ViolationKey {
+        path: "src/core/extension/mod.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/extension/runtime_helper.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/runtime_helper/assets.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/test/drift.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/test/drift.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/extension/test/mod.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/extension/test/report.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/extension/test/run.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/git/commits.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/git/primitives.rs",
+        term: "wordpress",
+    },
+    ViolationKey {
+        path: "src/core/project/mod.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/refactor/decompose.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/refactor/move_items.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/refactor/plan/generate/compiler_warning_fixes.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/refactor/plan/generate/compiler_warning_fixes.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/refactor/plan/generate/duplicate_fixes.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/refactor/plan/generate/signatures.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/refactor/plan/sources.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/refactor/transform.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/release/executor.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/release/executor.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/release/pipeline.rs",
+        term: "Cargo.lock",
+    },
+    ViolationKey {
+        path: "src/core/release/pipeline.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/release/pipeline.rs",
+        term: "npm",
+    },
+    ViolationKey {
+        path: "src/core/release/pipeline.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/release/pipeline.rs",
+        term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/release/version.rs",
+        term: "Cargo.lock",
+    },
+    ViolationKey {
+        path: "src/core/release/version.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/release/version.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/release/version/default_pattern_for_file.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/rig/toolchain.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/self_status.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/self_status.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/upgrade/execution.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/upgrade/helpers.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/upgrade/mod.rs",
+        term: "cargo",
+    },
+];
+
+const BASELINE_OCCURRENCES: usize = 260;
+
+#[test]
+fn core_owned_source_stays_language_and_framework_agnostic() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut found = BTreeMap::<(String, String), Vec<usize>>::new();
+
+    for source_root in CORE_OWNED_SOURCE_ROOTS {
+        let path = root.join(source_root);
+        if path.is_dir() {
+            scan_dir(root, &path, &mut found);
+        } else {
+            scan_file(root, &path, &mut found);
+        }
+    }
+
+    let baseline = BASELINE
+        .iter()
+        .map(|entry| (entry.path.to_string(), entry.term.to_string()))
+        .collect::<BTreeSet<_>>();
+
+    let unexpected = found
+        .iter()
+        .filter(|(key, _)| !baseline.contains(*key))
+        .map(|((path, term), lines)| format!("{path}: {term} on lines {lines:?}"))
+        .collect::<Vec<_>>();
+
+    assert!(
+        unexpected.is_empty(),
+        "core-owned source contains non-baselined ecosystem behavior:\n{}\n\nAdd extension-owned behavior instead, or update the narrow baseline only for known issue #2240 cleanup violations.",
+        unexpected.join("\n")
+    );
+
+    let occurrence_count = found.values().map(Vec::len).sum::<usize>();
+    assert_eq!(
+        occurrence_count, BASELINE_OCCURRENCES,
+        "core-owned source ecosystem baseline occurrence count changed"
+    );
+}
+
+fn scan_dir(root: &Path, dir: &Path, found: &mut BTreeMap<(String, String), Vec<usize>>) {
+    for entry in fs::read_dir(dir).expect("source dir should be readable") {
+        let entry = entry.expect("source entry should be readable");
+        let path = entry.path();
+        if path.is_dir() {
+            scan_dir(root, &path, found);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            scan_file(root, &path, found);
+        }
+    }
+}
+
+fn scan_file(root: &Path, path: &Path, found: &mut BTreeMap<(String, String), Vec<usize>>) {
+    if is_test_helper(path) {
+        return;
+    }
+
+    let content = fs::read_to_string(path).expect("source file should be readable");
+    let relative = relative_path(root, path);
+    let mut skip_rest_as_test_module = false;
+
+    for (index, line) in content.lines().enumerate() {
+        if line.trim() == "#[cfg(test)]" {
+            skip_rest_as_test_module = true;
+            continue;
+        }
+        if skip_rest_as_test_module {
+            continue;
+        }
+
+        for term in TERMS {
+            if term.matches(line) {
+                found
+                    .entry((relative.clone(), term.name.to_string()))
+                    .or_default()
+                    .push(index + 1);
+            }
+        }
+    }
+}
+
+fn is_test_helper(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    file_name == "tests.rs"
+        || file_name.starts_with("test_")
+        || file_name.ends_with("_test.rs")
+        || file_name.ends_with("_tests.rs")
+}
+
+fn relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+impl Term {
+    fn matches(self, line: &str) -> bool {
+        match self.kind {
+            MatchKind::Literal => line.contains(self.name),
+            MatchKind::Token => contains_token(line, self.name),
+        }
+    }
+}
+
+fn contains_token(haystack: &str, needle: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(offset) = haystack[search_from..].find(needle) {
+        let start = search_from + offset;
+        let end = start + needle.len();
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[end..].chars().next();
+
+        if !is_word_char(before) && !is_word_char(after) {
+            return true;
+        }
+
+        search_from = end;
+    }
+
+    false
+}
+
+fn is_word_char(ch: Option<char>) -> bool {
+    ch.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
