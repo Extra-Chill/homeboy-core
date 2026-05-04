@@ -342,6 +342,8 @@ pub fn write_standalone_registration(component: &Component) -> Result<()> {
         }
     }
 
+    crate::component::portable::validate_component_remote_urls(&json)?;
+
     let content = crate::config::to_string_pretty(&json)?;
     crate::engine::local_files::write_file_atomic(
         &path,
@@ -825,6 +827,44 @@ mod tests {
         assert_eq!(
             json.get("extra_field").and_then(|v| v.as_str()),
             Some("preserve-me")
+        );
+    }
+
+    #[test]
+    fn write_standalone_rejects_preserved_invalid_remote_url() {
+        let dir = TempDir::new().unwrap();
+        let config_components = dir
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("components");
+        fs::create_dir_all(&config_components).unwrap();
+
+        let existing = serde_json::json!({
+            "local_path": "/old/path",
+            "remote_url": "/Users/chubes/Developer/homeboy"
+        });
+        fs::write(
+            config_components.join("my-comp.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let _home = with_home_override(dir.path());
+
+        let component = Component::new(
+            "my-comp".to_string(),
+            "/new/path".to_string(),
+            String::new(),
+            None,
+        );
+
+        let result = write_standalone_registration(&component);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code.as_str(),
+            "validation.invalid_argument"
         );
     }
 }
