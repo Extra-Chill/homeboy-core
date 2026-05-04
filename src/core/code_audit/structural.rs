@@ -58,13 +58,31 @@ pub(crate) fn analyze_structure(root: &Path) -> Vec<Finding> {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| path.to_string_lossy().to_string());
 
+        // Count top-level items before line-count severity so god-file warnings
+        // require more than size alone.
+        let item_count = count_top_level_items(&content, ext);
+
         // Check line count
         let line_count = content.lines().count();
         if line_count > GOD_FILE_LINE_THRESHOLD {
-            let suggestion = "Review whether the file has crossed a real responsibility boundary before extracting focused modules.".to_string();
+            let has_actionable_shape = item_count > HIGH_ITEM_COUNT_THRESHOLD;
+            let severity = if has_actionable_shape {
+                Severity::Warning
+            } else {
+                Severity::Info
+            };
+            let suggestion = if has_actionable_shape {
+                format!(
+                    "Review whether the file's {} top-level items cross a real responsibility boundary before extracting focused modules.",
+                    item_count
+                )
+            } else {
+                "Review-only: line count alone is not enough evidence to extract modules."
+                    .to_string()
+            };
             findings.push(Finding {
                 convention: "structural".to_string(),
-                severity: Severity::Warning,
+                severity,
                 file: relative.clone(),
                 description: format!(
                     "File has {} lines (threshold: {})",
@@ -76,7 +94,6 @@ pub(crate) fn analyze_structure(root: &Path) -> Vec<Finding> {
         }
 
         // Count top-level items (functions, structs, enums, consts, etc.)
-        let item_count = count_top_level_items(&content, ext);
         if item_count > HIGH_ITEM_COUNT_THRESHOLD {
             findings.push(Finding {
                 convention: "structural".to_string(),
@@ -392,6 +409,39 @@ export default function main() {}
         assert_eq!(god_findings.len(), 1, "Should flag big.rs as god file");
         assert_eq!(god_findings[0].file, "big.rs");
         assert!(god_findings[0].description.contains("1600 lines"));
+        assert_eq!(god_findings[0].severity, Severity::Warning);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn count_only_god_file_is_review_only_info() {
+        let dir = std::env::temp_dir().join("homeboy_structural_count_only_god_test");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let mut content = String::from("fn cohesive() {\n");
+        for i in 0..1600 {
+            content.push_str(&format!("    let line_{} = {};\n", i, i));
+        }
+        content.push_str("}\n");
+        std::fs::write(dir.join("large.rs"), content).unwrap();
+
+        let findings = analyze_structure(&dir);
+        let god_findings: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| f.kind == AuditFinding::GodFile)
+            .collect();
+
+        assert_eq!(god_findings.len(), 1, "Should keep review-only visibility");
+        assert_eq!(god_findings[0].file, "large.rs");
+        assert_eq!(god_findings[0].severity, Severity::Info);
+        assert!(god_findings[0].suggestion.contains("line count alone"));
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.kind != AuditFinding::HighItemCount),
+            "Count-only god files should not be backed by a high-item-count signal"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
