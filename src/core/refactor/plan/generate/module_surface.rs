@@ -61,14 +61,29 @@ pub struct ModuleSurfaceIndex {
 
 impl ModuleSurfaceIndex {
     pub fn build(root: &Path) -> Self {
-        let mut by_file = HashMap::new();
         let files = walker::walk_source_files(root).unwrap_or_default();
+        let mut fingerprints = Vec::new();
 
         for file_path in files {
             let Some(fp) = fingerprint::fingerprint_file(&file_path, root) else {
                 continue;
             };
-            let surface = build_surface_for_fingerprint(root, &fp);
+            fingerprints.push(fp);
+        }
+
+        Self::from_fingerprints(root, &fingerprints)
+    }
+
+    pub fn from_fingerprints(root: &Path, fingerprints: &[FileFingerprint]) -> Self {
+        let symbol_refs = symbol_graph::SymbolReferenceIndex::from_files(
+            fingerprints
+                .iter()
+                .map(|fp| (fp.relative_path.as_str(), fp.content.as_str())),
+        );
+        let mut by_file = HashMap::new();
+
+        for fp in fingerprints {
+            let surface = build_surface_for_fingerprint_with_symbols(root, fp, &symbol_refs);
             by_file.insert(surface.file.clone(), surface);
         }
 
@@ -89,7 +104,11 @@ impl ModuleSurfaceIndex {
     }
 }
 
-fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSurface {
+fn build_surface_for_fingerprint_with_symbols(
+    root: &Path,
+    fp: &FileFingerprint,
+    symbol_refs: &symbol_graph::SymbolReferenceIndex,
+) -> ModuleSurface {
     let file = fp.relative_path.clone();
     let module_path = symbol_graph::module_path_from_file(&file);
     let role = classify_file_role(&file);
@@ -100,11 +119,10 @@ fn build_surface_for_fingerprint(root: &Path, fp: &FileFingerprint) -> ModuleSur
         .iter()
         .map(|site| site.target.clone())
         .collect();
-    let extensions = file_extensions_for(&fp.language);
 
     let mut symbols = HashMap::new();
     for symbol in &public_api {
-        let callers = symbol_graph::trace_symbol_callers(symbol, &module_path, root, &extensions);
+        let callers = symbol_refs.trace_symbol_callers(symbol, &module_path);
         let mut incoming_callers = Vec::new();
         let mut incoming_importers = Vec::new();
         for caller in callers {
@@ -151,16 +169,6 @@ fn classify_file_role(file: &str) -> FileRole {
         return FileRole::PublicApi;
     }
     FileRole::Regular
-}
-
-fn file_extensions_for(language: &crate::code_audit::conventions::Language) -> Vec<&'static str> {
-    match language {
-        crate::code_audit::conventions::Language::Rust => vec!["rs"],
-        crate::code_audit::conventions::Language::Php => vec!["php"],
-        crate::code_audit::conventions::Language::JavaScript => vec!["js", "mjs", "jsx"],
-        crate::code_audit::conventions::Language::TypeScript => vec!["ts", "tsx"],
-        crate::code_audit::conventions::Language::Unknown => vec!["rs", "php", "js", "ts"],
-    }
 }
 
 fn find_reexport_files_for_symbol(root: &Path, file_path: &str, symbol: &str) -> Vec<String> {

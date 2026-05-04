@@ -54,6 +54,82 @@ pub struct CallerRef {
     pub has_call_site: bool,
 }
 
+#[derive(Debug, Clone)]
+struct IndexedFileRefs {
+    file: String,
+    content: String,
+    imports: Vec<ImportRef>,
+}
+
+/// Parsed symbol-reference view of a set of already-fingerprinted files.
+///
+/// This avoids `trace_symbol_callers()`'s per-symbol walk/read/import-parse loop
+/// when a caller already has audit fingerprints in memory.
+#[derive(Debug, Clone, Default)]
+pub struct SymbolReferenceIndex {
+    files: Vec<IndexedFileRefs>,
+}
+
+impl SymbolReferenceIndex {
+    pub fn from_files<'a, I>(files: I) -> Self
+    where
+        I: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let files = files
+            .into_iter()
+            .map(|(relative_path, content)| {
+                let ext = Path::new(relative_path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                let imports = load_grammar_for_ext(ext)
+                    .map(|grammar| parse_imports(content, &grammar, relative_path))
+                    .unwrap_or_default();
+
+                IndexedFileRefs {
+                    file: relative_path.to_string(),
+                    content: content.to_string(),
+                    imports,
+                }
+            })
+            .collect();
+
+        Self { files }
+    }
+
+    pub fn trace_symbol_callers(&self, symbol_name: &str, source_module: &str) -> Vec<CallerRef> {
+        let mut callers = Vec::new();
+        let symbol = symbol_name.to_string();
+
+        for file in &self.files {
+            if !file.content.contains(symbol_name) {
+                continue;
+            }
+
+            let matching_import = file.imports.iter().find_map(|imp| {
+                (imp.imported_names.contains(&symbol)
+                    && import_matches_module(&imp.module_path, source_module))
+                .then(|| imp.clone())
+            });
+
+            let has_import = matching_import.is_some();
+            let has_call_site = file.content.contains(&format!("{}(", symbol_name))
+                || file.content.contains(&format!("{}::", symbol_name))
+                || file.content.contains(&format!(".{}", symbol_name));
+
+            if has_import || has_call_site {
+                callers.push(CallerRef {
+                    file: file.file.clone(),
+                    import: matching_import,
+                    has_call_site,
+                });
+            }
+        }
+
+        callers
+    }
+}
+
 /// Result of rewriting an import line.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ImportRewrite {

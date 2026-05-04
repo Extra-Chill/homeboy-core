@@ -1,6 +1,7 @@
 use crate::code_audit::report::{
-    build_audit_summary, build_changed_since_summary, compute_fixability, finding_kind_key,
-    from_main_workflow, AuditChangedSinceSummary, AuditCommandOutput,
+    build_audit_summary, build_changed_since_summary, compute_fixability,
+    compute_fixability_with_analysis, finding_kind_key, from_main_workflow,
+    AuditChangedSinceSummary, AuditCommandOutput,
 };
 use crate::code_audit::test_helpers::{empty_result, make_finding};
 use crate::code_audit::{AuditFinding, Finding, FindingConfidence, Severity};
@@ -286,6 +287,54 @@ fn test_compute_fixability_counts_fixes_from_real_audit() {
     }
     // Note: fixability may also be None if the minimal codebase doesn't trigger
     // enough conventions — that's acceptable for this test.
+}
+
+#[test]
+fn test_compute_fixability_reuses_audit_analysis_context() {
+    use std::fs;
+
+    let _audit_guard = crate::test_support::AuditGuard::new();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("commands")).unwrap();
+    fs::write(
+        root.join("commands/good_one.rs"),
+        "pub fn run() {}\npub fn helper() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("commands/good_two.rs"),
+        "pub fn run() {}\npub fn helper() {}\n",
+    )
+    .unwrap();
+    fs::write(root.join("commands/bad.rs"), "pub fn run() {}\n").unwrap();
+
+    let audit = crate::code_audit::audit_path_with_id_with_plan_and_analysis(
+        "fixability-context-test",
+        &root.to_string_lossy(),
+        &crate::code_audit::AuditExecutionPlan::full(),
+    )
+    .expect("audit should run with analysis");
+
+    assert!(
+        !audit.analysis.fingerprints.is_empty(),
+        "audit analysis should retain fingerprints for fixability planning"
+    );
+
+    let from_context = compute_fixability_with_analysis(&audit.result, &audit.analysis);
+    let from_wrapper = compute_fixability(&audit.result);
+
+    assert_eq!(from_context.is_some(), from_wrapper.is_some());
+    if let (Some(context), Some(wrapper)) = (from_context, from_wrapper) {
+        assert_eq!(context.fixable_count, wrapper.fixable_count);
+        assert_eq!(context.automated_count, wrapper.automated_count);
+        assert_eq!(context.manual_only_count, wrapper.manual_only_count);
+        assert_eq!(
+            serde_json::to_value(&context.by_kind).unwrap(),
+            serde_json::to_value(&wrapper.by_kind).unwrap()
+        );
+    }
 }
 
 #[test]
