@@ -4,6 +4,33 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.156.2] - 2026-05-04
+
+### Changed
+- detect repeated enum dispatch contracts
+- detect configurable core boundary leaks
+- Detect repeated observation lifecycle scaffolding
+- Add command output policy audit detector
+- Share audit analysis for fixability planning
+- Add extension setting plumbing audit detector
+- detect parallel runner setup
+- detect vacuous test wiring
+- Refactor fingerprint variable metadata
+- Validate component remote URLs
+- Refactor command output policies
+- enforce core-agnostic source boundary
+- Centralize extension plumbing
+- simplify review stage orchestration
+
+### Fixed
+- require stronger god-file audit signal
+- require extensions for write validation and formatting
+- move release ecosystem behavior to extension contracts
+- generalize component runtime requirements
+- make extension discovery metadata-driven
+- parse bench force-hot after subcommand
+- keep component registration pointers in sync
+
 ## [0.156.1] - 2026-05-04
 
 ### Fixed
