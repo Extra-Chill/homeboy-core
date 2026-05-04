@@ -29,6 +29,7 @@ mod deprecation_age;
 mod discovery;
 pub mod docs_audit;
 mod duplication;
+mod enum_dispatch_contracts;
 mod extension_setting_plumbing;
 mod facade_passthrough;
 mod field_patterns;
@@ -159,6 +160,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_parallel_runner_setup: bool,
     pub(crate) run_command_output_policy: bool,
     pub(crate) run_observation_lifecycle: bool,
+    pub(crate) run_enum_dispatch_contracts: bool,
 }
 
 impl AuditExecutionPlan {
@@ -192,6 +194,7 @@ impl AuditExecutionPlan {
             run_parallel_runner_setup: true,
             run_command_output_policy: true,
             run_observation_lifecycle: true,
+            run_enum_dispatch_contracts: true,
         }
     }
 
@@ -374,6 +377,11 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::ObservationLifecycleScaffolding],
             ),
+            run_enum_dispatch_contracts: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::RepeatedEnumDispatchContract],
+            ),
         }
     }
 
@@ -408,6 +416,7 @@ impl AuditExecutionPlan {
             || self.run_parallel_runner_setup
             || self.run_command_output_policy
             || self.run_observation_lifecycle
+            || self.run_enum_dispatch_contracts
     }
 }
 
@@ -1239,6 +1248,21 @@ fn audit_internal(
             observation_lifecycle_findings.len()
         );
         all_findings.extend(observation_lifecycle_findings);
+    }
+
+    // Phase 4w: Repeated enum-dispatch contract detection.
+    let enum_dispatch_findings = if plan.run_enum_dispatch_contracts {
+        enum_dispatch_contracts::run(root)
+    } else {
+        Vec::new()
+    };
+    if !enum_dispatch_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Enum dispatch contracts: {} finding(s) (repeated exhaustive enum matches)",
+            enum_dispatch_findings.len()
+        );
+        all_findings.extend(enum_dispatch_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,

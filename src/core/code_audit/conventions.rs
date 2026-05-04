@@ -239,6 +239,9 @@ pub enum AuditFinding {
     /// Multiple files hand-roll the same observation lifecycle scaffolding
     /// instead of delegating lifecycle ownership to a shared wrapper/helper.
     ObservationLifecycleScaffolding,
+    /// Repeated exhaustive match blocks over the same enum duplicate a
+    /// label/getter/policy contract that should likely live on the enum.
+    RepeatedEnumDispatchContract,
     /// Configured ecosystem/language/framework term appears in core-owned source.
     CoreBoundaryLeak,
 }
@@ -301,6 +304,7 @@ impl AuditFinding {
             "parallel_runner_setup",
             "command_output_policy",
             "observation_lifecycle_scaffolding",
+            "repeated_enum_dispatch_contract",
             "core_boundary_leak",
         ]
     }
