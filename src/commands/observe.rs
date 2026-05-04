@@ -12,7 +12,9 @@ use serde::Serialize;
 
 use homeboy::component;
 use homeboy::engine::run_dir::{self, RunDir};
-use homeboy::extension::trace::{TraceArtifact, TraceEvent, TraceResults, TraceStatus};
+use homeboy::extension::trace::{
+    ActiveTraceProbes, TraceArtifact, TraceEvent, TraceProbeConfig, TraceResults, TraceStatus,
+};
 use homeboy::git::short_head_revision_at;
 use homeboy::observation::{NewRunRecord, ObservationStore, RunStatus};
 use homeboy::Error;
@@ -51,6 +53,10 @@ pub struct ObserveArgs {
         value_parser = parse_duration
     )]
     pub watch_process_interval: Duration,
+
+    /// Portable trace probe config as JSON. Repeatable.
+    #[arg(long = "probe", value_name = "JSON")]
+    pub probes: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -99,6 +105,7 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
         "grep": args.grep,
         "watch_processes": args.watch_processes,
         "watch_process_interval_ms": duration_millis(args.watch_process_interval),
+        "probes": args.probes,
         "run_dir": run_dir.path(),
     });
 
@@ -181,16 +188,17 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
 }
 
 fn validate_probe_selection(args: &ObserveArgs) -> homeboy::Result<()> {
-    if args.tail_logs.is_empty() && args.watch_processes.is_empty() {
+    if args.tail_logs.is_empty() && args.watch_processes.is_empty() && args.probes.is_empty() {
         return Err(Error::validation_invalid_argument(
             "probe",
-            "observe requires at least one --tail-log or --watch-process probe",
+            "observe requires at least one --tail-log, --watch-process, or --probe",
             None,
             Some(vec![
                 "homeboy observe my-component --duration 30s --tail-log /path/to/app.log"
                     .to_string(),
                 "homeboy observe my-component --duration 30s --watch-process 'node .*serve'"
                     .to_string(),
+                r#"homeboy observe my-component --duration 30s --probe '{"type":"http.poll","url":"http://127.0.0.1:3000/health"}'"#.to_string(),
             ]),
         ));
     }
@@ -201,6 +209,7 @@ fn collect_timeline(args: &ObserveArgs) -> homeboy::Result<Vec<TraceEvent>> {
     let start = Instant::now();
     let mut tail_logs = build_tail_log_states(args)?;
     let mut process_watches = build_process_watch_states(args)?;
+    let active_probes = ActiveTraceProbes::start(&build_standard_probe_configs(args)?)?;
     let mut timeline = vec![empty_event(0, "observe", "started")];
 
     loop {
@@ -221,7 +230,25 @@ fn collect_timeline(args: &ObserveArgs) -> homeboy::Result<Vec<TraceEvent>> {
     }
 
     timeline.push(empty_event(elapsed_ms(start), "observe", "finished"));
+    timeline.extend(active_probes.stop());
+    timeline.sort_by_key(|event| event.t_ms);
     Ok(timeline)
+}
+
+fn build_standard_probe_configs(args: &ObserveArgs) -> homeboy::Result<Vec<TraceProbeConfig>> {
+    args.probes
+        .iter()
+        .map(|raw| {
+            serde_json::from_str::<TraceProbeConfig>(raw).map_err(|error| {
+                Error::validation_invalid_argument(
+                    "probe",
+                    format!("invalid probe JSON: {error}"),
+                    Some(raw.clone()),
+                    None,
+                )
+            })
+        })
+        .collect()
 }
 
 fn build_tail_log_states(args: &ObserveArgs) -> homeboy::Result<Vec<TailLogState>> {
@@ -475,6 +502,10 @@ fn observe_command(args: &ObserveArgs) -> String {
         parts.push("--watch-process-interval".to_string());
         parts.push(format_duration(args.watch_process_interval));
     }
+    for probe in &args.probes {
+        parts.push("--probe".to_string());
+        parts.push(probe.clone());
+    }
     parts.join(" ")
 }
 
@@ -671,5 +702,94 @@ mod tests {
                 .watch_process_interval,
             Duration::from_millis(250)
         );
+    }
+
+    #[test]
+    fn standard_probe_json_parses_http_poll_and_process_snapshot() {
+        let args = ObserveArgs {
+            component: "demo".to_string(),
+            duration: Duration::from_millis(50),
+            tail_logs: Vec::new(),
+            grep: None,
+            watch_processes: Vec::new(),
+            watch_process_interval: Duration::from_secs(1),
+            probes: vec![
+                r#"{"type":"http.poll","url":"http://127.0.0.1:1234/health","interval_ms":25,"assert-status":200}"#.to_string(),
+                r#"{"type":"process.snapshot","pattern":"homeboy","interval_ms":25}"#.to_string(),
+            ],
+        };
+
+        let probes = build_standard_probe_configs(&args).unwrap();
+
+        assert!(matches!(probes[0], TraceProbeConfig::HttpPoll { .. }));
+        assert!(matches!(
+            probes[1],
+            TraceProbeConfig::ProcessSnapshot { .. }
+        ));
+    }
+
+    #[test]
+    fn observe_accepts_standard_probe_without_legacy_flags() {
+        let args = ObserveArgs {
+            component: "demo".to_string(),
+            duration: Duration::from_millis(50),
+            tail_logs: Vec::new(),
+            grep: None,
+            watch_processes: Vec::new(),
+            watch_process_interval: Duration::from_secs(1),
+            probes: vec![r#"{"type":"cmd.run","command":"true"}"#.to_string()],
+        };
+
+        validate_probe_selection(&args).unwrap();
+    }
+
+    #[test]
+    fn collect_timeline_consumes_standard_http_poll_and_process_snapshot() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0; 512];
+                let _ = stream.read(&mut buffer);
+                let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+        let process_pattern = std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| "homeboy".to_string());
+        let args = ObserveArgs {
+            component: "demo".to_string(),
+            duration: Duration::from_millis(80),
+            tail_logs: Vec::new(),
+            grep: None,
+            watch_processes: Vec::new(),
+            watch_process_interval: Duration::from_secs(1),
+            probes: vec![
+                format!(
+                    r#"{{"type":"http.poll","url":"{url}","interval_ms":25,"assert-status":204}}"#
+                ),
+                format!(
+                    r#"{{"type":"process.snapshot","pattern":"{}","interval_ms":25}}"#,
+                    process_pattern
+                ),
+            ],
+        };
+
+        let timeline = collect_timeline(&args).unwrap();
+        let _ = server.join();
+
+        assert!(timeline.iter().any(|event| event.source == "http.poll"
+            && event.event == "http.response"
+            && event.data.get("status").and_then(|value| value.as_u64()) == Some(204)));
+        assert!(timeline
+            .iter()
+            .any(|event| event.source == "process.snapshot" && event.event == "proc.list"));
     }
 }
