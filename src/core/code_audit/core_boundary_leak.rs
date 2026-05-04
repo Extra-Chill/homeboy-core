@@ -146,6 +146,13 @@ mod tests {
     }
 
     #[test]
+    fn test_run() {
+        let fp = rust_fp("src/core/engine.rs", "fn dispatch() {}");
+
+        assert!(run(&[&fp], &CoreBoundaryLeakConfig::default()).is_empty());
+    }
+
+    #[test]
     fn reports_configured_synthetic_ecosystem_terms_in_core_source() {
         let fp = rust_fp(
             "src/core/engine.rs",
