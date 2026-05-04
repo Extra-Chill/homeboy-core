@@ -25,6 +25,12 @@ pub enum TriageTarget {
     Fleet(String),
     Rig(String),
     Workspace,
+    /// Triage an unregistered checkout directly. Skips the component registry
+    /// and resolves the GitHub remote from `git remote get-url origin`.
+    Path {
+        path: String,
+        component_id: Option<String>,
+    },
 }
 
 impl TriageTarget {
@@ -35,6 +41,7 @@ impl TriageTarget {
             TriageTarget::Fleet(_) => "fleet",
             TriageTarget::Rig(_) => "rig",
             TriageTarget::Workspace => "workspace",
+            TriageTarget::Path { .. } => "path",
         }
     }
 
@@ -45,6 +52,9 @@ impl TriageTarget {
             | TriageTarget::Fleet(id)
             | TriageTarget::Rig(id) => id,
             TriageTarget::Workspace => "workspace",
+            TriageTarget::Path { path, component_id } => {
+                component_id.as_deref().unwrap_or(path.as_str())
+            }
         }
     }
 
@@ -55,6 +65,10 @@ impl TriageTarget {
             TriageTarget::Fleet(_) => "triage.fleet",
             TriageTarget::Rig(_) => "triage.rig",
             TriageTarget::Workspace => "triage.workspace",
+            // `--path` is an escape hatch on subcommands (currently `component`); keep
+            // the same command identity so JSON consumers don't see a phantom
+            // `triage.path` verb.
+            TriageTarget::Path { .. } => "triage.component",
         }
     }
 }
@@ -374,7 +388,60 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
             Ok(refs)
         }
         TriageTarget::Workspace => resolve_workspace_components(),
+        TriageTarget::Path { path, component_id } => {
+            resolve_path_component(path, component_id.as_deref())
+        }
     }
+}
+
+fn resolve_path_component(path: &str, component_id: Option<&str>) -> Result<Vec<ComponentRef>> {
+    let checkout = Path::new(path);
+    if !checkout.exists() {
+        return Err(Error::validation_invalid_argument(
+            "path",
+            "Checkout path does not exist",
+            Some(path.to_string()),
+            None,
+        ));
+    }
+    if !checkout.join(".git").exists() {
+        return Err(Error::validation_invalid_argument(
+            "path",
+            "Checkout path is not a git repository (no `.git` entry)",
+            Some(path.to_string()),
+            None,
+        ));
+    }
+    let remote_url = detect_remote_url(checkout).ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "path",
+            "Could not read `git remote get-url origin` from checkout",
+            Some(path.to_string()),
+            None,
+        )
+    })?;
+    let canonical = checkout
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| path.to_string());
+    let synthesized_id = component_id
+        .map(|id| id.to_string())
+        .or_else(|| {
+            checkout
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.to_string())
+        })
+        .unwrap_or_else(|| "path".to_string());
+    let source = format!("path:{canonical}");
+    Ok(vec![ComponentRef::new(
+        synthesized_id,
+        canonical,
+        Some(remote_url),
+        None,
+        source,
+    )])
 }
 
 fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
@@ -2209,6 +2276,135 @@ mod tests {
                 resolve_repo(&refs[0]).unwrap().repo.owner,
                 "WordPress".to_string()
             );
+        });
+    }
+
+    #[test]
+    fn path_target_synthesizes_component_from_git_origin() {
+        crate::test_support::with_isolated_home(|home| {
+            let checkout = home.path().join("ad-hoc-checkout");
+            std::fs::create_dir_all(&checkout).unwrap();
+            let status = std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&checkout)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let status = std::process::Command::new("git")
+                .args([
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/Extra-Chill/homeboy.git",
+                ])
+                .current_dir(&checkout)
+                .status()
+                .unwrap();
+            assert!(status.success());
+
+            let target = TriageTarget::Path {
+                path: checkout.to_string_lossy().into_owned(),
+                component_id: None,
+            };
+            let refs = resolve_target_components(&target).unwrap();
+            assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].component_id, "ad-hoc-checkout");
+            assert_eq!(
+                refs[0].remote_url.as_deref(),
+                Some("https://github.com/Extra-Chill/homeboy.git")
+            );
+            let repo = resolve_repo(&refs[0]).unwrap().repo;
+            assert_eq!(repo.owner, "Extra-Chill");
+            assert_eq!(repo.repo, "homeboy");
+        });
+    }
+
+    #[test]
+    fn path_target_uses_explicit_component_id_when_provided() {
+        crate::test_support::with_isolated_home(|home| {
+            let checkout = home.path().join("checkout-dir");
+            std::fs::create_dir_all(&checkout).unwrap();
+            let status = std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&checkout)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let status = std::process::Command::new("git")
+                .args([
+                    "remote",
+                    "add",
+                    "origin",
+                    "git@github.com:Extra-Chill/homeboy.git",
+                ])
+                .current_dir(&checkout)
+                .status()
+                .unwrap();
+            assert!(status.success());
+
+            let target = TriageTarget::Path {
+                path: checkout.to_string_lossy().into_owned(),
+                component_id: Some("homeboy".into()),
+            };
+            let refs = resolve_target_components(&target).unwrap();
+            assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].component_id, "homeboy");
+            let repo = resolve_repo(&refs[0]).unwrap().repo;
+            assert_eq!(repo.owner, "Extra-Chill");
+            assert_eq!(repo.repo, "homeboy");
+        });
+    }
+
+    #[test]
+    fn path_target_surfaces_remote_url_is_not_github_for_non_github_origin() {
+        crate::test_support::with_isolated_home(|home| {
+            let checkout = home.path().join("non-github");
+            std::fs::create_dir_all(&checkout).unwrap();
+            let status = std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&checkout)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let status = std::process::Command::new("git")
+                .args(["remote", "add", "origin", "https://gitlab.com/foo/bar.git"])
+                .current_dir(&checkout)
+                .status()
+                .unwrap();
+            assert!(status.success());
+
+            let target = TriageTarget::Path {
+                path: checkout.to_string_lossy().into_owned(),
+                component_id: None,
+            };
+            let refs = resolve_target_components(&target).unwrap();
+            let err = resolve_repo(&refs[0]).unwrap_err();
+            assert_eq!(err, "remote_url_is_not_github");
+        });
+    }
+
+    #[test]
+    fn path_target_rejects_missing_directory() {
+        let target = TriageTarget::Path {
+            path: "/definitely/does/not/exist/triage-path-test".into(),
+            component_id: None,
+        };
+        let err = resolve_target_components(&target).unwrap_err();
+        assert_eq!(err.code.as_str(), "validation.invalid_argument");
+    }
+
+    #[test]
+    fn path_target_rejects_non_git_directory() {
+        crate::test_support::with_isolated_home(|home| {
+            let checkout = home.path().join("not-a-git-repo");
+            std::fs::create_dir_all(&checkout).unwrap();
+
+            let target = TriageTarget::Path {
+                path: checkout.to_string_lossy().into_owned(),
+                component_id: None,
+            };
+            let err = resolve_target_components(&target).unwrap_err();
+            assert_eq!(err.code.as_str(), "validation.invalid_argument");
         });
     }
 }

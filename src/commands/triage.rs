@@ -1,5 +1,6 @@
 use clap::{Args, Subcommand};
 use homeboy::triage::{self, TriageOptions, TriageOutput, TriageTarget};
+use homeboy::Error;
 use std::path::PathBuf;
 
 use super::CmdResult;
@@ -58,10 +59,22 @@ pub struct TriageArgs {
     limit: usize,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum TriageCommand {
     /// Triage one registered component.
-    Component { component_id: String },
+    ///
+    /// When `--path <CHECKOUT>` is supplied, the registry is bypassed and the
+    /// GitHub remote is resolved directly from the checkout's `origin`. Useful
+    /// for unregistered checkouts (CI runners, ad-hoc clones, worktrees) or
+    /// when a component's registry record is broken.
+    Component {
+        /// Component ID. Optional when `--path` is supplied.
+        component_id: Option<String>,
+
+        /// Workspace path to triage directly, bypassing the registry.
+        #[arg(long, value_name = "CHECKOUT")]
+        path: Option<String>,
+    },
     /// Triage every component attached to a project.
     Project { project_id: String },
     /// Triage unique components used across a fleet.
@@ -100,7 +113,9 @@ pub fn run(args: TriageArgs, _global: &super::GlobalArgs) -> CmdResult<TriageOut
     };
 
     let target = match args.command.unwrap_or(TriageCommand::Workspace) {
-        TriageCommand::Component { component_id } => TriageTarget::Component(component_id),
+        TriageCommand::Component { component_id, path } => {
+            resolve_component_target(component_id, path)?
+        }
         TriageCommand::Project { project_id } => TriageTarget::Project(project_id),
         TriageCommand::Fleet { fleet_id } => TriageTarget::Fleet(fleet_id),
         TriageCommand::Rig { rig_id } => TriageTarget::Rig(rig_id),
@@ -110,10 +125,56 @@ pub fn run(args: TriageArgs, _global: &super::GlobalArgs) -> CmdResult<TriageOut
     Ok((triage::run(target, options)?, 0))
 }
 
+fn resolve_component_target(
+    component_id: Option<String>,
+    path: Option<String>,
+) -> Result<TriageTarget, Error> {
+    match (component_id, path) {
+        (None, None) => Err(Error::validation_missing_argument(vec![
+            "component_id".into(),
+            "path".into(),
+        ])),
+        (Some(component_id), None) => Ok(TriageTarget::Component(component_id)),
+        (component_id, Some(path)) => {
+            // When both are supplied, verify the registry record (if any) points at
+            // the same checkout. If it does not, surface a clear error rather than
+            // silently picking one side. If the component is not registered, we
+            // accept the explicit id as the synthetic component_id.
+            if let Some(ref id) = component_id {
+                if let Ok(comp) = homeboy::component::load(id) {
+                    let registered = canonicalize_for_compare(&comp.local_path);
+                    let supplied = canonicalize_for_compare(&path);
+                    if registered != supplied {
+                        return Err(Error::validation_invalid_argument(
+                            "path",
+                            format!(
+                                "Disagrees with registered component '{id}' (local_path={})",
+                                comp.local_path
+                            ),
+                            Some(path),
+                            None,
+                        ));
+                    }
+                }
+            }
+            Ok(TriageTarget::Path { path, component_id })
+        }
+    }
+}
+
+fn canonicalize_for_compare(path: &str) -> String {
+    std::path::Path::new(path)
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| path.to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TriageArgs, TriageCommand};
+    use super::{resolve_component_target, TriageArgs, TriageCommand};
     use clap::Parser;
+    use homeboy::triage::TriageTarget;
 
     #[derive(Parser)]
     struct TestCli {
@@ -133,5 +194,50 @@ mod tests {
         let cli = TestCli::parse_from(["triage", "workspace"]);
 
         assert!(matches!(cli.args.command, Some(TriageCommand::Workspace)));
+    }
+
+    #[test]
+    fn component_subcommand_accepts_path_without_id() {
+        let cli = TestCli::parse_from(["triage", "component", "--path", "/tmp/checkout"]);
+
+        match cli.args.command {
+            Some(TriageCommand::Component { component_id, path }) => {
+                assert_eq!(component_id, None);
+                assert_eq!(path.as_deref(), Some("/tmp/checkout"));
+            }
+            other => panic!("expected Component subcommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn component_subcommand_accepts_id_and_path() {
+        let cli =
+            TestCli::parse_from(["triage", "component", "homeboy", "--path", "/tmp/checkout"]);
+
+        match cli.args.command {
+            Some(TriageCommand::Component { component_id, path }) => {
+                assert_eq!(component_id.as_deref(), Some("homeboy"));
+                assert_eq!(path.as_deref(), Some("/tmp/checkout"));
+            }
+            other => panic!("expected Component subcommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn component_subcommand_requires_id_or_path() {
+        let err = resolve_component_target(None, None).unwrap_err();
+        assert_eq!(err.code.as_str(), "validation.missing_argument");
+    }
+
+    #[test]
+    fn component_subcommand_routes_path_to_path_target() {
+        let target = resolve_component_target(None, Some("/tmp/some-checkout".into())).unwrap();
+        match target {
+            TriageTarget::Path { path, component_id } => {
+                assert_eq!(path, "/tmp/some-checkout");
+                assert_eq!(component_id, None);
+            }
+            other => panic!("expected TriageTarget::Path, got {other:?}"),
+        }
     }
 }
