@@ -89,7 +89,7 @@ impl AuditFinding {
             | AuditFinding::DeprecationAge
             | AuditFinding::DeadGuard => FindingConfidence::Graph,
 
-            // Convention, naming, body-shape, and similarity findings remain review-only.
+            // Convention, naming, body-shape, and similarity findings require judgment.
             _ => FindingConfidence::Heuristic,
         }
     }

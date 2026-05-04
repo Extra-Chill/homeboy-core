@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::code_audit::{AuditFinding, FindingConfidence};
+use crate::code_audit::FindingConfidence;
 
 /// One row of incoming findings: "command produced N findings of category X
 /// for component Y." This is the input grain reconcile reasons over.
@@ -81,26 +81,6 @@ impl TrackedIssueState {
 /// Configuration that affects reconcile decisions but not finding shape.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconcileConfig {
-    /// Categories whose findings are unconditionally muted. No new issue is
-    /// filed; existing OPEN issues for these categories are left alone.
-    /// Existing CLOSED issues stay closed. Sourced from `homeboy.json`'s
-    /// `audit.suppressed_categories` (or a CLI override).
-    #[serde(default)]
-    pub suppressed_categories: Vec<String>,
-
-    /// Labels that, when present on a closed issue, suppress re-filing the
-    /// same category. Defaults to `["wontfix", "upstream-bug",
-    /// "audit-suppressed"]`. Sourced from `homeboy.json`'s
-    /// `issues.suppression_labels`.
-    #[serde(default)]
-    pub suppression_labels: Vec<String>,
-
-    /// Categories that should remain visible in reports but should not file
-    /// brand-new tracker issues by default. Existing open issues can still be
-    /// updated/closed so old tracker state converges naturally.
-    #[serde(default = "default_review_only_categories")]
-    pub review_only_categories: Vec<String>,
-
     /// When true, also refresh the body of closed-not_planned issues with
     /// the latest finding count + run link. This keeps the closed issue
     /// useful as a "current state" reference even though it stays closed.
@@ -112,9 +92,6 @@ pub struct ReconcileConfig {
 impl Default for ReconcileConfig {
     fn default() -> Self {
         Self {
-            suppressed_categories: Vec::new(),
-            suppression_labels: Vec::new(),
-            review_only_categories: default_review_only_categories(),
             refresh_closed_not_planned: default_refresh_closed(),
         }
     }
@@ -122,22 +99,6 @@ impl Default for ReconcileConfig {
 
 fn default_refresh_closed() -> bool {
     true
-}
-
-pub fn default_review_only_categories() -> Vec<String> {
-    AuditFinding::all_names()
-        .iter()
-        .copied()
-        .filter(|name| {
-            let Ok(finding) = name.parse::<AuditFinding>() else {
-                return false;
-            };
-
-            finding.confidence() == FindingConfidence::Heuristic
-                || matches!(finding, AuditFinding::UnusedParameter)
-        })
-        .map(String::from)
-        .collect()
 }
 
 /// One concrete action the reconciler decided on. Order matters in the plan:
@@ -179,14 +140,6 @@ pub enum ReconcileAction {
         category: String,
         comment: String,
     },
-    /// Close an advisory/review-only issue that was filed by an older policy.
-    /// Reason is always `not_planned` because findings still exist, but the
-    /// category is intentionally not tracker-actionable.
-    CloseReviewOnly {
-        number: u64,
-        category: String,
-        comment: String,
-    },
     /// Close a duplicate of another open issue for the same category.
     /// Reason is always `not_planned` — caller intent is "this is the same
     /// thing as #N." Caller keeps the lowest-numbered match.
@@ -204,24 +157,15 @@ pub enum ReconcileAction {
     },
 }
 
-/// Why the reconciler decided to skip a group. Surfaces in dry-run output
-/// so the user can see whether suppression came from config, label, or
-/// close-state.
+/// Why the reconciler decided to skip a group. Surfaces in dry-run output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReconcileSkipReason {
-    /// Category was in `suppressed_categories`.
-    SuppressedByConfig,
-    /// A closed-not_planned issue carried a `suppression_labels` label.
-    SuppressedByLabel,
-    /// A closed-not_planned issue without a suppression label, AND
-    /// `refresh_closed_not_planned = false`. Less common.
+    /// A closed-not_planned issue and `refresh_closed_not_planned = false`.
+    /// Less common.
     ClosedNotPlannedNoRefresh,
     /// No findings AND no existing open issue → nothing to do.
     NoFindingsNoIssue,
-    /// Category is advisory/review-only, so reconcile will not file a brand-new
-    /// tracker issue for it by default.
-    ReviewOnlyCategory,
 }
 
 /// The full reconciliation plan: every action, in execution order.
@@ -241,7 +185,6 @@ impl ReconcilePlan {
                 ReconcileAction::Update { .. } => c.update += 1,
                 ReconcileAction::UpdateClosed { .. } => c.update_closed += 1,
                 ReconcileAction::Close { .. } => c.close += 1,
-                ReconcileAction::CloseReviewOnly { .. } => c.close += 1,
                 ReconcileAction::CloseDuplicate { .. } => c.close_duplicate += 1,
                 ReconcileAction::Skip { .. } => c.skip += 1,
             }

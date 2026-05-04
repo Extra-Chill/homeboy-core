@@ -415,7 +415,7 @@ export default function main() {}
     }
 
     #[test]
-    fn count_only_god_file_is_review_only_info() {
+    fn count_only_god_file_is_info() {
         let dir = std::env::temp_dir().join("homeboy_structural_count_only_god_test");
         let _ = std::fs::create_dir_all(&dir);
 
@@ -432,7 +432,11 @@ export default function main() {}
             .filter(|f| f.kind == AuditFinding::GodFile)
             .collect();
 
-        assert_eq!(god_findings.len(), 1, "Should keep review-only visibility");
+        assert_eq!(
+            god_findings.len(),
+            1,
+            "Should keep low-confidence visibility"
+        );
         assert_eq!(god_findings[0].file, "large.rs");
         assert_eq!(god_findings[0].severity, Severity::Info);
         assert!(god_findings[0].suggestion.contains("line count alone"));
@@ -448,7 +452,7 @@ export default function main() {}
 
     #[test]
     fn count_only_structural_smells_below_actionable_threshold_are_ignored() {
-        let dir = std::env::temp_dir().join("homeboy_structural_review_only_test");
+        let dir = std::env::temp_dir().join("homeboy_structural_low_confidence_test");
         let root = dir.join("src/core");
         let _ = std::fs::create_dir_all(&root);
 
@@ -473,7 +477,7 @@ export default function main() {}
         let findings = analyze_structure(&dir);
         assert!(
             findings.is_empty(),
-            "Moderate count-only smells should stay review-only instead of producing audit findings"
+            "Moderate count-only smells should stay below the audit finding threshold"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

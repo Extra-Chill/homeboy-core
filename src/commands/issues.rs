@@ -9,7 +9,6 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::PathBuf;
 
 use homeboy::code_audit::FindingConfidence;
 use homeboy::issues::{
@@ -76,28 +75,6 @@ enum IssuesCommand {
         /// `--from-output`.
         #[arg(long, value_name = "URL")]
         run_url: Option<String>,
-
-        /// Read suppressions from `homeboy.json`'s `audit.suppressed_categories`
-        /// and `issues.suppression_labels`. When false, suppression must be
-        /// passed explicitly via the flags below.
-        #[arg(long, default_value_t = true)]
-        suppress_from_config: bool,
-
-        /// Override category suppressions (repeatable). Replaces the
-        /// homeboy.json list when both are set.
-        #[arg(long, value_name = "CATEGORY")]
-        suppress_category: Vec<String>,
-
-        /// Override label suppressions (repeatable). Replaces the
-        /// homeboy.json list when both are set.
-        #[arg(long, value_name = "LABEL")]
-        suppress_label: Vec<String>,
-
-        /// Override review-only categories (repeatable). Replaces the default
-        /// heuristic/threshold list and homeboy.json's
-        /// `issues.review_only_categories` when set.
-        #[arg(long, value_name = "CATEGORY")]
-        review_only_category: Vec<String>,
 
         /// Don't refresh the body of closed-not_planned issues with the
         /// latest finding count. Default is to refresh (so the closed
@@ -177,10 +154,6 @@ pub fn run(args: IssuesArgs, _global: &super::GlobalArgs) -> CmdResult<IssuesCom
             findings,
             from_output,
             run_url,
-            suppress_from_config,
-            suppress_category,
-            suppress_label,
-            review_only_category,
             no_refresh_closed,
             list_limit,
             apply,
@@ -190,17 +163,7 @@ pub fn run(args: IssuesArgs, _global: &super::GlobalArgs) -> CmdResult<IssuesCom
             let command_label = findings_input.command.clone();
             let groups = into_issue_groups(findings_input, &component_id);
 
-            // Build reconcile config: CLI overrides take priority; otherwise
-            // read homeboy.json when the flag is set; otherwise empty.
-            let config = build_reconcile_config(
-                &component_id,
-                path.as_deref(),
-                suppress_from_config,
-                suppress_category,
-                suppress_label,
-                review_only_category,
-                no_refresh_closed,
-            )?;
+            let config = build_reconcile_config(no_refresh_closed);
 
             // Default tracker = GitHub against the component's remote.
             let tracker_impl = GithubTracker::new(component_id.clone()).with_path(path.clone());
@@ -462,105 +425,10 @@ fn parse_confidence(raw: &str) -> Option<FindingConfidence> {
 // homeboy.json suppression read
 // ---------------------------------------------------------------------------
 
-fn build_reconcile_config(
-    component_id: &str,
-    path: Option<&str>,
-    suppress_from_config: bool,
-    cli_categories: Vec<String>,
-    cli_labels: Vec<String>,
-    cli_review_only_categories: Vec<String>,
-    no_refresh_closed: bool,
-) -> homeboy::Result<ReconcileConfig> {
-    let mut config = ReconcileConfig {
+fn build_reconcile_config(no_refresh_closed: bool) -> ReconcileConfig {
+    ReconcileConfig {
         refresh_closed_not_planned: !no_refresh_closed,
         ..ReconcileConfig::default()
-    };
-
-    if suppress_from_config {
-        if let Some(reconcile_config) = read_suppressions(component_id, path)? {
-            let (suppressed, labels, review_only) = reconcile_config;
-            config.suppressed_categories = suppressed;
-            config.suppression_labels = labels;
-            if let Some(review_only) = review_only {
-                config.review_only_categories = review_only;
-            }
-        }
-    }
-
-    // CLI flags override homeboy.json when present.
-    if !cli_categories.is_empty() {
-        config.suppressed_categories = cli_categories;
-    }
-    if !cli_labels.is_empty() {
-        config.suppression_labels = cli_labels;
-    }
-    if !cli_review_only_categories.is_empty() {
-        config.review_only_categories = cli_review_only_categories;
-    }
-
-    // Sane default for suppression_labels when neither config nor CLI set
-    // them. Mirrors the documented defaults in #1551.
-    if config.suppression_labels.is_empty() {
-        config.suppression_labels = vec![
-            "wontfix".into(),
-            "upstream-bug".into(),
-            "audit-suppressed".into(),
-        ];
-    }
-
-    Ok(config)
-}
-
-fn read_suppressions(
-    component_id: &str,
-    path: Option<&str>,
-) -> homeboy::Result<Option<(Vec<String>, Vec<String>, Option<Vec<String>>)>> {
-    let component_dir = match path {
-        Some(p) => PathBuf::from(p),
-        None => match homeboy::component::resolve_effective(Some(component_id), None, None) {
-            Ok(c) => PathBuf::from(c.local_path),
-            Err(_) => return Ok(None),
-        },
-    };
-
-    let raw = match homeboy::component::read_portable_config(&component_dir)? {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-
-    let categories = raw
-        .pointer("/audit/suppressed_categories")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let labels = raw
-        .pointer("/issues/suppression_labels")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let review_only = raw
-        .pointer("/issues/review_only_categories")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        });
-
-    if categories.is_empty() && labels.is_empty() && review_only.is_none() {
-        Ok(None)
-    } else {
-        Ok(Some((categories, labels, review_only)))
     }
 }
 
@@ -600,9 +468,6 @@ fn render_plan_lines(plan: &ReconcilePlan) -> Vec<String> {
             homeboy::issues::ReconcileAction::Close {
                 number, category, ..
             } => format!("close         {} → #{}", category, number),
-            homeboy::issues::ReconcileAction::CloseReviewOnly {
-                number, category, ..
-            } => format!("close_review  {} → #{} (not planned)", category, number),
             homeboy::issues::ReconcileAction::CloseDuplicate {
                 number,
                 keep,
@@ -658,27 +523,9 @@ mod tests {
     }
 
     #[test]
-    fn default_reconcile_config_marks_thresholds_and_heuristics_review_only() {
-        let config = ReconcileConfig::default();
+    fn reconcile_config_only_controls_closed_refresh_behavior() {
+        let config = build_reconcile_config(true);
 
-        assert!(config.review_only_categories.contains(&"god_file".into()));
-        assert!(config
-            .review_only_categories
-            .contains(&"directory_sprawl".into()));
-        assert!(config
-            .review_only_categories
-            .contains(&"missing_test_file".into()));
-        assert!(config
-            .review_only_categories
-            .contains(&"parallel_implementation".into()));
-        assert!(config
-            .review_only_categories
-            .contains(&"unused_parameter".into()));
-        assert!(!config
-            .review_only_categories
-            .contains(&"unreferenced_export".into()));
-        assert!(!config
-            .review_only_categories
-            .contains(&"compiler_warning".into()));
+        assert!(!config.refresh_closed_not_planned);
     }
 }
