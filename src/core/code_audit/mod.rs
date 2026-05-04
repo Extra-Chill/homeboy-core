@@ -37,6 +37,7 @@ pub(crate) mod impact;
 pub(crate) mod import_matching;
 mod layer_ownership;
 pub(crate) mod naming;
+mod parallel_runner_setup;
 mod repeated_literal_shape;
 pub mod report;
 mod requested_detectors;
@@ -136,6 +137,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_requested_detectors: bool,
     pub(crate) run_global_env_guard: bool,
     pub(crate) run_shared_scaffolding: bool,
+    pub(crate) run_parallel_runner_setup: bool,
 }
 
 impl AuditExecutionPlan {
@@ -164,6 +166,7 @@ impl AuditExecutionPlan {
             run_requested_detectors: true,
             run_global_env_guard: true,
             run_shared_scaffolding: true,
+            run_parallel_runner_setup: true,
         }
     }
 
@@ -321,6 +324,11 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::SharedScaffolding],
             ),
+            run_parallel_runner_setup: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::ParallelRunnerSetup],
+            ),
         }
     }
 
@@ -350,6 +358,7 @@ impl AuditExecutionPlan {
             || self.run_requested_detectors
             || self.run_global_env_guard
             || self.run_shared_scaffolding
+            || self.run_parallel_runner_setup
     }
 }
 
@@ -1092,6 +1101,22 @@ fn audit_internal(
             scaffolding_findings.len()
         );
         all_findings.extend(scaffolding_findings);
+    }
+
+    // Phase 4w: Parallel runner setup detection — command-family files that
+    // assemble the same generic execution contract independently.
+    let parallel_runner_findings = if plan.run_parallel_runner_setup {
+        parallel_runner_setup::run(&all_fingerprints)
+    } else {
+        Vec::new()
+    };
+    if !parallel_runner_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Parallel runner setup: {} finding(s) (duplicated execution contract setup)",
+            parallel_runner_findings.len()
+        );
+        all_findings.extend(parallel_runner_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,

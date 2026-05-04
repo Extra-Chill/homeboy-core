@@ -225,6 +225,9 @@ pub enum AuditFinding {
     /// Nested Rust test file is not wired into Cargo via a source-module
     /// `#[path = "..."] mod ...;` declaration.
     UnwiredNestedRustTest,
+    /// Command-family files independently assemble the same generic execution
+    /// contract phases and contract-call shape.
+    ParallelRunnerSetup,
 }
 
 impl AuditFinding {
@@ -281,6 +284,7 @@ impl AuditFinding {
             "stale_cli_invocation",
             "stale_cli_argument_shape",
             "unwired_nested_rust_test",
+            "parallel_runner_setup",
         ]
     }
 }
