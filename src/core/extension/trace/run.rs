@@ -313,17 +313,17 @@ fn run_trace_workflow_with_context(
     let mut baseline_comparison = None;
     let mut baseline_exit_override = None;
     let mut hints = Vec::new();
-    let has_span_results = results
+    let has_baseline_items = results
         .as_ref()
-        .is_some_and(|parsed| !parsed.span_results.is_empty());
+        .is_some_and(|parsed| !parsed.span_results.is_empty() || !parsed.assertions.is_empty());
 
-    if args.baseline_flags.baseline && status == "pass" && has_span_results {
+    if args.baseline_flags.baseline && status == "pass" && has_baseline_items {
         if let Some(ref parsed) = results {
             let _ =
                 super::baseline::save_baseline(source_path, &args.component_id, parsed, rig_id)?;
         }
     }
-    if has_span_results && !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
+    if has_baseline_items && !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
         if let Some(ref parsed) = results {
             if let Some(existing) = super::baseline::load_baseline(source_path, rig_id) {
                 let comparison = super::baseline::compare(
@@ -354,15 +354,15 @@ fn run_trace_workflow_with_context(
         ),
         None => format!("homeboy trace {} {}", args.component_id, args.scenario_id),
     };
-    if has_span_results && !args.baseline_flags.baseline && baseline_comparison.is_none() {
+    if has_baseline_items && !args.baseline_flags.baseline && baseline_comparison.is_none() {
         hints.push(format!(
-            "Save trace span baseline: {} --baseline",
+            "Save trace baseline: {} --baseline",
             trace_invocation
         ));
     }
     if baseline_comparison.is_some() && !args.baseline_flags.ratchet {
         hints.push(format!(
-            "Auto-update trace span baseline on improvement: {} --ratchet",
+            "Auto-update trace baseline on improvement: {} --ratchet",
             trace_invocation
         ));
     }
