@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn test_file_state() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let missing = file_state(&PathBuf::from(temp.path().join("missing.txt")));
+        let missing = file_state(&temp.path().join("missing.txt"));
         assert!(!missing.exists);
 
         let path = temp.path().join("present.txt");

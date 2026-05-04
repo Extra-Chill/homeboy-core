@@ -1231,7 +1231,7 @@ fn trace_variant_matches_component(variant: &rig::TraceVariantSpec, component_id
     variant
         .component
         .as_deref()
-        .map_or(true, |id| id == component_id)
+        .is_none_or(|id| id == component_id)
 }
 
 fn resolve_trace_variant_overlay(context: &TraceRigContext, overlay: &str) -> String {
