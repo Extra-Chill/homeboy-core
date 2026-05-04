@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn flags_repeated_policy_shapes_across_command_modules() {
+    fn test_run() {
         let one = fp(
             "src/commands/alpha.ext",
             r#"
