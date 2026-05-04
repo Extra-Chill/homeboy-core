@@ -1133,6 +1133,13 @@ pub(crate) fn extract_block_body<'a>(
 mod tests {
     use super::*;
 
+    fn captures(entries: &[(&str, usize)]) -> HashMap<String, usize> {
+        entries
+            .iter()
+            .map(|(name, index)| ((*name).to_string(), *index))
+            .collect()
+    }
+
     fn rust_grammar() -> Grammar {
         Grammar {
             language: LanguageMeta {
@@ -1160,12 +1167,7 @@ mod tests {
                     ConceptPattern {
                         regex: r"(?:pub(?:\(crate\))?\s+)?(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)"
                             .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c.insert("params".to_string(), 2);
-                            c
-                        },
+                        captures: captures(&[("name", 1), ("params", 2)]),
                         context: "any".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1177,11 +1179,7 @@ mod tests {
                     ConceptPattern {
                         regex: r"(?:pub(?:\(crate\))?\s+)?(?:struct|enum|trait)\s+(\w+)"
                             .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c
-                        },
+                        captures: captures(&[("name", 1)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1192,11 +1190,7 @@ mod tests {
                     "import".to_string(),
                     ConceptPattern {
                         regex: r"use\s+([\w:]+(?:::\{[^}]+\})?);".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("path".to_string(), 1);
-                            c
-                        },
+                        captures: captures(&[("path", 1)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1234,12 +1228,7 @@ mod tests {
                     "method".to_string(),
                     ConceptPattern {
                         regex: r"(?:(?:public|protected|private|static|abstract|final)\s+)*function\s+(\w+)\s*\(([^)]*)\)".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c.insert("params".to_string(), 2);
-                            c
-                        },
+                        captures: captures(&[("name", 1), ("params", 2)]),
                         context: "any".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1251,12 +1240,7 @@ mod tests {
                     ConceptPattern {
                         regex: r"(?:abstract\s+)?(?:final\s+)?(class|trait|interface)\s+(\w+)"
                             .to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("kind".to_string(), 1);
-                            c.insert("name".to_string(), 2);
-                            c
-                        },
+                        captures: captures(&[("kind", 1), ("name", 2)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
@@ -1267,11 +1251,7 @@ mod tests {
                     "namespace".to_string(),
                     ConceptPattern {
                         regex: r"namespace\s+([\w\\]+);".to_string(),
-                        captures: {
-                            let mut c = HashMap::new();
-                            c.insert("name".to_string(), 1);
-                            c
-                        },
+                        captures: captures(&[("name", 1)]),
                         context: "top_level".to_string(),
                         skip_comments: true,
                         skip_strings: true,
