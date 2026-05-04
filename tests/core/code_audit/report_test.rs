@@ -290,7 +290,7 @@ fn test_compute_fixability_counts_fixes_from_real_audit() {
 }
 
 #[test]
-fn test_compute_fixability_reuses_audit_analysis_context() {
+fn test_compute_fixability_with_analysis() {
     use std::fs;
 
     let _audit_guard = crate::test_support::AuditGuard::new();
