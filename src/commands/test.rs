@@ -15,7 +15,8 @@ use homeboy::observation::{
 use std::path::Path;
 
 use super::utils::args::{
-    BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+    filter_passthrough_args, BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs,
+    PassthroughCommand, PositionalComponentArgs, SettingArgs,
 };
 use super::{CmdResult, GlobalArgs};
 
@@ -88,64 +89,7 @@ pub struct TestArgs {
 /// This function strips homeboy-owned flags so only genuine passthrough args (like
 /// `--filter=TestName`) reach the extension script.
 fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
-    // Homeboy-owned boolean flags that should never reach the extension runner
-    const HOMEBOY_FLAGS: &[&str] = &[
-        "--analyze",
-        "--drift",
-        "--write",
-        "--json-summary",
-        "--baseline",
-        "--ignore-baseline",
-        "--ratchet",
-        "--skip-lint",
-        "--coverage",
-        "--json",
-    ];
-
-    // Homeboy-owned flags that take a value (--flag value or --flag=value)
-    const HOMEBOY_VALUE_FLAGS: &[&str] = &[
-        "--coverage-min",
-        "--since",
-        "--changed-since",
-        "--setting",
-        "--path",
-        "--extension",
-    ];
-
-    let mut filtered = Vec::new();
-    let mut skip_next = false;
-
-    for arg in args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        // Check boolean flags (exact match)
-        if HOMEBOY_FLAGS.contains(&arg.as_str()) {
-            continue;
-        }
-
-        // Check value flags: --flag=value (single arg) or --flag value (two args)
-        let is_value_flag = HOMEBOY_VALUE_FLAGS.iter().any(|f| {
-            if arg.starts_with(&format!("{}=", f)) {
-                return true; // --flag=value form, skip this arg only
-            }
-            if arg == *f {
-                skip_next = true; // --flag value form, skip this and next
-                return true;
-            }
-            false
-        });
-
-        if is_value_flag {
-            continue;
-        }
-
-        filtered.push(arg.clone());
-    }
-
-    filtered
+    filter_passthrough_args(PassthroughCommand::Test, args)
 }
 
 pub fn run(args: TestArgs, _global: &GlobalArgs) -> CmdResult<TestCommandOutput> {

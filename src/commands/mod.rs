@@ -338,6 +338,26 @@ pub fn run_markdown(
     }
 }
 
+pub fn run_plain_text(
+    command: crate::cli_surface::Commands,
+    global: &GlobalArgs,
+) -> homeboy::Result<(String, i32)> {
+    match command {
+        crate::cli_surface::Commands::File(args) => match file::run(args, global)? {
+            (file::FileCommandOutput::Raw(content), exit_code) => Ok((content, exit_code)),
+            _ => Err(homeboy::Error::internal_unexpected(
+                "Unexpected output type for raw mode",
+            )),
+        },
+        _ => Err(homeboy::Error::validation_invalid_argument(
+            "output_mode",
+            "Command does not support plain text output",
+            None,
+            None,
+        )),
+    }
+}
+
 /// Dispatch a command to its handler and map result to JSON.
 macro_rules! dispatch {
     ($args:expr, $global:expr, $extension:ident) => {

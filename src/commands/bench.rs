@@ -16,7 +16,8 @@ use homeboy::extension::ExtensionCapability;
 use homeboy::rig::{self, RigSpec};
 
 use super::utils::args::{
-    BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
+    filter_passthrough_args, BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs,
+    PassthroughCommand, PositionalComponentArgs, SettingArgs,
 };
 use super::{runs, CmdResult, GlobalArgs};
 
@@ -262,66 +263,7 @@ pub enum BenchReportFormat {
 /// including flags that also got parsed into named fields. Without
 /// filtering, homeboy-owned flags leak into the extension runner script.
 fn filter_homeboy_flags(args: &[String]) -> Vec<String> {
-    const HOMEBOY_FLAGS: &[&str] = &[
-        "--baseline",
-        "--ignore-baseline",
-        "--ignore-default-baseline",
-        "--ratchet",
-        "--force-hot",
-        "--json-summary",
-        "--json",
-    ];
-
-    const HOMEBOY_VALUE_FLAGS: &[&str] = &[
-        "--iterations",
-        "--warmup",
-        "--runs",
-        "--shared-state",
-        "--concurrency",
-        "--regression-threshold",
-        "--rig-concurrency",
-        "--scenario",
-        "--profile",
-        "--rig-order",
-        "--report",
-        "--rig",
-        "--setting",
-        "--path",
-        "--extension",
-    ];
-
-    let mut filtered = Vec::new();
-    let mut skip_next = false;
-
-    for arg in args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        if HOMEBOY_FLAGS.contains(&arg.as_str()) {
-            continue;
-        }
-
-        let is_value_flag = HOMEBOY_VALUE_FLAGS.iter().any(|f| {
-            if arg.starts_with(&format!("{}=", f)) {
-                return true;
-            }
-            if arg == *f {
-                skip_next = true;
-                return true;
-            }
-            false
-        });
-
-        if is_value_flag {
-            continue;
-        }
-
-        filtered.push(arg.clone());
-    }
-
-    filtered
+    filter_passthrough_args(PassthroughCommand::Bench, args)
 }
 
 /// Output envelope for `homeboy bench`.

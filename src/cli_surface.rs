@@ -125,6 +125,73 @@ pub enum Commands {
     List,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandResponseMode {
+    Json,
+    Raw(CommandRawOutputMode),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandRawOutputMode {
+    InteractivePassthrough,
+    Markdown,
+    PlainText,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandOutputArtifactPolicy {
+    GenericEnvelope,
+    ReviewStableArtifact,
+    TraceJsonSummaryArtifact,
+}
+
+impl Commands {
+    pub fn response_mode(&self, has_output_file: bool) -> CommandResponseMode {
+        match self {
+            Commands::Ssh(args) if args.subcommand.is_none() && args.command.is_empty() => {
+                CommandResponseMode::Raw(CommandRawOutputMode::InteractivePassthrough)
+            }
+            Commands::Logs(args) if logs::is_interactive(args) => {
+                CommandResponseMode::Raw(CommandRawOutputMode::InteractivePassthrough)
+            }
+            Commands::File(args) if file::is_raw_read(args) => {
+                CommandResponseMode::Raw(CommandRawOutputMode::PlainText)
+            }
+            Commands::Docs(args) if crate::commands::docs::is_json_mode(args) => {
+                CommandResponseMode::Json
+            }
+            Commands::Docs(_) => CommandResponseMode::Raw(CommandRawOutputMode::Markdown),
+            Commands::Changelog(args) if changelog::is_show_markdown(args) => {
+                CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+            }
+            Commands::Review(args) if review::is_markdown_mode(args) => {
+                CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+            }
+            Commands::Trace(args) if trace::is_markdown_mode(args) => {
+                CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+            }
+            Commands::Runs(args) if !has_output_file && args.is_markdown_mode() => {
+                CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+            }
+            Commands::Report(args) if report::is_markdown_mode(args) => {
+                CommandResponseMode::Raw(CommandRawOutputMode::Markdown)
+            }
+            Commands::List => CommandResponseMode::Raw(CommandRawOutputMode::Markdown),
+            _ => CommandResponseMode::Json,
+        }
+    }
+
+    pub fn output_artifact_policy(&self, has_output_file: bool) -> CommandOutputArtifactPolicy {
+        match self {
+            Commands::Review(_) => CommandOutputArtifactPolicy::ReviewStableArtifact,
+            Commands::Trace(args) if has_output_file && args.json_summary => {
+                CommandOutputArtifactPolicy::TraceJsonSummaryArtifact
+            }
+            _ => CommandOutputArtifactPolicy::GenericEnvelope,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandSurface {
     pub commands: Vec<CommandSurfaceEntry>,
