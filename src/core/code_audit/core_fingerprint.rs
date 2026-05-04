@@ -63,7 +63,6 @@ pub fn fingerprint_from_grammar(
         return None;
     }
 
-    let lang_id = grammar.language.id.as_str();
     let language = Language::from_extension(
         grammar
             .language
@@ -134,8 +133,6 @@ pub fn fingerprint_from_grammar(
     }
 
     // --- Method hashes and structural hashes ---
-    let keywords = &grammar.fingerprint.keywords;
-
     let mut method_hashes = HashMap::new();
     let mut structural_hashes = HashMap::new();
     for f in &functions {
@@ -149,7 +146,7 @@ pub fn fingerprint_from_grammar(
         }
         let exact = exact_hash(&f.body);
         method_hashes.insert(f.name.clone(), exact);
-        let structural = structural_hash(&f.body, keywords, lang_id == "php");
+        let structural = structural_hash(&f.body, grammar);
         structural_hashes.insert(f.name.clone(), structural);
     }
 
@@ -536,8 +533,8 @@ fn exact_hash(body: &str) -> String {
 }
 
 /// Compute structural hash: replace identifiers/literals with positional tokens.
-fn structural_hash(body: &str, keywords: &[String], is_php: bool) -> String {
-    let normalized = structural_normalize(body, keywords, is_php);
+fn structural_hash(body: &str, grammar: &Grammar) -> String {
+    let normalized = structural_normalize(body, grammar);
     sha256_hex16(&normalized)
 }
 
@@ -567,7 +564,7 @@ fn sha256_hex16(input: &str) -> String {
 
 /// Structural normalization: strip to body, replace strings/numbers/identifiers
 /// with positional tokens, preserving language keywords as structural markers.
-fn structural_normalize(body: &str, keywords: &[String], is_php: bool) -> String {
+fn structural_normalize(body: &str, grammar: &Grammar) -> String {
     // Strip to body (from first opening brace)
     let text = if let Some(pos) = body.find('{') {
         &body[pos..]
@@ -575,7 +572,12 @@ fn structural_normalize(body: &str, keywords: &[String], is_php: bool) -> String
         body
     };
 
-    let keyword_set: HashSet<&str> = keywords.iter().map(|keyword| keyword.as_str()).collect();
+    let keyword_set: HashSet<&str> = grammar
+        .fingerprint
+        .keywords
+        .iter()
+        .map(|keyword| keyword.as_str())
+        .collect();
 
     // Working string — we'll do sequential replacements
     let mut result = text.to_string();
@@ -586,9 +588,9 @@ fn structural_normalize(body: &str, keywords: &[String], is_php: bool) -> String
     // Replace numeric literals with NUM
     result = replace_numeric_literals(&result);
 
-    // Replace PHP variables with positional tokens (if PHP)
-    if is_php {
-        result = replace_php_variables(&result);
+    let preserved_variables = effective_preserved_variables(grammar);
+    for prefix in effective_variable_prefixes(grammar) {
+        result = replace_prefixed_variables(&result, &prefix, &preserved_variables);
     }
 
     // Replace non-keyword identifiers with positional tokens
@@ -637,16 +639,57 @@ fn replace_numeric_literals(input: &str) -> String {
     RE.replace_all(input, "NUM").to_string()
 }
 
-/// Replace PHP $variable references with positional tokens.
-fn replace_php_variables(input: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\$\w+").unwrap());
+fn effective_variable_prefixes(grammar: &Grammar) -> Vec<String> {
+    if !grammar.fingerprint.variable_prefixes.is_empty() {
+        return grammar.fingerprint.variable_prefixes.clone();
+    }
+
+    // Compatibility for existing external grammars: infer dollar-prefixed
+    // variables from grammar-owned patterns rather than language names.
+    let has_dollar_pattern = grammar
+        .patterns
+        .values()
+        .any(|pattern| pattern.regex.contains("\\$") || pattern.regex.contains('$'));
+
+    if has_dollar_pattern {
+        vec!["$".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+fn effective_preserved_variables(grammar: &Grammar) -> HashSet<String> {
+    let mut preserved: HashSet<String> = grammar
+        .fingerprint
+        .preserved_variables
+        .iter()
+        .cloned()
+        .collect();
+
+    // Compatibility for existing dollar-prefixed grammars that relied on the
+    // previous hardcoded structural treatment for object receiver references.
+    if preserved.is_empty()
+        && effective_variable_prefixes(grammar)
+            .iter()
+            .any(|p| p == "$")
+    {
+        preserved.insert("$this".to_string());
+    }
+
+    preserved
+}
+
+/// Replace prefixed variable references with positional tokens.
+fn replace_prefixed_variables(input: &str, prefix: &str, preserved: &HashSet<String>) -> String {
+    let Ok(re) = regex::Regex::new(&format!(r"{}\w+", regex::escape(prefix))) else {
+        return input.to_string();
+    };
     let mut var_map: HashMap<String, String> = HashMap::new();
     let mut counter = 0;
 
-    RE.replace_all(input, |caps: &regex::Captures| {
+    re.replace_all(input, |caps: &regex::Captures| {
         let var = caps[0].to_string();
-        if var == "$this" {
+        if preserved.contains(&var) {
             return var;
         }
         let token = var_map.entry(var).or_insert_with(|| {
@@ -1197,7 +1240,7 @@ fn extract_dead_code_markers(symbols: &[Symbol], lines: &[&str]) -> Vec<DeadCode
 }
 
 // ============================================================================
-// PHP-specific extraction from grammar symbols
+// Grammar-symbol extraction helpers
 // ============================================================================
 
 /// Extract PHP class properties from property symbols.
@@ -1329,10 +1372,6 @@ mod tests {
         }
     }
 
-    fn rust_keywords() -> Vec<String> {
-        rust_grammar().fingerprint.keywords
-    }
-
     #[test]
     fn rust_namespace_comes_from_file_path_not_crate_imports() {
         let mut grammar = rust_grammar();
@@ -1391,8 +1430,8 @@ pub fn undo() -> Result<()> {
         let a = "{ let foo = bar(); baz(foo); }";
         let b = "{ let qux = quux(); corge(qux); }";
         assert_eq!(
-            structural_hash(a, &rust_keywords(), false),
-            structural_hash(b, &rust_keywords(), false),
+            structural_hash(a, &rust_grammar()),
+            structural_hash(b, &rust_grammar()),
         );
     }
 
@@ -1401,8 +1440,8 @@ pub fn undo() -> Result<()> {
         let a = "{ let x = 1; if x > 0 { return true; } }";
         let b = "{ let x = 1; for i in 0..x { print(i); } }";
         assert_ne!(
-            structural_hash(a, &rust_keywords(), false),
-            structural_hash(b, &rust_keywords(), false),
+            structural_hash(a, &rust_grammar()),
+            structural_hash(b, &rust_grammar()),
         );
     }
 
@@ -1764,6 +1803,8 @@ fn helper() {}
             [fingerprint]
             keywords = ["class", "function", "public", "return", "int", "string", "bool", "true", "false"]
             skip_calls = ["if", "return"]
+            variable_prefixes = ["$"]
+            preserved_variables = ["$this"]
             contract_method_names = ["contractExecute"]
             contract_type_hints = ["FrameworkRequest"]
             registration_concepts = []
@@ -1844,6 +1885,35 @@ fn helper() {}
             .hooks
             .iter()
             .any(|hook| hook.hook_type == "filter" && hook.name == "sample_value"));
+    }
+
+    #[test]
+    fn grammar_variable_prefixes_drive_structural_hash_normalization() {
+        let grammar = php_metadata_grammar();
+        let a = "{ $first = make_value(); return $first; }";
+        let b = "{ $second = make_value(); return $second; }";
+
+        assert_eq!(structural_hash(a, &grammar), structural_hash(b, &grammar));
+    }
+
+    #[test]
+    fn existing_grammar_patterns_can_infer_dollar_variable_prefixes() {
+        let mut grammar = php_metadata_grammar();
+        grammar.fingerprint.variable_prefixes.clear();
+        grammar.fingerprint.preserved_variables.clear();
+        let a = "{ $first = make_value(); return $first; }";
+        let b = "{ $second = make_value(); return $second; }";
+
+        assert_eq!(structural_hash(a, &grammar), structural_hash(b, &grammar));
+    }
+
+    #[test]
+    fn grammar_preserved_variables_keep_receiver_references_stable() {
+        let grammar = php_metadata_grammar();
+        let a = "{ $first = $this->make_value(); return $first; }";
+        let b = "{ $second = $this->make_value(); return $second; }";
+
+        assert_eq!(structural_hash(a, &grammar), structural_hash(b, &grammar));
     }
 
     #[test]
