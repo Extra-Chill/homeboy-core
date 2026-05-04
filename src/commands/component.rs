@@ -207,19 +207,7 @@ pub fn run(
 
             let remote_path = remote_path.unwrap_or_default();
             let repo_path = Path::new(&local_path);
-            let dir_name = repo_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| {
-                    homeboy::Error::validation_invalid_argument(
-                        "local_path",
-                        "Could not derive component ID from local path",
-                        Some(local_path.clone()),
-                        None,
-                    )
-                })?;
-
-            let id = homeboy::engine::identifier::slugify_id(dir_name, "component_id")?;
+            let id = derive_component_id_for_create(repo_path, &local_path)?;
             let mut new_component =
                 Component::new(id.clone(), local_path.clone(), remote_path, build_artifact);
 
@@ -361,6 +349,26 @@ fn suggest_project_for_path(local_path: &str) -> Option<String> {
     }
 
     None
+}
+
+fn derive_component_id_for_create(repo_path: &Path, local_path: &str) -> homeboy::Result<String> {
+    if repo_path.join("homeboy.json").exists() {
+        return component::infer_portable_component_id(repo_path);
+    }
+
+    let dir_name = repo_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "local_path",
+                "Could not derive component ID from local path",
+                Some(local_path.to_string()),
+                None,
+            )
+        })?;
+
+    homeboy::engine::identifier::slugify_id(dir_name, "component_id")
 }
 
 fn show(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
@@ -1061,6 +1069,19 @@ mod tests {
 
         assert_eq!(obj["local_path"], serde_json::json!("/override"));
         assert_eq!(obj["remote_path"], serde_json::json!("/keep-this"));
+    }
+
+    #[test]
+    fn component_create_id_prefers_existing_portable_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("homeboy@fix-triage-default-workspace");
+        fs::create_dir_all(&repo).expect("repo dir");
+        fs::write(repo.join("homeboy.json"), r#"{"id":"homeboy"}"#).expect("homeboy.json");
+
+        let id = derive_component_id_for_create(&repo, &repo.to_string_lossy())
+            .expect("portable id should be used");
+
+        assert_eq!(id, "homeboy");
     }
 
     #[test]

@@ -65,6 +65,7 @@ pub fn rename_component(id: &str, new_id: &str) -> Result<Component> {
         component.id = resolved_new_id.clone();
         Ok(())
     })?;
+    crate::component::inventory::rename_standalone_registration(id, &component)?;
     update_project_references(id, &resolved_new_id)?;
     Ok(component)
 }

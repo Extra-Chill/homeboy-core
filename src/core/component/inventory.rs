@@ -350,6 +350,48 @@ pub fn write_standalone_registration(component: &Component) -> Result<()> {
     )
 }
 
+/// Move the standalone pointer file when a component ID changes, then rewrite it.
+pub fn rename_standalone_registration(old_id: &str, component: &Component) -> Result<()> {
+    if old_id == component.id {
+        return write_standalone_registration(component);
+    }
+
+    let dir = crate::paths::components()?;
+    crate::engine::local_files::local().ensure_dir(&dir)?;
+
+    let old_path = dir.join(format!("{}.json", old_id));
+    let new_path = dir.join(format!("{}.json", component.id));
+
+    if old_path.exists() && !new_path.exists() {
+        std::fs::rename(&old_path, &new_path).map_err(|e| {
+            Error::internal_io(
+                e.to_string(),
+                Some(format!(
+                    "rename standalone registration {} to {}",
+                    old_path.display(),
+                    new_path.display()
+                )),
+            )
+        })?;
+    }
+
+    write_standalone_registration(component)?;
+
+    if old_path.exists() {
+        std::fs::remove_file(&old_path).map_err(|e| {
+            Error::internal_io(
+                e.to_string(),
+                Some(format!(
+                    "remove stale standalone registration {}",
+                    old_path.display()
+                )),
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,6 +775,56 @@ mod tests {
             json.get("extra_field").and_then(|v| v.as_str()),
             Some("preserve-me"),
             "unknown fields should be preserved"
+        );
+    }
+
+    #[test]
+    fn rename_standalone_moves_pointer_to_new_component_id() {
+        let dir = TempDir::new().unwrap();
+        let config_components = dir
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("components");
+        fs::create_dir_all(&config_components).unwrap();
+
+        let existing = serde_json::json!({
+            "local_path": "/old/path",
+            "remote_path": "target/release/old-id",
+            "extra_field": "preserve-me"
+        });
+        fs::write(
+            config_components.join("old-id.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let _home = with_home_override(dir.path());
+
+        let component = Component::new(
+            "new-id".to_string(),
+            "/new/path".to_string(),
+            "target/release/new-id".to_string(),
+            None,
+        );
+
+        rename_standalone_registration("old-id", &component).unwrap();
+
+        assert!(!config_components.join("old-id.json").exists());
+        let content = fs::read_to_string(config_components.join("new-id.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(
+            json.get("local_path").and_then(|v| v.as_str()),
+            Some("/new/path")
+        );
+        assert_eq!(
+            json.get("remote_path").and_then(|v| v.as_str()),
+            Some("target/release/new-id")
+        );
+        assert_eq!(
+            json.get("extra_field").and_then(|v| v.as_str()),
+            Some("preserve-me")
         );
     }
 }
