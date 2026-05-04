@@ -96,7 +96,7 @@ Use repeatable `--attach KIND:TARGET` flags to observe already-running local sys
 Supported v1 attachment kinds:
 
 - `logfile:<path>` records whether the file exists and its byte length before and after the scenario.
-- `fswatch:<path>` records whether a watched file exists, its byte length, and its last-modified timestamp before and after the scenario. V1 is a safe snapshot, not a streaming filesystem event probe.
+- `fswatch:<path>` records whether a watched file exists, its byte length, and its last-modified timestamp before and after the scenario. It also enables the same passive `file.watch` probe used by rig workloads, so creates, writes, and deletes observed during the scenario are emitted as `file.watch.fs.*` timeline events. V1 is polling-based and does not attribute the writer PID.
 - `pid:<n>` records whether a local process exists before and after the scenario.
 - `port:<n>` checks whether `127.0.0.1:<n>` accepts TCP connections before and after the scenario.
 - `http:<url>` or a direct `http://` / `https://` URL performs a local HTTP GET before and after the scenario and records the response status or connection error.
@@ -111,7 +111,7 @@ homeboy trace wp-coding-agents auth-multi-session-race \
   --attach http://127.0.0.1:46227/health
 ```
 
-Core also exports the parsed attachments to the runner through `HOMEBOY_TRACE_ATTACHMENTS` so extension-owned scenarios can correlate their own events with the same observation surfaces. V1 intentionally omits `systemd:` and remote attach targets; those require reliable platform-specific probes.
+Core also exports the parsed attachments to the runner through `HOMEBOY_TRACE_ATTACHMENTS` so extension-owned scenarios can correlate their own events with the same observation surfaces. `fswatch` attachments are deduplicated with explicit `file.watch` rig probes for the same path. V1 intentionally omits `systemd:` and remote attach targets; those require reliable platform-specific probes.
 
 ## Spans
 
