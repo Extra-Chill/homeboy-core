@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_two_families_duplicating_runner_setup_contract() {
+    fn test_run() {
         let alpha = fingerprint(
             "src/families/alpha.rs",
             r#"
