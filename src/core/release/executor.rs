@@ -90,6 +90,15 @@ fn step_skipped(
 /// Populates [`ReleaseState::version`], [`tag`][ReleaseState::tag] (default
 /// `v{version}`), and [`notes`][ReleaseState::notes] from the just-written
 /// changelog section.
+///
+/// After the bump, every version target is re-read from disk and compared to
+/// the new version. If any target wasn't updated, the step is marked Failed
+/// so downstream steps (commit, tag, push) bail out before producing the
+/// orphan-tag pattern from issue #2234 — a tag pushed onto an unbumped
+/// commit. Without this invariant a silent no-op bump (e.g. a regression in
+/// the changelog finalization path that swallows the version write) leaves
+/// `state.version` advanced in memory while the working tree stays clean,
+/// `git.commit` skips, and `git.tag` lands on the wrong commit.
 pub(crate) fn run_version(
     component: &Component,
     state: &mut ReleaseState,
@@ -100,11 +109,155 @@ pub(crate) fn run_version(
     let data = serde_json::to_value(&result)
         .map_err(|e| Error::internal_json(e.to_string(), Some("version output".to_string())))?;
 
+    if let Some(mismatches) = collect_version_target_mismatches(component, &result.new_version) {
+        let error_msg = format!(
+            "Version bump verification failed: {} target(s) on disk are not at {} after bump_component_version: {}. \
+             Refusing to continue — tagging now would create an orphan tag (no release: commit, no version-file bump). See issue #2234.",
+            mismatches.len(),
+            result.new_version,
+            mismatches
+                .iter()
+                .map(|m| format!("{} = {}", m.file, m.found.as_deref().unwrap_or("<unreadable>")))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        let mut failure_data = data;
+        failure_data["mismatches"] = serde_json::to_value(&mismatches).unwrap_or_default();
+        failure_data["new_version"] = serde_json::Value::String(result.new_version.clone());
+        return Ok(step_failed(
+            "version",
+            "version",
+            Some(failure_data),
+            Some(error_msg),
+            vec![crate::error::Hint {
+                message: "If a previous run partially bumped this component, run `homeboy release <component> --recover` to finish it cleanly.".to_string(),
+            }],
+        ));
+    }
+
     state.version = Some(result.new_version.clone());
     state.tag = Some(format!("v{}", result.new_version));
     state.notes = Some(load_release_notes(component)?);
 
     Ok(step_success("version", "version", Some(data), Vec::new()))
+}
+
+#[derive(Debug, serde::Serialize)]
+struct VersionTargetMismatch {
+    file: String,
+    expected: String,
+    found: Option<String>,
+}
+
+/// Re-read every version target from disk and return any that don't show
+/// `expected_version`. Returns `None` when every target matches (the success
+/// case). Returns `Some(non_empty_vec)` when at least one target failed to
+/// update — caller treats that as a failed bump.
+///
+/// This is a defense-in-depth check around `bump_component_version`: if any
+/// upstream change ever causes the function to return Ok without actually
+/// writing every target, this catches it before `state.version` advances.
+fn collect_version_target_mismatches(
+    component: &Component,
+    expected_version: &str,
+) -> Option<Vec<VersionTargetMismatch>> {
+    let targets = component.version_targets.as_ref()?;
+    if targets.is_empty() {
+        return None;
+    }
+
+    let mut mismatches = Vec::new();
+    for target in targets {
+        let found = version::read_local_version(&component.local_path, target);
+        if found.as_deref() != Some(expected_version) {
+            mismatches.push(VersionTargetMismatch {
+                file: target.file.clone(),
+                expected: expected_version.to_string(),
+                found,
+            });
+        }
+    }
+
+    if mismatches.is_empty() {
+        None
+    } else {
+        Some(mismatches)
+    }
+}
+
+/// Re-read every version target from HEAD's tree (not the working tree) and
+/// return any that don't show `expected_version`. Returns `None` when every
+/// target matches.
+///
+/// Used as the final gate before `git.tag` — confirms the version bump was
+/// actually committed, not just written to the working tree. This catches
+/// the orphan-tag pattern even if `git.commit` is somehow skipped or amended
+/// to the wrong commit.
+fn collect_head_version_mismatches(
+    component: &Component,
+    expected_version: &str,
+) -> Option<Vec<VersionTargetMismatch>> {
+    let targets = component.version_targets.as_ref()?;
+    if targets.is_empty() {
+        return None;
+    }
+
+    let mut mismatches = Vec::new();
+    for target in targets {
+        let found = read_version_at_head(component, target);
+        if found.as_deref() != Some(expected_version) {
+            mismatches.push(VersionTargetMismatch {
+                file: target.file.clone(),
+                expected: expected_version.to_string(),
+                found,
+            });
+        }
+    }
+
+    if mismatches.is_empty() {
+        None
+    } else {
+        Some(mismatches)
+    }
+}
+
+/// Read a version target's content from `HEAD` (committed tree) and parse
+/// the version string out of it. Returns `None` if the file is missing at
+/// HEAD, the git command fails, or the content can't be parsed.
+fn read_version_at_head(
+    component: &Component,
+    target: &crate::component::VersionTarget,
+) -> Option<String> {
+    use crate::release::version::{
+        default_pattern_for_file, parse_version, resolve_version_file_path,
+    };
+
+    let pattern = target
+        .pattern
+        .clone()
+        .or_else(|| default_pattern_for_file(&target.file))?;
+
+    // Resolve the path the same way bump_component_version does, then make it
+    // repo-relative for `git show HEAD:<rel>`. `git show` requires forward
+    // slashes and rejects absolute paths.
+    let full_path = resolve_version_file_path(&component.local_path, &target.file);
+    let local_root = std::path::Path::new(&component.local_path);
+    let rel_path = std::path::Path::new(&full_path)
+        .strip_prefix(local_root)
+        .ok()?
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    let spec = format!("HEAD:{}", rel_path);
+    let output =
+        crate::git::execute_git_for_release(&component.local_path, &["show", &spec]).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let content = String::from_utf8(output.stdout).ok()?;
+    let normalized_pattern = crate::component::normalize_version_pattern(&pattern);
+    parse_version(&content, &normalized_pattern)
 }
 
 /// Commit any staged release artifacts (changelog/version files). Amends the
@@ -180,12 +333,50 @@ pub(crate) fn run_git_commit(
 /// to HEAD; errors when it exists but points elsewhere. Updates
 /// [`ReleaseState::tag`] to the final tag name (may have been overridden by
 /// the caller for monorepo components).
+///
+/// Final invariant before tagging: HEAD's tree must contain every version
+/// target at `state.version`. If HEAD wasn't updated to the new version
+/// (orphan-tag pattern from issue #2234), the step fails *before* creating
+/// the tag instead of pushing a tag onto the wrong commit.
 pub(crate) fn run_git_tag(
     component: &Component,
     component_id: &str,
     state: &mut ReleaseState,
     tag_name: &str,
 ) -> Result<ReleaseStepResult> {
+    if let Some(version) = state.version.as_deref() {
+        if let Some(mismatches) = collect_head_version_mismatches(component, version) {
+            let error_msg = format!(
+                "Tag invariant failed: HEAD does not show version {} for {} target(s): {}. \
+                 Refusing to create tag {} on the wrong commit (would produce the orphan-tag pattern from issue #2234).",
+                version,
+                mismatches.len(),
+                mismatches
+                    .iter()
+                    .map(|m| format!("{} = {}", m.file, m.found.as_deref().unwrap_or("<unreadable>")))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                tag_name,
+            );
+            return Ok(step_failed(
+                "git.tag",
+                "git.tag",
+                Some(serde_json::json!({
+                    "tag": tag_name,
+                    "expected_version": version,
+                    "mismatches": mismatches,
+                })),
+                Some(error_msg),
+                vec![crate::error::Hint {
+                    message: format!(
+                        "Inspect the failed bump: `git status` then `git log -1`. To finish a partial release, run `homeboy release {} --recover`.",
+                        component_id
+                    ),
+                }],
+            ));
+        }
+    }
+
     if crate::git::tag_exists_locally(&component.local_path, tag_name).unwrap_or(false) {
         let tag_commit = crate::git::get_tag_commit(&component.local_path, tag_name)?;
         let head_commit = crate::git::get_head_commit(&component.local_path)?;
@@ -1023,5 +1214,139 @@ mod tests {
         let result = publish_step_result("publish.npm", "npm", "npm", None, &response);
 
         assert_eq!(result.status, ReleaseStepStatus::Failed);
+    }
+
+    // ----- Orphan-tag regression coverage (issue #2234) -----
+
+    use super::{collect_head_version_mismatches, collect_version_target_mismatches, run_git_tag};
+    use crate::component::VersionTarget;
+    use crate::release::types::ReleaseState;
+
+    fn run_in(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+        let output = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(dir)
+            .output()
+            .expect("spawn command");
+        assert!(
+            output.status.success(),
+            "command {:?} failed: stdout={:?} stderr={:?}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        output
+    }
+
+    /// Fixture: a git repo with one committed plugin header file at version
+    /// `committed_version`. The working tree is clean. Returns (temp, component).
+    fn plugin_repo_at(committed_version: &str) -> (tempfile::TempDir, Component) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path();
+        run_in(dir, &["git", "init", "-q"]);
+        run_in(dir, &["git", "config", "user.email", "test@example.com"]);
+        run_in(dir, &["git", "config", "user.name", "Test"]);
+        run_in(dir, &["git", "config", "commit.gpgsign", "false"]);
+
+        let plugin = format!(
+            "<?php\n/*\nPlugin Name: Fixture\nVersion: {}\n*/\n",
+            committed_version
+        );
+        std::fs::write(dir.join("plugin.php"), plugin).expect("write plugin");
+        run_in(dir, &["git", "add", "."]);
+        run_in(dir, &["git", "commit", "-q", "-m", "Initial commit"]);
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: dir.to_string_lossy().to_string(),
+            version_targets: Some(vec![VersionTarget {
+                file: "plugin.php".to_string(),
+                pattern: Some(r"(?:Version|version)[:=]\s+([0-9]+\.[0-9]+\.[0-9]+)".to_string()),
+            }]),
+            ..Component::default()
+        };
+        (temp, component)
+    }
+
+    #[test]
+    fn collect_version_target_mismatches_returns_none_when_disk_matches_expected() {
+        let (_temp, component) = plugin_repo_at("0.6.13");
+        assert!(collect_version_target_mismatches(&component, "0.6.13").is_none());
+    }
+
+    #[test]
+    fn collect_version_target_mismatches_flags_unbumped_target() {
+        let (_temp, component) = plugin_repo_at("0.6.12");
+        let mismatches = collect_version_target_mismatches(&component, "0.6.13")
+            .expect("expected mismatch on stale version file");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].file, "plugin.php");
+        assert_eq!(mismatches[0].expected, "0.6.13");
+        assert_eq!(mismatches[0].found.as_deref(), Some("0.6.12"));
+    }
+
+    #[test]
+    fn collect_head_version_mismatches_flags_when_head_lacks_new_version() {
+        // HEAD has 0.6.12 committed, but state.version is 0.6.13.
+        // Working tree is also at 0.6.12 (no bump happened). HEAD check fires.
+        let (_temp, component) = plugin_repo_at("0.6.12");
+        let mismatches = collect_head_version_mismatches(&component, "0.6.13")
+            .expect("HEAD should not show 0.6.13");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].found.as_deref(), Some("0.6.12"));
+    }
+
+    #[test]
+    fn collect_head_version_mismatches_returns_none_when_head_matches() {
+        let (_temp, component) = plugin_repo_at("0.6.13");
+        assert!(collect_head_version_mismatches(&component, "0.6.13").is_none());
+    }
+
+    #[test]
+    fn git_tag_step_refuses_to_tag_when_head_lacks_new_version() {
+        // The orphan-tag scenario from issue #2234: the in-memory state.version
+        // says 0.6.13, but HEAD's plugin.php still reads 0.6.12. Without the
+        // invariant check this would happily push a tag onto the wrong commit.
+        let (_temp, component) = plugin_repo_at("0.6.12");
+        let mut state = ReleaseState {
+            version: Some("0.6.13".to_string()),
+            tag: Some("v0.6.13".to_string()),
+            ..ReleaseState::default()
+        };
+
+        let result = run_git_tag(&component, "fixture", &mut state, "v0.6.13")
+            .expect("step should return a result, not propagate Err");
+
+        assert_eq!(result.status, ReleaseStepStatus::Failed);
+        let err = result.error.expect("expected failure error");
+        assert!(
+            err.contains("issue #2234"),
+            "expected #2234 reference in error, got: {}",
+            err
+        );
+        assert!(err.contains("v0.6.13"), "error should name the tag");
+        assert!(
+            !crate::git::tag_exists_locally(&component.local_path, "v0.6.13").unwrap_or(true),
+            "tag must NOT have been created when invariant fails"
+        );
+    }
+
+    #[test]
+    fn git_tag_step_creates_tag_when_head_matches_state_version() {
+        let (_temp, component) = plugin_repo_at("0.6.13");
+        let mut state = ReleaseState {
+            version: Some("0.6.13".to_string()),
+            tag: Some("v0.6.13".to_string()),
+            ..ReleaseState::default()
+        };
+
+        let result = run_git_tag(&component, "fixture", &mut state, "v0.6.13")
+            .expect("step should succeed when HEAD shows the bumped version");
+
+        assert_eq!(result.status, ReleaseStepStatus::Success);
+        assert!(
+            crate::git::tag_exists_locally(&component.local_path, "v0.6.13").unwrap_or(false),
+            "tag should have been created on HEAD"
+        );
     }
 }

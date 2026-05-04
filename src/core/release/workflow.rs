@@ -591,6 +591,18 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
     let current_version = &version_info.version;
     let tag_name = format_tag(current_version, monorepo.as_ref());
 
+    // Surface the orphan-tag pattern from issue #2234. When the latest release
+    // tag points at a commit whose subject is *not* `release: vX.Y.Z`, the
+    // previous release was botched (tag without bump). Recover should warn
+    // loudly so the operator can decide whether to delete the orphan tag, hand
+    // back-fill a release: commit, or run `--recover` to commit the version
+    // files at the tagged commit.
+    if let Some(latest_tag) = latest_release_tag(&component.local_path, monorepo.as_ref()) {
+        if let Some(diagnostic) = diagnose_orphan_tag(&component.local_path, &latest_tag) {
+            log_status!("recover", "{}", diagnostic);
+        }
+    }
+
     let tag_exists_local =
         git::tag_exists_locally(&component.local_path, &tag_name).unwrap_or(false);
     let tag_exists_remote =
@@ -684,6 +696,53 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
             deployment: None,
         },
         0,
+    ))
+}
+
+/// Resolve the most recent release-shaped tag for the component, honoring
+/// monorepo prefixes. Returns `None` if no matching tag is found.
+fn latest_release_tag(local_path: &str, monorepo: Option<&git::MonorepoContext>) -> Option<String> {
+    match monorepo {
+        Some(ctx) => git::get_latest_tag_with_prefix(&ctx.git_root, Some(&ctx.tag_prefix)).ok()?,
+        None => git::get_latest_tag(local_path).ok()?,
+    }
+}
+
+/// Inspect the latest release tag for the orphan-tag pattern (#2234): a tag
+/// whose tagged commit subject is not `release: vX.Y.Z`. Returns a one-line
+/// warning when the tag looks orphaned, otherwise `None`.
+///
+/// This is intentionally a soft warning — `--recover` may still be the
+/// right move (re-commit the working tree), but the operator deserves to
+/// know they're recovering on top of a misplaced tag before they push more
+/// state to origin.
+fn diagnose_orphan_tag(local_path: &str, tag: &str) -> Option<String> {
+    let tag_commit = git::get_tag_commit(local_path, tag).ok()?;
+    let subject_output =
+        git::execute_git_for_release(local_path, &["log", "-1", "--format=%s", &tag_commit])
+            .ok()?;
+    if !subject_output.status.success() {
+        return None;
+    }
+    let subject = String::from_utf8_lossy(&subject_output.stdout)
+        .trim()
+        .to_string();
+
+    if subject.starts_with("release: v") || subject.starts_with("release:v") {
+        return None;
+    }
+
+    Some(format!(
+        "⚠ Latest tag {} points at commit {} ({}) — not a `release: v...` commit. \
+         This matches the orphan-tag pattern from issue #2234. Inspect the tag/commit before recovering: \
+         `git show {}`. To delete a misplaced tag locally and on origin: \
+         `git tag -d {} && git push origin :refs/tags/{}`",
+        tag,
+        &tag_commit[..8.min(tag_commit.len())],
+        subject,
+        tag,
+        tag,
+        tag,
     ))
 }
 
@@ -989,5 +1048,63 @@ mod tests {
         };
 
         assert!(has_post_release_warnings(&run));
+    }
+
+    // ----- Recover-time orphan-tag warning (issue #2234 ask #3) -----
+
+    fn run_in(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+        let output = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(dir)
+            .output()
+            .expect("spawn command");
+        assert!(
+            output.status.success(),
+            "command {:?} failed: stdout={:?} stderr={:?}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        output
+    }
+
+    #[test]
+    fn diagnose_orphan_tag_warns_when_tag_points_at_non_release_commit() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path();
+        run_in(dir, &["git", "init", "-q"]);
+        run_in(dir, &["git", "config", "user.email", "test@example.com"]);
+        run_in(dir, &["git", "config", "user.name", "Test"]);
+        run_in(dir, &["git", "config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("README"), "x").expect("write");
+        run_in(dir, &["git", "add", "."]);
+        run_in(
+            dir,
+            &["git", "commit", "-q", "-m", "Update h2bc bundle to v0.6.14"],
+        );
+        run_in(dir, &["git", "tag", "v0.7.6"]);
+
+        let warning = diagnose_orphan_tag(&dir.to_string_lossy(), "v0.7.6")
+            .expect("orphan tag should produce a warning");
+
+        assert!(warning.contains("v0.7.6"));
+        assert!(warning.contains("issue #2234"));
+        assert!(warning.contains("Update h2bc bundle"));
+    }
+
+    #[test]
+    fn diagnose_orphan_tag_silent_when_tag_points_at_release_commit() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path();
+        run_in(dir, &["git", "init", "-q"]);
+        run_in(dir, &["git", "config", "user.email", "test@example.com"]);
+        run_in(dir, &["git", "config", "user.name", "Test"]);
+        run_in(dir, &["git", "config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("README"), "x").expect("write");
+        run_in(dir, &["git", "add", "."]);
+        run_in(dir, &["git", "commit", "-q", "-m", "release: v0.7.4"]);
+        run_in(dir, &["git", "tag", "v0.7.4"]);
+
+        assert!(diagnose_orphan_tag(&dir.to_string_lossy(), "v0.7.4").is_none());
     }
 }
