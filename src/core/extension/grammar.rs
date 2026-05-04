@@ -106,6 +106,28 @@ pub struct FingerprintGrammar {
     /// Registration name prefixes to suppress.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub registration_skip_prefixes: Vec<String>,
+
+    /// Optional grammar-owned namespace derivation rule. Use this for languages
+    /// where the declaring namespace/module is implied by the file path rather
+    /// than a parsed source symbol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace_derivation: Option<NamespaceDerivationConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamespaceDerivationConfig {
+    /// Prefix prepended to the derived namespace, e.g. `crate::`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+    /// Path segments to drop before deriving a namespace, e.g. `1` to drop `src`.
+    #[serde(default)]
+    pub strip_leading_segments: usize,
+    /// Separator used between remaining path segments.
+    #[serde(default = "default_namespace_separator")]
+    pub separator: String,
+    /// Whether a root-level file contributes its file stem as the namespace.
+    #[serde(default)]
+    pub include_file_stem_when_root: bool,
 }
 
 impl FingerprintGrammar {
@@ -118,7 +140,12 @@ impl FingerprintGrammar {
             && self.registration_concepts.is_empty()
             && self.registration_skip_names.is_empty()
             && self.registration_skip_prefixes.is_empty()
+            && self.namespace_derivation.is_none()
     }
+}
+
+fn default_namespace_separator() -> String {
+    "::".to_string()
 }
 
 /// Grammar section for function contract extraction.

@@ -236,6 +236,26 @@ pub struct ProvidesConfig {
     /// Capabilities this extension supports (e.g., ["fingerprint", "refactor"]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
+    /// Component-root marker rules used to suggest this extension for an
+    /// unattached component. Core evaluates these generically; extension
+    /// manifests own the ecosystem-specific file/glob knowledge.
+    #[serde(
+        default,
+        alias = "discoveryMarkers",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub discovery_markers: Vec<DiscoveryMarkerConfig>,
+}
+
+/// Component-root marker rule for extension discovery suggestions.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiscoveryMarkerConfig {
+    /// Marker paths/globs that must all match relative to the component root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub all: Vec<String>,
+    /// Marker paths/globs where any single match is sufficient.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub any: Vec<String>,
 }
 
 /// Scripts that implement extension capabilities.
@@ -664,6 +684,14 @@ impl ExtensionManifest {
         self.provides
             .as_ref()
             .map(|p| p.capabilities.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get component discovery marker rules (empty if not specified).
+    pub fn discovery_markers(&self) -> &[DiscoveryMarkerConfig] {
+        self.provides
+            .as_ref()
+            .map(|p| p.discovery_markers.as_slice())
             .unwrap_or(&[])
     }
 

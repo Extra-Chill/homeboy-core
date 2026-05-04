@@ -55,17 +55,6 @@ pub mod source_metadata {
         pub(super) repair: Option<SourceMetadataRepair>,
     }
 
-    pub(super) const OFFICIAL_EXTENSION_SOURCE_URL: &str =
-        "https://github.com/Extra-Chill/homeboy-extensions";
-    const OFFICIAL_EXTENSION_IDS: &[&str] = &[
-        "rust",
-        "wordpress",
-        "php",
-        "javascript",
-        "typescript",
-        "nodejs",
-    ];
-
     pub(super) fn resolve_source_url(extension_id: &str) -> Result<SourceMetadataResolution> {
         let extension = load_extension(extension_id)?;
         let extension_dir = paths::extension(extension_id)?;
@@ -113,22 +102,6 @@ pub mod source_metadata {
             });
         }
 
-        if let Some(source_url) = official_source_url_for_id(extension_id) {
-            write_source_metadata(
-                &extension_dir,
-                source_url,
-                read_source_revision(extension_id),
-            );
-            return Ok(SourceMetadataResolution {
-                url: source_url.to_string(),
-                repair: Some(SourceMetadataRepair {
-                    source_url: source_url.to_string(),
-                    reason: "restored .source-url for known official Homeboy extension".to_string(),
-                    repair_command: repair_command(extension_id, source_url),
-                }),
-            });
-        }
-
         let mut err = Error::validation_invalid_argument(
             "extension_id",
             format!(
@@ -141,10 +114,6 @@ pub mod source_metadata {
         .with_hint(format!(
             "Repair by reinstalling from the original source: homeboy extension install <url> --id {}",
             extension_id
-        ))
-        .with_hint(format!(
-            "If this is an official extension, use: {}",
-            repair_command(extension_id, OFFICIAL_EXTENSION_SOURCE_URL)
         ));
 
         if let Some(path) = extension.extension_path {
@@ -152,12 +121,6 @@ pub mod source_metadata {
         }
 
         Err(err)
-    }
-
-    fn official_source_url_for_id(extension_id: &str) -> Option<&'static str> {
-        OFFICIAL_EXTENSION_IDS
-            .contains(&extension_id)
-            .then_some(OFFICIAL_EXTENSION_SOURCE_URL)
     }
 
     fn repair_command(extension_id: &str, source_url: &str) -> String {
@@ -1473,27 +1436,39 @@ exec '{}' "$@"
     }
 
     #[test]
-    fn copied_official_extension_missing_source_metadata_repairs_source_url() {
+    fn copied_extension_manifest_source_metadata_repairs_source_url() {
         with_isolated_home(|home| {
             let extensions_dir = home.path().join(".config/homeboy/extensions");
-            write_extension_fixture(&extensions_dir, "rust");
             let extension_dir = extensions_dir.join("rust");
+            fs::create_dir_all(&extension_dir).expect("extension dir");
+            fs::write(
+                extension_dir.join("rust.json"),
+                r#"{
+  "name": "rust extension",
+  "version": "1.0.0",
+  "source_url": "https://github.com/Extra-Chill/homeboy-extensions"
+}"#,
+            )
+            .expect("extension manifest");
 
             let source =
-                source_metadata::resolve_source_url("rust").expect("official source repair");
+                source_metadata::resolve_source_url("rust").expect("manifest source repair");
 
-            assert_eq!(source.url, source_metadata::OFFICIAL_EXTENSION_SOURCE_URL);
+            assert_eq!(
+                source.url,
+                "https://github.com/Extra-Chill/homeboy-extensions"
+            );
             let repair = source.repair.expect("repair result");
             assert_eq!(
                 repair.source_url,
-                source_metadata::OFFICIAL_EXTENSION_SOURCE_URL
+                "https://github.com/Extra-Chill/homeboy-extensions"
             );
-            assert!(repair.reason.contains("official Homeboy extension"));
+            assert!(repair.reason.contains("manifest sourceUrl"));
             assert_eq!(
                 fs::read_to_string(extension_dir.join(".source-url"))
                     .expect("source url marker")
                     .trim(),
-                source_metadata::OFFICIAL_EXTENSION_SOURCE_URL
+                "https://github.com/Extra-Chill/homeboy-extensions"
             );
         });
     }
@@ -1547,7 +1522,6 @@ exec '{}' "$@"
 
             assert!(text.contains("no sourceUrl or .source-url metadata"));
             assert!(hints.contains("homeboy extension install <url> --id custom"));
-            assert!(hints.contains("homeboy extension install https://github.com/Extra-Chill/homeboy-extensions --id custom"));
             assert!(hints.contains(&extension_dir.to_string_lossy().to_string()));
         });
     }

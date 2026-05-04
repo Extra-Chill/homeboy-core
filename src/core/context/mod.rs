@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::component;
 use crate::error::{Error, Result};
-use crate::extension;
+use crate::extension::{self, DiscoveryMarkerConfig, ExtensionManifest};
 use crate::project::{self, Project};
 use crate::server::SshClient;
 use crate::server::{self, Server};
@@ -297,23 +297,24 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
     // Check for missing extension configuration
     if component.extensions.is_none() || component.extensions.as_ref().is_none_or(|m| m.is_empty())
     {
-        // Suggest a extension based on project file indicators
-        let suggestion =
-            if local_path.join("style.css").exists() && local_path.join("functions.php").exists() {
-                Some("wordpress")
-            } else if local_path.join("Cargo.toml").exists() {
-                Some("rust")
-            } else if local_path.join("package.json").exists() {
-                Some("nodejs")
-            } else {
-                None
-            };
-
-        let extension_hint = suggestion.unwrap_or("EXTENSION_ID");
+        let suggestions = extension_suggestions_for_path(&local_path);
+        let extension_hint = if suggestions.len() == 1 {
+            suggestions[0].as_str()
+        } else {
+            "EXTENSION_ID"
+        };
+        let reason = if suggestions.len() > 1 {
+            format!(
+                "No extension configured. Matching extension manifests: {}.",
+                suggestions.join(", ")
+            )
+        } else {
+            "No extension configured. Extension commands (lint, test, build) require a extension."
+                .to_string()
+        };
         gaps.push(ComponentGap {
             field: "extensions".to_string(),
-            reason: "No extension configured. Extension commands (lint, test, build) require a extension."
-                .to_string(),
+            reason,
             command: format!(
                 "homeboy component set {} --extension {}",
                 component.id, extension_hint
@@ -351,6 +352,59 @@ pub fn build_component_info(component: &component::Component) -> ContainedCompon
         build_artifact: component.build_artifact.clone().unwrap_or_default(),
         remote_path: component.remote_path.clone(),
         gaps,
+    }
+}
+
+fn extension_suggestions_for_path(local_path: &Path) -> Vec<String> {
+    extension::load_all_extensions()
+        .map(|extensions| extension_suggestions_from_manifests(local_path, &extensions))
+        .unwrap_or_default()
+}
+
+fn extension_suggestions_from_manifests(
+    local_path: &Path,
+    extensions: &[ExtensionManifest],
+) -> Vec<String> {
+    let mut suggestions: Vec<String> = extensions
+        .iter()
+        .filter(|manifest| {
+            manifest
+                .discovery_markers()
+                .iter()
+                .any(|rule| discovery_marker_matches(local_path, rule))
+        })
+        .map(|manifest| manifest.id.clone())
+        .collect();
+    suggestions.sort();
+    suggestions.dedup();
+    suggestions
+}
+
+fn discovery_marker_matches(local_path: &Path, rule: &DiscoveryMarkerConfig) -> bool {
+    if rule.all.is_empty() && rule.any.is_empty() {
+        return false;
+    }
+    let all_match = rule
+        .all
+        .iter()
+        .all(|marker| marker_exists(local_path, marker));
+    let any_match = rule.any.is_empty()
+        || rule
+            .any
+            .iter()
+            .any(|marker| marker_exists(local_path, marker));
+
+    all_match && any_match
+}
+
+fn marker_exists(local_path: &Path, marker: &str) -> bool {
+    if marker.contains('*') || marker.contains('?') || marker.contains('[') {
+        let pattern = local_path.join(marker).to_string_lossy().to_string();
+        glob::glob(&pattern)
+            .ok()
+            .is_some_and(|mut matches| matches.any(|entry| entry.is_ok()))
+    } else {
+        local_path.join(marker).exists()
     }
 }
 
@@ -414,4 +468,65 @@ pub fn resolve_project_ssh_with_base_path(
     let ctx = resolve_project_ssh(project_id)?;
     let base_path = require_project_base_path(project_id, &ctx.project)?;
     Ok((ctx, base_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(id: &str, markers: serde_json::Value) -> ExtensionManifest {
+        let mut manifest: ExtensionManifest = serde_json::from_value(serde_json::json!({
+            "name": id,
+            "version": "1.0.0",
+            "provides": {
+                "discovery_markers": markers
+            }
+        }))
+        .expect("manifest parses");
+        manifest.id = id.to_string();
+        manifest
+    }
+
+    #[test]
+    fn extension_suggestions_are_manifest_driven() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]").expect("cargo marker");
+
+        let suggestions = extension_suggestions_from_manifests(
+            dir.path(),
+            &[
+                manifest("rust-like", serde_json::json!([{ "all": ["Cargo.toml"] }])),
+                manifest(
+                    "wordpress-like",
+                    serde_json::json!([{ "all": ["style.css", "functions.php"] }]),
+                ),
+            ],
+        );
+
+        assert_eq!(suggestions, vec!["rust-like"]);
+    }
+
+    #[test]
+    fn extension_suggestions_support_globs_and_ambiguity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+        std::fs::write(dir.path().join("package.json"), "{}").expect("package marker");
+        std::fs::write(dir.path().join("src/index.ts"), "export {};").expect("ts marker");
+
+        let suggestions = extension_suggestions_from_manifests(
+            dir.path(),
+            &[
+                manifest(
+                    "node-like",
+                    serde_json::json!([{ "all": ["package.json"] }]),
+                ),
+                manifest(
+                    "typescript-like",
+                    serde_json::json!([{ "all": ["package.json"], "any": ["src/**/*.ts"] }]),
+                ),
+            ],
+        );
+
+        assert_eq!(suggestions, vec!["node-like", "typescript-like"]);
+    }
 }
