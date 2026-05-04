@@ -248,7 +248,11 @@ fn run_trace_workflow_with_context(
         Some(acquire_trace_overlay_locks(&args.overlays, run_dir)?)
     };
     let applied_overlays = apply_trace_overlays(&args.overlays, args.keep_overlay)?;
-    let active_probes = ActiveTraceProbes::start(&args.runner_inputs.probes)?;
+    let probe_configs = trace_probes_with_fswatch_attachments(
+        &args.runner_inputs.probes,
+        &args.runner_inputs.attachments,
+    );
+    let active_probes = ActiveTraceProbes::start(&probe_configs)?;
     let started_at = Instant::now();
     let mut attach_observations =
         observe_trace_attachments(&args.runner_inputs.attachments, "before", started_at);
@@ -624,6 +628,29 @@ pub fn trace_is_unclaimed(error: &Error) -> bool {
                 .contains("has no linked extensions that provide trace support"))
 }
 
+fn trace_probes_with_fswatch_attachments(
+    probes: &[TraceProbeConfig],
+    attachments: &[TraceAttachment],
+) -> Vec<TraceProbeConfig> {
+    let mut merged = probes.to_vec();
+    for attachment in attachments {
+        if attachment.kind != "fswatch" {
+            continue;
+        }
+        let already_watched = merged.iter().any(|probe| match probe {
+            TraceProbeConfig::FileWatch { path, .. } => path == &attachment.target,
+            _ => false,
+        });
+        if !already_watched {
+            merged.push(TraceProbeConfig::FileWatch {
+                path: attachment.target.clone(),
+                interval_ms: None,
+            });
+        }
+    }
+    merged
+}
+
 fn run_generic_trace_runner(
     component: &Component,
     args: &TraceRunWorkflowArgs,
@@ -959,6 +986,28 @@ mod tests {
             serde_json::json!({}),
         );
         assert!(trace_is_unclaimed(&unsupported));
+    }
+
+    #[test]
+    fn fswatch_attachments_add_file_watch_probes_without_duplicates() {
+        let attachment = TraceAttachment::parse("fswatch:/tmp/auth.json").unwrap();
+        let existing_probe = TraceProbeConfig::FileWatch {
+            path: "/tmp/auth.json".to_string(),
+            interval_ms: Some(50),
+        };
+
+        let merged =
+            trace_probes_with_fswatch_attachments(&[existing_probe.clone()], &[attachment.clone()]);
+        assert_eq!(merged, vec![existing_probe]);
+
+        let merged = trace_probes_with_fswatch_attachments(&[], &[attachment]);
+        assert_eq!(
+            merged,
+            vec![TraceProbeConfig::FileWatch {
+                path: "/tmp/auth.json".to_string(),
+                interval_ms: None,
+            }]
+        );
     }
 
     fn test_component(path: &std::path::Path) -> Component {
