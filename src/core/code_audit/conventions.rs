@@ -236,6 +236,9 @@ pub enum AuditFinding {
     /// output routing, or response wrapping policy that should live in the
     /// shared command output layer.
     CommandOutputPolicy,
+    /// Multiple files hand-roll the same observation lifecycle scaffolding
+    /// instead of delegating lifecycle ownership to a shared wrapper/helper.
+    ObservationLifecycleScaffolding,
 }
 
 impl AuditFinding {
@@ -295,6 +298,7 @@ impl AuditFinding {
             "unwired_nested_rust_test",
             "parallel_runner_setup",
             "command_output_policy",
+            "observation_lifecycle_scaffolding",
         ]
     }
 }
