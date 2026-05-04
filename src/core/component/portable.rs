@@ -504,6 +504,47 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_component_remote_urls_rejects_invalid_merge_without_rewriting_homeboy_json() {
+        crate::test_support::with_isolated_home(|home| {
+            let repo = home.path().join("my-comp");
+            fs::create_dir_all(&repo).unwrap();
+            let original = serde_json::json!({
+                "id": "my-comp",
+                "remote_url": "https://github.com/Extra-Chill/homeboy.git"
+            });
+            fs::write(
+                repo.join("homeboy.json"),
+                serde_json::to_string_pretty(&original).unwrap(),
+            )
+            .unwrap();
+
+            let standalone_dir = home.path().join(".config/homeboy/components");
+            fs::create_dir_all(&standalone_dir).unwrap();
+            fs::write(
+                standalone_dir.join("my-comp.json"),
+                serde_json::json!({ "local_path": repo.to_string_lossy() }).to_string(),
+            )
+            .unwrap();
+
+            let patch = r#"{"remote_url":"/Users/chubes/Developer/homeboy"}"#;
+            let result = crate::component::mutations::merge(Some("my-comp"), patch, &[]);
+
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err().code.as_str(),
+                "validation.invalid_argument"
+            );
+
+            let content = fs::read_to_string(repo.join("homeboy.json")).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(
+                json.get("remote_url").and_then(|v| v.as_str()),
+                Some("https://github.com/Extra-Chill/homeboy.git")
+            );
+        });
+    }
+
+    #[test]
     fn write_accepts_github_remote_urls() {
         let dir = TempDir::new().expect("temp dir");
         let mut component = Component::new(
