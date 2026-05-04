@@ -27,6 +27,7 @@ mod deprecation_age;
 mod discovery;
 pub mod docs_audit;
 mod duplication;
+mod extension_setting_plumbing;
 mod facade_passthrough;
 mod field_patterns;
 mod findings;
@@ -132,6 +133,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_field_patterns: bool,
     pub(crate) run_facade_passthrough: bool,
     pub(crate) run_literal_shapes: bool,
+    pub(crate) run_extension_setting_plumbing: bool,
     pub(crate) run_deprecation_age: bool,
     pub(crate) run_dead_guard: bool,
     pub(crate) run_requested_detectors: bool,
@@ -161,6 +163,7 @@ impl AuditExecutionPlan {
             run_field_patterns: true,
             run_facade_passthrough: true,
             run_literal_shapes: true,
+            run_extension_setting_plumbing: true,
             run_deprecation_age: true,
             run_dead_guard: true,
             run_requested_detectors: true,
@@ -299,6 +302,11 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::RepeatedLiteralShape],
             ),
+            run_extension_setting_plumbing: Self::family_enabled(
+                only,
+                exclude,
+                &[AuditFinding::ExtensionSettingPlumbing],
+            ),
             run_deprecation_age: Self::family_enabled(
                 only,
                 exclude,
@@ -353,6 +361,7 @@ impl AuditExecutionPlan {
             || self.run_shadow_modules
             || self.run_facade_passthrough
             || self.run_literal_shapes
+            || self.run_extension_setting_plumbing
             || self.run_deprecation_age
             || self.run_dead_guard
             || self.run_requested_detectors
@@ -1023,6 +1032,21 @@ fn audit_internal(
             literal_shape_findings.len()
         );
         all_findings.extend(literal_shape_findings);
+    }
+
+    // Phase 4u2: Repeated extension setting parse/serialize plumbing in commands.
+    let extension_setting_findings = if plan.run_extension_setting_plumbing {
+        extension_setting_plumbing::run(&all_fingerprints)
+    } else {
+        Vec::new()
+    };
+    if !extension_setting_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Extension setting plumbing: {} finding(s) (duplicated command setting conversion)",
+            extension_setting_findings.len()
+        );
+        all_findings.extend(extension_setting_findings);
     }
 
     // Phase 4r: Deprecation age detection
