@@ -285,6 +285,7 @@ impl AuditExecutionPlan {
                 &[
                     AuditFinding::InlineTestModule,
                     AuditFinding::ScatteredTestFile,
+                    AuditFinding::VacuousTest,
                 ],
             ),
             run_rust_test_wiring: Self::family_enabled(
@@ -1895,6 +1896,20 @@ mod tests {
         assert!(result.conventions.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_vacuous_test_keeps_all_vacuous_detector_families_enabled() {
+        let plan = AuditExecutionPlan::from_filters(&[AuditFinding::VacuousTest], &[]);
+
+        assert!(
+            plan.run_test_coverage,
+            "coverage detector also emits vacuous_test for mapped tests"
+        );
+        assert!(
+            plan.run_test_topology,
+            "test topology/test quality detector emits standalone vacuous_test findings"
+        );
     }
 
     #[test]
