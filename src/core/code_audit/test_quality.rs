@@ -66,11 +66,15 @@ struct ProductImport {
 
 fn detect_vacuous_tests(file: &str, content: &str) -> Vec<Finding> {
     let file_path = file.to_string();
+    let inline_source_file = !file.starts_with("tests/") && !file.ends_with("_test.rs");
     let product_imports = collect_product_imports(content);
-    let product_symbols = product_imports
+    let mut product_symbols = product_imports
         .iter()
         .map(|import| import.symbol.clone())
         .collect::<BTreeSet<_>>();
+    if inline_source_file {
+        product_symbols.extend(collect_local_product_symbols(content));
+    }
     let tests = extract_test_functions(content);
 
     let mut findings = tests
@@ -93,11 +97,13 @@ fn detect_vacuous_tests(file: &str, content: &str) -> Vec<Finding> {
         .collect::<Vec<_>>();
 
     findings.extend(detect_duplicate_test_names(&file_path, &tests));
-    findings.extend(detect_unused_product_imports(
-        &file_path,
-        &tests,
-        &product_imports,
-    ));
+    if !inline_source_file {
+        findings.extend(detect_unused_product_imports(
+            &file_path,
+            &tests,
+            &product_imports,
+        ));
+    }
 
     findings.extend(tests.into_iter().filter_map(|test| {
         vacuous_reason(&test, &product_symbols).map(|reason| Finding {
@@ -117,6 +123,15 @@ fn detect_vacuous_tests(file: &str, content: &str) -> Vec<Finding> {
 
 fn collect_product_imports(content: &str) -> Vec<ProductImport> {
     let mut imports = BTreeSet::new();
+    let module =
+        regex::Regex::new(r"(?m)^\s*use\s+(?:homeboy|crate|super)::([A-Za-z_][A-Za-z0-9_]*)\s*;")
+            .unwrap();
+    for cap in module.captures_iter(content) {
+        imports.insert(ProductImport {
+            symbol: cap[1].to_string(),
+        });
+    }
+
     let simple = regex::Regex::new(
         r"(?m)^\s*use\s+(?:homeboy|crate|super)::[^;]*::([A-Za-z_][A-Za-z0-9_]*)\s*;",
     )
@@ -128,11 +143,19 @@ fn collect_product_imports(content: &str) -> Vec<ProductImport> {
     }
 
     let grouped =
-        regex::Regex::new(r"(?m)^\s*use\s+(?:homeboy|crate|super)::[^;]*\{([^}]+)\}\s*;").unwrap();
+        regex::Regex::new(r"(?m)^\s*use\s+(homeboy|crate|super)::([^;{]+)::\{([^}]+)\}\s*;")
+            .unwrap();
     for cap in grouped.captures_iter(content) {
-        for raw in cap[1].split(',') {
+        let root = &cap[1];
+        let prefix = cap[2].rsplit("::").next().map(str::trim).unwrap_or("");
+        for raw in cap[3].split(',') {
             let symbol = raw.trim().trim_start_matches("self::");
             let symbol = symbol.split_whitespace().next().unwrap_or("");
+            let symbol = if symbol == "self" && root == "homeboy" {
+                prefix
+            } else {
+                symbol
+            };
             if !symbol.is_empty()
                 && symbol != "self"
                 && symbol
@@ -147,6 +170,19 @@ fn collect_product_imports(content: &str) -> Vec<ProductImport> {
     }
 
     imports.into_iter().collect()
+}
+
+fn collect_local_product_symbols(content: &str) -> BTreeSet<String> {
+    let mut symbols = BTreeSet::new();
+    let product_content = content.split("#[cfg(test)]").next().unwrap_or(content);
+    let item = regex::Regex::new(
+        r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|struct|enum|type|trait)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+    )
+    .unwrap();
+    for cap in item.captures_iter(product_content) {
+        symbols.insert(cap[1].to_string());
+    }
+    symbols
 }
 
 fn detect_duplicate_test_names(file: &str, tests: &[TestFunction]) -> Vec<Finding> {
@@ -603,6 +639,62 @@ fn test_evaluate_file_exists() {
     let rig = minimal_rig();
     let spec = CheckSpec::default();
     evaluate(&rig, &spec).expect("existing file passes");
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn keeps_module_import_product_calls() {
+        let findings = detect_vacuous_tests(
+            "tests/core/deps_test.rs",
+            r#"
+use homeboy::deps::{self, ComposerAction};
+
+#[test]
+fn status_filters_to_one_package() {
+    let status = deps::status(Some("fixture"), Some("/tmp/fixture"), Some("fixture/two")).unwrap();
+    assert_eq!(status.packages.len(), 1);
+}
+
+#[test]
+fn update_command_args_are_composer_first_and_package_scoped() {
+    assert_eq!(
+        deps::composer_command_args("fixture/package", &ComposerAction::Update),
+        vec!["update", "fixture/package"]
+    );
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn keeps_inline_super_import_tests_that_call_local_product_code() {
+        let findings = detect_vacuous_tests(
+            "src/core/extension/test/baseline.rs",
+            r#"
+pub fn load_baseline(path: &Path) -> Option<TestBaseline> { todo!() }
+pub fn compare(current: &TestCounts, baseline: &TestBaseline) -> TestBaselineComparison { todo!() }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_returns_none_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_baseline(dir.path()).is_none());
+    }
+
+    #[test]
+    fn compare_no_regression() {
+        let result = compare(&current, &baseline);
+        assert!(!result.regression);
+    }
 }
 "#,
         );

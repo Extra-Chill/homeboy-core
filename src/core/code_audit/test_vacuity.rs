@@ -175,26 +175,136 @@ fn extract_rust_function_body(content: &str, fn_name: &str) -> Option<String> {
     ))
     .ok()?;
     let mat = pattern.find(content)?;
-    let open = content[mat.end() - 1..].chars().next()?;
-    if open != '{' {
+    let open = mat.end() - 1;
+    matching_rust_brace(content, open).map(|end| content[mat.end()..end].to_string())
+}
+
+fn matching_rust_brace(content: &str, open: usize) -> Option<usize> {
+    if content.as_bytes().get(open) != Some(&b'{') {
         return None;
     }
+
     let mut depth = 0_i32;
-    let mut end = None;
-    for (idx, ch) in content[mat.end() - 1..].char_indices() {
+    let mut iter = content[open..].char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
+        let absolute = open + idx;
         match ch {
+            '/' if iter.peek().is_some_and(|(_, next)| *next == '/') => {
+                skip_line_comment(&mut iter);
+            }
+            '/' if iter.peek().is_some_and(|(_, next)| *next == '*') => {
+                iter.next();
+                skip_block_comment(&mut iter);
+            }
+            'r' if raw_string_hashes(content, absolute).is_some() => {
+                let hashes = raw_string_hashes(content, absolute)?;
+                skip_raw_string(&mut iter, hashes);
+            }
+            '"' => skip_quoted_string(&mut iter),
+            '\'' => skip_char_literal(&mut iter),
             '{' => depth += 1,
             '}' => {
                 depth -= 1;
                 if depth == 0 {
-                    end = Some(mat.end() - 1 + idx);
-                    break;
+                    return Some(absolute);
                 }
             }
             _ => {}
         }
     }
-    end.map(|end| content[mat.end()..end].to_string())
+    None
+}
+
+fn skip_line_comment(iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    for (_, ch) in iter.by_ref() {
+        if ch == '\n' {
+            break;
+        }
+    }
+}
+
+fn skip_block_comment(iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    let mut previous = '\0';
+    for (_, ch) in iter.by_ref() {
+        if previous == '*' && ch == '/' {
+            break;
+        }
+        previous = ch;
+    }
+}
+
+fn raw_string_hashes(content: &str, offset: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    if bytes.get(offset) != Some(&b'r') {
+        return None;
+    }
+    let mut idx = offset + 1;
+    let mut hashes = 0;
+    while bytes.get(idx) == Some(&b'#') {
+        hashes += 1;
+        idx += 1;
+    }
+    (bytes.get(idx) == Some(&b'"')).then_some(hashes)
+}
+
+fn skip_raw_string(iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>, hashes: usize) {
+    let mut saw_opening_quote = false;
+    for (_, ch) in iter.by_ref() {
+        if ch == '"' {
+            saw_opening_quote = true;
+            break;
+        }
+    }
+    if !saw_opening_quote {
+        return;
+    }
+
+    while let Some((_, ch)) = iter.next() {
+        if ch != '"' {
+            continue;
+        }
+        if hashes == 0 {
+            break;
+        }
+
+        let mut hash_count = 0usize;
+        while iter.peek().is_some_and(|(_, next)| *next == '#') {
+            iter.next();
+            hash_count += 1;
+            if hash_count == hashes {
+                break;
+            }
+        }
+        if hash_count == hashes {
+            break;
+        }
+    }
+}
+
+fn skip_quoted_string(iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    let mut escaped = false;
+    for (_, ch) in iter.by_ref() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            break;
+        }
+    }
+}
+
+fn skip_char_literal(iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    let mut escaped = false;
+    for (_, ch) in iter.by_ref() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '\'' {
+            break;
+        }
+    }
 }
 
 fn strip_rust_comments(content: &str) -> String {
@@ -206,4 +316,42 @@ fn strip_rust_comments(content: &str) -> String {
         .map(|line| line.split_once("//").map(|(code, _)| code).unwrap_or(line))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_body_with_unbalanced_braces_inside_raw_string() {
+        let content = r#"
+#[cfg(test)]
+mod tests {
+    fn build_grammar() -> Grammar {
+        Grammar {
+            regex: r"(?:::\{[^}]+\})?".to_string(),
+        }
+    }
+}
+"#;
+
+        let body = extract_rust_function_body(content, "build_grammar").expect("body");
+
+        assert!(body.contains("Grammar"));
+        assert!(body.contains("regex"));
+    }
+
+    #[test]
+    fn extracts_body_with_hash_raw_string_containing_braces() {
+        let content = r##"
+fn parse_json() {
+    let value = r#"{"name":"homeboy"}"#;
+    assert!(value.contains("homeboy"));
+}
+"##;
+
+        let body = extract_rust_function_body(content, "parse_json").expect("body");
+
+        assert!(body.contains("assert!"));
+    }
 }
