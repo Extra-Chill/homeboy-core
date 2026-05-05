@@ -309,6 +309,17 @@ pub struct WorkloadEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_groups: Option<Vec<String>>,
 
+    /// Number of contiguous local ports this workload needs for one child
+    /// invocation. Homeboy allocates non-overlapping ranges and exposes them as
+    /// HOMEBOY_INVOCATION_PORT_BASE/MAX.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_range_size: Option<u16>,
+
+    /// Logical machine-local resources this workload requires exclusively while
+    /// its child process is running.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named_leases: Vec<String>,
+
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub trace_phase_presets: HashMap<String, Vec<String>>,
 
@@ -409,6 +420,20 @@ impl WorkloadSpec {
         }
     }
 
+    pub fn port_range_size(&self) -> Option<u16> {
+        match self {
+            WorkloadSpec::Path(_) => None,
+            WorkloadSpec::Detailed(entry) => entry.port_range_size,
+        }
+    }
+
+    pub fn named_leases(&self) -> &[String] {
+        match self {
+            WorkloadSpec::Path(_) => &[],
+            WorkloadSpec::Detailed(entry) => &entry.named_leases,
+        }
+    }
+
     pub fn trace_phase_preset(&self, name: &str) -> Option<&[String]> {
         match self {
             WorkloadSpec::Path(_) => None,
@@ -499,6 +524,8 @@ mod tests {
         let workload = WorkloadSpec::Detailed(WorkloadEntry {
             path: "trace.mjs".to_string(),
             check_groups: None,
+            port_range_size: None,
+            named_leases: Vec::new(),
             trace_phase_presets: HashMap::from([(
                 "startup".to_string(),
                 vec!["launch".to_string(), "ready".to_string()],
@@ -614,6 +641,8 @@ mod tests {
         let workload = WorkloadSpec::Detailed(WorkloadEntry {
             path: "trace.mjs".to_string(),
             check_groups: None,
+            port_range_size: None,
+            named_leases: Vec::new(),
             trace_phase_presets: HashMap::new(),
             trace_span_metadata: HashMap::new(),
             trace_default_phase_preset: Some("startup".to_string()),

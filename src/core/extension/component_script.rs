@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::component::Component;
+use crate::engine::invocation::{InvocationGuard, InvocationRequirements};
 use crate::engine::run_dir::RunDir;
 use crate::error::{Error, Result};
 use crate::extension::{exec_context, ExtensionCapability, RunnerOutput};
@@ -130,6 +131,8 @@ pub(crate) fn run_component_scripts_with_run_dir(
     script_args: &[String],
 ) -> Result<ComponentScriptOutput> {
     let mut env = run_dir.legacy_env_vars();
+    let invocation = InvocationGuard::acquire(run_dir, &InvocationRequirements::default())?;
+    env.extend(invocation.env_vars());
     env.extend(extra_env.iter().cloned());
     run_component_scripts_with_env(
         component,

@@ -39,6 +39,42 @@ fn test_bench_workloads_for_extension_filters_and_expands_paths() {
 }
 
 #[test]
+fn invocation_requirements_for_workloads_merge_ports_and_named_leases() {
+    let rig_spec: RigSpec = serde_json::from_str(
+        r#"{
+            "id": "playground-bench",
+            "bench_workloads": {
+                "nodejs": [
+                    {
+                        "path": "/tmp/playground-server.bench.mjs",
+                        "port_range_size": 8,
+                        "named_leases": ["browser-profile"]
+                    },
+                    {
+                        "path": "/tmp/playground-browser.bench.mjs",
+                        "port_range_size": 3,
+                        "named_leases": ["browser-profile", "wasm-cache"]
+                    }
+                ]
+            }
+        }"#,
+    )
+    .expect("parse rig spec");
+
+    let requirements = crate::rig::invocation_requirements_for_extension_workloads(
+        &rig_spec,
+        crate::rig::RigWorkloadKind::Bench,
+        "nodejs",
+    );
+
+    assert_eq!(requirements.port_range_size, Some(8));
+    assert_eq!(
+        requirements.named_leases,
+        vec!["browser-profile".to_string(), "wasm-cache".to_string()]
+    );
+}
+
+#[test]
 fn test_trace_workloads_for_extension_filters_and_expands_paths() {
     std::env::set_var("HOMEBOY_TEST_TRACE_ROOT", "/tmp/private-traces");
     let rig_spec: RigSpec = serde_json::from_str(

@@ -173,6 +173,11 @@ pub fn rig_leases_dir() -> Result<PathBuf> {
     Ok(homeboy()?.join("rig-leases"))
 }
 
+/// Active per-invocation leases (~/.config/homeboy/invocation-leases/).
+pub fn invocation_leases_dir() -> Result<PathBuf> {
+    Ok(homeboy()?.join("invocation-leases"))
+}
+
 /// Stacks directory (~/.config/homeboy/stacks/)
 pub fn stacks() -> Result<PathBuf> {
     Ok(homeboy()?.join("stacks"))

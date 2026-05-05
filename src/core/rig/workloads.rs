@@ -3,6 +3,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::engine::invocation::InvocationRequirements;
+
 use super::spec::RigSpec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +67,40 @@ pub fn check_groups_for_extension_workloads(
     }
 
     Some(groups.into_iter().collect())
+}
+
+pub fn invocation_requirements_for_extension_workloads(
+    rig_spec: &RigSpec,
+    kind: RigWorkloadKind,
+    extension_id: &str,
+) -> InvocationRequirements {
+    let workloads = match kind {
+        RigWorkloadKind::Bench => &rig_spec.bench_workloads,
+        RigWorkloadKind::Trace => &rig_spec.trace_workloads,
+    };
+    let Some(entries) = workloads.get(extension_id) else {
+        return InvocationRequirements::default();
+    };
+
+    let port_range_size = entries
+        .iter()
+        .filter_map(|entry| entry.port_range_size())
+        .max();
+    let mut named_leases = BTreeSet::new();
+    for entry in entries {
+        named_leases.extend(
+            entry
+                .named_leases()
+                .iter()
+                .filter(|name| !name.is_empty())
+                .cloned(),
+        );
+    }
+
+    InvocationRequirements {
+        port_range_size,
+        named_leases: named_leases.into_iter().collect(),
+    }
 }
 
 fn expand_workload_path(rig_spec: &RigSpec, package_root: Option<&Path>, path: &str) -> PathBuf {

@@ -454,6 +454,18 @@ fn run_component_with_rig_context(
             })
         })
         .unwrap_or_default();
+    let invocation_requirements = rig_spec
+        .as_ref()
+        .and_then(|spec| {
+            ctx.extension_id.as_deref().map(|id| {
+                rig::invocation_requirements_for_extension_workloads(
+                    spec,
+                    rig::RigWorkloadKind::Bench,
+                    id,
+                )
+            })
+        })
+        .unwrap_or_default();
 
     let selected_scenarios = selected_scenario_ids(args, rig_spec)?;
     let observation = observation::start(BenchObservationStart {
@@ -494,6 +506,7 @@ fn run_component_with_rig_context(
             rig_id: rig_id.clone(),
             shared_state: shared_state_override.or_else(|| args.shared_state.clone()),
             extra_workloads,
+            invocation_requirements,
         },
         &run_dir,
     );
