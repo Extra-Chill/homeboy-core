@@ -48,11 +48,18 @@ contract and return the same JSON envelope shape as other daemon responses.
 - `GET /runs?kind=bench|audit&component=<id>&rig=<id>&status=<status>&limit=<n>`
 - `GET /runs/:id`
 - `GET /runs/:id/artifacts`
+- `GET /runs/:id/findings?tool=<tool>&file=<path>&fingerprint=<id>&limit=<n>`
 - `GET /audit/runs?component=<id>&rig=<id>&status=<status>&limit=<n>`
 - `GET /bench/runs?component=<id>&rig=<id>&status=<status>&limit=<n>`
 
 The run readers expose persisted observation-store evidence from previous
 analysis runs. They do not start audit, lint, test, bench, rig, or stack work.
+Run summaries include `status_note` when a running record appears stale or
+cannot be verified with owner metadata, matching the CLI run-history output.
+
+`homeboy runs compare --format=json` remains CLI-only for now. A daemon compare
+endpoint should reuse that implementation rather than duplicating comparison
+logic in the HTTP API contract.
 
 The analysis entry points `POST /audit`, `POST /lint`, `POST /test`, and
 `POST /bench` are reserved by the contract, but intentionally return a daemon

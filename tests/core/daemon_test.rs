@@ -68,6 +68,10 @@ fn routes_read_only_http_api_contract() {
     assert_eq!(bench_runs.status_code, 200);
     assert_eq!(bench_runs.body["endpoint"], "bench.runs");
     assert!(bench_runs.body["body"]["runs"].is_array());
+
+    let findings = route("GET", "/runs/run-missing/findings");
+    assert_eq!(findings.status_code, 404);
+    assert_eq!(findings.body["error"], "validation.invalid_argument");
 }
 
 #[test]

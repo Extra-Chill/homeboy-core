@@ -2,12 +2,10 @@ use clap::Args;
 use serde::Serialize;
 use serde_json::Value;
 
-use homeboy::observation::{ObservationStore, RunListFilter, RunRecord, RunStatus};
+use homeboy::observation::{run_owner_pid, ObservationStore, RunListFilter, RunRecord, RunStatus};
 
 use crate::commands::runs::RunsOutput;
 use crate::commands::CmdResult;
-
-const RUN_OWNER_METADATA_KEY: &str = "homeboy_run_owner";
 
 #[derive(Args, Clone, Default)]
 pub struct RunsReconcileArgs {
@@ -120,35 +118,7 @@ where
 }
 
 pub fn running_status_note(run: &RunRecord) -> Option<String> {
-    if run.status != RunStatus::Running.as_str() {
-        return None;
-    }
-
-    let Some(owner_pid) = run_owner_pid(run) else {
-        return Some(
-            "running status has no owner metadata; run may predate reconciliation support"
-                .to_string(),
-        );
-    };
-
-    if pid_is_running(owner_pid) {
-        None
-    } else {
-        Some(
-            "owner process is not running; run may be stale; run `homeboy runs reconcile`"
-                .to_string(),
-        )
-    }
-}
-
-fn run_owner_pid(run: &RunRecord) -> Option<u32> {
-    run.metadata_json
-        .get(RUN_OWNER_METADATA_KEY)
-        .and_then(|owner| owner.get("pid"))
-        .or_else(|| run.metadata_json.get("owner_pid"))
-        .or_else(|| run.metadata_json.get("process_id"))
-        .and_then(|pid| pid.as_u64())
-        .and_then(|pid| u32::try_from(pid).ok())
+    homeboy::observation::running_status_note(run)
 }
 
 fn with_reconcile_metadata(run: &RunRecord, owner_pid: u32, reason: &str) -> Value {
