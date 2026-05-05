@@ -1,4 +1,4 @@
-use homeboy::api_jobs::{JobStatus, JobStore};
+use homeboy::api_jobs::{JobEventKind, JobStatus, JobStore};
 use homeboy::http_api::{self, HttpApiRequest, HttpEndpoint, HttpMethod, JobReadyRunKind};
 use homeboy::observation::{NewRunRecord, ObservationStore, RunStatus};
 
@@ -301,21 +301,102 @@ fn rejects_mutating_endpoint_shapes() {
 }
 
 #[test]
-fn job_ready_endpoint_reports_daemon_job_routing_blocker() {
-    let err = http_api::handle(HttpApiRequest {
-        method: HttpMethod::Post,
-        path: "/audit".to_string(),
-        body: None,
-    })
-    .expect_err("daemon job routing blocker");
+fn job_ready_endpoint_enqueues_daemon_job() {
+    let store = JobStore::default();
+    let response = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Post,
+            path: "/audit".to_string(),
+            body: Some(serde_json::json!({
+                "component": "missing-component",
+                "path": "/tmp/homeboy-missing-component",
+                "changed_since": "origin/main",
+                "json_summary": true
+            })),
+        },
+        &store,
+    )
+    .expect("audit job enqueued");
+
+    assert_eq!(response.endpoint, "jobs.required");
+    assert_eq!(response.body["command"], "api.audit.enqueue");
+    let job_id = response.body["job"]["id"].as_str().expect("job id");
+    assert_eq!(response.body["poll"]["job"], format!("/jobs/{job_id}"));
+    assert_eq!(store.list().len(), 1);
+}
+
+#[test]
+fn job_ready_endpoint_rejects_mutating_body_fields() {
+    let err = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Post,
+            path: "/lint".to_string(),
+            body: Some(serde_json::json!({ "fix": true })),
+        },
+        &JobStore::default(),
+    )
+    .expect_err("mutating lint fix is rejected");
+
+    let rendered = err.to_string();
+    assert!(rendered.contains("--fix"), "{rendered}");
+}
+
+#[test]
+fn job_ready_endpoint_rejects_unknown_body_fields() {
+    let err = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Post,
+            path: "/bench".to_string(),
+            body: Some(serde_json::json!({ "deploy": true })),
+        },
+        &JobStore::default(),
+    )
+    .expect_err("unknown field is rejected");
 
     let rendered = err.to_string();
     assert!(
-        rendered.contains("daemon HTTP analysis enqueue wiring"),
+        rendered.contains("unsupported analysis job body field"),
         "{rendered}"
     );
-    assert!(rendered.contains("src/core/api_jobs.rs"), "{rendered}");
-    assert!(!rendered.contains("Extra-Chill/homeboy#"), "{rendered}");
+}
+
+#[test]
+fn job_ready_endpoint_preserves_background_result_events() {
+    let store = JobStore::default();
+    let response = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Post,
+            path: "/lint".to_string(),
+            body: Some(serde_json::json!({
+                "component": "missing-component",
+                "path": "/tmp/homeboy-missing-component",
+                "json_summary": true
+            })),
+        },
+        &store,
+    )
+    .expect("lint job enqueued");
+    let job_id = response.body["job"]["id"].as_str().expect("job id");
+    let job_id = uuid::Uuid::parse_str(job_id).expect("uuid");
+
+    for _ in 0..100 {
+        let status = store.get(job_id).expect("job").status;
+        if matches!(
+            status,
+            JobStatus::Succeeded | JobStatus::Failed | JobStatus::Cancelled
+        ) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let events = store.events(job_id).expect("events");
+    assert!(events
+        .iter()
+        .any(|event| event.kind == JobEventKind::Progress));
+    assert!(events
+        .iter()
+        .any(|event| { event.kind == JobEventKind::Result || event.kind == JobEventKind::Error }));
 }
 
 fn sample_run(kind: &str, component_id: &str, rig_id: &str) -> NewRunRecord {

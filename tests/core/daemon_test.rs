@@ -51,12 +51,13 @@ fn routes_read_only_http_api_contract() {
     assert!(components.body["body"]["components"].is_array());
 
     let job_ready = route("POST", "/audit");
-    assert_eq!(job_ready.status_code, 404);
-    assert_eq!(job_ready.body["error"], "validation.invalid_argument");
-    assert!(job_ready.body["message"]
+    assert_eq!(job_ready.status_code, 200);
+    assert_eq!(job_ready.body["endpoint"], "jobs.required");
+    assert_eq!(job_ready.body["body"]["command"], "api.audit.enqueue");
+    assert!(job_ready.body["body"]["poll"]["job"]
         .as_str()
         .unwrap()
-        .contains("daemon HTTP analysis enqueue wiring"));
+        .starts_with("/jobs/"));
 
     let runs = route("GET", "/runs?kind=bench&limit=1");
     assert_eq!(runs.status_code, 200);
@@ -93,6 +94,27 @@ fn routes_job_inspection_against_daemon_job_store() {
     assert_eq!(cancel.status_code, 200);
     assert_eq!(cancel.body["endpoint"], "jobs.cancel");
     assert_eq!(cancel.body["body"]["job"]["status"], "cancelled");
+}
+
+#[test]
+fn routes_json_body_to_analysis_enqueue() {
+    let store = JobStore::default();
+    let response = route_with_job_store_and_body(
+        "POST",
+        "/lint",
+        Some(serde_json::json!({
+            "component": "missing-component",
+            "path": "/tmp/homeboy-missing-component",
+            "changed_since": "origin/main",
+            "json_summary": true
+        })),
+        &store,
+    );
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.body["endpoint"], "jobs.required");
+    assert_eq!(response.body["body"]["command"], "api.lint.enqueue");
+    assert_eq!(store.list().len(), 1);
 }
 
 #[test]
