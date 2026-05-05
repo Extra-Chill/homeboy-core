@@ -56,7 +56,7 @@ fn routes_read_only_http_api_contract() {
     assert!(job_ready.body["message"]
         .as_str()
         .unwrap()
-        .contains("analysis enqueue"));
+        .contains("daemon HTTP analysis enqueue wiring"));
 
     let runs = route("GET", "/runs?kind=bench&limit=1");
     assert_eq!(runs.status_code, 200);

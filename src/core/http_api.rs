@@ -3,7 +3,7 @@
 //! This module is intentionally transport-free: the daemon can hand it a
 //! method/path pair and serialize the returned JSON without duplicating Homeboy
 //! command behavior. Long-running analysis endpoints are routed here, but they
-//! wait for the job model before execution.
+//! wait for daemon HTTP job routing before execution.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -309,12 +309,12 @@ pub fn handle_with_jobs(request: HttpApiRequest, job_store: &JobStore) -> Result
             return Err(Error::validation_invalid_argument(
                 "endpoint",
                 format!(
-                    "POST /{} requires analysis enqueue wiring before it can run safely",
+                    "POST /{} requires daemon HTTP analysis enqueue wiring through src/core/api_jobs.rs before it can run safely",
                     job_ready_slug(*kind)
                 ),
                 Some(job_ready_slug(*kind).to_string()),
                 Some(vec![
-                    "Wire this endpoint to enqueue a long-running analysis job in a follow-up PR"
+                    "Wire this endpoint to enqueue a long-running analysis job through the existing daemon job model"
                         .to_string(),
                 ]),
             ));
