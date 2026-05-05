@@ -16,6 +16,12 @@ const LOCK_SLEEP: Duration = Duration::from_millis(20);
 const PORT_POOL_START: u16 = 20_000;
 const PORT_POOL_END: u16 = 60_999;
 
+mod child;
+pub use child::{
+    cleanup_invocation_children, cleanup_stale_child_records, register_child_process,
+    InvocationChildGuard, InvocationChildRecord,
+};
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvocationRequirements {
     pub port_range_size: Option<u16>,
@@ -51,6 +57,8 @@ struct InvocationLease {
 
 impl InvocationGuard {
     pub fn acquire(run_dir: &RunDir, requirements: &InvocationRequirements) -> Result<Self> {
+        cleanup_stale_child_records()?;
+
         let id = format!("inv-{}", uuid::Uuid::new_v4());
         let root = run_dir.path().join("invocations").join(&id);
         let state_dir = root.join("state");
