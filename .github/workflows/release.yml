@@ -55,7 +55,6 @@ jobs:
         id: release-check
         uses: Extra-Chill/homeboy-action@v2
         with:
-          source: '.'
           commands: release
           expected-commands: audit,lint,test
           release-dry-run: 'true'
@@ -642,4 +641,3 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-
