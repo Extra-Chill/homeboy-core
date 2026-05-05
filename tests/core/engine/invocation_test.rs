@@ -1,6 +1,6 @@
 use super::*;
 use crate::engine::run_dir::RunDir;
-use crate::test_support::with_isolated_home;
+use crate::test_support::{home_env_guard, with_isolated_home};
 
 #[test]
 fn test_env_vars() {
@@ -290,6 +290,7 @@ fn invocation_id_path_component_is_short() {
 fn invocation_runtime_root_honors_override_env() {
     // This test sets/restores HOMEBOY_INVOCATION_RUNTIME_DIR explicitly to
     // verify the env-driven fallback selection.
+    let _guard = home_env_guard();
     let prior = std::env::var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV).ok();
     let dir = tempfile::tempdir().expect("tempdir");
     std::env::set_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV, dir.path());
@@ -326,18 +327,149 @@ fn enforce_path_budget_rejects_overlong_paths() {
 fn invocation_drop_cleans_up_root_directory() {
     with_isolated_home(|_| {
         let run_dir = RunDir::create().expect("run dir");
-        let state_dir = {
+        let (state_dir, artifact_dir, tmp_dir) = {
             let guard = InvocationGuard::acquire(&run_dir, &InvocationRequirements::default())
                 .expect("invocation guard");
             let env = guard.env_vars();
-            std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_STATE_DIR"))
+            (
+                std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_STATE_DIR")),
+                std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_ARTIFACT_DIR")),
+                std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_TMP_DIR")),
+            )
         };
-        assert!(
-            !state_dir.exists(),
-            "invocation state dir should be removed on Drop: {}",
-            state_dir.display()
+        for path in [&state_dir, &artifact_dir, &tmp_dir] {
+            assert!(
+                !path.exists(),
+                "invocation dir should be removed on Drop: {}",
+                path.display()
+            );
+        }
+
+        run_dir.cleanup();
+    });
+}
+
+// --- followup: STATE_DIR is the leaf the workload owns ---------------------
+
+#[test]
+fn state_dir_is_the_invocation_leaf_with_artifact_and_tmp_as_siblings() {
+    with_isolated_home(|_| {
+        let run_dir = RunDir::create().expect("run dir");
+        let guard = InvocationGuard::acquire(&run_dir, &InvocationRequirements::default())
+            .expect("invocation guard");
+        let env = guard.env_vars();
+
+        let state = std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_STATE_DIR"));
+        let artifact = std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_ARTIFACT_DIR"));
+        let tmp = std::path::PathBuf::from(value_for(&env, "HOMEBOY_INVOCATION_TMP_DIR"));
+
+        // STATE_DIR is the invocation leaf — workloads bind sockets directly
+        // under it without any extra Homeboy-injected segment. ARTIFACT_DIR
+        // and TMP_DIR live alongside as siblings under the runtime root, so
+        // they cannot collide with workload-created subdirs under STATE_DIR.
+        assert_eq!(
+            state.parent(),
+            artifact.parent(),
+            "siblings under same root"
+        );
+        assert_eq!(state.parent(), tmp.parent(), "siblings under same root");
+
+        // Distinct leaves (no two env vars pointing at the same dir).
+        assert_ne!(state, artifact);
+        assert_ne!(state, tmp);
+        assert_ne!(artifact, tmp);
+
+        // No `s/a/t` subdir layer — STATE_DIR's basename is the short id
+        // (10 hex chars), not `s`.
+        let state_basename = state
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("state basename");
+        assert_eq!(
+            state_basename.len(),
+            10,
+            "STATE_DIR basename should be the 10-char short id, not a subdir: {state_basename}"
         );
 
         run_dir.cleanup();
     });
+}
+
+#[test]
+fn realistic_socket_path_fits_under_sockaddr_un_on_default_platform_root() {
+    // Regression for #2311 follow-up: on macOS the default $TMPDIR is
+    // ~/var/folders/<14>/T/ ≈ 50 bytes, so anchoring to /tmp instead is
+    // what makes the budget work. Build the longest realistic socket path
+    // the Studio site-build workload produces and assert it fits under
+    // sockaddr_un on the default platform root (no override env).
+
+    // Save and clear the runtime override so the platform detection ladder
+    // is exercised end-to-end.
+    let _guard = home_env_guard();
+    let prior = std::env::var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV).ok();
+    std::env::remove_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV);
+
+    let runtime_root = invocation_runtime_root().expect("platform runtime root");
+
+    // Worst-case STATE_DIR: runtime_root + '/' + 10-char short id.
+    let state_dir = runtime_root.join("a1b2c3d4e5");
+
+    // Realistic workload-relative socket suffix: a 32-char workload id
+    // plus the canonical `daemon/daemon.sock` filename. This is what the
+    // Studio site-build workload + similar rigs append under STATE_DIR.
+    let workload_relative = "studio-agent-site-build-restaurant/daemon/daemon.sock";
+    assert!(
+        workload_relative.len() >= 32,
+        "regression test should use a realistic 32+ byte socket suffix"
+    );
+
+    let full_socket_path = state_dir.join(workload_relative);
+    let full_len = full_socket_path.to_string_lossy().len();
+
+    assert!(
+        full_len <= SUN_PATH_CAPACITY,
+        "realistic socket path is {full_len} bytes, exceeds platform sun_path \
+         capacity {SUN_PATH_CAPACITY}: {} (runtime_root = {})",
+        full_socket_path.display(),
+        runtime_root.display()
+    );
+
+    // STATE_DIR alone must also satisfy the homeboy ≥48-byte (macOS) /
+    // ≥32-byte (Linux) headroom contract under default platform root.
+    enforce_path_budget(&state_dir).expect("default platform root meets budget contract");
+
+    match prior {
+        Some(value) => std::env::set_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV, value),
+        None => std::env::remove_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV),
+    }
+}
+
+#[test]
+fn studio_site_build_socket_path_fits_macos_sockaddr_un() {
+    // Specific regression for the failure observed in #2311 follow-up:
+    // Studio's daemon binds to
+    //   $HOMEBOY_INVOCATION_STATE_DIR/studio-agent-site-build/daemon/daemon.sock
+    // and previously got EINVAL on macOS because the prefix was already
+    // ~64 bytes by the time the workload appended its 41-byte suffix.
+    let _guard = home_env_guard();
+    let prior = std::env::var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV).ok();
+    std::env::remove_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV);
+
+    let runtime_root = invocation_runtime_root().expect("platform runtime root");
+    let state_dir = runtime_root.join("0123456789");
+    let socket = state_dir.join("studio-agent-site-build/daemon/daemon.sock");
+    let socket_len = socket.to_string_lossy().len();
+
+    // macOS sockaddr_un sun_path = 104; Linux = 108. Test must hold on
+    // either platform's actual default root.
+    assert!(
+        socket_len <= SUN_PATH_CAPACITY,
+        "Studio site-build socket path is {socket_len} bytes, exceeds {SUN_PATH_CAPACITY}: {}",
+        socket.display()
+    );
+
+    match prior {
+        Some(value) => std::env::set_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV, value),
+        None => std::env::remove_var(HOMEBOY_INVOCATION_RUNTIME_DIR_ENV),
+    }
 }

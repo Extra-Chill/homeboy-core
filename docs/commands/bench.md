@@ -187,29 +187,54 @@ variables, independent of runner implementation:
 
 Invocation directories are placed under a short, platform-aware root so any
 workload can put a UNIX domain socket or other path-length-sensitive primitive
-under `HOMEBOY_INVOCATION_STATE_DIR` without bespoke defense:
+under `HOMEBOY_INVOCATION_STATE_DIR` without bespoke defense.
 
-- macOS: `$TMPDIR/hb/<short-id>/{state,artifacts,tmp}` (typically
-  `/var/folders/<short>/T/hb/...`).
-- Linux: `$XDG_RUNTIME_DIR/hb/<short-id>/...` when set, else
-  `/tmp/hb/<short-id>/...`.
-- Fallback: `~/.cache/homeboy/inv/<short-id>/...`.
-- Override: set `HOMEBOY_INVOCATION_RUNTIME_DIR` to pin the root explicitly
-  (tests and unusual host configurations).
+**Layout.** The invocation owns three sibling directories under the runtime
+root:
+
+- `<root>/<short-id>`     → `HOMEBOY_INVOCATION_STATE_DIR` (the leaf the
+  workload owns; downstream sockets bind directly here).
+- `<root>/<short-id>.a`   → `HOMEBOY_INVOCATION_ARTIFACT_DIR`
+- `<root>/<short-id>.t`   → `HOMEBOY_INVOCATION_TMP_DIR`
+
+There is no `s/a/t` subdir layer underneath the short id. The invocation is
+1:1 with a single workload run, so an extra workload-id segment under
+STATE_DIR would burn `sockaddr_un` budget for no isolation gain. Workloads
+that need internal subdirs under STATE_DIR can still create them, but they
+own the path-length budget at that point.
+
+**Root selection.** In priority order:
+
+- `HOMEBOY_INVOCATION_RUNTIME_DIR` env override (tests and unusual host
+  configurations).
+- `/tmp/hb` on every Unix host when `/tmp` is a writable directory. macOS
+  apps that respect `$TMPDIR` get per-user isolation under
+  `/var/folders/<14>/T/...` (~50 bytes), which leaves no realistic
+  `sockaddr_un` budget. Anchoring to `/tmp` saves ~35 bytes of headroom and
+  is writable on every standard macOS / Linux configuration.
+- Linux fallback: `$XDG_RUNTIME_DIR/hb` when set and `/tmp` is unusable.
+- macOS fallback: `$TMPDIR/hb` when `/tmp` is unusable.
+- Generic fallback: `~/.cache/homeboy/inv` (or `$XDG_CACHE_HOME/homeboy/inv`).
 
 Path components use a short opaque id (~10 hex chars) instead of a full
 UUID v4. The full UUID is retained inside the on-disk invocation lease for
 traceability, but is never embedded in path components.
 
-**Path budget contract.** Homeboy guarantees that `HOMEBOY_INVOCATION_STATE_DIR`,
-`HOMEBOY_INVOCATION_ARTIFACT_DIR`, and `HOMEBOY_INVOCATION_TMP_DIR` leave at
-least 32 bytes of headroom under the platform `sockaddr_un` `sun_path`
-capacity (104 bytes on macOS, 108 bytes on Linux). Workloads can append a
-typical socket filename like `daemon/daemon.sock` directly under any of these
-directories and bind to it without `EINVAL`. If `$HOME` or `$TMPDIR` are
-unusually long, `homeboy` fails fast at invocation acquisition with a clear
-error pointing at `HOMEBOY_INVOCATION_RUNTIME_DIR` instead of letting a
-downstream workload hit the limit at bind time.
+**Path budget contract.** Homeboy guarantees that
+`HOMEBOY_INVOCATION_STATE_DIR`, `HOMEBOY_INVOCATION_ARTIFACT_DIR`, and
+`HOMEBOY_INVOCATION_TMP_DIR` leave at least:
+
+- **48 bytes** of headroom under the macOS `sockaddr_un` `sun_path`
+  capacity (104 bytes), and
+- **32 bytes** of headroom under the Linux capacity (108 bytes).
+
+Workloads can append a realistic workload-relative socket name like
+`<workload-id>/daemon/daemon.sock` (≈40 bytes) directly under STATE_DIR and
+bind to it without `EINVAL`. If `$HOME` or the configured root are
+unusually long, Homeboy fails fast at invocation acquisition with a clear
+error naming `sockaddr_un`, the platform-specific limit, the available
+headroom, and the `HOMEBOY_INVOCATION_RUNTIME_DIR` override — instead of
+letting a downstream workload hit the limit at bind time.
 
 Rig workload object entries can request optional shared-machine primitives:
 
