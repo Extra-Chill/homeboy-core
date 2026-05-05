@@ -4,6 +4,25 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.157.0] - 2026-05-05
+
+### Added
+- enqueue analysis HTTP jobs
+- add invocation isolation primitives
+- expose daemon job inspection routes
+
+### Changed
+- satisfy invocation audit coverage
+
+### Fixed
+- include test quality in vacuous-only runs
+- satisfy invocation cleanup audit
+- recognize helper-backed test coverage
+- track invocation child process ownership
+- avoid vacuous test false positives
+- avoid source build during release check
+- remove review-only issue policy
+
 ## [0.156.2] - 2026-05-04
 
 ### Changed
