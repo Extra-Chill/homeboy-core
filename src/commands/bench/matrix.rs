@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use homeboy::component::Component;
 use homeboy::engine::execution_context::{self, ResolveOptions};
+use homeboy::engine::invocation::InvocationRequirements;
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::bench as extension_bench;
 use homeboy::extension::bench::report::collect_artifacts;
@@ -441,19 +442,8 @@ fn run_component_with_rig_context(
         effective_id
     )));
 
-    let extra_workloads = rig_spec
-        .as_ref()
-        .and_then(|spec| {
-            ctx.extension_id.as_deref().map(|id| {
-                rig::workloads_for_extension(
-                    spec,
-                    rig::RigWorkloadKind::Bench,
-                    rig_context.and_then(|context| context.package_root.as_deref()),
-                    id,
-                )
-            })
-        })
-        .unwrap_or_default();
+    let (extra_workloads, invocation_requirements) =
+        rig_workload_runtime_inputs(rig_context, rig_spec, ctx.extension_id.as_deref());
 
     let selected_scenarios = selected_scenario_ids(args, rig_spec)?;
     let observation = observation::start(BenchObservationStart {
@@ -494,6 +484,7 @@ fn run_component_with_rig_context(
             rig_id: rig_id.clone(),
             shared_state: shared_state_override.or_else(|| args.shared_state.clone()),
             extra_workloads,
+            invocation_requirements,
         },
         &run_dir,
     );
@@ -520,6 +511,34 @@ fn run_component_with_rig_context(
         workflow,
         rig_snapshot,
     ))
+}
+
+fn rig_workload_runtime_inputs(
+    rig_context: Option<&RigBenchContext>,
+    rig_spec: Option<&RigSpec>,
+    extension_id: Option<&str>,
+) -> (Vec<PathBuf>, InvocationRequirements) {
+    let Some(spec) = rig_spec else {
+        return (Vec::new(), InvocationRequirements::default());
+    };
+    let Some(extension_id) = extension_id else {
+        return (Vec::new(), InvocationRequirements::default());
+    };
+
+    let package_root = rig_context.and_then(|context| context.package_root.as_deref());
+    (
+        rig::workloads_for_extension(
+            spec,
+            rig::RigWorkloadKind::Bench,
+            package_root,
+            extension_id,
+        ),
+        rig::invocation_requirements_for_extension_workloads(
+            spec,
+            rig::RigWorkloadKind::Bench,
+            extension_id,
+        ),
+    )
 }
 
 fn run_rig_workload_preflight(spec: &RigSpec, extension_id: Option<&str>) -> homeboy::Result<()> {

@@ -268,6 +268,7 @@ fn find_extension_with_validate(file_ext: &str) -> Option<extension::ExtensionMa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::with_isolated_home;
     use std::fs;
     use tempfile::TempDir;
 
@@ -354,28 +355,30 @@ mod tests {
 
     #[test]
     fn validate_write_without_extension_validator_is_success() {
-        let dir = TempDir::new().expect("temp dir");
-        let root = dir.path();
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src/lib.rs"), "pub fn broken( {}\n").unwrap();
+        with_isolated_home(|_| {
+            let dir = TempDir::new().expect("temp dir");
+            let root = dir.path();
+            fs::create_dir_all(root.join("src")).unwrap();
+            fs::write(root.join("src/lib.rs"), "pub fn broken( {}\n").unwrap();
 
-        let mut rollback = InMemoryRollback::new();
-        let lib_path = root.join("src/lib.rs");
-        rollback.capture(&lib_path);
+            let mut rollback = InMemoryRollback::new();
+            let lib_path = root.join("src/lib.rs");
+            rollback.capture(&lib_path);
 
-        let changed = vec![lib_path.clone()];
-        let result = validate_write(root, &changed, &rollback).expect("should not error");
+            let changed = vec![lib_path.clone()];
+            let result = validate_write(root, &changed, &rollback).expect("should not error");
 
-        assert!(
-            result.success,
-            "validation should skip without extension contract"
-        );
-        assert!(
-            !result.rolled_back,
-            "skipped validation should not roll back"
-        );
-        assert!(result.command.is_none());
-        let content = fs::read_to_string(&lib_path).unwrap();
-        assert_eq!(content, "pub fn broken( {}\n");
+            assert!(
+                result.success,
+                "validation should skip without extension contract"
+            );
+            assert!(
+                !result.rolled_back,
+                "skipped validation should not roll back"
+            );
+            assert!(result.command.is_none());
+            let content = fs::read_to_string(&lib_path).unwrap();
+            assert_eq!(content, "pub fn broken( {}\n");
+        });
     }
 }

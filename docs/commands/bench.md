@@ -170,6 +170,51 @@ Rig-declared metric gates are merged with workload-emitted `gates` before
 Homeboy evaluates scenario status. Supported rig operators are `equals`, `gte`,
 and `lte`.
 
+## Invocation Isolation
+
+Every bench child process receives generic invocation-scoped environment
+variables, independent of runner implementation:
+
+- `HOMEBOY_INVOCATION_ID`: stable identifier for this child workload invocation.
+- `HOMEBOY_INVOCATION_STATE_DIR`: private state directory for files that should
+  outlive one internal iteration but remain scoped to this invocation.
+- `HOMEBOY_INVOCATION_ARTIFACT_DIR`: private artifact directory for logs,
+  screenshots, traces, and downloaded/build artifacts.
+- `HOMEBOY_INVOCATION_TMP_DIR`: private temporary directory for project copies,
+  browser profiles, wasm caches, and other scratch state.
+
+Rig workload object entries can request optional shared-machine primitives:
+
+```json
+{
+  "bench_workloads": {
+    "nodejs": [
+      {
+        "path": "${package.root}/bench/playground-server.bench.mjs",
+        "port_range_size": 8,
+        "named_leases": ["playground-browser-profile"]
+      }
+    ]
+  }
+}
+```
+
+When `port_range_size` is set, Homeboy allocates a non-overlapping local port
+range for each child invocation and exports `HOMEBOY_INVOCATION_PORT_BASE` and
+`HOMEBOY_INVOCATION_PORT_MAX`. Leases are persisted under Homeboy's local config
+directory while the child is running, guarded by a local index lock, and stale
+PID leases are pruned on the next allocation.
+
+`named_leases` are for truly shared machine-local resources that cannot be
+namespaced with dirs or ports. Conflicts fail before the workload starts and
+name the held lease and holder invocation when available.
+
+These primitives are intentionally generic enough for WordPress
+Playground-style benchmarks: one invocation can run browser/server/wasm/node
+services, consume multiple local ports, keep downloaded or built artifacts in
+the artifact dir, and use private temp project dirs without Studio-specific
+namespace code.
+
 ## Examples
 
 ```bash

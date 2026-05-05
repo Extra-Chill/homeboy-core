@@ -592,6 +592,7 @@ pub(crate) fn build_trace_runner(
             &args.runner_inputs.workload_paths,
             "trace_workloads",
         )),
+        invocation_requirements: crate::engine::invocation::InvocationRequirements::default(),
     })?;
 
     if let Some(rig_id) = &args.rig_id {

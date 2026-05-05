@@ -202,6 +202,7 @@ pub struct ScenarioRunnerOptions<'a> {
     pub artifact_env: Option<(&'a str, &'a Path)>,
     pub list_only_env: Option<(&'a str, bool)>,
     pub extra_workloads_env: Option<(&'a str, &'a [PathBuf], &'a str)>,
+    pub invocation_requirements: crate::engine::invocation::InvocationRequirements,
 }
 
 pub fn build_scenario_runner(options: ScenarioRunnerOptions<'_>) -> Result<ExtensionRunner> {
@@ -210,7 +211,8 @@ pub fn build_scenario_runner(options: ScenarioRunnerOptions<'_>) -> Result<Exten
         .path_override(options.path_override)
         .settings(options.settings)
         .settings_json(options.settings_json)
-        .with_run_dir(options.run_dir);
+        .with_run_dir(options.run_dir)
+        .invocation_requirements(options.invocation_requirements);
 
     if options.cleanup_process_group {
         runner = runner.cleanup_process_group(true);

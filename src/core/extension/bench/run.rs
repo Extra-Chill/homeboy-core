@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::component::Component;
 use crate::engine::baseline::BaselineFlags;
+use crate::engine::invocation::InvocationRequirements;
 use crate::engine::run_dir::{self, RunDir};
 use crate::error::{Error, Result};
 use crate::extension::bench::aggregate_runs;
@@ -65,6 +66,10 @@ pub struct BenchRunWorkflowArgs {
     /// Rig-declared out-of-tree workloads to run alongside in-tree discovery.
     /// Exported to dispatchers as `HOMEBOY_BENCH_EXTRA_WORKLOADS`.
     pub extra_workloads: Vec<PathBuf>,
+    /// Generic Homeboy isolation requirements for each child workload
+    /// invocation. Rigs can use this for browser/server/wasm benchmarks without
+    /// runner-specific namespace logic.
+    pub invocation_requirements: InvocationRequirements,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -175,6 +180,7 @@ pub fn run_bench_list_workflow(
             rig_id: None,
             shared_state: None,
             extra_workloads: args.extra_workloads,
+            invocation_requirements: InvocationRequirements::default(),
         },
         run_dir,
         None,
@@ -1006,6 +1012,7 @@ fn build_runner(
             &args.extra_workloads,
             "bench_workloads",
         )),
+        invocation_requirements: args.invocation_requirements.clone(),
     })?
     .env("HOMEBOY_BENCH_ITERATIONS", &args.iterations.to_string())
     .env("HOMEBOY_BENCH_PROGRESS", bench_progress_env_value())
@@ -1295,6 +1302,7 @@ mod tests {
                 rig_id: None,
                 shared_state: None,
                 extra_workloads: Vec::new(),
+                invocation_requirements: InvocationRequirements::default(),
             },
             &run_dir,
         )
@@ -1349,6 +1357,7 @@ mod tests {
             rig_id: Some("studio".to_string()),
             shared_state: Some(component_dir.path().join("shared")),
             extra_workloads: Vec::new(),
+            invocation_requirements: InvocationRequirements::default(),
         };
         let mut results = BenchResults {
             component_id: "homeboy".to_string(),

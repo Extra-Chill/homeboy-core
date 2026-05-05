@@ -68,8 +68,8 @@ pub use state::{
     ComponentSnapshot, MaterializedRigState, RigState, RigStateSnapshot, ServiceState,
 };
 pub use workloads::{
-    check_groups_for_extension_workloads, extension_ids_for_workloads, workloads_for_extension,
-    RigWorkloadKind,
+    check_groups_for_extension_workloads, extension_ids_for_workloads,
+    invocation_requirements_for_extension_workloads, workloads_for_extension, RigWorkloadKind,
 };
 
 use crate::error::{Error, Result};

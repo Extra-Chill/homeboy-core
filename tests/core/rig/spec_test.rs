@@ -335,6 +335,8 @@ fn workload_with_trace_metadata() -> WorkloadSpec {
     WorkloadSpec::Detailed(WorkloadEntry {
         path: "/tmp/scoped.trace.mjs".to_string(),
         check_groups: Some(vec!["desktop-app".to_string()]),
+        port_range_size: None,
+        named_leases: Vec::new(),
         trace_phase_presets: std::collections::HashMap::from([(
             "startup".to_string(),
             vec!["boot:runner.boot".to_string()],

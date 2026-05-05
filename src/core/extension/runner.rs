@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::component::Component;
+use crate::engine::invocation::{InvocationGuard, InvocationRequirements};
 use crate::engine::resource;
 use crate::error::Result;
 use crate::server::CommandOutput;
@@ -45,6 +46,7 @@ pub struct ExtensionRunner {
     cleanup_process_group: bool,
     /// Run directory path for recording machine-local child process evidence.
     run_dir_path: Option<PathBuf>,
+    invocation_requirements: InvocationRequirements,
 }
 
 impl ExtensionRunner {
@@ -73,6 +75,7 @@ impl ExtensionRunner {
             stderr_passthrough: false,
             cleanup_process_group: false,
             run_dir_path: None,
+            invocation_requirements: InvocationRequirements::default(),
         }
     }
 
@@ -127,6 +130,12 @@ impl ExtensionRunner {
     pub fn with_run_dir(mut self, run_dir: &crate::engine::run_dir::RunDir) -> Self {
         self.env_vars.extend(run_dir.legacy_env_vars());
         self.run_dir_path = Some(run_dir.path().to_path_buf());
+        self
+    }
+
+    /// Require invocation-scoped resources for the child workload.
+    pub fn invocation_requirements(mut self, requirements: InvocationRequirements) -> Self {
+        self.invocation_requirements = requirements;
         self
     }
 
@@ -195,11 +204,17 @@ impl ExtensionRunner {
         )?;
 
         let project_path = PathBuf::from(&prepared.execution.component.local_path);
+        let invocation = self.acquire_invocation_guard()?;
+        let mut extra_env_vars = self.env_vars.clone();
+        if let Some(invocation) = invocation.as_ref() {
+            extra_env_vars.extend(invocation.env_vars());
+        }
         let env_vars = self.prepare_env_vars(
             &prepared.execution.extension_path,
             &project_path,
             &prepared.settings_json,
             &prepared.execution.extension_id,
+            &extra_env_vars,
         );
 
         let output = self.execute_script(&prepared.execution.extension_path, &env_vars)?;
@@ -217,12 +232,21 @@ impl ExtensionRunner {
         })
     }
 
+    fn acquire_invocation_guard(&self) -> Result<Option<InvocationGuard>> {
+        let Some(path) = &self.run_dir_path else {
+            return Ok(None);
+        };
+        let run_dir = crate::engine::run_dir::RunDir::from_existing(path.clone())?;
+        InvocationGuard::acquire(&run_dir, &self.invocation_requirements).map(Some)
+    }
+
     fn prepare_env_vars(
         &self,
         extension_path: &Path,
         project_path: &Path,
         settings_json: &str,
         extension_name: &str,
+        extra_env_vars: &[(String, String)],
     ) -> Vec<(String, String)> {
         super::execution::build_capability_env(
             extension_name,
@@ -230,7 +254,7 @@ impl ExtensionRunner {
             extension_path,
             project_path,
             settings_json,
-            &self.env_vars,
+            extra_env_vars,
         )
     }
 

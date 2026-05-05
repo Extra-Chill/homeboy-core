@@ -145,6 +145,7 @@ mod tests {
             rig_id: Some("studio-bfb".to_string()),
             shared_state: None,
             extra_workloads: Vec::new(),
+            invocation_requirements: crate::engine::invocation::InvocationRequirements::default(),
         }
     }
 }
