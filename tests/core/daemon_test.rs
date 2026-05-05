@@ -1,4 +1,5 @@
 use super::*;
+use crate::api_jobs::JobStore;
 use crate::test_support::HomeGuard;
 
 #[test]
@@ -55,7 +56,7 @@ fn routes_read_only_http_api_contract() {
     assert!(job_ready.body["message"]
         .as_str()
         .unwrap()
-        .contains("#1764"));
+        .contains("analysis enqueue"));
 
     let runs = route("GET", "/runs?kind=bench&limit=1");
     assert_eq!(runs.status_code, 200);
@@ -66,6 +67,32 @@ fn routes_read_only_http_api_contract() {
     assert_eq!(bench_runs.status_code, 200);
     assert_eq!(bench_runs.body["endpoint"], "bench.runs");
     assert!(bench_runs.body["body"]["runs"].is_array());
+}
+
+#[test]
+fn routes_job_inspection_against_daemon_job_store() {
+    let store = JobStore::default();
+    let job = store.create("lint");
+
+    let list = route_with_job_store("GET", "/jobs", &store);
+    assert_eq!(list.status_code, 200);
+    assert_eq!(list.body["endpoint"], "jobs.list");
+    assert_eq!(list.body["body"]["jobs"].as_array().unwrap().len(), 1);
+
+    let show = route_with_job_store("GET", &format!("/jobs/{}", job.id), &store);
+    assert_eq!(show.status_code, 200);
+    assert_eq!(show.body["endpoint"], "jobs.show");
+    assert_eq!(show.body["body"]["job"]["operation"], "lint");
+
+    let events = route_with_job_store("GET", &format!("/jobs/{}/events", job.id), &store);
+    assert_eq!(events.status_code, 200);
+    assert_eq!(events.body["endpoint"], "jobs.events");
+    assert_eq!(events.body["body"]["events"].as_array().unwrap().len(), 1);
+
+    let cancel = route_with_job_store("POST", &format!("/jobs/{}/cancel", job.id), &store);
+    assert_eq!(cancel.status_code, 200);
+    assert_eq!(cancel.body["endpoint"], "jobs.cancel");
+    assert_eq!(cancel.body["body"]["job"]["status"], "cancelled");
 }
 
 #[test]
