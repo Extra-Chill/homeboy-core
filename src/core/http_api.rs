@@ -2,14 +2,17 @@
 //!
 //! This module is intentionally transport-free: the daemon can hand it a
 //! method/path pair and serialize the returned JSON without duplicating Homeboy
-//! command behavior. Long-running analysis endpoints are routed here, but they
-//! wait for daemon HTTP job routing before execution.
+//! command behavior. Long-running analysis endpoints enqueue daemon-owned jobs
+//! so HTTP requests can return immediately while clients poll job events.
 
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::api_jobs::JobStore;
+use crate::cli_surface::{Cli, Commands};
+use crate::commands::{self, GlobalArgs};
 use crate::error::{Error, Result};
 use crate::observation::{ObservationStore, RunListFilter, RunRecord};
 use crate::{component, git, rig, stack};
@@ -305,20 +308,7 @@ pub fn handle_with_jobs(request: HttpApiRequest, job_store: &JobStore) -> Result
             "command": "api.jobs.cancel",
             "job": job_store.cancel(parse_job_id(id)?, "cancel requested via HTTP API")?,
         }),
-        HttpEndpoint::JobReadyRun { kind } => {
-            return Err(Error::validation_invalid_argument(
-                "endpoint",
-                format!(
-                    "POST /{} requires daemon HTTP analysis enqueue wiring through src/core/api_jobs.rs before it can run safely",
-                    job_ready_slug(*kind)
-                ),
-                Some(job_ready_slug(*kind).to_string()),
-                Some(vec![
-                    "Wire this endpoint to enqueue a long-running analysis job through the existing daemon job model"
-                        .to_string(),
-                ]),
-            ));
-        }
+        HttpEndpoint::JobReadyRun { kind } => enqueue_analysis_job(job_store, *kind, request.body)?,
     };
 
     Ok(HttpApiResponse {
@@ -391,6 +381,375 @@ fn parse_job_id(job_id: &str) -> Result<Uuid> {
             None,
         )
     })
+}
+
+fn enqueue_analysis_job(
+    job_store: &JobStore,
+    kind: JobReadyRunKind,
+    body: Option<Value>,
+) -> Result<Value> {
+    let request = AnalysisJobRequest::from_body(kind, body)?;
+    let argv = request.argv();
+    let command = parse_analysis_command(argv.clone())?;
+    let operation = format!("analysis.{}", job_ready_slug(kind));
+    let request_summary = request.summary();
+    let runner = job_store.run_background(operation, move |job| {
+        job.progress(json!({
+            "phase": "started",
+            "command": request.command_label(),
+            "job_id": job.job_id(),
+        }))?;
+
+        let global = GlobalArgs {};
+        let (result, exit_code) = commands::run_json(command, &global);
+        let output = result?;
+        job.progress(json!({
+            "phase": "finished",
+            "exit_code": exit_code,
+        }))?;
+        Ok(json!({
+            "command": request.command_label(),
+            "exit_code": exit_code,
+            "output": output,
+        }))
+    });
+    let job = job_store.get(runner.job_id)?;
+
+    Ok(json!({
+        "command": format!("api.{}.enqueue", job_ready_slug(kind)),
+        "job": job,
+        "poll": {
+            "job": format!("/jobs/{}", runner.job_id),
+            "events": format!("/jobs/{}/events", runner.job_id),
+        },
+        "request": request_summary,
+    }))
+}
+
+fn parse_analysis_command(argv: Vec<String>) -> Result<Commands> {
+    let cli = Cli::try_parse_from(argv).map_err(|error| {
+        Error::validation_invalid_argument(
+            "body",
+            error.to_string(),
+            None,
+            Some(vec![
+                "Use the documented JSON request body contract for this endpoint".to_string(),
+            ]),
+        )
+    })?;
+    Ok(cli.command)
+}
+
+#[derive(Debug, Clone)]
+struct AnalysisJobRequest {
+    kind: JobReadyRunKind,
+    args: Vec<String>,
+    summary: Value,
+}
+
+impl AnalysisJobRequest {
+    fn from_body(kind: JobReadyRunKind, body: Option<Value>) -> Result<Self> {
+        let mut parser = AnalysisBodyParser::new(body)?;
+        let mut args = vec![job_ready_slug(kind).to_string()];
+
+        parser.push_optional_string("component", &mut args)?;
+        parser.push_optional_flag_value("path", "--path", &mut args)?;
+        parser.push_bool_flag("json_summary", "--json-summary", &mut args)?;
+
+        match kind {
+            JobReadyRunKind::Audit => {
+                parser.push_bool_flag("conventions", "--conventions", &mut args)?;
+                parser.push_string_array("only", "--only", &mut args)?;
+                parser.push_string_array("exclude", "--exclude", &mut args)?;
+                parser.push_optional_flag_value("changed_since", "--changed-since", &mut args)?;
+                parser.push_bool_flag("fixability", "--fixability", &mut args)?;
+            }
+            JobReadyRunKind::Lint => {
+                parser.push_bool_flag("summary", "--summary", &mut args)?;
+                parser.push_optional_flag_value("file", "--file", &mut args)?;
+                parser.push_optional_flag_value("glob", "--glob", &mut args)?;
+                parser.push_bool_flag("changed_only", "--changed-only", &mut args)?;
+                parser.push_optional_flag_value("changed_since", "--changed-since", &mut args)?;
+                parser.push_bool_flag("errors_only", "--errors-only", &mut args)?;
+                parser.push_optional_flag_value("sniffs", "--sniffs", &mut args)?;
+                parser.push_optional_flag_value("exclude_sniffs", "--exclude-sniffs", &mut args)?;
+                parser.push_optional_flag_value("category", "--category", &mut args)?;
+                parser.reject_present("fix", "POST /lint jobs do not expose mutating --fix")?;
+            }
+            JobReadyRunKind::Test => {
+                parser.push_bool_flag("skip_lint", "--skip-lint", &mut args)?;
+                parser.push_bool_flag("coverage", "--coverage", &mut args)?;
+                parser.push_optional_number("coverage_min", "--coverage-min", &mut args)?;
+                parser.push_bool_flag("analyze", "--analyze", &mut args)?;
+                parser.push_bool_flag("drift", "--drift", &mut args)?;
+                parser.push_optional_flag_value("since", "--since", &mut args)?;
+                parser.push_optional_flag_value("changed_since", "--changed-since", &mut args)?;
+                parser.push_passthrough_args(&mut args)?;
+                parser.reject_present("write", "POST /test jobs do not expose mutating --write")?;
+            }
+            JobReadyRunKind::Bench => {
+                parser.push_optional_u64("iterations", "--iterations", &mut args)?;
+                parser.push_optional_u64("warmup", "--warmup", &mut args)?;
+                parser.push_optional_u64("runs", "--runs", &mut args)?;
+                parser.push_optional_u32("concurrency", "--concurrency", &mut args)?;
+                parser.push_string_array("rig", "--rig", &mut args)?;
+                parser.push_string_array("scenario", "--scenario", &mut args)?;
+                parser.push_optional_flag_value("profile", "--profile", &mut args)?;
+                parser.push_optional_number(
+                    "regression_threshold",
+                    "--regression-threshold",
+                    &mut args,
+                )?;
+                parser.push_bool_flag(
+                    "ignore_default_baseline",
+                    "--ignore-default-baseline",
+                    &mut args,
+                )?;
+                parser.push_passthrough_args(&mut args)?;
+            }
+        }
+
+        parser.reject_present(
+            "baseline",
+            "analysis jobs do not expose mutating --baseline",
+        )?;
+        parser.reject_present("ratchet", "analysis jobs do not expose mutating --ratchet")?;
+        parser.reject_present(
+            "shared_state",
+            "POST /bench jobs do not expose --shared-state",
+        )?;
+        parser.reject_unknown()?;
+
+        Ok(Self {
+            kind,
+            summary: parser.summary(),
+            args,
+        })
+    }
+
+    fn argv(&self) -> Vec<String> {
+        let mut argv = vec!["homeboy".to_string()];
+        argv.extend(self.args.clone());
+        argv
+    }
+
+    fn command_label(&self) -> String {
+        format!("homeboy {}", self.args.join(" "))
+    }
+
+    fn summary(&self) -> Value {
+        json!({
+            "kind": job_ready_slug(self.kind),
+            "args": self.args,
+            "body": self.summary,
+        })
+    }
+}
+
+struct AnalysisBodyParser {
+    fields: serde_json::Map<String, Value>,
+    consumed: Vec<String>,
+}
+
+impl AnalysisBodyParser {
+    fn new(body: Option<Value>) -> Result<Self> {
+        match body.unwrap_or_else(|| json!({})) {
+            Value::Object(fields) => Ok(Self {
+                fields,
+                consumed: Vec::new(),
+            }),
+            other => Err(Error::validation_invalid_argument(
+                "body",
+                "request body must be a JSON object",
+                Some(other.to_string()),
+                None,
+            )),
+        }
+    }
+
+    fn push_optional_string(&mut self, key: &str, args: &mut Vec<String>) -> Result<()> {
+        if let Some(value) = self.take_string(key)? {
+            args.push(value);
+        }
+        Ok(())
+    }
+
+    fn push_optional_flag_value(
+        &mut self,
+        key: &str,
+        flag: &str,
+        args: &mut Vec<String>,
+    ) -> Result<()> {
+        if let Some(value) = self.take_string(key)? {
+            args.push(flag.to_string());
+            args.push(value);
+        }
+        Ok(())
+    }
+
+    fn push_bool_flag(&mut self, key: &str, flag: &str, args: &mut Vec<String>) -> Result<()> {
+        if let Some(value) = self.take(key) {
+            match value {
+                Value::Bool(true) => args.push(flag.to_string()),
+                Value::Bool(false) | Value::Null => {}
+                other => return Err(invalid_body_type(key, "boolean", &other)),
+            }
+        }
+        Ok(())
+    }
+
+    fn push_string_array(&mut self, key: &str, flag: &str, args: &mut Vec<String>) -> Result<()> {
+        if let Some(value) = self.take(key) {
+            match value {
+                Value::Array(values) => {
+                    for value in values {
+                        let Some(value) = value.as_str() else {
+                            return Err(invalid_body_type(key, "array of strings", &value));
+                        };
+                        args.push(flag.to_string());
+                        args.push(value.to_string());
+                    }
+                }
+                Value::String(value) => {
+                    args.push(flag.to_string());
+                    args.push(value);
+                }
+                Value::Null => {}
+                other => return Err(invalid_body_type(key, "string or array of strings", &other)),
+            }
+        }
+        Ok(())
+    }
+
+    fn push_optional_number(
+        &mut self,
+        key: &str,
+        flag: &str,
+        args: &mut Vec<String>,
+    ) -> Result<()> {
+        if let Some(value) = self.take(key) {
+            match value {
+                Value::Number(number) => {
+                    args.push(flag.to_string());
+                    args.push(number.to_string());
+                }
+                Value::Null => {}
+                other => return Err(invalid_body_type(key, "number", &other)),
+            }
+        }
+        Ok(())
+    }
+
+    fn push_optional_u64(&mut self, key: &str, flag: &str, args: &mut Vec<String>) -> Result<()> {
+        if let Some(value) = self.take(key) {
+            match value {
+                Value::Number(number) if number.as_u64().is_some() => {
+                    args.push(flag.to_string());
+                    args.push(number.to_string());
+                }
+                Value::Null => {}
+                other => return Err(invalid_body_type(key, "unsigned integer", &other)),
+            }
+        }
+        Ok(())
+    }
+
+    fn push_optional_u32(&mut self, key: &str, flag: &str, args: &mut Vec<String>) -> Result<()> {
+        if let Some(value) = self.take(key) {
+            match value {
+                Value::Number(number) => {
+                    let Some(parsed) = number.as_u64().and_then(|value| u32::try_from(value).ok())
+                    else {
+                        return Err(invalid_body_type(key, "u32", &Value::Number(number)));
+                    };
+                    args.push(flag.to_string());
+                    args.push(parsed.to_string());
+                }
+                Value::Null => {}
+                other => return Err(invalid_body_type(key, "u32", &other)),
+            }
+        }
+        Ok(())
+    }
+
+    fn push_passthrough_args(&mut self, args: &mut Vec<String>) -> Result<()> {
+        if let Some(value) = self.take("args") {
+            match value {
+                Value::Array(values) if values.is_empty() => {}
+                Value::Array(values) => {
+                    args.push("--".to_string());
+                    for value in values {
+                        let Some(value) = value.as_str() else {
+                            return Err(invalid_body_type("args", "array of strings", &value));
+                        };
+                        args.push(value.to_string());
+                    }
+                }
+                Value::Null => {}
+                other => return Err(invalid_body_type("args", "array of strings", &other)),
+            }
+        }
+        Ok(())
+    }
+
+    fn reject_present(&mut self, key: &str, message: &str) -> Result<()> {
+        if self.take(key).is_some() {
+            return Err(Error::validation_invalid_argument(
+                key,
+                message,
+                Some(key.to_string()),
+                None,
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_unknown(&self) -> Result<()> {
+        if self.fields.is_empty() {
+            return Ok(());
+        }
+        let mut unknown: Vec<String> = self.fields.keys().cloned().collect();
+        unknown.sort();
+        Err(Error::validation_invalid_argument(
+            "body",
+            format!(
+                "unsupported analysis job body field(s): {}",
+                unknown.join(", ")
+            ),
+            Some(unknown.join(",")),
+            None,
+        ))
+    }
+
+    fn summary(&self) -> Value {
+        json!({ "accepted_fields": self.consumed })
+    }
+
+    fn take_string(&mut self, key: &str) -> Result<Option<String>> {
+        let Some(value) = self.take(key) else {
+            return Ok(None);
+        };
+        match value {
+            Value::String(value) => Ok(Some(value)),
+            Value::Null => Ok(None),
+            other => Err(invalid_body_type(key, "string", &other)),
+        }
+    }
+
+    fn take(&mut self, key: &str) -> Option<Value> {
+        let value = self.fields.remove(key)?;
+        self.consumed.push(key.to_string());
+        Some(value)
+    }
+}
+
+fn invalid_body_type(key: &str, expected: &str, value: &Value) -> Error {
+    Error::validation_invalid_argument(
+        key,
+        format!("{key} must be {expected}"),
+        Some(value.to_string()),
+        None,
+    )
 }
 
 fn run_summary(run: RunRecord) -> RunSummary {

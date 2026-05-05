@@ -163,6 +163,19 @@ pub fn route(method: &str, path: &str) -> HttpResponse {
 }
 
 pub fn route_with_job_store(method: &str, path: &str, job_store: &JobStore) -> HttpResponse {
+    route_with_job_store_and_body(method, path, None, job_store)
+}
+
+pub fn route_with_body(method: &str, path: &str, body: Option<serde_json::Value>) -> HttpResponse {
+    route_with_job_store_and_body(method, path, body, daemon_job_store())
+}
+
+pub fn route_with_job_store_and_body(
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+    job_store: &JobStore,
+) -> HttpResponse {
     match (method, path) {
         ("GET", "/health") => HttpResponse {
             status_code: 200,
@@ -188,7 +201,7 @@ pub fn route_with_job_store(method: &str, path: &str, job_store: &JobStore) -> H
             status_code: 405,
             body: json!({ "error": "method_not_allowed" }),
         },
-        _ => route_read_only_api(method, path, job_store),
+        _ => route_read_only_api(method, path, body, job_store),
     }
 }
 
@@ -196,7 +209,12 @@ fn daemon_job_store() -> &'static JobStore {
     DAEMON_JOB_STORE.get_or_init(JobStore::default)
 }
 
-fn route_read_only_api(method: &str, path: &str, job_store: &JobStore) -> HttpResponse {
+fn route_read_only_api(
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+    job_store: &JobStore,
+) -> HttpResponse {
     let method = match method {
         "GET" => HttpMethod::Get,
         "POST" => HttpMethod::Post,
@@ -212,7 +230,7 @@ fn route_read_only_api(method: &str, path: &str, job_store: &JobStore) -> HttpRe
         http_api::HttpApiRequest {
             method,
             path: path.to_string(),
-            body: None,
+            body,
         },
         job_store,
     ) {
@@ -274,17 +292,43 @@ fn write_state(addr: SocketAddr) -> Result<DaemonState> {
 }
 
 fn handle_connection(mut stream: TcpStream, job_store: &JobStore) -> std::io::Result<()> {
-    let mut buffer = [0; 2048];
+    let mut buffer = [0; 64 * 1024];
     let bytes = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..bytes]);
-    let mut parts = request
+    let mut headers_and_body = request.splitn(2, "\r\n\r\n");
+    let headers = headers_and_body.next().unwrap_or_default();
+    let body = headers_and_body.next().unwrap_or_default();
+    let mut parts = headers
         .lines()
         .next()
         .unwrap_or_default()
         .split_whitespace();
     let method = parts.next().unwrap_or_default();
     let path = parts.next().unwrap_or_default();
-    let response = route_with_job_store(method, path, job_store);
+    let parsed_body = if body.trim().is_empty() {
+        None
+    } else {
+        match serde_json::from_str::<serde_json::Value>(body.trim()) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                let response = error_response(
+                    400,
+                    Error::validation_invalid_argument(
+                        "body",
+                        format!("invalid JSON request body: {error}"),
+                        None,
+                        None,
+                    ),
+                );
+                return write_http_response(stream, response);
+            }
+        }
+    };
+    let response = route_with_job_store_and_body(method, path, parsed_body, job_store);
+    write_http_response(stream, response)
+}
+
+fn write_http_response(mut stream: TcpStream, response: HttpResponse) -> std::io::Result<()> {
     let body = serde_json::to_string_pretty(&json!({
         "success": (200..300).contains(&response.status_code),
         "data": response.body,
@@ -292,6 +336,7 @@ fn handle_connection(mut stream: TcpStream, job_store: &JobStore) -> std::io::Re
     .unwrap_or_else(|_| "{\"success\":false}".to_string());
     let status_text = match response.status_code {
         200 => "OK",
+        400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
         _ => "Internal Server Error",
