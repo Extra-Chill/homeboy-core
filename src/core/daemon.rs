@@ -4,12 +4,16 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
+use crate::api_jobs::JobStore;
 use crate::error::{Error, Result};
 use crate::http_api::{self, HttpMethod};
 use crate::paths;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1:0";
+
+static DAEMON_JOB_STORE: OnceLock<JobStore> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct DaemonState {
@@ -135,11 +139,12 @@ pub fn serve(addr: SocketAddr) -> Result<DaemonState> {
         Error::internal_io(e.to_string(), Some("read daemon local address".to_string()))
     })?;
     let state = write_state(local_addr)?;
+    let job_store = JobStore::default();
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let _ = handle_connection(stream);
+                let _ = handle_connection(stream, &job_store);
             }
             Err(err) => {
                 return Err(Error::internal_io(
@@ -154,6 +159,10 @@ pub fn serve(addr: SocketAddr) -> Result<DaemonState> {
 }
 
 pub fn route(method: &str, path: &str) -> HttpResponse {
+    route_with_job_store(method, path, daemon_job_store())
+}
+
+pub fn route_with_job_store(method: &str, path: &str, job_store: &JobStore) -> HttpResponse {
     match (method, path) {
         ("GET", "/health") => HttpResponse {
             status_code: 200,
@@ -179,11 +188,15 @@ pub fn route(method: &str, path: &str) -> HttpResponse {
             status_code: 405,
             body: json!({ "error": "method_not_allowed" }),
         },
-        _ => route_read_only_api(method, path),
+        _ => route_read_only_api(method, path, job_store),
     }
 }
 
-fn route_read_only_api(method: &str, path: &str) -> HttpResponse {
+fn daemon_job_store() -> &'static JobStore {
+    DAEMON_JOB_STORE.get_or_init(JobStore::default)
+}
+
+fn route_read_only_api(method: &str, path: &str, job_store: &JobStore) -> HttpResponse {
     let method = match method {
         "GET" => HttpMethod::Get,
         "POST" => HttpMethod::Post,
@@ -195,11 +208,14 @@ fn route_read_only_api(method: &str, path: &str) -> HttpResponse {
         }
     };
 
-    match http_api::handle(http_api::HttpApiRequest {
-        method,
-        path: path.to_string(),
-        body: None,
-    }) {
+    match http_api::handle_with_jobs(
+        http_api::HttpApiRequest {
+            method,
+            path: path.to_string(),
+            body: None,
+        },
+        job_store,
+    ) {
         Ok(response) => HttpResponse {
             status_code: response.status,
             body: serde_json::to_value(response)
@@ -257,7 +273,7 @@ fn write_state(addr: SocketAddr) -> Result<DaemonState> {
     Ok(state)
 }
 
-fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle_connection(mut stream: TcpStream, job_store: &JobStore) -> std::io::Result<()> {
     let mut buffer = [0; 2048];
     let bytes = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..bytes]);
@@ -268,7 +284,7 @@ fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
         .split_whitespace();
     let method = parts.next().unwrap_or_default();
     let path = parts.next().unwrap_or_default();
-    let response = route(method, path);
+    let response = route_with_job_store(method, path, job_store);
     let body = serde_json::to_string_pretty(&json!({
         "success": (200..300).contains(&response.status_code),
         "data": response.body,
