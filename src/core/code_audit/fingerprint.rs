@@ -144,6 +144,14 @@ fn fingerprint_via_extension(
     content: &str,
     relative_path: &str,
 ) -> Option<FileFingerprint> {
+    fingerprint_extension_content(ext, relative_path, content)
+}
+
+pub(crate) fn fingerprint_extension_content(
+    ext: &str,
+    relative_path: &str,
+    content: &str,
+) -> Option<FileFingerprint> {
     use crate::extension;
 
     let matched_extension = extension::find_extension_for_file_ext(ext, "fingerprint")?;
@@ -315,6 +323,29 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_normalize_convention_tags() {
+        let tags = normalize_convention_tags(vec![
+            " beta ".to_string(),
+            "alpha".to_string(),
+            "".to_string(),
+            "alpha".to_string(),
+            "  ".to_string(),
+        ]);
+
+        assert_eq!(tags, vec!["alpha".to_string(), "beta".to_string()]);
+    }
+
+    #[test]
+    fn test_fingerprint_extension_content_returns_none_without_claimed_extension() {
+        assert!(fingerprint_extension_content(
+            "homeboy-unclaimed-extension",
+            "src/example.homeboy-unclaimed-extension",
+            "content"
+        )
+        .is_none());
     }
 
     #[test]
