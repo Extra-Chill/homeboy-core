@@ -4,20 +4,36 @@
 //! path-length-sensitive primitives under `HOMEBOY_INVOCATION_STATE_DIR`.
 //! macOS `sockaddr_un` only accepts socket paths up to 104 bytes (108 on
 //! Linux), so the prefix that Homeboy hands out must stay short enough for
-//! a typical filename to fit underneath without any per-workload defense.
+//! a realistic workload-relative socket name to fit underneath without any
+//! per-workload defense.
 //!
 //! ## Root selection
 //!
 //! In priority order:
 //! 1. `HOMEBOY_INVOCATION_RUNTIME_DIR` env override (tests, advanced users).
-//! 2. `$TMPDIR/hb` on macOS when set (typically `/var/folders/<short>/T/hb`).
-//! 3. `$XDG_RUNTIME_DIR/hb` on Linux when set.
-//! 4. `/tmp/hb` on Linux when no XDG runtime dir is available.
+//! 2. `/tmp/hb` on macOS / Linux when `/tmp` is a writable directory. macOS
+//!    apps that respect `$TMPDIR` get per-user isolation under
+//!    `/var/folders/<14>/T/...` which is already ~50 bytes — anchoring the
+//!    runtime root to `/tmp` saves ~35 bytes of `sockaddr_un` budget per
+//!    invocation, the difference between "fits" and "EINVAL on bind".
+//! 3. `$XDG_RUNTIME_DIR/hb` on Linux when set and `/tmp` is not usable.
+//! 4. `$TMPDIR/hb` on macOS as a last resort before falling back to the
+//!    user cache directory. Only reached when `/tmp` is missing, which is
+//!    not a real macOS configuration.
 //! 5. `~/.cache/homeboy/inv` fallback on every platform.
 //!
-//! Each invocation is one directory directly beneath the chosen root:
-//! `<root>/<short-id>/{state,artifacts,tmp}`. There is no `homeboy-run-<uuid>`
-//! / `invocations/inv-<uuid>` nesting like the legacy layout used.
+//! Each invocation owns one short id; the directories are siblings of that
+//! id under the chosen root:
+//!
+//! - `<root>/<short-id>`     → `HOMEBOY_INVOCATION_STATE_DIR` (the leaf the
+//!   workload owns; downstream sockets bind directly here).
+//! - `<root>/<short-id>.a`   → `HOMEBOY_INVOCATION_ARTIFACT_DIR`
+//! - `<root>/<short-id>.t`   → `HOMEBOY_INVOCATION_TMP_DIR`
+//!
+//! There is no `s/a/t` subdir layer — that would burn `sockaddr_un` budget
+//! for no isolation gain since the invocation is already 1:1 with a single
+//! workload run. Workloads that need internal subdirs under STATE_DIR can
+//! still create them, but they own the path-length budget at that point.
 //!
 //! ## Path budget
 //!
@@ -25,7 +41,10 @@
 //! least [`SOCKET_HEADROOM_BYTES`] bytes of headroom under the platform
 //! `sockaddr_un` limit, and fails fast with a clear error when an unusually
 //! long `$HOME` or `$TMPDIR` would otherwise hand out a directory that no
-//! UDS-using workload can use.
+//! UDS-using workload can use. macOS reserves more headroom (48 bytes) than
+//! Linux (32 bytes) because the macOS limit is 4 bytes shorter and
+//! workloads commonly nest a workload-id segment plus a socket filename
+//! (`<workload-id>/daemon/daemon.sock` ≈ 40 bytes) underneath.
 
 use crate::error::{Error, Result};
 #[cfg(windows)]
@@ -40,7 +59,18 @@ use std::path::{Path, PathBuf};
 pub const HOMEBOY_INVOCATION_RUNTIME_DIR_ENV: &str = "HOMEBOY_INVOCATION_RUNTIME_DIR";
 
 /// Bytes of headroom reserved beneath `sockaddr_un` so workloads can append
-/// a typical socket filename (e.g. `daemon/daemon.sock`) without overflowing.
+/// a realistic workload-relative socket name (e.g.
+/// `<workload-id>/daemon/daemon.sock`, ≈40 bytes) without overflowing.
+///
+/// macOS gets a larger reserve (48 bytes) than Linux (32 bytes) because the
+/// macOS `sockaddr_un` limit is 4 bytes shorter (104 vs 108) *and*
+/// workloads typically nest a workload-id segment under STATE_DIR. The
+/// previous 32-byte reserve was insufficient under realistic Apple
+/// `$TMPDIR` configurations and caused Studio's daemon to hit `EINVAL` on
+/// bind despite the contract.
+#[cfg(target_os = "macos")]
+pub const SOCKET_HEADROOM_BYTES: usize = 48;
+#[cfg(not(target_os = "macos"))]
 pub const SOCKET_HEADROOM_BYTES: usize = 32;
 
 /// Platform `sockaddr_un` `sun_path` capacity in bytes (excluding NUL).
@@ -60,19 +90,32 @@ pub fn invocation_runtime_root() -> Result<PathBuf> {
         return Ok(override_root);
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     {
-        if let Some(tmpdir) = non_empty_env("TMPDIR") {
-            return Ok(PathBuf::from(tmpdir).join("hb"));
+        // Prefer `/tmp/hb` on every Unix host. On macOS the per-user
+        // `$TMPDIR` (`/var/folders/<14>/T/...`) is already ~50 bytes long,
+        // which leaves no realistic `sockaddr_un` budget after appending a
+        // short id and a typical workload-relative socket name. `/tmp` is
+        // ~5 bytes, gives us ~35 extra bytes of headroom, and is writable
+        // on every standard macOS / Linux configuration.
+        if Path::new("/tmp").is_dir() {
+            return Ok(PathBuf::from("/tmp/hb"));
         }
-    }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Some(xdg) = non_empty_env("XDG_RUNTIME_DIR") {
-            return Ok(PathBuf::from(xdg).join("hb"));
+        // Fallbacks for unusual hosts where `/tmp` is missing or not a
+        // directory (containers with stripped layouts, etc.).
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(xdg) = non_empty_env("XDG_RUNTIME_DIR") {
+                return Ok(PathBuf::from(xdg).join("hb"));
+            }
         }
-        return Ok(PathBuf::from("/tmp").join("hb"));
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(tmpdir) = non_empty_env("TMPDIR") {
+                return Ok(PathBuf::from(tmpdir).join("hb"));
+            }
+        }
     }
 
     // Generic fallback: ~/.cache/homeboy/inv (also Windows).
@@ -85,6 +128,7 @@ fn override_root() -> Option<PathBuf> {
     (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn non_empty_env(key: &str) -> Option<String> {
     let raw = env::var(key).ok()?;
     let trimmed = raw.trim();
@@ -117,11 +161,13 @@ fn cache_fallback_root() -> Result<PathBuf> {
     }
 }
 
-/// Verify that handing out `path` leaves room for a downstream socket
-/// filename within the `sockaddr_un` budget.
+/// Verify that handing out `path` leaves room for a realistic
+/// workload-relative socket name within the `sockaddr_un` budget.
 ///
-/// Fails fast with a clear error message when the platform budget cannot
-/// accommodate at least [`SOCKET_HEADROOM_BYTES`] beyond `path`'s length.
+/// Fails fast with a clear error message that names `sockaddr_un`, the
+/// platform-specific limit, the actual headroom available, and the override
+/// env var when the platform budget cannot accommodate at least
+/// [`SOCKET_HEADROOM_BYTES`] beyond `path`'s length.
 pub fn enforce_path_budget(path: &Path) -> Result<()> {
     let path_str = path.to_string_lossy();
     let path_len = path_str.len();
@@ -130,12 +176,13 @@ pub fn enforce_path_budget(path: &Path) -> Result<()> {
         .saturating_add(1)
         .saturating_add(SOCKET_HEADROOM_BYTES);
     if needed > SUN_PATH_CAPACITY {
+        let headroom = SUN_PATH_CAPACITY.saturating_sub(path_len).saturating_sub(1);
         return Err(Error::internal_unexpected(format!(
-            "Homeboy invocation runtime path is too long for the platform sockaddr_un limit: \
-             path is {path_len} bytes, need {needed} bytes (path + 1 separator + \
-             {SOCKET_HEADROOM_BYTES} bytes socket filename headroom), but sun_path capacity is \
-             {SUN_PATH_CAPACITY} bytes. Set {HOMEBOY_INVOCATION_RUNTIME_DIR_ENV} to a shorter \
-             root (path: {path_str})."
+            "Homeboy invocation runtime path exceeds the platform sockaddr_un budget: \
+             path is {path_len} bytes, leaving {headroom} bytes of headroom for a downstream \
+             socket name, but Homeboy guarantees at least {SOCKET_HEADROOM_BYTES} bytes of \
+             headroom under the {SUN_PATH_CAPACITY}-byte sun_path capacity. Set \
+             {HOMEBOY_INVOCATION_RUNTIME_DIR_ENV} to a shorter root (path: {path_str})."
         )));
     }
     Ok(())
@@ -241,9 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn budget_headroom_is_at_least_thirty_two_bytes() {
+    fn budget_headroom_meets_platform_minimum() {
         // For a maximum-length accepted path, the remaining bytes after
-        // appending '/' + a 32-byte socket filename must not overflow.
+        // appending '/' + a platform-headroom socket filename must not
+        // overflow the platform sun_path capacity.
         let mut s = String::from("/");
         let max_accepted = SUN_PATH_CAPACITY - SOCKET_HEADROOM_BYTES - 1;
         while s.len() < max_accepted {
@@ -252,11 +300,30 @@ mod tests {
         let path = PathBuf::from(&s);
         enforce_path_budget(&path).expect("max-accepted path fits");
 
-        // Verify the headroom: appending a 32-byte filename stays under cap.
+        // Verify the headroom: appending a SOCKET_HEADROOM_BYTES-sized
+        // filename stays under cap.
         let appended_len = s.len() + 1 + SOCKET_HEADROOM_BYTES;
         assert!(
             appended_len <= SUN_PATH_CAPACITY,
             "appended path {appended_len} should fit in {SUN_PATH_CAPACITY}"
+        );
+    }
+
+    #[test]
+    fn macos_headroom_is_at_least_forty_eight_bytes() {
+        // The macOS sockaddr_un limit is 4 bytes shorter than Linux and
+        // workloads commonly nest a workload-id/daemon/daemon.sock segment
+        // (~40 bytes) under STATE_DIR. The contract guarantees ≥48 bytes
+        // of headroom on macOS so realistic workload paths always fit.
+        #[cfg(target_os = "macos")]
+        assert!(
+            SOCKET_HEADROOM_BYTES >= 48,
+            "macOS headroom must be at least 48 bytes; got {SOCKET_HEADROOM_BYTES}"
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert!(
+            SOCKET_HEADROOM_BYTES >= 32,
+            "non-macOS headroom must be at least 32 bytes; got {SOCKET_HEADROOM_BYTES}"
         );
     }
 }

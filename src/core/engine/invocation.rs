@@ -47,10 +47,11 @@ pub struct InvocationEnv {
 pub struct InvocationGuard {
     env: InvocationEnv,
     lease_id: Option<String>,
-    /// Root invocation directory under [`invocation_runtime_root`]. Removed
-    /// on `Drop` so concurrent invocations do not accumulate stale state on
-    /// disk. Decoupled from any caller-provided `RunDir` cleanup.
-    invocation_root: PathBuf,
+    /// Sibling invocation directories (state, artifact, tmp) under
+    /// [`invocation_runtime_root`]. All three are removed on `Drop` so
+    /// concurrent invocations do not accumulate stale state on disk.
+    /// Decoupled from any caller-provided `RunDir` cleanup.
+    cleanup_paths: [PathBuf; 3],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,18 +90,23 @@ impl InvocationGuard {
         // working. The path component does not include the prefix.
         let id = format!("inv-{}", short);
         let runtime_root = invocation_runtime_root()?;
-        let invocation_root = runtime_root.join(&short);
-        // Single-char subdirs keep `HOMEBOY_INVOCATION_*_DIR` paths short
-        // enough for the platform `sockaddr_un` budget on macOS where the
-        // default `$TMPDIR` is already ~50 bytes. The basenames are
-        // internal — workloads only ever read them via env var values.
-        let state_dir = invocation_root.join("s");
-        let artifact_dir = invocation_root.join("a");
-        let tmp_dir = invocation_root.join("t");
+        // STATE_DIR is the leaf the workload owns: the invocation root
+        // itself. ARTIFACT_DIR and TMP_DIR are siblings with `.a` / `.t`
+        // suffixes so they cannot collide with workload-created subdirs
+        // under STATE_DIR. Removing the `s/a/t` subdir layer used in the
+        // initial PR #2312 reclaims 2 bytes of `sockaddr_un` budget per
+        // invocation and — more importantly — gives downstream workloads
+        // exclusive ownership of the leaf they bind sockets under, so
+        // no extra workload-id segment is needed under STATE_DIR.
+        let state_dir = runtime_root.join(&short);
+        let artifact_dir = runtime_root.join(format!("{short}.a"));
+        let tmp_dir = runtime_root.join(format!("{short}.t"));
 
         // Enforce the sockaddr_un budget before creating anything on disk
         // so callers fail fast with a clear error instead of much later in
-        // a downstream workload's UDS bind.
+        // a downstream workload's UDS bind. STATE_DIR is the leaf
+        // workloads will append socket names to, so its budget is the one
+        // that matters most; check all three for completeness.
         for dir in [&state_dir, &artifact_dir, &tmp_dir] {
             enforce_path_budget(dir)?;
         }
@@ -150,6 +156,7 @@ impl InvocationGuard {
             lease_id = Some(id.clone());
         }
 
+        let cleanup_paths = [state_dir.clone(), artifact_dir.clone(), tmp_dir.clone()];
         Ok(Self {
             env: InvocationEnv {
                 id,
@@ -160,7 +167,7 @@ impl InvocationGuard {
                 port_max,
             },
             lease_id,
-            invocation_root,
+            cleanup_paths,
         })
     }
 
@@ -190,11 +197,13 @@ impl InvocationGuard {
 
 impl Drop for InvocationGuard {
     fn drop(&mut self) {
-        // Best-effort cleanup of the invocation root directory. Decoupled
-        // from any caller-provided `RunDir` cleanup so concurrent
+        // Best-effort cleanup of all three sibling invocation directories.
+        // Decoupled from any caller-provided `RunDir` cleanup so concurrent
         // invocations do not accumulate stale state under the short
         // platform runtime root.
-        let _ = fs::remove_dir_all(&self.invocation_root);
+        for path in &self.cleanup_paths {
+            let _ = fs::remove_dir_all(path);
+        }
 
         let Some(id) = &self.lease_id else {
             return;
