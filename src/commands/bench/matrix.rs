@@ -495,7 +495,8 @@ fn run_component_with_rig_context(
     let workflow = match workflow {
         Ok(mut workflow) => {
             apply_declared_scenario_gates(&mut workflow, declared_scenario_gates(rig_spec));
-            if let Some(summary) = observation::finish_success(observation, &workflow, &run_dir) {
+            if let Some(summary) = observation::finish_success(observation, &mut workflow, &run_dir)
+            {
                 let hints = workflow.hints.get_or_insert_with(Vec::new);
                 hints.extend(observation::history_hints(&summary));
             }

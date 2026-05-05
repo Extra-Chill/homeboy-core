@@ -460,10 +460,12 @@ impl ObservationStore {
 
         let id = Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
-        let path_string = path.to_string_lossy().to_string();
         let size_bytes = i64::try_from(metadata.len()).ok();
         let sha256 = Some(sha256_file(path)?);
         let mime = mime_from_path(path);
+        let stored_path = persisted_artifact_path(run_id, &id, path)?;
+        copy_artifact_file(path, &stored_path)?;
+        let path_string = stored_path.to_string_lossy().to_string();
 
         self.connection
             .execute(
@@ -1062,6 +1064,41 @@ fn sha256_file(path: &Path) -> Result<String> {
         )
     })?;
     Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+fn persisted_artifact_path(run_id: &str, artifact_id: &str, source: &Path) -> Result<PathBuf> {
+    let file_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("{artifact_id}-{name}"))
+        .unwrap_or_else(|| artifact_id.to_string());
+    Ok(paths::homeboy_data()?
+        .join("artifacts")
+        .join(run_id)
+        .join(file_name))
+}
+
+fn copy_artifact_file(source: &Path, target: &Path) -> Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            Error::internal_io(
+                e.to_string(),
+                Some(format!("create artifact directory {}", parent.display())),
+            )
+        })?;
+    }
+    fs::copy(source, target).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!(
+                "persist artifact {} to {}",
+                source.display(),
+                target.display()
+            )),
+        )
+    })?;
+    Ok(())
 }
 
 fn mime_from_path(path: &Path) -> Option<String> {

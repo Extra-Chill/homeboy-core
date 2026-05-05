@@ -374,7 +374,12 @@ fn test_record_artifact() {
         assert_eq!(artifact.run_id, run.id);
         assert_eq!(artifact.kind, "trace-results");
         assert_eq!(artifact.artifact_type, "file");
-        assert_eq!(artifact.path, artifact_path.to_string_lossy());
+        assert_ne!(artifact.path, artifact_path.to_string_lossy());
+        assert!(std::path::PathBuf::from(&artifact.path).is_file());
+        assert_eq!(
+            std::fs::read_to_string(&artifact.path).expect("read persisted artifact"),
+            "{\"status\":\"pass\"}"
+        );
         assert_eq!(artifact.url, None);
         assert_eq!(artifact.size_bytes, Some(17));
         assert_eq!(artifact.mime.as_deref(), Some("application/json"));
