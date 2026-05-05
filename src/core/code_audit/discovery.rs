@@ -4,8 +4,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::conventions::Language;
-use super::fingerprint::{fingerprint_content, FileFingerprint};
+use super::fingerprint::{fingerprint_content, normalize_convention_tags, FileFingerprint};
 use super::walker::{is_test_path, walk_source_files_snapshot};
+use crate::component::AuditConfig;
+
+type DiscoveryGroupKey = (String, Language, bool, Vec<String>);
 
 /// Result of auto-discovering file groups.
 pub struct DiscoveryResult {
@@ -26,22 +29,20 @@ pub struct DiscoveryResult {
 /// exactly once. Fingerprinting goes through [`fingerprint_content`] so the
 /// snapshot's already-loaded content is reused — no second `read_to_string`.
 /// Slice 2 of #1492.
-pub(crate) fn auto_discover_groups(root: &Path) -> DiscoveryResult {
-    let mut groups: Vec<(String, String, Vec<FileFingerprint>)> = Vec::new();
-
-    // Walk directories, group files by (parent dir, language, is_test).
+pub(crate) fn auto_discover_groups(root: &Path, audit_config: &AuditConfig) -> DiscoveryResult {
+    // Walk directories, group files by (parent dir, language, is_test, opaque convention tags).
     // Test files are separated from production files so conventions from
     // production code don't get applied to test files and vice versa.
     // This prevents false positives like test files being flagged for
     // missing production methods (set_up, tear_down are optional hooks).
-    let mut dir_files: HashMap<(String, Language, bool), Vec<FileFingerprint>> = HashMap::new();
+    let mut dir_files: HashMap<DiscoveryGroupKey, Vec<FileFingerprint>> = HashMap::new();
     let mut files_walked: usize = 0;
     let mut files_fingerprinted: usize = 0;
 
     let snapshot = walk_source_files_snapshot(root);
     for (path, content) in snapshot.iter() {
         files_walked += 1;
-        if let Some(fp) = fingerprint_content(path, root, content) {
+        if let Some(mut fp) = fingerprint_content(path, root, content) {
             files_fingerprinted += 1;
             let parent = path
                 .parent()
@@ -49,12 +50,45 @@ pub(crate) fn auto_discover_groups(root: &Path) -> DiscoveryResult {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             let file_is_test = is_test_path(&fp.relative_path);
-            let key = (parent, fp.language.clone(), file_is_test);
+            fp.convention_tags = convention_tags_for(&fp, audit_config);
+            let key = (
+                parent,
+                fp.language.clone(),
+                file_is_test,
+                fp.convention_tags.clone(),
+            );
             dir_files.entry(key).or_default().push(fp);
         }
     }
 
-    for ((dir, _lang, is_test), fingerprints) in dir_files {
+    DiscoveryResult {
+        groups: groups_from_dir_files(dir_files),
+        files_walked,
+        files_fingerprinted,
+    }
+}
+
+fn convention_tags_for(fp: &FileFingerprint, audit_config: &AuditConfig) -> Vec<String> {
+    let normalized_path = fp.relative_path.replace('\\', "/");
+    let mut tags = fp.convention_tags.clone();
+    for rule in &audit_config.convention_tag_globs {
+        if rule
+            .globs
+            .iter()
+            .any(|pattern| glob_match::glob_match(pattern, &normalized_path))
+        {
+            tags.push(rule.tag.clone());
+        }
+    }
+    normalize_convention_tags(tags)
+}
+
+fn groups_from_dir_files(
+    dir_files: HashMap<DiscoveryGroupKey, Vec<FileFingerprint>>,
+) -> Vec<(String, String, Vec<FileFingerprint>)> {
+    let mut groups: Vec<(String, String, Vec<FileFingerprint>)> = Vec::new();
+
+    for ((dir, _lang, is_test, convention_tags), fingerprints) in dir_files {
         if fingerprints.len() < 2 {
             continue;
         }
@@ -85,22 +119,21 @@ pub(crate) fn auto_discover_groups(root: &Path) -> DiscoveryResult {
                 .join(" ")
         };
 
-        let name = if is_test {
+        let mut name = if is_test {
             format!("{} (Tests)", base_name)
         } else {
             base_name
         };
+        if !convention_tags.is_empty() {
+            name = format!("{} [{}]", name, convention_tags.join(", "));
+        }
 
         groups.push((name, glob_pattern, fingerprints));
     }
 
     // Sort by group name for deterministic output
     groups.sort_by(|a, b| a.0.cmp(&b.0));
-    DiscoveryResult {
-        groups,
-        files_walked,
-        files_fingerprinted,
-    }
+    groups
 }
 
 /// Discover cross-directory conventions by analyzing sibling subdirectories.
@@ -219,6 +252,84 @@ pub(crate) fn discover_cross_directory(
 mod tests {
     use super::super::test_helpers::make_convention;
     use super::*;
+
+    fn tagged_fingerprint(path: &str, tags: &[&str]) -> FileFingerprint {
+        FileFingerprint {
+            relative_path: path.to_string(),
+            language: Language::Unknown,
+            methods: vec!["run".to_string()],
+            convention_tags: tags.iter().map(|tag| tag.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn opaque_convention_tags_keep_directory_groups_separate() {
+        let mut dir_files: HashMap<DiscoveryGroupKey, Vec<FileFingerprint>> = HashMap::new();
+
+        let alpha = vec!["extension:alpha".to_string()];
+        let beta = vec!["extension:beta".to_string()];
+        dir_files.insert(
+            (
+                "src/items".to_string(),
+                Language::Unknown,
+                false,
+                alpha.clone(),
+            ),
+            vec![
+                tagged_fingerprint("src/items/a.one", &["extension:alpha"]),
+                tagged_fingerprint("src/items/b.one", &["extension:alpha"]),
+            ],
+        );
+        dir_files.insert(
+            (
+                "src/items".to_string(),
+                Language::Unknown,
+                false,
+                beta.clone(),
+            ),
+            vec![
+                tagged_fingerprint("src/items/a.two", &["extension:beta"]),
+                tagged_fingerprint("src/items/b.two", &["extension:beta"]),
+            ],
+        );
+
+        let groups = groups_from_dir_files(dir_files);
+
+        assert_eq!(groups.len(), 2);
+        assert!(groups
+            .iter()
+            .any(|(name, _, files)| name == "Items [extension:alpha]" && files.len() == 2));
+        assert!(groups
+            .iter()
+            .any(|(name, _, files)| name == "Items [extension:beta]" && files.len() == 2));
+    }
+
+    #[test]
+    fn component_convention_tag_globs_add_opaque_grouping_tags() {
+        let fp = FileFingerprint {
+            relative_path: "src/generated/item.fixture".to_string(),
+            convention_tags: vec!["extension:seed".to_string()],
+            ..Default::default()
+        };
+        let audit_config = AuditConfig {
+            convention_tag_globs: vec![crate::component::ConventionTagGlob {
+                tag: "component:generated".to_string(),
+                globs: vec!["src/generated/*".to_string()],
+            }],
+            ..Default::default()
+        };
+
+        let tags = convention_tags_for(&fp, &audit_config);
+
+        assert_eq!(
+            tags,
+            vec![
+                "component:generated".to_string(),
+                "extension:seed".to_string()
+            ]
+        );
+    }
 
     #[test]
     fn cross_directory_detects_shared_methods() {

@@ -641,6 +641,11 @@ pub struct FingerprintOutput {
     /// runtime in another file.
     #[serde(default)]
     pub runtime_dispatched_types: Vec<String>,
+    /// Opaque extension-provided tags used to keep convention inference from
+    /// mixing unlike source roles. Core never interprets tag values; it only
+    /// groups files with the same normalized tag set together.
+    #[serde(default)]
+    pub convention_tags: Vec<String>,
 }
 
 // ============================================================================

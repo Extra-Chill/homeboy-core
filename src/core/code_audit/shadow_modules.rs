@@ -275,6 +275,7 @@ mod tests {
             public_api: vec![],
             hook_callbacks: vec![],
             runtime_dispatched_types: vec![],
+            convention_tags: vec![],
             trait_impl_methods: vec![],
         }
     }

@@ -165,6 +165,7 @@ pub(crate) fn fingerprint_from_git_ref(
         public_api: output.public_api,
         hook_callbacks: output.hook_callbacks,
         runtime_dispatched_types: output.runtime_dispatched_types,
+        convention_tags: super::fingerprint::normalize_convention_tags(output.convention_tags),
         trait_impl_methods: Vec::new(),
     })
 }

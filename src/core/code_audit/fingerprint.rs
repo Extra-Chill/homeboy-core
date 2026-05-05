@@ -87,6 +87,12 @@ pub struct FileFingerprint {
     /// convention. Core consumes the generic metadata; extensions own the
     /// framework-specific registration parsing.
     pub runtime_dispatched_types: Vec<String>,
+    /// Opaque extension-provided tags for convention grouping.
+    ///
+    /// Core does not interpret these values. Extensions/components own the
+    /// taxonomy and core only uses the normalized tag set as part of the
+    /// convention grouping key.
+    pub convention_tags: Vec<String>,
     /// Method names that are trait implementations (called via trait dispatch).
     pub trait_impl_methods: Vec<String>,
 }
@@ -173,8 +179,20 @@ fn fingerprint_via_extension(
         public_api: output.public_api,
         hook_callbacks: output.hook_callbacks,
         runtime_dispatched_types: output.runtime_dispatched_types,
+        convention_tags: normalize_convention_tags(output.convention_tags),
         trait_impl_methods: Vec::new(), // Extension scripts don't track this
     })
+}
+
+pub(crate) fn normalize_convention_tags(tags: Vec<String>) -> Vec<String> {
+    let mut tags: Vec<String> = tags
+        .into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    tags.sort();
+    tags.dedup();
+    tags
 }
 
 // ============================================================================
