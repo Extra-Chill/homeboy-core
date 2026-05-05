@@ -30,7 +30,7 @@ multi-user service.
 - `GET /version` — Homeboy version
 - `GET /config/paths` — local Homeboy config paths
 
-### Read-Only Contract Endpoints
+### Completed Read-Only Contract Endpoints
 
 These endpoints dispatch through Homeboy's transport-free read-only HTTP API
 contract and return the same JSON envelope shape as other daemon responses.
@@ -55,8 +55,9 @@ The run readers expose persisted observation-store evidence from previous
 analysis runs. They do not start audit, lint, test, bench, rig, or stack work.
 
 The analysis entry points `POST /audit`, `POST /lint`, `POST /test`, and
-`POST /bench` are reserved by the contract, but intentionally return a job-model
-blocker until the long-running job/event API lands.
+`POST /bench` are reserved by the contract, but intentionally return a daemon
+HTTP job-routing blocker until the existing `src/core/api_jobs.rs` job model is
+wired into daemon routes.
 
 Mutating operations such as deploy, release, rig up/down, stack apply, git
 writes, and SSH execution are not exposed by this daemon slice.

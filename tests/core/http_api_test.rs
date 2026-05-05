@@ -209,17 +209,18 @@ fn rejects_mutating_endpoint_shapes() {
 }
 
 #[test]
-fn job_ready_endpoint_reports_job_model_blocker() {
+fn job_ready_endpoint_reports_daemon_job_routing_blocker() {
     let err = http_api::handle(HttpApiRequest {
         method: HttpMethod::Post,
         path: "/audit".to_string(),
         body: None,
     })
-    .expect_err("job model blocker");
+    .expect_err("daemon job routing blocker");
 
     let rendered = err.to_string();
-    assert!(rendered.contains("job model"), "{rendered}");
-    assert!(rendered.contains("#1764"), "{rendered}");
+    assert!(rendered.contains("daemon HTTP job routing"), "{rendered}");
+    assert!(rendered.contains("src/core/api_jobs.rs"), "{rendered}");
+    assert!(!rendered.contains("Extra-Chill/homeboy#"), "{rendered}");
 }
 
 fn sample_run(kind: &str, component_id: &str, rig_id: &str) -> NewRunRecord {
