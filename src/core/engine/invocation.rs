@@ -15,6 +15,8 @@ const LOCK_ATTEMPTS: usize = 100;
 const LOCK_SLEEP: Duration = Duration::from_millis(20);
 const PORT_POOL_START: u16 = 20_000;
 const PORT_POOL_END: u16 = 60_999;
+const CHILD_RECORD_DIR: &str = "invocation-children";
+const CHILD_CLEANUP_GRACE: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvocationRequirements {
@@ -38,6 +40,11 @@ pub struct InvocationGuard {
     lease_id: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct InvocationChildGuard {
+    path: PathBuf,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct InvocationLease {
     invocation_id: String,
@@ -49,8 +56,25 @@ struct InvocationLease {
     named_leases: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvocationChildRecord {
+    pub invocation_id: String,
+    pub owner_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_started_at: Option<String>,
+    pub root_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pgid: Option<i32>,
+    pub command_label: String,
+    pub started_at: String,
+}
+
 impl InvocationGuard {
     pub fn acquire(run_dir: &RunDir, requirements: &InvocationRequirements) -> Result<Self> {
+        cleanup_stale_child_records()?;
+
         let id = format!("inv-{}", uuid::Uuid::new_v4());
         let root = run_dir.path().join("invocations").join(&id);
         let state_dir = root.join("state");
@@ -135,6 +159,115 @@ impl InvocationGuard {
         }
         vars
     }
+}
+
+impl Drop for InvocationChildGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+pub fn register_child_process(
+    invocation_id: &str,
+    root_pid: u32,
+    pgid: Option<i32>,
+    command_label: String,
+) -> Result<InvocationChildGuard> {
+    let dir = invocation_children_dir(invocation_id)?;
+    fs::create_dir_all(&dir).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to create invocation child directory {}: {}",
+                dir.display(),
+                e
+            ),
+            Some("invocation.child.dir".to_string()),
+        )
+    })?;
+
+    let record = InvocationChildRecord {
+        invocation_id: invocation_id.to_string(),
+        owner_pid: std::process::id(),
+        owner_started_at: process_started_at(std::process::id()),
+        root_pid,
+        root_started_at: process_started_at(root_pid),
+        pgid,
+        command_label,
+        started_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let path = child_record_path(invocation_id, root_pid)?;
+    let json = serde_json::to_string_pretty(&record).map_err(|e| {
+        Error::internal_unexpected(format!(
+            "Failed to serialize invocation child record: {}",
+            e
+        ))
+    })?;
+    fs::write(&path, json).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to write invocation child record {}: {}",
+                path.display(),
+                e
+            ),
+            Some("invocation.child.write".to_string()),
+        )
+    })?;
+
+    Ok(InvocationChildGuard { path })
+}
+
+pub fn cleanup_invocation_children(invocation_id: &str) -> Result<usize> {
+    let mut cleaned = 0;
+    for path in invocation_child_files(invocation_id)? {
+        let Some(record) = decode_child_record(&path)? else {
+            continue;
+        };
+        if cleanup_child_record(&record) {
+            cleaned += 1;
+        }
+        let _ = fs::remove_file(path);
+    }
+    Ok(cleaned)
+}
+
+pub fn cleanup_stale_child_records() -> Result<usize> {
+    let mut cleaned = 0;
+    let root = invocation_children_root()?;
+    if !root.exists() {
+        return Ok(0);
+    }
+
+    for entry in fs::read_dir(&root).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to read invocation child root {}: {}",
+                root.display(),
+                e
+            ),
+            Some("invocation.child.read".to_string()),
+        )
+    })? {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(e.to_string(), Some("invocation.child.entry".to_string()))
+        })?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        for child_path in child_files_in_dir(&path)? {
+            let Some(record) = decode_child_record(&child_path)? else {
+                let _ = fs::remove_file(child_path);
+                continue;
+            };
+            if owner_is_gone(&record) {
+                if cleanup_child_record(&record) {
+                    cleaned += 1;
+                }
+                let _ = fs::remove_file(child_path);
+            }
+        }
+    }
+    Ok(cleaned)
 }
 
 impl Drop for InvocationGuard {
@@ -325,6 +458,134 @@ fn lease_path(invocation_id: &str) -> Result<PathBuf> {
 
 fn invocation_leases_dir() -> Result<PathBuf> {
     Ok(paths::homeboy()?.join("invocation-leases"))
+}
+
+fn invocation_children_root() -> Result<PathBuf> {
+    Ok(paths::homeboy()?.join(CHILD_RECORD_DIR))
+}
+
+fn invocation_children_dir(invocation_id: &str) -> Result<PathBuf> {
+    Ok(invocation_children_root()?.join(sanitize_id(invocation_id)))
+}
+
+fn child_record_path(invocation_id: &str, root_pid: u32) -> Result<PathBuf> {
+    Ok(invocation_children_dir(invocation_id)?.join(format!("{}.json", root_pid)))
+}
+
+fn invocation_child_files(invocation_id: &str) -> Result<Vec<PathBuf>> {
+    child_files_in_dir(&invocation_children_dir(invocation_id)?)
+}
+
+fn child_files_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to read invocation child directory {}: {}",
+                dir.display(),
+                e
+            ),
+            Some("invocation.child.read".to_string()),
+        )
+    })? {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(e.to_string(), Some("invocation.child.entry".to_string()))
+        })?;
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn decode_child_record(path: &Path) -> Result<Option<InvocationChildRecord>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to read invocation child record {}: {}",
+                path.display(),
+                e
+            ),
+            Some("invocation.child.read".to_string()),
+        )
+    })?;
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str::<InvocationChildRecord>(&content)
+        .map(Some)
+        .map_err(|e| {
+            Error::validation_invalid_json(
+                e,
+                Some(parse_context(path)),
+                Some(json_excerpt(&content)),
+            )
+        })
+}
+
+fn owner_is_gone(record: &InvocationChildRecord) -> bool {
+    !process_identity_matches(record.owner_pid, record.owner_started_at.as_deref())
+}
+
+fn cleanup_child_record(record: &InvocationChildRecord) -> bool {
+    if !process_identity_matches(record.root_pid, record.root_started_at.as_deref()) {
+        return false;
+    }
+
+    #[cfg(unix)]
+    if let Some(pgid) = record.pgid {
+        if pgid <= 0 || pgid as u32 != record.root_pid {
+            return false;
+        }
+        cleanup_process_group(pgid as libc::pid_t);
+        return true;
+    }
+
+    false
+}
+
+fn process_identity_matches(pid: u32, started_at: Option<&str>) -> bool {
+    if !crate::core::daemon::pid_is_running(pid) {
+        return false;
+    }
+    match (started_at, process_started_at(pid)) {
+        (Some(expected), Some(actual)) => expected == actual,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+fn process_started_at(pid: u32) -> Option<String> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let started = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!started.is_empty()).then_some(started)
+}
+
+#[cfg(unix)]
+fn cleanup_process_group(pgid: libc::pid_t) {
+    unsafe {
+        libc::kill(-pgid, libc::SIGTERM);
+    }
+    std::thread::sleep(CHILD_CLEANUP_GRACE);
+    unsafe {
+        if libc::kill(-pgid, 0) == 0 {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+    }
 }
 
 fn sanitize_id(id: &str) -> String {

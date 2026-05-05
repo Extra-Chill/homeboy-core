@@ -5,6 +5,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use crate::engine::invocation;
 use crate::engine::resource::ExtensionChildResourceSummary;
 use crate::engine::shell;
 use crate::error::{Error, Result};
@@ -326,6 +327,8 @@ fn execute_local_command_in_dir_impl(
         }
     };
     let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let _invocation_child_guard =
+        invocation_child_guard(env, child.id(), cleanup_guard.pgid(), command);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
 
     let output = match child.wait_with_output() {
@@ -459,6 +462,8 @@ fn execute_local_command_passthrough_impl(
         }
     };
     let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let _invocation_child_guard =
+        invocation_child_guard(env, child.id(), cleanup_guard.pgid(), command);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
 
     // Tee each stream: copy every chunk to the parent's stdout/stderr as it
@@ -571,6 +576,8 @@ pub(crate) fn execute_local_command_stderr_passthrough(
         }
     };
     let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let _invocation_child_guard =
+        invocation_child_guard(env, child.id(), cleanup_guard.pgid(), command);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
 
     fn read_all<R: Read>(mut src: R) -> String {
@@ -696,6 +703,32 @@ impl ProcessGroupCleanupGuard {
             self.pgid = None;
         }
     }
+
+    #[cfg(unix)]
+    fn pgid(&self) -> Option<i32> {
+        self.pgid.map(|pgid| pgid as i32)
+    }
+
+    #[cfg(not(unix))]
+    fn pgid(&self) -> Option<i32> {
+        None
+    }
+}
+
+fn invocation_child_guard(
+    env: Option<&[(&str, &str)]>,
+    root_pid: u32,
+    pgid: Option<i32>,
+    command_label: &str,
+) -> Option<invocation::InvocationChildGuard> {
+    let invocation_id = env.and_then(|pairs| {
+        pairs
+            .iter()
+            .find_map(|(key, value)| (*key == "HOMEBOY_INVOCATION_ID").then_some(*value))
+    })?;
+
+    invocation::register_child_process(invocation_id, root_pid, pgid, command_label.to_string())
+        .ok()
 }
 
 impl Drop for ProcessGroupCleanupGuard {
