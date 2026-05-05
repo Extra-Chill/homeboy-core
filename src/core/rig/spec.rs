@@ -659,6 +659,49 @@ mod tests {
     }
 
     #[test]
+    fn test_port_range_size() {
+        let workload = WorkloadSpec::Detailed(WorkloadEntry {
+            path: "bench.mjs".to_string(),
+            check_groups: None,
+            port_range_size: Some(8),
+            named_leases: Vec::new(),
+            trace_phase_presets: HashMap::new(),
+            trace_span_metadata: HashMap::new(),
+            trace_default_phase_preset: None,
+            trace_variants: HashMap::new(),
+            trace_guardrails: Vec::new(),
+            trace_probes: Vec::new(),
+        });
+
+        assert_eq!(workload.port_range_size(), Some(8));
+        assert_eq!(
+            WorkloadSpec::Path("bench.mjs".to_string()).port_range_size(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_named_leases() {
+        let workload = WorkloadSpec::Detailed(WorkloadEntry {
+            path: "bench.mjs".to_string(),
+            check_groups: None,
+            port_range_size: None,
+            named_leases: vec!["browser-profile".to_string()],
+            trace_phase_presets: HashMap::new(),
+            trace_span_metadata: HashMap::new(),
+            trace_default_phase_preset: None,
+            trace_variants: HashMap::new(),
+            trace_guardrails: Vec::new(),
+            trace_probes: Vec::new(),
+        });
+
+        assert_eq!(workload.named_leases(), &["browser-profile".to_string()]);
+        assert!(WorkloadSpec::Path("bench.mjs".to_string())
+            .named_leases()
+            .is_empty());
+    }
+
+    #[test]
     fn test_trace_guardrails_parse_at_rig_workload_and_variant_scope() {
         let spec: RigSpec = serde_json::from_str(
             r#"{

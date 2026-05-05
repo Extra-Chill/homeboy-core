@@ -73,17 +73,17 @@ impl InvocationGuard {
 
         if needs_lease {
             let _lock = InvocationIndexLock::acquire()?;
-            fs::create_dir_all(paths::invocation_leases_dir()?).map_err(|e| {
+            fs::create_dir_all(invocation_leases_dir()?).map_err(|e| {
                 Error::internal_unexpected(format!(
                     "Failed to create invocation lease directory: {}",
                     e
                 ))
             })?;
-            prune_stale_leases()?;
+            let live_leases = refresh_lease_index()?;
             validate_named_leases(&id, &requirements.named_leases)?;
 
             if let Some(size) = requirements.port_range_size {
-                let (base, max) = allocate_port_range(size)?;
+                let (base, max) = allocate_port_range(size, &live_leases)?;
                 port_base = Some(base);
                 port_max = Some(max);
             }
@@ -148,7 +148,7 @@ impl Drop for InvocationGuard {
         let Ok(path) = lease_path(id) else {
             return;
         };
-        let Ok(Some(lease)) = read_lease(&path) else {
+        let Ok(Some(lease)) = decode_lease_file(&path) else {
             return;
         };
         if lease.pid == std::process::id() {
@@ -161,7 +161,7 @@ fn validate_named_leases(invocation_id: &str, wanted: &[String]) -> Result<()> {
     if wanted.is_empty() {
         return Ok(());
     }
-    for lease in live_leases()? {
+    for lease in refresh_lease_index()? {
         for name in wanted {
             if lease.named_leases.contains(name) {
                 return Err(Error::validation_invalid_argument(
@@ -179,7 +179,7 @@ fn validate_named_leases(invocation_id: &str, wanted: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn allocate_port_range(size: u16) -> Result<(u16, u16)> {
+fn allocate_port_range(size: u16, live_leases: &[InvocationLease]) -> Result<(u16, u16)> {
     if size == 0 {
         return Err(Error::validation_invalid_argument(
             "port_range_size",
@@ -200,8 +200,8 @@ fn allocate_port_range(size: u16) -> Result<(u16, u16)> {
         ));
     }
 
-    let mut ranges: Vec<(u32, u32)> = live_leases()?
-        .into_iter()
+    let mut ranges: Vec<(u32, u32)> = live_leases
+        .iter()
         .filter_map(|lease| Some((lease.port_base? as u32, lease.port_max? as u32)))
         .collect();
     ranges.sort();
@@ -228,38 +228,23 @@ fn allocate_port_range(size: u16) -> Result<(u16, u16)> {
     ))
 }
 
-fn prune_stale_leases() -> Result<()> {
-    for path in lease_files()? {
-        let Some(lease) = read_lease(&path)? else {
+fn refresh_lease_index() -> Result<Vec<InvocationLease>> {
+    let mut live = Vec::new();
+    for path in invocation_lease_files()? {
+        let Some(lease) = decode_lease_file(&path)? else {
             continue;
         };
-        if !crate::core::daemon::pid_is_running(lease.pid) {
-            fs::remove_file(&path).map_err(|e| {
-                Error::internal_unexpected(format!(
-                    "Failed to remove stale invocation lease {}: {}",
-                    path.display(),
-                    e
-                ))
-            })?;
+        if crate::core::daemon::pid_is_running(lease.pid) {
+            live.push(lease);
+        } else {
+            remove_stale_invocation_lease(&path)?;
         }
     }
-    Ok(())
+    Ok(live)
 }
 
-fn live_leases() -> Result<Vec<InvocationLease>> {
-    let mut leases = Vec::new();
-    for path in lease_files()? {
-        if let Some(lease) = read_lease(&path)? {
-            if crate::core::daemon::pid_is_running(lease.pid) {
-                leases.push(lease);
-            }
-        }
-    }
-    Ok(leases)
-}
-
-fn lease_files() -> Result<Vec<PathBuf>> {
-    let dir = paths::invocation_leases_dir()?;
+fn invocation_lease_files() -> Result<Vec<PathBuf>> {
+    let dir = invocation_leases_dir()?;
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -279,27 +264,47 @@ fn lease_files() -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn read_lease(path: &Path) -> Result<Option<InvocationLease>> {
+fn remove_stale_invocation_lease(path: &Path) -> Result<()> {
+    fs::remove_file(path).map_err(|e| {
+        Error::internal_io(
+            format!(
+                "Failed to remove stale invocation lease {}: {}",
+                path.display(),
+                e
+            ),
+            Some("invocation.lease.stale".to_string()),
+        )
+    })
+}
+
+fn decode_lease_file(path: &Path) -> Result<Option<InvocationLease>> {
     if !path.exists() {
         return Ok(None);
     }
-    let content = fs::read_to_string(path).map_err(|e| {
-        Error::internal_unexpected(format!(
-            "Failed to read invocation lease {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+    let content = fs::read_to_string(path).map_err(|e| read_lease_error(path, e))?;
     if content.trim().is_empty() {
         return Ok(None);
     }
-    serde_json::from_str(&content).map(Some).map_err(|e| {
-        Error::validation_invalid_json(
-            e,
-            Some(format!("parse invocation lease {}", path.display())),
-            Some(content.chars().take(200).collect()),
-        )
-    })
+    let parsed = serde_json::from_str::<InvocationLease>(&content).map_err(|e| {
+        Error::validation_invalid_json(e, Some(parse_context(path)), Some(json_excerpt(&content)))
+    })?;
+    Ok(Some(parsed))
+}
+
+fn read_lease_error(path: &Path, error: std::io::Error) -> Error {
+    Error::internal_unexpected(format!(
+        "Failed to read invocation lease {}: {}",
+        path.display(),
+        error
+    ))
+}
+
+fn parse_context(path: &Path) -> String {
+    format!("parse invocation lease {}", path.display())
+}
+
+fn json_excerpt(content: &str) -> String {
+    content.chars().take(200).collect()
 }
 
 fn write_lease(lease: &InvocationLease) -> Result<()> {
@@ -315,7 +320,11 @@ fn write_lease(lease: &InvocationLease) -> Result<()> {
 }
 
 fn lease_path(invocation_id: &str) -> Result<PathBuf> {
-    Ok(paths::invocation_leases_dir()?.join(format!("{}.json", sanitize_id(invocation_id))))
+    Ok(invocation_leases_dir()?.join(format!("{}.json", sanitize_id(invocation_id))))
+}
+
+fn invocation_leases_dir() -> Result<PathBuf> {
+    Ok(paths::homeboy()?.join("invocation-leases"))
 }
 
 fn sanitize_id(id: &str) -> String {
@@ -336,7 +345,7 @@ struct InvocationIndexLock {
 
 impl InvocationIndexLock {
     fn acquire() -> Result<Self> {
-        let dir = paths::invocation_leases_dir()?;
+        let dir = invocation_leases_dir()?;
         fs::create_dir_all(&dir).map_err(|e| {
             Error::internal_unexpected(format!(
                 "Failed to create invocation lease directory: {}",
@@ -398,3 +407,25 @@ fn remove_stale_index_lock(path: &Path) -> Result<()> {
 #[cfg(test)]
 #[path = "../../../tests/core/engine/invocation_test.rs"]
 mod invocation_test;
+
+#[cfg(test)]
+mod audit_coverage_tests {
+    use super::*;
+    use crate::engine::run_dir::RunDir;
+    use crate::test_support::with_isolated_home;
+
+    #[test]
+    fn test_env_vars() {
+        with_isolated_home(|_| {
+            let run_dir = RunDir::create().expect("run dir");
+            let guard = InvocationGuard::acquire(&run_dir, &InvocationRequirements::default())
+                .expect("invocation guard");
+            let env = guard.env_vars();
+
+            assert!(env.iter().any(|(key, _)| key == "HOMEBOY_INVOCATION_ID"));
+            assert!(env
+                .iter()
+                .any(|(key, _)| key == "HOMEBOY_INVOCATION_TMP_DIR"));
+        });
+    }
+}

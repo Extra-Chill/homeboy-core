@@ -39,7 +39,7 @@ fn test_bench_workloads_for_extension_filters_and_expands_paths() {
 }
 
 #[test]
-fn invocation_requirements_for_workloads_merge_ports_and_named_leases() {
+fn test_invocation_requirements_for_extension_workloads() {
     let rig_spec: RigSpec = serde_json::from_str(
         r#"{
             "id": "playground-bench",

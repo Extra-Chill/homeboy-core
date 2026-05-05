@@ -3,7 +3,7 @@ use crate::engine::run_dir::RunDir;
 use crate::test_support::with_isolated_home;
 
 #[test]
-fn invocation_guard_exports_scoped_dirs() {
+fn test_env_vars() {
     with_isolated_home(|_| {
         let run_dir = RunDir::create().expect("run dir");
         let guard = InvocationGuard::acquire(&run_dir, &InvocationRequirements::default())
