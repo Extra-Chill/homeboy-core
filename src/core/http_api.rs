@@ -7,7 +7,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use uuid::Uuid;
 
+use crate::api_jobs::JobStore;
 use crate::error::{Error, Result};
 use crate::observation::{ObservationStore, RunListFilter, RunRecord};
 use crate::{component, git, rig, stack};
@@ -51,6 +53,10 @@ pub enum HttpEndpoint {
     RunArtifacts { id: String },
     AuditRuns,
     BenchRuns,
+    Jobs,
+    Job { id: String },
+    JobEvents { id: String },
+    JobCancel { id: String },
     JobReadyRun { kind: JobReadyRunKind },
 }
 
@@ -104,6 +110,10 @@ impl HttpEndpoint {
             Self::RunArtifacts { .. } => "runs.artifacts",
             Self::AuditRuns => "audit.runs",
             Self::BenchRuns => "bench.runs",
+            Self::Jobs => "jobs.list",
+            Self::Job { .. } => "jobs.show",
+            Self::JobEvents { .. } => "jobs.events",
+            Self::JobCancel { .. } => "jobs.cancel",
             Self::JobReadyRun { .. } => "jobs.required",
         }
     }
@@ -147,6 +157,16 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
         }),
         (HttpMethod::Get, ["audit", "runs"]) => Ok(HttpEndpoint::AuditRuns),
         (HttpMethod::Get, ["bench", "runs"]) => Ok(HttpEndpoint::BenchRuns),
+        (HttpMethod::Get, ["jobs"]) => Ok(HttpEndpoint::Jobs),
+        (HttpMethod::Get, ["jobs", id]) => Ok(HttpEndpoint::Job {
+            id: (*id).to_string(),
+        }),
+        (HttpMethod::Get, ["jobs", id, "events"]) => Ok(HttpEndpoint::JobEvents {
+            id: (*id).to_string(),
+        }),
+        (HttpMethod::Post, ["jobs", id, "cancel"]) => Ok(HttpEndpoint::JobCancel {
+            id: (*id).to_string(),
+        }),
         (HttpMethod::Post, ["audit"]) => Ok(HttpEndpoint::JobReadyRun {
             kind: JobReadyRunKind::Audit,
         }),
@@ -179,6 +199,10 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
                 "GET /runs/:id/artifacts".to_string(),
                 "GET /audit/runs".to_string(),
                 "GET /bench/runs".to_string(),
+                "GET /jobs".to_string(),
+                "GET /jobs/:id".to_string(),
+                "GET /jobs/:id/events".to_string(),
+                "POST /jobs/:id/cancel".to_string(),
             ]),
         )),
     }
@@ -186,6 +210,11 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
 
 /// Execute a routed read-only API request through existing Homeboy core code.
 pub fn handle(request: HttpApiRequest) -> Result<HttpApiResponse> {
+    handle_with_jobs(request, &JobStore::default())
+}
+
+/// Execute a routed HTTP API request against the daemon-owned in-memory job store.
+pub fn handle_with_jobs(request: HttpApiRequest, job_store: &JobStore) -> Result<HttpApiResponse> {
     let endpoint = route(request.method, &request.path)?;
     let body = match &endpoint {
         HttpEndpoint::Components => json!({
@@ -259,18 +288,34 @@ pub fn handle(request: HttpApiRequest) -> Result<HttpApiResponse> {
             "command": "api.bench.runs",
             "runs": list_runs(&request.path, Some("bench"))?,
         }),
+        HttpEndpoint::Jobs => json!({
+            "command": "api.jobs.list",
+            "jobs": job_store.list(),
+        }),
+        HttpEndpoint::Job { id } => json!({
+            "command": "api.jobs.show",
+            "job": job_store.get(parse_job_id(id)?)?,
+        }),
+        HttpEndpoint::JobEvents { id } => json!({
+            "command": "api.jobs.events",
+            "job_id": id,
+            "events": job_store.events(parse_job_id(id)?)?,
+        }),
+        HttpEndpoint::JobCancel { id } => json!({
+            "command": "api.jobs.cancel",
+            "job": job_store.cancel(parse_job_id(id)?, "cancel requested via HTTP API")?,
+        }),
         HttpEndpoint::JobReadyRun { kind } => {
             return Err(Error::validation_invalid_argument(
                 "endpoint",
                 format!(
-                    "POST /{} requires daemon HTTP job routing through src/core/api_jobs.rs before it can run safely",
+                    "POST /{} requires daemon HTTP analysis enqueue wiring through src/core/api_jobs.rs before it can run safely",
                     job_ready_slug(*kind)
                 ),
                 Some(job_ready_slug(*kind).to_string()),
                 Some(vec![
-                    "Wire the existing src/core/api_jobs.rs job model into the daemon HTTP routes"
+                    "Wire this endpoint to enqueue a long-running analysis job through the existing daemon job model"
                         .to_string(),
-                    "Then wire this endpoint to enqueue the long-running analysis job".to_string(),
                 ]),
             ));
         }
@@ -332,6 +377,17 @@ fn require_run(store: &ObservationStore, run_id: &str) -> Result<RunRecord> {
             "run_id",
             format!("run record not found: {run_id}"),
             Some(run_id.to_string()),
+            None,
+        )
+    })
+}
+
+fn parse_job_id(job_id: &str) -> Result<Uuid> {
+    Uuid::parse_str(job_id).map_err(|_| {
+        Error::validation_invalid_argument(
+            "job_id",
+            format!("invalid job id: {job_id}"),
+            Some(job_id.to_string()),
             None,
         )
     })

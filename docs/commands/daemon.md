@@ -56,8 +56,8 @@ analysis runs. They do not start audit, lint, test, bench, rig, or stack work.
 
 The analysis entry points `POST /audit`, `POST /lint`, `POST /test`, and
 `POST /bench` are reserved by the contract, but intentionally return a daemon
-HTTP job-routing blocker until the existing `src/core/api_jobs.rs` job model is
-wired into daemon routes.
+HTTP analysis-enqueue blocker until the existing `src/core/api_jobs.rs` job
+model is wired into daemon routes.
 
 Mutating operations such as deploy, release, rig up/down, stack apply, git
 writes, and SSH execution are not exposed by this daemon slice.

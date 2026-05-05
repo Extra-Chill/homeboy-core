@@ -1,3 +1,4 @@
+use homeboy::api_jobs::{JobStatus, JobStore};
 use homeboy::http_api::{self, HttpApiRequest, HttpEndpoint, HttpMethod, JobReadyRunKind};
 use homeboy::observation::{NewRunRecord, ObservationStore, RunStatus};
 
@@ -143,6 +144,97 @@ fn routes_observation_run_readers() {
 }
 
 #[test]
+fn routes_job_inspection_endpoints() {
+    assert_eq!(
+        http_api::route(HttpMethod::Get, "/jobs").expect("route"),
+        HttpEndpoint::Jobs
+    );
+    assert_eq!(
+        http_api::route(HttpMethod::Get, "/jobs/abc").expect("route"),
+        HttpEndpoint::Job {
+            id: "abc".to_string()
+        }
+    );
+    assert_eq!(
+        http_api::route(HttpMethod::Get, "/jobs/abc/events").expect("route"),
+        HttpEndpoint::JobEvents {
+            id: "abc".to_string()
+        }
+    );
+    assert_eq!(
+        http_api::route(HttpMethod::Post, "/jobs/abc/cancel").expect("route"),
+        HttpEndpoint::JobCancel {
+            id: "abc".to_string()
+        }
+    );
+}
+
+#[test]
+fn handles_job_inspection_routes_against_shared_store() {
+    let store = JobStore::default();
+    let job = store.create("audit");
+    store.start(job.id).expect("job starts");
+    store
+        .append_event(
+            job.id,
+            homeboy::api_jobs::JobEventKind::Stdout,
+            Some("audit output".to_string()),
+            None,
+        )
+        .expect("stdout event");
+
+    let list = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Get,
+            path: "/jobs".to_string(),
+            body: None,
+        },
+        &store,
+    )
+    .expect("list jobs");
+    assert_eq!(list.endpoint, "jobs.list");
+    assert_eq!(list.body["jobs"].as_array().unwrap().len(), 1);
+    assert_eq!(list.body["jobs"][0]["id"], job.id.to_string());
+
+    let show = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Get,
+            path: format!("/jobs/{}", job.id),
+            body: None,
+        },
+        &store,
+    )
+    .expect("show job");
+    assert_eq!(show.endpoint, "jobs.show");
+    assert_eq!(show.body["job"]["operation"], "audit");
+
+    let events = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Get,
+            path: format!("/jobs/{}/events", job.id),
+            body: None,
+        },
+        &store,
+    )
+    .expect("job events");
+    assert_eq!(events.endpoint, "jobs.events");
+    assert!(events.body["events"].as_array().unwrap().len() >= 3);
+
+    let cancel = http_api::handle_with_jobs(
+        HttpApiRequest {
+            method: HttpMethod::Post,
+            path: format!("/jobs/{}/cancel", job.id),
+            body: None,
+        },
+        &store,
+    )
+    .expect("cancel job");
+    assert_eq!(cancel.endpoint, "jobs.cancel");
+    assert_eq!(cancel.body["job"]["status"], "cancelled");
+    assert_eq!(store.get(job.id).expect("job").status, JobStatus::Cancelled);
+}
+
+#[test]
 fn handles_filtered_observation_run_readers_without_starting_jobs() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::unset();
@@ -218,7 +310,10 @@ fn job_ready_endpoint_reports_daemon_job_routing_blocker() {
     .expect_err("daemon job routing blocker");
 
     let rendered = err.to_string();
-    assert!(rendered.contains("daemon HTTP job routing"), "{rendered}");
+    assert!(
+        rendered.contains("daemon HTTP analysis enqueue wiring"),
+        "{rendered}"
+    );
     assert!(rendered.contains("src/core/api_jobs.rs"), "{rendered}");
     assert!(!rendered.contains("Extra-Chill/homeboy#"), "{rendered}");
 }
