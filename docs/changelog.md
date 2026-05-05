@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.157.1] - 2026-05-05
+
+### Changed
+- keep audit convention tag changes clean
+
+### Fixed
+- meet sockaddr_un budget with /tmp anchor and STATE_DIR leaf
+- shorten runtime path to fit sockaddr_un budget
+- separate audit conventions with opaque tags
+
 ## [0.157.0] - 2026-05-05
 
 ### Added
