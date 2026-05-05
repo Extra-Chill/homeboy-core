@@ -5,7 +5,13 @@ use tempfile::TempDir;
 pub(crate) struct HomeGuard {
     prior: Option<String>,
     prior_xdg_data_home: Option<String>,
+    prior_invocation_runtime: Option<String>,
     dir: TempDir,
+    /// Held alongside `dir` so the short invocation runtime tempdir is
+    /// dropped only after the test completes. Distinct from `dir` so the
+    /// invocation root can live on a short path (e.g. `/tmp/hb-XXXX`)
+    /// regardless of where `$TMPDIR` lands.
+    _inv_dir: Option<TempDir>,
     _guard: MutexGuard<'static, ()>,
 }
 
@@ -30,16 +36,49 @@ impl HomeGuard {
         let guard = home_lock().lock().unwrap_or_else(|e| e.into_inner());
         let prior = std::env::var("HOME").ok();
         let prior_xdg_data_home = std::env::var("XDG_DATA_HOME").ok();
+        let prior_invocation_runtime =
+            std::env::var(crate::engine::invocation::HOMEBOY_INVOCATION_RUNTIME_DIR_ENV).ok();
         let dir = TempDir::new().expect("home tempdir");
         std::env::set_var("HOME", dir.path());
         std::env::set_var("XDG_DATA_HOME", dir.path().join(".local").join("share"));
+        // Pin invocation runtime to a SHORT tempdir, isolated from `$TMPDIR`
+        // and from the home tempdir (which itself can already live on a long
+        // path on macOS, e.g. `/var/folders/<14>/T/.tmpXXXXXX/...`). Using
+        // `/tmp` directly keeps tests within the platform `sockaddr_un`
+        // budget regardless of host configuration.
+        let inv_dir = short_invocation_tempdir();
+        std::env::set_var(
+            crate::engine::invocation::HOMEBOY_INVOCATION_RUNTIME_DIR_ENV,
+            inv_dir.path(),
+        );
         Self {
             prior,
             prior_xdg_data_home,
+            prior_invocation_runtime,
             dir,
+            _inv_dir: Some(inv_dir),
             _guard: guard,
         }
     }
+}
+
+/// Return a short-path tempdir suitable for the invocation runtime root.
+///
+/// On Unix-like systems we anchor to `/tmp` so the path stays well under
+/// `sockaddr_un` even on macOS where `$TMPDIR` typically lives at
+/// `/var/folders/<14>/T/.tmpXXXXXX/`. Falls back to the default tempdir
+/// otherwise (Windows / odd hosts).
+fn short_invocation_tempdir() -> TempDir {
+    #[cfg(unix)]
+    {
+        if std::path::Path::new("/tmp").is_dir() {
+            return tempfile::Builder::new()
+                .prefix("hb-test-")
+                .tempdir_in("/tmp")
+                .expect("invocation runtime tempdir under /tmp");
+        }
+    }
+    TempDir::new().expect("invocation runtime tempdir")
 }
 
 impl Drop for HomeGuard {
@@ -51,6 +90,15 @@ impl Drop for HomeGuard {
         match &self.prior_xdg_data_home {
             Some(value) => std::env::set_var("XDG_DATA_HOME", value),
             None => std::env::remove_var("XDG_DATA_HOME"),
+        }
+        match &self.prior_invocation_runtime {
+            Some(value) => std::env::set_var(
+                crate::engine::invocation::HOMEBOY_INVOCATION_RUNTIME_DIR_ENV,
+                value,
+            ),
+            None => {
+                std::env::remove_var(crate::engine::invocation::HOMEBOY_INVOCATION_RUNTIME_DIR_ENV)
+            }
         }
     }
 }
