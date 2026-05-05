@@ -17,6 +17,9 @@ pub struct AuditConfig {
     /// Files exempt from convention outlier checks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub convention_exception_globs: Vec<String>,
+    /// Component-owned path rules that attach opaque tags before convention grouping.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub convention_tag_globs: Vec<ConventionTagGlob>,
     /// Symbols that are known to exist when component metadata proves a runtime
     /// floor, package, or bootstrap file is present.
     #[serde(default, skip_serializing_if = "KnownSymbolsConfig::is_empty")]
@@ -68,6 +71,15 @@ impl CoreBoundaryLeakConfig {
             &other.example_path_contains,
         );
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConventionTagGlob {
+    /// Opaque tag value. Core never interprets this string.
+    pub tag: String,
+    /// File globs that receive this tag.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub globs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -213,6 +225,7 @@ impl AuditConfig {
             && self.lifecycle_path_globs.is_empty()
             && self.utility_suffixes.is_empty()
             && self.convention_exception_globs.is_empty()
+            && self.convention_tag_globs.is_empty()
             && self.known_symbols.is_empty()
             && self.requested_detectors.is_empty()
             && self.core_boundary_leaks.is_empty()
@@ -233,6 +246,7 @@ impl AuditConfig {
             &mut self.convention_exception_globs,
             &other.convention_exception_globs,
         );
+        extend_unique(&mut self.convention_tag_globs, &other.convention_tag_globs);
         self.known_symbols.merge(&other.known_symbols);
         self.core_boundary_leaks.merge(&other.core_boundary_leaks);
         for rule in &other.requested_detectors {

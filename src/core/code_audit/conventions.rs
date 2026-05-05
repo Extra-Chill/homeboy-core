@@ -1057,6 +1057,43 @@ mod tests {
     }
 
     #[test]
+    fn opaque_convention_exception_globs_suppress_group_findings() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "src/items/one.item".to_string(),
+                language: Language::Unknown,
+                methods: vec!["run".to_string()],
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "src/items/two.item".to_string(),
+                language: Language::Unknown,
+                methods: vec!["run".to_string()],
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "src/generated/fixture.item".to_string(),
+                language: Language::Unknown,
+                methods: vec![],
+                ..Default::default()
+            },
+        ];
+        let audit_config = AuditConfig {
+            convention_exception_globs: vec!["src/generated/*".to_string()],
+            ..Default::default()
+        };
+
+        let convention =
+            discover_conventions_with_config("Items", "src/items/*", &fingerprints, &audit_config)
+                .unwrap();
+
+        assert!(
+            convention.outliers.is_empty(),
+            "configured exception globs are opaque to core and should suppress convention deviations"
+        );
+    }
+
+    #[test]
     fn declared_traits_do_not_become_missing_interfaces() {
         let fingerprints = vec![
             FileFingerprint {

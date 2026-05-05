@@ -653,7 +653,7 @@ fn audit_internal(
     }
 
     // Phase 1: Auto-discover file groups (always full codebase for convention detection)
-    let discovery = discovery::auto_discover_groups(root);
+    let discovery = discovery::auto_discover_groups(root, &audit_config);
     let files_skipped = discovery
         .files_walked
         .saturating_sub(discovery.files_fingerprinted);

@@ -122,51 +122,13 @@ pub(crate) fn fingerprint_from_git_ref(
     git_ref: &str,
     relative_path: &str,
 ) -> Option<FileFingerprint> {
-    use crate::extension;
-
     // Get file content from the git ref
     let git_spec = format!("{}:{}", git_ref, relative_path);
     let content =
         crate::engine::command::run_in_optional(source_path, "git", &["show", &git_spec])?;
 
-    // Find the extension for this file type
     let ext = Path::new(relative_path).extension()?.to_str()?;
-    let matched_extension = extension::find_extension_for_file_ext(ext, "fingerprint")?;
-
-    // Run the fingerprint script on the base content
-    let output = extension::run_fingerprint_script(&matched_extension, relative_path, &content)?;
-
-    let language = super::conventions::Language::from_extension(ext);
-
-    Some(FileFingerprint {
-        relative_path: relative_path.to_string(),
-        language,
-        methods: output.methods,
-        // Extension-script fingerprinting does not structurally distinguish
-        // test methods — callers fall back to prefix filtering on `methods`.
-        test_methods: Vec::new(),
-        registrations: output.registrations,
-        type_name: output.type_name,
-        type_names: output.type_names,
-        extends: output.extends,
-        implements: output.implements,
-        namespace: output.namespace,
-        imports: output.imports,
-        content,
-        method_hashes: output.method_hashes,
-        structural_hashes: output.structural_hashes,
-        visibility: output.visibility,
-        properties: output.properties,
-        hooks: output.hooks,
-        unused_parameters: output.unused_parameters,
-        dead_code_markers: output.dead_code_markers,
-        internal_calls: output.internal_calls,
-        call_sites: output.call_sites,
-        public_api: output.public_api,
-        hook_callbacks: output.hook_callbacks,
-        runtime_dispatched_types: output.runtime_dispatched_types,
-        trait_impl_methods: Vec::new(),
-    })
+    super::fingerprint::fingerprint_extension_content(ext, relative_path, &content)
 }
 
 // ============================================================================
