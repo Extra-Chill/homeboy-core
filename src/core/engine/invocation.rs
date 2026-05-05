@@ -17,9 +17,14 @@ const PORT_POOL_START: u16 = 20_000;
 const PORT_POOL_END: u16 = 60_999;
 
 mod child;
+mod runtime;
 pub use child::{
     cleanup_invocation_children, cleanup_stale_child_records, register_child_process,
     InvocationChildGuard, InvocationChildRecord,
+};
+pub use runtime::{
+    enforce_path_budget, invocation_runtime_root, short_invocation_id,
+    HOMEBOY_INVOCATION_RUNTIME_DIR_ENV, SOCKET_HEADROOM_BYTES, SUN_PATH_CAPACITY,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -42,11 +47,19 @@ pub struct InvocationEnv {
 pub struct InvocationGuard {
     env: InvocationEnv,
     lease_id: Option<String>,
+    /// Root invocation directory under [`invocation_runtime_root`]. Removed
+    /// on `Drop` so concurrent invocations do not accumulate stale state on
+    /// disk. Decoupled from any caller-provided `RunDir` cleanup.
+    invocation_root: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct InvocationLease {
     invocation_id: String,
+    /// Full UUID retained for traceability across logs and observation
+    /// records. Path components use [`short_invocation_id`] instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invocation_uuid: Option<String>,
     pid: u32,
     started_at: String,
     port_base: Option<u16>,
@@ -56,14 +69,42 @@ struct InvocationLease {
 }
 
 impl InvocationGuard {
+    /// Acquire an isolated invocation environment.
+    ///
+    /// `run_dir` is retained for API compatibility and pipeline context,
+    /// but the invocation's state/artifact/tmp directories are placed under
+    /// a short, platform-aware root (see [`invocation_runtime_root`]) rather
+    /// than nested beneath the run dir. This keeps `HOMEBOY_INVOCATION_*`
+    /// paths within the platform `sockaddr_un` budget so downstream
+    /// workloads can place UNIX sockets under them without bespoke
+    /// path-length defense.
     pub fn acquire(run_dir: &RunDir, requirements: &InvocationRequirements) -> Result<Self> {
+        let _ = run_dir; // retained for API compatibility (see doc comment)
         cleanup_stale_child_records()?;
 
-        let id = format!("inv-{}", uuid::Uuid::new_v4());
-        let root = run_dir.path().join("invocations").join(&id);
-        let state_dir = root.join("state");
-        let artifact_dir = root.join("artifacts");
-        let tmp_dir = root.join("tmp");
+        let uuid = uuid::Uuid::new_v4();
+        let short = short_invocation_id();
+        // Public id keeps the legacy `inv-` prefix so log scrapers and
+        // existing string matchers (rigs, runners, child records) keep
+        // working. The path component does not include the prefix.
+        let id = format!("inv-{}", short);
+        let runtime_root = invocation_runtime_root()?;
+        let invocation_root = runtime_root.join(&short);
+        // Single-char subdirs keep `HOMEBOY_INVOCATION_*_DIR` paths short
+        // enough for the platform `sockaddr_un` budget on macOS where the
+        // default `$TMPDIR` is already ~50 bytes. The basenames are
+        // internal — workloads only ever read them via env var values.
+        let state_dir = invocation_root.join("s");
+        let artifact_dir = invocation_root.join("a");
+        let tmp_dir = invocation_root.join("t");
+
+        // Enforce the sockaddr_un budget before creating anything on disk
+        // so callers fail fast with a clear error instead of much later in
+        // a downstream workload's UDS bind.
+        for dir in [&state_dir, &artifact_dir, &tmp_dir] {
+            enforce_path_budget(dir)?;
+        }
+
         for dir in [&state_dir, &artifact_dir, &tmp_dir] {
             fs::create_dir_all(dir).map_err(|e| {
                 Error::internal_io(
@@ -98,6 +139,7 @@ impl InvocationGuard {
 
             let lease = InvocationLease {
                 invocation_id: id.clone(),
+                invocation_uuid: Some(uuid.to_string()),
                 pid: std::process::id(),
                 started_at: chrono::Utc::now().to_rfc3339(),
                 port_base,
@@ -118,6 +160,7 @@ impl InvocationGuard {
                 port_max,
             },
             lease_id,
+            invocation_root,
         })
     }
 
@@ -147,6 +190,12 @@ impl InvocationGuard {
 
 impl Drop for InvocationGuard {
     fn drop(&mut self) {
+        // Best-effort cleanup of the invocation root directory. Decoupled
+        // from any caller-provided `RunDir` cleanup so concurrent
+        // invocations do not accumulate stale state under the short
+        // platform runtime root.
+        let _ = fs::remove_dir_all(&self.invocation_root);
+
         let Some(id) = &self.lease_id else {
             return;
         };
