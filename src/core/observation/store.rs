@@ -497,6 +497,86 @@ impl ObservationStore {
             })
     }
 
+    pub fn record_directory_artifact(
+        &self,
+        run_id: &str,
+        kind: &str,
+        path: impl AsRef<Path>,
+    ) -> Result<ArtifactRecord> {
+        validate_required("run_id", run_id)?;
+        validate_required("kind", kind)?;
+        if self.get_run(run_id)?.is_none() {
+            return Err(Error::validation_invalid_argument(
+                "run_id",
+                format!("run record not found: {run_id}"),
+                Some(run_id.to_string()),
+                None,
+            ));
+        }
+
+        let path = path.as_ref();
+        let metadata = fs::metadata(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Error::validation_invalid_argument(
+                    "path",
+                    format!("artifact directory not found: {}", path.display()),
+                    Some(path.to_string_lossy().to_string()),
+                    None,
+                );
+            }
+            Error::internal_io(
+                e.to_string(),
+                Some(format!(
+                    "read artifact directory metadata {}",
+                    path.display()
+                )),
+            )
+        })?;
+        if !metadata.is_dir() {
+            return Err(Error::validation_invalid_argument(
+                "path",
+                format!("artifact path is not a directory: {}", path.display()),
+                Some(path.to_string_lossy().to_string()),
+                None,
+            ));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let stored_path = persisted_artifact_path(run_id, &id, path)?;
+        copy_artifact_directory(path, &stored_path)?;
+        let path_string = stored_path.to_string_lossy().to_string();
+
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO artifacts(id, run_id, kind, artifact_type, path, sha256, size_bytes, mime, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+                params![
+                    id,
+                    run_id,
+                    kind,
+                    "directory",
+                    path_string,
+                    Option::<String>::None,
+                    Option::<i64>::None,
+                    Option::<String>::None,
+                    created_at,
+                ],
+            )
+            .map_err(sqlite_error("insert directory artifact record"))?;
+
+        self.list_artifacts(run_id)?
+            .into_iter()
+            .find(|artifact| artifact.id == id)
+            .ok_or_else(|| {
+                Error::internal_unexpected(format!(
+                    "Inserted directory artifact record {id} but could not read it back"
+                ))
+            })
+    }
+
     pub fn record_url_artifact(
         &self,
         run_id: &str,
@@ -1098,6 +1178,48 @@ fn copy_artifact_file(source: &Path, target: &Path) -> Result<()> {
             )),
         )
     })?;
+    Ok(())
+}
+
+fn copy_artifact_directory(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!("create artifact directory {}", target.display())),
+        )
+    })?;
+    for entry in fs::read_dir(source).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!("read artifact directory {}", source.display())),
+        )
+    })? {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(
+                e.to_string(),
+                Some(format!(
+                    "read artifact directory entry {}",
+                    source.display()
+                )),
+            )
+        })?;
+        let entry_source = entry.path();
+        let entry_target = target.join(entry.file_name());
+        let entry_type = entry.file_type().map_err(|e| {
+            Error::internal_io(
+                e.to_string(),
+                Some(format!(
+                    "read artifact entry type {}",
+                    entry_source.display()
+                )),
+            )
+        })?;
+        if entry_type.is_dir() {
+            copy_artifact_directory(&entry_source, &entry_target)?;
+        } else if entry_type.is_file() {
+            copy_artifact_file(&entry_source, &entry_target)?;
+        }
+    }
     Ok(())
 }
 

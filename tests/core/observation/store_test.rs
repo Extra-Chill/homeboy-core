@@ -391,6 +391,47 @@ fn test_record_artifact() {
 }
 
 #[test]
+fn test_record_directory_artifact() {
+    with_isolated_home(|home| {
+        let _xdg = XdgGuard::unset();
+        let store = ObservationStore::open_initialized().expect("init store");
+        let run = store
+            .start_run(sample_run("bench", "homeboy"))
+            .expect("start run");
+        let artifact_path = home.path().join("visual-comparisons");
+        std::fs::create_dir_all(artifact_path.join("nested")).expect("mkdir artifact");
+        std::fs::write(artifact_path.join("summary.json"), br#"{"status":"skip"}"#)
+            .expect("write artifact");
+        std::fs::write(artifact_path.join("nested/detail.txt"), "detail").expect("write nested");
+
+        let artifact = store
+            .record_directory_artifact(&run.id, "bench_artifact", &artifact_path)
+            .expect("record directory artifact");
+        let artifacts = store.list_artifacts(&run.id).expect("list artifacts");
+
+        assert_eq!(artifacts, vec![artifact.clone()]);
+        assert_eq!(artifact.run_id, run.id);
+        assert_eq!(artifact.kind, "bench_artifact");
+        assert_eq!(artifact.artifact_type, "directory");
+        assert_ne!(artifact.path, artifact_path.to_string_lossy());
+        let persisted = std::path::PathBuf::from(&artifact.path);
+        assert!(persisted.is_dir());
+        assert_eq!(
+            std::fs::read_to_string(persisted.join("summary.json")).expect("read persisted"),
+            "{\"status\":\"skip\"}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(persisted.join("nested/detail.txt")).expect("read nested"),
+            "detail"
+        );
+        assert_eq!(artifact.url, None);
+        assert_eq!(artifact.size_bytes, None);
+        assert_eq!(artifact.mime, None);
+        assert_eq!(artifact.sha256, None);
+    });
+}
+
+#[test]
 fn test_record_url_artifact() {
     with_isolated_home(|_home| {
         let _xdg = XdgGuard::unset();

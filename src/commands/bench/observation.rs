@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use homeboy::engine::run_dir::{self, RunDir};
@@ -239,6 +240,11 @@ fn record_bench_observation_artifacts(
     workflow: &mut BenchRunWorkflowResult,
     run_dir: &RunDir,
 ) {
+    if let Some(results) = workflow.results.as_mut() {
+        persist_bench_result_artifact_paths(observation, results, run_dir);
+        rewrite_bench_results_file(results, run_dir);
+    }
+
     record_if_exists(
         observation,
         "bench_results",
@@ -250,7 +256,7 @@ fn record_bench_observation_artifacts(
         run_dir.step_file(run_dir::files::RESOURCE_SUMMARY),
     );
 
-    let Some(results) = workflow.results.as_mut() else {
+    let Some(results) = workflow.results.as_ref() else {
         return;
     };
     for artifact in collect_artifacts(results) {
@@ -262,7 +268,6 @@ fn record_bench_observation_artifacts(
                 .record_url_artifact(observation.run_id(), kind, url);
         }
     }
-    persist_bench_result_artifact_paths(observation, results, run_dir);
 }
 
 fn record_if_exists(observation: &BenchObservation, kind: &str, path: PathBuf) {
@@ -297,17 +302,30 @@ fn persist_bench_artifact_path(
         return;
     };
     let path = resolve_bench_artifact_path(path, run_dir);
-    if !path.is_file() {
-        return;
-    }
-    if let Ok(record) =
+    let record = if path.is_file() {
         observation
             .0
             .store()
             .record_artifact(observation.run_id(), "bench_artifact", &path)
-    {
+    } else if path.is_dir() {
+        observation.0.store().record_directory_artifact(
+            observation.run_id(),
+            "bench_artifact",
+            &path,
+        )
+    } else {
+        return;
+    };
+    if let Ok(record) = record {
         artifact.path = Some(record.path);
     }
+}
+
+fn rewrite_bench_results_file(results: &BenchResults, run_dir: &RunDir) {
+    let Ok(json) = serde_json::to_vec_pretty(results) else {
+        return;
+    };
+    let _ = fs::write(run_dir.step_file(run_dir::files::BENCH_RESULTS), json);
 }
 
 fn resolve_bench_artifact_path(path: &str, run_dir: &RunDir) -> PathBuf {
@@ -568,6 +586,7 @@ mod tests {
                 run_dir: &run_dir,
             })
             .expect("start observation");
+            let run_id = observation.run_id().to_string();
 
             finish_success(Some(observation), &mut workflow, &run_dir)
                 .expect("observation summary");
@@ -584,6 +603,105 @@ mod tests {
                 fs::read_to_string(persisted_path).expect("read persisted"),
                 "{\"score\":1}"
             );
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let artifacts = store.list_artifacts(&run_id).expect("artifacts");
+            let bench_results_artifact = artifacts
+                .iter()
+                .find(|artifact| artifact.kind == "bench_results")
+                .expect("bench results artifact");
+            let persisted_results_json: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(&bench_results_artifact.path).expect("read bench results"),
+            )
+            .expect("parse persisted bench results");
+            assert_eq!(
+                persisted_results_json["scenarios"][0]["artifacts"]["semantic"]["path"],
+                persisted_path
+            );
+        });
+    }
+
+    #[test]
+    fn bench_observation_persists_workload_artifact_directories() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let run_dir = RunDir::create().expect("run dir");
+            fs::write(run_dir.step_file(run_dir::files::BENCH_RESULTS), b"{}").expect("results");
+            let artifact_dir = run_dir
+                .path()
+                .join("invocations/inv-1/artifacts/visual-comparisons");
+            fs::create_dir_all(&artifact_dir).expect("mkdir");
+            fs::write(
+                artifact_dir.join("visual-comparison-skipped.json"),
+                b"{\"skip\":true}",
+            )
+            .expect("artifact");
+
+            let mut results = bench_results("homeboy", "cold", 42.0);
+            let original_path = artifact_dir.to_string_lossy().to_string();
+            results.scenarios[0].artifacts.insert(
+                "visual_comparison_dir".to_string(),
+                BenchArtifact {
+                    path: Some(original_path.clone()),
+                    url: None,
+                    artifact_type: Some("directory".to_string()),
+                    kind: Some("visual_comparison_dir".to_string()),
+                    label: Some("Visual comparisons".to_string()),
+                },
+            );
+            let mut workflow = BenchRunWorkflowResult {
+                status: "passed".to_string(),
+                component: "homeboy".to_string(),
+                exit_code: 0,
+                iterations: 10,
+                results: Some(results),
+                gate_failures: Vec::new(),
+                baseline_comparison: None,
+                hints: None,
+                failure: None,
+                diagnostics: Vec::new(),
+            };
+
+            let args = bench_args();
+            let selected_scenarios = vec!["cold".to_string()];
+            let observation = start(BenchObservationStart {
+                component_id: "homeboy",
+                component_label: "homeboy",
+                source_path: home.path(),
+                args: &args,
+                selected_scenarios: &selected_scenarios,
+                rig_id: None,
+                rig_snapshot: None,
+                run_dir: &run_dir,
+            })
+            .expect("start observation");
+            let run_id = observation.run_id().to_string();
+
+            finish_success(Some(observation), &mut workflow, &run_dir)
+                .expect("observation summary");
+            run_dir.cleanup();
+
+            let persisted_path = workflow.results.as_ref().unwrap().scenarios[0].artifacts
+                ["visual_comparison_dir"]
+                .path
+                .as_deref()
+                .expect("persisted artifact path");
+            assert_ne!(persisted_path, original_path);
+            let persisted_dir = PathBuf::from(persisted_path);
+            assert!(persisted_dir.is_dir());
+            assert_eq!(
+                fs::read_to_string(persisted_dir.join("visual-comparison-skipped.json"))
+                    .expect("read persisted"),
+                "{\"skip\":true}"
+            );
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let artifacts = store.list_artifacts(&run_id).expect("artifacts");
+            assert!(artifacts
+                .iter()
+                .any(|artifact| artifact.kind == "bench_artifact"
+                    && artifact.artifact_type == "directory"
+                    && artifact.path == persisted_path));
         });
     }
 
