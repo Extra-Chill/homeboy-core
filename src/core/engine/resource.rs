@@ -39,9 +39,15 @@ pub struct RunResourceSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExtensionChildResourceSummary {
+pub struct ChildProcessIdentity {
     pub root_pid: u32,
     pub command_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtensionChildResourceSummary {
+    #[serde(flatten)]
+    pub child: ChildProcessIdentity,
     pub started_at: String,
     pub finished_at: String,
     pub duration_ms: u128,
@@ -173,7 +179,7 @@ pub fn record_extension_child_resource(
 
     let filename = format!(
         "{}-{}.json",
-        summary.root_pid,
+        summary.child.root_pid,
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
     );
     let path = dir.join(filename);
@@ -212,7 +218,7 @@ fn read_extension_child_resources(run_dir: &RunDir) -> Vec<ExtensionChildResourc
     summaries.sort_by(|a, b| {
         a.started_at
             .cmp(&b.started_at)
-            .then(a.root_pid.cmp(&b.root_pid))
+            .then(a.child.root_pid.cmp(&b.child.root_pid))
     });
     summaries
 }
@@ -382,8 +388,10 @@ mod tests {
                 warnings: vec!["homeboy_rss_unsupported".to_string()],
             },
             vec![ExtensionChildResourceSummary {
-                root_pid: 99,
-                command_label: "runner".to_string(),
+                child: ChildProcessIdentity {
+                    root_pid: 99,
+                    command_label: "runner".to_string(),
+                },
                 started_at: Utc::now().to_rfc3339(),
                 finished_at: Utc::now().to_rfc3339(),
                 duration_ms: 10,
@@ -431,8 +439,10 @@ mod tests {
     fn test_record_extension_child_resource() {
         let run_dir = RunDir::create().expect("run dir");
         let child = ExtensionChildResourceSummary {
-            root_pid: 123,
-            command_label: "extension-runner".to_string(),
+            child: ChildProcessIdentity {
+                root_pid: 123,
+                command_label: "extension-runner".to_string(),
+            },
             started_at: "2026-04-30T00:00:00+00:00".to_string(),
             finished_at: "2026-04-30T00:00:00.100+00:00".to_string(),
             duration_ms: 100,

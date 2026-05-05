@@ -6,7 +6,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use crate::engine::invocation;
-use crate::engine::resource::ExtensionChildResourceSummary;
+use crate::engine::resource::{ChildProcessIdentity, ExtensionChildResourceSummary};
 use crate::engine::shell;
 use crate::error::{Error, Result};
 use chrono::Utc;
@@ -784,8 +784,7 @@ fn cleanup_process_group(pgid: libc::pid_t) {
 }
 
 struct ChildResourceMonitor {
-    root_pid: u32,
-    command_label: String,
+    child: ChildProcessIdentity,
     started_at: String,
     started_instant: Instant,
     stop: Arc<AtomicBool>,
@@ -807,8 +806,10 @@ impl ChildResourceMonitor {
             std::thread::spawn(move || sample_child_until_stopped(root_pid, stop_for_thread));
 
         Self {
-            root_pid,
-            command_label,
+            child: ChildProcessIdentity {
+                root_pid,
+                command_label,
+            },
             started_at: Utc::now().to_rfc3339(),
             started_instant: Instant::now(),
             stop,
@@ -827,8 +828,7 @@ impl ChildResourceMonitor {
         state.warnings.dedup();
 
         ExtensionChildResourceSummary {
-            root_pid: self.root_pid,
-            command_label: self.command_label,
+            child: self.child,
             started_at: self.started_at,
             finished_at: Utc::now().to_rfc3339(),
             duration_ms: self.started_instant.elapsed().as_millis(),
@@ -1049,12 +1049,36 @@ mod tests {
 
         assert!(output.success);
         let child = output.child_resource.expect("child resource summary");
-        assert!(child.root_pid > 0);
-        assert_eq!(child.command_label, "sleep 0.2");
+        assert!(child.child.root_pid > 0);
+        assert_eq!(child.child.command_label, "sleep 0.2");
         assert!(child.duration_ms > 0);
         assert!(
             child.sampled_peak_rss_bytes.is_some() || !child.warnings.is_empty(),
             "resource probes should either sample RSS or explain why they could not"
+        );
+    }
+
+    #[test]
+    fn test_upload_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("source.txt");
+        let target = dir.path().join("target with spaces.txt");
+        std::fs::write(&source, "uploaded through stdin\n").expect("write source");
+        let client = SshClient {
+            host: "localhost".to_string(),
+            user: "tester".to_string(),
+            port: 22,
+            identity_file: None,
+            is_local: true,
+            env: HashMap::new(),
+        };
+
+        let output = client.upload_file(&source.to_string_lossy(), &target.to_string_lossy());
+
+        assert!(output.success, "upload failed: {}", output.stderr);
+        assert_eq!(
+            std::fs::read_to_string(target).expect("read target"),
+            "uploaded through stdin\n"
         );
     }
 

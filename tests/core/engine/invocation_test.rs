@@ -70,7 +70,7 @@ fn named_lease_conflicts_report_holder() {
 }
 
 #[test]
-fn child_record_is_removed_when_guard_drops() {
+fn test_register_child_process() {
     with_isolated_home(|_| {
         let guard =
             register_child_process("inv-test", std::process::id(), None, "self".to_string())
@@ -89,7 +89,7 @@ fn child_record_is_removed_when_guard_drops() {
 
 #[cfg(unix)]
 #[test]
-fn stale_owner_cleanup_kills_owned_process_group() {
+fn test_cleanup_stale_child_records() {
     with_isolated_home(|_| {
         let mut child = spawn_isolated_sleep();
         let pid = child.id();
@@ -99,13 +99,15 @@ fn stale_owner_cleanup_kills_owned_process_group() {
 
         assert_eq!(cleaned, 1);
         assert_child_exits(&mut child);
-        assert!(!child_record_path("inv-stale", pid).unwrap().exists());
+        assert!(!InvocationChildRecord::record_path("inv-stale", pid)
+            .unwrap()
+            .exists());
     });
 }
 
 #[cfg(unix)]
 #[test]
-fn invocation_cleanup_does_not_overlap_concurrent_invocations() {
+fn test_cleanup_invocation_children() {
     with_isolated_home(|_| {
         let mut first = spawn_isolated_sleep();
         let mut second = spawn_isolated_sleep();
@@ -154,21 +156,23 @@ fn spawn_isolated_sleep() -> std::process::Child {
 
 #[cfg(unix)]
 fn write_test_child_record(invocation_id: &str, owner_pid: u32, root_pid: u32, pgid: Option<i32>) {
-    let dir = invocation_children_dir(invocation_id).expect("child dir");
+    let dir = InvocationChildRecord::children_dir(invocation_id).expect("child dir");
     std::fs::create_dir_all(&dir).expect("create child dir");
     let record = InvocationChildRecord {
         invocation_id: invocation_id.to_string(),
         owner_pid,
         owner_started_at: None,
-        root_pid,
-        root_started_at: process_started_at(root_pid),
+        child: crate::engine::resource::ChildProcessIdentity {
+            root_pid,
+            command_label: "sleep".to_string(),
+        },
+        root_started_at: InvocationChildRecord::process_started_at(root_pid),
         pgid,
-        command_label: "sleep".to_string(),
         started_at: chrono::Utc::now().to_rfc3339(),
     };
     let json = serde_json::to_string_pretty(&record).expect("serialize child record");
     std::fs::write(
-        child_record_path(invocation_id, root_pid).expect("record path"),
+        InvocationChildRecord::record_path(invocation_id, root_pid).expect("record path"),
         json,
     )
     .expect("write child record");
