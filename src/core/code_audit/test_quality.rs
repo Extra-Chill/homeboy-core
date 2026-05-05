@@ -100,6 +100,7 @@ fn detect_vacuous_tests(file: &str, content: &str) -> Vec<Finding> {
     if !inline_source_file {
         findings.extend(detect_unused_product_imports(
             &file_path,
+            content,
             &tests,
             &product_imports,
         ));
@@ -149,12 +150,11 @@ fn collect_product_imports(content: &str) -> Vec<ProductImport> {
         let root = &cap[1];
         let prefix = cap[2].rsplit("::").next().map(str::trim).unwrap_or("");
         for raw in cap[3].split(',') {
-            let symbol = raw.trim().trim_start_matches("self::");
-            let symbol = symbol.split_whitespace().next().unwrap_or("");
+            let symbol = imported_symbol(raw);
             let symbol = if symbol == "self" && root == "homeboy" {
                 prefix
             } else {
-                symbol
+                symbol.as_str()
             };
             if !symbol.is_empty()
                 && symbol != "self"
@@ -169,7 +169,34 @@ fn collect_product_imports(content: &str) -> Vec<ProductImport> {
         }
     }
 
+    let root_grouped =
+        regex::Regex::new(r"(?m)^\s*use\s+(homeboy|crate|super)::\{([^}]+)\}\s*;").unwrap();
+    for cap in root_grouped.captures_iter(content) {
+        for raw in cap[2].split(',') {
+            let symbol = imported_symbol(raw);
+            if !symbol.is_empty()
+                && symbol != "self"
+                && symbol
+                    .chars()
+                    .all(|c| c == '_' || c.is_ascii_alphanumeric())
+            {
+                imports.insert(ProductImport {
+                    symbol: symbol.to_string(),
+                });
+            }
+        }
+    }
+
     imports.into_iter().collect()
+}
+
+fn imported_symbol(raw: &str) -> String {
+    let symbol = raw.trim().trim_start_matches("self::");
+    if let Some((_, alias)) = symbol.split_once(" as ") {
+        alias.trim().to_string()
+    } else {
+        symbol.split_whitespace().next().unwrap_or("").to_string()
+    }
 }
 
 fn collect_local_product_symbols(content: &str) -> BTreeSet<String> {
@@ -213,6 +240,7 @@ fn detect_duplicate_test_names(file: &str, tests: &[TestFunction]) -> Vec<Findin
 
 fn detect_unused_product_imports(
     file: &str,
+    content: &str,
     tests: &[TestFunction],
     imports: &[ProductImport],
 ) -> Vec<Finding> {
@@ -220,12 +248,7 @@ fn detect_unused_product_imports(
         return Vec::new();
     }
 
-    let test_body = tests
-        .iter()
-        .map(|test| test.body.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let stripped_body = strip_comments(&test_body);
+    let stripped_body = strip_use_lines(&strip_comments(content));
 
     imports
         .iter()
@@ -358,6 +381,13 @@ fn strip_comments(body: &str) -> String {
                 .map(|(before, _)| before)
                 .unwrap_or(line)
         })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn strip_use_lines(body: &str) -> String {
+    body.lines()
+        .filter(|line| !line.trim_start().starts_with("use "))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -776,7 +806,7 @@ fn fixture_only() {
         let tests = extract_test_functions(content);
         assert_eq!(tests.len(), 1);
         let import_findings =
-            detect_unused_product_imports("tests/core/wiring_test.rs", &tests, &imports);
+            detect_unused_product_imports("tests/core/wiring_test.rs", content, &tests, &imports);
         assert_eq!(import_findings.len(), 1);
 
         let findings = detect_vacuous_tests("tests/core/wiring_test.rs", content);
@@ -815,6 +845,82 @@ use crate::core::target::run_target;
 fn calls_product() {
     let value = run_target();
     assert_eq!(value, 1);
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn keeps_product_imports_exercised_through_helpers() {
+        let findings = detect_vacuous_tests(
+            "tests/core/extension/bench/runs_flag_test.rs",
+            r#"
+use crate::extension::bench::test_support::{results_with_scenarios, scenario_with_iterations};
+
+fn scenario(id: &str) -> BenchScenario {
+    scenario_with_iterations(id, &[("ms", 1.0)], 1)
+}
+
+fn results(scenarios: Vec<BenchScenario>) -> BenchResults {
+    results_with_scenarios("bench-noop", 5, scenarios)
+}
+
+#[test]
+fn test_aggregate_runs() {
+    let aggregated = aggregate_runs(&[results(vec![scenario("cold")])]).unwrap();
+    assert_eq!(aggregated.scenarios.len(), 1);
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn keeps_super_grouped_product_calls() {
+        let findings = detect_vacuous_tests(
+            "tests/core/rig/stack_test.rs",
+            r#"
+use super::{plan_stack_sync, validate_component_stack_path};
+
+#[test]
+fn test_plan_stack_sync_uses_components_with_stack_ids_in_sorted_order() {
+    let plan = plan_stack_sync(&rig);
+    assert_eq!(plan.len(), 2);
+}
+
+#[test]
+fn test_validate_component_stack_path_accepts_matching_paths() {
+    validate_component_stack_path(&rig, "studio", &stack).expect("path should match");
+}
+"#,
+        );
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn keeps_aliased_grouped_product_import_calls() {
+        let findings = detect_vacuous_tests(
+            "tests/self_checks_test.rs",
+            r#"
+use homeboy::commands::lint::{run as run_lint, LintArgs};
+use homeboy::commands::test::{run as run_test, TestArgs};
+
+#[test]
+fn lint_runs_declared_self_check_without_extensions() {
+    let (output, exit_code) = run_lint(lint_args(dir.path()), &GlobalArgs {}).unwrap();
+    assert_eq!(exit_code, 0);
+    assert!(output.passed);
+}
+
+#[test]
+fn test_runs_declared_self_check_without_extensions() {
+    let (output, exit_code) = run_test(test_args(dir.path()), &GlobalArgs {}).unwrap();
+    assert_eq!(exit_code, 0);
+    assert!(output.passed);
 }
 "#,
         );
