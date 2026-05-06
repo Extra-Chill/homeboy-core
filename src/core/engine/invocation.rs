@@ -193,6 +193,30 @@ impl InvocationGuard {
         }
         vars
     }
+
+    pub fn preserve_artifacts(&self, run_dir: &RunDir) -> Result<Option<PathBuf>> {
+        if !self.env.artifact_dir.exists() {
+            return Ok(None);
+        }
+
+        let target = run_dir
+            .path()
+            .join("invocations")
+            .join(&self.env.id)
+            .join("artifacts");
+
+        if target.exists() {
+            fs::remove_dir_all(&target).map_err(|e| {
+                Error::internal_io(
+                    format!("Failed to replace preserved invocation artifacts: {e}"),
+                    Some(target.display().to_string()),
+                )
+            })?;
+        }
+
+        copy_directory(&self.env.artifact_dir, &target)?;
+        Ok(Some(target))
+    }
 }
 
 impl Drop for InvocationGuard {
@@ -470,6 +494,57 @@ fn remove_stale_index_lock(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn copy_directory(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target).map_err(|e| {
+        Error::internal_io(
+            format!("Failed to create directory {}: {e}", target.display()),
+            Some("invocation.artifacts.preserve".to_string()),
+        )
+    })?;
+
+    for entry in fs::read_dir(source).map_err(|e| {
+        Error::internal_io(
+            format!("Failed to read directory {}: {e}", source.display()),
+            Some("invocation.artifacts.preserve".to_string()),
+        )
+    })? {
+        let entry = entry.map_err(|e| {
+            Error::internal_io(
+                format!(
+                    "Failed to read directory entry in {}: {e}",
+                    source.display()
+                ),
+                Some("invocation.artifacts.preserve".to_string()),
+            )
+        })?;
+        let entry_source = entry.path();
+        let entry_target = target.join(entry.file_name());
+        let metadata = entry.metadata().map_err(|e| {
+            Error::internal_io(
+                format!("Failed to stat {}: {e}", entry_source.display()),
+                Some("invocation.artifacts.preserve".to_string()),
+            )
+        })?;
+
+        if metadata.is_dir() {
+            copy_directory(&entry_source, &entry_target)?;
+        } else if metadata.is_file() {
+            fs::copy(&entry_source, &entry_target).map_err(|e| {
+                Error::internal_io(
+                    format!(
+                        "Failed to copy {} to {}: {e}",
+                        entry_source.display(),
+                        entry_target.display()
+                    ),
+                    Some("invocation.artifacts.preserve".to_string()),
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "../../../tests/core/engine/invocation_test.rs"]
 mod invocation_test;
@@ -492,6 +567,39 @@ mod audit_coverage_tests {
             assert!(env
                 .iter()
                 .any(|(key, _)| key == "HOMEBOY_INVOCATION_TMP_DIR"));
+        });
+    }
+
+    #[test]
+    fn preserve_artifacts_copies_before_guard_cleanup() {
+        with_isolated_home(|_| {
+            let run_dir = RunDir::create().expect("run dir");
+            let original_artifact_path;
+            let preserved_path;
+            {
+                let guard = InvocationGuard::acquire(&run_dir, &InvocationRequirements::default())
+                    .expect("invocation guard");
+                original_artifact_path = guard.env.artifact_dir.join("nested/result.json");
+                fs::create_dir_all(original_artifact_path.parent().expect("artifact parent"))
+                    .expect("mkdir");
+                fs::write(&original_artifact_path, b"{\"ok\":true}").expect("artifact");
+
+                preserved_path = guard
+                    .preserve_artifacts(&run_dir)
+                    .expect("preserve artifacts")
+                    .expect("preserved path")
+                    .join("nested/result.json");
+
+                assert!(original_artifact_path.is_file());
+                assert!(preserved_path.is_file());
+            }
+
+            assert!(!original_artifact_path.exists());
+            assert_eq!(
+                fs::read_to_string(&preserved_path).expect("read preserved artifact"),
+                "{\"ok\":true}"
+            );
+            run_dir.cleanup();
         });
     }
 }

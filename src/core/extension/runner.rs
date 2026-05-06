@@ -224,6 +224,11 @@ impl ExtensionRunner {
             let _ = resource::record_extension_child_resource(run_dir_path, child_resource);
         }
 
+        if let (Some(run_dir_path), Some(invocation)) = (&self.run_dir_path, invocation.as_ref()) {
+            let run_dir = crate::engine::run_dir::RunDir::from_existing(run_dir_path.clone())?;
+            invocation.preserve_artifacts(&run_dir)?;
+        }
+
         Ok(RunnerOutput {
             exit_code: output.exit_code,
             success: output.success,
