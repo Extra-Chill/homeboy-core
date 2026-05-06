@@ -81,21 +81,41 @@ pub enum SemverBump {
     Major,
 }
 
+/// Static metadata for a [`SemverBump`] variant.
+///
+/// Centralizing label and rank in one descriptor keeps variant additions
+/// localized: a new variant only needs one new arm in
+/// [`SemverBump::descriptor`] instead of parallel arms scattered across
+/// every getter.
+struct SemverBumpDescriptor {
+    name: &'static str,
+    rank: u8,
+}
+
 impl SemverBump {
-    pub fn as_str(&self) -> &'static str {
+    const fn descriptor(self) -> SemverBumpDescriptor {
         match self {
-            SemverBump::Patch => "patch",
-            SemverBump::Minor => "minor",
-            SemverBump::Major => "major",
+            SemverBump::Patch => SemverBumpDescriptor {
+                name: "patch",
+                rank: 1,
+            },
+            SemverBump::Minor => SemverBumpDescriptor {
+                name: "minor",
+                rank: 2,
+            },
+            SemverBump::Major => SemverBumpDescriptor {
+                name: "major",
+                rank: 3,
+            },
         }
     }
 
+    pub fn as_str(&self) -> &'static str {
+        self.descriptor().name
+    }
+
     pub fn rank(&self) -> u8 {
-        match self {
-            SemverBump::Patch => 1,
-            SemverBump::Minor => 2,
-            SemverBump::Major => 3,
-        }
+        self.descriptor().rank
     }
 
     pub fn parse(value: &str) -> Option<Self> {

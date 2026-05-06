@@ -143,35 +143,59 @@ pub enum ExtensionCapability {
     Trace,
 }
 
+/// Static metadata for an [`ExtensionCapability`] variant.
+///
+/// Centralizing label, manifest-support probe, and script accessor in one
+/// descriptor keeps variant additions localized: a new capability only
+/// needs one new arm in [`ExtensionCapability::descriptor`] instead of
+/// parallel arms scattered across each getter / policy method.
+struct ExtensionCapabilityDescriptor {
+    label: &'static str,
+    has_manifest_support: fn(&ExtensionManifest) -> bool,
+    script_path: fn(&ExtensionManifest) -> Option<&str>,
+}
+
 impl ExtensionCapability {
-    pub(crate) fn label(self) -> &'static str {
+    fn descriptor(self) -> ExtensionCapabilityDescriptor {
         match self {
-            ExtensionCapability::Lint => "lint",
-            ExtensionCapability::Test => "test",
-            ExtensionCapability::Build => "build",
-            ExtensionCapability::Bench => "bench",
-            ExtensionCapability::Trace => "trace",
+            ExtensionCapability::Lint => ExtensionCapabilityDescriptor {
+                label: "lint",
+                has_manifest_support: ExtensionManifest::has_lint,
+                script_path: ExtensionManifest::lint_script,
+            },
+            ExtensionCapability::Test => ExtensionCapabilityDescriptor {
+                label: "test",
+                has_manifest_support: ExtensionManifest::has_test,
+                script_path: ExtensionManifest::test_script,
+            },
+            ExtensionCapability::Build => ExtensionCapabilityDescriptor {
+                label: "build",
+                has_manifest_support: ExtensionManifest::has_build,
+                script_path: ExtensionManifest::build_script,
+            },
+            ExtensionCapability::Bench => ExtensionCapabilityDescriptor {
+                label: "bench",
+                has_manifest_support: ExtensionManifest::has_bench,
+                script_path: ExtensionManifest::bench_script,
+            },
+            ExtensionCapability::Trace => ExtensionCapabilityDescriptor {
+                label: "trace",
+                has_manifest_support: ExtensionManifest::has_trace,
+                script_path: ExtensionManifest::trace_script,
+            },
         }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        self.descriptor().label
     }
 
     pub(crate) fn has_manifest_support(self, manifest: &ExtensionManifest) -> bool {
-        match self {
-            ExtensionCapability::Lint => manifest.has_lint(),
-            ExtensionCapability::Test => manifest.has_test(),
-            ExtensionCapability::Build => manifest.has_build(),
-            ExtensionCapability::Bench => manifest.has_bench(),
-            ExtensionCapability::Trace => manifest.has_trace(),
-        }
+        (self.descriptor().has_manifest_support)(manifest)
     }
 
     pub(crate) fn script_path(self, manifest: &ExtensionManifest) -> Option<&str> {
-        match self {
-            ExtensionCapability::Lint => manifest.lint_script(),
-            ExtensionCapability::Test => manifest.test_script(),
-            ExtensionCapability::Build => manifest.build_script(),
-            ExtensionCapability::Bench => manifest.bench_script(),
-            ExtensionCapability::Trace => manifest.trace_script(),
-        }
+        (self.descriptor().script_path)(manifest)
     }
 
     pub(crate) fn requires_script(self) -> bool {
