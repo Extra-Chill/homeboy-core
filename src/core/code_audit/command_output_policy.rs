@@ -3,6 +3,13 @@
 //! The audit is intentionally source-shape based: command modules should not
 //! independently own response modes, artifact emission, or success/error
 //! wrapping policy. The canonical output layer should own those contracts.
+//!
+//! The detector is shaped for binaries with central dispatch. Consumers built
+//! on a framework that owns dispatch per-subcommand declare a
+//! `framework_command_recognizers` rule via their extension manifest so this
+//! detector skips files where "duplication" is the framework contract rather
+//! than a refactor target. Core never names a specific framework — the
+//! recognizer rules are extension-owned. See Extra-Chill/homeboy#2335.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -11,6 +18,7 @@ use regex::Regex;
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
+use crate::component::FrameworkCommandRecognizer;
 
 const MIN_FILES: usize = 2;
 
@@ -20,7 +28,10 @@ struct PolicySite {
     functions: Vec<String>,
 }
 
-pub(super) fn run(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
+pub(super) fn run(
+    fingerprints: &[&FileFingerprint],
+    framework_recognizers: &[FrameworkCommandRecognizer],
+) -> Vec<Finding> {
     let mut groups: HashMap<String, Vec<PolicySite>> = HashMap::new();
 
     for fp in fingerprints {
@@ -30,14 +41,12 @@ pub(super) fn run(fingerprints: &[&FileFingerprint]) -> Vec<Finding> {
         if is_intentionally_command_specific(&fp.content) {
             continue;
         }
-        if is_wp_cli_command_module(&fp.content) {
-            // WP-CLI consumers register subcommands with `WP_CLI::add_command` and
-            // emit output through the framework contract (`WP_CLI::success`,
-            // `WP_CLI::error`, `WP_CLI::log`, `WP_CLI::print_value`). The
-            // "duplication" the detector sees on these modules is the framework
-            // contract itself, not a refactor target — there is no canonical
-            // command output layer to extract to without inventing one.
-            // See Extra-Chill/homeboy#2335.
+        if matches_framework_recognizer(&fp.content, framework_recognizers) {
+            // The file matched an extension-declared framework recognizer.
+            // "Duplication" inside framework-owned per-subcommand surfaces
+            // is the contract, not a refactor target. Core never names a
+            // specific framework — each ecosystem extension declares its
+            // own recognizer rule.
             continue;
         }
 
@@ -120,54 +129,17 @@ fn is_excluded_path(path: &str) -> bool {
         || lower.ends_with(".md")
 }
 
-/// Returns true when the file is a WP-CLI subcommand module.
+/// Returns true when any extension-declared recognizer matches the file.
 ///
-/// WP-CLI plugins register each subcommand with `WP_CLI::add_command` (or by
-/// extending `\WP_CLI_Command`) and emit output through the framework's
-/// per-command API: `WP_CLI::success`, `WP_CLI::error`, `WP_CLI::log`,
-/// `WP_CLI::print_value`, and `WP_CLI\Utils\format_items`. That is the
-/// framework contract — every subcommand calling `WP_CLI::success` is correct,
-/// not a smell. The `command_output_policy` detector is shaped for binaries
-/// with central dispatch (cf. homeboy's own #2249 refactor); it does not
-/// transfer to WP-CLI consumers because the framework owns dispatch
-/// per-subcommand. Skip these files entirely.
-///
-/// Recognition strategy (substring-based — cheap, no PHP parser):
-///
-/// 1. **Direct registration:** the file calls `WP_CLI::add_command` itself
-///    (top-level `Bootstrap.php`-style files inside a command directory).
-/// 2. **Direct framework subclass:** the file extends `\WP_CLI_Command`.
-/// 3. **Indirect framework subclass:** the file imports `WP_CLI` (via
-///    `use WP_CLI;` or fully qualified `\WP_CLI`) AND calls one of the
-///    framework's per-command output methods (`WP_CLI::success`,
-///    `WP_CLI::error`, `WP_CLI::log`, `WP_CLI::warning`, `WP_CLI::print_value`,
-///    `WP_CLI\Utils\format_items`). This catches plugins that put a thin
-///    `BaseCommand extends \WP_CLI_Command` shim between every command and
-///    the framework — the dominant idiomatic shape for non-trivial WP-CLI
-///    plugins (e.g. `data-machine`'s `inc/Cli/BaseCommand.php`). Without
-///    this, the scope guard misses the very files the issue reports.
-fn is_wp_cli_command_module(content: &str) -> bool {
-    if content.contains("WP_CLI::add_command")
-        || content.contains("extends WP_CLI_Command")
-        || content.contains("extends \\WP_CLI_Command")
-    {
-        return true;
-    }
-
-    let imports_wp_cli = content.contains("use WP_CLI;")
-        || content.contains("use \\WP_CLI;")
-        || content.contains("use WP_CLI ")
-        || content.contains("use \\WP_CLI ");
-    if !imports_wp_cli {
-        return false;
-    }
-
-    content.contains("WP_CLI::success")
-        || content.contains("WP_CLI::error")
-        || content.contains("WP_CLI::log")
-        || content.contains("WP_CLI::warning")
-        || content.contains("WP_CLI::print_value")
-        || content.contains("WP_CLI\\Utils\\format_items")
+/// Each [`FrameworkCommandRecognizer`] encodes the structural shape of a
+/// framework subcommand for one ecosystem (for example, framework-owned CLI
+/// commands, etc.). Core stays framework-agnostic; the rules live in
+/// extension manifests. Substring matching is intentional — cheap,
+/// language-agnostic, and avoids any per-framework parser dependency.
+fn matches_framework_recognizer(content: &str, recognizers: &[FrameworkCommandRecognizer]) -> bool {
+    recognizers
+        .iter()
+        .any(|recognizer| recognizer.matches(content))
 }
 
 fn is_intentionally_command_specific(content: &str) -> bool {
@@ -352,7 +324,7 @@ function execute_beta(ctx) {
 "#,
         );
 
-        let findings = run(&[&one, &two]);
+        let findings = run(&[&one, &two], &[]);
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].kind, AuditFinding::CommandOutputPolicy);
@@ -385,7 +357,7 @@ function run_beta(ctx) {
 "#,
         );
 
-        assert!(run(&[&one, &two]).is_empty());
+        assert!(run(&[&one, &two], &[]).is_empty());
     }
 
     #[test]
@@ -410,7 +382,7 @@ function run_alpha(ctx) {
 "#,
         );
 
-        assert!(run(&[&helper, &command]).is_empty());
+        assert!(run(&[&helper, &command], &[]).is_empty());
     }
 
     #[test]
@@ -436,139 +408,67 @@ function canonical(ctx) {
 "#,
         );
 
-        assert!(run(&[&test_module, &response_helper]).is_empty());
+        assert!(run(&[&test_module, &response_helper], &[]).is_empty());
+    }
+
+    /// Synthetic, framework-agnostic recognizer used purely to exercise the
+    /// extension hook from inside core tests. Real recognizer values come
+    /// from extension manifests; core never names a specific framework.
+    fn synthetic_recognizer() -> FrameworkCommandRecognizer {
+        FrameworkCommandRecognizer {
+            id: "synthetic-test-framework".to_string(),
+            requires_all: vec!["FRAMEWORK_REGISTER(".to_string()],
+            requires_any: vec![
+                "framework_emit_success".to_string(),
+                "framework_emit_error".to_string(),
+            ],
+            requires_any_groups: Vec::new(),
+        }
     }
 
     #[test]
-    fn skips_wp_cli_command_modules_using_framework_contract() {
-        // Negative case: idiomatic WP-CLI subcommands. Each module registers a
-        // command via `WP_CLI::add_command` (or extends `\WP_CLI_Command`) and
-        // calls the framework's per-command output API. The detector must NOT
-        // flag these even though every module ends up "duplicating" the
-        // success/error contract — that is the framework, not a smell.
-        // Regression coverage for Extra-Chill/homeboy#2335.
+    fn skips_files_matching_framework_recognizer() {
+        // Negative case: extension declares a recognizer for its framework's
+        // per-subcommand shape. Files emitting through the framework contract
+        // are skipped even though they otherwise look like duplication. Core
+        // stays framework-agnostic — the recognizer values come from an
+        // extension manifest, not from core.
         let alpha = fp(
-            "inc/Cli/Commands/AlphaCommand.php",
+            "src/commands/alpha.ext",
             r#"
-<?php
-WP_CLI::add_command('alpha do', AlphaCommand::class);
-
-class AlphaCommand extends \WP_CLI_Command {
-    public function do($args, $assoc_args) {
-        $format = $assoc_args['format'] ?? 'text';
-        if ($format === 'json') {
-            WP_CLI::print_value(['success' => true, 'message' => 'ok'], ['format' => 'json']);
-            return;
-        }
-        if (empty($args)) {
-            WP_CLI::error('missing arg');
-        }
-        WP_CLI::success('done');
-    }
+FRAMEWORK_REGISTER('alpha do', AlphaCommand);
+function run_alpha(ctx) {
+  if (ctx.output_format == "json") framework_emit_success({ value: ctx.value });
+  if (ctx.output_format == "markdown") framework_emit_success(renderMarkdown(ctx.value));
+  if (ctx.artifact_path) writeArtifact(ctx.artifact_path, ctx.value);
 }
 "#,
         );
         let beta = fp(
-            "inc/Cli/Commands/BetaCommand.php",
+            "src/commands/beta.ext",
             r#"
-<?php
-WP_CLI::add_command('beta run', BetaCommand::class);
-
-class BetaCommand extends \WP_CLI_Command {
-    public function run($args, $assoc_args) {
-        $format = $assoc_args['format'] ?? 'table';
-        if ($format === 'json') {
-            WP_CLI::print_value(['success' => false, 'error' => 'nope'], ['format' => 'json']);
-            return;
-        }
-        if (!isset($args[0])) {
-            WP_CLI::error('boom');
-        }
-        WP_CLI::log('working');
-        WP_CLI::success('finished');
-    }
+FRAMEWORK_REGISTER('beta run', BetaCommand);
+function run_beta(ctx) {
+  if (ctx.output_format == "json") framework_emit_error({ err: ctx.err });
+  if (ctx.output_format == "markdown") framework_emit_error(formatMarkdown(ctx.err));
+  if (ctx.artifact_path) saveArtifact(ctx.artifact_path, ctx.err);
 }
 "#,
         );
 
+        let recognizers = vec![synthetic_recognizer()];
         assert!(
-            run(&[&alpha, &beta]).is_empty(),
-            "WP-CLI command modules using framework contract must not be flagged"
+            run(&[&alpha, &beta], &recognizers).is_empty(),
+            "files matching a framework recognizer must not be flagged"
         );
     }
 
     #[test]
-    fn skips_wp_cli_command_modules_via_intermediate_base_class() {
-        // Real-world shape from data-machine (and many other non-trivial
-        // WP-CLI plugins): commands extend an in-tree `BaseCommand` that
-        // itself extends `\WP_CLI_Command`. Registration happens centrally in
-        // a `Bootstrap.php`. Each command file imports `WP_CLI` and emits
-        // output through the framework contract — that's the WP-CLI shape,
-        // not a refactor target. Regression coverage for
-        // Extra-Chill/homeboy#2335.
-        let alpha = fp(
-            "inc/Cli/Commands/AlphaCommand.php",
-            r#"
-<?php
-namespace Plugin\Cli\Commands;
-
-use Plugin\Cli\BaseCommand;
-use WP_CLI;
-
-class AlphaCommand extends BaseCommand {
-    public function list_things($args, $assoc_args) {
-        $format = $assoc_args['format'] ?? 'table';
-        if ($format === 'json') {
-            WP_CLI::print_value($items, ['format' => 'json']);
-            return;
-        }
-        if (empty($items)) {
-            WP_CLI::error('no items');
-        }
-        WP_CLI::success(sprintf('listed %d', count($items)));
-    }
-}
-"#,
-        );
-        let beta = fp(
-            "inc/Cli/Commands/BetaCommand.php",
-            r#"
-<?php
-namespace Plugin\Cli\Commands;
-
-use Plugin\Cli\BaseCommand;
-use WP_CLI;
-
-class BetaCommand extends BaseCommand {
-    public function run($args, $assoc_args) {
-        $format = $assoc_args['format'] ?? 'text';
-        if ($format === 'json') {
-            WP_CLI::print_value($result, ['format' => 'json']);
-            return;
-        }
-        if (!isset($args[0])) {
-            WP_CLI::error('missing arg');
-        }
-        WP_CLI::log('working');
-        WP_CLI::success('done');
-    }
-}
-"#,
-        );
-
-        assert!(
-            run(&[&alpha, &beta]).is_empty(),
-            "WP-CLI command modules using an intermediate BaseCommand must not be flagged"
-        );
-    }
-
-    #[test]
-    fn fires_on_non_wp_cli_command_duplication() {
-        // Positive case: parallel-shape command modules with custom response
-        // mode branching, success/error envelopes, and artifact emission —
-        // none of them WP-CLI consumers. The detector must still fire so
-        // homeboy's own #2249 surface (and similar non-framework duplication)
-        // remains covered.
+    fn fires_when_recognizer_does_not_match() {
+        // Positive case: parallel-shape command modules with response-mode
+        // branching, success/error envelopes, and artifact emission. No
+        // recognizer matches, so the detector still fires — covering homeboy's
+        // own #2249 surface and any non-framework duplication.
         let one = fp(
             "src/commands/alpha.rs",
             r#"
@@ -593,9 +493,41 @@ fn run_beta(ctx: Context) {
 "#,
         );
 
-        let findings = run(&[&one, &two]);
-        assert_eq!(findings.len(), 1, "non-WP-CLI duplication must still fire");
+        let findings = run(&[&one, &two], &[synthetic_recognizer()]);
+        assert_eq!(
+            findings.len(),
+            1,
+            "duplication outside any recognized framework must still fire"
+        );
         assert_eq!(findings[0].kind, AuditFinding::CommandOutputPolicy);
+    }
+
+    #[test]
+    fn empty_recognizers_match_nothing() {
+        // Sanity: when no extension declares a recognizer, the detector
+        // behaves exactly as it did before the extension hook was added.
+        let one = fp(
+            "src/commands/alpha.rs",
+            r#"
+fn run_alpha(ctx: Context) {
+    if ctx.output_format == "json" { return json!({ "success": true, "message": ctx.value }); }
+    if ctx.output_format == "markdown" { return render_markdown(ctx.value); }
+    if let Some(path) = ctx.artifact_path { write_artifact(path, ctx.value); }
+}
+"#,
+        );
+        let two = fp(
+            "src/commands/beta.rs",
+            r#"
+fn run_beta(ctx: Context) {
+    if ctx.output_format == "json" { return json!({ "success": false, "error": ctx.err }); }
+    if ctx.output_format == "markdown" { return format_markdown(ctx.err); }
+    if let Some(path) = ctx.artifact_path { save_artifact(path, ctx.err); }
+}
+"#,
+        );
+
+        assert_eq!(run(&[&one, &two], &[]).len(), 1);
     }
 
     #[test]
@@ -635,6 +567,6 @@ mod tests {
 "#,
         );
 
-        assert!(run(&[&one, &two]).is_empty());
+        assert!(run(&[&one, &two], &[]).is_empty());
     }
 }

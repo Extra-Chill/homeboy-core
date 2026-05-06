@@ -36,6 +36,14 @@ pub struct AuditConfig {
     /// are merged with the built-in generic floor lists.
     #[serde(default, skip_serializing_if = "DuplicationDetectorConfig::is_empty")]
     pub duplication_detector: DuplicationDetectorConfig,
+    /// Extension-owned recognizers that mark a file as a framework subcommand.
+    ///
+    /// Used by `command_output_policy` to scope itself out of files where
+    /// "duplication" is the framework contract rather than a refactor target.
+    /// Core never names a specific framework — extensions declare which
+    /// substring patterns identify their framework's per-subcommand surface.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub framework_command_recognizers: Vec<FrameworkCommandRecognizer>,
 }
 
 /// Extension-supplied call-name lists for the parallel-implementation /
@@ -248,6 +256,71 @@ pub enum RequestedDetectorRuleBody {
     },
 }
 
+/// Recognizer rule that flags a file as a framework subcommand.
+///
+/// A file matches the rule when:
+///
+/// 1. It contains every substring in `requires_all` (zero entries = trivially
+///    satisfied), AND
+/// 2. Either `requires_any` is empty, or it contains at least one substring
+///    in `requires_any`, AND
+/// 3. Every `requires_any_groups` group contains at least one matching
+///    substring.
+///
+/// `requires_any_groups` lets an extension express shapes like:
+///
+/// ```text
+/// (any framework import marker) AND (any framework output marker)
+/// ```
+///
+/// Multiple recognizers in the same `AuditConfig` are OR'd together: a file
+/// matches if any recognizer matches. Substring matching is intentional —
+/// cheap, language-agnostic, and avoids per-framework parser dependencies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FrameworkCommandRecognizer {
+    /// Human-readable rule label. Core never interprets this string; it is
+    /// surfaced in debug logging and helps extension authors trace which
+    /// rule fired for a given file.
+    pub id: String,
+    /// All substrings that must be present in the file content.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires_all: Vec<String>,
+    /// At least one of these substrings must be present in the file content.
+    /// An empty list disables this constraint (acts as wildcard).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires_any: Vec<String>,
+    /// Every nested group must have at least one substring present in the file
+    /// content. Empty nested groups are ignored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires_any_groups: Vec<Vec<String>>,
+}
+
+impl FrameworkCommandRecognizer {
+    /// Returns true when `content` matches this recognizer.
+    pub fn matches(&self, content: &str) -> bool {
+        if !self
+            .requires_all
+            .iter()
+            .all(|needle| content.contains(needle))
+        {
+            return false;
+        }
+
+        if self.requires_any.is_empty() {
+            return self.requires_any_groups.iter().all(|group| {
+                group.is_empty() || group.iter().any(|needle| content.contains(needle))
+            });
+        }
+
+        self.requires_any
+            .iter()
+            .any(|needle| content.contains(needle))
+            && self.requires_any_groups.iter().all(|group| {
+                group.is_empty() || group.iter().any(|needle| content.contains(needle))
+            })
+    }
+}
+
 fn default_requested_detector_severity() -> String {
     "warning".to_string()
 }
@@ -268,6 +341,7 @@ impl AuditConfig {
             && self.requested_detectors.is_empty()
             && self.core_boundary_leaks.is_empty()
             && self.duplication_detector.is_empty()
+            && self.framework_command_recognizers.is_empty()
     }
 
     pub fn merge(&mut self, other: &AuditConfig) {
@@ -296,6 +370,15 @@ impl AuditConfig {
                 .any(|existing| existing.id == rule.id)
             {
                 self.requested_detectors.push(rule.clone());
+            }
+        }
+        for recognizer in &other.framework_command_recognizers {
+            if !self
+                .framework_command_recognizers
+                .iter()
+                .any(|existing| existing.id == recognizer.id)
+            {
+                self.framework_command_recognizers.push(recognizer.clone());
             }
         }
     }
@@ -360,5 +443,26 @@ mod tests {
             config.core_boundary_leaks.allow_line_contains,
             vec!["allow-core-boundary-example"]
         );
+    }
+
+    #[test]
+    fn framework_command_recognizer_requires_each_any_group() {
+        let recognizer = FrameworkCommandRecognizer {
+            id: "test-framework".to_string(),
+            requires_all: vec!["command module".to_string()],
+            requires_any: Vec::new(),
+            requires_any_groups: vec![
+                vec!["import Framework".to_string(), "use Framework".to_string()],
+                vec![
+                    "Framework.success".to_string(),
+                    "Framework.error".to_string(),
+                ],
+            ],
+        };
+
+        assert!(recognizer.matches("command module\nuse Framework\nFramework.success('done')"));
+        assert!(!recognizer.matches("command module\nuse Framework"));
+        assert!(!recognizer.matches("command module\nFramework.success('done')"));
+        assert!(!recognizer.matches("use Framework\nFramework.success('done')"));
     }
 }

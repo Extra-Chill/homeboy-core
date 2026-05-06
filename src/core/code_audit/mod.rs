@@ -1225,7 +1225,10 @@ fn audit_internal(
 
     // Phase 4x: Scattered command response/output policy ownership.
     let command_output_findings = if plan.run_command_output_policy {
-        command_output_policy::run(&all_fingerprints)
+        command_output_policy::run(
+            &all_fingerprints,
+            &audit_config.framework_command_recognizers,
+        )
     } else {
         Vec::new()
     };
