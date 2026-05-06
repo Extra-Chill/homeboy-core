@@ -663,7 +663,14 @@ mod tests {
                 panic!("expected artifacts output");
             };
             assert_eq!(output.artifacts.len(), 1);
-            assert_eq!(output.artifacts[0].path, artifact_path.to_string_lossy());
+            let reported_path = std::path::PathBuf::from(&output.artifacts[0].path);
+            let expected_file_name = format!("{}-trace-results.json", output.artifacts[0].id);
+            assert_ne!(reported_path, artifact_path);
+            assert!(reported_path.is_file());
+            assert_eq!(
+                reported_path.file_name().and_then(|name| name.to_str()),
+                Some(expected_file_name.as_str())
+            );
         });
     }
 
