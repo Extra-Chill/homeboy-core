@@ -849,7 +849,11 @@ fn audit_internal(
 
     // Phase 4d2: Parallel implementation detection (similar call patterns across files)
     let parallel_findings = if plan.run_duplication {
-        duplication::detect_parallel_implementations(&all_fingerprints, &convention_methods)
+        duplication::detect_parallel_implementations(
+            &all_fingerprints,
+            &convention_methods,
+            &audit_config.duplication_detector,
+        )
     } else {
         Vec::new()
     };

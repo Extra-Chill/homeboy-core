@@ -30,6 +30,44 @@ pub struct AuditConfig {
     /// Configurable ecosystem-term checks for core-owned source boundaries.
     #[serde(default, skip_serializing_if = "CoreBoundaryLeakConfig::is_empty")]
     pub core_boundary_leaks: CoreBoundaryLeakConfig,
+    /// Extension-owned call-name lists used by the duplication /
+    /// parallel-implementation detector to filter out language- and
+    /// framework-specific noise. Core never interprets these strings; they
+    /// are merged with the built-in generic floor lists.
+    #[serde(default, skip_serializing_if = "DuplicationDetectorConfig::is_empty")]
+    pub duplication_detector: DuplicationDetectorConfig,
+}
+
+/// Extension-supplied call-name lists for the parallel-implementation /
+/// duplication detector.
+///
+/// These augment — they do not replace — the built-in generic floors
+/// (`to_string`, `clone`, `unwrap`, etc.) hard-coded in core. Core never
+/// inspects these strings; it just merges them into the filter sets it
+/// already uses on call sequences.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct DuplicationDetectorConfig {
+    /// Function/method names treated as trivial — too generic to carry
+    /// workflow signal in the host language/framework. Merged with the
+    /// built-in generic list (to_string, clone, len, etc.).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trivial_calls: Vec<String>,
+    /// Function/method names treated as plumbing — useful in a body but
+    /// too generic to flag as parallel implementation. Merged with the
+    /// built-in plumbing list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plumbing_calls: Vec<String>,
+}
+
+impl DuplicationDetectorConfig {
+    pub fn is_empty(&self) -> bool {
+        self.trivial_calls.is_empty() && self.plumbing_calls.is_empty()
+    }
+
+    fn merge(&mut self, other: &DuplicationDetectorConfig) {
+        extend_unique(&mut self.trivial_calls, &other.trivial_calls);
+        extend_unique(&mut self.plumbing_calls, &other.plumbing_calls);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -229,6 +267,7 @@ impl AuditConfig {
             && self.known_symbols.is_empty()
             && self.requested_detectors.is_empty()
             && self.core_boundary_leaks.is_empty()
+            && self.duplication_detector.is_empty()
     }
 
     pub fn merge(&mut self, other: &AuditConfig) {
@@ -249,6 +288,7 @@ impl AuditConfig {
         extend_unique(&mut self.convention_tag_globs, &other.convention_tag_globs);
         self.known_symbols.merge(&other.known_symbols);
         self.core_boundary_leaks.merge(&other.core_boundary_leaks);
+        self.duplication_detector.merge(&other.duplication_detector);
         for rule in &other.requested_detectors {
             if !self
                 .requested_detectors
