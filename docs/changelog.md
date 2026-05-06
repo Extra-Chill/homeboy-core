@@ -4,6 +4,34 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.158.0] - 2026-05-06
+
+### Added
+- extension-supplied trivial/plumbing call lists for parallel-implementation detector
+- expose computed drift_files for autofix consumers
+
+### Changed
+- move repeated enum dispatch onto impl methods
+- refactor(update-check): share cache primitives between cli and extension update checks
+- unify recursive directory copy helpers
+- extract shared files_match helper
+
+### Fixed
+- remove Homeboy-specific core smell detectors
+- stabilize intra-method duplicate findings
+- remove core ecosystem wording leaks
+- move framework command scopes into extension config
+- expect persisted run artifact paths
+- remove deploy planning duplicate error block
+- body-shape gate for parallel-implementation detector
+- scope command_output_policy out of WP-CLI consumers
+- store rig trace baselines outside component checkouts
+- resolve HEAD version paths against git toplevel for monorepo components (#2327)
+- always pgid+cleanup local command spawns
+- preserve invocation artifacts before cleanup
+- persist bench workload artifacts
+- persist bench observation artifacts
+
 ## [0.157.1] - 2026-05-05
 
 ### Changed
