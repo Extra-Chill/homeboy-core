@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn framework_command_recognizer_requires_each_any_group() {
+    fn test_matches() {
         let recognizer = FrameworkCommandRecognizer {
             id: "test-framework".to_string(),
             requires_all: vec!["command module".to_string()],
