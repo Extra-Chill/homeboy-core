@@ -65,6 +65,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_now_unix() {
+        assert!(now_unix() > 0);
+    }
+
+    #[test]
+    fn test_cache_path() {
+        let path = cache_path("example_update_check.json").expect("homeboy path resolves");
+
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("example_update_check.json")
+        );
+    }
+
+    #[test]
     fn fresh_when_recent() {
         assert!(is_cache_fresh(now_unix().saturating_sub(10), 100));
     }
