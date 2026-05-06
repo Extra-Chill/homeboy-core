@@ -1338,6 +1338,82 @@ mod tests {
         assert!(collect_head_version_mismatches(&component, "0.6.13").is_none());
     }
 
+    /// Fixture: a git repo whose toplevel contains a `subdir/` with the
+    /// version target file. `component.local_path` points at `<toplevel>/subdir`,
+    /// NOT the git toplevel. This mirrors the monorepo-extension layout
+    /// (`homeboy-extensions/wordpress`, `homeboy-extensions/swift`, etc.) that
+    /// triggers issue #2327.
+    fn plugin_repo_at_subdir(
+        committed_version: &str,
+        subdir: &str,
+    ) -> (tempfile::TempDir, Component) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let toplevel = temp.path();
+        run_in(toplevel, &["git", "init", "-q"]);
+        run_in(toplevel, &["git", "config", "user.email", "test@example.com"]);
+        run_in(toplevel, &["git", "config", "user.name", "Test"]);
+        run_in(toplevel, &["git", "config", "commit.gpgsign", "false"]);
+
+        let sub = toplevel.join(subdir);
+        std::fs::create_dir_all(&sub).expect("create subdir");
+
+        let plugin = format!(
+            "<?php\n/*\nPlugin Name: Fixture\nVersion: {}\n*/\n",
+            committed_version
+        );
+        std::fs::write(sub.join("plugin.php"), plugin).expect("write plugin");
+        run_in(toplevel, &["git", "add", "."]);
+        run_in(toplevel, &["git", "commit", "-q", "-m", "Initial commit"]);
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: sub.to_string_lossy().to_string(),
+            version_targets: Some(vec![VersionTarget {
+                file: "plugin.php".to_string(),
+                pattern: Some(r"(?:Version|version)[:=]\s+([0-9]+\.[0-9]+\.[0-9]+)".to_string()),
+            }]),
+            ..Component::default()
+        };
+        (temp, component)
+    }
+
+    #[test]
+    fn collect_head_version_mismatches_works_in_monorepo_subdir() {
+        // Issue #2327: when the component's local_path is a subdir of the git
+        // toplevel (monorepo extension layout), `git show HEAD:<path>` must
+        // resolve `<path>` against the git toplevel, not against
+        // component.local_path. Before the fix this returns `None` because
+        // `git show HEAD:plugin.php` fails ("path subdir/plugin.php exists,
+        // but not plugin.php"), which makes the HEAD invariant treat the
+        // committed version as `<unreadable>` and either flag a spurious
+        // mismatch or silently pass when comparing `None != Some(expected)`.
+        let (_temp, component) = plugin_repo_at_subdir("0.6.13", "wordpress");
+
+        // HEAD has 0.6.13. With a correct toplevel-relative path resolution,
+        // `read_version_at_head` returns Some("0.6.13") and the mismatch
+        // collector returns None.
+        assert!(
+            collect_head_version_mismatches(&component, "0.6.13").is_none(),
+            "HEAD has the expected version; mismatch collector should return None \
+             but the bug makes git show fail and mismatches are reported with \
+             found = None"
+        );
+
+        // And when HEAD does NOT have the expected version, the collector
+        // must still surface the real committed value (0.6.13) — not None.
+        let mismatches = collect_head_version_mismatches(&component, "0.7.0")
+            .expect("HEAD does not have 0.7.0; mismatch expected");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].file, "plugin.php");
+        assert_eq!(mismatches[0].expected, "0.7.0");
+        assert_eq!(
+            mismatches[0].found.as_deref(),
+            Some("0.6.13"),
+            "found value must be the version actually committed at HEAD, \
+             not None from a failed `git show HEAD:<wrong-path>`"
+        );
+    }
+
     #[test]
     fn git_tag_step_refuses_to_tag_when_head_lacks_new_version() {
         // The orphan-tag scenario from issue #2234: the in-memory state.version
