@@ -168,6 +168,15 @@ pub fn rig_logs_dir(id: &str) -> Result<PathBuf> {
     Ok(rig_state_dir(id)?.join("logs"))
 }
 
+/// Rig-owned baseline root (~/.config/homeboy/rigs/{id}.state/baselines/).
+///
+/// Baselines for rig-owned workloads (e.g. trace --rig) live here instead of
+/// in the target component checkout. The component repo may be unrelated to
+/// Homeboy and must stay clean.
+pub fn rig_baseline_root(id: &str) -> Result<PathBuf> {
+    Ok(rig_state_dir(id)?.join("baselines"))
+}
+
 /// Active rig run leases (~/.config/homeboy/rig-leases/).
 pub fn rig_leases_dir() -> Result<PathBuf> {
     Ok(homeboy()?.join("rig-leases"))
@@ -376,6 +385,21 @@ mod tests {
     fn test_rig_logs_dir_nested_under_state_dir() {
         let path = rig_logs_dir("studio-dev").expect("rig_logs_dir resolves");
         assert_eq!(path.file_name().and_then(|s| s.to_str()), Some("logs"));
+        assert_eq!(
+            path.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str()),
+            Some("studio-dev.state")
+        );
+    }
+
+    #[test]
+    fn test_rig_baseline_root_nested_under_state_dir() {
+        let path = rig_baseline_root("studio-dev").expect("rig_baseline_root resolves");
+        assert_eq!(
+            path.file_name().and_then(|s| s.to_str()),
+            Some("baselines")
+        );
         assert_eq!(
             path.parent()
                 .and_then(|p| p.file_name())

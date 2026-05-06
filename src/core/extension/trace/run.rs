@@ -15,6 +15,7 @@ use crate::extension::{
     build_scenario_runner, path_list_env_value, resolve_execution_context, stderr_tail,
     ExtensionCapability, ExtensionExecutionContext, ScenarioRunnerOptions,
 };
+use crate::paths;
 use crate::rig::RigStateSnapshot;
 
 use super::attach::{append_attach_observations, observe_trace_attachments, TraceAttachment};
@@ -314,7 +315,7 @@ fn run_trace_workflow_with_context(
         runner_output.exit_code
     };
     let rig_id = args.rig_id.as_deref();
-    let source_path = Path::new(component_path);
+    let baseline_root = resolve_trace_baseline_root(component_path, rig_id)?;
     let mut baseline_comparison = None;
     let mut baseline_exit_override = None;
     let mut hints = Vec::new();
@@ -324,13 +325,17 @@ fn run_trace_workflow_with_context(
 
     if args.baseline_flags.baseline && status == "pass" && has_baseline_items {
         if let Some(ref parsed) = results {
-            let _ =
-                super::baseline::save_baseline(source_path, &args.component_id, parsed, rig_id)?;
+            let _ = super::baseline::save_baseline(
+                &baseline_root,
+                &args.component_id,
+                parsed,
+                rig_id,
+            )?;
         }
     }
     if has_baseline_items && !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
         if let Some(ref parsed) = results {
-            if let Some(existing) = super::baseline::load_baseline(source_path, rig_id) {
+            if let Some(existing) = super::baseline::load_baseline(&baseline_root, rig_id) {
                 let comparison = super::baseline::compare(
                     parsed,
                     &existing,
@@ -341,7 +346,7 @@ fn run_trace_workflow_with_context(
                     baseline_exit_override = Some(1);
                 } else if comparison.has_improvements && args.baseline_flags.ratchet {
                     let _ = super::baseline::save_baseline(
-                        source_path,
+                        &baseline_root,
                         &args.component_id,
                         parsed,
                         rig_id,
@@ -895,6 +900,34 @@ fn extra_workloads_env_value(paths: &[PathBuf]) -> Result<String> {
     path_list_env_value("trace_workloads", paths)
 }
 
+/// Resolve the directory that holds the trace baseline `homeboy.json`.
+///
+/// Non-rig traces keep the historical component-local behavior — the baseline
+/// is co-located with the project's `homeboy.json` in the component checkout.
+/// Rig-owned traces store baselines in the rig state directory so that
+/// `homeboy trace --rig <id>` against an unrelated component checkout (e.g.
+/// `Automattic/studio`) never creates or mutates a `homeboy.json` inside that
+/// repo. See Extra-Chill/homeboy#2329.
+fn resolve_trace_baseline_root(component_path: &str, rig_id: Option<&str>) -> Result<PathBuf> {
+    match rig_id {
+        Some(id) => {
+            let root = paths::rig_baseline_root(id)?;
+            std::fs::create_dir_all(&root).map_err(|e| {
+                Error::internal_io(
+                    format!(
+                        "Failed to create rig baseline root {}: {}",
+                        root.display(),
+                        e
+                    ),
+                    Some("trace.baseline.rig_root.create".to_string()),
+                )
+            })?;
+            Ok(root)
+        }
+        None => Ok(PathBuf::from(component_path)),
+    }
+}
+
 fn failure_from_output(args: &TraceRunWorkflowArgs, output: &RunnerOutput) -> TraceRunFailure {
     TraceRunFailure {
         component_id: args.component_id.clone(),
@@ -974,6 +1007,115 @@ mod tests {
             serde_json::json!({}),
         );
         assert!(trace_is_unclaimed(&unsupported));
+    }
+
+    #[test]
+    fn resolve_trace_baseline_root_without_rig_returns_component_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let component_path = temp.path().to_string_lossy().to_string();
+        let root = resolve_trace_baseline_root(&component_path, None).unwrap();
+        assert_eq!(root, PathBuf::from(&component_path));
+        // Crucially, no homeboy.json gets created in the component checkout
+        // just by resolving — that only happens when a baseline is saved.
+        assert!(!temp.path().join("homeboy.json").exists());
+    }
+
+    #[test]
+    fn resolve_trace_baseline_root_with_rig_uses_rig_state_dir_and_skips_component_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let component_path = temp.path().to_string_lossy().to_string();
+        let rig_id = format!("__hb-trace-baseline-test-{}", std::process::id());
+
+        let root = resolve_trace_baseline_root(&component_path, Some(&rig_id)).unwrap();
+
+        assert!(
+            root.ends_with(format!("{}.state/baselines", rig_id)),
+            "rig baseline root should live under <id>.state/baselines, got {}",
+            root.display()
+        );
+        assert!(
+            root.exists(),
+            "rig baseline root should be created on resolve"
+        );
+        assert!(
+            !root.starts_with(temp.path()),
+            "rig baseline root must not live inside the component checkout"
+        );
+        assert!(
+            !temp.path().join("homeboy.json").exists(),
+            "resolving a rig baseline root must not touch component homeboy.json"
+        );
+
+        // Cleanup: best-effort remove the rig state dir we created.
+        if let Some(state_dir) = root.parent() {
+            let _ = std::fs::remove_dir_all(state_dir);
+        }
+    }
+
+    #[test]
+    fn rig_save_baseline_does_not_write_component_homeboy_json() {
+        use crate::extension::trace::baseline;
+        use crate::extension::trace::parsing::{
+            TraceResults, TraceSpanResult, TraceSpanStatus, TraceStatus,
+        };
+
+        let temp = tempfile::tempdir().unwrap();
+        let component_path = temp.path().to_string_lossy().to_string();
+        let rig_id = format!("__hb-trace-save-test-{}", std::process::id());
+
+        let baseline_root =
+            resolve_trace_baseline_root(&component_path, Some(&rig_id)).unwrap();
+
+        let results = TraceResults {
+            component_id: "studio".to_string(),
+            scenario_id: "create-site".to_string(),
+            status: TraceStatus::Pass,
+            summary: None,
+            failure: None,
+            rig: None,
+            timeline: Vec::new(),
+            span_definitions: Vec::new(),
+            span_results: vec![TraceSpanResult {
+                id: "submit_to_cli".to_string(),
+                from: "ui.submit".to_string(),
+                to: "cli.start".to_string(),
+                status: TraceSpanStatus::Ok,
+                duration_ms: Some(120),
+                from_t_ms: Some(0),
+                to_t_ms: Some(120),
+                missing: Vec::new(),
+                message: None,
+            }],
+            assertions: Vec::new(),
+            temporal_assertions: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        let written = baseline::save_baseline(
+            &baseline_root,
+            "studio",
+            &results,
+            Some(&rig_id),
+        )
+        .expect("rig baseline saves into rig state dir");
+
+        assert!(
+            written.starts_with(&baseline_root),
+            "rig baseline must be written under the rig baseline root, got {}",
+            written.display()
+        );
+        assert!(
+            !temp.path().join("homeboy.json").exists(),
+            "rig baseline save must not write homeboy.json into the component checkout"
+        );
+
+        let loaded = baseline::load_baseline(&baseline_root, Some(&rig_id))
+            .expect("rig baseline loads from rig state dir");
+        assert_eq!(loaded.metadata.spans[0].id, "submit_to_cli");
+
+        if let Some(state_dir) = baseline_root.parent() {
+            let _ = std::fs::remove_dir_all(state_dir);
+        }
     }
 
     #[test]
