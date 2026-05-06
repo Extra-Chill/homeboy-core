@@ -30,13 +30,41 @@ enum GuardKind {
     Constant,
 }
 
+/// Static metadata for a [`GuardKind`] variant.
+///
+/// Centralizing the guard label and the matching `KnownSymbols` lookup in
+/// one descriptor keeps variant additions localized: a new guard kind only
+/// needs one new arm in [`GuardKind::descriptor`] instead of parallel arms
+/// scattered across each getter / policy method.
+struct GuardKindDescriptor {
+    label: &'static str,
+    has_symbol: fn(&KnownSymbols, &str) -> bool,
+}
+
 impl GuardKind {
-    fn label(self) -> &'static str {
+    fn descriptor(self) -> GuardKindDescriptor {
         match self {
-            GuardKind::Function => "function_exists",
-            GuardKind::Class => "class_exists",
-            GuardKind::Constant => "defined",
+            GuardKind::Function => GuardKindDescriptor {
+                label: "function_exists",
+                has_symbol: |known, symbol| known.has_function(symbol),
+            },
+            GuardKind::Class => GuardKindDescriptor {
+                label: "class_exists",
+                has_symbol: |known, symbol| known.has_class(symbol),
+            },
+            GuardKind::Constant => GuardKindDescriptor {
+                label: "defined",
+                has_symbol: |known, symbol| known.has_constant(symbol),
+            },
         }
+    }
+
+    fn label(self) -> &'static str {
+        self.descriptor().label
+    }
+
+    fn symbol_is_known(self, known: &KnownSymbols, symbol: &str) -> bool {
+        (self.descriptor().has_symbol)(known, symbol)
     }
 }
 
@@ -65,7 +93,7 @@ pub(super) fn run_with_config(
             if guard_is_contextual(fp, &guard, audit_config) {
                 continue;
             }
-            if symbol_is_known(&known, &guard) {
+            if guard.kind.symbol_is_known(&known, &guard.symbol) {
                 findings.push(Finding {
                     convention: "dead_guard".to_string(),
                     severity: Severity::Warning,
@@ -89,14 +117,6 @@ pub(super) fn run_with_config(
 
     findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.description.cmp(&b.description)));
     findings
-}
-
-fn symbol_is_known(known: &KnownSymbols, guard: &Guard) -> bool {
-    match guard.kind {
-        GuardKind::Function => known.has_function(&guard.symbol),
-        GuardKind::Class => known.has_class(&guard.symbol),
-        GuardKind::Constant => known.has_constant(&guard.symbol),
-    }
 }
 
 fn guard_is_contextual(fp: &FileFingerprint, guard: &Guard, audit_config: &AuditConfig) -> bool {
