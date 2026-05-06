@@ -254,14 +254,7 @@ fn config_matches_source(config_path: &Path, source_path: &Path) -> bool {
 
     match (config_path.canonicalize(), source_path.canonicalize()) {
         (Ok(config), Ok(source)) if config == source => true,
-        (Ok(_), Ok(_)) => files_match(config_path, source_path),
-        _ => false,
-    }
-}
-
-fn files_match(left: &Path, right: &Path) -> bool {
-    match (fs::read(left), fs::read(right)) {
-        (Ok(left), Ok(right)) => left == right,
+        (Ok(_), Ok(_)) => super::files_match(config_path, source_path),
         _ => false,
     }
 }

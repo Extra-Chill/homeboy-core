@@ -75,6 +75,18 @@ pub use workloads::{
 use crate::error::{Error, Result};
 use crate::paths;
 use std::fs;
+use std::path::Path;
+
+/// Byte-compare the contents of two files.
+///
+/// Returns `true` only when both files are readable and have identical bytes.
+/// Any I/O error on either side yields `false`.
+pub(crate) fn files_match(left: &Path, right: &Path) -> bool {
+    match (fs::read(left), fs::read(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
 
 fn read_config(id: &str) -> Result<(RigSpec, Option<String>)> {
     let path = paths::rig_config(id)?;
