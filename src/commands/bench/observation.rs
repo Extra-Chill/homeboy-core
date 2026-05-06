@@ -330,7 +330,14 @@ fn rewrite_bench_results_file(results: &BenchResults, run_dir: &RunDir) {
 
 fn resolve_bench_artifact_path(path: &str, run_dir: &RunDir) -> PathBuf {
     let artifact_path = PathBuf::from(path);
-    if artifact_path.is_absolute() || artifact_path.exists() {
+    if artifact_path.exists() {
+        return artifact_path;
+    }
+    if artifact_path.is_absolute() {
+        if let Some(preserved_path) = resolve_preserved_invocation_artifact(&artifact_path, run_dir)
+        {
+            return preserved_path;
+        }
         return artifact_path;
     }
     let run_dir_path = run_dir.path().join(path);
@@ -338,6 +345,30 @@ fn resolve_bench_artifact_path(path: &str, run_dir: &RunDir) -> PathBuf {
         return run_dir_path;
     }
     artifact_path
+}
+
+fn resolve_preserved_invocation_artifact(path: &Path, run_dir: &RunDir) -> Option<PathBuf> {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        let name = component.as_os_str().to_string_lossy();
+        let Some(short_id) = name.strip_suffix(".a") else {
+            continue;
+        };
+
+        let mut preserved = run_dir
+            .path()
+            .join("invocations")
+            .join(format!("inv-{short_id}"))
+            .join("artifacts");
+        for rest in components {
+            preserved.push(rest.as_os_str());
+        }
+        if preserved.exists() {
+            return Some(preserved);
+        }
+        return None;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -617,6 +648,76 @@ mod tests {
             assert_eq!(
                 persisted_results_json["scenarios"][0]["artifacts"]["semantic"]["path"],
                 persisted_path
+            );
+        });
+    }
+
+    #[test]
+    fn bench_observation_rewrites_cleaned_short_invocation_artifact_paths() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let run_dir = RunDir::create().expect("run dir");
+            fs::write(run_dir.step_file(run_dir::files::BENCH_RESULTS), b"{}").expect("results");
+            let preserved_artifact = run_dir
+                .path()
+                .join("invocations/inv-cleaned-artifacts/artifacts/semantic-fidelity.json");
+            fs::create_dir_all(preserved_artifact.parent().expect("artifact parent"))
+                .expect("mkdir");
+            fs::write(&preserved_artifact, b"{\"score\":1}").expect("artifact");
+
+            let mut results = bench_results("homeboy", "cold", 42.0);
+            let original_path = "/tmp/hb/cleaned-artifacts.a/semantic-fidelity.json".to_string();
+            results.scenarios[0].artifacts.insert(
+                "semantic".to_string(),
+                BenchArtifact {
+                    path: Some(original_path.clone()),
+                    url: None,
+                    artifact_type: None,
+                    kind: Some("json".to_string()),
+                    label: Some("Semantic fidelity".to_string()),
+                },
+            );
+            let mut workflow = BenchRunWorkflowResult {
+                status: "passed".to_string(),
+                component: "homeboy".to_string(),
+                exit_code: 0,
+                iterations: 10,
+                results: Some(results),
+                gate_failures: Vec::new(),
+                baseline_comparison: None,
+                hints: None,
+                failure: None,
+                diagnostics: Vec::new(),
+            };
+
+            let args = bench_args();
+            let selected_scenarios = vec!["cold".to_string()];
+            let observation = start(BenchObservationStart {
+                component_id: "homeboy",
+                component_label: "homeboy",
+                source_path: home.path(),
+                args: &args,
+                selected_scenarios: &selected_scenarios,
+                rig_id: None,
+                rig_snapshot: None,
+                run_dir: &run_dir,
+            })
+            .expect("start observation");
+
+            finish_success(Some(observation), &mut workflow, &run_dir)
+                .expect("observation summary");
+            run_dir.cleanup();
+
+            let persisted_path = workflow.results.as_ref().unwrap().scenarios[0].artifacts
+                ["semantic"]
+                .path
+                .as_deref()
+                .expect("persisted artifact path");
+            assert_ne!(persisted_path, original_path);
+            assert!(PathBuf::from(persisted_path).is_file());
+            assert_eq!(
+                fs::read_to_string(persisted_path).expect("read persisted"),
+                "{\"score\":1}"
             );
         });
     }
