@@ -112,11 +112,9 @@ pub(super) fn plan_components(
         }
 
         if selected.is_empty() {
-            return Err(Error::validation_invalid_argument(
+            return Err(empty_selection_error(
                 "componentIds",
                 "No components selected",
-                None,
-                None,
             ));
         }
 
@@ -151,11 +149,9 @@ pub(super) fn plan_components(
             .collect();
 
         if selected.is_empty() {
-            return Err(Error::validation_invalid_argument(
+            return Err(empty_selection_error(
                 "outdated",
                 "No outdated components found",
-                None,
-                None,
             ));
         }
 
@@ -180,6 +176,10 @@ pub(super) fn plan_components(
     Err(Error::validation_missing_argument(vec![
         "component IDs, --all, --outdated, --behind-upstream, or --check".to_string(),
     ]))
+}
+
+fn empty_selection_error(field: &str, message: &str) -> Error {
+    Error::validation_invalid_argument(field, message, None, None)
 }
 
 fn select_behind_upstream_components(all_components: &[Component]) -> Vec<Component> {
