@@ -510,7 +510,11 @@ pub(crate) fn detect_intra_method_duplicates(fingerprints: &[&FileFingerprint]) 
             let mut reported = false;
             let mut suppressed_ranges: Vec<(usize, usize)> = Vec::new();
 
-            for positions in hash_positions.values() {
+            let mut duplicate_windows: Vec<&Vec<(usize, usize)>> =
+                hash_positions.values().collect();
+            duplicate_windows.sort_by_key(|positions| positions.first().copied());
+
+            for positions in duplicate_windows {
                 if reported || positions.len() < 2 {
                     continue;
                 }
