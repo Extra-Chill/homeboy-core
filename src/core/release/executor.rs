@@ -260,11 +260,9 @@ fn read_version_at_head(
     // relative to the git toplevel for `git show HEAD:<rel>`. `git show`
     // resolves `<rel>` against the repository toplevel — NOT against the
     // current working directory — so for monorepo-scoped components whose
-    // `local_path` is a subdirectory of the toplevel (e.g. an extension at
-    // `homeboy-extensions/wordpress`) we MUST strip the toplevel, not
-    // `local_path`. Stripping `local_path` produced `HEAD:plugin.php` for a
-    // file actually at `wordpress/plugin.php`, which `git show` rejected
-    // ("path wordpress/plugin.php exists, but not plugin.php"). See #2327.
+    // `local_path` is a subdirectory of the toplevel we MUST strip the
+    // toplevel, not `local_path`. Stripping `local_path` produced a
+    // toplevel-incomplete path, which `git show` rejected. See #2327.
     //
     // For root-layout components `local_path` *is* the toplevel, so the
     // toplevel-relative path equals the `local_path`-relative path and
