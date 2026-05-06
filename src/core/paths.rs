@@ -396,10 +396,7 @@ mod tests {
     #[test]
     fn test_rig_baseline_root_nested_under_state_dir() {
         let path = rig_baseline_root("studio-dev").expect("rig_baseline_root resolves");
-        assert_eq!(
-            path.file_name().and_then(|s| s.to_str()),
-            Some("baselines")
-        );
+        assert_eq!(path.file_name().and_then(|s| s.to_str()), Some("baselines"));
         assert_eq!(
             path.parent()
                 .and_then(|p| p.file_name())

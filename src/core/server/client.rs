@@ -692,7 +692,7 @@ impl ProcessGroupCleanupGuard {
 
     #[cfg(unix)]
     fn pgid(&self) -> Option<i32> {
-        self.pgid.map(|pgid| pgid as i32)
+        self.pgid.map(|pgid| pgid)
     }
 
     #[cfg(not(unix))]
