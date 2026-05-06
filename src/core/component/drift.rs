@@ -103,6 +103,29 @@ fn normalize_relative_drift_path(path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Top-level coverage entry for `drift_file_paths` — the audit
+    /// convention `test_coverage::missing_test_method` expects a
+    /// `test_<fn_name>` test for every public function. The detailed
+    /// behavior is exercised by the named tests below; this one asserts
+    /// the public contract.
+    #[test]
+    fn test_drift_file_paths() {
+        let mut component = Component::default();
+        component.extra_drift_files = vec!["build/version.txt".to_string()];
+
+        let paths = drift_file_paths(&component);
+
+        // Audit baseline always comes first.
+        assert_eq!(paths.first().map(String::as_str), Some("homeboy.json"));
+        // Component extras land in the deduped tail.
+        assert!(paths.iter().any(|p| p == "build/version.txt"));
+        // No duplicates.
+        let mut sorted = paths.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), paths.len());
+    }
+
     #[test]
     fn normalize_strips_curdir_and_rejects_absolute() {
         assert_eq!(
