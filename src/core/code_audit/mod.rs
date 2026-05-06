@@ -13,9 +13,7 @@
 
 pub mod baseline;
 mod checks;
-mod cli_invocation_arguments;
 pub mod codebase_map;
-mod command_output_policy;
 mod comment_blocks;
 mod comment_hygiene;
 pub mod compare;
@@ -30,7 +28,6 @@ mod discovery;
 pub mod docs_audit;
 mod duplication;
 mod enum_dispatch_contracts;
-mod extension_setting_plumbing;
 mod facade_passthrough;
 mod field_patterns;
 mod findings;
@@ -41,7 +38,6 @@ pub(crate) mod impact;
 pub(crate) mod import_matching;
 mod layer_ownership;
 pub(crate) mod naming;
-mod observation_lifecycle;
 mod parallel_runner_setup;
 mod repeated_literal_shape;
 pub mod report;
@@ -52,7 +48,6 @@ mod rust_test_wiring;
 mod shadow_modules;
 mod shared_scaffolding;
 mod signatures;
-mod stale_cli_invocation;
 mod structural;
 mod test_coverage;
 pub(crate) mod test_mapping;
@@ -133,8 +128,6 @@ pub(crate) struct AuditWithAnalysis {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuditExecutionPlan {
     pub(crate) run_conventions: bool,
-    pub(crate) run_stale_cli_invocations: bool,
-    pub(crate) run_cli_argument_shapes: bool,
     pub(crate) run_structural: bool,
     pub(crate) run_duplication: bool,
     pub(crate) run_dead_code: bool,
@@ -150,7 +143,6 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_field_patterns: bool,
     pub(crate) run_facade_passthrough: bool,
     pub(crate) run_literal_shapes: bool,
-    pub(crate) run_extension_setting_plumbing: bool,
     pub(crate) run_deprecation_age: bool,
     pub(crate) run_dead_guard: bool,
     pub(crate) run_requested_detectors: bool,
@@ -158,8 +150,6 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_global_env_guard: bool,
     pub(crate) run_shared_scaffolding: bool,
     pub(crate) run_parallel_runner_setup: bool,
-    pub(crate) run_command_output_policy: bool,
-    pub(crate) run_observation_lifecycle: bool,
     pub(crate) run_enum_dispatch_contracts: bool,
 }
 
@@ -167,8 +157,6 @@ impl AuditExecutionPlan {
     pub(crate) fn full() -> Self {
         Self {
             run_conventions: true,
-            run_stale_cli_invocations: true,
-            run_cli_argument_shapes: true,
             run_structural: true,
             run_duplication: true,
             run_dead_code: true,
@@ -184,7 +172,6 @@ impl AuditExecutionPlan {
             run_field_patterns: true,
             run_facade_passthrough: true,
             run_literal_shapes: true,
-            run_extension_setting_plumbing: true,
             run_deprecation_age: true,
             run_dead_guard: true,
             run_requested_detectors: true,
@@ -192,8 +179,6 @@ impl AuditExecutionPlan {
             run_global_env_guard: true,
             run_shared_scaffolding: true,
             run_parallel_runner_setup: true,
-            run_command_output_policy: true,
-            run_observation_lifecycle: true,
             run_enum_dispatch_contracts: true,
         }
     }
@@ -218,16 +203,6 @@ impl AuditExecutionPlan {
                     AuditFinding::NamespaceMismatch,
                     AuditFinding::MissingImport,
                 ],
-            ),
-            run_stale_cli_invocations: Self::family_enabled(
-                only,
-                exclude,
-                &[AuditFinding::StaleCliInvocation],
-            ),
-            run_cli_argument_shapes: Self::family_enabled(
-                only,
-                exclude,
-                &[AuditFinding::StaleCliArgumentShape],
             ),
             run_structural: Self::family_enabled(
                 only,
@@ -328,11 +303,6 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::RepeatedLiteralShape],
             ),
-            run_extension_setting_plumbing: Self::family_enabled(
-                only,
-                exclude,
-                &[AuditFinding::ExtensionSettingPlumbing],
-            ),
             run_deprecation_age: Self::family_enabled(
                 only,
                 exclude,
@@ -368,16 +338,6 @@ impl AuditExecutionPlan {
                 exclude,
                 &[AuditFinding::ParallelRunnerSetup],
             ),
-            run_command_output_policy: Self::family_enabled(
-                only,
-                exclude,
-                &[AuditFinding::CommandOutputPolicy],
-            ),
-            run_observation_lifecycle: Self::family_enabled(
-                only,
-                exclude,
-                &[AuditFinding::ObservationLifecycleScaffolding],
-            ),
             run_enum_dispatch_contracts: Self::family_enabled(
                 only,
                 exclude,
@@ -407,7 +367,6 @@ impl AuditExecutionPlan {
             || self.run_shadow_modules
             || self.run_facade_passthrough
             || self.run_literal_shapes
-            || self.run_extension_setting_plumbing
             || self.run_deprecation_age
             || self.run_dead_guard
             || self.run_requested_detectors
@@ -415,8 +374,6 @@ impl AuditExecutionPlan {
             || self.run_global_env_guard
             || self.run_shared_scaffolding
             || self.run_parallel_runner_setup
-            || self.run_command_output_policy
-            || self.run_observation_lifecycle
             || self.run_enum_dispatch_contracts
     }
 }
@@ -657,17 +614,6 @@ fn audit_internal(
     let files_skipped = discovery
         .files_walked
         .saturating_sub(discovery.files_fingerprinted);
-    let stale_cli_findings = if plan.run_stale_cli_invocations {
-        stale_cli_invocation::run(root)
-    } else {
-        Vec::new()
-    };
-    let cli_argument_findings = if plan.run_cli_argument_shapes {
-        cli_invocation_arguments::run(root)
-    } else {
-        Vec::new()
-    };
-
     if discovery.groups.is_empty() {
         let mut warnings = Vec::new();
         let unclaimed = walker::count_unclaimed_source_files(root);
@@ -696,14 +642,6 @@ fn audit_internal(
         } else {
             log_status!("audit", "No source files found");
         }
-        if !stale_cli_findings.is_empty() {
-            log_status!(
-                "audit",
-                "CLI invocations: {} finding(s) (stale Homeboy command arrays)",
-                stale_cli_findings.len()
-            );
-        }
-
         return Ok(AuditWithAnalysis {
             result: CodeAuditResult {
                 component_id: component_id.to_string(),
@@ -711,14 +649,14 @@ fn audit_internal(
                 summary: AuditSummary {
                     files_scanned: 0,
                     conventions_detected: 0,
-                    outliers_found: stale_cli_findings.len() + cli_argument_findings.len(),
+                    outliers_found: 0,
                     alignment_score: None,
                     files_skipped: total_skipped,
                     warnings,
                 },
                 conventions: vec![],
                 directory_conventions: vec![],
-                findings: [stale_cli_findings, cli_argument_findings].concat(),
+                findings: vec![],
                 duplicate_groups: vec![],
             },
             analysis: AuditAnalysisContext::default(),
@@ -746,25 +684,6 @@ fn audit_internal(
 
     // Phase 4: Build findings
     let mut all_findings = findings::build_findings(&check_results);
-
-    if !stale_cli_findings.is_empty() {
-        log_status!(
-            "audit",
-            "CLI invocations: {} finding(s) (stale Homeboy command arrays)",
-            stale_cli_findings.len()
-        );
-        all_findings.extend(stale_cli_findings);
-    }
-
-    // Phase 4a: Homeboy shell-out argument-shape drift detection.
-    if !cli_argument_findings.is_empty() {
-        log_status!(
-            "audit",
-            "CLI argument shapes: {} finding(s) (stale Homeboy shell-out forms)",
-            cli_argument_findings.len()
-        );
-        all_findings.extend(cli_argument_findings);
-    }
 
     // Phase 4b: Structural complexity analysis (god files, high item counts)
     let structural_findings = if plan.run_structural {
@@ -1099,21 +1018,6 @@ fn audit_internal(
         all_findings.extend(literal_shape_findings);
     }
 
-    // Phase 4u2: Repeated extension setting parse/serialize plumbing in commands.
-    let extension_setting_findings = if plan.run_extension_setting_plumbing {
-        extension_setting_plumbing::run(&all_fingerprints)
-    } else {
-        Vec::new()
-    };
-    if !extension_setting_findings.is_empty() {
-        log_status!(
-            "audit",
-            "Extension setting plumbing: {} finding(s) (duplicated command setting conversion)",
-            extension_setting_findings.len()
-        );
-        all_findings.extend(extension_setting_findings);
-    }
-
     // Phase 4r: Deprecation age detection
     let deprecation_findings = if plan.run_deprecation_age {
         deprecation_age::run(&all_fingerprints, root)
@@ -1221,41 +1125,6 @@ fn audit_internal(
             parallel_runner_findings.len()
         );
         all_findings.extend(parallel_runner_findings);
-    }
-
-    // Phase 4x: Scattered command response/output policy ownership.
-    let command_output_findings = if plan.run_command_output_policy {
-        command_output_policy::run(
-            &all_fingerprints,
-            &audit_config.framework_command_recognizers,
-        )
-    } else {
-        Vec::new()
-    };
-    if !command_output_findings.is_empty() {
-        log_status!(
-            "audit",
-            "Command output policy: {} finding(s) (scattered command response/output contracts)",
-            command_output_findings.len()
-        );
-        all_findings.extend(command_output_findings);
-    }
-
-    // Phase 4y: Observation lifecycle scaffolding duplication. This is intentionally
-    // agnostic: it looks for repeated ownership of start/metadata/finalize/artifact/failure
-    // phases around observations, not specific command names.
-    let observation_lifecycle_findings = if plan.run_observation_lifecycle {
-        observation_lifecycle::run(&all_fingerprints)
-    } else {
-        Vec::new()
-    };
-    if !observation_lifecycle_findings.is_empty() {
-        log_status!(
-            "audit",
-            "Observation lifecycle: {} finding(s) (repeated lifecycle scaffolding)",
-            observation_lifecycle_findings.len()
-        );
-        all_findings.extend(observation_lifecycle_findings);
     }
 
     // Phase 4w: Repeated enum-dispatch contract detection.
@@ -1424,30 +1293,6 @@ fn audit_root_only(
     plan: &AuditExecutionPlan,
 ) -> CodeAuditResult {
     let mut findings = Vec::new();
-
-    if plan.run_stale_cli_invocations {
-        let stale_cli_findings = stale_cli_invocation::run(root);
-        if !stale_cli_findings.is_empty() {
-            log_status!(
-                "audit",
-                "CLI invocations: {} finding(s) (stale Homeboy command arrays)",
-                stale_cli_findings.len()
-            );
-            findings.extend(stale_cli_findings);
-        }
-    }
-
-    if plan.run_cli_argument_shapes {
-        let cli_argument_findings = cli_invocation_arguments::run(root);
-        if !cli_argument_findings.is_empty() {
-            log_status!(
-                "audit",
-                "CLI argument shapes: {} finding(s) (stale Homeboy shell-out forms)",
-                cli_argument_findings.len()
-            );
-            findings.extend(cli_argument_findings);
-        }
-    }
 
     if plan.run_structural {
         let structural_findings = structural::analyze_structure(root);

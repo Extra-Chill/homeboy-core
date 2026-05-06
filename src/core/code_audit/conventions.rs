@@ -177,10 +177,6 @@ pub enum AuditFinding {
     /// many times across the codebase — candidate for extraction into a helper
     /// constructor (e.g. `error_envelope($error, $message)`).
     RepeatedLiteralShape,
-    /// Multiple command functions independently parse, serialize, or normalize
-    /// the same extension setting key instead of delegating to the shared
-    /// extension settings contract.
-    ExtensionSettingPlumbing,
     /// Docblock `@deprecated X.Y.Z` tag is older than the configured age
     /// threshold relative to the component's current version.
     DeprecationAge,
@@ -222,23 +218,12 @@ pub enum AuditFinding {
     /// Tests mutate process-global environment variables without using the
     /// shared guard for that variable.
     GlobalEnvMutationGuard,
-    /// Source code shells out to a Homeboy CLI command shape that no longer exists.
-    StaleCliInvocation,
-    /// Homeboy shell-out consumer uses a known-stale argument shape.
-    StaleCliArgumentShape,
     /// Nested Rust test file is not wired into Cargo via a source-module
     /// `#[path = "..."] mod ...;` declaration.
     UnwiredNestedRustTest,
     /// Command-family files independently assemble the same generic execution
     /// contract phases and contract-call shape.
     ParallelRunnerSetup,
-    /// Multiple command modules independently own response mode, artifact,
-    /// output routing, or response wrapping policy that should live in the
-    /// shared command output layer.
-    CommandOutputPolicy,
-    /// Multiple files hand-roll the same observation lifecycle scaffolding
-    /// instead of delegating lifecycle ownership to a shared wrapper/helper.
-    ObservationLifecycleScaffolding,
     /// Repeated exhaustive match blocks over the same enum duplicate a
     /// label/getter/policy contract that should likely live on the enum.
     RepeatedEnumDispatchContract,
@@ -288,7 +273,6 @@ impl AuditFinding {
             "shadow_module",
             "repeated_field_pattern",
             "repeated_literal_shape",
-            "extension_setting_plumbing",
             "deprecation_age",
             "dead_guard",
             "upstream_workaround",
@@ -298,12 +282,8 @@ impl AuditFinding {
             "constant_backed_slug_literal",
             "option_scope_drift",
             "global_env_mutation_guard",
-            "stale_cli_invocation",
-            "stale_cli_argument_shape",
             "unwired_nested_rust_test",
             "parallel_runner_setup",
-            "command_output_policy",
-            "observation_lifecycle_scaffolding",
             "repeated_enum_dispatch_contract",
             "core_boundary_leak",
         ]

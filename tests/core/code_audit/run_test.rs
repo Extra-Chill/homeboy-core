@@ -108,6 +108,24 @@ fn make_changed_since_args() -> AuditRunWorkflowArgs {
 }
 
 #[test]
+fn audit_finding_taxonomy_excludes_homeboy_specific_smells() {
+    let forbidden = [
+        "stale_cli_invocation",
+        "stale_cli_argument_shape",
+        "extension_setting_plumbing",
+        "command_output_policy",
+        "observation_lifecycle_scaffolding",
+    ];
+
+    for kind in forbidden {
+        assert!(
+            !AuditFinding::all_names().contains(&kind),
+            "Homeboy-specific smell `{kind}` belongs in regression tests or extension-owned rules, not core audit taxonomy"
+        );
+    }
+}
+
+#[test]
 fn filter_noop_when_both_lists_empty() {
     // The common case: no flags → no-op, untouched findings AND untouched summary.
     let mut result = make_result(vec![
