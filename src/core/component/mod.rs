@@ -12,8 +12,8 @@ pub mod scope;
 pub mod versioning;
 
 pub use audit::{
-    AuditConfig, ConventionTagGlob, CoreBoundaryLeakConfig, KnownSymbolEntry,
-    KnownSymbolHeaderVersionProvider, KnownSymbolKind, KnownSymbolVersionedEntry,
+    AuditConfig, ConventionTagGlob, CoreBoundaryLeakConfig, DuplicationDetectorConfig,
+    KnownSymbolEntry, KnownSymbolHeaderVersionProvider, KnownSymbolKind, KnownSymbolVersionedEntry,
     RequestedDetectorRule, RequestedDetectorRuleBody,
 };
 pub use inventory::{

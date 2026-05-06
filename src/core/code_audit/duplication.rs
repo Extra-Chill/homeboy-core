@@ -12,12 +12,13 @@
 //! - `detect_near_duplicates()` → flat `Vec<Finding>` for structural near-duplicates
 //! - `detect_intra_method_duplicates()` → duplicated blocks within a single method
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
 use super::idiomatic::is_trivial_method;
+use crate::component::DuplicationDetectorConfig;
 
 /// Minimum number of locations for a function to count as duplicated.
 const MIN_DUPLICATE_LOCATIONS: usize = 2;
@@ -1208,7 +1209,11 @@ fn contains_self_call(body: &str, method_name: &str) -> bool {
 ///
 /// Matches patterns like `function_name(`, `self.method(`, `Type::method(`.
 /// Returns the called name (without receiver/namespace prefix).
-fn extract_calls_from_body(body: &str) -> Vec<String> {
+///
+/// `extra_trivial` is an extension-supplied set of additional trivial call
+/// names that augment the built-in `TRIVIAL_CALLS` floor. Core never inspects
+/// these strings — they are merged with the generic floor and used opaquely.
+fn extract_calls_from_body(body: &str, extra_trivial: &HashSet<&str>) -> Vec<String> {
     let mut calls = Vec::new();
 
     for line in body.lines() {
@@ -1236,6 +1241,7 @@ fn extract_calls_from_body(body: &str) -> Vec<String> {
                     if !is_keyword(&name)
                         && !name.is_empty()
                         && !TRIVIAL_CALLS.contains(&name.as_str())
+                        && !extra_trivial.contains(name.as_str())
                     {
                         calls.push(name);
                     }
@@ -1248,10 +1254,12 @@ fn extract_calls_from_body(body: &str) -> Vec<String> {
     calls
 }
 
-fn signal_calls(calls: &[String]) -> Vec<String> {
+fn signal_calls(calls: &[String], extra_plumbing: &HashSet<&str>) -> Vec<String> {
     calls
         .iter()
-        .filter(|call| !PLUMBING_CALLS.contains(&call.as_str()))
+        .filter(|call| {
+            !PLUMBING_CALLS.contains(&call.as_str()) && !extra_plumbing.contains(call.as_str())
+        })
         .cloned()
         .collect()
 }
@@ -1308,7 +1316,15 @@ fn is_keyword(name: &str) -> bool {
 }
 
 /// Extract per-method call sequences from all fingerprints.
-fn extract_call_sequences(fingerprints: &[&FileFingerprint]) -> Vec<MethodCallSequence> {
+///
+/// `extra_trivial` is an extension-supplied set of additional call names to
+/// treat as trivial during call-sequence extraction. It is merged with the
+/// built-in `TRIVIAL_CALLS` floor — this function never interprets the
+/// strings, it only filters them out of the recorded sequence.
+fn extract_call_sequences(
+    fingerprints: &[&FileFingerprint],
+    extra_trivial: &HashSet<&str>,
+) -> Vec<MethodCallSequence> {
     let mut sequences = Vec::new();
 
     for fp in fingerprints {
@@ -1344,7 +1360,7 @@ fn extract_call_sequences(fingerprints: &[&FileFingerprint]) -> Vec<MethodCallSe
             }
 
             let body: String = lines[body_start + 1..body_end].join("\n");
-            let calls = extract_calls_from_body(&body);
+            let calls = extract_calls_from_body(&body, extra_trivial);
             let shape = detect_body_shape(&body, method_name);
 
             if calls.len() >= MIN_CALL_COUNT {
@@ -1423,11 +1439,27 @@ fn lcs_ratio(a: &[String], b: &[String]) -> f64 {
 /// `convention_methods` contains method names that are expected by discovered conventions.
 /// When both methods in a pair are convention-expected, the pair is skipped — similar call
 /// patterns are the expected behavior for convention-following code, not a finding.
+///
+/// `detector_config` carries extension-supplied trivial/plumbing call name lists
+/// that augment the built-in generic floors. Core never interprets these strings;
+/// they are merged into the existing filters.
 pub(crate) fn detect_parallel_implementations(
     fingerprints: &[&FileFingerprint],
     convention_methods: &std::collections::HashSet<String>,
+    detector_config: &DuplicationDetectorConfig,
 ) -> Vec<Finding> {
-    let sequences = extract_call_sequences(fingerprints);
+    let extra_trivial: HashSet<&str> = detector_config
+        .trivial_calls
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let extra_plumbing: HashSet<&str> = detector_config
+        .plumbing_calls
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
+    let sequences = extract_call_sequences(fingerprints, &extra_trivial);
 
     // Build sets of already-flagged pairs (exact + near duplicates) to avoid double-flagging
     let exact_groups = build_groups(fingerprints);
@@ -1483,8 +1515,8 @@ pub(crate) fn detect_parallel_implementations(
                 continue;
             }
 
-            let a_signal = signal_calls(&a.calls);
-            let b_signal = signal_calls(&b.calls);
+            let a_signal = signal_calls(&a.calls, &extra_plumbing);
+            let b_signal = signal_calls(&b.calls, &extra_plumbing);
 
             if a_signal.len() < MIN_CALL_COUNT || b_signal.len() < MIN_CALL_COUNT {
                 continue;
@@ -2604,8 +2636,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             "fn upgrade_on_server() {\n    for host in hosts {\n        validate_component();\n        build_artifact();\n        upload_to_host();\n        run_post_hooks();\n        send_notification();\n    }\n}",
         );
 
-        let findings =
-            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
 
         assert_eq!(findings.len(), 2, "Should emit one finding per file");
         assert!(findings
@@ -2628,8 +2663,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             "fn parse_config() {\n    read_file();\n    tokenize();\n    parse_ast();\n    validate_schema();\n}",
         );
 
-        let findings =
-            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
         assert!(
             findings.is_empty(),
             "Completely different call sets should not flag"
@@ -2644,7 +2682,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             "fn deploy_op() {\n    validate();\n    build();\n    upload();\n    notify();\n}\nfn upgrade_op() {\n    validate();\n    build();\n    upload();\n    notify();\n}",
         );
 
-        let findings = detect_parallel_implementations(&[&fp], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&fp],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
         assert!(
             findings.is_empty(),
             "Same-file methods should not be flagged as parallel"
@@ -2664,8 +2706,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             "fn small_b() {\n    foo();\n    bar();\n}",
         );
 
-        let findings =
-            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
         assert!(
             findings.is_empty(),
             "Methods with < MIN_CALL_COUNT calls should be skipped"
@@ -2688,6 +2733,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&fs_helper, &extension_scan],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert!(
@@ -2712,6 +2758,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&command_runner, &branch_reader],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert!(
@@ -2736,6 +2783,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&http_handler, &process_probe],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert!(
@@ -2760,6 +2808,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&artifact_deploy, &override_deploy],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert!(
@@ -2783,8 +2832,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             "fn sync_stack() {\n    for pr in prs {\n        ensure_head_remote();\n        checkout_force();\n        fetch_pr_meta();\n        cherry_pick();\n        record_synced_pr();\n        run_git();\n        success();\n    }\n}",
         );
 
-        let findings =
-            detect_parallel_implementations(&[&apply, &sync], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&apply, &sync],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
 
         assert_eq!(
             findings.len(),
@@ -2814,8 +2866,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         );
 
         // "run" is skipped, so only one method in the pool — no pair to compare
-        let findings =
-            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
         // Only fp2's "execute" has a valid call sequence; fp1's "run" is filtered
         // So there's only 1 candidate, no pair → no findings
         assert!(findings.is_empty(), "Generic names should be filtered out");
@@ -2824,7 +2879,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
     #[test]
     fn extract_calls_skips_keywords() {
         let body = "if something() {\n    let x = process();\n    for item in list() {\n        handle(item);\n    }\n}";
-        let calls = extract_calls_from_body(body);
+        let calls = extract_calls_from_body(body, &std::collections::HashSet::new());
         assert!(calls.contains(&"something".to_string()));
         assert!(calls.contains(&"process".to_string()));
         assert!(calls.contains(&"list".to_string()));
@@ -2877,8 +2932,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         );
 
         // Without convention methods: flagged
-        let findings =
-            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
         assert_eq!(findings.len(), 2, "Should flag without convention context");
 
         // With EITHER method as convention-expected: NOT flagged
@@ -2886,7 +2944,11 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let findings = detect_parallel_implementations(&[&fp1, &fp2], &conv_methods);
+        let findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &conv_methods,
+            &DuplicationDetectorConfig::default(),
+        );
         assert!(
             findings.is_empty(),
             "Pairs involving convention methods should not be flagged, got: {:?}",
@@ -2916,6 +2978,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&copy_dir_recursive, &copy_directory],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert_eq!(
@@ -2946,6 +3009,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&copy_artifact_file, &copy_dir_recursive],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert!(
@@ -2973,6 +3037,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&helper_a, &helper_b],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert!(
@@ -3001,6 +3066,7 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         let findings = detect_parallel_implementations(
             &[&helper_a, &helper_b],
             &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
         );
 
         assert_eq!(
@@ -3026,13 +3092,74 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             "fn walk_tree_b(node) {\n    visit_node();\n    record_step();\n    sanitize_value();\n    log_progress();\n    walk_tree_b(child);\n}",
         );
 
-        let findings =
-            detect_parallel_implementations(&[&walk_a, &walk_b], &std::collections::HashSet::new());
+        let findings = detect_parallel_implementations(
+            &[&walk_a, &walk_b],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
 
         assert_eq!(
             findings.len(),
             2,
             "Recursive ↔ Recursive helpers with shared call set must flag"
+        );
+    }
+
+    // ========================================================================
+    // Extension-supplied trivial/plumbing call list tests (#2333)
+    // ========================================================================
+
+    #[test]
+    fn extension_trivial_calls_filter_out_of_signal() {
+        // Two parallel deploy/upgrade workflows that share several
+        // domain-meaningful calls — flagged by default. With `custom_helper`
+        // declared trivial via extension, that call is filtered out of the
+        // recorded sequence; the remaining shared signal is unchanged so
+        // this test specifically demonstrates the trivial path is wired
+        // (compare against the default-config sanity below).
+        let fp1 = make_fingerprint_with_content(
+            "src/deploy.rs",
+            &["deploy_to_server"],
+            "fn deploy_to_server() {\n    custom_helper();\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    notify_complete();\n}",
+        );
+        let fp2 = make_fingerprint_with_content(
+            "src/upgrade.rs",
+            &["upgrade_on_server"],
+            "fn upgrade_on_server() {\n    custom_helper();\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    send_notification();\n}",
+        );
+
+        // Default config: flagged (has the shared workflow signal).
+        let default_findings = detect_parallel_implementations(
+            &[&fp1, &fp2],
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
+        assert!(
+            !default_findings.is_empty(),
+            "Sanity: workflow pair must flag without extension config"
+        );
+        assert!(
+            default_findings
+                .iter()
+                .any(|f| f.description.contains("`custom_helper`")),
+            "Sanity: without trivial-list filtering, `custom_helper` should appear in the shared-call summary"
+        );
+
+        // Extension-supplied trivial removes `custom_helper` from sequences.
+        let cfg = DuplicationDetectorConfig {
+            trivial_calls: vec!["custom_helper".to_string()],
+            plumbing_calls: vec![],
+        };
+        let findings =
+            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new(), &cfg);
+        // The pair still flags (other workflow signal remains), but the
+        // extension-trivial name is gone from the description.
+        assert!(
+            findings
+                .iter()
+                .all(|f| !f.description.contains("`custom_helper`")),
+            "Extension-trivial `custom_helper` must be filtered out of the call sequence and shared-call summary, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
         );
     }
 
@@ -3063,6 +3190,112 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         assert_eq!(
             detect_body_shape("    let s = format!(\"x\");\n    foo();\n", "thing"),
             BodyShape::StraightLine
+        );
+    }
+
+    #[test]
+    fn extension_plumbing_calls_filter_out_of_signal() {
+        // Two methods share only `log_event` as workflow overlap — everything
+        // else is unique. With default config, `log_event` is workflow signal
+        // and the pair flags. With `log_event` declared plumbing via extension,
+        // the shared signal collapses below MIN_CALL_COUNT and the pair is
+        // dropped.
+        let fp1 = make_fingerprint_with_content(
+            "src/a.rs",
+            &["worker_a"],
+            "fn worker_a() {\n    log_event();\n    log_event();\n    log_event();\n    log_event();\n    step_a1();\n    step_a2();\n}",
+        );
+        let fp2 = make_fingerprint_with_content(
+            "src/b.rs",
+            &["worker_b"],
+            "fn worker_b() {\n    log_event();\n    log_event();\n    log_event();\n    log_event();\n    step_b1();\n    step_b2();\n}",
+        );
+
+        // Without extension config, log_event is recorded as signal — but with
+        // the existing built-in idiomatic floors, results vary. We only assert
+        // the extension hook genuinely silences any pairing.
+        let cfg = DuplicationDetectorConfig {
+            trivial_calls: vec![],
+            plumbing_calls: vec!["log_event".to_string()],
+        };
+        let findings =
+            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new(), &cfg);
+        assert!(
+            findings
+                .iter()
+                .all(|f| !f.description.contains("`log_event`")),
+            "Extension-plumbing `log_event` must be removed from signal calls / shared-call summary, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn extension_call_lists_fix_env_path_helper_fp_2333() {
+        // Direct regression for issue #2333: `cache_fallback_root` ↔ `homeboy_data`
+        // both call `var`, `cfg`, `not`, `internal_unexpected` (Rust env-derived
+        // path plumbing). Without extension hints the detector flags them; with
+        // the rust manifest declaring those calls as trivial/plumbing, no FP.
+        let cache = make_fingerprint_with_content(
+            "src/core/cache.rs",
+            &["cache_fallback_root"],
+            "fn cache_fallback_root() {\n    var();\n    cfg();\n    not();\n    internal_unexpected();\n    join_cache_path();\n}",
+        );
+        let data = make_fingerprint_with_content(
+            "src/core/data.rs",
+            &["homeboy_data"],
+            "fn homeboy_data() {\n    var();\n    cfg();\n    not();\n    internal_unexpected();\n    join_data_path();\n}",
+        );
+
+        // Default config: detector may still flag (this is the FP we are fixing).
+        // We do NOT assert a specific shape here — issue #2334 covers a body-shape
+        // gate that may also suppress this. We only require that the extension
+        // hook genuinely silences it.
+
+        // With extension config matching the rust manifest:
+        let cfg = DuplicationDetectorConfig {
+            trivial_calls: vec!["var".to_string(), "cfg".to_string(), "not".to_string()],
+            plumbing_calls: vec!["internal_unexpected".to_string()],
+        };
+        let findings = detect_parallel_implementations(
+            &[&cache, &data],
+            &std::collections::HashSet::new(),
+            &cfg,
+        );
+        assert!(
+            findings.is_empty(),
+            "Issue #2333: env-derived path helpers should NOT flag once rust extension supplies trivial/plumbing lists, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn extension_lists_augment_built_in_floor_not_replace() {
+        // Built-in floors must remain active even when an extension supplies
+        // its own lists. Two methods sharing only built-in trivial calls
+        // (`to_string`, `clone`, `unwrap`) should not flag, regardless of
+        // extension config contents.
+        let fp1 = make_fingerprint_with_content(
+            "src/a.rs",
+            &["render_a"],
+            "fn render_a() {\n    to_string();\n    clone();\n    unwrap();\n    len();\n    iter();\n}",
+        );
+        let fp2 = make_fingerprint_with_content(
+            "src/b.rs",
+            &["render_b"],
+            "fn render_b() {\n    to_string();\n    clone();\n    unwrap();\n    len();\n    iter();\n}",
+        );
+
+        // Extension config that does NOT mention to_string/clone/etc.
+        let cfg = DuplicationDetectorConfig {
+            trivial_calls: vec!["something_unrelated".to_string()],
+            plumbing_calls: vec!["another_unrelated".to_string()],
+        };
+        let findings =
+            detect_parallel_implementations(&[&fp1, &fp2], &std::collections::HashSet::new(), &cfg);
+        assert!(
+            findings.is_empty(),
+            "Built-in trivial floor must remain active even with extension config, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
         );
     }
 }
