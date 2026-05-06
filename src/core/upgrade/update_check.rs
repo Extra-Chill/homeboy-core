@@ -8,11 +8,14 @@
 //! Disable via:
 //! - Environment variable: `HOMEBOY_NO_UPDATE_CHECK=1`
 //! - Config: `homeboy config set /update_check false`
+//!
+//! Cache I/O primitives are shared with the extension update check via
+//! [`crate::core::update_check_cache`]. The on-disk filename and JSON
+//! schema live here and are unchanged.
 
-use crate::paths;
+use crate::core::update_check_cache;
 use crate::upgrade;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const CACHE_FILENAME: &str = "update_check.json";
 const CHECK_INTERVAL_SECS: u64 = 86400;
@@ -26,34 +29,17 @@ pub struct UpdateCheckCache {
     pub checked_at: u64,
 }
 
-pub(crate) fn cache_path() -> Option<std::path::PathBuf> {
-    paths::homeboy().ok().map(|path| path.join(CACHE_FILENAME))
-}
-
 fn read_cache() -> Option<UpdateCheckCache> {
-    let path = cache_path()?;
-    let content = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&content).ok()
+    update_check_cache::read_cache(CACHE_FILENAME)
 }
 
 fn write_cache(cache: &UpdateCheckCache) {
-    let Some(path) = cache_path() else { return };
-    let Ok(content) = serde_json::to_string_pretty(cache) else {
-        return;
-    };
-    let _ = std::fs::write(&path, content);
-}
-
-pub(crate) fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
+    update_check_cache::write_cache(CACHE_FILENAME, cache);
 }
 
 fn is_cache_fresh(cache: &UpdateCheckCache) -> bool {
-    let elapsed = now_unix().saturating_sub(cache.checked_at);
-    elapsed < CHECK_INTERVAL_SECS && cache.current_version == upgrade::current_version()
+    update_check_cache::is_cache_fresh(cache.checked_at, CHECK_INTERVAL_SECS)
+        && cache.current_version == upgrade::current_version()
 }
 
 fn is_disabled_by_env() -> bool {
@@ -103,7 +89,7 @@ pub fn run_startup_check() {
         latest_version: check.latest_version.clone().unwrap_or_default(),
         current_version: check.current_version.clone(),
         update_available: check.update_available,
-        checked_at: now_unix(),
+        checked_at: update_check_cache::now_unix(),
     });
 
     if !already_printed && check.update_available {

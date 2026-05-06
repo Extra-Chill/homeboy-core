@@ -8,12 +8,15 @@
 //! Shares the disable mechanisms with CLI update check:
 //! - `HOMEBOY_NO_UPDATE_CHECK=1`
 //! - `homeboy config set /update_check false`
+//!
+//! Cache I/O primitives are shared with the CLI update check via
+//! [`crate::core::update_check_cache`]. The on-disk filename and JSON
+//! schema live here and are unchanged.
 
+use crate::core::update_check_cache;
 use crate::extension;
-use crate::paths;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const CACHE_FILENAME: &str = "extension_update_check.json";
 const CHECK_INTERVAL_SECS: u64 = 86400;
@@ -24,33 +27,12 @@ pub struct ExtensionUpdateCache {
     pub checked_at: u64,
 }
 
-fn cache_path() -> Option<std::path::PathBuf> {
-    paths::homeboy().ok().map(|path| path.join(CACHE_FILENAME))
-}
-
 fn read_cache() -> Option<ExtensionUpdateCache> {
-    let path = cache_path()?;
-    let content = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&content).ok()
+    update_check_cache::read_cache(CACHE_FILENAME)
 }
 
 fn write_cache(cache: &ExtensionUpdateCache) {
-    let Some(path) = cache_path() else { return };
-    let Ok(content) = serde_json::to_string_pretty(cache) else {
-        return;
-    };
-    let _ = std::fs::write(&path, content);
-}
-
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
-}
-
-fn is_cache_fresh(cache: &ExtensionUpdateCache) -> bool {
-    now_unix().saturating_sub(cache.checked_at) < CHECK_INTERVAL_SECS
+    update_check_cache::write_cache(CACHE_FILENAME, cache);
 }
 
 fn is_disabled_by_env() -> bool {
@@ -107,7 +89,7 @@ pub fn run_startup_check() {
             already_printed = true;
         }
 
-        if is_cache_fresh(cache) {
+        if update_check_cache::is_cache_fresh(cache.checked_at, CHECK_INTERVAL_SECS) {
             return;
         }
     }
@@ -123,7 +105,7 @@ pub fn run_startup_check() {
 
     write_cache(&ExtensionUpdateCache {
         extensions_behind: extensions_behind.clone(),
-        checked_at: now_unix(),
+        checked_at: update_check_cache::now_unix(),
     });
 
     if !already_printed && !extensions_behind.is_empty() {
@@ -139,18 +121,24 @@ mod tests {
     fn cache_freshness_within_24h() {
         let cache = ExtensionUpdateCache {
             extensions_behind: HashMap::new(),
-            checked_at: now_unix() - 100,
+            checked_at: update_check_cache::now_unix() - 100,
         };
-        assert!(is_cache_fresh(&cache));
+        assert!(update_check_cache::is_cache_fresh(
+            cache.checked_at,
+            CHECK_INTERVAL_SECS
+        ));
     }
 
     #[test]
     fn cache_stale_after_24h() {
         let cache = ExtensionUpdateCache {
             extensions_behind: HashMap::new(),
-            checked_at: now_unix() - CHECK_INTERVAL_SECS - 1,
+            checked_at: update_check_cache::now_unix() - CHECK_INTERVAL_SECS - 1,
         };
-        assert!(!is_cache_fresh(&cache));
+        assert!(!update_check_cache::is_cache_fresh(
+            cache.checked_at,
+            CHECK_INTERVAL_SECS
+        ));
     }
 
     #[test]
