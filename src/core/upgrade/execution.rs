@@ -152,6 +152,22 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_upgrade() {
+        assert_eq!(
+            parse_cli_version_output("homeboy 0.158.0").as_deref(),
+            Some("0.158.0")
+        );
+        assert!(!upgrade_verification_result("0.157.1", Some("0.157.1")));
+    }
+
+    #[test]
+    fn test_upgrade_verification_result() {
+        assert!(upgrade_verification_result("0.157.1", Some("0.158.0")));
+        assert!(!upgrade_verification_result("0.157.1", Some("0.157.1")));
+        assert!(!upgrade_verification_result("0.157.1", None));
+    }
+
+    #[test]
     fn verification_rejects_unchanged_active_binary() {
         assert!(!upgrade_verification_result("0.157.1", Some("0.157.1")));
     }
