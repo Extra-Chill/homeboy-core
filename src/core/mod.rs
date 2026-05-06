@@ -17,6 +17,7 @@ pub mod fleet;
 pub mod git;
 pub mod http_api;
 pub(crate) mod http_probe;
+pub(crate) mod io;
 pub mod issues;
 pub mod observation;
 pub mod output;

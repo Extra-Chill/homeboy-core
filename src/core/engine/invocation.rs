@@ -214,7 +214,12 @@ impl InvocationGuard {
             })?;
         }
 
-        copy_directory(&self.env.artifact_dir, &target)?;
+        crate::core::io::copy_tree(
+            &self.env.artifact_dir,
+            &target,
+            "invocation.artifacts.preserve",
+            crate::core::io::EntryPolicy::CopyRegularFilesOnly,
+        )?;
         Ok(Some(target))
     }
 }
@@ -491,57 +496,6 @@ fn remove_stale_index_lock(path: &Path) -> Result<()> {
             ))
         })?;
     }
-    Ok(())
-}
-
-fn copy_directory(source: &Path, target: &Path) -> Result<()> {
-    fs::create_dir_all(target).map_err(|e| {
-        Error::internal_io(
-            format!("Failed to create directory {}: {e}", target.display()),
-            Some("invocation.artifacts.preserve".to_string()),
-        )
-    })?;
-
-    for entry in fs::read_dir(source).map_err(|e| {
-        Error::internal_io(
-            format!("Failed to read directory {}: {e}", source.display()),
-            Some("invocation.artifacts.preserve".to_string()),
-        )
-    })? {
-        let entry = entry.map_err(|e| {
-            Error::internal_io(
-                format!(
-                    "Failed to read directory entry in {}: {e}",
-                    source.display()
-                ),
-                Some("invocation.artifacts.preserve".to_string()),
-            )
-        })?;
-        let entry_source = entry.path();
-        let entry_target = target.join(entry.file_name());
-        let metadata = entry.metadata().map_err(|e| {
-            Error::internal_io(
-                format!("Failed to stat {}: {e}", entry_source.display()),
-                Some("invocation.artifacts.preserve".to_string()),
-            )
-        })?;
-
-        if metadata.is_dir() {
-            copy_directory(&entry_source, &entry_target)?;
-        } else if metadata.is_file() {
-            fs::copy(&entry_source, &entry_target).map_err(|e| {
-                Error::internal_io(
-                    format!(
-                        "Failed to copy {} to {}: {e}",
-                        entry_source.display(),
-                        entry_target.display()
-                    ),
-                    Some("invocation.artifacts.preserve".to_string()),
-                )
-            })?;
-        }
-    }
-
     Ok(())
 }
 

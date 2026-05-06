@@ -447,26 +447,16 @@ pub(crate) fn rename_dir(from: &Path, to: &Path) -> Result<()> {
 }
 
 /// Recursively copy a directory tree.
+///
+/// Thin wrapper over [`crate::core::io::copy_tree`] with the legacy
+/// extension-lifecycle entry policy (copy any non-directory entry).
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("create target dir".into())))?;
-
-    for entry in std::fs::read_dir(src)
-        .map_err(|e| Error::internal_io(e.to_string(), Some("read source dir".into())))?
-    {
-        let entry =
-            entry.map_err(|e| Error::internal_io(e.to_string(), Some("read dir entry".into())))?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path)
-                .map_err(|e| Error::internal_io(e.to_string(), Some("copy file".into())))?;
-        }
-    }
-    Ok(())
+    crate::core::io::copy_tree(
+        src,
+        dst,
+        "extension.lifecycle.copy_dir_recursive",
+        crate::core::io::EntryPolicy::CopyAnyNonDir,
+    )
 }
 
 /// Install a extension by symlinking a local directory.
