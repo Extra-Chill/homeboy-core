@@ -325,12 +325,8 @@ fn run_trace_workflow_with_context(
 
     if args.baseline_flags.baseline && status == "pass" && has_baseline_items {
         if let Some(ref parsed) = results {
-            let _ = super::baseline::save_baseline(
-                &baseline_root,
-                &args.component_id,
-                parsed,
-                rig_id,
-            )?;
+            let _ =
+                super::baseline::save_baseline(&baseline_root, &args.component_id, parsed, rig_id)?;
         }
     }
     if has_baseline_items && !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
@@ -1063,8 +1059,7 @@ mod tests {
         let component_path = temp.path().to_string_lossy().to_string();
         let rig_id = format!("__hb-trace-save-test-{}", std::process::id());
 
-        let baseline_root =
-            resolve_trace_baseline_root(&component_path, Some(&rig_id)).unwrap();
+        let baseline_root = resolve_trace_baseline_root(&component_path, Some(&rig_id)).unwrap();
 
         let results = TraceResults {
             component_id: "studio".to_string(),
@@ -1091,13 +1086,8 @@ mod tests {
             artifacts: Vec::new(),
         };
 
-        let written = baseline::save_baseline(
-            &baseline_root,
-            "studio",
-            &results,
-            Some(&rig_id),
-        )
-        .expect("rig baseline saves into rig state dir");
+        let written = baseline::save_baseline(&baseline_root, "studio", &results, Some(&rig_id))
+            .expect("rig baseline saves into rig state dir");
 
         assert!(
             written.starts_with(&baseline_root),
