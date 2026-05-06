@@ -205,3 +205,29 @@ pub fn write_json_to_file(result: &Result<serde_json::Value>, path: &str, exit_c
         eprintln!("Warning: failed to write --output file '{}': {}", path, e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn json_mapping_preserves_success_payload_and_exit_code() {
+        let (payload, exit_code) = map_cmd_result_to_json(Ok((json!({ "changed": 2 }), 20)));
+
+        assert_eq!(exit_code, 20);
+        assert_eq!(payload.expect("payload"), json!({ "changed": 2 }));
+    }
+
+    #[test]
+    fn json_mapping_turns_validation_errors_into_cli_exit_code() {
+        let err = Error::validation_missing_argument(vec!["component".to_string()]);
+        let (payload, exit_code) = map_cmd_result_to_json::<serde_json::Value>(Err(err));
+
+        assert_eq!(exit_code, 2);
+        assert_eq!(
+            payload.expect_err("error payload").code,
+            ErrorCode::ValidationMissingArgument
+        );
+    }
+}
