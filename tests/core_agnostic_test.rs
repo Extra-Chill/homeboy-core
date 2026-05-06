@@ -308,6 +308,22 @@ const BASELINE: &[ViolationKey] = &[
         term: "npm",
     },
     ViolationKey {
+        path: "src/core/component/drift.rs",
+        term: "Cargo.lock",
+    },
+    ViolationKey {
+        path: "src/core/component/drift.rs",
+        term: "cargo",
+    },
+    ViolationKey {
+        path: "src/core/component/drift.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/component/drift.rs",
+        term: "npm",
+    },
+    ViolationKey {
         path: "src/core/context/mod.rs",
         term: "Cargo.toml",
     },
@@ -501,6 +517,18 @@ const BASELINE: &[ViolationKey] = &[
     },
     ViolationKey {
         path: "src/core/extension/manifest.rs",
+        term: "Cargo.lock",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "Cargo.toml",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
+        term: "composer",
+    },
+    ViolationKey {
+        path: "src/core/extension/manifest.rs",
         term: "npx",
     },
     ViolationKey {
@@ -601,7 +629,15 @@ const BASELINE: &[ViolationKey] = &[
     },
     ViolationKey {
         path: "src/core/release/executor.rs",
+        term: "php",
+    },
+    ViolationKey {
+        path: "src/core/release/executor.rs",
         term: "rust",
+    },
+    ViolationKey {
+        path: "src/core/release/executor.rs",
+        term: "wordpress",
     },
     ViolationKey {
         path: "src/core/release/pipeline.rs",
@@ -665,7 +701,7 @@ const BASELINE: &[ViolationKey] = &[
     },
 ];
 
-const BASELINE_OCCURRENCES: usize = 184;
+const BASELINE_OCCURRENCES: usize = 200;
 
 #[test]
 fn core_owned_source_stays_language_and_framework_agnostic() {
