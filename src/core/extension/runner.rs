@@ -42,8 +42,6 @@ pub struct ExtensionRunner {
     passthrough: bool,
     /// Tee only runner stderr to the terminal while capturing stdout/stderr.
     stderr_passthrough: bool,
-    /// Run the child shell in a process group and clean up lingering descendants.
-    cleanup_process_group: bool,
     /// Run directory path for recording machine-local child process evidence.
     run_dir_path: Option<PathBuf>,
     invocation_requirements: InvocationRequirements,
@@ -73,7 +71,6 @@ impl ExtensionRunner {
             command_override: None,
             passthrough: true,
             stderr_passthrough: false,
-            cleanup_process_group: false,
             run_dir_path: None,
             invocation_requirements: InvocationRequirements::default(),
         }
@@ -176,12 +173,6 @@ impl ExtensionRunner {
         self
     }
 
-    /// Clean up the full process group after this runner exits or is interrupted.
-    pub(crate) fn cleanup_process_group(mut self, cleanup: bool) -> Self {
-        self.cleanup_process_group = cleanup;
-        self
-    }
-
     /// Execute the extension runner script.
     ///
     /// Performs the full orchestration:
@@ -278,7 +269,6 @@ impl ExtensionRunner {
             super::execution::CapabilityScriptOptions {
                 passthrough: self.passthrough,
                 stderr_passthrough: self.stderr_passthrough,
-                cleanup_process_group: self.cleanup_process_group,
             },
         )
     }

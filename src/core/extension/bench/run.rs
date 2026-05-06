@@ -1002,7 +1002,6 @@ fn build_runner(
         settings: &args.settings,
         settings_json: &args.settings_json,
         run_dir,
-        cleanup_process_group: false,
         results_env: None,
         scenario_env: None,
         artifact_env: None,

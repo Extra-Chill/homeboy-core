@@ -196,7 +196,6 @@ pub struct ScenarioRunnerOptions<'a> {
     pub settings: &'a [(String, String)],
     pub settings_json: &'a [(String, serde_json::Value)],
     pub run_dir: &'a RunDir,
-    pub cleanup_process_group: bool,
     pub results_env: Option<(&'a str, PathBuf)>,
     pub scenario_env: Option<(&'a str, &'a str)>,
     pub artifact_env: Option<(&'a str, &'a Path)>,
@@ -214,9 +213,6 @@ pub fn build_scenario_runner(options: ScenarioRunnerOptions<'_>) -> Result<Exten
         .with_run_dir(options.run_dir)
         .invocation_requirements(options.invocation_requirements);
 
-    if options.cleanup_process_group {
-        runner = runner.cleanup_process_group(true);
-    }
     if let Some((key, path)) = options.results_env {
         runner = runner.env(key, &path.to_string_lossy());
     }

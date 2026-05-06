@@ -266,27 +266,26 @@ pub fn execute_local_command(command: &str) -> CommandOutput {
     execute_local_command_in_dir(command, None, None)
 }
 
+/// Run a local command, capturing stdout/stderr.
+///
+/// All locally-spawned commands run in their own process group with
+/// guaranteed teardown of every descendant on exit, panic, or signal.
+/// There is no "leak the children" mode — verbs that genuinely want a
+/// process to outlive the command (e.g. `homeboy daemon`) build their
+/// own background spawn directly with `std::process::Command` and
+/// manage the pid themselves.
 pub fn execute_local_command_in_dir(
     command: &str,
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
 ) -> CommandOutput {
-    execute_local_command_in_dir_impl(command, current_dir, env, false)
-}
-
-pub fn execute_local_command_in_dir_with_process_cleanup(
-    command: &str,
-    current_dir: Option<&str>,
-    env: Option<&[(&str, &str)]>,
-) -> CommandOutput {
-    execute_local_command_in_dir_impl(command, current_dir, env, true)
+    execute_local_command_in_dir_impl(command, current_dir, env)
 }
 
 fn execute_local_command_in_dir_impl(
     command: &str,
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
-    cleanup_process_group: bool,
 ) -> CommandOutput {
     #[cfg(windows)]
     let mut cmd = {
@@ -312,7 +311,7 @@ fn execute_local_command_in_dir_impl(
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    configure_process_group_cleanup(&mut cmd, cleanup_process_group);
+    configure_process_group_cleanup(&mut cmd);
 
     let child = match cmd.spawn() {
         Ok(child) => child,
@@ -326,7 +325,7 @@ fn execute_local_command_in_dir_impl(
             };
         }
     };
-    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id());
     let _invocation_child_guard =
         invocation_child_guard(env, child.id(), cleanup_guard.pgid(), command);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
@@ -403,22 +402,13 @@ pub fn execute_local_command_passthrough(
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
 ) -> CommandOutput {
-    execute_local_command_passthrough_impl(command, current_dir, env, false)
-}
-
-pub fn execute_local_command_passthrough_with_process_cleanup(
-    command: &str,
-    current_dir: Option<&str>,
-    env: Option<&[(&str, &str)]>,
-) -> CommandOutput {
-    execute_local_command_passthrough_impl(command, current_dir, env, true)
+    execute_local_command_passthrough_impl(command, current_dir, env)
 }
 
 fn execute_local_command_passthrough_impl(
     command: &str,
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
-    cleanup_process_group: bool,
 ) -> CommandOutput {
     use std::io::{Read, Write};
     use std::thread;
@@ -447,7 +437,7 @@ fn execute_local_command_passthrough_impl(
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    configure_process_group_cleanup(&mut cmd, cleanup_process_group);
+    configure_process_group_cleanup(&mut cmd);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -461,7 +451,7 @@ fn execute_local_command_passthrough_impl(
             };
         }
     };
-    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id());
     let _invocation_child_guard =
         invocation_child_guard(env, child.id(), cleanup_guard.pgid(), command);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
@@ -532,7 +522,6 @@ pub(crate) fn execute_local_command_stderr_passthrough(
     command: &str,
     current_dir: Option<&str>,
     env: Option<&[(&str, &str)]>,
-    cleanup_process_group: bool,
 ) -> CommandOutput {
     use std::io::{Read, Write};
     use std::thread;
@@ -561,7 +550,7 @@ pub(crate) fn execute_local_command_stderr_passthrough(
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    configure_process_group_cleanup(&mut cmd, cleanup_process_group);
+    configure_process_group_cleanup(&mut cmd);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -575,7 +564,7 @@ pub(crate) fn execute_local_command_stderr_passthrough(
             };
         }
     };
-    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id(), cleanup_process_group);
+    let cleanup_guard = ProcessGroupCleanupGuard::new(child.id());
     let _invocation_child_guard =
         invocation_child_guard(env, child.id(), cleanup_guard.pgid(), command);
     let monitor = ChildResourceMonitor::start(child.id(), command.to_string());
@@ -650,10 +639,7 @@ pub(crate) fn execute_local_command_stderr_passthrough(
 }
 
 #[cfg(unix)]
-fn configure_process_group_cleanup(cmd: &mut Command, enabled: bool) {
-    if !enabled {
-        return;
-    }
+fn configure_process_group_cleanup(cmd: &mut Command) {
     install_process_cleanup_signal_handlers();
     use std::os::unix::process::CommandExt;
     unsafe {
@@ -668,7 +654,7 @@ fn configure_process_group_cleanup(cmd: &mut Command, enabled: bool) {
 }
 
 #[cfg(not(unix))]
-fn configure_process_group_cleanup(_cmd: &mut Command, _enabled: bool) {}
+fn configure_process_group_cleanup(_cmd: &mut Command) {}
 
 struct ProcessGroupCleanupGuard {
     #[cfg(unix)]
@@ -676,10 +662,10 @@ struct ProcessGroupCleanupGuard {
 }
 
 impl ProcessGroupCleanupGuard {
-    fn new(root_pid: u32, enabled: bool) -> Self {
+    fn new(root_pid: u32) -> Self {
         #[cfg(unix)]
         {
-            let pgid = enabled.then_some(root_pid as libc::pid_t);
+            let pgid = Some(root_pid as libc::pid_t);
             if let Some(pgid) = pgid {
                 ACTIVE_CLEANUP_PGID.store(pgid, Ordering::SeqCst);
             }
@@ -688,7 +674,7 @@ impl ProcessGroupCleanupGuard {
 
         #[cfg(not(unix))]
         {
-            let _ = (root_pid, enabled);
+            let _ = root_pid;
             Self {}
         }
     }
@@ -1088,21 +1074,6 @@ mod tests {
             "printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2",
             None,
             None,
-            false,
-        );
-
-        assert!(output.success);
-        assert_eq!(output.stdout, "{\"ok\":true}\n");
-        assert_eq!(output.stderr, "progress turn=1\n");
-    }
-
-    #[test]
-    fn stderr_passthrough_with_process_cleanup_preserves_stdout() {
-        let output = execute_local_command_stderr_passthrough(
-            "printf '{\"ok\":true}\n'; printf 'progress turn=1\n' >&2",
-            None,
-            None,
-            true,
         );
 
         assert!(output.success);
@@ -1122,7 +1093,7 @@ mod tests {
             crate::engine::shell::quote_path(&pid_file.to_string_lossy())
         );
 
-        let output = execute_local_command_in_dir_with_process_cleanup(&command, None, None);
+        let output = execute_local_command_in_dir(&command, None, None);
 
         assert!(output.success, "command failed: {}", output.stderr);
         let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
