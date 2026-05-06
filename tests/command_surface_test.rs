@@ -53,6 +53,8 @@ fn rejects_stale_or_deeper_paths() {
 
     assert!(!surface.contains_path(&["supports"]));
     assert!(!surface.contains_path(&["audit", "code"]));
+    assert!(!surface.contains_path(&["audit", "docs"]));
+    assert!(!surface.contains_path(&["audit", "structure"]));
     assert!(!surface.contains_path(&["stack", "inspect", "extra"]));
 }
 
