@@ -221,6 +221,25 @@ fn collect_head_version_mismatches(
     }
 }
 
+/// Resolve the git toplevel directory for `path`. Returns `None` if `path`
+/// is not inside a git repo or if the git invocation fails for any reason.
+/// Used to translate `component.local_path` into a stripping root for
+/// `git show HEAD:<rel>`, which always resolves `<rel>` against the
+/// repository toplevel regardless of cwd.
+fn git_toplevel(path: &str) -> Option<std::path::PathBuf> {
+    let output =
+        crate::git::execute_git_for_release(path, &["rev-parse", "--show-toplevel"]).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(std::path::PathBuf::from(trimmed))
+}
+
 /// Read a version target's content from `HEAD` (committed tree) and parse
 /// the version string out of it. Returns `None` if the file is missing at
 /// HEAD, the git command fails, or the content can't be parsed.
@@ -238,12 +257,33 @@ fn read_version_at_head(
         .or_else(|| default_pattern_for_file(&target.file))?;
 
     // Resolve the path the same way bump_component_version does, then make it
-    // repo-relative for `git show HEAD:<rel>`. `git show` requires forward
-    // slashes and rejects absolute paths.
+    // relative to the git toplevel for `git show HEAD:<rel>`. `git show`
+    // resolves `<rel>` against the repository toplevel — NOT against the
+    // current working directory — so for monorepo-scoped components whose
+    // `local_path` is a subdirectory of the toplevel (e.g. an extension at
+    // `homeboy-extensions/wordpress`) we MUST strip the toplevel, not
+    // `local_path`. Stripping `local_path` produced `HEAD:plugin.php` for a
+    // file actually at `wordpress/plugin.php`, which `git show` rejected
+    // ("path wordpress/plugin.php exists, but not plugin.php"). See #2327.
+    //
+    // For root-layout components `local_path` *is* the toplevel, so the
+    // toplevel-relative path equals the `local_path`-relative path and
+    // behavior is unchanged.
+    //
+    // We canonicalize both sides before stripping so that platform symlinks
+    // (notably macOS `/var` → `/private/var`) don't defeat the prefix match
+    // when `full_path` and the git toplevel were derived through different
+    // resolution paths.
+    //
+    // `git show` also requires forward slashes and rejects absolute paths.
     let full_path = resolve_version_file_path(&component.local_path, &target.file);
-    let local_root = std::path::Path::new(&component.local_path);
-    let rel_path = std::path::Path::new(&full_path)
-        .strip_prefix(local_root)
+    let strip_root = git_toplevel(&component.local_path)
+        .unwrap_or_else(|| std::path::PathBuf::from(&component.local_path));
+    let canonical_full =
+        std::fs::canonicalize(&full_path).unwrap_or_else(|_| std::path::PathBuf::from(&full_path));
+    let canonical_root = std::fs::canonicalize(&strip_root).unwrap_or_else(|_| strip_root.clone());
+    let rel_path = canonical_full
+        .strip_prefix(&canonical_root)
         .ok()?
         .to_string_lossy()
         .replace('\\', "/");
@@ -1336,6 +1376,85 @@ mod tests {
     fn collect_head_version_mismatches_returns_none_when_head_matches() {
         let (_temp, component) = plugin_repo_at("0.6.13");
         assert!(collect_head_version_mismatches(&component, "0.6.13").is_none());
+    }
+
+    /// Fixture: a git repo whose toplevel contains a `subdir/` with the
+    /// version target file. `component.local_path` points at `<toplevel>/subdir`,
+    /// NOT the git toplevel. This mirrors the monorepo-extension layout
+    /// (`homeboy-extensions/wordpress`, `homeboy-extensions/swift`, etc.) that
+    /// triggers issue #2327.
+    fn plugin_repo_at_subdir(
+        committed_version: &str,
+        subdir: &str,
+    ) -> (tempfile::TempDir, Component) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let toplevel = temp.path();
+        run_in(toplevel, &["git", "init", "-q"]);
+        run_in(
+            toplevel,
+            &["git", "config", "user.email", "test@example.com"],
+        );
+        run_in(toplevel, &["git", "config", "user.name", "Test"]);
+        run_in(toplevel, &["git", "config", "commit.gpgsign", "false"]);
+
+        let sub = toplevel.join(subdir);
+        std::fs::create_dir_all(&sub).expect("create subdir");
+
+        let plugin = format!(
+            "<?php\n/*\nPlugin Name: Fixture\nVersion: {}\n*/\n",
+            committed_version
+        );
+        std::fs::write(sub.join("plugin.php"), plugin).expect("write plugin");
+        run_in(toplevel, &["git", "add", "."]);
+        run_in(toplevel, &["git", "commit", "-q", "-m", "Initial commit"]);
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: sub.to_string_lossy().to_string(),
+            version_targets: Some(vec![VersionTarget {
+                file: "plugin.php".to_string(),
+                pattern: Some(r"(?:Version|version)[:=]\s+([0-9]+\.[0-9]+\.[0-9]+)".to_string()),
+            }]),
+            ..Component::default()
+        };
+        (temp, component)
+    }
+
+    #[test]
+    fn collect_head_version_mismatches_works_in_monorepo_subdir() {
+        // Issue #2327: when the component's local_path is a subdir of the git
+        // toplevel (monorepo extension layout), `git show HEAD:<path>` must
+        // resolve `<path>` against the git toplevel, not against
+        // component.local_path. Before the fix this returns `None` because
+        // `git show HEAD:plugin.php` fails ("path subdir/plugin.php exists,
+        // but not plugin.php"), which makes the HEAD invariant treat the
+        // committed version as `<unreadable>` and either flag a spurious
+        // mismatch or silently pass when comparing `None != Some(expected)`.
+        let (_temp, component) = plugin_repo_at_subdir("0.6.13", "wordpress");
+
+        // HEAD has 0.6.13. With a correct toplevel-relative path resolution,
+        // `read_version_at_head` returns Some("0.6.13") and the mismatch
+        // collector returns None.
+        assert!(
+            collect_head_version_mismatches(&component, "0.6.13").is_none(),
+            "HEAD has the expected version; mismatch collector should return None \
+             but the bug makes git show fail and mismatches are reported with \
+             found = None"
+        );
+
+        // And when HEAD does NOT have the expected version, the collector
+        // must still surface the real committed value (0.6.13) — not None.
+        let mismatches = collect_head_version_mismatches(&component, "0.7.0")
+            .expect("HEAD does not have 0.7.0; mismatch expected");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].file, "plugin.php");
+        assert_eq!(mismatches[0].expected, "0.7.0");
+        assert_eq!(
+            mismatches[0].found.as_deref(),
+            Some("0.6.13"),
+            "found value must be the version actually committed at HEAD, \
+             not None from a failed `git show HEAD:<wrong-path>`"
+        );
     }
 
     #[test]
