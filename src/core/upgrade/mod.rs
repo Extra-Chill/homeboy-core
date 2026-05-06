@@ -58,6 +58,36 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_install_method_prefers_active_cargo_path_over_brew_list() {
+        let method = helpers::detect_install_method_from_exe_path(
+            "/Users/chubes/.cargo/bin/homeboy",
+            |cmd, args| cmd == "brew" && args == ["list", "homeboy"],
+        );
+
+        assert_eq!(method, InstallMethod::Cargo);
+    }
+
+    #[test]
+    fn test_detect_install_method_preserves_active_homebrew_path() {
+        let method = helpers::detect_install_method_from_exe_path(
+            "/opt/homebrew/bin/homeboy",
+            |_cmd, _args| false,
+        );
+
+        assert_eq!(method, InstallMethod::Homebrew);
+    }
+
+    #[test]
+    fn test_detect_install_method_uses_brew_list_only_as_fallback() {
+        let method = helpers::detect_install_method_from_exe_path(
+            "/Applications/Homeboy/homeboy",
+            |cmd, args| cmd == "brew" && args == ["list", "homeboy"],
+        );
+
+        assert_eq!(method, InstallMethod::Homebrew);
+    }
+
+    #[test]
     fn test_resolve_binary_on_path_var_finds_first_existing_binary() {
         let base = tempdir().unwrap();
         let first = base.path().join("first");
