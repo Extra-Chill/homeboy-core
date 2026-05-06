@@ -579,7 +579,6 @@ pub(crate) fn build_trace_runner(
         settings: &args.settings,
         settings_json: &args.runner_inputs.json_settings,
         run_dir,
-        cleanup_process_group: true,
         results_env: Some((
             "HOMEBOY_TRACE_RESULTS_FILE",
             run_dir.step_file(run_dir::files::TRACE_RESULTS),

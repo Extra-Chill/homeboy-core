@@ -93,10 +93,6 @@ pub(crate) fn run_component_scripts_with_env(
             super::execution::CapabilityScriptOptions {
                 passthrough,
                 stderr_passthrough: false,
-                cleanup_process_group: matches!(
-                    capability,
-                    ExtensionCapability::Bench | ExtensionCapability::Trace
-                ),
             },
         )?;
 
