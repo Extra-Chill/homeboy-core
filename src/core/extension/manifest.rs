@@ -900,13 +900,13 @@ pub struct BuildConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cleanup_paths: Vec<String>,
     /// Repo-relative paths to lockfiles this extension's build process
-    /// regenerates (e.g. `Cargo.lock`, `composer.lock`, `package-lock.json`).
+    /// regenerates.
     ///
     /// These are merge-aftermath drift on the base branch: a release version
-    /// bump in `Cargo.toml` causes `cargo build` on main to refresh
-    /// `Cargo.lock`. The CI autofix pipeline treats lockfile drift the same
-    /// as audit baseline drift — it's pushed directly to the base branch
-    /// instead of opened as a reviewable PR.
+    /// bump can cause extension-managed dependency metadata to refresh. The CI
+    /// autofix pipeline treats lockfile drift the same as audit baseline drift:
+    /// it's pushed directly to the base branch instead of opened as a
+    /// reviewable PR.
     ///
     /// Paths are repo-root-relative. Absolute paths are rejected. Existence
     /// is the caller's responsibility.
