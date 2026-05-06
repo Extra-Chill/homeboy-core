@@ -947,6 +947,15 @@ const MIN_LCS_RATIO: f64 = 0.5;
 /// from methods that share only 1-2 trivial calls like `to_string`.
 const MIN_SHARED_CALLS: usize = 3;
 
+/// Raised Jaccard floor for two `StraightLine` bodies that share calls.
+///
+/// Without a loop or recursion two functions that overlap on stdlib
+/// helpers (e.g. `fs::copy`, `create_dir_all`) carry weak workflow
+/// signal — they are usually small focused helpers that happen to share
+/// one stdlib pair. Force them to clear a much higher bar before flagging.
+/// Loop/recursion pairs keep the standard `MIN_JACCARD_SIMILARITY`.
+const STRAIGHT_LINE_JACCARD_FLOOR: f64 = 0.7;
+
 /// Common plumbing calls that are useful in a method body but too generic to
 /// carry signal for workflow-level similarity. Keep these out of the scoring
 /// pass so filesystem scans, command wrappers, and terminal renderers do not
@@ -1062,6 +1071,46 @@ const TRIVIAL_CALLS: &[&str] = &[
     "with_extension",
 ];
 
+/// Generic, language-agnostic structural shape of a function body.
+///
+/// Used as a gate before flagging two methods as parallel implementations:
+/// a 22-line straight-line copy helper and a recursive directory walk can
+/// share the same call set (`copy`, `create_dir_all`, …) yet have nothing
+/// in common at the workflow level. Requiring shape compatibility kills
+/// that false positive without leaning on language-specific identifiers.
+///
+/// Detection is purely lexical so it works for Rust, Python, JS, PHP, Go,
+/// etc. — see [`detect_body_shape`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyShape {
+    /// Body contains at least one loop construct or iterator-pipeline call.
+    Looping,
+    /// Body calls its own function name (direct recursion).
+    Recursive,
+    /// Body contains neither a loop nor a self-call.
+    StraightLine,
+}
+
+impl BodyShape {
+    /// True when two shapes can plausibly implement the same workflow.
+    ///
+    /// Looping and Recursive are both "iterates over something" and freely
+    /// match each other — a recursive directory walk and a `for` loop over
+    /// `read_dir` are genuinely interchangeable. StraightLine only matches
+    /// itself; pairing a straight-line helper with a loop is the FP shape.
+    fn compatible_with(self, other: BodyShape) -> bool {
+        use BodyShape::*;
+        matches!(
+            (self, other),
+            (Looping, Looping)
+                | (Looping, Recursive)
+                | (Recursive, Looping)
+                | (Recursive, Recursive)
+                | (StraightLine, StraightLine)
+        )
+    }
+}
+
 /// Per-method call sequence extracted from file content.
 #[derive(Debug)]
 struct MethodCallSequence {
@@ -1069,6 +1118,90 @@ struct MethodCallSequence {
     method: String,
     /// Ordered list of function/method calls made in the body.
     calls: Vec<String>,
+    /// Generic structural shape of the body — used as a gate before flagging
+    /// two methods as parallel implementations.
+    shape: BodyShape,
+}
+
+/// Generic looping markers — substrings that indicate the body iterates over
+/// something. Covers control-flow keywords (`for`, `while`, `loop`,
+/// `foreach`) shared by most languages and common iterator-pipeline calls
+/// from Rust, JS, Python, PHP, and Go. Match is whitespace/`(`-bounded so
+/// substrings like `format!` (containing `for`) do not register.
+const LOOPING_MARKERS: &[&str] = &[
+    "for ",
+    "for(",
+    "while ",
+    "while(",
+    "loop {",
+    "loop{",
+    "foreach ",
+    "foreach(",
+    ".iter()",
+    ".into_iter()",
+    ".iter_mut()",
+    ".for_each(",
+    ".map(",
+    ".filter(",
+    ".fold(",
+    ".flat_map(",
+    ".reduce(",
+    ".for_each (",
+    "forEach(",
+    "range(",
+];
+
+/// Detect the body shape of a function body purely from text.
+///
+/// Generic by construction — uses substrings (`for`, `while`, `loop`,
+/// `.map(`, `.filter(`, `forEach(`, `range(`, …) that exist in every
+/// mainstream language, plus a self-call probe (`<method_name>(`) for
+/// recursion. No AST, no language-specific identifiers.
+fn detect_body_shape(body: &str, method_name: &str) -> BodyShape {
+    let has_loop = LOOPING_MARKERS.iter().any(|marker| body.contains(marker));
+    let has_self_call = contains_self_call(body, method_name);
+
+    match (has_loop, has_self_call) {
+        // Recursive wins over Looping for reporting purposes only when there
+        // is no loop; if both are present we still want to flag it as Looping
+        // (loops are the dominant signal). For the compatibility gate the
+        // distinction does not matter — Looping and Recursive are mutually
+        // compatible.
+        (true, _) => BodyShape::Looping,
+        (false, true) => BodyShape::Recursive,
+        (false, false) => BodyShape::StraightLine,
+    }
+}
+
+/// Return true if `body` contains a call to `method_name` (i.e. direct
+/// recursion). The check is the function name followed by `(`, with the
+/// preceding character either absent or a non-identifier byte so that
+/// `do_thing` does not match `redo_thing`.
+fn contains_self_call(body: &str, method_name: &str) -> bool {
+    if method_name.is_empty() {
+        return false;
+    }
+    let bytes = body.as_bytes();
+    let needle = method_name.as_bytes();
+    if needle.len() >= bytes.len() {
+        return false;
+    }
+
+    let mut i = 0;
+    while i + needle.len() < bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            let after = bytes[i + needle.len()];
+            let before_ok = i == 0 || {
+                let b = bytes[i - 1];
+                !(b.is_ascii_alphanumeric() || b == b'_')
+            };
+            if after == b'(' && before_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Extract function call names from a code block.
@@ -1212,12 +1345,14 @@ fn extract_call_sequences(fingerprints: &[&FileFingerprint]) -> Vec<MethodCallSe
 
             let body: String = lines[body_start + 1..body_end].join("\n");
             let calls = extract_calls_from_body(&body);
+            let shape = detect_body_shape(&body, method_name);
 
             if calls.len() >= MIN_CALL_COUNT {
                 sequences.push(MethodCallSequence {
                     file: fp.relative_path.clone(),
                     method: method_name.clone(),
                     calls,
+                    shape,
                 });
             }
         }
@@ -1355,10 +1490,32 @@ pub(crate) fn detect_parallel_implementations(
                 continue;
             }
 
+            // Body-shape gate (issue #2334): a parallel-implementation finding
+            // must reflect a shared workflow, not just a shared call set. Two
+            // bodies with incompatible shapes (e.g. a single-file copy helper
+            // vs a recursive directory walk) are not the same workflow even
+            // when they share `fs::copy` and `create_dir_all`.
+            if !a.shape.compatible_with(b.shape) {
+                continue;
+            }
+
+            // For two StraightLine bodies the shared call set is the only
+            // signal we have, so raise the Jaccard floor — a small focused
+            // helper that overlaps with another small helper on a couple of
+            // stdlib calls is too weak to flag.
+            let jaccard_floor = if matches!(
+                (a.shape, b.shape),
+                (BodyShape::StraightLine, BodyShape::StraightLine)
+            ) {
+                STRAIGHT_LINE_JACCARD_FLOOR
+            } else {
+                MIN_JACCARD_SIMILARITY
+            };
+
             let jaccard = jaccard_similarity(&a_signal, &b_signal);
             let lcs = lcs_ratio(&a_signal, &b_signal);
 
-            if jaccard >= MIN_JACCARD_SIMILARITY && lcs >= MIN_LCS_RATIO {
+            if jaccard >= jaccard_floor && lcs >= MIN_LCS_RATIO {
                 // Find the shared calls for the description
                 let set_a: std::collections::HashSet<&str> =
                     a_signal.iter().map(|s| s.as_str()).collect();
@@ -2433,15 +2590,18 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
 
     #[test]
     fn detects_parallel_implementation() {
+        // Both bodies loop over a worklist — Looping ↔ Looping matches at the
+        // standard Jaccard floor. Mirrors the real `copy_dir_recursive` ↔
+        // `copy_directory` shape from issue #2334.
         let fp1 = make_fingerprint_with_content(
             "src/deploy.rs",
             &["deploy_to_server"],
-            "fn deploy_to_server() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    notify_complete();\n}",
+            "fn deploy_to_server() {\n    for host in hosts {\n        validate_component();\n        build_artifact();\n        upload_to_host();\n        run_post_hooks();\n        notify_complete();\n    }\n}",
         );
         let fp2 = make_fingerprint_with_content(
             "src/upgrade.rs",
             &["upgrade_on_server"],
-            "fn upgrade_on_server() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    send_notification();\n}",
+            "fn upgrade_on_server() {\n    for host in hosts {\n        validate_component();\n        build_artifact();\n        upload_to_host();\n        run_post_hooks();\n        send_notification();\n    }\n}",
         );
 
         let findings =
@@ -2610,15 +2770,17 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
 
     #[test]
     fn detects_parallel_implementation_after_plumbing_filter() {
+        // Both bodies loop over their PR list — Looping ↔ Looping clears the
+        // body-shape gate at the standard Jaccard floor.
         let apply = make_fingerprint_with_content(
             "src/core/stack/apply.rs",
             &["apply_stack"],
-            "fn apply_stack() {\n    ensure_head_remote();\n    checkout_force();\n    fetch_pr_meta();\n    cherry_pick();\n    record_applied_pr();\n    run_git();\n    success();\n}",
+            "fn apply_stack() {\n    for pr in prs {\n        ensure_head_remote();\n        checkout_force();\n        fetch_pr_meta();\n        cherry_pick();\n        record_applied_pr();\n        run_git();\n        success();\n    }\n}",
         );
         let sync = make_fingerprint_with_content(
             "src/core/stack/sync.rs",
             &["sync_stack"],
-            "fn sync_stack() {\n    ensure_head_remote();\n    checkout_force();\n    fetch_pr_meta();\n    cherry_pick();\n    record_synced_pr();\n    run_git();\n    success();\n}",
+            "fn sync_stack() {\n    for pr in prs {\n        ensure_head_remote();\n        checkout_force();\n        fetch_pr_meta();\n        cherry_pick();\n        record_synced_pr();\n        run_git();\n        success();\n    }\n}",
         );
 
         let findings =
@@ -2701,16 +2863,17 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
 
     #[test]
     fn convention_methods_skip_parallel_detection() {
-        // Two methods with identical call patterns — would normally flag
+        // Two methods with identical call patterns — would normally flag.
+        // Wrapped in a loop so they clear the body-shape gate.
         let fp1 = make_fingerprint_with_content(
             "src/deploy.rs",
             &["registerAbilities"],
-            "fn registerAbilities() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    notify_complete();\n}",
+            "fn registerAbilities() {\n    for ability in abilities {\n        validate_component();\n        build_artifact();\n        upload_to_host();\n        run_post_hooks();\n        notify_complete();\n    }\n}",
         );
         let fp2 = make_fingerprint_with_content(
             "src/upgrade.rs",
             &["registerAbility"],
-            "fn registerAbility() {\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    send_notification();\n}",
+            "fn registerAbility() {\n    for ability in abilities {\n        validate_component();\n        build_artifact();\n        upload_to_host();\n        run_post_hooks();\n        send_notification();\n    }\n}",
         );
 
         // Without convention methods: flagged
@@ -2728,6 +2891,178 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
             findings.is_empty(),
             "Pairs involving convention methods should not be flagged, got: {:?}",
             findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    // ========================================================================
+    // Body-shape gate tests (issue #2334)
+    // ========================================================================
+
+    #[test]
+    fn body_shape_gate_two_loops_with_shared_calls_flag() {
+        // Mirrors the real `copy_dir_recursive` ↔ `copy_directory` shape that
+        // we MUST keep flagging after the body-shape gate ships.
+        let copy_dir_recursive = make_fingerprint_with_content(
+            "src/core/extension/lifecycle.rs",
+            &["copy_dir_recursive"],
+            "fn copy_dir_recursive() {\n    create_dir_all(dst);\n    for entry in read_dir(src) {\n        copy_file_entry();\n        record_copied();\n        verify_target();\n    }\n}",
+        );
+        let copy_directory = make_fingerprint_with_content(
+            "src/core/engine/invocation.rs",
+            &["copy_directory"],
+            "fn copy_directory() {\n    create_dir_all(dst);\n    for entry in read_dir(src) {\n        copy_file_entry();\n        record_copied();\n        preserve_artifact();\n    }\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&copy_dir_recursive, &copy_directory],
+            &std::collections::HashSet::new(),
+        );
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "Two looping copy helpers with shared calls must still flag — that is the real finding from #2334"
+        );
+    }
+
+    #[test]
+    fn body_shape_gate_kills_single_file_vs_recursive_walk_fp() {
+        // The canonical FP from issue #2334:
+        // `copy_artifact_file` is StraightLine (single `fs::copy` after a
+        // `create_dir_all` of the parent), `copy_dir_recursive` is
+        // Looping+Recursive (recursive walk over `read_dir`). They share
+        // `create_dir_all` and `copy` but the workflows are not the same.
+        let copy_artifact_file = make_fingerprint_with_content(
+            "src/core/observation/store.rs",
+            &["copy_artifact_file"],
+            "fn copy_artifact_file() {\n    let parent = target_parent();\n    create_dir_all(parent);\n    copy(source, target);\n    verify_size();\n    record_copy();\n}",
+        );
+        let copy_dir_recursive = make_fingerprint_with_content(
+            "src/core/extension/lifecycle.rs",
+            &["copy_dir_recursive"],
+            "fn copy_dir_recursive() {\n    create_dir_all(dst);\n    for entry in read_dir(src) {\n        copy(entry, target);\n        verify_size();\n        record_copy();\n        copy_dir_recursive(entry, dst);\n    }\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&copy_artifact_file, &copy_dir_recursive],
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Single-file copy (StraightLine) vs recursive walk (Looping) must not flag — got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn body_shape_gate_two_straight_line_below_raised_jaccard_floor() {
+        // Two StraightLine bodies: 4 shared calls, 6 union → Jaccard 0.667.
+        // Below the raised StraightLine floor of 0.7 → must NOT flag.
+        let helper_a = make_fingerprint_with_content(
+            "src/core/a.rs",
+            &["build_thing_a"],
+            "fn build_thing_a() {\n    let x = open_resource();\n    register_handler();\n    configure_options();\n    finalize_build();\n    emit_metric_a();\n}",
+        );
+        let helper_b = make_fingerprint_with_content(
+            "src/core/b.rs",
+            &["build_thing_b"],
+            "fn build_thing_b() {\n    let x = open_resource();\n    register_handler();\n    configure_options();\n    finalize_build();\n    emit_metric_b();\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&helper_a, &helper_b],
+            &std::collections::HashSet::new(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Two StraightLine bodies at Jaccard 0.667 must not flag under the raised floor — got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn body_shape_gate_two_straight_line_above_raised_jaccard_floor() {
+        // Same StraightLine pair but with identical signal calls (Jaccard 1.0)
+        // — clears the raised floor and MUST flag. This proves the gate is a
+        // shape filter, not a blanket ban on StraightLine pairs.
+        let helper_a = make_fingerprint_with_content(
+            "src/core/a.rs",
+            &["build_thing_a"],
+            "fn build_thing_a() {\n    let x = open_resource();\n    register_handler();\n    configure_options();\n    finalize_build();\n    emit_metric();\n}",
+        );
+        let helper_b = make_fingerprint_with_content(
+            "src/core/b.rs",
+            &["build_thing_b"],
+            "fn build_thing_b() {\n    let x = open_resource();\n    register_handler();\n    configure_options();\n    finalize_build();\n    emit_metric();\n}",
+        );
+
+        let findings = detect_parallel_implementations(
+            &[&helper_a, &helper_b],
+            &std::collections::HashSet::new(),
+        );
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "Two StraightLine bodies above the raised Jaccard floor must still flag"
+        );
+    }
+
+    #[test]
+    fn body_shape_gate_recursive_to_recursive_flags() {
+        // Two recursive helpers (no loop, but each calls itself) share the
+        // same workflow — Recursive ↔ Recursive is compatible and uses the
+        // standard Jaccard floor.
+        let walk_a = make_fingerprint_with_content(
+            "src/core/a.rs",
+            &["walk_tree_a"],
+            "fn walk_tree_a(node) {\n    visit_node();\n    record_step();\n    sanitize_value();\n    log_progress();\n    walk_tree_a(child);\n}",
+        );
+        let walk_b = make_fingerprint_with_content(
+            "src/core/b.rs",
+            &["walk_tree_b"],
+            "fn walk_tree_b(node) {\n    visit_node();\n    record_step();\n    sanitize_value();\n    log_progress();\n    walk_tree_b(child);\n}",
+        );
+
+        let findings =
+            detect_parallel_implementations(&[&walk_a, &walk_b], &std::collections::HashSet::new());
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "Recursive ↔ Recursive helpers with shared call set must flag"
+        );
+    }
+
+    #[test]
+    fn body_shape_detection_smoke() {
+        assert_eq!(
+            detect_body_shape("    foo();\n    bar();\n", "thing"),
+            BodyShape::StraightLine
+        );
+        assert_eq!(
+            detect_body_shape("    for entry in items {\n        foo();\n    }\n", "thing"),
+            BodyShape::Looping
+        );
+        assert_eq!(
+            detect_body_shape("    items.iter().map(|x| x).collect();\n", "thing"),
+            BodyShape::Looping
+        );
+        assert_eq!(
+            detect_body_shape("    foo();\n    walk(child);\n", "walk"),
+            BodyShape::Recursive
+        );
+        // Identifier guard — `redo_walk` must not register as a self-call to `walk`.
+        assert_eq!(
+            detect_body_shape("    redo_walk(x);\n", "walk"),
+            BodyShape::StraightLine
+        );
+        // `format!` contains the substring `for` but must not register as Looping.
+        assert_eq!(
+            detect_body_shape("    let s = format!(\"x\");\n    foo();\n", "thing"),
+            BodyShape::StraightLine
         );
     }
 }
