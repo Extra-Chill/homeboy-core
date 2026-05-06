@@ -423,9 +423,7 @@ fn show(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
                     // homeboy-action to scope direct-push drift.
                     map.insert(
                         "drift_files".to_string(),
-                        Value::Array(
-                            drift_files.into_iter().map(Value::String).collect(),
-                        ),
+                        Value::Array(drift_files.into_iter().map(Value::String).collect()),
                     );
                 }
                 value
