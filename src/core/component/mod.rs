@@ -2,6 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 
 pub mod audit;
+pub mod drift;
 pub mod inventory;
 pub mod mutations;
 pub mod portable;
@@ -187,6 +188,17 @@ pub struct Component {
     /// Override the CLI path used by extension deploy install steps.
     /// For example, Studio sites need "studio wp" instead of the default "wp".
     pub cli_path: Option<String>,
+    /// Component-level additions to the merge-aftermath drift list.
+    ///
+    /// Extensions declare baseline drift (lockfiles) via their manifests.
+    /// This field lets a component add extra paths — for example, a
+    /// generated SDK file regenerated on every release. Component entries
+    /// are additive only; they cannot remove extension-declared drift.
+    ///
+    /// Paths are repo-root-relative. The audit baseline (`homeboy.json`)
+    /// is always drift and does not need to be listed here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_drift_files: Vec<String>,
 }
 
 /// Raw JSON shape for Component — handles backward-compatible deserialization
@@ -256,6 +268,8 @@ struct RawComponent {
     audit: Option<AuditConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cli_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    extra_drift_files: Vec<String>,
 }
 
 /// Insert legacy commands into hooks map if the event key doesn't already exist.
@@ -307,6 +321,7 @@ impl From<RawComponent> for Component {
             scripts: raw.scripts,
             audit: raw.audit,
             cli_path: raw.cli_path,
+            extra_drift_files: raw.extra_drift_files,
         }
     }
 }
@@ -343,6 +358,7 @@ impl From<Component> for RawComponent {
             scripts: c.scripts,
             audit: c.audit,
             cli_path: c.cli_path,
+            extra_drift_files: c.extra_drift_files,
         }
     }
 }
@@ -416,6 +432,7 @@ impl Component {
             scripts: None,
             audit: None,
             cli_path: None,
+            extra_drift_files: Vec::new(),
         }
     }
 

@@ -401,6 +401,7 @@ fn show(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
     };
 
     let resolved_id = component.id.clone();
+    let drift_files = homeboy::component::drift::drift_file_paths(&component);
 
     Ok((
         ComponentOutput {
@@ -417,6 +418,15 @@ fn show(id: Option<&str>, path: Option<&str>) -> CmdResult<ComponentOutput> {
                 })?;
                 if let Value::Object(ref mut map) = value {
                     map.insert("id".to_string(), Value::String(resolved_id));
+                    // Computed: extension-declared lockfiles + component
+                    // extras + the audit baseline. Consumed by
+                    // homeboy-action to scope direct-push drift.
+                    map.insert(
+                        "drift_files".to_string(),
+                        Value::Array(
+                            drift_files.into_iter().map(Value::String).collect(),
+                        ),
+                    );
                 }
                 value
             }),
