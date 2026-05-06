@@ -221,6 +221,25 @@ fn collect_head_version_mismatches(
     }
 }
 
+/// Resolve the git toplevel directory for `path`. Returns `None` if `path`
+/// is not inside a git repo or if the git invocation fails for any reason.
+/// Used to translate `component.local_path` into a stripping root for
+/// `git show HEAD:<rel>`, which always resolves `<rel>` against the
+/// repository toplevel regardless of cwd.
+fn git_toplevel(path: &str) -> Option<std::path::PathBuf> {
+    let output =
+        crate::git::execute_git_for_release(path, &["rev-parse", "--show-toplevel"]).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(std::path::PathBuf::from(trimmed))
+}
+
 /// Read a version target's content from `HEAD` (committed tree) and parse
 /// the version string out of it. Returns `None` if the file is missing at
 /// HEAD, the git command fails, or the content can't be parsed.
@@ -238,12 +257,33 @@ fn read_version_at_head(
         .or_else(|| default_pattern_for_file(&target.file))?;
 
     // Resolve the path the same way bump_component_version does, then make it
-    // repo-relative for `git show HEAD:<rel>`. `git show` requires forward
-    // slashes and rejects absolute paths.
+    // relative to the git toplevel for `git show HEAD:<rel>`. `git show`
+    // resolves `<rel>` against the repository toplevel — NOT against the
+    // current working directory — so for monorepo-scoped components whose
+    // `local_path` is a subdirectory of the toplevel (e.g. an extension at
+    // `homeboy-extensions/wordpress`) we MUST strip the toplevel, not
+    // `local_path`. Stripping `local_path` produced `HEAD:plugin.php` for a
+    // file actually at `wordpress/plugin.php`, which `git show` rejected
+    // ("path wordpress/plugin.php exists, but not plugin.php"). See #2327.
+    //
+    // For root-layout components `local_path` *is* the toplevel, so the
+    // toplevel-relative path equals the `local_path`-relative path and
+    // behavior is unchanged.
+    //
+    // We canonicalize both sides before stripping so that platform symlinks
+    // (notably macOS `/var` → `/private/var`) don't defeat the prefix match
+    // when `full_path` and the git toplevel were derived through different
+    // resolution paths.
+    //
+    // `git show` also requires forward slashes and rejects absolute paths.
     let full_path = resolve_version_file_path(&component.local_path, &target.file);
-    let local_root = std::path::Path::new(&component.local_path);
-    let rel_path = std::path::Path::new(&full_path)
-        .strip_prefix(local_root)
+    let strip_root = git_toplevel(&component.local_path)
+        .unwrap_or_else(|| std::path::PathBuf::from(&component.local_path));
+    let canonical_full =
+        std::fs::canonicalize(&full_path).unwrap_or_else(|_| std::path::PathBuf::from(&full_path));
+    let canonical_root = std::fs::canonicalize(&strip_root).unwrap_or_else(|_| strip_root.clone());
+    let rel_path = canonical_full
+        .strip_prefix(&canonical_root)
         .ok()?
         .to_string_lossy()
         .replace('\\', "/");
@@ -1350,7 +1390,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let toplevel = temp.path();
         run_in(toplevel, &["git", "init", "-q"]);
-        run_in(toplevel, &["git", "config", "user.email", "test@example.com"]);
+        run_in(
+            toplevel,
+            &["git", "config", "user.email", "test@example.com"],
+        );
         run_in(toplevel, &["git", "config", "user.name", "Test"]);
         run_in(toplevel, &["git", "config", "commit.gpgsign", "false"]);
 
