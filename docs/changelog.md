@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.160.0] - 2026-05-07
+
+### Added
+- support --path for ad-hoc observation of unregistered systems
+
+### Fixed
+- record effective component path on bench output (#2362)
+
 ## [0.159.0] - 2026-05-07
 
 ### Added
