@@ -198,7 +198,11 @@ mod tests {
             "files": ["target/foo.rs", "Cargo.lock"],
             "hint": "Commit, stash, or discard changes before releasing",
         });
-        v.push("working_tree", "Uncommitted changes detected", Some(context.clone()));
+        v.push(
+            "working_tree",
+            "Uncommitted changes detected",
+            Some(context.clone()),
+        );
 
         let err = v.finish_if_errors().unwrap_err();
         assert_eq!(err.details, context);
