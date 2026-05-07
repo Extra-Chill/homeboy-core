@@ -397,7 +397,7 @@ fn run_component_with_rig_context(
 ) -> CmdResult<BenchCommandOutput> {
     let rig_spec = rig_context.map(|context| &context.spec);
     let rig_id = rig_context.map(|context| context.id.clone());
-    let rig_snapshot = rig_context.map(|context| context.snapshot.clone());
+    let mut rig_snapshot = rig_context.map(|context| context.snapshot.clone());
     let default_component_id = rig_spec.and_then(|spec| {
         spec.bench
             .as_ref()
@@ -431,6 +431,13 @@ fn run_component_with_rig_context(
     resolve_options.extension_overrides = args.extension_override.extensions.clone();
 
     let ctx = execution_context::resolve_with_component(&resolve_options, component_override)?;
+
+    if let Some(snapshot) = rig_snapshot.as_mut() {
+        let effective_path = ctx.source_path.to_string_lossy().into_owned();
+        snapshot.set_effective_component_path(&ctx.component_id, &effective_path, |path| {
+            rig::head_sha_and_branch(path)
+        });
+    }
 
     if let Some(spec) = rig_spec {
         run_rig_workload_preflight(spec, ctx.extension_id.as_deref())?;

@@ -41,8 +41,8 @@ pub use install::{
 pub use lease::{acquire_active_run_lease, active_run_leases, ActiveRigRunLease, RigRunLease};
 pub use pipeline::{PipelineOutcome, PipelineStepOutcome};
 pub use runner::{
-    run_check, run_check_groups, run_down, run_repair, run_status, run_up, snapshot_state,
-    CheckReport, DownReport, RepairReport, RepairResourceReport, RigStatusReport,
+    head_sha_and_branch, run_check, run_check_groups, run_down, run_repair, run_status, run_up,
+    snapshot_state, CheckReport, DownReport, RepairReport, RepairResourceReport, RigStatusReport,
     SymlinkStatusReport, SymlinkStatusState, UpReport,
 };
 pub use service::{DiscoveredProcess, ServiceStatus};

@@ -482,16 +482,12 @@ pub fn snapshot_state(rig: &RigSpec) -> RigStateSnapshot {
     for (id, comp) in &rig.components {
         let expanded = expand_vars(rig, &comp.path);
         let resolved = shellexpand::tilde(&expanded).into_owned();
-        let sha = run_in_optional(&resolved, "git", &["rev-parse", "HEAD"])
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let branch = run_in_optional(&resolved, "git", &["rev-parse", "--abbrev-ref", "HEAD"])
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let (sha, branch) = head_sha_and_branch(&resolved);
         components.insert(
             id.clone(),
             ComponentSnapshot {
                 path: resolved,
+                declared_path: None,
                 sha,
                 branch,
             },
@@ -502,6 +498,21 @@ pub fn snapshot_state(rig: &RigSpec) -> RigStateSnapshot {
         captured_at: now_rfc3339(),
         components,
     }
+}
+
+/// Look up the HEAD SHA and current branch for a path on disk.
+///
+/// Returns `(None, None)` for paths that aren't git repos. Used by both rig
+/// snapshotting and effective-path overrides so persisted snapshots always
+/// describe the checkout that was actually exercised.
+pub fn head_sha_and_branch(path: &str) -> (Option<String>, Option<String>) {
+    let sha = run_in_optional(path, "git", &["rev-parse", "HEAD"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let branch = run_in_optional(path, "git", &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    (sha, branch)
 }
 
 struct RigRunObserver {

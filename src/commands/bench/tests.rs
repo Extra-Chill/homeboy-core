@@ -1475,3 +1475,6 @@ mod bench_resource_lease_test;
 #[cfg(test)]
 #[path = "../../../tests/core/rig/bench_rig_concurrency_dispatch_test.rs"]
 mod bench_rig_concurrency_dispatch_test;
+#[cfg(test)]
+#[path = "../../../tests/core/rig/bench_rig_path_override_test.rs"]
+mod bench_rig_path_override_test;

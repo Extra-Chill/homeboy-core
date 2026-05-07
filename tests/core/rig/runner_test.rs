@@ -17,8 +17,9 @@ use std::collections::HashMap;
 
 use crate::rig::pipeline::PipelineOutcome;
 use crate::rig::runner::{
-    run_check, run_check_groups, run_down, run_repair, run_status, run_up, snapshot_state,
-    CheckReport, RigStatusReport, ServiceStatusReport, SymlinkStatusState, UpReport,
+    head_sha_and_branch, run_check, run_check_groups, run_down, run_repair, run_status, run_up,
+    snapshot_state, CheckReport, RigStatusReport, ServiceStatusReport, SymlinkStatusState,
+    UpReport,
 };
 use crate::rig::spec::{
     ComponentSpec, PipelineStep, RigResourcesSpec, RigSpec, ServiceKind, ServiceSpec, SharedPathOp,
@@ -745,4 +746,72 @@ fn test_snapshot_state() {
         assert!(entry.sha.is_none(), "non-repo path has no HEAD SHA");
         assert!(entry.branch.is_none(), "non-repo path has no branch");
     }
+}
+
+#[test]
+fn test_head_sha_and_branch_returns_none_for_non_repo_path() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let (sha, branch) = head_sha_and_branch(&temp.path().to_string_lossy());
+    assert!(sha.is_none(), "non-repo path has no HEAD SHA");
+    assert!(branch.is_none(), "non-repo path has no branch");
+}
+
+#[test]
+fn test_head_sha_and_branch_returns_sha_and_branch_for_git_repo() {
+    use std::process::Command;
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let path = temp.path();
+
+    // Initialize a minimal git repo with a deterministic commit so the
+    // helper has something to read. Skip the test gracefully when git is
+    // unavailable so the suite stays portable.
+    let init = Command::new("git")
+        .arg("init")
+        .arg("--quiet")
+        .arg("--initial-branch=fixture-main")
+        .current_dir(path)
+        .status();
+    let Ok(status) = init else {
+        eprintln!("git not available; skipping head_sha_and_branch repo test");
+        return;
+    };
+    if !status.success() {
+        eprintln!("git init failed; skipping head_sha_and_branch repo test");
+        return;
+    }
+
+    for (key, value) in [
+        ("user.email", "fixture@example.test"),
+        ("user.name", "Fixture"),
+        ("commit.gpgsign", "false"),
+    ] {
+        let _ = Command::new("git")
+            .args(["config", key, value])
+            .current_dir(path)
+            .status();
+    }
+
+    std::fs::write(path.join("README"), b"fixture\n").expect("write readme");
+    let _ = Command::new("git")
+        .args(["add", "README"])
+        .current_dir(path)
+        .status();
+    let commit = Command::new("git")
+        .args(["commit", "--quiet", "-m", "fixture"])
+        .current_dir(path)
+        .status();
+    if !commit.map(|s| s.success()).unwrap_or(false) {
+        eprintln!("git commit failed; skipping head_sha_and_branch repo test");
+        return;
+    }
+
+    let (sha, branch) = head_sha_and_branch(&path.to_string_lossy());
+    let sha = sha.expect("HEAD SHA on a fresh git repo");
+    assert_eq!(sha.len(), 40, "HEAD SHA is full 40-char hex: {sha}");
+    assert!(
+        sha.chars().all(|c| c.is_ascii_hexdigit()),
+        "HEAD SHA is hex: {sha}"
+    );
+    assert_eq!(branch.as_deref(), Some("fixture-main"));
 }
