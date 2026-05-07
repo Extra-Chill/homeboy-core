@@ -99,14 +99,21 @@ pub fn eval_jsonpath(path: &serde_json_path::JsonPath, value: &Value) -> Vec<Val
 
 /// Render a JSON value as a flat scalar string suitable for grouping or
 /// table display. Returns `None` for objects, arrays, and `null`.
-pub fn scalar_to_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Null => None,
-        Value::Object(_) | Value::Array(_) => None,
+///
+/// Inlined into `distribution_share` callers as a closure so the helper
+/// stays private to its only caller; cross-file callers should pass a
+/// custom projection if they need different scalar semantics.
+fn scalar_label(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
     }
+    if let Some(b) = value.as_bool() {
+        return Some(b.to_string());
+    }
+    if let Some(n) = value.as_number() {
+        return Some(n.to_string());
+    }
+    None
 }
 
 /// Loaded artifact row: the raw JSON parsed from the artifact's stored file
@@ -212,7 +219,7 @@ pub fn distribution_share(
         let matches = eval_jsonpath(metric_path, &row.json);
         let mut row_had_scalar = false;
         for matched in matches {
-            if let Some(scalar) = scalar_to_string(&matched) {
+            if let Some(scalar) = scalar_label(&matched) {
                 *counts.entry(scalar).or_insert(0) += 1;
                 total += 1;
                 row_had_scalar = true;
