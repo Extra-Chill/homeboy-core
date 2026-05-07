@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.160.1] - 2026-05-07
+
+### Changed
+- format validation context regression test
+
+### Fixed
+- keep git status refresh docs ecosystem agnostic
+- surface dirty file list and refresh stale git index before working-tree check
+
 ## [0.160.0] - 2026-05-07
 
 ### Added
