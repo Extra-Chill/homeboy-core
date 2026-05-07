@@ -1,0 +1,355 @@
+//! Shared helpers for the `runs` subcommand family.
+//!
+//! Hosts duration parsing (used by `--since` flags), JSONPath compilation
+//! (used by `query`/`drift`), and the artifact-row loader (used by
+//! `query`/`drift` to project JSON over imported run artifacts).
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
+
+use homeboy::observation::{ObservationStore, RunListFilter, RunRecord};
+use homeboy::Error;
+use serde_json::Value;
+
+/// Convert a `--since <duration>` flag value into an RFC-3339 timestamp.
+///
+/// Accepts the same forms as elsewhere in the runs surface (s, m, h, d).
+/// Returned timestamp is `now - duration` so the caller can compare with
+/// `started_at >= threshold` semantics.
+pub fn since_threshold(raw: &str) -> homeboy::Result<String> {
+    let duration = parse_duration(raw)?;
+    let chrono_duration = chrono::Duration::from_std(duration).map_err(|e| {
+        Error::validation_invalid_argument("since", e.to_string(), Some(raw.to_string()), None)
+    })?;
+    Ok((chrono::Utc::now() - chrono_duration).to_rfc3339())
+}
+
+/// Parse a duration string with units (s, m, h, d).
+///
+/// Mirrors the parser in `bundle.rs`. Kept here so the gh-actions / query /
+/// drift commands can share the same surface without re-implementing it.
+pub fn parse_duration(raw: &str) -> homeboy::Result<Duration> {
+    let trimmed = raw.trim();
+    let split = trimmed
+        .find(|ch: char| !ch.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    let (amount, unit) = trimmed.split_at(split);
+    if amount.is_empty() || unit.is_empty() || !unit.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        return Err(Error::validation_invalid_argument(
+            "since",
+            "expected duration like 30m, 24h, or 7d",
+            Some(raw.to_string()),
+            None,
+        ));
+    }
+    let amount = amount.parse::<u64>().map_err(|_| {
+        Error::validation_invalid_argument(
+            "since",
+            "duration amount must be a positive integer",
+            Some(raw.to_string()),
+            None,
+        )
+    })?;
+    if amount == 0 {
+        return Err(Error::validation_invalid_argument(
+            "since",
+            "duration amount must be greater than zero",
+            Some(raw.to_string()),
+            None,
+        ));
+    }
+    let seconds = match unit {
+        "s" | "sec" | "secs" | "second" | "seconds" => amount,
+        "m" | "min" | "mins" | "minute" | "minutes" => amount * 60,
+        "h" | "hr" | "hrs" | "hour" | "hours" => amount * 60 * 60,
+        "d" | "day" | "days" => amount * 60 * 60 * 24,
+        _ => {
+            return Err(Error::validation_invalid_argument(
+                "since",
+                "duration unit must be one of s, m, h, or d",
+                Some(raw.to_string()),
+                None,
+            ))
+        }
+    };
+    Ok(Duration::from_secs(seconds))
+}
+
+/// Compile a JSONPath expression. Returns a structured validation error on
+/// invalid syntax instead of panicking. Schema-blind: the engine doesn't know
+/// what the JSON looks like, only how to walk it.
+pub fn compile_jsonpath(expr: &str) -> homeboy::Result<serde_json_path::JsonPath> {
+    serde_json_path::JsonPath::parse(expr).map_err(|e| {
+        Error::validation_invalid_argument(
+            "jsonpath",
+            format!("invalid JSONPath expression: {e}"),
+            Some(expr.to_string()),
+            None,
+        )
+    })
+}
+
+/// Apply a compiled JSONPath to a JSON value and return all matched nodes,
+/// each as an owned `Value` clone.
+pub fn eval_jsonpath(path: &serde_json_path::JsonPath, value: &Value) -> Vec<Value> {
+    path.query(value).all().into_iter().cloned().collect()
+}
+
+/// Render a JSON value as a flat scalar string suitable for grouping or
+/// table display. Returns `None` for objects, arrays, and `null`.
+///
+/// Inlined into `distribution_share` callers as a closure so the helper
+/// stays private to its only caller; cross-file callers should pass a
+/// custom projection if they need different scalar semantics.
+fn scalar_label(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(b) = value.as_bool() {
+        return Some(b.to_string());
+    }
+    if let Some(n) = value.as_number() {
+        return Some(n.to_string());
+    }
+    None
+}
+
+/// Loaded artifact row: the raw JSON parsed from the artifact's stored file
+/// plus the run that owns it. Used by `query` and `drift` for
+/// schema-blind projections.
+pub struct ArtifactJsonRow {
+    pub run: RunRecord,
+    pub artifact_kind: String,
+    /// Local path on disk. Held for diagnostics so callers can mention which
+    /// file produced a finding; not currently consumed by core primitives.
+    #[allow(dead_code)]
+    pub artifact_path: String,
+    pub json: Value,
+}
+
+/// Load every JSON artifact attached to runs matching the filter.
+///
+/// Schema-blind: artifacts whose stored file is missing, unreadable, or not
+/// valid JSON are skipped silently (we record artifacts with non-JSON kinds
+/// like images and zips that callers might not want to project over). The
+/// caller decides what to do with a zero-row result.
+pub fn load_artifact_rows(
+    store: &ObservationStore,
+    filter: RunListFilter,
+    since: Option<&str>,
+) -> homeboy::Result<Vec<ArtifactJsonRow>> {
+    let runs = if let Some(raw) = since {
+        let threshold = since_threshold(raw)?;
+        store
+            .list_runs_started_since(&threshold)?
+            .into_iter()
+            .filter(|run| run_matches_filter(run, &filter))
+            .collect::<Vec<_>>()
+    } else {
+        store.list_runs(filter)?
+    };
+
+    let mut rows = Vec::new();
+    for run in runs {
+        let artifacts = store.list_artifacts(&run.id)?;
+        for artifact in artifacts {
+            if artifact.artifact_type != "file" {
+                continue;
+            }
+            let path = Path::new(&artifact.path);
+            let Ok(raw) = fs::read_to_string(path) else {
+                continue;
+            };
+            let Ok(json) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            rows.push(ArtifactJsonRow {
+                run: run.clone(),
+                artifact_kind: artifact.kind,
+                artifact_path: artifact.path,
+                json,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+/// Apply the same filters `list_runs` applies, but client-side. Used to
+/// re-filter rows fetched via `list_runs_started_since` (which doesn't take
+/// a kind/component filter).
+fn run_matches_filter(run: &RunRecord, filter: &RunListFilter) -> bool {
+    if let Some(kind) = &filter.kind {
+        if &run.kind != kind {
+            return false;
+        }
+    }
+    if let Some(component) = &filter.component_id {
+        if run.component_id.as_deref() != Some(component.as_str()) {
+            return false;
+        }
+    }
+    if let Some(status) = &filter.status {
+        if &run.status != status {
+            return false;
+        }
+    }
+    if let Some(rig) = &filter.rig_id {
+        if run.rig_id.as_deref() != Some(rig.as_str()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Tally the share of each scalar value of `metric_path` across `rows`.
+///
+/// Schema-blind: returns `(value, count, share)` tuples sorted by descending
+/// count. Non-scalar matches and missing matches are tallied under
+/// `missing_count` so callers can report coverage.
+pub fn distribution_share(
+    rows: &[ArtifactJsonRow],
+    metric_path: &serde_json_path::JsonPath,
+) -> DistributionSnapshot {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut total = 0usize;
+    let mut missing = 0usize;
+    for row in rows {
+        let matches = eval_jsonpath(metric_path, &row.json);
+        let mut row_had_scalar = false;
+        for matched in matches {
+            if let Some(scalar) = scalar_label(&matched) {
+                *counts.entry(scalar).or_insert(0) += 1;
+                total += 1;
+                row_had_scalar = true;
+            }
+        }
+        if !row_had_scalar {
+            missing += 1;
+        }
+    }
+    let mut values: Vec<(String, usize, f64)> = counts
+        .into_iter()
+        .map(|(value, count)| {
+            let share = if total == 0 {
+                0.0
+            } else {
+                count as f64 / total as f64
+            };
+            (value, count, share)
+        })
+        .collect();
+    values.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    DistributionSnapshot {
+        total_observations: total,
+        missing_row_count: missing,
+        values,
+    }
+}
+
+/// Snapshot of a categorical distribution over a metric.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DistributionSnapshot {
+    pub total_observations: usize,
+    pub missing_row_count: usize,
+    /// `(value, count, share)` triples sorted by descending count. `share`
+    /// is in `0.0..=1.0`.
+    pub values: Vec<(String, usize, f64)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duration_accepts_supported_units() {
+        assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
+        assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
+        assert_eq!(parse_duration("2h").unwrap(), Duration::from_secs(7200));
+        assert_eq!(parse_duration("3d").unwrap(), Duration::from_secs(259_200));
+    }
+
+    #[test]
+    fn parse_duration_rejects_zero_and_unknown_units() {
+        assert!(parse_duration("0s").is_err());
+        assert!(parse_duration("10x").is_err());
+        assert!(parse_duration("h").is_err());
+    }
+
+    #[test]
+    fn eval_jsonpath_matches_root_property() {
+        let path = compile_jsonpath("$.color").expect("compile");
+        let value = serde_json::json!({ "color": "red" });
+        let matches = eval_jsonpath(&path, &value);
+        assert_eq!(matches, vec![Value::String("red".into())]);
+    }
+
+    #[test]
+    fn eval_jsonpath_matches_array_wildcard() {
+        let path = compile_jsonpath("$.runs[*].status").expect("compile");
+        let value = serde_json::json!({
+            "runs": [
+                { "status": "pass" },
+                { "status": "fail" },
+                { "status": "pass" }
+            ]
+        });
+        let matches = eval_jsonpath(&path, &value);
+        assert_eq!(matches.len(), 3);
+    }
+
+    #[test]
+    fn distribution_share_tallies_scalars_and_misses() {
+        let path = compile_jsonpath("$.kind").expect("compile");
+        let rows = vec![
+            ArtifactJsonRow {
+                run: sample_run("a"),
+                artifact_kind: "k".into(),
+                artifact_path: "/dev/null".into(),
+                json: serde_json::json!({ "kind": "alpha" }),
+            },
+            ArtifactJsonRow {
+                run: sample_run("b"),
+                artifact_kind: "k".into(),
+                artifact_path: "/dev/null".into(),
+                json: serde_json::json!({ "kind": "alpha" }),
+            },
+            ArtifactJsonRow {
+                run: sample_run("c"),
+                artifact_kind: "k".into(),
+                artifact_path: "/dev/null".into(),
+                json: serde_json::json!({ "kind": "beta" }),
+            },
+            ArtifactJsonRow {
+                run: sample_run("d"),
+                artifact_kind: "k".into(),
+                artifact_path: "/dev/null".into(),
+                json: serde_json::json!({ "other": true }),
+            },
+        ];
+        let snap = distribution_share(&rows, &path);
+        assert_eq!(snap.total_observations, 3);
+        assert_eq!(snap.missing_row_count, 1);
+        assert_eq!(snap.values[0].0, "alpha");
+        assert_eq!(snap.values[0].1, 2);
+        assert!((snap.values[0].2 - 2.0 / 3.0).abs() < 1e-9);
+    }
+
+    fn sample_run(id: &str) -> RunRecord {
+        RunRecord {
+            id: id.to_string(),
+            kind: "gh-actions".into(),
+            component_id: Some("homeboy".into()),
+            started_at: "2026-05-04T00:00:00Z".into(),
+            finished_at: None,
+            status: "pass".into(),
+            command: None,
+            cwd: None,
+            homeboy_version: None,
+            git_sha: None,
+            rig_id: None,
+            metadata_json: Value::Null,
+        }
+    }
+}

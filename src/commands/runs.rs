@@ -1,8 +1,14 @@
 mod bundle;
+mod common;
 mod compare;
+#[cfg(test)]
+mod corpus_tests;
 mod distribution;
+mod drift;
 mod findings;
+mod gh_actions;
 mod latest;
+mod query;
 mod reconcile;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,8 +26,11 @@ use bundle::{
 };
 use compare::{compare_runs, RunsCompareArgs, RunsCompareOutput};
 pub use distribution::{runs_distribution, RunsDistributionArgs, RunsDistributionOutput};
+use drift::{runs_drift, RunsDriftArgs, RunsDriftOutput};
 use findings::{RunsFindingOutput, RunsFindingsOutput};
+use gh_actions::GhActionsImportOutput;
 use latest::{RunsLatestFindingOutput, RunsLatestRunArgs, RunsLatestRunOutput};
+use query::{runs_query, RunsQueryArgs, RunsQueryOutput};
 use reconcile::{reconcile_runs, RunsReconcileArgs, RunsReconcileOutput};
 
 const DEFAULT_LIMIT: i64 = 20;
@@ -56,8 +65,13 @@ enum RunsCommand {
     LatestFinding(findings::RunsLatestFindingArgs),
     /// Export observation records as an inspectable directory bundle
     Export(RunsExportArgs),
-    /// Import an observation bundle into the local observation store
+    /// Import an observation bundle (default) or ingest GitHub Actions artifacts
+    /// (`--from-gh-actions`).
     Import(RunsImportArgs),
+    /// Project JSONPath expressions over imported run artifact rows.
+    Query(RunsQueryArgs),
+    /// Window-based distribution drift over a JSONPath metric.
+    Drift(RunsDriftArgs),
 }
 
 #[derive(Args, Clone, Default)]
@@ -96,6 +110,9 @@ pub enum RunsOutput {
     Reconcile(RunsReconcileOutput),
     Export(RunsExportOutput),
     Import(RunsImportOutput),
+    ImportFromGhActions(GhActionsImportOutput),
+    Query(RunsQueryOutput),
+    Drift(RunsDriftOutput),
 }
 
 #[derive(Serialize)]
@@ -195,6 +212,8 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::LatestFinding(args) => findings::latest_finding(args),
         RunsCommand::Export(args) => export_runs(args),
         RunsCommand::Import(args) => import_runs(args),
+        RunsCommand::Query(args) => runs_query(args),
+        RunsCommand::Drift(args) => runs_drift(args),
     }
 }
 
@@ -1212,11 +1231,13 @@ mod tests {
                 .expect("remove db");
 
             import_runs(RunsImportArgs {
-                input: bundle.clone(),
+                input: Some(bundle.clone()),
+                ..RunsImportArgs::default()
             })
             .expect("import");
             import_runs(RunsImportArgs {
-                input: bundle.clone(),
+                input: Some(bundle.clone()),
+                ..RunsImportArgs::default()
             })
             .expect("second import is idempotent");
 
@@ -1245,7 +1266,10 @@ mod tests {
             std::fs::create_dir_all(&bundle).expect("bundle dir");
             std::fs::write(bundle.join("manifest.json"), "not json").expect("manifest");
 
-            let err = match import_runs(RunsImportArgs { input: bundle }) {
+            let err = match import_runs(RunsImportArgs {
+                input: Some(bundle),
+                ..RunsImportArgs::default()
+            }) {
                 Ok(_) => panic!("malformed bundle should fail"),
                 Err(err) => err,
             };
@@ -1277,7 +1301,10 @@ mod tests {
             )
             .expect("rewrite runs");
 
-            let err = match import_runs(RunsImportArgs { input: bundle }) {
+            let err = match import_runs(RunsImportArgs {
+                input: Some(bundle),
+                ..RunsImportArgs::default()
+            }) {
                 Ok(_) => panic!("conflicting import should fail"),
                 Err(err) => err,
             };

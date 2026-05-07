@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use clap::Args;
 use serde::{Deserialize, Serialize};
@@ -10,6 +9,7 @@ use homeboy::observation::{
 };
 use homeboy::Error;
 
+use super::common::since_threshold;
 use super::{require_run, CmdResult, RunsOutput};
 
 const BUNDLE_FORMAT: &str = "homeboy-observations";
@@ -28,10 +28,37 @@ pub(super) struct RunsExportArgs {
     pub output: PathBuf,
 }
 
-#[derive(Args, Clone)]
+#[derive(Args, Clone, Default)]
 pub(super) struct RunsImportArgs {
-    /// Bundle directory produced by `homeboy runs export`
-    pub input: PathBuf,
+    /// Bundle directory produced by `homeboy runs export`. Required when not
+    /// using `--from-gh-actions`. Mutually exclusive with `--from-gh-actions`.
+    pub input: Option<PathBuf>,
+
+    /// Ingest artifacts directly from a GitHub Actions workflow instead of
+    /// from a portable bundle directory. When set, all of `--component`,
+    /// `--repo`, `--workflow`, and `--artifact-glob` are required.
+    #[arg(long, default_value_t = false)]
+    pub from_gh_actions: bool,
+
+    /// Component ID to stamp on imported runs (gh-actions mode).
+    #[arg(long = "component")]
+    pub component_id: Option<String>,
+    /// `owner/repo` form (gh-actions mode).
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Workflow filename or display name (gh-actions mode).
+    #[arg(long)]
+    pub workflow: Option<String>,
+    /// Glob filter for artifact names (gh-actions mode). Examples:
+    /// `'design-distribution-*'`, `'*.json'`.
+    #[arg(long = "artifact-glob")]
+    pub artifact_glob: Option<String>,
+    /// Restrict the gh-actions ingest window (e.g. 24h, 7d, 30d).
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Maximum runs to inspect per import call (gh-actions mode).
+    #[arg(long, default_value_t = 200)]
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -133,7 +160,15 @@ pub(super) fn export_runs(args: RunsExportArgs) -> CmdResult<RunsOutput> {
 }
 
 pub(super) fn import_runs(args: RunsImportArgs) -> CmdResult<RunsOutput> {
-    let bundle = read_bundle_dir(&args.input)?;
+    if args.from_gh_actions {
+        return import_via_gh_actions(args);
+    }
+    let input = args.input.clone().ok_or_else(|| {
+        Error::validation_missing_argument(vec![
+            "<input> (bundle directory) or --from-gh-actions ...".to_string(),
+        ])
+    })?;
+    let bundle = read_bundle_dir(&input)?;
     let store = ObservationStore::open_initialized()?;
     for run in &bundle.runs {
         store.import_run(run)?;
@@ -151,7 +186,7 @@ pub(super) fn import_runs(args: RunsImportArgs) -> CmdResult<RunsOutput> {
     Ok((
         RunsOutput::Import(RunsImportOutput {
             command: "runs.import",
-            input: args.input.to_string_lossy().to_string(),
+            input: input.to_string_lossy().to_string(),
             imported: ObservationBundleImportSummary {
                 runs: bundle.runs.len(),
                 artifacts: bundle.artifacts.len(),
@@ -162,6 +197,29 @@ pub(super) fn import_runs(args: RunsImportArgs) -> CmdResult<RunsOutput> {
         }),
         0,
     ))
+}
+
+fn import_via_gh_actions(args: RunsImportArgs) -> CmdResult<RunsOutput> {
+    let component_id = require_gh_arg(args.component_id.clone(), "component")?;
+    let repo = require_gh_arg(args.repo.clone(), "repo")?;
+    let workflow = require_gh_arg(args.workflow.clone(), "workflow")?;
+    let artifact_glob = require_gh_arg(args.artifact_glob.clone(), "artifact-glob")?;
+    let since = args.since.clone().unwrap_or_else(|| "30d".to_string());
+
+    super::gh_actions::import_from_gh_actions(super::gh_actions::GhActionsImportArgs {
+        component_id,
+        repo,
+        workflow,
+        artifact_glob,
+        since,
+        limit: args.limit,
+    })
+}
+
+fn require_gh_arg(value: Option<String>, name: &str) -> homeboy::Result<String> {
+    value
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| Error::validation_missing_argument(vec![format!("--{name}")]))
 }
 
 fn build_bundle(
@@ -336,59 +394,4 @@ fn read_optional_json<T: for<'de> Deserialize<'de> + Default>(path: PathBuf) -> 
         return Ok(T::default());
     }
     read_json(path)
-}
-
-fn since_threshold(raw: &str) -> homeboy::Result<String> {
-    let duration = parse_duration(raw)?;
-    let chrono_duration = chrono::Duration::from_std(duration).map_err(|e| {
-        Error::validation_invalid_argument("since", e.to_string(), Some(raw.to_string()), None)
-    })?;
-    Ok((chrono::Utc::now() - chrono_duration).to_rfc3339())
-}
-
-fn parse_duration(raw: &str) -> homeboy::Result<Duration> {
-    let trimmed = raw.trim();
-    let split = trimmed
-        .find(|ch: char| !ch.is_ascii_digit())
-        .unwrap_or(trimmed.len());
-    let (amount, unit) = trimmed.split_at(split);
-    if amount.is_empty() || unit.is_empty() || !unit.chars().all(|ch| ch.is_ascii_alphabetic()) {
-        return Err(Error::validation_invalid_argument(
-            "since",
-            "expected duration like 30m, 24h, or 7d",
-            Some(raw.to_string()),
-            None,
-        ));
-    }
-    let amount = amount.parse::<u64>().map_err(|_| {
-        Error::validation_invalid_argument(
-            "since",
-            "duration amount must be a positive integer",
-            Some(raw.to_string()),
-            None,
-        )
-    })?;
-    if amount == 0 {
-        return Err(Error::validation_invalid_argument(
-            "since",
-            "duration amount must be greater than zero",
-            Some(raw.to_string()),
-            None,
-        ));
-    }
-    let seconds = match unit {
-        "s" | "sec" | "secs" | "second" | "seconds" => amount,
-        "m" | "min" | "mins" | "minute" | "minutes" => amount * 60,
-        "h" | "hr" | "hrs" | "hour" | "hours" => amount * 60 * 60,
-        "d" | "day" | "days" => amount * 60 * 60 * 24,
-        _ => {
-            return Err(Error::validation_invalid_argument(
-                "since",
-                "duration unit must be one of s, m, h, or d",
-                Some(raw.to_string()),
-                None,
-            ))
-        }
-    };
-    Ok(Duration::from_secs(seconds))
 }
