@@ -74,48 +74,53 @@ pub fn detect_install_method() -> InstallMethod {
         Err(_) => return InstallMethod::Unknown,
     };
 
+    detect_install_method_from_exe_path(&exe_path, |cmd, args| {
+        Command::new(cmd)
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+}
+
+pub(crate) fn detect_install_method_from_exe_path<F>(
+    exe_path: &str,
+    mut list_command_succeeds: F,
+) -> InstallMethod
+where
+    F: FnMut(&str, &[&str]) -> bool,
+{
     let defaults = defaults::load_defaults();
 
-    // Check for Homebrew installation via path patterns
+    // Prefer the active executable path over unrelated installed copies.
     for pattern in &defaults.install_methods.homebrew.path_patterns {
         if exe_path.contains(pattern) {
             return InstallMethod::Homebrew;
         }
     }
-
-    // Alternative Homebrew check: brew list (if list_command configured)
-    if let Some(list_cmd) = &defaults.install_methods.homebrew.list_command {
-        let parts: Vec<&str> = list_cmd.split_whitespace().collect();
-        if let Some((cmd, args)) = parts.split_first() {
-            if Command::new(cmd)
-                .args(args)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-            {
-                return InstallMethod::Homebrew;
-            }
-        }
-    }
-
-    // Check for Cargo installation via path patterns
     for pattern in &defaults.install_methods.cargo.path_patterns {
         if exe_path.contains(pattern) {
             return InstallMethod::Cargo;
         }
     }
-
-    // Check for source installation via path patterns
     for pattern in &defaults.install_methods.source.path_patterns {
         if exe_path.contains(pattern) {
             return InstallMethod::Source;
         }
     }
-
-    // Check for downloaded release binary via path patterns
     for pattern in &defaults.install_methods.binary.path_patterns {
         if exe_path.contains(pattern) {
             return InstallMethod::Binary;
+        }
+    }
+
+    // Fall back to Homebrew presence only when the active path is not recognized.
+    if let Some(list_cmd) = &defaults.install_methods.homebrew.list_command {
+        let parts: Vec<&str> = list_cmd.split_whitespace().collect();
+        if let Some((cmd, args)) = parts.split_first() {
+            if list_command_succeeds(cmd, args) {
+                return InstallMethod::Homebrew;
+            }
         }
     }
 
@@ -214,8 +219,13 @@ pub fn run_upgrade_with_method(
         upgraded: success,
         message: if success {
             format!("Upgraded to {}", new_version.as_deref().unwrap_or("latest"))
+        } else if let Some(version) = &new_version {
+            format!(
+                "Upgrade command completed but active binary is still {}",
+                version
+            )
         } else {
-            "Upgrade command completed but version unchanged".to_string()
+            "Upgrade command completed but active binary version could not be verified".to_string()
         },
         restart_required: success && matches!(install_method, InstallMethod::Source),
         extensions_updated,
