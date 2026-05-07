@@ -165,15 +165,27 @@ fn main() -> std::process::ExitCode {
         output_file = None;
     }
 
-    if !cli.force_hot {
-        if let Some(hot_command) = resource_policy::hot_command(&cli.command) {
-            if let Ok((resources, _)) = homeboy::commands::doctor::resources::run(
-                homeboy::commands::doctor::resources::ResourcesArgs {},
-            ) {
-                if let Some(warning) = resource_policy::evaluate(hot_command, &resources) {
+    if let Some(hot_command) = resource_policy::hot_command(&cli.command) {
+        if let Ok((resources, _)) = homeboy::commands::doctor::resources::run(
+            homeboy::commands::doctor::resources::ResourcesArgs {},
+        ) {
+            let warning = resource_policy::evaluate(hot_command, &resources);
+            if let Some(warning) = warning.as_ref() {
+                if !cli.force_hot {
                     eprintln!("{}", warning.message);
                 }
             }
+            // Persist the preflight resource policy decision so observation
+            // runs (bench, lint, test, etc.) can record it in their metadata
+            // for later interpretation. This stays generic to Homeboy core.
+            resource_policy::capture_context(
+                resource_policy::ResourcePolicyContext::from_evaluation(
+                    hot_command,
+                    &resources,
+                    warning.as_ref(),
+                    cli.force_hot,
+                ),
+            );
         }
     }
 
