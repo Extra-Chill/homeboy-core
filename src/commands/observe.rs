@@ -10,7 +10,7 @@ use clap::Args;
 use regex::Regex;
 use serde::Serialize;
 
-use homeboy::component;
+use homeboy::engine::execution_context::{self, ResolveOptions};
 use homeboy::engine::run_dir::{self, RunDir};
 use homeboy::extension::trace::{
     ActiveTraceProbes, TraceArtifact, TraceEvent, TraceProbeConfig, TraceResults, TraceStatus,
@@ -19,6 +19,7 @@ use homeboy::git::short_head_revision_at;
 use homeboy::observation::{NewRunRecord, ObservationStore, RunStatus};
 use homeboy::Error;
 
+use super::utils::args::PositionalComponentArgs;
 use super::{CmdResult, GlobalArgs};
 
 const DEFAULT_DURATION: &str = "30s";
@@ -27,8 +28,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Args, Clone)]
 pub struct ObserveArgs {
-    /// Component ID whose live system is being observed.
-    pub component: String,
+    /// Component whose live system is being observed (optional when `--path` is supplied).
+    #[command(flatten)]
+    pub comp: PositionalComponentArgs,
 
     /// Observation duration, e.g. 30s, 5m, 1h.
     #[arg(long, default_value = DEFAULT_DURATION, value_parser = parse_duration)]
@@ -93,8 +95,18 @@ struct ProcessInfo {
 
 pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> {
     validate_probe_selection(&args)?;
-    let comp = component::load(&args.component)?;
-    let component_path = PathBuf::from(&comp.local_path);
+    // `observe` runs only passive probes (--tail-log, --watch-process, --probe).
+    // None of them require an extension provider, so we resolve the source
+    // context with no capability and gracefully accept unregistered paths via
+    // `--path`. Probes that intrinsically need component metadata should
+    // surface a clear error in their own validation, not in component lookup.
+    let ctx = execution_context::resolve(&ResolveOptions {
+        component_id: args.comp.component.clone(),
+        path_override: args.comp.path.clone(),
+        ..Default::default()
+    })?;
+    let component_id = ctx.component_id.clone();
+    let component_path = ctx.source_path.clone();
     let run_dir = RunDir::create()?;
     let trace_path = run_dir.step_file(run_dir::files::TRACE_RESULTS);
     let store = ObservationStore::open_initialized()?;
@@ -111,7 +123,7 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
 
     let run = store.start_run(NewRunRecord {
         kind: "observe".to_string(),
-        component_id: Some(comp.id.clone()),
+        component_id: Some(component_id.clone()),
         command: Some(command),
         cwd: Some(component_path.to_string_lossy().to_string()),
         homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
@@ -139,7 +151,7 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
     };
 
     let results = TraceResults {
-        component_id: comp.id.clone(),
+        component_id: component_id.clone(),
         scenario_id: "observe".to_string(),
         status: trace_status_for_run_status(status),
         summary: Some("Passive observation timeline".to_string()),
@@ -173,7 +185,7 @@ pub fn run(args: ObserveArgs, _global: &GlobalArgs) -> CmdResult<ObserveOutput> 
         ObserveOutput {
             command: "observe",
             run_id: finished.id.clone(),
-            component_id: comp.id,
+            component_id,
             status: finished.status,
             duration_ms: duration_millis(args.duration),
             event_count: results.timeline.len(),
@@ -196,7 +208,7 @@ fn validate_probe_selection(args: &ObserveArgs) -> homeboy::Result<()> {
             Some(vec![
                 "homeboy observe my-component --duration 30s --tail-log /path/to/app.log"
                     .to_string(),
-                "homeboy observe my-component --duration 30s --watch-process 'node .*serve'"
+                "homeboy observe --path /path/to/checkout --duration 30s --watch-process 'node .*serve'"
                     .to_string(),
                 r#"homeboy observe my-component --duration 30s --probe '{"type":"http.poll","url":"http://127.0.0.1:3000/health"}'"#.to_string(),
             ]),
@@ -479,13 +491,16 @@ fn trace_status_for_run_status(status: RunStatus) -> TraceStatus {
 }
 
 fn observe_command(args: &ObserveArgs) -> String {
-    let mut parts = vec![
-        "homeboy".to_string(),
-        "observe".to_string(),
-        args.component.clone(),
-        "--duration".to_string(),
-        format_duration(args.duration),
-    ];
+    let mut parts = vec!["homeboy".to_string(), "observe".to_string()];
+    if let Some(component) = &args.comp.component {
+        parts.push(component.clone());
+    }
+    if let Some(path) = &args.comp.path {
+        parts.push("--path".to_string());
+        parts.push(path.clone());
+    }
+    parts.push("--duration".to_string());
+    parts.push(format_duration(args.duration));
     for path in &args.tail_logs {
         parts.push("--tail-log".to_string());
         parts.push(path.to_string_lossy().to_string());
@@ -704,20 +719,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn standard_probe_json_parses_http_poll_and_process_snapshot() {
-        let args = ObserveArgs {
-            component: "demo".to_string(),
+    fn args_with_probes(component: Option<&str>, probes: Vec<String>) -> ObserveArgs {
+        ObserveArgs {
+            comp: PositionalComponentArgs {
+                component: component.map(str::to_string),
+                path: None,
+            },
             duration: Duration::from_millis(50),
             tail_logs: Vec::new(),
             grep: None,
             watch_processes: Vec::new(),
             watch_process_interval: Duration::from_secs(1),
-            probes: vec![
+            probes,
+        }
+    }
+
+    #[test]
+    fn standard_probe_json_parses_http_poll_and_process_snapshot() {
+        let args = args_with_probes(
+            Some("demo"),
+            vec![
                 r#"{"type":"http.poll","url":"http://127.0.0.1:1234/health","interval_ms":25,"assert-status":200}"#.to_string(),
                 r#"{"type":"process.snapshot","pattern":"homeboy","interval_ms":25}"#.to_string(),
             ],
-        };
+        );
 
         let probes = build_standard_probe_configs(&args).unwrap();
 
@@ -730,15 +755,10 @@ mod tests {
 
     #[test]
     fn observe_accepts_standard_probe_without_legacy_flags() {
-        let args = ObserveArgs {
-            component: "demo".to_string(),
-            duration: Duration::from_millis(50),
-            tail_logs: Vec::new(),
-            grep: None,
-            watch_processes: Vec::new(),
-            watch_process_interval: Duration::from_secs(1),
-            probes: vec![r#"{"type":"cmd.run","command":"true"}"#.to_string()],
-        };
+        let args = args_with_probes(
+            Some("demo"),
+            vec![r#"{"type":"cmd.run","command":"true"}"#.to_string()],
+        );
 
         validate_probe_selection(&args).unwrap();
     }
@@ -764,14 +784,9 @@ mod tests {
                     .map(|name| name.to_string_lossy().to_string())
             })
             .unwrap_or_else(|| "homeboy".to_string());
-        let args = ObserveArgs {
-            component: "demo".to_string(),
-            duration: Duration::from_millis(80),
-            tail_logs: Vec::new(),
-            grep: None,
-            watch_processes: Vec::new(),
-            watch_process_interval: Duration::from_secs(1),
-            probes: vec![
+        let mut args = args_with_probes(
+            Some("demo"),
+            vec![
                 format!(
                     r#"{{"type":"http.poll","url":"{url}","interval_ms":25,"assert-status":204}}"#
                 ),
@@ -780,7 +795,8 @@ mod tests {
                     process_pattern
                 ),
             ],
-        };
+        );
+        args.duration = Duration::from_millis(80);
 
         let timeline = collect_timeline(&args).unwrap();
         let _ = server.join();
@@ -791,5 +807,93 @@ mod tests {
         assert!(timeline
             .iter()
             .any(|event| event.source == "process.snapshot" && event.event == "proc.list"));
+    }
+
+    /// Issue #2366: `homeboy observe --path <DIR>` parses without a positional
+    /// component, mirroring `lint --path` and `trace --path`. The path is
+    /// captured in `comp.path` so the runner can degrade component-level
+    /// lookups gracefully.
+    #[test]
+    fn observe_accepts_path_without_component() {
+        let command = <ObserveArgs as clap::Args>::augment_args(clap::Command::new("homeboy"));
+        let matches = command
+            .try_get_matches_from([
+                "homeboy",
+                "--path",
+                "/Users/chubes/Developer/opencode",
+                "--watch-process",
+                ".opencode serve",
+            ])
+            .expect("observe should parse --path without a component arg");
+
+        let parsed = <ObserveArgs as clap::FromArgMatches>::from_arg_matches(&matches).unwrap();
+        assert!(parsed.comp.component.is_none());
+        assert_eq!(
+            parsed.comp.path.as_deref(),
+            Some("/Users/chubes/Developer/opencode")
+        );
+        assert_eq!(parsed.watch_processes, vec![".opencode serve".to_string()]);
+    }
+
+    /// Issue #2366: registered components keep working unchanged — positional
+    /// component IDs still parse without `--path`, preserving the legacy UX.
+    #[test]
+    fn observe_accepts_registered_component_unchanged() {
+        let command = <ObserveArgs as clap::Args>::augment_args(clap::Command::new("homeboy"));
+        let matches = command
+            .try_get_matches_from(["homeboy", "demo", "--watch-process", "sleep"])
+            .expect("observe should parse a positional component without --path");
+
+        let parsed = <ObserveArgs as clap::FromArgMatches>::from_arg_matches(&matches).unwrap();
+        assert_eq!(parsed.comp.component.as_deref(), Some("demo"));
+        assert!(parsed.comp.path.is_none());
+    }
+
+    /// Issue #2366: `--path` pointed at an unregistered directory resolves to
+    /// a synthetic component so the rest of the observe pipeline (run record,
+    /// trace results, observation store) sees a well-formed component id and
+    /// source path. Mirrors `lint --path` behavior introduced for #2361.
+    #[test]
+    fn observe_path_override_synthesizes_component_from_unregistered_directory() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = dir.path().join("ad-hoc-target");
+        std::fs::create_dir_all(&repo).expect("create repo dir");
+
+        let ctx = execution_context::resolve(&ResolveOptions {
+            component_id: None,
+            path_override: Some(repo.to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .expect("path-only override should resolve");
+
+        assert_eq!(ctx.component_id, "ad-hoc-target");
+        assert_eq!(ctx.source_path, repo);
+    }
+
+    /// Issue #2366: probe selection validation hint mentions the `--path`
+    /// shape so unregistered probes are discoverable from the error.
+    #[test]
+    fn validate_probe_selection_hints_at_path_usage() {
+        let args = ObserveArgs {
+            comp: PositionalComponentArgs {
+                component: None,
+                path: Some("/tmp/anywhere".to_string()),
+            },
+            duration: Duration::from_secs(30),
+            tail_logs: Vec::new(),
+            grep: None,
+            watch_processes: Vec::new(),
+            watch_process_interval: Duration::from_secs(1),
+            probes: Vec::new(),
+        };
+
+        let err = validate_probe_selection(&args).expect_err("missing probes should error");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("--tail-log")
+                || rendered.contains("--watch-process")
+                || rendered.contains("--probe"),
+            "expected probe-selection error, got: {rendered}"
+        );
     }
 }
