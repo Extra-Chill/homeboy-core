@@ -19,7 +19,7 @@ pub struct UncommittedChanges {
 ///
 /// Refreshes the git index (`git update-index --refresh`) before reading
 /// status so stale stat info from upstream tooling — common in CI after
-/// `git pull --ff-only`, `cargo build`, or extension setup steps that
+/// `git pull --ff-only`, build steps, or extension setup steps that
 /// touch tracked files without changing their content — does not surface
 /// as false-positive "modified" entries. The refresh never modifies file
 /// contents; it only updates the index's mtime/size cache so `git status`
@@ -269,7 +269,7 @@ mod tests {
 
     /// Regression: get_uncommitted_changes runs `git update-index --refresh`
     /// before reading status so stale stat info from upstream tooling
-    /// (cargo build, git pull, extension setup) doesn't surface as
+    /// (build steps, git pull, extension setup) doesn't surface as
     /// false-positive "modified" entries. After a touch that doesn't
     /// change content, status must report a clean tree.
     #[test]
