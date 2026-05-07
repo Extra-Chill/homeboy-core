@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.159.0] - 2026-05-07
+
+### Added
+- persist resource policy context with run metadata
+
 ## [0.158.2] - 2026-05-07
 
 ### Changed
