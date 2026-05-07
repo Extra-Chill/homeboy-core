@@ -8,6 +8,8 @@ use homeboy::git::short_head_revision_at;
 use homeboy::observation::{merge_metadata, ActiveObservation, NewRunRecord, RunStatus};
 use homeboy::rig::RigStateSnapshot;
 
+use crate::commands::utils::resource_policy;
+
 use super::BenchRunArgs;
 
 pub(super) struct BenchObservation(ActiveObservation);
@@ -164,6 +166,10 @@ fn bench_observation_initial_metadata(
     rig_snapshot: Option<&RigStateSnapshot>,
     run_dir: &RunDir,
 ) -> serde_json::Value {
+    let resource_policy = resource_policy::captured_context()
+        .as_ref()
+        .map(resource_policy::ResourcePolicyContext::to_json)
+        .unwrap_or(serde_json::Value::Null);
     serde_json::json!({
         "component_label": component_label,
         "iterations": args.iterations,
@@ -181,6 +187,7 @@ fn bench_observation_initial_metadata(
         "shared_state": args.shared_state.as_ref().map(|path| path.to_string_lossy().to_string()),
         "run_dir": run_dir.path().to_string_lossy().to_string(),
         "rig_state": rig_snapshot,
+        "resource_policy": resource_policy,
     })
 }
 
@@ -382,9 +389,13 @@ mod tests {
 
     use super::*;
     use crate::commands::bench::BenchRigOrder;
+    use crate::commands::doctor::resources::{
+        DoctorOutput, LoadSummary, ProcessSummary, ResourceRecommendation, RigLeaseSummary,
+    };
     use crate::commands::utils::args::{
         BaselineArgs, ExtensionOverrideArgs, HiddenJsonArgs, PositionalComponentArgs, SettingArgs,
     };
+    use crate::commands::utils::resource_policy::{self, HotCommand, ResourcePolicyContext};
     use crate::test_support::with_isolated_home;
 
     struct XdgGuard(Option<String>);
@@ -858,5 +869,205 @@ mod tests {
 
         assert!(hints.iter().any(|hint| hint
             == "List related bench runs: homeboy runs list --kind bench --component studio --rig studio-trunk"));
+    }
+
+    fn synthetic_resources(recommendation: ResourceRecommendation) -> DoctorOutput {
+        DoctorOutput {
+            command: "doctor.resources",
+            recommendation,
+            load: LoadSummary {
+                one: Some(18.2),
+                five: Some(15.0),
+                fifteen: Some(12.0),
+                cpu_count: 18,
+                recommendation,
+            },
+            memory: None,
+            processes: ProcessSummary {
+                relevant_count: 3,
+                top_cpu: Vec::new(),
+                top_rss: Vec::new(),
+                recommendation: ResourceRecommendation::Ok,
+            },
+            rig_leases: RigLeaseSummary {
+                active_count: 0,
+                leases: Vec::new(),
+                recommendation: ResourceRecommendation::Ok,
+            },
+            notes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn bench_observation_persists_resource_policy_warning_for_hot_machine() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            resource_policy::reset_captured_context_for_test();
+
+            let synthetic = synthetic_resources(ResourceRecommendation::Hot);
+            let warning = resource_policy::evaluate(HotCommand { label: "bench" }, &synthetic)
+                .expect("synthetic warning");
+            resource_policy::capture_context(ResourcePolicyContext::from_evaluation(
+                HotCommand { label: "bench" },
+                &synthetic,
+                Some(&warning),
+                false,
+            ));
+
+            let run_dir = RunDir::create().expect("run dir");
+            fs::write(run_dir.step_file(run_dir::files::BENCH_RESULTS), b"{}").expect("results");
+
+            let args = bench_args();
+            let observation = start(BenchObservationStart {
+                component_id: "homeboy",
+                component_label: "homeboy",
+                source_path: home.path(),
+                args: &args,
+                selected_scenarios: &[],
+                rig_id: None,
+                rig_snapshot: None,
+                run_dir: &run_dir,
+            })
+            .expect("start observation");
+            let run_id = observation.run_id().to_string();
+
+            let mut workflow = BenchRunWorkflowResult {
+                status: "passed".to_string(),
+                component: "homeboy".to_string(),
+                exit_code: 0,
+                iterations: 10,
+                results: None,
+                gate_failures: Vec::new(),
+                baseline_comparison: None,
+                hints: None,
+                failure: None,
+                diagnostics: Vec::new(),
+            };
+            finish_success(Some(observation), &mut workflow, &run_dir)
+                .expect("observation summary");
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.get_run(&run_id).expect("read run").expect("run");
+            let policy = &run.metadata_json["resource_policy"];
+            assert_eq!(policy["command"], "bench");
+            assert_eq!(policy["severity"], "hot");
+            assert_eq!(policy["force_hot"], false);
+            assert_eq!(policy["warned"], true);
+            assert!(policy["message"]
+                .as_str()
+                .expect("message string")
+                .contains("Resource policy warning"));
+            assert_eq!(policy["host"]["load_severity"], "hot");
+            assert_eq!(policy["host"]["load_one"], 18.2);
+            assert_eq!(policy["host"]["cpu_count"], 18);
+
+            resource_policy::reset_captured_context_for_test();
+        });
+    }
+
+    #[test]
+    fn bench_observation_records_force_hot_bypass() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            resource_policy::reset_captured_context_for_test();
+
+            let synthetic = synthetic_resources(ResourceRecommendation::Hot);
+            let warning = resource_policy::evaluate(HotCommand { label: "bench" }, &synthetic)
+                .expect("synthetic warning");
+            resource_policy::capture_context(ResourcePolicyContext::from_evaluation(
+                HotCommand { label: "bench" },
+                &synthetic,
+                Some(&warning),
+                true,
+            ));
+
+            let run_dir = RunDir::create().expect("run dir");
+            fs::write(run_dir.step_file(run_dir::files::BENCH_RESULTS), b"{}").expect("results");
+
+            let args = bench_args();
+            let observation = start(BenchObservationStart {
+                component_id: "homeboy",
+                component_label: "homeboy",
+                source_path: home.path(),
+                args: &args,
+                selected_scenarios: &[],
+                rig_id: None,
+                rig_snapshot: None,
+                run_dir: &run_dir,
+            })
+            .expect("start observation");
+            let run_id = observation.run_id().to_string();
+
+            let mut workflow = BenchRunWorkflowResult {
+                status: "passed".to_string(),
+                component: "homeboy".to_string(),
+                exit_code: 0,
+                iterations: 10,
+                results: None,
+                gate_failures: Vec::new(),
+                baseline_comparison: None,
+                hints: None,
+                failure: None,
+                diagnostics: Vec::new(),
+            };
+            finish_success(Some(observation), &mut workflow, &run_dir)
+                .expect("observation summary");
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.get_run(&run_id).expect("read run").expect("run");
+            let policy = &run.metadata_json["resource_policy"];
+            assert_eq!(policy["severity"], "hot");
+            assert_eq!(policy["force_hot"], true);
+            assert_eq!(policy["warned"], true);
+
+            resource_policy::reset_captured_context_for_test();
+        });
+    }
+
+    #[test]
+    fn bench_observation_omits_resource_policy_when_not_captured() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            resource_policy::reset_captured_context_for_test();
+
+            let run_dir = RunDir::create().expect("run dir");
+            fs::write(run_dir.step_file(run_dir::files::BENCH_RESULTS), b"{}").expect("results");
+
+            let args = bench_args();
+            let observation = start(BenchObservationStart {
+                component_id: "homeboy",
+                component_label: "homeboy",
+                source_path: home.path(),
+                args: &args,
+                selected_scenarios: &[],
+                rig_id: None,
+                rig_snapshot: None,
+                run_dir: &run_dir,
+            })
+            .expect("start observation");
+            let run_id = observation.run_id().to_string();
+
+            let mut workflow = BenchRunWorkflowResult {
+                status: "passed".to_string(),
+                component: "homeboy".to_string(),
+                exit_code: 0,
+                iterations: 10,
+                results: None,
+                gate_failures: Vec::new(),
+                baseline_comparison: None,
+                hints: None,
+                failure: None,
+                diagnostics: Vec::new(),
+            };
+            finish_success(Some(observation), &mut workflow, &run_dir)
+                .expect("observation summary");
+
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.get_run(&run_id).expect("read run").expect("run");
+            // When no preflight context was captured (e.g. the bench was
+            // invoked from a context where main never ran), the metadata
+            // explicitly records `null` rather than fabricating a snapshot.
+            assert!(run.metadata_json["resource_policy"].is_null());
+        });
     }
 }
