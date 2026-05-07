@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.158.2] - 2026-05-07
+
+### Changed
+- GH Actions artifact ingestor + generic corpus primitives
+
 ## [0.158.1] - 2026-05-07
 
 ### Fixed
