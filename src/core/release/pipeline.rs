@@ -1808,6 +1808,57 @@ mod tests {
         assert_eq!(unexpected, vec!["src/lib.rs"]);
     }
 
+    /// Regression for the homeboy-action release blocker:
+    /// `validate_working_tree_fail_fast` builds an Error with a hint vec
+    /// listing the dirty files. That error flows through ValidationCollector,
+    /// which used to drop the hints on the single-error re-emit path —
+    /// leaving CI consumers with a bare `Uncommitted changes detected`
+    /// message and no way to see *which* files were dirty.
+    ///
+    /// This test pins down the round-trip: build the same shape of error
+    /// that `validate_working_tree_fail_fast` would produce, push it through
+    /// `ValidationCollector::finish_if_errors`, and assert the dirty file
+    /// hints survive in the resulting JSON details.
+    #[test]
+    fn working_tree_fail_fast_error_preserves_file_hints_through_collector() {
+        use crate::engine::validation::ValidationCollector;
+        use crate::error::Error;
+
+        let original = Error::validation_invalid_argument(
+            "working_tree",
+            "Uncommitted changes detected — refusing to release",
+            None,
+            Some(vec![
+                "Commit, stash, or discard changes before releasing".to_string(),
+                "Unexpected dirty files (2): src/lib.rs, Cargo.lock".to_string(),
+            ]),
+        );
+
+        let mut collector = ValidationCollector::new();
+        collector.capture::<()>(Err(original), "working_tree");
+        let propagated = collector.finish_if_errors().unwrap_err();
+
+        let details = &propagated.details;
+        let tried = details
+            .get("tried")
+            .and_then(|v| v.as_array())
+            .expect("tried hints must survive collector round-trip");
+        assert_eq!(tried.len(), 2, "expected both hints to survive: {details}");
+        let joined: String = tried
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            joined.contains("src/lib.rs"),
+            "dirty file list must reach the JSON envelope, got: {joined}"
+        );
+        assert!(
+            joined.contains("Cargo.lock"),
+            "dirty file list must reach the JSON envelope, got: {joined}"
+        );
+    }
+
     #[test]
     fn unexpected_files_honor_allowed_list_alongside_homeboy_filter() {
         let changes = uncommitted(

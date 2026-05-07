@@ -16,7 +16,19 @@ pub struct UncommittedChanges {
 }
 
 /// Parse git status output into structured uncommitted changes.
+///
+/// Refreshes the git index (`git update-index --refresh`) before reading
+/// status so stale stat info from upstream tooling — common in CI after
+/// `git pull --ff-only`, `cargo build`, or extension setup steps that
+/// touch tracked files without changing their content — does not surface
+/// as false-positive "modified" entries. The refresh never modifies file
+/// contents; it only updates the index's mtime/size cache so `git status`
+/// reports the true content state.
 pub fn get_uncommitted_changes(path: &str) -> Result<UncommittedChanges> {
+    // Best-effort: ignore failures (returns nonzero when files have real
+    // changes, which is exactly what `git status` is about to report anyway).
+    let _ = execute_git(path, &["update-index", "--refresh"]);
+
     let output = execute_git(
         path,
         &["status", "--porcelain=v1", "--untracked-files=normal"],
@@ -253,6 +265,73 @@ mod tests {
     fn test_get_uncommitted_changes_default_path() {
         let path = "";
         let _result = get_uncommitted_changes(path);
+    }
+
+    /// Regression: get_uncommitted_changes runs `git update-index --refresh`
+    /// before reading status so stale stat info from upstream tooling
+    /// (cargo build, git pull, extension setup) doesn't surface as
+    /// false-positive "modified" entries. After a touch that doesn't
+    /// change content, status must report a clean tree.
+    #[test]
+    fn get_uncommitted_changes_treats_stat_only_touches_as_clean() {
+        use std::fs;
+        use std::process::Command;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().to_str().unwrap();
+
+        // Init repo, commit a file, then touch it without changing content.
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .output();
+        if init.is_err() || !init.unwrap().status.success() {
+            // Test environment lacks git — skip rather than fail.
+            return;
+        }
+        let _ = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(path)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "test"])
+            .current_dir(path)
+            .output();
+
+        let file = dir.path().join("hello.txt");
+        fs::write(&file, "content\n").expect("write");
+        let _ = Command::new("git")
+            .args(["add", "hello.txt"])
+            .current_dir(path)
+            .output();
+        let _ = Command::new("git")
+            .args(["commit", "-q", "-m", "init"])
+            .current_dir(path)
+            .output();
+
+        // Rewrite the file with identical content via `touch`-then-rewrite
+        // to bump mtime/size cache state without changing the bytes. On
+        // platforms with `touch`, this is the simplest way to simulate the
+        // stale-index condition that `git pull` + prior tooling can leave
+        // behind in CI. Without the index refresh, `git status --porcelain`
+        // would report it as modified.
+        let touch = Command::new("touch")
+            .args(["-c", "-m", "-t", "203012010101"])
+            .arg(&file)
+            .output();
+        if touch.is_err() || !touch.unwrap().status.success() {
+            // No `touch` available — skip rather than fail. The Linux/macOS
+            // CI runners we care about all have it.
+            return;
+        }
+
+        let result = get_uncommitted_changes(path).expect("status read");
+        assert!(
+            !result.has_changes,
+            "stat-only touch must not surface as a real change after index refresh, got: {:?}",
+            result
+        );
     }
 
     #[test]

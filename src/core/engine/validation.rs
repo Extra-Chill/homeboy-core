@@ -64,15 +64,7 @@ impl ValidationCollector {
     pub fn finish(self) -> Result<()> {
         match self.errors.len() {
             0 => Ok(()),
-            1 => {
-                let err = &self.errors[0];
-                Err(Error::validation_invalid_argument(
-                    &err.field,
-                    &err.problem,
-                    None,
-                    None,
-                ))
-            }
+            1 => Err(single_error_to_invalid_argument(&self.errors[0])),
             _ => Err(Error::validation_multiple_errors(self.errors)),
         }
     }
@@ -93,17 +85,27 @@ impl ValidationCollector {
         }
         let drained: Vec<_> = std::mem::take(&mut self.errors);
         match drained.len() {
-            1 => {
-                let err = &drained[0];
-                Err(Error::validation_invalid_argument(
-                    &err.field,
-                    &err.problem,
-                    None,
-                    None,
-                ))
-            }
+            1 => Err(single_error_to_invalid_argument(&drained[0])),
             _ => Err(Error::validation_multiple_errors(drained)),
         }
+    }
+}
+
+/// Convert a single collected validation error back into an [`Error`].
+///
+/// Preserves any structured `context` payload the original validator attached
+/// (file lists, hints, deeper diagnostic data). Without this, the single-error
+/// re-emit path would drop everything except `field`/`problem` — making it
+/// impossible to debug failures that bottle up via `ValidationCollector`
+/// (e.g. release working-tree checks emitting the dirty file list).
+fn single_error_to_invalid_argument(err: &crate::error::ValidationErrorItem) -> Error {
+    let base = Error::validation_invalid_argument(&err.field, &err.problem, None, None);
+    match &err.context {
+        Some(context) => Error {
+            details: context.clone(),
+            ..base
+        },
+        None => base,
     }
 }
 
@@ -183,5 +185,57 @@ mod tests {
         // Multiple errors flow through validation_multiple_errors and
         // surface as a structured payload (not a single invalid_argument).
         assert!(err.message.to_lowercase().contains("validation"));
+    }
+
+    #[test]
+    fn test_finish_if_errors_preserves_single_error_context() {
+        // Regression: the single-error re-emit path used to drop the
+        // `context` JSON entirely, making structured diagnostics
+        // (e.g. release working-tree dirty file lists) invisible to
+        // JSON consumers. Now context is preserved verbatim.
+        let mut v = ValidationCollector::new();
+        let context = serde_json::json!({
+            "files": ["target/foo.rs", "Cargo.lock"],
+            "hint": "Commit, stash, or discard changes before releasing",
+        });
+        v.push(
+            "working_tree",
+            "Uncommitted changes detected",
+            Some(context.clone()),
+        );
+
+        let err = v.finish_if_errors().unwrap_err();
+        assert_eq!(err.details, context);
+    }
+
+    #[test]
+    fn test_finish_preserves_single_error_context() {
+        // Same regression as above, but on the consume-self `finish` path
+        // taken by validators that don't need fail-fast semantics.
+        let mut v = ValidationCollector::new();
+        let context = serde_json::json!({"files": ["only.rs"]});
+        v.push("field", "problem", Some(context.clone()));
+
+        let err = v.finish().unwrap_err();
+        assert_eq!(err.details, context);
+    }
+
+    #[test]
+    fn test_finish_if_errors_single_error_without_context_works() {
+        // Errors collected without context still serialize cleanly — the
+        // preservation logic must not require context to be present.
+        let mut v = ValidationCollector::new();
+        v.push("field", "problem", None);
+        let err = v.finish_if_errors().unwrap_err();
+        // Without context, the base validation_invalid_argument shape
+        // (field + problem) is what we get.
+        assert_eq!(
+            err.details.get("field").and_then(|v| v.as_str()),
+            Some("field")
+        );
+        assert_eq!(
+            err.details.get("problem").and_then(|v| v.as_str()),
+            Some("problem")
+        );
     }
 }
