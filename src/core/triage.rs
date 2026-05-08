@@ -604,7 +604,7 @@ fn triage_changed_fields(
         &previous.signals.review_decision,
         &current.signals.review_decision,
     );
-    push_if_changed(
+    push_if_changed_unless_unknown(
         &mut fields,
         "merge_state",
         &previous.signals.merge_state,
@@ -653,6 +653,21 @@ fn push_if_changed<T: PartialEq>(fields: &mut Vec<String>, field: &str, previous
     if previous != current {
         fields.push(field.to_string());
     }
+}
+
+fn push_if_changed_unless_unknown(
+    fields: &mut Vec<String>,
+    field: &str,
+    previous: &Option<String>,
+    current: &Option<String>,
+) {
+    if previous == current
+        || previous.as_deref() == Some("UNKNOWN")
+        || current.as_deref() == Some("UNKNOWN")
+    {
+        return;
+    }
+    fields.push(field.to_string());
 }
 
 fn triage_observation_component_id(target: &TriageTarget) -> String {
@@ -2595,6 +2610,18 @@ mod tests {
             comparison.changed_items[0].changed_fields,
             vec!["next_action"]
         );
+    }
+
+    #[test]
+    fn compare_triage_observations_ignores_unknown_merge_state_flaps() {
+        let mut previous = stored_triage_item(1, "Flappy PR", Some("checks_failed"));
+        previous.signals.merge_state = Some("UNKNOWN".to_string());
+        let mut current = new_triage_item("current-run", 1, "Flappy PR", Some("checks_failed"));
+        current.signals.merge_state = Some("DIRTY".to_string());
+
+        let comparison = compare_triage_observations("previous-run", &[previous], &[current]);
+
+        assert!(comparison.changed_items.is_empty());
     }
 
     fn triage_pr_with_action(action: &str) -> TriagePrItem {
