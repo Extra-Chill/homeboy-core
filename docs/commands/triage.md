@@ -2,7 +2,8 @@
 
 Produce an attention report for components, projects, fleets, rigs, or the full configured workspace.
 GitHub access is read-only; each run also records a local observation in the
-Homeboy SQLite database so later runs can report the previous triage time.
+Homeboy SQLite database so later runs can compare against the previous
+observation for the same target.
 
 ## Synopsis
 
@@ -46,9 +47,13 @@ Surfaced pull requests include the same comment activity plus review activity:
 
 Each successful observation adds an `observation` block to the JSON output with
 the local `run_id`, recorded `item_count`, SQLite `store_path`, and
-`previous_run_at` when the same triage target was observed before. Triage item
-snapshots are stored in the `triage_items` table and linked to the existing
-`runs` table.
+`previous_run_at` when the same triage target was observed before. When previous
+item snapshots are available, the block also includes a `comparison` with
+`previous_run_id`, `previous_item_count`, `new_items`, `resolved_items`, and
+`changed_items`. Changed items report the fields that moved, such as
+`next_action`, `checks`, `review_decision`, `comments_count`, or
+`last_comment_at`. Triage item snapshots are stored in the `triage_items` table
+and linked to the existing `runs` table.
 
 ## `--path` (component)
 

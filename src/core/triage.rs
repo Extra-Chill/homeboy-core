@@ -18,7 +18,7 @@ use crate::error::{Error, Result};
 use crate::git::gh_probe_succeeds;
 use crate::observation::{
     NewRunRecord, NewTriageItemRecord, ObservationStore, RunListFilter, RunStatus,
-    TriagePullRequestSignals,
+    TriageItemRecord, TriagePullRequestSignals,
 };
 use crate::{defaults, fleet, project, rig};
 
@@ -111,6 +111,37 @@ pub struct TriageObservationOutput {
     pub store_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_run_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comparison: Option<TriageObservationComparison>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TriageObservationComparison {
+    pub previous_run_id: String,
+    pub previous_item_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub new_items: Vec<TriageObservationItemRef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resolved_items: Vec<TriageObservationItemRef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub changed_items: Vec<TriageObservationChangedItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TriageObservationItemRef {
+    pub provider: String,
+    pub repo: String,
+    pub item_type: String,
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TriageObservationChangedItem {
+    #[serde(flatten)]
+    pub item: TriageObservationItemRef,
+    pub changed_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -353,6 +384,7 @@ struct TriageObservation {
     store: ObservationStore,
     run_id: String,
     store_path: String,
+    previous_run_id: Option<String>,
     previous_run_at: Option<String>,
 }
 
@@ -360,7 +392,7 @@ impl TriageObservation {
     fn start(target: &TriageTarget, options: &TriageOptions) -> Option<Self> {
         let store = ObservationStore::open_initialized().ok()?;
         let component_id = triage_observation_component_id(target);
-        let previous_run_at = store
+        let previous_run = store
             .latest_run(RunListFilter {
                 kind: Some("triage".to_string()),
                 component_id: Some(component_id.clone()),
@@ -369,8 +401,7 @@ impl TriageObservation {
                 limit: Some(1),
             })
             .ok()
-            .flatten()
-            .map(|run| run.started_at);
+            .flatten();
         let store_path = store
             .status()
             .map(|status| status.path)
@@ -415,13 +446,25 @@ impl TriageObservation {
             store,
             run_id: run.id,
             store_path,
-            previous_run_at,
+            previous_run_id: previous_run.as_ref().map(|run| run.id.clone()),
+            previous_run_at: previous_run.map(|run| run.started_at),
         })
     }
 
     fn finish(self, output: &TriageOutput) -> Option<TriageObservationOutput> {
         let items = triage_observation_items(&self.run_id, output);
         let item_count = items.len();
+        let previous_items = self
+            .previous_run_id
+            .as_deref()
+            .and_then(|run_id| self.store.list_triage_items_for_run(run_id).ok());
+        let comparison = self
+            .previous_run_id
+            .as_ref()
+            .zip(previous_items.as_ref())
+            .map(|(previous_run_id, previous_items)| {
+                compare_triage_observations(previous_run_id, previous_items, &items)
+            });
         let record_result = self.store.record_triage_items(&items);
         let status = if record_result.is_ok() {
             RunStatus::Pass
@@ -447,7 +490,178 @@ impl TriageObservation {
             item_count,
             store_path: self.store_path,
             previous_run_at: self.previous_run_at,
+            comparison,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct TriageObservationItemKey {
+    provider: String,
+    repo_owner: String,
+    repo_name: String,
+    item_type: String,
+    number: u64,
+}
+
+fn compare_triage_observations(
+    previous_run_id: &str,
+    previous_items: &[TriageItemRecord],
+    current_items: &[NewTriageItemRecord],
+) -> TriageObservationComparison {
+    let previous_by_key: BTreeMap<_, _> = previous_items
+        .iter()
+        .map(|item| (triage_record_key(item), item))
+        .collect();
+    let current_by_key: BTreeMap<_, _> = current_items
+        .iter()
+        .map(|item| (triage_new_item_key(item), item))
+        .collect();
+
+    let new_items = current_by_key
+        .iter()
+        .filter(|(key, _)| !previous_by_key.contains_key(*key))
+        .map(|(_, item)| triage_new_item_ref(item))
+        .collect();
+    let resolved_items = previous_by_key
+        .iter()
+        .filter(|(key, _)| !current_by_key.contains_key(*key))
+        .map(|(_, item)| triage_record_item_ref(item))
+        .collect();
+    let changed_items = current_by_key
+        .iter()
+        .filter_map(|(key, current)| {
+            let previous = previous_by_key.get(key)?;
+            let changed_fields = triage_changed_fields(previous, current);
+            if changed_fields.is_empty() {
+                return None;
+            }
+            Some(TriageObservationChangedItem {
+                item: triage_new_item_ref(current),
+                changed_fields,
+            })
+        })
+        .collect();
+
+    TriageObservationComparison {
+        previous_run_id: previous_run_id.to_string(),
+        previous_item_count: previous_items.len(),
+        new_items,
+        resolved_items,
+        changed_items,
+    }
+}
+
+fn triage_record_key(item: &TriageItemRecord) -> TriageObservationItemKey {
+    TriageObservationItemKey {
+        provider: item.provider.clone(),
+        repo_owner: item.repo_owner.clone(),
+        repo_name: item.repo_name.clone(),
+        item_type: item.item_type.clone(),
+        number: item.number,
+    }
+}
+
+fn triage_new_item_key(item: &NewTriageItemRecord) -> TriageObservationItemKey {
+    TriageObservationItemKey {
+        provider: item.provider.clone(),
+        repo_owner: item.repo_owner.clone(),
+        repo_name: item.repo_name.clone(),
+        item_type: item.item_type.clone(),
+        number: item.number,
+    }
+}
+
+fn triage_record_item_ref(item: &TriageItemRecord) -> TriageObservationItemRef {
+    TriageObservationItemRef {
+        provider: item.provider.clone(),
+        repo: format!("{}/{}", item.repo_owner, item.repo_name),
+        item_type: item.item_type.clone(),
+        number: item.number,
+        title: item.title.clone(),
+        url: item.url.clone(),
+    }
+}
+
+fn triage_new_item_ref(item: &NewTriageItemRecord) -> TriageObservationItemRef {
+    TriageObservationItemRef {
+        provider: item.provider.clone(),
+        repo: format!("{}/{}", item.repo_owner, item.repo_name),
+        item_type: item.item_type.clone(),
+        number: item.number,
+        title: item.title.clone(),
+        url: item.url.clone(),
+    }
+}
+
+fn triage_changed_fields(
+    previous: &TriageItemRecord,
+    current: &NewTriageItemRecord,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    push_if_changed(&mut fields, "state", &previous.state, &current.state);
+    push_if_changed(&mut fields, "title", &previous.title, &current.title);
+    push_if_changed(&mut fields, "url", &previous.url, &current.url);
+    push_if_changed(
+        &mut fields,
+        "checks",
+        &previous.signals.checks,
+        &current.signals.checks,
+    );
+    push_if_changed(
+        &mut fields,
+        "review_decision",
+        &previous.signals.review_decision,
+        &current.signals.review_decision,
+    );
+    push_if_changed(
+        &mut fields,
+        "merge_state",
+        &previous.signals.merge_state,
+        &current.signals.merge_state,
+    );
+    push_if_changed(
+        &mut fields,
+        "next_action",
+        &previous.signals.next_action,
+        &current.signals.next_action,
+    );
+    push_if_changed(
+        &mut fields,
+        "comments_count",
+        &previous.signals.comments_count,
+        &current.signals.comments_count,
+    );
+    push_if_changed(
+        &mut fields,
+        "reviews_count",
+        &previous.signals.reviews_count,
+        &current.signals.reviews_count,
+    );
+    push_if_changed(
+        &mut fields,
+        "last_comment_at",
+        &previous.signals.last_comment_at,
+        &current.signals.last_comment_at,
+    );
+    push_if_changed(
+        &mut fields,
+        "last_review_at",
+        &previous.signals.last_review_at,
+        &current.signals.last_review_at,
+    );
+    push_if_changed(
+        &mut fields,
+        "updated_at",
+        &previous.updated_at,
+        &current.updated_at,
+    );
+    fields
+}
+
+fn push_if_changed<T: PartialEq>(fields: &mut Vec<String>, field: &str, previous: &T, current: &T) {
+    if previous != current {
+        fields.push(field.to_string());
     }
 }
 
@@ -2364,6 +2578,35 @@ mod tests {
         assert_eq!(summary.actions, 1);
     }
 
+    #[test]
+    fn compare_triage_observations_reports_new_resolved_and_changed_items() {
+        let previous = vec![
+            stored_triage_item(1, "Old issue", None),
+            stored_triage_item(2, "Resolved issue", None),
+            stored_triage_item(3, "Changed PR", Some("review_required")),
+        ];
+        let current = vec![
+            new_triage_item("current-run", 1, "Old issue", None),
+            new_triage_item("current-run", 3, "Changed PR", Some("checks_failed")),
+            new_triage_item("current-run", 4, "New issue", None),
+        ];
+
+        let comparison = compare_triage_observations("previous-run", &previous, &current);
+
+        assert_eq!(comparison.previous_run_id, "previous-run");
+        assert_eq!(comparison.previous_item_count, 3);
+        assert_eq!(comparison.new_items.len(), 1);
+        assert_eq!(comparison.new_items[0].number, 4);
+        assert_eq!(comparison.resolved_items.len(), 1);
+        assert_eq!(comparison.resolved_items[0].number, 2);
+        assert_eq!(comparison.changed_items.len(), 1);
+        assert_eq!(comparison.changed_items[0].item.number, 3);
+        assert_eq!(
+            comparison.changed_items[0].changed_fields,
+            vec!["next_action"]
+        );
+    }
+
     fn triage_pr_with_action(action: &str) -> TriagePrItem {
         TriagePrItem {
             number: 1,
@@ -2381,6 +2624,53 @@ mod tests {
             author: None,
             updated_at: None,
             stale: false,
+        }
+    }
+
+    fn stored_triage_item(number: u64, title: &str, next_action: Option<&str>) -> TriageItemRecord {
+        TriageItemRecord {
+            id: format!("item-{number}"),
+            run_id: "previous-run".to_string(),
+            provider: "github".to_string(),
+            repo_owner: "Extra-Chill".to_string(),
+            repo_name: "homeboy".to_string(),
+            item_type: "pull_request".to_string(),
+            number,
+            state: "OPEN".to_string(),
+            title: title.to_string(),
+            url: format!("https://github.com/Extra-Chill/homeboy/pull/{number}"),
+            signals: TriagePullRequestSignals {
+                next_action: next_action.map(str::to_string),
+                ..TriagePullRequestSignals::default()
+            },
+            updated_at: None,
+            metadata_json: serde_json::json!({}),
+            observed_at: "2026-05-08T12:00:00Z".to_string(),
+        }
+    }
+
+    fn new_triage_item(
+        run_id: &str,
+        number: u64,
+        title: &str,
+        next_action: Option<&str>,
+    ) -> NewTriageItemRecord {
+        NewTriageItemRecord {
+            run_id: run_id.to_string(),
+            provider: "github".to_string(),
+            repo_owner: "Extra-Chill".to_string(),
+            repo_name: "homeboy".to_string(),
+            item_type: "pull_request".to_string(),
+            number,
+            state: "OPEN".to_string(),
+            title: title.to_string(),
+            url: format!("https://github.com/Extra-Chill/homeboy/pull/{number}"),
+            signals: TriagePullRequestSignals {
+                next_action: next_action.map(str::to_string),
+                ..TriagePullRequestSignals::default()
+            },
+            updated_at: None,
+            metadata_json: serde_json::json!({}),
         }
     }
 
