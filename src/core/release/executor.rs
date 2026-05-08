@@ -22,6 +22,9 @@ use crate::{changelog, version};
 use super::types::{ReleaseArtifact, ReleaseState, ReleaseStepResult, ReleaseStepStatus};
 use super::utils::{extract_latest_notes, parse_release_artifacts};
 
+mod prepare;
+pub(crate) use prepare::run_prepare;
+
 /// Build a successful step result with optional data and hints.
 pub(crate) fn step_success(
     id: &str,

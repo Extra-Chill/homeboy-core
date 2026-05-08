@@ -23,10 +23,14 @@ use crate::release::changelog;
 use crate::version;
 
 use super::executor;
+use super::pipeline_capabilities::{
+    get_publish_targets, has_package_capability, has_prepare_capability,
+};
+use super::pipeline_summary::{build_summary, derive_overall_status};
 use super::types::{
     ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun, ReleaseRunResult,
-    ReleaseRunSummary, ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseState,
-    ReleaseStepResult, ReleaseStepStatus,
+    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
+    ReleaseStepStatus,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -98,11 +102,21 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     )?);
     bail_on_failure!();
 
-    // 2. Git commit
+    // 2. Optional release preparation. Extension-owned ecosystems can sync
+    //    generated release files after the version bump and before the commit.
+    if has_prepare_capability(&extensions) {
+        match executor::run_prepare(&extensions, &state, component_id, &component.local_path) {
+            Ok(result) => results.push(result),
+            Err(err) => results.push(failed_result("release.prepare", "release.prepare", err)),
+        }
+        bail_on_failure!();
+    }
+
+    // 3. Git commit
     results.push(executor::run_git_commit(&component, component_id, &state)?);
     bail_on_failure!();
 
-    // 3. Optional packaging (runs BEFORE tag so build failures don't leave
+    // 4. Optional packaging (runs BEFORE tag so build failures don't leave
     //    orphan tags on the remote).
     let has_publish_targets = !get_publish_targets(&extensions).is_empty();
     let want_publish = !options.skip_publish && has_publish_targets;
@@ -114,7 +128,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
         bail_on_failure!();
     }
 
-    // 4. Git tag
+    // 5. Git tag
     let tag_name = match monorepo.as_ref() {
         Some(ctx) => ctx.format_tag(state.version.as_deref().unwrap_or("")),
         None => format!("v{}", state.version.as_deref().unwrap_or("")),
@@ -127,11 +141,11 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     )?);
     bail_on_failure!();
 
-    // 5. Git push (commits + tags)
+    // 6. Git push (commits + tags)
     results.push(executor::run_git_push(&component, component_id)?);
     bail_on_failure!();
 
-    // 6. GitHub Release (soft-fails on gh issues; skipped for non-GitHub remotes).
+    // 7. GitHub Release (soft-fails on gh issues; skipped for non-GitHub remotes).
     if !options.skip_github_release && github_release_applies(&component) {
         match executor::run_github_release(&component, &state) {
             Ok(result) => results.push(result),
@@ -139,7 +153,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
         }
     }
 
-    // 7. Publish to each configured target. Failures here mark the step failed
+    // 8. Publish to each configured target. Failures here mark the step failed
     //    but don't halt — other targets may still succeed.
     let mut publish_failed = false;
     if want_publish {
@@ -166,7 +180,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
         }
     }
 
-    // 8. Cleanup staging dir. Skipped when --deploy is set (deploy needs the
+    // 9. Cleanup staging dir. Skipped when --deploy is set (deploy needs the
     //    build artifact) and when publishing was skipped entirely.
     if want_publish && !options.deploy && !publish_failed {
         match executor::run_cleanup(&component) {
@@ -236,139 +250,6 @@ fn finalize(
     }
 }
 
-fn derive_overall_status(results: &[ReleaseStepResult]) -> ReleaseStepStatus {
-    let has_success = results
-        .iter()
-        .any(|r| matches!(r.status, ReleaseStepStatus::Success));
-    let has_failed = results
-        .iter()
-        .any(|r| matches!(r.status, ReleaseStepStatus::Failed));
-
-    if has_failed && has_success {
-        ReleaseStepStatus::PartialSuccess
-    } else if has_failed {
-        ReleaseStepStatus::Failed
-    } else {
-        ReleaseStepStatus::Success
-    }
-}
-
-fn build_summary(results: &[ReleaseStepResult], status: &ReleaseStepStatus) -> ReleaseRunSummary {
-    let succeeded = results
-        .iter()
-        .filter(|r| matches!(r.status, ReleaseStepStatus::Success))
-        .count();
-    let failed = results
-        .iter()
-        .filter(|r| matches!(r.status, ReleaseStepStatus::Failed))
-        .count();
-    let skipped = results
-        .iter()
-        .filter(|r| matches!(r.status, ReleaseStepStatus::Skipped))
-        .count();
-    let missing = results
-        .iter()
-        .filter(|r| matches!(r.status, ReleaseStepStatus::Missing))
-        .count();
-
-    let next_actions = match status {
-        ReleaseStepStatus::PartialSuccess | ReleaseStepStatus::Failed => vec![
-            "Fix the issue and re-run (idempotent - completed steps will succeed again)"
-                .to_string(),
-        ],
-        ReleaseStepStatus::Missing => {
-            vec!["Install missing extensions or actions to resolve missing steps".to_string()]
-        }
-        _ => Vec::new(),
-    };
-
-    let success_summary = if matches!(status, ReleaseStepStatus::Success) {
-        results.iter().filter_map(build_step_summary_line).collect()
-    } else {
-        Vec::new()
-    };
-
-    ReleaseRunSummary {
-        total_steps: results.len(),
-        succeeded,
-        failed,
-        skipped,
-        missing,
-        next_actions,
-        success_summary,
-    }
-}
-
-fn build_step_summary_line(result: &ReleaseStepResult) -> Option<String> {
-    if !matches!(result.status, ReleaseStepStatus::Success) {
-        return None;
-    }
-
-    let data = result.data.as_ref();
-
-    match result.step_type.as_str() {
-        "version" => data
-            .and_then(|d| d.get("new_version"))
-            .and_then(|v| v.as_str())
-            .map(|ver| format!("Version bumped to {}", ver)),
-        "git.commit" => {
-            let skipped = data
-                .and_then(|d| d.get("skipped"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if skipped {
-                Some("Working tree was clean".to_string())
-            } else {
-                Some("Committed release changes".to_string())
-            }
-        }
-        "git.tag" => {
-            let tag = data.and_then(|d| d.get("tag")).and_then(|v| v.as_str());
-            let skipped = data
-                .and_then(|d| d.get("skipped"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            match (tag, skipped) {
-                (Some(t), true) => Some(format!("Tag {} already exists", t)),
-                (Some(t), false) => Some(format!("Tagged {}", t)),
-                (None, _) => Some("Tagged release".to_string()),
-            }
-        }
-        "git.push" => Some("Pushed to origin (with tags)".to_string()),
-        "package" => Some("Created release artifacts".to_string()),
-        "cleanup" => None,
-        "github.release" => {
-            let skipped = data
-                .and_then(|d| d.get("skipped"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if skipped {
-                None
-            } else {
-                data.and_then(|d| d.get("url"))
-                    .and_then(|v| v.as_str())
-                    .map(|url| format!("Created GitHub Release: {}", url))
-            }
-        }
-        "post_release" => {
-            let all_succeeded = data
-                .and_then(|d| d.get("all_succeeded"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            if all_succeeded {
-                Some("Post-release commands completed".to_string())
-            } else {
-                Some("Post-release commands completed (with warnings)".to_string())
-            }
-        }
-        step if step.starts_with("publish.") => {
-            let target = step.strip_prefix("publish.").unwrap_or("registry");
-            Some(format!("Published to {}", target))
-        }
-        _ => None,
-    }
-}
-
 /// Plan a release: run all preflight validations, then return a description
 /// of the steps the executor will run. Used by `--dry-run` to preview work
 /// without side effects and by [`run`] to drive validation + auto-generated
@@ -383,6 +264,7 @@ fn build_step_summary_line(result: &ReleaseStepResult) -> Option<String> {
 /// 4. Git push (commits AND tags)
 ///
 /// Extension-derived steps, added when applicable:
+/// - `release.prepare` — component has an extension with `release.prepare` action
 /// - `package` — component has an extension with `release.package` action
 /// - `publish.<target>` — one per extension with `release.publish` action
 /// - `cleanup` — after publish (skipped with `--deploy`)
@@ -1150,22 +1032,6 @@ fn github_release_applies(component: &Component) -> bool {
         .is_some()
 }
 
-/// Derive publish targets from extensions that have `release.publish` action.
-fn get_publish_targets(extensions: &[ExtensionManifest]) -> Vec<String> {
-    extensions
-        .iter()
-        .filter(|m| m.actions.iter().any(|a| a.id == "release.publish"))
-        .map(|m| m.id.clone())
-        .collect()
-}
-
-/// Check if any extension provides the `release.package` action.
-fn has_package_capability(extensions: &[ExtensionManifest]) -> bool {
-    extensions
-        .iter()
-        .any(|m| m.actions.iter().any(|a| a.id == "release.package"))
-}
-
 /// Build all release steps: core steps (non-configurable) + publish steps (extension-derived).
 fn build_release_steps(
     component: &Component,
@@ -1220,12 +1086,27 @@ fn build_release_steps(
         missing: vec![],
     });
 
+    let commit_needs = if has_prepare_capability(extensions) {
+        steps.push(ReleasePlanStep {
+            id: "release.prepare".to_string(),
+            step_type: "release.prepare".to_string(),
+            label: Some("Prepare release files".to_string()),
+            needs: vec!["version".to_string()],
+            config: std::collections::HashMap::new(),
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
+        vec!["release.prepare".to_string()]
+    } else {
+        vec!["version".to_string()]
+    };
+
     // 2. Git commit
     steps.push(ReleasePlanStep {
         id: "git.commit".to_string(),
         step_type: "git.commit".to_string(),
         label: Some(format!("Commit release: v{}", new_version)),
-        needs: vec!["version".to_string()],
+        needs: commit_needs,
         config: std::collections::HashMap::new(),
         status: ReleasePlanStatus::Ready,
         missing: vec![],
@@ -1607,14 +1488,15 @@ fn get_unexpected_uncommitted_files(
 #[cfg(test)]
 mod tests {
     use super::{
-        code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
-        get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
-        is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
-        validate_release_version_floor,
+        build_release_steps, code_quality_failure_message, ensure_changelog_initialized,
+        filter_homeboy_managed, get_release_allowed_files, get_unexpected_uncommitted_files,
+        is_homeboy_managed_path, is_runner_infrastructure_failure, read_changelog_for_release,
+        strip_pr_reference, validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
     use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
+    use crate::release::types::ReleaseOptions;
 
     fn commit(subject: &str, category: CommitCategory) -> CommitInfo {
         CommitInfo {
@@ -1909,6 +1791,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn release_prepare_runs_after_version_before_commit_when_extension_declares_action() {
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: "/tmp/fixture".to_string(),
+            ..Default::default()
+        };
+        let extension = serde_json::from_value(serde_json::json!({
+            "name": "Fixture",
+            "version": "1.0.0",
+            "actions": [
+                {
+                    "id": "release.prepare",
+                    "label": "Prepare release",
+                    "type": "command",
+                    "command": "true"
+                }
+            ]
+        }))
+        .expect("extension manifest");
+        let mut warnings = Vec::new();
+        let mut hints = Vec::new();
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            ..Default::default()
+        };
+
+        let steps = build_release_steps(
+            &component,
+            &[extension],
+            "1.0.0",
+            "1.0.1",
+            &options,
+            None,
+            &mut warnings,
+            &mut hints,
+        )
+        .expect("steps");
+
+        let ids: Vec<&str> = steps.iter().map(|step| step.id.as_str()).collect();
+        assert_eq!(ids[0], "version");
+        assert_eq!(ids[1], "release.prepare");
+        assert_eq!(ids[2], "git.commit");
+        assert_eq!(steps[1].needs, vec!["version"]);
+        assert_eq!(steps[2].needs, vec!["release.prepare"]);
     }
 
     fn component_with_changelog_target(
