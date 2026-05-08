@@ -1,6 +1,8 @@
 pub mod changelog;
 mod executor;
 mod pipeline;
+mod pipeline_capabilities;
+mod pipeline_summary;
 mod types;
 mod utils;
 pub mod version;
