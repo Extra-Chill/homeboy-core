@@ -129,7 +129,6 @@ pub struct TriageObservationComparison {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TriageObservationItemRef {
-    pub provider: String,
     pub repo: String,
     pub item_type: String,
     pub number: u64,
@@ -495,14 +494,7 @@ impl TriageObservation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct TriageObservationItemKey {
-    provider: String,
-    repo_owner: String,
-    repo_name: String,
-    item_type: String,
-    number: u64,
-}
+type TriageObservationItemKey = (String, String, String, String, u64);
 
 fn compare_triage_observations(
     previous_run_id: &str,
@@ -553,28 +545,27 @@ fn compare_triage_observations(
 }
 
 fn triage_record_key(item: &TriageItemRecord) -> TriageObservationItemKey {
-    TriageObservationItemKey {
-        provider: item.provider.clone(),
-        repo_owner: item.repo_owner.clone(),
-        repo_name: item.repo_name.clone(),
-        item_type: item.item_type.clone(),
-        number: item.number,
-    }
+    (
+        item.provider.clone(),
+        item.repo_owner.clone(),
+        item.repo_name.clone(),
+        item.item_type.clone(),
+        item.number,
+    )
 }
 
 fn triage_new_item_key(item: &NewTriageItemRecord) -> TriageObservationItemKey {
-    TriageObservationItemKey {
-        provider: item.provider.clone(),
-        repo_owner: item.repo_owner.clone(),
-        repo_name: item.repo_name.clone(),
-        item_type: item.item_type.clone(),
-        number: item.number,
-    }
+    (
+        item.provider.clone(),
+        item.repo_owner.clone(),
+        item.repo_name.clone(),
+        item.item_type.clone(),
+        item.number,
+    )
 }
 
 fn triage_record_item_ref(item: &TriageItemRecord) -> TriageObservationItemRef {
     TriageObservationItemRef {
-        provider: item.provider.clone(),
         repo: format!("{}/{}", item.repo_owner, item.repo_name),
         item_type: item.item_type.clone(),
         number: item.number,
@@ -585,7 +576,6 @@ fn triage_record_item_ref(item: &TriageItemRecord) -> TriageObservationItemRef {
 
 fn triage_new_item_ref(item: &NewTriageItemRecord) -> TriageObservationItemRef {
     TriageObservationItemRef {
-        provider: item.provider.clone(),
         repo: format!("{}/{}", item.repo_owner, item.repo_name),
         item_type: item.item_type.clone(),
         number: item.number,
