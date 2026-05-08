@@ -5,6 +5,10 @@ use std::{collections::BTreeMap, path::Path};
 use crate::code_audit::{self, report::finding_kind_key};
 use crate::extension::lint::LintFinding;
 
+mod triage_items;
+
+pub use triage_items::{NewTriageItemRecord, TriageItemRecord, TriagePullRequestSignals};
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum RunStatus {
     Running,

@@ -16,6 +16,10 @@ use crate::component;
 use crate::deploy::release_download::{detect_remote_url, parse_github_url, GitHubRepo};
 use crate::error::{Error, Result};
 use crate::git::gh_probe_succeeds;
+use crate::observation::{
+    NewRunRecord, NewTriageItemRecord, ObservationStore, RunListFilter, RunStatus,
+    TriagePullRequestSignals,
+};
 use crate::{defaults, fleet, project, rig};
 
 #[derive(Debug, Clone)]
@@ -92,10 +96,21 @@ pub struct TriageOptions {
 pub struct TriageOutput {
     pub command: &'static str,
     pub target: TriageTargetOutput,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation: Option<TriageObservationOutput>,
     pub summary: TriageSummary,
     pub components: Vec<TriageComponentReport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unresolved: Vec<TriageUnresolved>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TriageObservationOutput {
+    pub run_id: String,
+    pub item_count: usize,
+    pub store_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_run_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -173,6 +188,10 @@ pub struct TriageIssueItem {
     pub assignees: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comments_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_comment_at: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -202,14 +221,10 @@ pub struct TriagePrItem {
     pub url: String,
     pub state: String,
     pub draft: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review_decision: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checks: Option<String>,
+    #[serde(flatten)]
+    pub signals: TriagePullRequestSignals,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub check_failures: Vec<TriageCheckFailure>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub merge_state: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -220,8 +235,6 @@ pub struct TriagePrItem {
     pub updated_at: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,6 +306,7 @@ impl ComponentRef {
 }
 
 pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput> {
+    let observation = TriageObservation::start(&target, &options);
     let refs = resolve_target_components(&target)?;
     let global_priority_labels = defaults::load_config().triage.priority_labels;
     let mut components = Vec::new();
@@ -316,16 +330,197 @@ pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput>
     }
 
     let summary = summarize(&components, &unresolved);
-    Ok(TriageOutput {
+    let mut output = TriageOutput {
         command: target.command(),
         target: TriageTargetOutput {
             kind: target.kind(),
             id: target.id().to_string(),
         },
+        observation: None,
         summary,
         components,
         unresolved,
-    })
+    };
+
+    if let Some(observation) = observation {
+        output.observation = observation.finish(&output);
+    }
+
+    Ok(output)
+}
+
+struct TriageObservation {
+    store: ObservationStore,
+    run_id: String,
+    store_path: String,
+    previous_run_at: Option<String>,
+}
+
+impl TriageObservation {
+    fn start(target: &TriageTarget, options: &TriageOptions) -> Option<Self> {
+        let store = ObservationStore::open_initialized().ok()?;
+        let component_id = triage_observation_component_id(target);
+        let previous_run_at = store
+            .latest_run(RunListFilter {
+                kind: Some("triage".to_string()),
+                component_id: Some(component_id.clone()),
+                status: None,
+                rig_id: None,
+                limit: Some(1),
+            })
+            .ok()
+            .flatten()
+            .map(|run| run.started_at);
+        let store_path = store
+            .status()
+            .map(|status| status.path)
+            .unwrap_or_else(|_| "<unavailable>".to_string());
+        let run = store
+            .start_run(NewRunRecord {
+                kind: "triage".to_string(),
+                component_id: Some(component_id),
+                command: Some(target.command().to_string()),
+                cwd: std::env::current_dir()
+                    .ok()
+                    .map(|path| path.to_string_lossy().to_string()),
+                homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                git_sha: None,
+                rig_id: match target {
+                    TriageTarget::Rig(id) => Some(id.clone()),
+                    _ => None,
+                },
+                metadata_json: serde_json::json!({
+                    "target": {
+                        "kind": target.kind(),
+                        "id": target.id(),
+                    },
+                    "options": {
+                        "include_issues": options.include_issues,
+                        "include_prs": options.include_prs,
+                        "mine": options.mine,
+                        "assigned": options.assigned,
+                        "labels": options.labels,
+                        "needs_review": options.needs_review,
+                        "failing_checks": options.failing_checks,
+                        "drilldown": options.drilldown,
+                        "issue_numbers": options.issue_numbers,
+                        "stale_days": options.stale_days,
+                        "limit": options.limit,
+                    }
+                }),
+            })
+            .ok()?;
+
+        Some(Self {
+            store,
+            run_id: run.id,
+            store_path,
+            previous_run_at,
+        })
+    }
+
+    fn finish(self, output: &TriageOutput) -> Option<TriageObservationOutput> {
+        let items = triage_observation_items(&self.run_id, output);
+        let item_count = items.len();
+        let record_result = self.store.record_triage_items(&items);
+        let status = if record_result.is_ok() {
+            RunStatus::Pass
+        } else {
+            RunStatus::Error
+        };
+        let _ = self.store.finish_run(
+            &self.run_id,
+            status,
+            Some(serde_json::json!({
+                "summary": output.summary,
+                "item_count": item_count,
+                "recorded": record_result.is_ok(),
+            })),
+        );
+
+        if record_result.is_err() {
+            return None;
+        }
+
+        Some(TriageObservationOutput {
+            run_id: self.run_id,
+            item_count,
+            store_path: self.store_path,
+            previous_run_at: self.previous_run_at,
+        })
+    }
+}
+
+fn triage_observation_component_id(target: &TriageTarget) -> String {
+    format!("{}:{}", target.kind(), target.id())
+}
+
+fn triage_observation_items(run_id: &str, output: &TriageOutput) -> Vec<NewTriageItemRecord> {
+    let mut records = Vec::new();
+    for component in &output.components {
+        if let Some(issues) = &component.issues {
+            for issue in &issues.items {
+                records.push(NewTriageItemRecord {
+                    run_id: run_id.to_string(),
+                    provider: component.repo.provider.to_string(),
+                    repo_owner: component.repo.owner.clone(),
+                    repo_name: component.repo.name.clone(),
+                    item_type: "issue".to_string(),
+                    number: issue.number,
+                    state: issue.state.clone(),
+                    title: issue.title.clone(),
+                    url: issue.url.clone(),
+                    signals: TriagePullRequestSignals {
+                        comments_count: issue.comments_count.and_then(usize_to_i64),
+                        last_comment_at: issue.last_comment_at.clone(),
+                        next_action: if issue.stale {
+                            Some("stale_issue".to_string())
+                        } else {
+                            None
+                        },
+                        ..TriagePullRequestSignals::default()
+                    },
+                    updated_at: issue.updated_at.clone(),
+                    metadata_json: serde_json::json!({
+                        "component_id": component.component_id,
+                        "labels": issue.labels,
+                        "assignees": issue.assignees,
+                        "linked_prs": issue.linked_prs,
+                    }),
+                });
+            }
+        }
+        if let Some(prs) = &component.pull_requests {
+            for pr in &prs.items {
+                records.push(NewTriageItemRecord {
+                    run_id: run_id.to_string(),
+                    provider: component.repo.provider.to_string(),
+                    repo_owner: component.repo.owner.clone(),
+                    repo_name: component.repo.name.clone(),
+                    item_type: "pull_request".to_string(),
+                    number: pr.number,
+                    state: pr.state.clone(),
+                    title: pr.title.clone(),
+                    url: pr.url.clone(),
+                    signals: pr.signals.clone(),
+                    updated_at: pr.updated_at.clone(),
+                    metadata_json: serde_json::json!({
+                        "component_id": component.component_id,
+                        "draft": pr.draft,
+                        "labels": pr.labels,
+                        "assignees": pr.assignees,
+                        "author": pr.author,
+                        "check_failures": pr.check_failures,
+                    }),
+                });
+            }
+        }
+    }
+    records
+}
+
+fn usize_to_i64(value: usize) -> Option<i64> {
+    i64::try_from(value).ok()
 }
 
 fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>> {
@@ -754,7 +949,7 @@ fn fetch_issues(
         "--limit".to_string(),
         effective_limit(options).to_string(),
         "--json".to_string(),
-        "number,title,url,state,labels,assignees,updatedAt".to_string(),
+        "number,title,url,state,labels,assignees,comments,updatedAt".to_string(),
     ];
     if options.mine {
         args.push("--assignee".to_string());
@@ -787,7 +982,7 @@ fn fetch_targeted_issues(
             "-R".to_string(),
             format!("{}/{}", repo.owner, repo.repo),
             "--json".to_string(),
-            "number,title,url,state,labels,assignees,updatedAt".to_string(),
+            "number,title,url,state,labels,assignees,comments,updatedAt".to_string(),
         ];
         let raw = run_gh(&args)?;
         let mut issue = parse_issue(&raw, stale_cutoff)?;
@@ -813,7 +1008,7 @@ fn fetch_prs(
         "--limit".to_string(),
         effective_limit(options).to_string(),
         "--json".to_string(),
-        "number,title,url,state,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,labels,assignees,author,updatedAt".to_string(),
+        "number,title,url,state,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,labels,assignees,author,comments,reviews,updatedAt".to_string(),
     ];
     if options.mine {
         args.push("--author".to_string());
@@ -827,10 +1022,10 @@ fn fetch_prs(
     let raw = run_gh(&args)?;
     let mut items = parse_prs(&raw, stale_cutoff, options.drilldown)?;
     if options.needs_review {
-        items.retain(|item| item.review_decision.as_deref() == Some("REVIEW_REQUIRED"));
+        items.retain(|item| item.signals.review_decision.as_deref() == Some("REVIEW_REQUIRED"));
     }
     if options.failing_checks {
-        items.retain(|item| item.checks.as_deref() == Some("FAILURE"));
+        items.retain(|item| item.signals.checks.as_deref() == Some("FAILURE"));
     }
     if let Some(assigned) = &options.assigned {
         items.retain(|item| item.assignees.iter().any(|a| a == assigned));
@@ -885,8 +1080,24 @@ struct RawIssue {
     labels: Vec<RawNamedNode>,
     #[serde(default)]
     assignees: Vec<RawNamedNode>,
+    #[serde(default)]
+    comments: Vec<RawComment>,
     #[serde(default, rename = "updatedAt")]
     updated_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawComment {
+    #[serde(default, rename = "createdAt")]
+    created_at: Option<String>,
+    #[serde(default, rename = "updatedAt")]
+    updated_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawReview {
+    #[serde(default, rename = "submittedAt")]
+    submitted_at: Option<String>,
 }
 
 fn parse_issues(
@@ -917,6 +1128,8 @@ fn raw_issue_to_item(item: RawIssue, stale_cutoff: Option<DateTime<Utc>>) -> Tri
         state: item.state,
         labels: item.labels.into_iter().filter_map(|l| l.name).collect(),
         assignees: item.assignees.into_iter().filter_map(|a| a.login).collect(),
+        comments_count: Some(item.comments.len()),
+        last_comment_at: latest_comment_at(&item.comments),
         updated_at: item.updated_at,
         stale,
         linked_prs: Vec::new(),
@@ -989,6 +1202,10 @@ struct RawPr {
     assignees: Vec<RawNamedNode>,
     #[serde(default)]
     author: Option<RawNamedNode>,
+    #[serde(default)]
+    comments: Vec<RawComment>,
+    #[serde(default)]
+    reviews: Vec<RawReview>,
     #[serde(default, rename = "updatedAt")]
     updated_at: Option<String>,
 }
@@ -1009,31 +1226,53 @@ fn parse_prs(
                 url: item.url,
                 state: item.state,
                 draft: item.is_draft,
-                review_decision: non_empty(item.review_decision),
-                checks: summarize_checks(&item.status_check_rollup),
+                signals: TriagePullRequestSignals {
+                    checks: summarize_checks(&item.status_check_rollup),
+                    review_decision: non_empty(item.review_decision),
+                    merge_state: non_empty(item.merge_state_status),
+                    comments_count: usize_to_i64(item.comments.len()),
+                    reviews_count: usize_to_i64(item.reviews.len()),
+                    last_comment_at: latest_comment_at(&item.comments),
+                    last_review_at: latest_review_at(&item.reviews),
+                    ..TriagePullRequestSignals::default()
+                },
                 check_failures: if include_drilldown {
                     summarize_check_failures(&item.status_check_rollup)
                 } else {
                     Vec::new()
                 },
-                merge_state: non_empty(item.merge_state_status),
                 labels: item.labels.into_iter().filter_map(|l| l.name).collect(),
                 assignees: item.assignees.into_iter().filter_map(|a| a.login).collect(),
                 author: item.author.and_then(|a| a.login),
                 updated_at: item.updated_at,
                 stale,
-                next_action: None,
             };
-            pr.next_action = derive_pr_next_action(&pr);
+            pr.signals.next_action = derive_pr_next_action(&pr);
             pr
         })
         .collect())
 }
 
+fn latest_comment_at(comments: &[RawComment]) -> Option<String> {
+    comments
+        .iter()
+        .filter_map(|comment| comment.updated_at.as_ref().or(comment.created_at.as_ref()))
+        .max()
+        .cloned()
+}
+
+fn latest_review_at(reviews: &[RawReview]) -> Option<String> {
+    reviews
+        .iter()
+        .filter_map(|review| review.submitted_at.as_ref())
+        .max()
+        .cloned()
+}
+
 fn derive_pr_next_action(pr: &TriagePrItem) -> Option<String> {
-    let checks = pr.checks.as_deref();
-    let review = pr.review_decision.as_deref();
-    let merge = pr.merge_state.as_deref();
+    let checks = pr.signals.checks.as_deref();
+    let review = pr.signals.review_decision.as_deref();
+    let merge = pr.signals.merge_state.as_deref();
 
     if pr.draft && checks == Some("FAILURE") {
         return Some("draft_with_failing_checks".to_string());
@@ -1153,7 +1392,7 @@ fn build_actions(
     if let Some(prs) = pull_requests {
         let mut action_counts = BTreeMap::<String, usize>::new();
         for pr in &prs.items {
-            if let Some(next_action) = &pr.next_action {
+            if let Some(next_action) = &pr.signals.next_action {
                 *action_counts.entry(next_action.clone()).or_default() += 1;
             }
         }
@@ -1309,12 +1548,12 @@ fn summarize(
             summary.needs_review += prs
                 .items
                 .iter()
-                .filter(|item| item.review_decision.as_deref() == Some("REVIEW_REQUIRED"))
+                .filter(|item| item.signals.review_decision.as_deref() == Some("REVIEW_REQUIRED"))
                 .count();
             summary.failing_checks += prs
                 .items
                 .iter()
-                .filter(|item| item.checks.as_deref() == Some("FAILURE"))
+                .filter(|item| item.signals.checks.as_deref() == Some("FAILURE"))
                 .count();
             summary.stale += prs.items.iter().filter(|item| item.stale).count();
         }
@@ -1507,16 +1746,25 @@ mod tests {
           "number": 8,
           "title": "Closed bug",
           "url": "https://github.com/o/r/issues/8",
-          "state": "CLOSED",
-          "labels": [],
-          "assignees": [],
-          "updatedAt": "2026-04-01T00:00:00Z"
+              "state": "CLOSED",
+              "labels": [],
+              "assignees": [],
+              "comments": [
+                {"createdAt":"2026-04-02T00:00:00Z","updatedAt":"2026-04-03T00:00:00Z"},
+                {"createdAt":"2026-04-04T00:00:00Z","updatedAt":null}
+              ],
+              "updatedAt": "2026-04-01T00:00:00Z"
         }"#;
 
         let item = parse_issue(raw, None).unwrap();
 
         assert_eq!(item.number, 8);
         assert_eq!(item.state, "CLOSED");
+        assert_eq!(item.comments_count, Some(2));
+        assert_eq!(
+            item.last_comment_at.as_deref(),
+            Some("2026-04-04T00:00:00Z")
+        );
         assert!(item.linked_prs.is_empty());
     }
 
@@ -1531,6 +1779,8 @@ mod tests {
                 labels: vec![],
                 assignees: vec![],
                 updated_at: None,
+                comments_count: None,
+                last_comment_at: None,
                 stale: false,
                 linked_prs: Vec::new(),
             },
@@ -1542,6 +1792,8 @@ mod tests {
                 labels: vec![],
                 assignees: vec![],
                 updated_at: None,
+                comments_count: None,
+                last_comment_at: None,
                 stale: false,
                 linked_prs: Vec::new(),
             },
@@ -1563,6 +1815,8 @@ mod tests {
                 labels: vec!["P1".to_string()],
                 assignees: vec![],
                 updated_at: None,
+                comments_count: None,
+                last_comment_at: None,
                 stale: true,
                 linked_prs: Vec::new(),
             }],
@@ -1646,16 +1900,28 @@ mod tests {
               "labels": [],
               "assignees": [],
               "author": {"login":"chubes4"},
+              "comments": [{"createdAt":"2026-04-27T00:00:00Z","updatedAt":null}],
+              "reviews": [{"submittedAt":"2026-04-28T00:00:00Z"}],
               "updatedAt": "2026-04-26T00:00:00Z"
             }
         ]"#;
         let items = parse_prs(raw, None, false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].author.as_deref(), Some("chubes4"));
-        assert!(items[0].review_decision.is_none());
-        assert!(items[0].merge_state.is_none());
+        assert!(items[0].signals.review_decision.is_none());
+        assert!(items[0].signals.merge_state.is_none());
         assert!(items[0].check_failures.is_empty());
-        assert!(items[0].next_action.is_none());
+        assert!(items[0].signals.next_action.is_none());
+        assert_eq!(items[0].signals.comments_count, Some(1));
+        assert_eq!(items[0].signals.reviews_count, Some(1));
+        assert_eq!(
+            items[0].signals.last_comment_at.as_deref(),
+            Some("2026-04-27T00:00:00Z")
+        );
+        assert_eq!(
+            items[0].signals.last_review_at.as_deref(),
+            Some("2026-04-28T00:00:00Z")
+        );
     }
 
     #[test]
@@ -1701,7 +1967,10 @@ mod tests {
         ]"#;
 
         let without_drilldown = parse_prs(raw, None, false).unwrap();
-        assert_eq!(without_drilldown[0].checks.as_deref(), Some("FAILURE"));
+        assert_eq!(
+            without_drilldown[0].signals.checks.as_deref(),
+            Some("FAILURE")
+        );
         assert!(without_drilldown[0].check_failures.is_empty());
 
         let with_drilldown = parse_prs(raw, None, true).unwrap();
@@ -1797,7 +2066,7 @@ mod tests {
         let items = parse_prs(raw, None, false).unwrap();
         let actions: Vec<_> = items
             .iter()
-            .map(|item| item.next_action.as_deref().unwrap())
+            .map(|item| item.signals.next_action.as_deref().unwrap())
             .collect();
         assert_eq!(
             actions,
@@ -1859,9 +2128,15 @@ mod tests {
         ]"#;
 
         let items = parse_prs(raw, None, false).unwrap();
-        assert_eq!(items[0].next_action.as_deref(), Some("needs_rebase"));
-        assert_eq!(items[1].next_action.as_deref(), Some("needs_rebase"));
-        assert!(items[2].next_action.is_none());
+        assert_eq!(
+            items[0].signals.next_action.as_deref(),
+            Some("needs_rebase")
+        );
+        assert_eq!(
+            items[1].signals.next_action.as_deref(),
+            Some("needs_rebase")
+        );
+        assert!(items[2].signals.next_action.is_none());
 
         let actions = build_actions(
             None,
@@ -2030,6 +2305,8 @@ mod tests {
                         labels: vec!["P1".to_string()],
                         assignees: vec![],
                         updated_at: None,
+                        comments_count: None,
+                        last_comment_at: None,
                         stale: false,
                         linked_prs: Vec::new(),
                     },
@@ -2041,6 +2318,8 @@ mod tests {
                         labels: vec![],
                         assignees: vec![],
                         updated_at: None,
+                        comments_count: None,
+                        last_comment_at: None,
                         stale: false,
                         linked_prs: Vec::new(),
                     },
@@ -2054,16 +2333,18 @@ mod tests {
                     url: "https://github.com/o/r/pull/2".to_string(),
                     state: "OPEN".to_string(),
                     draft: false,
-                    review_decision: Some("REVIEW_REQUIRED".to_string()),
-                    checks: Some("FAILURE".to_string()),
+                    signals: TriagePullRequestSignals {
+                        checks: Some("FAILURE".to_string()),
+                        review_decision: Some("REVIEW_REQUIRED".to_string()),
+                        next_action: Some("checks_failed".to_string()),
+                        ..TriagePullRequestSignals::default()
+                    },
                     check_failures: Vec::new(),
-                    merge_state: None,
                     labels: vec![],
                     assignees: vec![],
                     author: None,
                     updated_at: None,
                     stale: false,
-                    next_action: Some("checks_failed".to_string()),
                 }],
             }),
             actions: vec![TriageAction {
@@ -2090,16 +2371,16 @@ mod tests {
             url: "https://github.com/o/r/pull/1".to_string(),
             state: "OPEN".to_string(),
             draft: false,
-            review_decision: None,
-            checks: None,
+            signals: TriagePullRequestSignals {
+                next_action: Some(action.to_string()),
+                ..TriagePullRequestSignals::default()
+            },
             check_failures: Vec::new(),
-            merge_state: None,
             labels: vec![],
             assignees: vec![],
             author: None,
             updated_at: None,
             stale: false,
-            next_action: Some(action.to_string()),
         }
     }
 
@@ -2124,6 +2405,8 @@ mod tests {
                     labels: labels.into_iter().map(str::to_string).collect(),
                     assignees: vec![],
                     updated_at: None,
+                    comments_count: None,
+                    last_comment_at: None,
                     stale: false,
                     linked_prs: Vec::new(),
                 })

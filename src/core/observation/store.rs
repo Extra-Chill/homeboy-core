@@ -7,15 +7,16 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 mod findings;
+mod triage_items;
 
 use super::records::{
     ArtifactRecord, FindingListFilter, FindingRecord, NewFindingRecord, NewRunRecord,
-    NewTraceRunRecord, NewTraceSpanRecord, RunListFilter, RunRecord, RunStatus, TraceRunRecord,
-    TraceSpanRecord,
+    NewTraceRunRecord, NewTraceSpanRecord, NewTriageItemRecord, RunListFilter, RunRecord,
+    RunStatus, TraceRunRecord, TraceSpanRecord, TriageItemRecord, TriagePullRequestSignals,
 };
 use crate::{paths, Error, Result};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 struct Migration {
     version: i64,
@@ -125,6 +126,40 @@ const MIGRATIONS: &[Migration] = &[
         sql: r#"
         ALTER TABLE artifacts
             ADD COLUMN artifact_type TEXT NOT NULL DEFAULT 'file';
+    "#,
+    },
+    Migration {
+        version: 5,
+        sql: r#"
+        CREATE TABLE IF NOT EXISTS triage_items (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            repo_owner TEXT NOT NULL,
+            repo_name TEXT NOT NULL,
+            item_type TEXT NOT NULL,
+            number INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            checks TEXT,
+            review_decision TEXT,
+            merge_state TEXT,
+            next_action TEXT,
+            comments_count INTEGER,
+            reviews_count INTEGER,
+            last_comment_at TEXT,
+            last_review_at TEXT,
+            updated_at TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            observed_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES runs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_triage_items_run
+            ON triage_items(run_id);
+        CREATE INDEX IF NOT EXISTS idx_triage_items_repo_item
+            ON triage_items(provider, repo_owner, repo_name, item_type, number);
     "#,
     },
 ];

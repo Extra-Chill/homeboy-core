@@ -1,6 +1,8 @@
 # `homeboy triage`
 
-Produce a read-only attention report for components, projects, fleets, rigs, or the full configured workspace.
+Produce an attention report for components, projects, fleets, rigs, or the full configured workspace.
+GitHub access is read-only; each run also records a local observation in the
+Homeboy SQLite database so later runs can report the previous triage time.
 
 ## Synopsis
 
@@ -27,6 +29,26 @@ When no command is provided, `homeboy triage` defaults to `homeboy triage worksp
 - `--needs-review` — restrict PRs to review-required items
 - `--failing-checks` — restrict PRs to failing-check items
 - `--drilldown` — include compact failing check names and URLs
+
+## Output Signals
+
+Surfaced issues include comment activity when GitHub returns it:
+
+- `comments_count`
+- `last_comment_at`
+
+Surfaced pull requests include the same comment activity plus review activity:
+
+- `comments_count`
+- `reviews_count`
+- `last_comment_at`
+- `last_review_at`
+
+Each successful observation adds an `observation` block to the JSON output with
+the local `run_id`, recorded `item_count`, SQLite `store_path`, and
+`previous_run_at` when the same triage target was observed before. Triage item
+snapshots are stored in the `triage_items` table and linked to the existing
+`runs` table.
 
 ## `--path` (component)
 
