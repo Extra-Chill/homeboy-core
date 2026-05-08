@@ -136,3 +136,41 @@ fn build_step_summary_line(result: &ReleaseStepResult) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{build_summary, derive_overall_status};
+    use crate::release::types::{ReleaseStepResult, ReleaseStepStatus};
+
+    fn step(id: &str, status: ReleaseStepStatus) -> ReleaseStepResult {
+        ReleaseStepResult {
+            id: id.to_string(),
+            step_type: id.to_string(),
+            status,
+            missing: Vec::new(),
+            warnings: Vec::new(),
+            hints: Vec::new(),
+            data: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn release_summary_counts_steps_and_partial_failures() {
+        let results = vec![
+            step("version", ReleaseStepStatus::Success),
+            step("release.prepare", ReleaseStepStatus::Failed),
+            step("cleanup", ReleaseStepStatus::Skipped),
+        ];
+
+        let status = derive_overall_status(&results);
+        let summary = build_summary(&results, &status);
+
+        assert_eq!(status, ReleaseStepStatus::PartialSuccess);
+        assert_eq!(summary.total_steps, 3);
+        assert_eq!(summary.succeeded, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.next_actions.len(), 1);
+    }
+}
