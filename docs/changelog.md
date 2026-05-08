@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.162.0] - 2026-05-08
+
+### Added
+- record comment activity observations
+
+### Changed
+- update schema count expectations
+
+### Fixed
+- keep triage item store APIs internal
+- reuse PR signal record fields
+
 ## [0.161.0] - 2026-05-08
 
 ### Added
