@@ -156,7 +156,20 @@ mod tests {
     }
 
     #[test]
-    fn release_summary_counts_steps_and_partial_failures() {
+    fn test_derive_overall_status() {
+        let results = vec![
+            step("version", ReleaseStepStatus::Success),
+            step("release.prepare", ReleaseStepStatus::Failed),
+        ];
+
+        assert_eq!(
+            derive_overall_status(&results),
+            ReleaseStepStatus::PartialSuccess
+        );
+    }
+
+    #[test]
+    fn test_build_summary() {
         let results = vec![
             step("version", ReleaseStepStatus::Success),
             step("release.prepare", ReleaseStepStatus::Failed),
@@ -166,7 +179,6 @@ mod tests {
         let status = derive_overall_status(&results);
         let summary = build_summary(&results, &status);
 
-        assert_eq!(status, ReleaseStepStatus::PartialSuccess);
         assert_eq!(summary.total_steps, 3);
         assert_eq!(summary.succeeded, 1);
         assert_eq!(summary.failed, 1);
