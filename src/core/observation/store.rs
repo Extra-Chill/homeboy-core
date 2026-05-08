@@ -12,7 +12,7 @@ mod triage_items;
 use super::records::{
     ArtifactRecord, FindingListFilter, FindingRecord, NewFindingRecord, NewRunRecord,
     NewTraceRunRecord, NewTraceSpanRecord, NewTriageItemRecord, RunListFilter, RunRecord,
-    RunStatus, TraceRunRecord, TraceSpanRecord, TriageItemRecord,
+    RunStatus, TraceRunRecord, TraceSpanRecord, TriageItemRecord, TriagePullRequestSignals,
 };
 use crate::{paths, Error, Result};
 

@@ -67,14 +67,14 @@ impl ObservationStore {
                     item.state,
                     item.title,
                     item.url,
-                    item.checks,
-                    item.review_decision,
-                    item.merge_state,
-                    item.next_action,
-                    item.comments_count,
-                    item.reviews_count,
-                    item.last_comment_at,
-                    item.last_review_at,
+                    item.signals.checks,
+                    item.signals.review_decision,
+                    item.signals.merge_state,
+                    item.signals.next_action,
+                    item.signals.comments_count,
+                    item.signals.reviews_count,
+                    item.signals.last_comment_at,
+                    item.signals.last_review_at,
                     item.updated_at,
                     metadata_json,
                     observed_at,
@@ -151,14 +151,16 @@ fn row_to_triage_item_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Triage
         state: row.get(7)?,
         title: row.get(8)?,
         url: row.get(9)?,
-        checks: row.get(10)?,
-        review_decision: row.get(11)?,
-        merge_state: row.get(12)?,
-        next_action: row.get(13)?,
-        comments_count: row.get(14)?,
-        reviews_count: row.get(15)?,
-        last_comment_at: row.get(16)?,
-        last_review_at: row.get(17)?,
+        signals: TriagePullRequestSignals {
+            checks: row.get(10)?,
+            review_decision: row.get(11)?,
+            merge_state: row.get(12)?,
+            next_action: row.get(13)?,
+            comments_count: row.get(14)?,
+            reviews_count: row.get(15)?,
+            last_comment_at: row.get(16)?,
+            last_review_at: row.get(17)?,
+        },
         updated_at: row.get(18)?,
         metadata_json: parse_metadata(row.get(19)?)?,
         observed_at: row.get(20)?,
@@ -199,22 +201,24 @@ mod tests {
                     state: "OPEN".to_string(),
                     title: "Add triage observations".to_string(),
                     url: "https://github.com/Extra-Chill/homeboy/pull/42".to_string(),
-                    checks: Some("SUCCESS".to_string()),
-                    review_decision: Some("REVIEW_REQUIRED".to_string()),
-                    merge_state: Some("CLEAN".to_string()),
-                    next_action: Some("review_required".to_string()),
-                    comments_count: Some(3),
-                    reviews_count: Some(2),
-                    last_comment_at: Some("2026-05-08T10:00:00Z".to_string()),
-                    last_review_at: Some("2026-05-08T11:00:00Z".to_string()),
+                    signals: TriagePullRequestSignals {
+                        checks: Some("SUCCESS".to_string()),
+                        review_decision: Some("REVIEW_REQUIRED".to_string()),
+                        merge_state: Some("CLEAN".to_string()),
+                        next_action: Some("review_required".to_string()),
+                        comments_count: Some(3),
+                        reviews_count: Some(2),
+                        last_comment_at: Some("2026-05-08T10:00:00Z".to_string()),
+                        last_review_at: Some("2026-05-08T11:00:00Z".to_string()),
+                    },
                     updated_at: Some("2026-05-08T12:00:00Z".to_string()),
                     metadata_json: serde_json::json!({ "labels": ["enhancement"] }),
                 }])
                 .expect("triage items");
 
             assert_eq!(records.len(), 1);
-            assert_eq!(records[0].comments_count, Some(3));
-            assert_eq!(records[0].reviews_count, Some(2));
+            assert_eq!(records[0].signals.comments_count, Some(3));
+            assert_eq!(records[0].signals.reviews_count, Some(2));
 
             let listed = store.list_triage_items_for_run(&run.id).expect("listed");
             assert_eq!(listed, records);

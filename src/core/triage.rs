@@ -18,6 +18,7 @@ use crate::error::{Error, Result};
 use crate::git::gh_probe_succeeds;
 use crate::observation::{
     NewRunRecord, NewTriageItemRecord, ObservationStore, RunListFilter, RunStatus,
+    TriagePullRequestSignals,
 };
 use crate::{defaults, fleet, project, rig};
 
@@ -220,14 +221,10 @@ pub struct TriagePrItem {
     pub url: String,
     pub state: String,
     pub draft: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review_decision: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checks: Option<String>,
+    #[serde(flatten)]
+    pub signals: TriagePullRequestSignals,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub check_failures: Vec<TriageCheckFailure>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub merge_state: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -236,18 +233,8 @@ pub struct TriagePrItem {
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comments_count: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reviews_count: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_comment_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_review_at: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -483,18 +470,16 @@ fn triage_observation_items(run_id: &str, output: &TriageOutput) -> Vec<NewTriag
                     state: issue.state.clone(),
                     title: issue.title.clone(),
                     url: issue.url.clone(),
-                    checks: None,
-                    review_decision: None,
-                    merge_state: None,
-                    next_action: if issue.stale {
-                        Some("stale_issue".to_string())
-                    } else {
-                        None
+                    signals: TriagePullRequestSignals {
+                        comments_count: issue.comments_count.and_then(usize_to_i64),
+                        last_comment_at: issue.last_comment_at.clone(),
+                        next_action: if issue.stale {
+                            Some("stale_issue".to_string())
+                        } else {
+                            None
+                        },
+                        ..TriagePullRequestSignals::default()
                     },
-                    comments_count: issue.comments_count.and_then(usize_to_i64),
-                    reviews_count: None,
-                    last_comment_at: issue.last_comment_at.clone(),
-                    last_review_at: None,
                     updated_at: issue.updated_at.clone(),
                     metadata_json: serde_json::json!({
                         "component_id": component.component_id,
@@ -517,14 +502,7 @@ fn triage_observation_items(run_id: &str, output: &TriageOutput) -> Vec<NewTriag
                     state: pr.state.clone(),
                     title: pr.title.clone(),
                     url: pr.url.clone(),
-                    checks: pr.checks.clone(),
-                    review_decision: pr.review_decision.clone(),
-                    merge_state: pr.merge_state.clone(),
-                    next_action: pr.next_action.clone(),
-                    comments_count: pr.comments_count.and_then(usize_to_i64),
-                    reviews_count: pr.reviews_count.and_then(usize_to_i64),
-                    last_comment_at: pr.last_comment_at.clone(),
-                    last_review_at: pr.last_review_at.clone(),
+                    signals: pr.signals.clone(),
                     updated_at: pr.updated_at.clone(),
                     metadata_json: serde_json::json!({
                         "component_id": component.component_id,
@@ -1044,10 +1022,10 @@ fn fetch_prs(
     let raw = run_gh(&args)?;
     let mut items = parse_prs(&raw, stale_cutoff, options.drilldown)?;
     if options.needs_review {
-        items.retain(|item| item.review_decision.as_deref() == Some("REVIEW_REQUIRED"));
+        items.retain(|item| item.signals.review_decision.as_deref() == Some("REVIEW_REQUIRED"));
     }
     if options.failing_checks {
-        items.retain(|item| item.checks.as_deref() == Some("FAILURE"));
+        items.retain(|item| item.signals.checks.as_deref() == Some("FAILURE"));
     }
     if let Some(assigned) = &options.assigned {
         items.retain(|item| item.assignees.iter().any(|a| a == assigned));
@@ -1248,26 +1226,28 @@ fn parse_prs(
                 url: item.url,
                 state: item.state,
                 draft: item.is_draft,
-                review_decision: non_empty(item.review_decision),
-                checks: summarize_checks(&item.status_check_rollup),
+                signals: TriagePullRequestSignals {
+                    checks: summarize_checks(&item.status_check_rollup),
+                    review_decision: non_empty(item.review_decision),
+                    merge_state: non_empty(item.merge_state_status),
+                    comments_count: usize_to_i64(item.comments.len()),
+                    reviews_count: usize_to_i64(item.reviews.len()),
+                    last_comment_at: latest_comment_at(&item.comments),
+                    last_review_at: latest_review_at(&item.reviews),
+                    ..TriagePullRequestSignals::default()
+                },
                 check_failures: if include_drilldown {
                     summarize_check_failures(&item.status_check_rollup)
                 } else {
                     Vec::new()
                 },
-                merge_state: non_empty(item.merge_state_status),
                 labels: item.labels.into_iter().filter_map(|l| l.name).collect(),
                 assignees: item.assignees.into_iter().filter_map(|a| a.login).collect(),
                 author: item.author.and_then(|a| a.login),
-                comments_count: Some(item.comments.len()),
-                reviews_count: Some(item.reviews.len()),
-                last_comment_at: latest_comment_at(&item.comments),
-                last_review_at: latest_review_at(&item.reviews),
                 updated_at: item.updated_at,
                 stale,
-                next_action: None,
             };
-            pr.next_action = derive_pr_next_action(&pr);
+            pr.signals.next_action = derive_pr_next_action(&pr);
             pr
         })
         .collect())
@@ -1290,9 +1270,9 @@ fn latest_review_at(reviews: &[RawReview]) -> Option<String> {
 }
 
 fn derive_pr_next_action(pr: &TriagePrItem) -> Option<String> {
-    let checks = pr.checks.as_deref();
-    let review = pr.review_decision.as_deref();
-    let merge = pr.merge_state.as_deref();
+    let checks = pr.signals.checks.as_deref();
+    let review = pr.signals.review_decision.as_deref();
+    let merge = pr.signals.merge_state.as_deref();
 
     if pr.draft && checks == Some("FAILURE") {
         return Some("draft_with_failing_checks".to_string());
@@ -1412,7 +1392,7 @@ fn build_actions(
     if let Some(prs) = pull_requests {
         let mut action_counts = BTreeMap::<String, usize>::new();
         for pr in &prs.items {
-            if let Some(next_action) = &pr.next_action {
+            if let Some(next_action) = &pr.signals.next_action {
                 *action_counts.entry(next_action.clone()).or_default() += 1;
             }
         }
@@ -1568,12 +1548,12 @@ fn summarize(
             summary.needs_review += prs
                 .items
                 .iter()
-                .filter(|item| item.review_decision.as_deref() == Some("REVIEW_REQUIRED"))
+                .filter(|item| item.signals.review_decision.as_deref() == Some("REVIEW_REQUIRED"))
                 .count();
             summary.failing_checks += prs
                 .items
                 .iter()
-                .filter(|item| item.checks.as_deref() == Some("FAILURE"))
+                .filter(|item| item.signals.checks.as_deref() == Some("FAILURE"))
                 .count();
             summary.stale += prs.items.iter().filter(|item| item.stale).count();
         }
@@ -1928,18 +1908,18 @@ mod tests {
         let items = parse_prs(raw, None, false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].author.as_deref(), Some("chubes4"));
-        assert!(items[0].review_decision.is_none());
-        assert!(items[0].merge_state.is_none());
+        assert!(items[0].signals.review_decision.is_none());
+        assert!(items[0].signals.merge_state.is_none());
         assert!(items[0].check_failures.is_empty());
-        assert!(items[0].next_action.is_none());
-        assert_eq!(items[0].comments_count, Some(1));
-        assert_eq!(items[0].reviews_count, Some(1));
+        assert!(items[0].signals.next_action.is_none());
+        assert_eq!(items[0].signals.comments_count, Some(1));
+        assert_eq!(items[0].signals.reviews_count, Some(1));
         assert_eq!(
-            items[0].last_comment_at.as_deref(),
+            items[0].signals.last_comment_at.as_deref(),
             Some("2026-04-27T00:00:00Z")
         );
         assert_eq!(
-            items[0].last_review_at.as_deref(),
+            items[0].signals.last_review_at.as_deref(),
             Some("2026-04-28T00:00:00Z")
         );
     }
@@ -1987,7 +1967,10 @@ mod tests {
         ]"#;
 
         let without_drilldown = parse_prs(raw, None, false).unwrap();
-        assert_eq!(without_drilldown[0].checks.as_deref(), Some("FAILURE"));
+        assert_eq!(
+            without_drilldown[0].signals.checks.as_deref(),
+            Some("FAILURE")
+        );
         assert!(without_drilldown[0].check_failures.is_empty());
 
         let with_drilldown = parse_prs(raw, None, true).unwrap();
@@ -2083,7 +2066,7 @@ mod tests {
         let items = parse_prs(raw, None, false).unwrap();
         let actions: Vec<_> = items
             .iter()
-            .map(|item| item.next_action.as_deref().unwrap())
+            .map(|item| item.signals.next_action.as_deref().unwrap())
             .collect();
         assert_eq!(
             actions,
@@ -2145,9 +2128,15 @@ mod tests {
         ]"#;
 
         let items = parse_prs(raw, None, false).unwrap();
-        assert_eq!(items[0].next_action.as_deref(), Some("needs_rebase"));
-        assert_eq!(items[1].next_action.as_deref(), Some("needs_rebase"));
-        assert!(items[2].next_action.is_none());
+        assert_eq!(
+            items[0].signals.next_action.as_deref(),
+            Some("needs_rebase")
+        );
+        assert_eq!(
+            items[1].signals.next_action.as_deref(),
+            Some("needs_rebase")
+        );
+        assert!(items[2].signals.next_action.is_none());
 
         let actions = build_actions(
             None,
@@ -2344,20 +2333,18 @@ mod tests {
                     url: "https://github.com/o/r/pull/2".to_string(),
                     state: "OPEN".to_string(),
                     draft: false,
-                    review_decision: Some("REVIEW_REQUIRED".to_string()),
-                    checks: Some("FAILURE".to_string()),
+                    signals: TriagePullRequestSignals {
+                        checks: Some("FAILURE".to_string()),
+                        review_decision: Some("REVIEW_REQUIRED".to_string()),
+                        next_action: Some("checks_failed".to_string()),
+                        ..TriagePullRequestSignals::default()
+                    },
                     check_failures: Vec::new(),
-                    merge_state: None,
                     labels: vec![],
                     assignees: vec![],
                     author: None,
                     updated_at: None,
-                    comments_count: None,
-                    reviews_count: None,
-                    last_comment_at: None,
-                    last_review_at: None,
                     stale: false,
-                    next_action: Some("checks_failed".to_string()),
                 }],
             }),
             actions: vec![TriageAction {
@@ -2384,20 +2371,16 @@ mod tests {
             url: "https://github.com/o/r/pull/1".to_string(),
             state: "OPEN".to_string(),
             draft: false,
-            review_decision: None,
-            checks: None,
+            signals: TriagePullRequestSignals {
+                next_action: Some(action.to_string()),
+                ..TriagePullRequestSignals::default()
+            },
             check_failures: Vec::new(),
-            merge_state: None,
             labels: vec![],
             assignees: vec![],
             author: None,
             updated_at: None,
-            comments_count: None,
-            reviews_count: None,
-            last_comment_at: None,
-            last_review_at: None,
             stale: false,
-            next_action: Some(action.to_string()),
         }
     }
 
