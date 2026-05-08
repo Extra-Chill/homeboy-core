@@ -107,6 +107,29 @@ impl ObservationStore {
             .optional()
             .map_err(sqlite_error("read triage item record"))
     }
+
+    pub(crate) fn list_triage_items_for_run(&self, run_id: &str) -> Result<Vec<TriageItemRecord>> {
+        validate_required("run_id", run_id)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT id, run_id, provider, repo_owner, repo_name, item_type, number, state,
+                       title, url, checks, review_decision, merge_state, next_action,
+                       comments_count, reviews_count, last_comment_at, last_review_at, updated_at,
+                       metadata_json, observed_at
+                FROM triage_items
+                WHERE run_id = ?1
+                ORDER BY provider ASC, repo_owner ASC, repo_name ASC, item_type ASC, number ASC
+                "#,
+            )
+            .map_err(sqlite_error("prepare list run triage item records"))?;
+        let rows = statement
+            .query_map([run_id], row_to_triage_item_record)
+            .map_err(sqlite_error("list run triage item records"))?;
+
+        collect_rows(rows, "collect run triage item records")
+    }
 }
 
 fn row_to_triage_item_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<TriageItemRecord> {
@@ -177,6 +200,21 @@ mod tests {
             assert_eq!(records.len(), 1);
             assert_eq!(records[0].signals.comments_count, Some(3));
             assert_eq!(records[0].signals.reviews_count, Some(2));
+        });
+    }
+
+    #[test]
+    fn test_list_triage_items_for_run() {
+        with_isolated_home(|_| {
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = start_triage_run(&store);
+            let records = store
+                .record_triage_items(&[sample_triage_item(&run.id)])
+                .expect("triage items");
+
+            let listed = store.list_triage_items_for_run(&run.id).expect("listed");
+
+            assert_eq!(listed, records);
         });
     }
 
