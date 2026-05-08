@@ -4,7 +4,7 @@ use uuid::Uuid;
 use super::*;
 
 impl ObservationStore {
-    pub fn record_triage_items(
+    pub(crate) fn record_triage_items(
         &self,
         items: &[NewTriageItemRecord],
     ) -> Result<Vec<TriageItemRecord>> {
@@ -15,7 +15,7 @@ impl ObservationStore {
         Ok(records)
     }
 
-    pub fn record_triage_item(&self, item: &NewTriageItemRecord) -> Result<TriageItemRecord> {
+    fn record_triage_item(&self, item: &NewTriageItemRecord) -> Result<TriageItemRecord> {
         validate_required("triage_item.run_id", &item.run_id)?;
         validate_required("triage_item.provider", &item.provider)?;
         validate_required("triage_item.repo_owner", &item.repo_owner)?;
@@ -89,7 +89,7 @@ impl ObservationStore {
         })
     }
 
-    pub fn get_triage_item(&self, item_id: &str) -> Result<Option<TriageItemRecord>> {
+    fn get_triage_item(&self, item_id: &str) -> Result<Option<TriageItemRecord>> {
         validate_required("triage_item_id", item_id)?;
         self.connection
             .query_row(
@@ -106,29 +106,6 @@ impl ObservationStore {
             )
             .optional()
             .map_err(sqlite_error("read triage item record"))
-    }
-
-    pub fn list_triage_items_for_run(&self, run_id: &str) -> Result<Vec<TriageItemRecord>> {
-        validate_required("run_id", run_id)?;
-        let mut statement = self
-            .connection
-            .prepare(
-                r#"
-                SELECT id, run_id, provider, repo_owner, repo_name, item_type, number, state,
-                       title, url, checks, review_decision, merge_state, next_action,
-                       comments_count, reviews_count, last_comment_at, last_review_at, updated_at,
-                       metadata_json, observed_at
-                FROM triage_items
-                WHERE run_id = ?1
-                ORDER BY provider ASC, repo_owner ASC, repo_name ASC, item_type ASC, number ASC
-                "#,
-            )
-            .map_err(sqlite_error("prepare list run triage item records"))?;
-        let rows = statement
-            .query_map([run_id], row_to_triage_item_record)
-            .map_err(sqlite_error("list run triage item records"))?;
-
-        collect_rows(rows, "collect run triage item records")
     }
 }
 
@@ -170,62 +147,77 @@ fn row_to_triage_item_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Triage
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::observation::{NewRunRecord, RunStatus};
+    use crate::observation::NewRunRecord;
     use crate::test_support::with_isolated_home;
 
     #[test]
-    fn record_and_list_triage_items_for_run() {
+    fn test_record_triage_item() {
         with_isolated_home(|_| {
             let store = ObservationStore::open_initialized().expect("store");
-            let run = store
-                .start_run(NewRunRecord {
-                    kind: "triage".to_string(),
-                    component_id: Some("workspace".to_string()),
-                    command: Some("triage.workspace".to_string()),
-                    cwd: None,
-                    homeboy_version: Some("test".to_string()),
-                    git_sha: None,
-                    rig_id: None,
-                    metadata_json: serde_json::json!({}),
-                })
-                .expect("run");
+            let run = start_triage_run(&store);
+            let record = store
+                .record_triage_item(&sample_triage_item(&run.id))
+                .expect("triage item");
+
+            assert_eq!(record.signals.comments_count, Some(3));
+            assert_eq!(record.signals.reviews_count, Some(2));
+        });
+    }
+
+    #[test]
+    fn test_record_triage_items() {
+        with_isolated_home(|_| {
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = start_triage_run(&store);
 
             let records = store
-                .record_triage_items(&[NewTriageItemRecord {
-                    run_id: run.id.clone(),
-                    provider: "github".to_string(),
-                    repo_owner: "Extra-Chill".to_string(),
-                    repo_name: "homeboy".to_string(),
-                    item_type: "pull_request".to_string(),
-                    number: 42,
-                    state: "OPEN".to_string(),
-                    title: "Add triage observations".to_string(),
-                    url: "https://github.com/Extra-Chill/homeboy/pull/42".to_string(),
-                    signals: TriagePullRequestSignals {
-                        checks: Some("SUCCESS".to_string()),
-                        review_decision: Some("REVIEW_REQUIRED".to_string()),
-                        merge_state: Some("CLEAN".to_string()),
-                        next_action: Some("review_required".to_string()),
-                        comments_count: Some(3),
-                        reviews_count: Some(2),
-                        last_comment_at: Some("2026-05-08T10:00:00Z".to_string()),
-                        last_review_at: Some("2026-05-08T11:00:00Z".to_string()),
-                    },
-                    updated_at: Some("2026-05-08T12:00:00Z".to_string()),
-                    metadata_json: serde_json::json!({ "labels": ["enhancement"] }),
-                }])
+                .record_triage_items(&[sample_triage_item(&run.id)])
                 .expect("triage items");
 
             assert_eq!(records.len(), 1);
             assert_eq!(records[0].signals.comments_count, Some(3));
             assert_eq!(records[0].signals.reviews_count, Some(2));
-
-            let listed = store.list_triage_items_for_run(&run.id).expect("listed");
-            assert_eq!(listed, records);
-            let finished = store
-                .finish_run(&run.id, RunStatus::Pass, None)
-                .expect("finish");
-            assert_eq!(finished.status, "pass");
         });
+    }
+
+    fn start_triage_run(store: &ObservationStore) -> RunRecord {
+        store
+            .start_run(NewRunRecord {
+                kind: "triage".to_string(),
+                component_id: Some("workspace".to_string()),
+                command: Some("triage.workspace".to_string()),
+                cwd: None,
+                homeboy_version: Some("test".to_string()),
+                git_sha: None,
+                rig_id: None,
+                metadata_json: serde_json::json!({}),
+            })
+            .expect("run")
+    }
+
+    fn sample_triage_item(run_id: &str) -> NewTriageItemRecord {
+        NewTriageItemRecord {
+            run_id: run_id.to_string(),
+            provider: "github".to_string(),
+            repo_owner: "Extra-Chill".to_string(),
+            repo_name: "homeboy".to_string(),
+            item_type: "pull_request".to_string(),
+            number: 42,
+            state: "OPEN".to_string(),
+            title: "Add triage observations".to_string(),
+            url: "https://github.com/Extra-Chill/homeboy/pull/42".to_string(),
+            signals: TriagePullRequestSignals {
+                checks: Some("SUCCESS".to_string()),
+                review_decision: Some("REVIEW_REQUIRED".to_string()),
+                merge_state: Some("CLEAN".to_string()),
+                next_action: Some("review_required".to_string()),
+                comments_count: Some(3),
+                reviews_count: Some(2),
+                last_comment_at: Some("2026-05-08T10:00:00Z".to_string()),
+                last_review_at: Some("2026-05-08T11:00:00Z".to_string()),
+            },
+            updated_at: Some("2026-05-08T12:00:00Z".to_string()),
+            metadata_json: serde_json::json!({ "labels": ["enhancement"] }),
+        }
     }
 }
