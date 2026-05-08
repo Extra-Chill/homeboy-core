@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.161.0] - 2026-05-08
+
+### Added
+- add extension prepare step
+
+### Changed
+- align summary helper test names
+- cover split pipeline helpers
+- split prepare helpers from pipeline
+
 ## [0.160.1] - 2026-05-07
 
 ### Changed
