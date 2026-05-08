@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.163.0] - 2026-05-08
+
+### Added
+- compare observation snapshots
+
+### Fixed
+- avoid repeated comparison key fields
+
 ## [0.162.0] - 2026-05-08
 
 ### Added
