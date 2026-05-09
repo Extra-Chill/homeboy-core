@@ -1,11 +1,15 @@
 use crate::defaults;
 use crate::error::{Error, Result};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::helpers::{current_version, version_is_newer};
 use super::types::InstallMethod;
 
-pub(crate) fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<String>)> {
+pub(crate) fn execute_upgrade(
+    method: InstallMethod,
+    source_path: Option<&Path>,
+) -> Result<(bool, Option<String>)> {
     let defaults = defaults::load_defaults();
 
     let output = match method {
@@ -22,33 +26,7 @@ pub(crate) fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<Str
             })?
         }
         InstallMethod::Source => {
-            // For source builds, we need to find the git root
-            let exe_path = std::env::current_exe().map_err(|e| {
-                Error::internal_io(
-                    e.to_string(),
-                    Some("get current executable path".to_string()),
-                )
-            })?;
-
-            // Navigate up from target/release/homeboy to find the workspace root
-            let mut workspace_root = exe_path.clone();
-            for _ in 0..3 {
-                workspace_root = workspace_root
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or(workspace_root);
-            }
-
-            // Check if this looks like a git repo
-            let git_dir = workspace_root.join(".git");
-            if !git_dir.exists() {
-                return Err(Error::validation_invalid_argument(
-                    "source_path",
-                    "Could not find git repository for source build",
-                    Some(workspace_root.to_string_lossy().to_string()),
-                    None,
-                ));
-            }
+            let workspace_root = resolve_source_workspace(source_path)?;
 
             // Execute the upgrade command from defaults
             let cmd = &defaults.install_methods.source.upgrade_command;
@@ -86,16 +64,118 @@ pub(crate) fn execute_upgrade(method: InstallMethod) -> Result<(bool, Option<Str
         } else {
             format!("exit code {}", output.status.code().unwrap_or(1))
         };
-        return Err(Error::internal_io(
-            format!("{} upgrade failed: {}", method.as_str(), error_detail),
-            Some("execute upgrade".to_string()),
-        ));
+        return Err(upgrade_failure_error(method, &error_detail));
     }
 
     let new_version = active_binary_version().ok().flatten();
     let success = upgrade_verification_result(current_version(), new_version.as_deref());
 
     Ok((success, new_version))
+}
+
+fn upgrade_failure_error(method: InstallMethod, error_detail: &str) -> Error {
+    let mut error = Error::internal_io(
+        format!("{} upgrade failed: {}", method.as_str(), error_detail),
+        Some("execute upgrade".to_string()),
+    );
+
+    if method == InstallMethod::Binary && error_detail.contains("404") {
+        error = error
+            .with_hint("No release asset was found for this Homeboy version.")
+            .with_hint("Try: homeboy upgrade --method source --source-path <PATH>");
+    } else if method == InstallMethod::Cargo && error_detail.contains("cargo: not found") {
+        error = error
+            .with_hint("Cargo is not installed or is not on PATH.")
+            .with_hint(
+                "Install Rust/Cargo, or use: homeboy upgrade --method source --source-path <PATH>",
+            );
+    }
+
+    error
+}
+
+pub(crate) fn resolve_source_workspace(source_path: Option<&Path>) -> Result<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = source_path {
+        candidates.push(path.to_path_buf());
+    } else {
+        if let Ok(current_dir) = std::env::current_dir() {
+            candidates.push(current_dir);
+        }
+
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(workspace_root) = workspace_from_exe_path(&exe_path) {
+                candidates.push(workspace_root);
+            }
+        }
+    }
+
+    for candidate in candidates {
+        if let Some(checkout) = find_homeboy_source_checkout(&candidate) {
+            return Ok(checkout);
+        }
+    }
+
+    let id = source_path
+        .map(|path| path.to_string_lossy().to_string())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().to_string())
+        });
+
+    Err(Error::validation_invalid_argument(
+        "source_path",
+        "Could not find a Homeboy git checkout for source build",
+        id,
+        None,
+    )
+    .with_hint("Run from the Homeboy source checkout, or pass: homeboy upgrade --method source --source-path <PATH>"))
+}
+
+fn workspace_from_exe_path(exe_path: &Path) -> Option<PathBuf> {
+    let parent = exe_path.parent()?;
+    let build_dir = parent.file_name()?.to_string_lossy();
+    if build_dir != "release" && build_dir != "debug" {
+        return None;
+    }
+
+    let target_dir = parent.parent()?;
+    if target_dir.file_name()?.to_string_lossy() != "target" {
+        return None;
+    }
+
+    target_dir.parent().map(Path::to_path_buf)
+}
+
+fn is_homeboy_source_checkout(path: &Path) -> bool {
+    let git_dir = path.join(".git");
+    if !git_dir.exists() {
+        return false;
+    }
+
+    let manifest = path.join("homeboy.json");
+    let Ok(contents) = std::fs::read_to_string(manifest) else {
+        return false;
+    };
+
+    serde_json::from_str::<serde_json::Value>(&contents)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(str::to_string)
+        })
+        .as_deref()
+        == Some("homeboy")
+}
+
+fn find_homeboy_source_checkout(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|candidate| is_homeboy_source_checkout(candidate))
+        .map(Path::to_path_buf)
 }
 
 fn active_binary_version() -> Result<Option<String>> {
@@ -180,5 +260,89 @@ mod tests {
     #[test]
     fn verification_rejects_missing_active_binary_version() {
         assert!(!upgrade_verification_result("0.157.1", None));
+    }
+
+    #[test]
+    fn source_workspace_accepts_explicit_homeboy_checkout() {
+        let dir = checkout_with_package_name("homeboy");
+
+        let resolved = resolve_source_workspace(Some(dir.path())).expect("source checkout");
+
+        assert_eq!(resolved, dir.path());
+    }
+
+    #[test]
+    fn source_workspace_rejects_non_homeboy_checkout() {
+        let dir = checkout_with_package_name("other");
+
+        let err = resolve_source_workspace(Some(dir.path())).expect_err("invalid checkout");
+
+        assert!(err.message.contains("Homeboy git checkout"));
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("--source-path")));
+    }
+
+    #[test]
+    fn source_workspace_resolves_from_nested_checkout_path() {
+        let dir = checkout_with_package_name("homeboy");
+        let nested = dir.path().join("src/core");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+
+        let resolved = resolve_source_workspace(Some(&nested)).expect("source checkout");
+
+        assert_eq!(resolved, dir.path());
+    }
+
+    #[test]
+    fn executable_workspace_only_resolves_target_build_paths() {
+        let path = Path::new("/repo/target/release/homeboy");
+        assert_eq!(
+            workspace_from_exe_path(path).as_deref(),
+            Some(Path::new("/repo"))
+        );
+
+        let installed = Path::new("/usr/local/bin/homeboy");
+        assert!(workspace_from_exe_path(installed).is_none());
+    }
+
+    #[test]
+    fn binary_404_upgrade_error_suggests_source_fallback() {
+        let err = upgrade_failure_error(
+            InstallMethod::Binary,
+            "curl: (22) The requested URL returned error: 404",
+        );
+
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("No release asset")));
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("--source-path")));
+    }
+
+    #[test]
+    fn missing_cargo_upgrade_error_suggests_source_fallback() {
+        let err = upgrade_failure_error(InstallMethod::Cargo, "sh: 1: cargo: not found");
+
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("Cargo is not installed")));
+        assert!(err
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("--source-path")));
+    }
+
+    fn checkout_with_package_name(package_name: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join(".git")).expect("git dir");
+        let manifest = serde_json::json!({ "id": package_name });
+        std::fs::write(dir.path().join("homeboy.json"), manifest.to_string()).expect("manifest");
+        dir
     }
 }

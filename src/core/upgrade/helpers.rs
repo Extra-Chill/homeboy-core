@@ -1,5 +1,6 @@
 use crate::defaults;
 use crate::error::{Error, Result};
+use std::path::Path;
 use std::process::Command;
 
 use super::constants::{CRATES_IO_API, GITHUB_RELEASES_API, VERSION};
@@ -151,6 +152,7 @@ pub fn run_upgrade_with_method(
     force: bool,
     method_override: Option<InstallMethod>,
     skip_extensions: bool,
+    source_path: Option<&Path>,
 ) -> Result<UpgradeResult> {
     let install_method = method_override.unwrap_or_else(detect_install_method);
     let previous_version = current_version().to_string();
@@ -195,7 +197,7 @@ pub fn run_upgrade_with_method(
     }
 
     // Execute the upgrade
-    let (success, new_version) = execute_upgrade(install_method)?;
+    let (success, new_version) = execute_upgrade(install_method, source_path)?;
 
     // Auto-update all installed extensions after a successful upgrade.
     // This prevents CI/local extension version drift that causes baseline
