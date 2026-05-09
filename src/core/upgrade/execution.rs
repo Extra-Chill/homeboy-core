@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn source_workspace_accepts_explicit_homeboy_checkout() {
+    fn test_resolve_source_workspace() {
         let dir = checkout_with_package_name("homeboy");
 
         let resolved = resolve_source_workspace(Some(dir.path())).expect("source checkout");
