@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.163.2] - 2026-05-09
+
+### Fixed
+- include upstream prs for forks
+
 ## [0.163.1] - 2026-05-08
 
 ### Fixed
