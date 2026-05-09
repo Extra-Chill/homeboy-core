@@ -1,6 +1,7 @@
 use clap::Args;
 use homeboy::upgrade;
 use serde_json::Value;
+use std::path::PathBuf;
 
 use crate::commands::utils::args::HiddenJsonArgs;
 use crate::commands::{CmdResult, GlobalArgs};
@@ -26,6 +27,10 @@ pub struct UpgradeArgs {
     /// Override install method detection (homebrew|cargo|source|binary)
     #[arg(long)]
     pub method: Option<String>,
+
+    /// Homeboy source checkout to use with --method source
+    #[arg(long, value_name = "PATH")]
+    pub source_path: Option<PathBuf>,
 
     #[command(flatten)]
     _json: HiddenJsonArgs,
@@ -56,8 +61,12 @@ pub fn run(args: UpgradeArgs, _global: &GlobalArgs) -> CmdResult<Value> {
         })
         .transpose()?;
 
-    let result =
-        upgrade::run_upgrade_with_method(args.force, method_override, args.skip_extensions)?;
+    let result = upgrade::run_upgrade_with_method(
+        args.force,
+        method_override,
+        args.skip_extensions,
+        args.source_path.as_deref(),
+    )?;
     let json = serde_json::to_value(&result)
         .map_err(|e| homeboy::Error::internal_json(e.to_string(), None))?;
 
