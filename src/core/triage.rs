@@ -1037,6 +1037,13 @@ struct ResolvedRepo {
 }
 
 fn resolve_repo(component_ref: &ComponentRef) -> std::result::Result<ResolvedRepo, String> {
+    resolve_repo_with_parent_resolver(component_ref, github_parent_repo)
+}
+
+fn resolve_repo_with_parent_resolver(
+    component_ref: &ComponentRef,
+    parent_resolver: impl Fn(&GitHubRepo) -> std::result::Result<Option<GitHubRepo>, String>,
+) -> std::result::Result<ResolvedRepo, String> {
     let source_remote_url = component_ref
         .remote_url
         .clone()
@@ -1047,7 +1054,7 @@ fn resolve_repo(component_ref: &ComponentRef) -> std::result::Result<ResolvedRep
         .clone()
         .or_else(|| source_remote_url.clone())
         .ok_or_else(|| "missing_remote_url_and_no_git_origin".to_string())?;
-    let repo = parse_github_url(&triage_remote_url).ok_or_else(|| {
+    let mut repo = parse_github_url(&triage_remote_url).ok_or_else(|| {
         if component_ref.triage_remote_url.is_some() {
             "triage_remote_url_is_not_github".to_string()
         } else {
@@ -1055,14 +1062,69 @@ fn resolve_repo(component_ref: &ComponentRef) -> std::result::Result<ResolvedRep
         }
     })?;
 
-    let source_repo = source_remote_url
+    let mut source_repo = source_remote_url
         .and_then(|url| parse_github_url(&url))
         .filter(|source| source.owner != repo.owner || source.repo != repo.repo);
+
+    if component_ref.triage_remote_url.is_none() {
+        if let Ok(Some(parent)) = parent_resolver(&repo) {
+            source_repo = Some(repo);
+            repo = parent;
+        }
+    }
 
     Ok(ResolvedRepo {
         repo,
         triage_remote_url: component_ref.triage_remote_url.clone(),
         source_repo,
+    })
+}
+
+#[cfg(not(test))]
+fn github_parent_repo(repo: &GitHubRepo) -> std::result::Result<Option<GitHubRepo>, String> {
+    let args = vec![
+        "repo".to_string(),
+        "view".to_string(),
+        format!("{}/{}", repo.owner, repo.repo),
+        "--json".to_string(),
+        "isFork,parent".to_string(),
+    ];
+    parse_github_parent_repo(&run_gh(&args)?)
+}
+
+#[cfg(test)]
+fn github_parent_repo(_repo: &GitHubRepo) -> std::result::Result<Option<GitHubRepo>, String> {
+    Ok(None)
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRepoParent {
+    #[serde(default, rename = "isFork")]
+    is_fork: bool,
+    #[serde(default)]
+    parent: Option<RawRepoParentRepo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRepoParentRepo {
+    name: String,
+    owner: RawRepoParentOwner,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRepoParentOwner {
+    login: String,
+}
+
+fn parse_github_parent_repo(raw: &str) -> std::result::Result<Option<GitHubRepo>, String> {
+    let parsed: RawRepoParent = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
+    Ok(if parsed.is_fork {
+        parsed.parent.map(|parent| GitHubRepo {
+            owner: parent.owner.login,
+            repo: parent.name,
+        })
+    } else {
+        None
     })
 }
 
@@ -1073,12 +1135,13 @@ fn fetch_component_report(
     global_priority_labels: Option<&Vec<String>>,
 ) -> TriageComponentReport {
     let repo = resolved.repo;
+    let source_repo = resolved.source_repo.clone();
     let repo_output = TriageRepo {
         provider: "github",
         owner: repo.owner.clone(),
         name: repo.repo.clone(),
         url: format!("https://github.com/{}/{}", repo.owner, repo.repo),
-        source_repo: resolved.source_repo.map(|source| TriageRepoRef {
+        source_repo: source_repo.clone().map(|source| TriageRepoRef {
             owner: source.owner.clone(),
             name: source.repo.clone(),
             url: format!("https://github.com/{}/{}", source.owner, source.repo),
@@ -1111,7 +1174,7 @@ fn fetch_component_report(
     };
 
     let pull_requests = if options.include_prs {
-        match fetch_prs(&repo, options, stale_cutoff) {
+        match fetch_prs(&repo, source_repo.as_ref(), options, stale_cutoff) {
             Ok(items) => Some(TriagePrBucket {
                 open: items.len(),
                 items,
@@ -1213,6 +1276,7 @@ fn fetch_targeted_issues(
 
 fn fetch_prs(
     repo: &GitHubRepo,
+    source_repo: Option<&GitHubRepo>,
     options: &TriageOptions,
     stale_cutoff: Option<DateTime<Utc>>,
 ) -> std::result::Result<Vec<TriagePrItem>, String> {
@@ -1232,6 +1296,9 @@ fn fetch_prs(
     if options.mine {
         args.push("--author".to_string());
         args.push("@me".to_string());
+    } else if let Some(source_repo) = source_repo {
+        args.push("--author".to_string());
+        args.push(source_repo.owner.clone());
     }
     for label in &options.labels {
         args.push("--label".to_string());
@@ -2759,6 +2826,65 @@ mod tests {
         assert_eq!(resolved.repo.owner, "WordPress");
         assert_eq!(resolved.repo.repo, "wordpress-playground");
         assert!(resolved.source_repo.is_none());
+    }
+
+    #[test]
+    fn resolve_repo_uses_parent_repo_for_fork_without_triage_remote() {
+        let component_ref = ComponentRef::new(
+            "playground".to_string(),
+            "/tmp/playground".to_string(),
+            Some("https://github.com/chubes4/wordpress-playground.git".to_string()),
+            None,
+            "component:playground".to_string(),
+        );
+
+        let resolved = resolve_repo_with_parent_resolver(&component_ref, |repo| {
+            assert_eq!(repo.owner, "chubes4");
+            assert_eq!(repo.repo, "wordpress-playground");
+            Ok(Some(GitHubRepo {
+                owner: "WordPress".to_string(),
+                repo: "wordpress-playground".to_string(),
+            }))
+        })
+        .unwrap();
+
+        assert_eq!(resolved.repo.owner, "WordPress");
+        assert_eq!(resolved.repo.repo, "wordpress-playground");
+        assert!(resolved.triage_remote_url.is_none());
+        let source = resolved.source_repo.expect("source repo is fork");
+        assert_eq!(source.owner, "chubes4");
+        assert_eq!(source.repo, "wordpress-playground");
+    }
+
+    #[test]
+    fn parse_github_parent_repo_returns_parent_for_fork() {
+        let parent = parse_github_parent_repo(
+            r#"{
+                "isFork": true,
+                "parent": {
+                    "name": "wordpress-playground",
+                    "owner": { "login": "WordPress" }
+                }
+            }"#,
+        )
+        .unwrap()
+        .expect("fork parent");
+
+        assert_eq!(parent.owner, "WordPress");
+        assert_eq!(parent.repo, "wordpress-playground");
+    }
+
+    #[test]
+    fn parse_github_parent_repo_ignores_non_forks() {
+        let parent = parse_github_parent_repo(
+            r#"{
+                "isFork": false,
+                "parent": null
+            }"#,
+        )
+        .unwrap();
+
+        assert!(parent.is_none());
     }
 
     #[test]
