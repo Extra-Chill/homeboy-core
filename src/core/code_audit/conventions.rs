@@ -1834,6 +1834,63 @@ mod tests {
     }
 
     #[test]
+    fn missing_import_not_flagged_when_terminal_only_appears_in_namespace() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "core/agents/AgentBundler.php".to_string(),
+                language: Language::Php,
+                methods: vec!["__construct".to_string()],
+                type_name: Some("AgentBundler".to_string()),
+                namespace: Some("DataMachine\\Core\\Agents".to_string()),
+                imports: vec!["DataMachine\\Core\\Database\\Agents\\Agents".to_string()],
+                content: "namespace DataMachine\\Core\\Agents;\nuse DataMachine\\Core\\Database\\Agents\\Agents;\nclass AgentBundler { public function __construct() { new Agents(); } }".to_string(),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "core/agents/AgentIdentityResolver.php".to_string(),
+                language: Language::Php,
+                methods: vec!["__construct".to_string()],
+                type_name: Some("AgentIdentityResolver".to_string()),
+                namespace: Some("DataMachine\\Core\\Agents".to_string()),
+                imports: vec!["DataMachine\\Core\\Database\\Agents\\Agents".to_string()],
+                content: "namespace DataMachine\\Core\\Agents;\nuse DataMachine\\Core\\Database\\Agents\\Agents;\nclass AgentIdentityResolver { public function __construct() { new Agents(); } }".to_string(),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "core/agents/AgentIdentity.php".to_string(),
+                language: Language::Php,
+                methods: vec!["__construct".to_string()],
+                type_name: Some("AgentIdentity".to_string()),
+                namespace: Some("DataMachine\\Core\\Agents".to_string()),
+                imports: vec![],
+                content: "namespace DataMachine\\Core\\Agents;\nclass AgentIdentity { public function __construct() {} }".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        let convention = discover_conventions("Agents", "core/agents/*", &fingerprints).unwrap();
+
+        assert!(convention
+            .expected_imports
+            .contains(&"DataMachine\\Core\\Database\\Agents\\Agents".to_string()));
+
+        let identity_outlier = convention
+            .outliers
+            .iter()
+            .find(|o| o.file == "core/agents/AgentIdentity.php");
+
+        if let Some(outlier) = identity_outlier {
+            assert!(
+                !outlier.deviations.iter().any(|d| {
+                    d.kind == AuditFinding::MissingImport && d.description.contains("Agents")
+                }),
+                "Namespace-only terminal segment should not be flagged as missing import. Got deviations: {:?}",
+                outlier.deviations
+            );
+        }
+    }
+
+    #[test]
     fn missing_import_detected_in_convention() {
         let fingerprints = vec![
             FileFingerprint {
