@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 
 use crate::error::{Error, Result};
@@ -110,7 +112,9 @@ pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>>
     .map_err(|e| Error::git_command_failed(e.to_string()))?;
 
     if output.status.success() {
-        return parse_diff_output(&output.stdout);
+        let mut files: BTreeSet<String> = parse_diff_output(&output.stdout)?.into_iter().collect();
+        files.extend(get_working_tree_files_for_changed_since(path)?);
+        return Ok(files.into_iter().collect());
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -119,6 +123,38 @@ pub fn get_files_changed_since(path: &str, git_ref: &str) -> Result<Vec<String>>
         git_ref,
         stderr.trim()
     )))
+}
+
+/// Get staged, unstaged, and untracked files that should participate in a
+/// changed-since scope before they are committed.
+///
+/// Uses the same add/copy/modify/rename filter as the committed diff path, so
+/// deleted files are not returned to lint/test scopes that need existing files.
+fn get_working_tree_files_for_changed_since(path: &str) -> Result<Vec<String>> {
+    // Best-effort index refresh keeps stat-only touches from surfacing as dirty.
+    let _ = execute_git(path, &["update-index", "--refresh"]);
+
+    let mut files: BTreeSet<String> = BTreeSet::new();
+
+    for args in [
+        vec!["diff", "--name-only", "--diff-filter=ACMR"],
+        vec!["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+        vec!["ls-files", "--others", "--exclude-standard"],
+    ] {
+        let output =
+            execute_git(path, &args).map_err(|e| Error::git_command_failed(e.to_string()))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::git_command_failed(format!(
+                "git {} failed: {}",
+                args.join(" "),
+                stderr.trim()
+            )));
+        }
+        files.extend(parse_diff_output(&output.stdout)?);
+    }
+
+    Ok(files.into_iter().collect())
 }
 
 /// Check whether the repo is a shallow clone.
@@ -331,6 +367,72 @@ mod tests {
             !result.has_changes,
             "stat-only touch must not surface as a real change after index refresh, got: {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn get_files_changed_since_includes_dirty_and_untracked_files() {
+        use std::fs;
+        use std::process::Command;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().to_str().unwrap();
+
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .output();
+        if init.is_err() || !init.unwrap().status.success() {
+            return;
+        }
+        let _ = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(path)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "test"])
+            .current_dir(path)
+            .output();
+
+        fs::write(dir.path().join("tracked.txt"), "initial\n").expect("write tracked");
+        fs::write(dir.path().join("staged.txt"), "initial\n").expect("write staged");
+        fs::write(dir.path().join("deleted.txt"), "initial\n").expect("write deleted");
+        let _ = Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output();
+        let _ = Command::new("git")
+            .args(["commit", "-q", "-m", "init"])
+            .current_dir(path)
+            .output();
+
+        fs::write(dir.path().join("tracked.txt"), "dirty\n").expect("modify tracked");
+        fs::write(dir.path().join("staged.txt"), "staged dirty\n").expect("modify staged");
+        fs::write(dir.path().join("untracked.txt"), "new\n").expect("write untracked");
+        fs::remove_file(dir.path().join("deleted.txt")).expect("delete tracked");
+        let _ = Command::new("git")
+            .args(["add", "staged.txt"])
+            .current_dir(path)
+            .output();
+
+        let files = get_files_changed_since(path, "HEAD").expect("changed files");
+
+        assert!(
+            files.contains(&"tracked.txt".to_string()),
+            "unstaged tracked file included: {files:?}"
+        );
+        assert!(
+            files.contains(&"staged.txt".to_string()),
+            "staged tracked file included: {files:?}"
+        );
+        assert!(
+            files.contains(&"untracked.txt".to_string()),
+            "untracked file included: {files:?}"
+        );
+        assert!(
+            !files.contains(&"deleted.txt".to_string()),
+            "deleted file excluded: {files:?}"
         );
     }
 
