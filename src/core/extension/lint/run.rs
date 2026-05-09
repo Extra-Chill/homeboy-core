@@ -122,29 +122,22 @@ pub fn run_main_lint_workflow(
     };
 
     let lint_findings_file = run_dir.step_file(run_dir::files::LINT_FINDINGS);
-    let lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
-
-    // Status computation — check findings first, exit code as fallback.
-    // The extension runner uses passthrough mode (stdout goes to terminal),
-    // so `output.success` only reflects the shell exit code. PHPCS/PHPStan
-    // wrappers may exit 0 even when findings exist, so the sidecar findings
-    // file is the canonical source of truth (mirrors test command pattern).
-    let mut status = if !lint_findings.is_empty() {
-        "failed"
-    } else if output.success {
-        "passed"
-    } else {
-        "failed"
-    }
-    .to_string();
+    let raw_lint_findings = lint_baseline::parse_findings_file(&lint_findings_file)?;
+    let lint_findings = filter_lint_findings(raw_lint_findings, &args);
 
     let mut hints = Vec::new();
 
-    let lint_clean = lint_findings.is_empty() && output.success;
+    let runner_exit_code =
+        normalize_empty_finding_exit_code(output.exit_code, output.success, &lint_findings);
+    let lint_exit_code = normalize_finding_exit_code(runner_exit_code, &lint_findings);
 
     // Baseline lifecycle
     let (baseline_comparison, baseline_exit_override) =
         process_baseline(source_path, &args, &lint_findings)?;
+
+    let exit_code = effective_lint_exit_code(lint_exit_code, baseline_exit_override);
+    let status = if exit_code == 0 { "passed" } else { "failed" }.to_string();
+    let lint_clean = lint_findings.is_empty() && exit_code == 0;
 
     // Hint assembly — point to the auto-fix CTA for autofixable findings.
     //
@@ -179,11 +172,6 @@ pub fn run_main_lint_workflow(
     }
 
     let hints = if hints.is_empty() { None } else { Some(hints) };
-    let exit_code = baseline_exit_override.unwrap_or(output.exit_code);
-    if exit_code != output.exit_code {
-        status = "failed".to_string();
-    }
-
     Ok(LintRunWorkflowResult {
         status,
         component: args.component_label,
@@ -198,6 +186,83 @@ pub fn run_main_lint_workflow(
         },
         lint_findings: Some(lint_findings),
     })
+}
+
+fn filter_lint_findings(
+    findings: Vec<LintFinding>,
+    args: &LintRunWorkflowArgs,
+) -> Vec<LintFinding> {
+    let included_sniffs = parse_csv_filter(args.sniffs.as_deref());
+    let excluded_sniffs = parse_csv_filter(args.exclude_sniffs.as_deref());
+    let category = args
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    findings
+        .into_iter()
+        .filter(|finding| {
+            category.is_none_or(|expected| finding.category == expected)
+                && (included_sniffs.is_empty()
+                    || included_sniffs
+                        .iter()
+                        .any(|expected| finding_matches_sniff(finding, expected)))
+                && !excluded_sniffs
+                    .iter()
+                    .any(|excluded| finding_matches_sniff(finding, excluded))
+        })
+        .collect()
+}
+
+fn parse_csv_filter(value: Option<&str>) -> Vec<String> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn finding_matches_sniff(finding: &LintFinding, sniff: &str) -> bool {
+    finding.category == sniff
+        || finding_rule(finding).is_some_and(|rule| rule == sniff)
+        || finding.id == sniff
+        || finding.id.split("::").any(|part| part == sniff)
+        || finding.id.ends_with(sniff)
+}
+
+fn finding_rule(finding: &LintFinding) -> Option<&str> {
+    finding.extra.get("rule").and_then(|value| value.as_str())
+}
+
+fn normalize_empty_finding_exit_code(
+    exit_code: i32,
+    success: bool,
+    lint_findings: &[LintFinding],
+) -> i32 {
+    if lint_findings.is_empty() && !success && exit_code == 1 {
+        0
+    } else {
+        exit_code
+    }
+}
+
+fn normalize_finding_exit_code(exit_code: i32, lint_findings: &[LintFinding]) -> i32 {
+    if !lint_findings.is_empty() && exit_code == 0 {
+        1
+    } else {
+        exit_code
+    }
+}
+
+fn effective_lint_exit_code(exit_code: i32, baseline_exit_override: Option<i32>) -> i32 {
+    match baseline_exit_override {
+        Some(0) if exit_code >= 2 => exit_code,
+        Some(override_code) => override_code,
+        None => exit_code,
+    }
 }
 
 fn build_lint_summary(findings: &[LintFinding], exit_code: i32) -> LintSummaryOutput {
@@ -520,8 +585,10 @@ fn process_baseline(
                     "[lint] Drift reduced: {} finding(s) resolved since baseline",
                     comparison.resolved_fingerprints.len()
                 );
+                baseline_exit_override = Some(0);
             } else {
                 eprintln!("[lint] No change from baseline");
+                baseline_exit_override = Some(0);
             }
 
             baseline_comparison = Some(comparison);
@@ -690,6 +757,87 @@ mod tests {
     }
 
     #[test]
+    fn filter_lint_findings_keeps_requested_category_only() {
+        let mut args = lint_args();
+        args.category = Some("security".to_string());
+        let findings = vec![
+            lint_finding(
+                "a",
+                "security",
+                "WordPress.Security.ValidatedSanitizedInput",
+            ),
+            lint_finding("b", "database", "WordPress.DB.PreparedSQL"),
+            lint_finding("c", "eslint", "react-hooks/rules-of-hooks"),
+        ];
+
+        let filtered = filter_lint_findings(findings, &args);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, "a");
+    }
+
+    #[test]
+    fn filter_lint_findings_honors_include_and_exclude_sniffs() {
+        let mut args = lint_args();
+        args.sniffs = Some(
+            "WordPress.Security.ValidatedSanitizedInput,Generic.WhiteSpace.ScopeIndent".to_string(),
+        );
+        args.exclude_sniffs = Some("Generic.WhiteSpace.ScopeIndent".to_string());
+        let findings = vec![
+            lint_finding(
+                "inc/a.php::WordPress.Security.ValidatedSanitizedInput",
+                "security",
+                "WordPress.Security.ValidatedSanitizedInput",
+            ),
+            lint_finding(
+                "inc/b.php::Generic.WhiteSpace.ScopeIndent",
+                "whitespace",
+                "Generic.WhiteSpace.ScopeIndent",
+            ),
+            lint_finding(
+                "inc/c.php::WordPress.DB.PreparedSQL",
+                "database",
+                "WordPress.DB.PreparedSQL",
+            ),
+        ];
+
+        let filtered = filter_lint_findings(findings, &args);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(
+            filtered[0].id,
+            "inc/a.php::WordPress.Security.ValidatedSanitizedInput"
+        );
+    }
+
+    #[test]
+    fn empty_filtered_findings_turn_lint_finding_exit_into_pass() {
+        let exit_code = normalize_empty_finding_exit_code(1, false, &[]);
+
+        assert_eq!(exit_code, 0);
+    }
+
+    #[test]
+    fn empty_filtered_findings_do_not_hide_infrastructure_errors() {
+        let exit_code = normalize_empty_finding_exit_code(2, false, &[]);
+
+        assert_eq!(exit_code, 2);
+    }
+
+    #[test]
+    fn findings_force_failure_when_runner_exits_cleanly() {
+        let exit_code = normalize_finding_exit_code(0, &[lint_finding("a", "security", "rule")]);
+
+        assert_eq!(exit_code, 1);
+    }
+
+    #[test]
+    fn baseline_clean_override_honors_known_findings_but_not_infrastructure_errors() {
+        assert_eq!(effective_lint_exit_code(1, Some(0)), 0);
+        assert_eq!(effective_lint_exit_code(2, Some(0)), 2);
+    }
+
+    #[test]
     fn manifest_changed_php_files_route_to_php_steps_only() {
         let component = component("/repo");
         let runs = build_changed_lint_runs_with_routes(
@@ -814,5 +962,17 @@ mod tests {
                 step: None,
             }]
         );
+    }
+
+    fn lint_finding(id: &str, category: &str, rule: &str) -> LintFinding {
+        LintFinding {
+            id: id.to_string(),
+            message: "message".to_string(),
+            category: category.to_string(),
+            extra: [("rule".to_string(), serde_json::json!(rule))]
+                .into_iter()
+                .collect(),
+            ..LintFinding::default()
+        }
     }
 }
