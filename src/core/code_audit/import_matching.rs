@@ -137,7 +137,9 @@ pub(crate) fn has_import_with_context(
 
     // 5. Usage check: if the terminal name isn't referenced outside imports,
     //    the import would be unused — not a real convention violation
-    if !terminal.is_empty() && !content_references_name(file_content, terminal) {
+    if !terminal.is_empty()
+        && !content_references_name_with_context(file_content, terminal, current_namespace)
+    {
         return true;
     }
 
@@ -326,7 +328,16 @@ pub(crate) fn content_defines_name(content: &str, name: &str) -> bool {
 /// Skips references that only appear inside string literals within attribute macros
 /// (e.g., `#[serde(default = "default_true")]`), since those are resolved by the
 /// macro at compile time, not by Rust's import system.
-pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
+#[cfg(test)]
+fn content_references_name(content: &str, name: &str) -> bool {
+    content_references_name_with_context(content, name, None)
+}
+
+fn content_references_name_with_context(
+    content: &str,
+    name: &str,
+    current_namespace: Option<&str>,
+) -> bool {
     let mut found_real_reference = false;
 
     for line in content.lines() {
@@ -338,12 +349,13 @@ pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
         if is_non_code_reference_line(trimmed) {
             continue;
         }
-        if !contains_word(trimmed, name) {
+        let searchable = remove_current_namespace_mentions(trimmed, current_namespace);
+        if !contains_word(searchable.as_ref(), name) {
             continue;
         }
         // If the name only appears inside a string literal on an attribute line,
         // it's a macro-resolved reference (serde, clap, etc.), not a real import.
-        if is_only_in_attribute_string(trimmed, name) {
+        if is_only_in_attribute_string(searchable.as_ref(), name) {
             continue;
         }
         found_real_reference = true;
@@ -353,13 +365,25 @@ pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
 }
 
 fn is_non_code_reference_line(line: &str) -> bool {
-    line.starts_with("namespace ")
-        || line.starts_with("//")
+    line.starts_with("//")
         || line.starts_with("/*")
         || line == "*"
         || line.starts_with("* ")
         || line.starts_with("*\t")
         || line.starts_with("*/")
+}
+
+fn remove_current_namespace_mentions<'a>(
+    line: &'a str,
+    current_namespace: Option<&str>,
+) -> std::borrow::Cow<'a, str> {
+    let Some(namespace) = current_namespace else {
+        return std::borrow::Cow::Borrowed(line);
+    };
+    if namespace.is_empty() || !line.contains(namespace) {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    std::borrow::Cow::Owned(line.replace(namespace, ""))
 }
 
 /// Check if `name` only appears inside string literals on an attribute line.
@@ -711,17 +735,18 @@ fn production(values: BTreeMap<String, f64>) {}
     }
 
     #[test]
-    fn namespace_and_docblock_mentions_are_not_code_references() {
-        let content = r#"<?php
-/**
- * @package DataMachine\Core\Agents
- */
+    fn current_namespace_path_mentions_are_not_symbol_references() {
+        let content = r#"
+/// Module docs mention app::core::Agents.
+module app::core::Agents;
 
-namespace DataMachine\Core\Agents;
-
-class AgentIdentity {}
+type AgentIdentity {}
 "#;
-        assert!(!content_references_name(content, "Agents"));
+        assert!(!content_references_name_with_context(
+            content,
+            "Agents",
+            Some("app::core::Agents")
+        ));
     }
 
     #[test]
