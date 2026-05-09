@@ -331,8 +331,17 @@ pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
 
     for line in content.lines() {
         let trimmed = line.trim();
-        // Skip import/use lines — we're looking for usage, not declarations
-        if trimmed.starts_with("use ") || trimmed.starts_with("import ") {
+        // Skip declaration/import/comment lines — we're looking for symbol
+        // usage, not namespace segments, imports, or documentation metadata
+        // that merely contain the terminal name.
+        if trimmed.starts_with("use ")
+            || trimmed.starts_with("import ")
+            || trimmed.starts_with("namespace ")
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("#")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("*")
+        {
             continue;
         }
         if !contains_word(trimmed, name) {
@@ -651,6 +660,22 @@ fn production(values: BTreeMap<String, f64>) {}
         assert!(!content_defines_name(
             "use crate::defaults::default_true;",
             "default_true"
+        ));
+    }
+
+    #[test]
+    fn content_references_name_skips_php_namespace_declarations() {
+        assert!(!content_references_name(
+            "namespace DataMachine\\Core\\Agents;\n\nclass AgentIdentity { public function __construct() {} }",
+            "Agents"
+        ));
+    }
+
+    #[test]
+    fn content_references_name_skips_comment_only_references() {
+        assert!(!content_references_name(
+            "<?php\n/**\n * @package DataMachine\\Core\\Agents\n */\nnamespace DataMachine\\Core;\nclass AgentIdentity {}",
+            "Agents"
         ));
     }
 
