@@ -335,6 +335,9 @@ pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
         if trimmed.starts_with("use ") || trimmed.starts_with("import ") {
             continue;
         }
+        if is_non_code_reference_line(trimmed) {
+            continue;
+        }
         if !contains_word(trimmed, name) {
             continue;
         }
@@ -347,6 +350,16 @@ pub(crate) fn content_references_name(content: &str, name: &str) -> bool {
         break;
     }
     found_real_reference
+}
+
+fn is_non_code_reference_line(line: &str) -> bool {
+    line.starts_with("namespace ")
+        || line.starts_with("//")
+        || line.starts_with("/*")
+        || line == "*"
+        || line.starts_with("* ")
+        || line.starts_with("*\t")
+        || line.starts_with("*/")
 }
 
 /// Check if `name` only appears inside string literals on an attribute line.
@@ -687,6 +700,28 @@ fn production(values: BTreeMap<String, f64>) {}
     fn non_attribute_reference_is_flagged() {
         let content = "let x = default_true();\n";
         assert!(content_references_name(content, "default_true"));
+    }
+
+    #[test]
+    fn rust_attribute_name_outside_string_is_still_a_reference() {
+        assert!(content_references_name(
+            "#[derive(default_true)]",
+            "default_true"
+        ));
+    }
+
+    #[test]
+    fn namespace_and_docblock_mentions_are_not_code_references() {
+        let content = r#"<?php
+/**
+ * @package DataMachine\Core\Agents
+ */
+
+namespace DataMachine\Core\Agents;
+
+class AgentIdentity {}
+"#;
+        assert!(!content_references_name(content, "Agents"));
     }
 
     #[test]
