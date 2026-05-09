@@ -9,6 +9,11 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+#[path = "support.rs"]
+mod support;
+
+use support::minimal_stack;
+
 fn write_rig(package: &Path, id: &str, body: &str) -> std::path::PathBuf {
     let rig_dir = package.join("rigs").join(id);
     fs::create_dir_all(&rig_dir).expect("rig dir");
@@ -39,21 +44,6 @@ fn write_stack(package: &Path, id: &str, component: &str) -> std::path::PathBuf 
     let stack_path = stacks_dir.join(format!("{}.json", id));
     fs::write(&stack_path, minimal_stack(id, component)).expect("stack json");
     stack_path
-}
-
-fn minimal_stack(id: &str, component: &str) -> String {
-    format!(
-        r#"{{
-            "id": "{}",
-            "description": "{} stack",
-            "component": "{}",
-            "component_path": "${{env.DEV_ROOT}}/{}",
-            "base": {{ "remote": "origin", "branch": "main" }},
-            "target": {{ "remote": "origin", "branch": "dev/combined-fixes" }},
-            "prs": []
-        }}"#,
-        id, id, component, component
-    )
 }
 
 fn write_single_rig(dir: &Path, id: &str, body: &str) -> std::path::PathBuf {

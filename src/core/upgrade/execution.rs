@@ -83,11 +83,11 @@ fn upgrade_failure_error(method: InstallMethod, error_detail: &str) -> Error {
         error = error
             .with_hint("No release asset was found for this Homeboy version.")
             .with_hint("Try: homeboy upgrade --method source --source-path <PATH>");
-    } else if method == InstallMethod::Cargo && error_detail.contains("cargo: not found") {
+    } else if method == InstallMethod::Cargo && error_detail.contains("not found") {
         error = error
-            .with_hint("Cargo is not installed or is not on PATH.")
+            .with_hint("Required executable is not installed or is not on PATH.")
             .with_hint(
-                "Install Rust/Cargo, or use: homeboy upgrade --method source --source-path <PATH>",
+                "Install the required toolchain, or use: homeboy upgrade --method source --source-path <PATH>",
             );
     }
 
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn source_workspace_accepts_explicit_homeboy_checkout() {
+    fn test_resolve_source_workspace() {
         let dir = checkout_with_package_name("homeboy");
 
         let resolved = resolve_source_workspace(Some(dir.path())).expect("source checkout");
@@ -325,13 +325,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_cargo_upgrade_error_suggests_source_fallback() {
+    fn missing_tool_upgrade_error_suggests_source_fallback() {
         let err = upgrade_failure_error(InstallMethod::Cargo, "sh: 1: cargo: not found");
 
         assert!(err
             .hints
             .iter()
-            .any(|hint| hint.message.contains("Cargo is not installed")));
+            .any(|hint| hint.message.contains("Required executable")));
         assert!(err
             .hints
             .iter()
