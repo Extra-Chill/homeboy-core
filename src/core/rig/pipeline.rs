@@ -443,7 +443,64 @@ fn run_git_step(rig: &RigSpec, component_id: &str, op: GitOp, extra_args: &[Stri
             ),
         ));
     }
+    fail_if_git_index_unmerged(rig, &path, &full_args)?;
     Ok(())
+}
+
+fn fail_if_git_index_unmerged(rig: &RigSpec, path: &str, completed_args: &[String]) -> Result<()> {
+    let output =
+        crate::git::execute_git_for_release(path, &["diff", "--name-only", "--diff-filter=U"])
+            .map_err(|e| {
+                Error::rig_pipeline_failed(
+                    &rig.id,
+                    "git",
+                    format!(
+                        "spawn `git diff --name-only --diff-filter=U` in {}: {}",
+                        path, e
+                    ),
+                )
+            })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let code = output.status.code().unwrap_or(-1);
+        return Err(Error::rig_pipeline_failed(
+            &rig.id,
+            "git",
+            format!(
+                "`git diff --name-only --diff-filter=U` in {} exited {}{}",
+                path,
+                code,
+                if stderr.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", stderr.trim())
+                }
+            ),
+        ));
+    }
+
+    let unresolved = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    if unresolved.is_empty() {
+        return Ok(());
+    }
+
+    Err(Error::rig_pipeline_failed(
+        &rig.id,
+        "git",
+        format!(
+            "`git {}` in {} completed but left unresolved conflicts: {}",
+            completed_args.join(" "),
+            path,
+            unresolved.join(", ")
+        ),
+    ))
 }
 
 fn run_stack_step(rig: &RigSpec, component_id: &str, op: StackOp, dry_run: bool) -> Result<()> {

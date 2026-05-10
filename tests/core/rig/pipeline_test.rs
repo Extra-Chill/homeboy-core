@@ -358,6 +358,121 @@ mod dag {
     }
 }
 
+// ---- Git steps --------------------------------------------------------------
+
+mod git_steps {
+    use std::collections::HashMap;
+    use std::fs;
+    use std::process::Command;
+
+    use crate::rig::pipeline::run_pipeline;
+    use crate::rig::spec::{ComponentSpec, GitOp, PipelineStep, RigSpec};
+
+    fn run_git(repo: &std::path::Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .expect("spawn git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn rig_with_git_step(component_path: String, op: GitOp) -> RigSpec {
+        let mut components = HashMap::new();
+        components.insert(
+            "repo".to_string(),
+            ComponentSpec {
+                path: component_path,
+                remote_url: None,
+                triage_remote_url: None,
+                stack: None,
+                branch: None,
+                extensions: None,
+            },
+        );
+
+        let mut pipeline = HashMap::new();
+        pipeline.insert(
+            "up".to_string(),
+            vec![PipelineStep::Git {
+                step_id: Some("git-status".to_string()),
+                depends_on: Vec::new(),
+                component: "repo".to_string(),
+                op,
+                args: Vec::new(),
+                label: Some("git status".to_string()),
+            }],
+        );
+
+        RigSpec {
+            id: "git-step-test".to_string(),
+            description: String::new(),
+            components,
+            services: Default::default(),
+            symlinks: Vec::new(),
+            shared_paths: Vec::new(),
+            resources: Default::default(),
+            pipeline,
+            bench: None,
+            app_launcher: None,
+            bench_workloads: Default::default(),
+            trace_workloads: Default::default(),
+            trace_variants: Default::default(),
+            trace_experiments: Default::default(),
+            trace_guardrails: Default::default(),
+            bench_profiles: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_git_step_fails_when_command_leaves_unmerged_index() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let repo = tmp.path();
+        run_git(repo, &["init"]);
+
+        fs::write(repo.join("conflicted.txt"), "base\n").expect("base file");
+        let base = run_git(repo, &["hash-object", "-w", "conflicted.txt"]);
+        fs::write(repo.join("conflicted.txt"), "ours\n").expect("ours file");
+        let ours = run_git(repo, &["hash-object", "-w", "conflicted.txt"]);
+        fs::write(repo.join("conflicted.txt"), "theirs\n").expect("theirs file");
+        let theirs = run_git(repo, &["hash-object", "-w", "conflicted.txt"]);
+
+        let index_info = format!(
+            "100644 {base} 1\tconflicted.txt\n100644 {ours} 2\tconflicted.txt\n100644 {theirs} 3\tconflicted.txt\n"
+        );
+        let mut update_index = Command::new("git")
+            .args(["update-index", "--index-info"])
+            .current_dir(repo)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn update-index");
+        use std::io::Write;
+        update_index
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(index_info.as_bytes())
+            .expect("write index info");
+        let status = update_index.wait().expect("wait update-index");
+        assert!(status.success(), "update-index failed");
+
+        let rig = rig_with_git_step(repo.to_string_lossy().into_owned(), GitOp::Status);
+        let outcome = run_pipeline(&rig, "up", true).expect("pipeline outcome");
+
+        assert!(!outcome.is_success());
+        assert_eq!(outcome.steps[0].status, "fail");
+        let error = outcome.steps[0].error.as_deref().unwrap_or_default();
+        assert!(error.contains("left unresolved conflicts"), "{error}");
+        assert!(error.contains("conflicted.txt"), "{error}");
+    }
+}
+
 // ---- Extension-backed lifecycle steps ---------------------------------------
 
 mod extension_lifecycle {
