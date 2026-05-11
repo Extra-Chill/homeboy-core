@@ -591,10 +591,10 @@ jobs:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
           ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
-          RELEASE_COMMIT: "${{ github.sha }}"
         run: |
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
           TAG="${{ needs.prepare.outputs.release-tag }}"
+          RELEASE_COMMIT="$(git rev-list -n 1 "$TAG")"
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists. Uploading assets..."
             gh release upload "$TAG" artifacts/* --clobber
