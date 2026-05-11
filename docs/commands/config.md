@@ -36,6 +36,9 @@ homeboy config set /defaults/version_candidates/4 '{"file": "VERSION", "pattern"
 
 # Change local file permissions
 homeboy config set /defaults/permissions/local/file_mode 'g+r'
+
+# Store copied run artifacts in a repo- or agent-readable directory
+homeboy config set /artifact_root '"~/Developer/.homeboy-artifacts"'
 ```
 
 ### `homeboy config remove`
@@ -73,6 +76,7 @@ homeboy config path
 
 ```json
 {
+  "artifact_root": null,
   "defaults": {
     "install_methods": {
       "homebrew": {
@@ -115,6 +119,17 @@ homeboy config path
 ```
 
 ## Configurable Behaviors
+
+### Artifact Root
+
+Controls where Homeboy copies persisted run artifacts from commands such as `bench`, `trace`, and `observe`.
+
+- `artifact_root`: Optional directory path for copied artifacts. Defaults to an `artifacts` subdirectory under the machine-local data directory.
+- CLI override: `homeboy --artifact-root <dir> ...`
+- Environment override: `HOMEBOY_ARTIFACT_ROOT=<dir>`
+- Config override: `homeboy config set /artifact_root '"~/Developer/.homeboy-artifacts"'`
+
+Precedence is CLI flag, then environment variable, then global config, then the built-in default.
 
 ### Install Methods
 

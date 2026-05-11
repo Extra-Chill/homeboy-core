@@ -1,6 +1,23 @@
 use crate::error::{Error, Result};
 use std::env;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+fn artifact_root_override() -> &'static Mutex<Option<PathBuf>> {
+    static OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+    OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+/// Set a process-local artifact root override.
+///
+/// This is intentionally process-scoped so CLI flags can outrank environment
+/// and config without mutating global config or environment variables.
+pub fn set_artifact_root_override(path: Option<PathBuf>) {
+    let mut guard = artifact_root_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = path;
+}
 
 /// Base homeboy config directory (universal ~/.config/homeboy/ on all platforms)
 pub fn homeboy() -> Result<PathBuf> {
@@ -70,6 +87,42 @@ pub fn homeboy_data() -> Result<PathBuf> {
 /// Local SQLite observation-store path.
 pub fn observation_db() -> Result<PathBuf> {
     Ok(homeboy_data()?.join("homeboy.sqlite"))
+}
+
+/// Root directory for copied run artifacts.
+///
+/// Precedence:
+/// 1. process-local CLI override (`homeboy --artifact-root <path>`)
+/// 2. `HOMEBOY_ARTIFACT_ROOT`
+/// 3. global config `/artifact_root`
+/// 4. historical default: `<homeboy_data>/artifacts`
+pub fn artifact_root() -> Result<PathBuf> {
+    if let Some(path) = artifact_root_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    {
+        return Ok(expand_path(path));
+    }
+
+    if let Ok(path) = env::var("HOMEBOY_ARTIFACT_ROOT") {
+        if !path.trim().is_empty() {
+            return Ok(expand_path(PathBuf::from(path)));
+        }
+    }
+
+    if let Some(path) = crate::defaults::load_config().artifact_root {
+        if !path.trim().is_empty() {
+            return Ok(expand_path(PathBuf::from(path)));
+        }
+    }
+
+    Ok(homeboy_data()?.join("artifacts"))
+}
+
+fn expand_path(path: PathBuf) -> PathBuf {
+    let raw = path.to_string_lossy();
+    PathBuf::from(shellexpand::tilde(&raw).into_owned())
 }
 
 /// Projects directory
@@ -285,6 +338,7 @@ pub(crate) fn join_remote_child(base_path: Option<&str>, dir: &str, child: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::with_isolated_home;
 
     #[test]
     fn join_remote_path_allows_absolute_paths_without_base() {
@@ -292,6 +346,58 @@ mod tests {
             join_remote_path(None, "/var/log/syslog").unwrap(),
             "/var/log/syslog"
         );
+    }
+
+    #[test]
+    fn artifact_root_defaults_under_homeboy_data() {
+        with_isolated_home(|home| {
+            assert_eq!(
+                artifact_root().expect("artifact root"),
+                home.path().join(".local/share/homeboy/artifacts")
+            );
+        });
+    }
+
+    #[test]
+    fn artifact_root_uses_configured_value() {
+        with_isolated_home(|home| {
+            let configured = home.path().join("custom-artifacts");
+            crate::defaults::save_config(&crate::defaults::HomeboyConfig {
+                artifact_root: Some(configured.to_string_lossy().to_string()),
+                ..crate::defaults::HomeboyConfig::default()
+            })
+            .expect("save config");
+
+            assert_eq!(artifact_root().expect("artifact root"), configured);
+        });
+    }
+
+    #[test]
+    fn artifact_root_prefers_env_over_config() {
+        with_isolated_home(|home| {
+            let configured = home.path().join("config-artifacts");
+            let env_root = home.path().join("env-artifacts");
+            crate::defaults::save_config(&crate::defaults::HomeboyConfig {
+                artifact_root: Some(configured.to_string_lossy().to_string()),
+                ..crate::defaults::HomeboyConfig::default()
+            })
+            .expect("save config");
+            std::env::set_var("HOMEBOY_ARTIFACT_ROOT", &env_root);
+
+            assert_eq!(artifact_root().expect("artifact root"), env_root);
+        });
+    }
+
+    #[test]
+    fn test_set_artifact_root_override() {
+        with_isolated_home(|home| {
+            let env_root = home.path().join("env-artifacts");
+            let override_root = home.path().join("override-artifacts");
+            std::env::set_var("HOMEBOY_ARTIFACT_ROOT", &env_root);
+            set_artifact_root_override(Some(override_root.clone()));
+
+            assert_eq!(artifact_root().expect("artifact root"), override_root);
+        });
     }
 
     #[test]

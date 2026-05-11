@@ -1188,10 +1188,7 @@ fn persisted_artifact_path(run_id: &str, artifact_id: &str, source: &Path) -> Re
         .filter(|name| !name.is_empty())
         .map(|name| format!("{artifact_id}-{name}"))
         .unwrap_or_else(|| artifact_id.to_string());
-    Ok(paths::homeboy_data()?
-        .join("artifacts")
-        .join(run_id)
-        .join(file_name))
+    Ok(paths::artifact_root()?.join(run_id).join(file_name))
 }
 
 fn copy_artifact_file(source: &Path, target: &Path) -> Result<()> {
@@ -1467,6 +1464,33 @@ mod api_coverage_tests {
                 .record_artifact(&run.id, "json", &path)
                 .expect("artifact");
             assert_eq!(artifact.size_bytes, Some(2));
+        });
+    }
+
+    #[test]
+    fn test_record_artifact_uses_custom_artifact_root() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let artifact_root = home.path().join("agent-readable-artifacts");
+            crate::set_artifact_root_override(Some(artifact_root.clone()));
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store.start_run(new_run("bench")).expect("start");
+            let path = home.path().join("artifact.json");
+            fs::write(&path, b"{}").expect("write artifact");
+
+            let artifact = store
+                .record_artifact(&run.id, "json", &path)
+                .expect("artifact");
+
+            assert!(
+                artifact
+                    .path
+                    .starts_with(&artifact_root.to_string_lossy().to_string()),
+                "artifact path {} should be under {}",
+                artifact.path,
+                artifact_root.display()
+            );
+            assert!(std::path::Path::new(&artifact.path).is_file());
         });
     }
 

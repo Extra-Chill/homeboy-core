@@ -13,6 +13,14 @@ pub struct HomeboyConfig {
     #[serde(default)]
     pub triage: TriageConfig,
 
+    /// Directory where persisted run artifacts are copied.
+    ///
+    /// Defaults to the machine-local Homeboy data directory under
+    /// `artifacts/`. Override with `homeboy --artifact-root <path>`,
+    /// `HOMEBOY_ARTIFACT_ROOT`, or `homeboy config set /artifact_root`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_root: Option<String>,
+
     /// Enable automatic update check on startup (default: true).
     /// Disable with `homeboy config set /update_check false`
     /// or set HOMEBOY_NO_UPDATE_CHECK=1.
@@ -25,6 +33,7 @@ impl Default for HomeboyConfig {
         Self {
             defaults: Defaults::default(),
             triage: TriageConfig::default(),
+            artifact_root: None,
             update_check: true,
         }
     }

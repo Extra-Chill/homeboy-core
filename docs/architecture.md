@@ -24,6 +24,7 @@
 ### `HomeboyConfig`
 
 - `defaults`
+- `artifact_root` — Optional directory where persisted run artifacts are copied. Override per command with `homeboy --artifact-root <dir>` or per process with `HOMEBOY_ARTIFACT_ROOT`.
 - `update_check` — Enable automatic update check on startup (default: true). Disable with `homeboy config set /update_check false` or set HOMEBOY_NO_UPDATE_CHECK=1.
 
 ### `InstallMethodsConfig`
