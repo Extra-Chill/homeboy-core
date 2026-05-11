@@ -28,6 +28,10 @@ on:
         description: 'Preview the release without making changes'
         type: boolean
         default: false
+      release_tag:
+        description: 'Existing tag to publish/recover without preparing a new release'
+        type: string
+        default: ''
 
 # Only one release pipeline at a time. If a push arrives while a release
 # is already running, it queues (never cancels). The queued run starts
@@ -45,32 +49,62 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should-release: ${{ steps.check.outputs.should-release }}
-      bump-type: ${{ steps.release-check.outputs.release-bump-type }}
+      bump-type: ${{ steps.check.outputs.release-bump-type }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Dry-run release check
         id: release-check
+        if: inputs.release_tag == ''
         uses: Extra-Chill/homeboy-action@v2
         with:
           commands: release
           expected-commands: audit,lint,test
           release-dry-run: 'true'
 
+      - name: Validate existing release tag
+        id: recovery
+        if: inputs.release_tag != ''
+        run: |
+          TAG="${{ inputs.release_tag }}"
+
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Release tag ${TAG} does not exist"
+            exit 1
+          fi
+
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag ${TAG} must look like v1.2.3"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "release-tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "release-bump-type=recovery" >> "$GITHUB_OUTPUT"
+          echo "::notice::Recovering publish pipeline for existing tag ${TAG}"
+
       - name: Decide whether to release
         id: check
         run: |
           HEAD_SHA="$(git rev-parse HEAD)"
-          RELEASE_VERSION="${{ steps.release-check.outputs.release-version }}"
-          BUMP_TYPE="${{ steps.release-check.outputs.release-bump-type }}"
+          RECOVERY_TAG="${{ steps.recovery.outputs.release-tag }}"
+          RELEASE_VERSION="${{ steps.recovery.outputs.release-version || steps.release-check.outputs.release-version }}"
+          BUMP_TYPE="${{ steps.recovery.outputs.release-bump-type || steps.release-check.outputs.release-bump-type }}"
 
-          if [ -z "${RELEASE_VERSION}" ]; then
+          if [ -n "${RECOVERY_TAG}" ]; then
+            echo "should-release=true" >> "$GITHUB_OUTPUT"
+            echo "release-bump-type=${BUMP_TYPE}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release recovery will publish ${RECOVERY_TAG}"
+          elif [ -z "${RELEASE_VERSION}" ]; then
             echo "should-release=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No releasable commits at HEAD ${HEAD_SHA:0:8}"
           else
             echo "should-release=true" >> "$GITHUB_OUTPUT"
+            echo "release-bump-type=${BUMP_TYPE}" >> "$GITHUB_OUTPUT"
             echo "::notice::Release dry-run predicts v${RELEASE_VERSION} (${BUMP_TYPE})"
           fi
 
@@ -84,6 +118,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -124,6 +160,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Download homeboy binary
@@ -159,6 +196,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Download homeboy binary
@@ -194,6 +232,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Download homeboy binary
@@ -226,11 +265,12 @@ jobs:
       - gate-audit
       - gate-lint
       - gate-test
-    if: ${{ always() && needs.check.outputs.should-release == 'true' && needs.gate-build.result == 'success' }}
+    if: ${{ always() && inputs.release_tag == '' && needs.check.outputs.should-release == 'true' && needs.gate-build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Download homeboy binary
@@ -279,9 +319,9 @@ jobs:
       - gate-audit
     runs-on: ubuntu-latest
     outputs:
-      release-version: ${{ steps.release.outputs.release-version }}
-      release-tag: ${{ steps.release.outputs.release-tag }}
-      released: ${{ steps.release.outputs.released }}
+      release-version: ${{ steps.recovery.outputs.release-version || steps.release.outputs.release-version }}
+      release-tag: ${{ steps.recovery.outputs.release-tag || steps.release.outputs.release-tag }}
+      released: ${{ steps.recovery.outputs.released || steps.release.outputs.released }}
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -293,6 +333,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
           persist-credentials: true
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
@@ -300,16 +341,30 @@ jobs:
       # Rust toolchain needed so run-release.sh can regenerate Cargo.lock
       # after bumping Cargo.toml version
       - name: Install Rust toolchain
+        if: inputs.release_tag == ''
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Extra-Chill/homeboy-action@v2
         id: release
+        if: inputs.release_tag == ''
         with:
           source: '.'
           commands: release
           expected-commands: audit,lint,test
           release-dry-run: ${{ inputs.dry-run || 'false' }}
           app-token: ${{ steps.app-token.outputs.token || '' }}
+
+      - name: Use existing release tag
+        id: recovery
+        if: inputs.release_tag != ''
+        run: |
+          TAG="${{ inputs.release_tag }}"
+          VERSION="${TAG#v}"
+
+          echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "release-tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Skipping release preparation; downstream jobs will publish existing tag ${TAG}"
 
   # ── Step 4: Build cross-platform binaries ──
   plan:
@@ -536,10 +591,10 @@ jobs:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
           ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
-          RELEASE_COMMIT: "${{ github.sha }}"
         run: |
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
           TAG="${{ needs.prepare.outputs.release-tag }}"
+          RELEASE_COMMIT="$(git rev-list -n 1 "$TAG")"
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists. Uploading assets..."
             gh release upload "$TAG" artifacts/* --clobber
