@@ -349,7 +349,6 @@ fn content_references_name_with_context(
             || trimmed.starts_with("import ")
             || trimmed.starts_with("namespace ")
             || trimmed.starts_with("//")
-            || trimmed.starts_with("#")
             || trimmed.starts_with("/*")
             || trimmed.starts_with("*")
         {
