@@ -146,10 +146,72 @@ fn renders_lint_aggregate_fallback_when_findings_are_missing() {
         build_findings_from_native_output("lint", output, &IssueRenderContext::default()).unwrap();
 
     let group = rendered.groups.get("lint_failure").unwrap();
-    assert_eq!(group.count, 1);
+    assert_eq!(group.count, 2);
     assert!(group
         .body
         .contains("Lint failed without structured findings (exit 2)."));
+}
+
+#[test]
+fn renders_lint_baseline_new_items_by_category() {
+    let output = json!({
+        "data": {
+            "status": "failed",
+            "baseline_comparison": {
+                "new_items": [
+                    {"context_label": "lint:security", "description": "escaped output missing"},
+                    {"context_label": "lint:security", "description": "nonce missing"},
+                    {"context_label": "lint:i18n", "description": "text domain missing"}
+                ]
+            }
+        }
+    });
+
+    let rendered =
+        build_findings_from_native_output("lint", output, &IssueRenderContext::default()).unwrap();
+
+    assert_eq!(rendered.groups.len(), 2);
+    let security = rendered.groups.get("security").unwrap();
+    assert_eq!(security.count, 2);
+    assert!(security.body.contains("escaped output missing"));
+}
+
+#[test]
+fn renders_lint_baseline_delta_fallback() {
+    let output = json!({
+        "data": {
+            "status": "failed",
+            "baseline_comparison": {
+                "delta": 4
+            }
+        }
+    });
+
+    let rendered =
+        build_findings_from_native_output("lint", output, &IssueRenderContext::default()).unwrap();
+
+    let group = rendered.groups.get("lint_baseline_regression").unwrap();
+    assert_eq!(group.count, 4);
+    assert_eq!(group.label, "4 new findings above baseline");
+}
+
+#[test]
+fn renders_lint_status_failed_without_passed_flag() {
+    let output = json!({
+        "data": {
+            "status": "failed",
+            "exit_code": 3
+        }
+    });
+
+    let rendered =
+        build_findings_from_native_output("lint", output, &IssueRenderContext::default()).unwrap();
+
+    let group = rendered.groups.get("lint_failure").unwrap();
+    assert_eq!(group.count, 3);
+    assert!(group
+        .body
+        .contains("Lint failed without structured findings (exit 3)."));
 }
 
 #[test]
@@ -210,6 +272,45 @@ fn renders_test_aggregate_fallback_from_counts() {
     let group = rendered.groups.get("test_failure").unwrap();
     assert_eq!(group.count, 2);
     assert!(group.body.contains("2 failed test(s) out of 12 total."));
+}
+
+#[test]
+fn renders_test_summary_failure_fallback() {
+    let output = json!({
+        "data": {
+            "status": "failed",
+            "exit_code": 1,
+            "summary": {
+                "failures": 5
+            }
+        }
+    });
+
+    let rendered =
+        build_findings_from_native_output("test", output, &IssueRenderContext::default()).unwrap();
+
+    let group = rendered.groups.get("test_failure").unwrap();
+    assert_eq!(group.count, 5);
+    assert!(group.body.contains("5 test failure(s)."));
+}
+
+#[test]
+fn renders_test_status_failed_without_passed_flag() {
+    let output = json!({
+        "data": {
+            "status": "failed",
+            "exit_code": 2
+        }
+    });
+
+    let rendered =
+        build_findings_from_native_output("test", output, &IssueRenderContext::default()).unwrap();
+
+    let group = rendered.groups.get("test_failure").unwrap();
+    assert_eq!(group.count, 1);
+    assert!(group
+        .body
+        .contains("Test phase failed without structured counts (exit 2)."));
 }
 
 #[test]
