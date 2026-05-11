@@ -2,6 +2,8 @@ use std::path::Path;
 
 use super::{NewFindingRecord, NewRunRecord, ObservationStore, RunRecord, RunStatus};
 
+const RUN_OWNER_METADATA_KEY: &str = "homeboy_run_owner";
+
 pub struct ActiveObservation {
     store: ObservationStore,
     run: RunRecord,
@@ -87,6 +89,54 @@ pub fn merge_metadata(
     initial
 }
 
+pub fn running_status_note(run: &RunRecord) -> Option<String> {
+    if run.status != RunStatus::Running.as_str() {
+        return None;
+    }
+
+    let Some(owner_pid) = run_owner_pid(run) else {
+        return Some(
+            "running status has no owner metadata; run may predate reconciliation support"
+                .to_string(),
+        );
+    };
+
+    if pid_is_running(owner_pid) {
+        None
+    } else {
+        Some(
+            "owner process is not running; run may be stale; run `homeboy runs reconcile`"
+                .to_string(),
+        )
+    }
+}
+
+pub fn run_owner_pid(run: &RunRecord) -> Option<u32> {
+    run.metadata_json
+        .get(RUN_OWNER_METADATA_KEY)
+        .and_then(|owner| owner.get("pid"))
+        .or_else(|| run.metadata_json.get("owner_pid"))
+        .or_else(|| run.metadata_json.get("process_id"))
+        .and_then(|pid| pid.as_u64())
+        .and_then(|pid| u32::try_from(pid).ok())
+}
+
+fn pid_is_running(pid: u32) -> bool {
+    if pid > i32::MAX as u32 {
+        return false;
+    }
+
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, 0) == 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        pid == std::process::id()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +171,51 @@ mod tests {
         assert_eq!(merged["component"], "homeboy");
         assert_eq!(merged["status"], "pass");
         assert_eq!(merged["exit_code"], 0);
+    }
+
+    fn running_run(metadata_json: serde_json::Value) -> RunRecord {
+        RunRecord {
+            id: "run-1".to_string(),
+            kind: "bench".to_string(),
+            component_id: Some("homeboy".to_string()),
+            started_at: "2026-05-01T00:00:00Z".to_string(),
+            finished_at: None,
+            status: "running".to_string(),
+            command: Some("homeboy bench".to_string()),
+            cwd: Some("/tmp".to_string()),
+            homeboy_version: Some("test".to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some("studio".to_string()),
+            metadata_json,
+        }
+    }
+
+    #[test]
+    fn test_running_status_note() {
+        let base = running_run(serde_json::json!({}));
+        let unverifiable = running_status_note(&base);
+        assert!(unverifiable
+            .as_deref()
+            .expect("status note")
+            .contains("no owner metadata"));
+
+        let dead_owner = running_run(serde_json::json!({
+            "homeboy_run_owner": { "pid": u32::MAX }
+        }));
+        let dead_owner = running_status_note(&dead_owner);
+        assert!(dead_owner
+            .as_deref()
+            .expect("status note")
+            .contains("owner process is not running"));
+    }
+
+    #[test]
+    fn test_run_owner_pid() {
+        let run = running_run(serde_json::json!({
+            "homeboy_run_owner": { "pid": 1234 }
+        }));
+
+        assert_eq!(run_owner_pid(&run), Some(1234));
     }
 
     #[test]

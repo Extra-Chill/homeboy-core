@@ -14,7 +14,9 @@ use crate::api_jobs::JobStore;
 use crate::cli_surface::{Cli, Commands};
 use crate::commands::{self, GlobalArgs};
 use crate::error::{Error, Result};
-use crate::observation::{ObservationStore, RunListFilter, RunRecord};
+use crate::observation::{
+    running_status_note, FindingListFilter, ObservationStore, RunListFilter, RunRecord,
+};
 use crate::{component, git, rig, stack};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +56,7 @@ pub enum HttpEndpoint {
     Runs,
     Run { id: String },
     RunArtifacts { id: String },
+    RunFindings { id: String },
     AuditRuns,
     BenchRuns,
     Jobs,
@@ -75,6 +78,8 @@ pub struct RunSummary {
     pub git_sha: Option<String>,
     pub command: Option<String>,
     pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +116,7 @@ impl HttpEndpoint {
             Self::Runs => "runs.list",
             Self::Run { .. } => "runs.show",
             Self::RunArtifacts { .. } => "runs.artifacts",
+            Self::RunFindings { .. } => "runs.findings",
             Self::AuditRuns => "audit.runs",
             Self::BenchRuns => "bench.runs",
             Self::Jobs => "jobs.list",
@@ -158,6 +164,9 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
         (HttpMethod::Get, ["runs", id, "artifacts"]) => Ok(HttpEndpoint::RunArtifacts {
             id: (*id).to_string(),
         }),
+        (HttpMethod::Get, ["runs", id, "findings"]) => Ok(HttpEndpoint::RunFindings {
+            id: (*id).to_string(),
+        }),
         (HttpMethod::Get, ["audit", "runs"]) => Ok(HttpEndpoint::AuditRuns),
         (HttpMethod::Get, ["bench", "runs"]) => Ok(HttpEndpoint::BenchRuns),
         (HttpMethod::Get, ["jobs"]) => Ok(HttpEndpoint::Jobs),
@@ -200,6 +209,7 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
                 "GET /runs".to_string(),
                 "GET /runs/:id".to_string(),
                 "GET /runs/:id/artifacts".to_string(),
+                "GET /runs/:id/findings".to_string(),
                 "GET /audit/runs".to_string(),
                 "GET /bench/runs".to_string(),
                 "GET /jobs".to_string(),
@@ -281,6 +291,23 @@ pub fn handle_with_jobs(request: HttpApiRequest, job_store: &JobStore) -> Result
                 "command": "api.runs.artifacts",
                 "run_id": id,
                 "artifacts": store.list_artifacts(id)?,
+            })
+        }
+        HttpEndpoint::RunFindings { id } => {
+            let store = ObservationStore::open_initialized()?;
+            require_run(&store, id)?;
+            json!({
+                "command": "api.runs.findings",
+                "run_id": id,
+                "findings": store.list_findings(FindingListFilter {
+                    run_id: Some(id.clone()),
+                    tool: query_value(&request.path, "tool"),
+                    file: query_value(&request.path, "file"),
+                    fingerprint: query_value(&request.path, "fingerprint"),
+                    limit: query_value(&request.path, "limit")
+                        .and_then(|value| value.parse::<i64>().ok())
+                        .map(|limit| limit.clamp(1, 1000)),
+                })?,
             })
         }
         HttpEndpoint::AuditRuns => json!({
@@ -753,6 +780,7 @@ fn invalid_body_type(key: &str, expected: &str, value: &Value) -> Error {
 }
 
 fn run_summary(run: RunRecord) -> RunSummary {
+    let status_note = running_status_note(&run);
     RunSummary {
         id: run.id,
         kind: run.kind,
@@ -764,6 +792,7 @@ fn run_summary(run: RunRecord) -> RunSummary {
         git_sha: run.git_sha,
         command: run.command,
         cwd: run.cwd,
+        status_note,
     }
 }
 

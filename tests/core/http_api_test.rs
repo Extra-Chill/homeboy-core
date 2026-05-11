@@ -1,6 +1,8 @@
 use homeboy::api_jobs::{JobEventKind, JobStatus, JobStore};
 use homeboy::http_api::{self, HttpApiRequest, HttpEndpoint, HttpMethod, JobReadyRunKind};
-use homeboy::observation::{NewRunRecord, ObservationStore, RunStatus};
+use homeboy::observation::{
+    NewFindingRecord, NewRunRecord, ObservationStore, RunRecord, RunStatus,
+};
 
 use crate::test_support::with_isolated_home;
 
@@ -134,6 +136,12 @@ fn routes_observation_run_readers() {
         }
     );
     assert_eq!(
+        http_api::route(HttpMethod::Get, "/runs/run-123/findings").expect("route"),
+        HttpEndpoint::RunFindings {
+            id: "run-123".to_string()
+        }
+    );
+    assert_eq!(
         http_api::route(HttpMethod::Get, "/audit/runs").expect("route"),
         HttpEndpoint::AuditRuns
     );
@@ -170,7 +178,7 @@ fn routes_job_inspection_endpoints() {
 }
 
 #[test]
-fn handles_job_inspection_routes_against_shared_store() {
+fn test_handle_with_jobs() {
     let store = JobStore::default();
     let job = store.create("audit");
     store.start(job.id).expect("job starts");
@@ -235,7 +243,7 @@ fn handles_job_inspection_routes_against_shared_store() {
 }
 
 #[test]
-fn handles_filtered_observation_run_readers_without_starting_jobs() {
+fn test_handle() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("store");
@@ -256,6 +264,14 @@ fn handles_filtered_observation_run_readers_without_starting_jobs() {
         store
             .record_artifact(&bench.id, "bench_results", &artifact_path)
             .expect("record artifact");
+        let lint = sample_imported_running_run("lint", "homeboy", "studio");
+        store.import_run(&lint).expect("lint run");
+        store
+            .record_findings(&[
+                sample_finding(&lint.id, "lint", "style", "src/main.rs"),
+                sample_finding(&lint.id, "audit", "security", "src/lib.rs"),
+            ])
+            .expect("record findings");
 
         let response = http_api::handle(HttpApiRequest {
             method: HttpMethod::Get,
@@ -289,6 +305,29 @@ fn handles_filtered_observation_run_readers_without_starting_jobs() {
         assert_eq!(response.endpoint, "audit.runs");
         assert_eq!(response.body["runs"].as_array().unwrap().len(), 1);
         assert_eq!(response.body["runs"][0]["id"], audit.id);
+
+        let response = http_api::handle(HttpApiRequest {
+            method: HttpMethod::Get,
+            path: format!("/runs/{}/findings?tool=lint&limit=1", lint.id),
+            body: None,
+        })
+        .expect("run findings");
+        assert_eq!(response.endpoint, "runs.findings");
+        assert_eq!(response.body["run_id"], lint.id);
+        assert_eq!(response.body["findings"].as_array().unwrap().len(), 1);
+        assert_eq!(response.body["findings"][0]["tool"], "lint");
+        assert_eq!(response.body["findings"][0]["rule"], "style");
+
+        let response = http_api::handle(HttpApiRequest {
+            method: HttpMethod::Get,
+            path: format!("/runs/{}", lint.id),
+            body: None,
+        })
+        .expect("show running run");
+        assert!(response.body["run"]["status_note"]
+            .as_str()
+            .expect("status note")
+            .contains("owner process is not running"));
     });
 }
 
@@ -400,6 +439,20 @@ fn job_ready_endpoint_preserves_background_result_events() {
 }
 
 fn sample_run(kind: &str, component_id: &str, rig_id: &str) -> NewRunRecord {
+    sample_run_with_metadata(
+        kind,
+        component_id,
+        rig_id,
+        serde_json::json!({ "source": "http-api-test" }),
+    )
+}
+
+fn sample_run_with_metadata(
+    kind: &str,
+    component_id: &str,
+    rig_id: &str,
+    metadata_json: serde_json::Value,
+) -> NewRunRecord {
     NewRunRecord {
         kind: kind.to_string(),
         component_id: Some(component_id.to_string()),
@@ -408,6 +461,38 @@ fn sample_run(kind: &str, component_id: &str, rig_id: &str) -> NewRunRecord {
         homeboy_version: Some("test-version".to_string()),
         git_sha: Some("abc123".to_string()),
         rig_id: Some(rig_id.to_string()),
+        metadata_json,
+    }
+}
+
+fn sample_imported_running_run(kind: &str, component_id: &str, rig_id: &str) -> RunRecord {
+    RunRecord {
+        id: format!("{kind}-dead-owner-run"),
+        kind: kind.to_string(),
+        component_id: Some(component_id.to_string()),
+        started_at: "2026-05-01T00:00:00Z".to_string(),
+        finished_at: None,
+        status: "running".to_string(),
+        command: Some(format!("homeboy {kind}")),
+        cwd: Some("/tmp/homeboy-fixture".to_string()),
+        homeboy_version: Some("test-version".to_string()),
+        git_sha: Some("abc123".to_string()),
+        rig_id: Some(rig_id.to_string()),
+        metadata_json: serde_json::json!({ "homeboy_run_owner": { "pid": u32::MAX } }),
+    }
+}
+
+fn sample_finding(run_id: &str, tool: &str, rule: &str, file: &str) -> NewFindingRecord {
+    NewFindingRecord {
+        run_id: run_id.to_string(),
+        tool: tool.to_string(),
+        rule: Some(rule.to_string()),
+        file: Some(file.to_string()),
+        line: Some(12),
+        severity: Some("warning".to_string()),
+        fingerprint: Some(format!("{file}::{rule}")),
+        message: format!("{rule} finding"),
+        fixable: Some(false),
         metadata_json: serde_json::json!({ "source": "http-api-test" }),
     }
 }

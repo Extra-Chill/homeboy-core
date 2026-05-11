@@ -8,7 +8,7 @@ mod lifecycle;
 pub mod records;
 pub mod store;
 
-pub use lifecycle::{merge_metadata, ActiveObservation};
+pub use lifecycle::{merge_metadata, run_owner_pid, running_status_note, ActiveObservation};
 
 pub use records::{
     finding_record_from_annotation, finding_record_from_audit, finding_record_from_lint,
