@@ -33,8 +33,8 @@ pub mod triage;
 pub mod update_check_cache;
 pub mod upgrade;
 
-// Internal extensions - not part of public API
-pub(crate) mod paths;
+// Path resolution helpers used by the CLI and library callers.
+pub mod paths;
 
 // Public extensions for CLI access
 pub mod defaults;

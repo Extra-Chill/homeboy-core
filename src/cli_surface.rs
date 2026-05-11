@@ -24,6 +24,11 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub force_hot: bool,
 
+    /// Directory where persisted run artifacts are copied.
+    /// Overrides HOMEBOY_ARTIFACT_ROOT and global config /artifact_root.
+    #[arg(long, global = true, value_name = "DIR")]
+    pub artifact_root: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
