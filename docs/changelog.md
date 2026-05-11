@@ -4,6 +4,28 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.164.0] - 2026-05-11
+
+### Added
+- add PR policy primitives
+- expose daemon run findings
+
+### Changed
+- cover PR policy primitives
+- satisfy audit coverage for run history API
+- align source resolver coverage
+
+### Fixed
+- detect import references in Rust attributes
+- fail git steps with unresolved conflicts
+- include dirty files in changed-since scopes
+- honor filtered findings in exit status
+- ignore namespace-only import references
+- keep namespace usage check agnostic
+- share rig stack test fixture
+- keep source fallback hint agnostic
+- resolve source checkout from cwd
+
 ## [0.163.2] - 2026-05-09
 
 ### Fixed
