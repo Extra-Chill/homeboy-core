@@ -5,7 +5,8 @@ use homeboy::git::{
     self, CherryPickOptions, GitOutput, GithubFindOutput, GithubIssueOutput, GithubPrOutput,
     IssueCloseOptions, IssueCloseReason, IssueCommentOptions, IssueCreateOptions, IssueEditOptions,
     IssueFindOptions, IssueState, PrCommentMode, PrCommentOptions, PrCreateOptions, PrEditOptions,
-    PrFindOptions, PrState, PushOptions, RebaseOptions,
+    PrFindOptions, PrPolicyDecision, PrPolicyMergeOptions, PrPolicyOpenOptions, PrState,
+    PushOptions, RebaseOptions,
 };
 use homeboy::BulkResult;
 
@@ -541,6 +542,108 @@ enum PrCommand {
         #[arg(long, value_name = "PATH")]
         path: Option<String>,
     },
+    /// Evaluate PR open/merge policy.
+    Policy(PrPolicyArgs),
+}
+
+#[derive(Args)]
+pub struct PrPolicyArgs {
+    #[command(subcommand)]
+    command: PrPolicyCommand,
+}
+
+#[derive(Subcommand)]
+enum PrPolicyCommand {
+    /// Evaluate whether Homeboy may create or update a proposed PR.
+    Open {
+        /// Component ID
+        component_id: String,
+
+        /// Policy file path (YAML or JSON)
+        #[arg(long, value_name = "PATH")]
+        policy: String,
+
+        /// Change source, e.g. autofix, deps, generated, release-prep, agent.
+        #[arg(long)]
+        source: Option<String>,
+
+        /// Base branch.
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Head branch.
+        #[arg(long)]
+        head: Option<String>,
+
+        /// Head repository owner/name.
+        #[arg(long = "head-repo")]
+        head_repository: Option<String>,
+
+        /// Base repository owner/name.
+        #[arg(long)]
+        repository: Option<String>,
+
+        /// Changed file path. Repeatable.
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<String>,
+
+        /// Read changed file paths from a newline-delimited file.
+        #[arg(long, value_name = "PATH")]
+        files_file: Option<String>,
+
+        /// Read changed files from the current git working tree.
+        #[arg(long)]
+        files_from_git: bool,
+
+        /// Workspace path to discover the component from a portable homeboy.json.
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
+    },
+    /// Evaluate whether an existing PR is safe to merge; optionally merge it.
+    Merge {
+        /// Component ID
+        component_id: String,
+
+        /// Policy file path (YAML or JSON)
+        #[arg(long, value_name = "PATH")]
+        policy: String,
+
+        /// PR number.
+        #[arg(short, long)]
+        number: u64,
+
+        /// Author login override. Defaults to GitHub PR metadata.
+        #[arg(long)]
+        author: Option<String>,
+
+        /// Base branch override. Defaults to GitHub PR metadata.
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Head branch override. Defaults to GitHub PR metadata.
+        #[arg(long)]
+        head: Option<String>,
+
+        /// Head repository owner/name override. Defaults to GitHub PR metadata.
+        #[arg(long = "head-repo")]
+        head_repository: Option<String>,
+
+        /// Base repository owner/name override. Defaults to component remote.
+        #[arg(long)]
+        repository: Option<String>,
+
+        /// Merge the PR when policy allows it.
+        #[arg(long)]
+        merge: bool,
+
+        /// Merge method: merge, squash, or rebase.
+        #[arg(long, default_value = "squash")]
+        merge_method: String,
+
+        /// Workspace path to discover the component from a portable homeboy.json.
+        #[arg(long, value_name = "PATH")]
+        path: Option<String>,
+    },
 }
 
 #[derive(Serialize)]
@@ -551,6 +654,7 @@ pub enum GitCommandOutput {
     Issue(GithubIssueOutput),
     Pr(GithubPrOutput),
     Find(GithubFindOutput),
+    Policy(PrPolicyDecision),
 }
 
 pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<GitCommandOutput> {
@@ -1021,6 +1125,72 @@ fn run_pr(args: PrArgs) -> CmdResult<GitCommandOutput> {
             )?;
             Ok((GitCommandOutput::Pr(output), 0))
         }
+        PrCommand::Policy(args) => run_pr_policy(args),
+    }
+}
+
+fn run_pr_policy(args: PrPolicyArgs) -> CmdResult<GitCommandOutput> {
+    match args.command {
+        PrPolicyCommand::Open {
+            component_id,
+            policy,
+            source,
+            base,
+            head,
+            head_repository,
+            repository,
+            mut files,
+            files_file,
+            files_from_git,
+            path,
+        } => {
+            if let Some(files_file) = files_file {
+                files.extend(read_lines_file(&files_file)?);
+            }
+            let output = git::evaluate_open_policy(PrPolicyOpenOptions {
+                component_id,
+                path,
+                policy_path: policy,
+                source,
+                base,
+                head,
+                head_repository,
+                repository,
+                files,
+                files_from_git,
+            })?;
+            let exit = if output.allowed { 0 } else { 1 };
+            Ok((GitCommandOutput::Policy(output), exit))
+        }
+        PrPolicyCommand::Merge {
+            component_id,
+            policy,
+            number,
+            author,
+            base,
+            head,
+            head_repository,
+            repository,
+            merge,
+            merge_method,
+            path,
+        } => {
+            let output = git::evaluate_merge_policy(PrPolicyMergeOptions {
+                component_id,
+                path,
+                policy_path: policy,
+                number,
+                author,
+                base,
+                head,
+                head_repository,
+                repository,
+                merge,
+                merge_method: Some(merge_method),
+            })?;
+            let exit = if output.allowed { 0 } else { 1 };
+            Ok((GitCommandOutput::Policy(output), exit))
+        }
     }
 }
 
@@ -1057,6 +1227,21 @@ fn resolve_body(inline: Option<String>, file: Option<String>) -> homeboy::Result
         )
     })?;
     Ok(Some(content))
+}
+
+fn read_lines_file(path: &str) -> homeboy::Result<Vec<String>> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        homeboy::Error::internal_io(
+            format!("Failed to read lines file: {}", e),
+            Some(path.to_string()),
+        )
+    })?;
+    Ok(content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect())
 }
 
 fn parse_issue_state(s: &str) -> homeboy::Result<IssueState> {

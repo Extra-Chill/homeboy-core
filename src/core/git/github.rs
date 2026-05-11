@@ -81,6 +81,18 @@ pub struct GithubPrOutput {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct GithubPrView {
+    pub component_id: String,
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+    pub author: Option<String>,
+    pub base: String,
+    pub head: String,
+    pub head_repository: Option<String>,
+}
+
 /// Result of a find-many operation (list of matches).
 #[derive(Debug, Clone, Serialize)]
 pub struct GithubFindOutput {
@@ -192,6 +204,15 @@ pub struct PrFindOptions {
     pub head: Option<String>,
     pub state: PrState,
     pub limit: usize,
+    /// Optional workspace path. See [`IssueCreateOptions::path`].
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PrMergeOptions {
+    pub number: u64,
+    pub method: String,
+    pub delete_branch: bool,
     /// Optional workspace path. See [`IssueCreateOptions::path`].
     pub path: Option<String>,
 }
@@ -754,6 +775,128 @@ pub fn pr_find(component_id: Option<&str>, options: PrFindOptions) -> Result<Git
         action: "pr.find".to_string(),
         success: true,
         items,
+    })
+}
+
+/// Fetch metadata for one PR.
+pub fn pr_view(
+    component_id: Option<&str>,
+    number: u64,
+    path: Option<String>,
+) -> Result<GithubPrView> {
+    let (id, repo) = resolve_component_github(component_id, path.as_deref())?;
+    ensure_gh_ready()?;
+
+    let repo_flag = format!("{}/{}", repo.owner, repo.repo);
+    let args: Vec<String> = vec![
+        "pr".into(),
+        "view".into(),
+        number.to_string(),
+        "-R".into(),
+        repo_flag,
+        "--json".into(),
+        "author,baseRefName,headRefName,headRepository".into(),
+    ];
+    let raw = run_gh(&args)?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        Error::internal_json(
+            format!("Failed to parse gh pr view JSON: {}", e),
+            Some(raw.clone()),
+        )
+    })?;
+    let author = parsed
+        .pointer("/author/login")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string());
+    let base = parsed
+        .get("baseRefName")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let head = parsed
+        .get("headRefName")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let head_repository = parsed
+        .pointer("/headRepository/nameWithOwner")
+        .or_else(|| parsed.pointer("/headRepository/name"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string());
+
+    Ok(GithubPrView {
+        component_id: id,
+        owner: repo.owner,
+        repo: repo.repo,
+        number,
+        author,
+        base,
+        head,
+        head_repository,
+    })
+}
+
+/// List changed files for one PR.
+pub fn pr_files(
+    component_id: Option<&str>,
+    number: u64,
+    path: Option<String>,
+) -> Result<Vec<String>> {
+    let (_id, repo) = resolve_component_github(component_id, path.as_deref())?;
+    ensure_gh_ready()?;
+    let args: Vec<String> = vec![
+        "api".into(),
+        "--paginate".into(),
+        format!("repos/{}/{}/pulls/{}/files", repo.owner, repo.repo, number),
+        "--jq".into(),
+        ".[].filename".into(),
+    ];
+    let raw = run_gh(&args)?;
+    Ok(raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect())
+}
+
+/// Merge a PR with an explicit method.
+pub fn pr_merge(component_id: Option<&str>, options: PrMergeOptions) -> Result<GithubPrOutput> {
+    let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
+    ensure_gh_ready()?;
+    let method = match options.method.as_str() {
+        "merge" | "squash" | "rebase" => options.method,
+        other => {
+            return Err(Error::validation_invalid_argument(
+                "merge_method",
+                format!("Unsupported merge method '{}'", other),
+                Some("Use merge, squash, or rebase".to_string()),
+                None,
+            ))
+        }
+    };
+    let repo_flag = format!("{}/{}", repo.owner, repo.repo);
+    let mut args: Vec<String> = vec![
+        "pr".into(),
+        "merge".into(),
+        options.number.to_string(),
+        "-R".into(),
+        repo_flag,
+        format!("--{}", method),
+    ];
+    if options.delete_branch {
+        args.push("--delete-branch".into());
+    }
+    run_gh(&args)?;
+    Ok(GithubPrOutput {
+        component_id: id,
+        owner: repo.owner,
+        repo: repo.repo,
+        action: "pr.merge".to_string(),
+        success: true,
+        number: Some(options.number),
+        state: Some("merged".to_string()),
+        ..Default::default()
     })
 }
 

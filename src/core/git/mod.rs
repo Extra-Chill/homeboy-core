@@ -2,12 +2,14 @@ mod changes;
 mod commits;
 mod github;
 mod operations;
+mod pr_policy;
 mod primitives;
 
 pub use changes::*;
 pub use commits::*;
 pub use github::*;
 pub use operations::*;
+pub use pr_policy::*;
 pub use primitives::*;
 
 use std::process::Command;
