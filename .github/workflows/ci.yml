@@ -1,15 +1,8 @@
 # PR quality pipeline.
 #
-# Build once, then strict serial pipeline: audit → lint → test
-# A single build job compiles homeboy from source and shares the binary
-# via artifact. Each stage downloads it instead of rebuilding.
-# Auto-refactor is intentionally disabled on PRs while high-throughput cleanup
-# work is in flight; failed read-only stages should be fixed explicitly.
-# Scoped to changed files only (--changed-since via scope module).
-#
-# Fork PRs: CI runs read-only checks (no autofix, no baseline writes).
-# The checkout uses the PR head SHA which works for both same-repo and fork PRs.
-# Secrets (App token) are unavailable for forks — continue-on-error handles this.
+# Homeboy Action owns the CI DAG so command failures aggregate instead of
+# skipping later quality checks. Build remains the hard gate because this repo
+# validates the Homeboy binary produced from the PR source.
 
 name: CI
 
@@ -24,134 +17,14 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
-  # ── Stage 0: Build once ──
-  # Compile homeboy from source once and share the binary with all
-  # subsequent stages. Eliminates 3× redundant cargo builds.
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-ci-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-ci-
-
-      - name: Build homeboy
-        run: cargo build --release
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: homeboy-binary
-          path: target/release/homeboy
-          retention-days: 1
-
-  # ── Stage 1: Audit ──
-  # Read-only architectural checks.
-  audit:
-    name: Audit
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Download homeboy binary
-        uses: actions/download-artifact@v4
-        with:
-          name: homeboy-binary
-          path: .homeboy-bin
-
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        continue-on-error: true
-        with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
-
-      - uses: Extra-Chill/homeboy-action@v2
-        with:
-          binary-path: .homeboy-bin/homeboy
-          commands: audit
-          app-token: ${{ steps.app-token.outputs.token || '' }}
-
-  # ── Stage 2: Lint ──
-  # Read-only linting after audit passes.
-  lint:
-    name: Lint
-    needs: [build, audit]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Download homeboy binary
-        uses: actions/download-artifact@v4
-        with:
-          name: homeboy-binary
-          path: .homeboy-bin
-
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        continue-on-error: true
-        with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
-
-      - uses: Extra-Chill/homeboy-action@v2
-        with:
-          binary-path: .homeboy-bin/homeboy
-          commands: lint
-          app-token: ${{ steps.app-token.outputs.token || '' }}
-
-  # ── Stage 3: Test ──
-  # Read-only tests after lint passes.
-  test:
-    name: Test
-    needs: [build, lint]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Download homeboy binary
-        uses: actions/download-artifact@v4
-        with:
-          name: homeboy-binary
-          path: .homeboy-bin
-
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        continue-on-error: true
-        with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
-
-      - uses: Extra-Chill/homeboy-action@v2
-        with:
-          binary-path: .homeboy-bin/homeboy
-          commands: test
-          app-token: ${{ steps.app-token.outputs.token || '' }}
+  homeboy:
+    uses: Extra-Chill/homeboy-action/.github/workflows/ci.yml@v2
+    with:
+      component: homeboy
+      commands: audit,lint,test
+      build-command: cargo build --release
+      build-artifact-path: target/release/homeboy
+    secrets: inherit
