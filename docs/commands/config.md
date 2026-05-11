@@ -124,7 +124,7 @@ homeboy config path
 
 Controls where Homeboy copies persisted run artifacts from commands such as `bench`, `trace`, and `observe`.
 
-- `artifact_root`: Optional directory path for copied artifacts. Defaults to the machine-local data directory under `artifacts/`.
+- `artifact_root`: Optional directory path for copied artifacts. Defaults to an `artifacts` subdirectory under the machine-local data directory.
 - CLI override: `homeboy --artifact-root <dir> ...`
 - Environment override: `HOMEBOY_ARTIFACT_ROOT=<dir>`
 - Config override: `homeboy config set /artifact_root '"~/Developer/.homeboy-artifacts"'`

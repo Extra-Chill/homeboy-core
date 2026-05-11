@@ -145,7 +145,7 @@ fn main() -> std::process::ExitCode {
         .ok()
         .flatten()
         .cloned();
-    homeboy::paths::set_artifact_root_override(artifact_root_override.clone());
+    homeboy::set_artifact_root_override(artifact_root_override.clone());
 
     if let Some(extension_cmd) = try_parse_extension_cli_command(&matches, &extension_info) {
         let cli_args = cli::CliArgs {
@@ -168,9 +168,7 @@ fn main() -> std::process::ExitCode {
         Err(e) => e.exit(),
     };
 
-    homeboy::paths::set_artifact_root_override(
-        cli.artifact_root.clone().or(artifact_root_override),
-    );
+    homeboy::set_artifact_root_override(cli.artifact_root.clone().or(artifact_root_override));
 
     if matches!(&cli.command, Commands::Runs(args) if args.is_bundle_export()) {
         output_file = None;

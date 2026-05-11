@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn artifact_root_prefers_process_override_over_env() {
+    fn test_set_artifact_root_override() {
         with_isolated_home(|home| {
             let env_root = home.path().join("env-artifacts");
             let override_root = home.path().join("override-artifacts");

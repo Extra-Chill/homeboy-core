@@ -1472,7 +1472,7 @@ mod api_coverage_tests {
         with_isolated_home(|home| {
             let _xdg = XdgGuard::unset();
             let artifact_root = home.path().join("agent-readable-artifacts");
-            crate::paths::set_artifact_root_override(Some(artifact_root.clone()));
+            crate::set_artifact_root_override(Some(artifact_root.clone()));
             let store = ObservationStore::open_initialized().expect("store");
             let run = store.start_run(new_run("bench")).expect("start");
             let path = home.path().join("artifact.json");

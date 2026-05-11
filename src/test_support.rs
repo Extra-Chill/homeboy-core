@@ -44,7 +44,7 @@ impl HomeGuard {
         std::env::set_var("HOME", dir.path());
         std::env::set_var("XDG_DATA_HOME", dir.path().join(".local").join("share"));
         std::env::remove_var("HOMEBOY_ARTIFACT_ROOT");
-        crate::paths::set_artifact_root_override(None);
+        crate::set_artifact_root_override(None);
         // Pin invocation runtime to a SHORT tempdir, isolated from `$TMPDIR`
         // and from the home tempdir (which itself can already live on a long
         // path on macOS, e.g. `/var/folders/<14>/T/.tmpXXXXXX/...`). Using
@@ -100,7 +100,7 @@ impl Drop for HomeGuard {
             Some(value) => std::env::set_var("HOMEBOY_ARTIFACT_ROOT", value),
             None => std::env::remove_var("HOMEBOY_ARTIFACT_ROOT"),
         }
-        crate::paths::set_artifact_root_override(None);
+        crate::set_artifact_root_override(None);
         match &self.prior_invocation_runtime {
             Some(value) => std::env::set_var(
                 crate::engine::invocation::HOMEBOY_INVOCATION_RUNTIME_DIR_ENV,

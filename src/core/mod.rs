@@ -33,8 +33,8 @@ pub mod triage;
 pub mod update_check_cache;
 pub mod upgrade;
 
-// Path resolution helpers used by the CLI and library callers.
-pub mod paths;
+// Internal path resolution helpers.
+pub(crate) mod paths;
 
 // Public extensions for CLI access
 pub mod defaults;
@@ -57,3 +57,8 @@ pub use output::{
     EntityCrudOutput, ItemOutcome, MergeOutput, MergeResult, NoExtra, ObservationOutputDetails,
     ObservationOutputMetadata, RemoveResult,
 };
+
+/// Set a process-local artifact root override for the current CLI invocation.
+pub fn set_artifact_root_override(path: Option<std::path::PathBuf>) {
+    paths::set_artifact_root_override(path);
+}
