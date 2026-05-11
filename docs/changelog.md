@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.165.0] - 2026-05-11
+
+### Added
+- configure observation artifact root
+
+### Fixed
+- keep path helpers internal
+- render issue fallbacks from native outputs
+
 ## [0.164.1] - 2026-05-11
 
 ### Fixed
