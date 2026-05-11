@@ -3,8 +3,8 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-08T14:58:24Z",
-      "item_count": 551,
+      "created_at": "2026-05-11T13:42:42Z",
+      "item_count": 546,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
         "Rust test discovery::tests/commands/test_scope_test.rs::UnwiredNestedRustTest",
@@ -44,8 +44,6 @@
         "dead_code::src/core/refactor/plan/sources.rs::UnreferencedExport",
         "dead_code::src/core/refactor/plan/sources.rs::UnreferencedExport",
         "dead_code::src/core/refactor/plan/sources.rs::UnreferencedExport",
-        "duplication::tests/core/rig/install_test.rs::DuplicateFunction",
-        "duplication::tests/core/rig/source_test.rs::DuplicateFunction",
         "intra-method-duplication::src/commands/review/render.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/commands/status.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/commands/status.rs::IntraMethodDuplicate",
@@ -142,7 +140,6 @@
         "test_coverage::src/core/code_audit/impact.rs::MissingTestMethod",
         "test_coverage::src/core/code_audit/impact.rs::MissingTestMethod",
         "test_coverage::src/core/code_audit/impact.rs::MissingTestMethod",
-        "test_coverage::src/core/code_audit/import_matching.rs::MissingTestMethod",
         "test_coverage::src/core/code_audit/layer_ownership.rs::MissingTestMethod",
         "test_coverage::src/core/code_audit/repeated_literal_shape.rs::MissingTestMethod",
         "test_coverage::src/core/code_audit/requested_detectors.rs::MissingTestMethod",
@@ -388,8 +385,6 @@
         "test_coverage::src/core/git/operations.rs::MissingTestMethod",
         "test_coverage::src/core/git/operations.rs::MissingTestMethod",
         "test_coverage::src/core/git/operations.rs::MissingTestMethod",
-        "test_coverage::src/core/http_api.rs::MissingTestMethod",
-        "test_coverage::src/core/http_api.rs::MissingTestMethod",
         "test_coverage::src/core/http_api.rs::MissingTestMethod",
         "test_coverage::src/core/issues/apply.rs::MissingTestMethod",
         "test_coverage::src/core/issues/reconcile.rs::MissingTestMethod",
