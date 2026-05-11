@@ -178,7 +178,7 @@ fn routes_job_inspection_endpoints() {
 }
 
 #[test]
-fn handles_job_inspection_routes_against_shared_store() {
+fn test_handle_with_jobs() {
     let store = JobStore::default();
     let job = store.create("audit");
     store.start(job.id).expect("job starts");
@@ -243,7 +243,7 @@ fn handles_job_inspection_routes_against_shared_store() {
 }
 
 #[test]
-fn handles_filtered_observation_run_readers_without_starting_jobs() {
+fn test_handle() {
     with_isolated_home(|home| {
         let _xdg = XdgGuard::unset();
         let store = ObservationStore::open_initialized().expect("store");

@@ -173,9 +173,8 @@ mod tests {
         assert_eq!(merged["exit_code"], 0);
     }
 
-    #[test]
-    fn running_summary_flags_unverifiable_and_dead_owner_records() {
-        let base = RunRecord {
+    fn running_run(metadata_json: serde_json::Value) -> RunRecord {
+        RunRecord {
             id: "run-1".to_string(),
             kind: "bench".to_string(),
             component_id: Some("homeboy".to_string()),
@@ -187,24 +186,36 @@ mod tests {
             homeboy_version: Some("test".to_string()),
             git_sha: Some("abc123".to_string()),
             rig_id: Some("studio".to_string()),
-            metadata_json: serde_json::json!({}),
-        };
+            metadata_json,
+        }
+    }
 
+    #[test]
+    fn test_running_status_note() {
+        let base = running_run(serde_json::json!({}));
         let unverifiable = running_status_note(&base);
         assert!(unverifiable
             .as_deref()
             .expect("status note")
             .contains("no owner metadata"));
 
-        let mut dead_owner = base;
-        dead_owner.metadata_json = serde_json::json!({
+        let dead_owner = running_run(serde_json::json!({
             "homeboy_run_owner": { "pid": u32::MAX }
-        });
+        }));
         let dead_owner = running_status_note(&dead_owner);
         assert!(dead_owner
             .as_deref()
             .expect("status note")
             .contains("owner process is not running"));
+    }
+
+    #[test]
+    fn test_run_owner_pid() {
+        let run = running_run(serde_json::json!({
+            "homeboy_run_owner": { "pid": 1234 }
+        }));
+
+        assert_eq!(run_owner_pid(&run), Some(1234));
     }
 
     #[test]
