@@ -106,7 +106,7 @@ pub struct PrPolicyMergeOptions {
     pub merge_method: Option<String>,
 }
 
-pub fn load_policy(path: &str) -> Result<PrPolicyFile> {
+fn load_policy(path: &str) -> Result<PrPolicyFile> {
     let raw = fs::read_to_string(path).map_err(|e| {
         Error::internal_io(
             format!("Failed to read PR policy file '{}': {}", path, e),
@@ -245,7 +245,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
     })
 }
 
-pub fn evaluate_rules(rules: &PrPolicyRules, context: PrPolicyContext) -> PrPolicyDecision {
+fn evaluate_rules(rules: &PrPolicyRules, context: PrPolicyContext) -> PrPolicyDecision {
     let mut failures = Vec::new();
 
     require_allowed(
@@ -425,7 +425,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn open_policy_allows_matching_source_branch_and_paths() {
+    fn test_evaluate_rules() {
         let rules = PrPolicyRules {
             allowed_sources: vec!["autofix".into()],
             allowed_head_branches: vec!["chore/homeboy-*".into()],
@@ -486,5 +486,58 @@ mod tests {
         );
         assert!(!decision.allowed);
         assert!(decision.reason.contains("does not match"));
+    }
+
+    #[test]
+    fn test_load_policy_reads_scoped_yaml() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("policy.yml");
+        fs::write(
+            &path,
+            "open:\n  allowed_sources: [autofix]\nmerge:\n  allowed_authors: ['homeboy-ci[bot]']\n",
+        )
+        .expect("write policy");
+
+        let policy = load_policy(path.to_str().expect("utf8 path")).expect("policy parses");
+        assert_eq!(policy.open.allowed_sources, vec!["autofix"]);
+        assert_eq!(policy.merge.allowed_authors, vec!["homeboy-ci[bot]"]);
+    }
+
+    #[test]
+    fn test_evaluate_open_policy_reads_explicit_files() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("policy.json");
+        fs::write(
+            &path,
+            r#"{"open":{"allowed_sources":["autofix"],"allowed_paths":["src/**"]}}"#,
+        )
+        .expect("write policy");
+
+        let decision = evaluate_open_policy(PrPolicyOpenOptions {
+            component_id: "homeboy".into(),
+            policy_path: path.to_string_lossy().to_string(),
+            source: Some("autofix".into()),
+            files: vec!["src/lib.rs".into()],
+            ..Default::default()
+        })
+        .expect("policy evaluates");
+
+        assert!(decision.allowed);
+    }
+
+    #[test]
+    fn test_evaluate_merge_policy_requires_github_metadata() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("policy.json");
+        fs::write(&path, r#"{"merge":{}}"#).expect("write policy");
+
+        let result = evaluate_merge_policy(PrPolicyMergeOptions {
+            component_id: "definitely-missing-component".into(),
+            policy_path: path.to_string_lossy().to_string(),
+            number: 1,
+            ..Default::default()
+        });
+
+        assert!(result.is_err());
     }
 }

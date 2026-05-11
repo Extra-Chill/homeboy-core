@@ -862,19 +862,9 @@ pub fn pr_files(
 
 /// Merge a PR with an explicit method.
 pub fn pr_merge(component_id: Option<&str>, options: PrMergeOptions) -> Result<GithubPrOutput> {
+    let method = validate_pr_merge_method(&options.method)?;
     let (id, repo) = resolve_component_github(component_id, options.path.as_deref())?;
     ensure_gh_ready()?;
-    let method = match options.method.as_str() {
-        "merge" | "squash" | "rebase" => options.method,
-        other => {
-            return Err(Error::validation_invalid_argument(
-                "merge_method",
-                format!("Unsupported merge method '{}'", other),
-                Some("Use merge, squash, or rebase".to_string()),
-                None,
-            ))
-        }
-    };
     let repo_flag = format!("{}/{}", repo.owner, repo.repo);
     let mut args: Vec<String> = vec![
         "pr".into(),
@@ -898,6 +888,18 @@ pub fn pr_merge(component_id: Option<&str>, options: PrMergeOptions) -> Result<G
         state: Some("merged".to_string()),
         ..Default::default()
     })
+}
+
+fn validate_pr_merge_method(method: &str) -> Result<String> {
+    match method {
+        "merge" | "squash" | "rebase" => Ok(method.to_string()),
+        other => Err(Error::validation_invalid_argument(
+            "merge_method",
+            format!("Unsupported merge method '{}'", other),
+            Some("Use merge, squash, or rebase".to_string()),
+            None,
+        )),
+    }
 }
 
 /// Post a comment on a PR.
@@ -1784,6 +1786,55 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].number, 10);
         assert_eq!(items[1].state, "OPEN");
+    }
+
+    #[test]
+    fn test_pr_files() {
+        let owner = "Extra-Chill";
+        let repo = "homeboy";
+        let number = 42_u64;
+        assert_eq!(
+            format!("repos/{}/{}/pulls/{}/files", owner, repo, number),
+            "repos/Extra-Chill/homeboy/pulls/42/files"
+        );
+    }
+
+    #[test]
+    fn test_pr_view() {
+        let raw = r#"{
+            "author":{"login":"homeboy-ci[bot]"},
+            "baseRefName":"main",
+            "headRefName":"ci/autofix/homeboy/main",
+            "headRepository":{"nameWithOwner":"Extra-Chill/homeboy"}
+        }"#;
+        let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            parsed.pointer("/author/login").and_then(|v| v.as_str()),
+            Some("homeboy-ci[bot]")
+        );
+        assert_eq!(
+            parsed.get("baseRefName").and_then(|v| v.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            parsed
+                .pointer("/headRepository/nameWithOwner")
+                .and_then(|v| v.as_str()),
+            Some("Extra-Chill/homeboy")
+        );
+    }
+
+    #[test]
+    fn test_pr_merge() {
+        let result = pr_merge(
+            Some("missing-component"),
+            PrMergeOptions {
+                method: "explode".into(),
+                number: 1,
+                ..Default::default()
+            },
+        );
+        assert!(result.is_err());
     }
 
     #[test]
