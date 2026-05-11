@@ -162,11 +162,64 @@ fn render_lint(data: &Value, context: &IssueRenderContext) -> ReconcileFindingsI
         }
     }
 
-    if by_category.is_empty() && !data.get("passed").and_then(Value::as_bool).unwrap_or(true) {
-        by_category.insert("lint_failure".to_string(), Vec::new());
+    let mut groups = BTreeMap::new();
+    if by_category.is_empty() {
+        if let Some(items) = data
+            .pointer("/baseline_comparison/new_items")
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                let category = item
+                    .get("context_label")
+                    .and_then(Value::as_str)
+                    .map(|label| {
+                        label
+                            .split_once(':')
+                            .map(|(_, category)| category)
+                            .unwrap_or(label)
+                    })
+                    .unwrap_or("lint_finding");
+                by_category
+                    .entry(category.to_string())
+                    .or_default()
+                    .push(item);
+            }
+        }
+
+        if by_category.is_empty() {
+            let delta = data
+                .pointer("/baseline_comparison/delta")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            if delta > 0 {
+                groups.insert(
+                    "lint_baseline_regression".to_string(),
+                    RenderedIssueGroup {
+                        count: delta as usize,
+                        label: format!("{} new findings above baseline", delta),
+                        body: render_lint_body("lint_baseline_regression", &[], data, context),
+                        confidence: None,
+                    },
+                );
+            } else if command_failed(data) {
+                let count = data
+                    .get("exit_code")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1)
+                    .max(1) as usize;
+                groups.insert(
+                    "lint_failure".to_string(),
+                    RenderedIssueGroup {
+                        count,
+                        label: "lint failure".to_string(),
+                        body: render_lint_body("lint_failure", &[], data, context),
+                        confidence: None,
+                    },
+                );
+            }
+        }
     }
 
-    let mut groups = BTreeMap::new();
     for (category, findings) in by_category {
         let count = findings.len().max(1);
         groups.insert(
@@ -218,10 +271,15 @@ fn render_lint_body(
     }
     let _ = writeln!(out, "\n### Findings");
     for finding in findings.iter().take(20) {
-        let id = finding.get("id").and_then(Value::as_str).unwrap_or("lint");
+        let id = finding
+            .get("id")
+            .and_then(Value::as_str)
+            .or_else(|| finding.get("context_label").and_then(Value::as_str))
+            .unwrap_or("lint");
         let message = finding
             .get("message")
             .and_then(Value::as_str)
+            .or_else(|| finding.get("description").and_then(Value::as_str))
             .unwrap_or("lint finding");
         let _ = writeln!(out, "- `{}` — {}", id, message);
     }
@@ -251,11 +309,22 @@ fn render_test(data: &Value, context: &IssueRenderContext) -> ReconcileFindingsI
     }
 
     if groups.is_empty() {
+        let summary_failures = data
+            .pointer("/summary/failures")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
         let failed = data
             .pointer("/test_counts/failed")
             .and_then(Value::as_u64)
             .unwrap_or(0) as usize;
-        if failed > 0 || !data.get("passed").and_then(Value::as_bool).unwrap_or(true) {
+        if summary_failures > 0 {
+            insert_test_group(
+                &mut groups,
+                "test_failure",
+                summary_failures,
+                render_test_fallback_body(data, context),
+            );
+        } else if failed > 0 || command_failed(data) {
             insert_test_group(
                 &mut groups,
                 "test_failure",
@@ -311,6 +380,10 @@ fn render_test_fallback_body(data: &Value, context: &IssueRenderContext) -> Stri
         .pointer("/test_counts/failed")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let summary_failures = data
+        .pointer("/summary/failures")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let total = data
         .pointer("/test_counts/total")
         .and_then(Value::as_u64)
@@ -320,6 +393,8 @@ fn render_test_fallback_body(data: &Value, context: &IssueRenderContext) -> Stri
     let _ = writeln!(out);
     if failed > 0 || total > 0 {
         let _ = writeln!(out, "{} failed test(s) out of {} total.", failed, total);
+    } else if summary_failures > 0 {
+        let _ = writeln!(out, "{} test failure(s).", summary_failures);
     } else {
         let _ = writeln!(
             out,
@@ -371,6 +446,11 @@ fn insert_test_group(
 
 fn labelize(raw: &str) -> String {
     raw.replace(['_', '-'], " ")
+}
+
+fn command_failed(data: &Value) -> bool {
+    data.get("passed").and_then(Value::as_bool) == Some(false)
+        || data.get("status").and_then(Value::as_str) == Some("failed")
 }
 
 #[cfg(test)]
