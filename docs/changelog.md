@@ -4,6 +4,12 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.164.1] - 2026-05-11
+
+### Fixed
+- target releases at tag commits
+- recover releases from existing tags
+
 ## [0.164.0] - 2026-05-11
 
 ### Added
