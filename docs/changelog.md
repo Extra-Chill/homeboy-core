@@ -4,6 +4,16 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.174.0] - 2026-05-12
+
+### Added
+- execute working tree release preflight
+- support push auth overrides
+
+### Fixed
+- Fix server connect false failure for per-command SSH
+- derive passthrough flags from clap metadata
+
 ## [0.173.0] - 2026-05-12
 
 ### Added
