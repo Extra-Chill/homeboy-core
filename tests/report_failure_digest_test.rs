@@ -76,6 +76,20 @@ fn bench_json() -> &'static str {
             "component": "studio",
             "exit_code": 0,
             "iterations": 5,
+            "budget_findings": [
+                {
+                    "category": "budget",
+                    "code": "rest.max_response_bytes",
+                    "severity": "error",
+                    "context_label": "profile:wordpress-rest",
+                    "message": "REST response exceeded 250 KB budget",
+                    "actual": 4378195,
+                    "expected": 250000,
+                    "unit": "bytes",
+                    "subject": "/wp-json/datamachine/v1/pipelines?per_page=100",
+                    "passed": false
+                }
+            ],
             "artifacts": [
                 {
                     "scenario_id": "wp-admin-load",
@@ -281,6 +295,10 @@ fn renders_bench_status_and_artifact_paths() {
 
     assert!(markdown.contains("### Bench: studio"));
     assert!(markdown.contains("**Status:** PASSED"));
+    assert!(markdown.contains("**Budget findings**"));
+    assert!(markdown.contains(
+        "| `rest.max_response_bytes` | /wp-json/datamachine/v1/pipelines?per_page=100 | 4378195 | 250000 | bytes | REST response exceeded 250 KB budget |"
+    ));
     assert!(markdown.contains(
         "- scenario `wp-admin-load` / run 0 — Playwright trace (playwright-trace): bench-artifacts/wp-admin-load/trace.zip"
     ));

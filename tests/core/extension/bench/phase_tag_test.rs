@@ -57,6 +57,7 @@ fn results_with(
         iterations: 10,
         run_metadata: None,
         diagnostics: Vec::new(),
+        budget_findings: Vec::new(),
         scenarios,
         metric_policies: policies,
     }

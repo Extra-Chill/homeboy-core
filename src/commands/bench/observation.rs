@@ -5,7 +5,9 @@ use homeboy::engine::run_dir::{self, RunDir};
 use homeboy::extension::bench::report::collect_artifacts;
 use homeboy::extension::bench::{BenchResults, BenchRunWorkflowResult};
 use homeboy::git::short_head_revision_at;
-use homeboy::observation::{merge_metadata, ActiveObservation, NewRunRecord, RunStatus};
+use homeboy::observation::{
+    finding_records_from_budget, merge_metadata, ActiveObservation, NewRunRecord, RunStatus,
+};
 use homeboy::rig::RigStateSnapshot;
 
 use crate::commands::utils::resource_policy;
@@ -269,6 +271,10 @@ fn record_bench_observation_artifacts(
     let Some(results) = workflow.results.as_ref() else {
         return;
     };
+    observation.0.record_findings(&finding_records_from_budget(
+        observation.run_id(),
+        &results.budget_findings,
+    ));
     for artifact in collect_artifacts(results) {
         if let Some(url) = artifact.url.as_deref() {
             let kind = artifact.kind.as_deref().unwrap_or(&artifact.name);

@@ -2,6 +2,7 @@
 #[macro_use]
 pub mod config;
 pub mod api_jobs;
+pub mod budget;
 pub mod code_audit;
 pub mod component;
 pub mod context;

@@ -146,7 +146,35 @@ Supported operators are `eq`, `gte`, and `lte`:
 ```
 
 Failed gates add `gate_results`, set the scenario's `passed` field to
-`false`, and add top-level `gate_failures` to the bench output.
+`false`, and add top-level `gate_failures` plus `budget_findings` to the bench
+output.
+
+## Budget Findings
+
+Benchmark and profile workloads can emit top-level `budget_findings` for fixed
+threshold failures that should report and gate consistently across extensions.
+The common shape is:
+
+```json
+{
+  "category": "budget",
+  "code": "rest.max_response_bytes",
+  "severity": "error",
+  "file": null,
+  "context_label": "profile:wordpress-rest",
+  "message": "REST response exceeded 250 KB budget",
+  "actual": 4378195,
+  "expected": 250000,
+  "unit": "bytes",
+  "subject": "/wp-json/datamachine/v1/pipelines?per_page=100",
+  "passed": false
+}
+```
+
+`severity: "error"` or `passed: false` fails the bench run. Lower severities
+are report-only. `code` is the stable grouping key, `subject` identifies the
+endpoint/resource/phase being measured, and `actual` / `expected` / `unit` are
+rendered by `homeboy report failure-digest`.
 
 Rigs can also declare gates for scenario metrics when the workload output is
 owned elsewhere. The keys under `metric_gates` are exact scenario ids:
