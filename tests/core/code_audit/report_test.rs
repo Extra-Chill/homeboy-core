@@ -64,7 +64,7 @@ fn test_build_audit_summary_prioritizes_warnings_in_top_findings() {
         kind: AuditFinding::DuplicateFunction,
     });
 
-    let summary = build_audit_summary(&result, 1);
+    let summary = crate::code_audit::report::build_audit_summary(&result, 1);
 
     assert_eq!(summary.top_findings[0].severity, Severity::Warning);
     assert_eq!(

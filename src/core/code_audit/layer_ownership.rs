@@ -11,6 +11,10 @@ use crate::engine::codebase_scan::{self, ExtensionFilter, ScanConfig};
 use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 
+#[cfg(test)]
+#[path = "../../../tests/core/code_audit/layer_ownership_test.rs"]
+mod layer_ownership_test;
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AuditRulesConfig {
     #[serde(default)]

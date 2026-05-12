@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+#[path = "../../../tests/core/component/audit_test.rs"]
+mod audit_test;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuditConfig {
     /// Class/base names whose public methods are invoked by a runtime dispatcher.

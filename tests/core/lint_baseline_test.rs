@@ -1,4 +1,4 @@
-use homeboy::lint_baseline::{self, LintFinding};
+use homeboy::extension::lint::baseline::{self as lint_baseline, LintFinding};
 use std::path::Path;
 
 #[test]
@@ -9,11 +9,13 @@ fn test_save_baseline() {
             id: "a".to_string(),
             message: "m1".to_string(),
             category: "cat1".to_string(),
+            ..Default::default()
         },
         LintFinding {
             id: "b".to_string(),
             message: "m2".to_string(),
             category: "cat2".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -29,6 +31,7 @@ fn test_load_baseline() {
         id: "a".to_string(),
         message: "m1".to_string(),
         category: "cat1".to_string(),
+        ..Default::default()
     }];
     lint_baseline::save_baseline(dir.path(), "homeboy", &findings).expect("baseline saved");
 
@@ -44,6 +47,7 @@ fn test_compare() {
         id: "a".to_string(),
         message: "m1".to_string(),
         category: "cat1".to_string(),
+        ..Default::default()
     }];
     lint_baseline::save_baseline(dir.path(), "homeboy", &base).expect("baseline saved");
     let loaded = lint_baseline::load_baseline(dir.path()).expect("baseline should load");
@@ -54,6 +58,7 @@ fn test_compare() {
             id: "b".to_string(),
             message: "m2".to_string(),
             category: "cat2".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -66,11 +71,8 @@ fn test_compare() {
 fn test_parse_findings_file() {
     let dir = tempfile::tempdir().expect("temp dir");
     let file = dir.path().join("lint-findings.json");
-    std::fs::write(
-        &file,
-        r#"[{"id":"a","message":"m1","category":"cat1"}]"#,
-    )
-    .expect("should write JSON");
+    std::fs::write(&file, r#"[{"id":"a","message":"m1","category":"cat1"}]"#)
+        .expect("should write JSON");
 
     let parsed = lint_baseline::parse_findings_file(&file).expect("should parse findings");
     assert_eq!(parsed.len(), 1);
