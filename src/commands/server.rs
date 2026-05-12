@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use homeboy::server::{self, Server, SshClient};
+use homeboy::server::{self, Server, ServerSessionConfig, SshClient};
 use homeboy::{EntityCrudOutput, MergeOutput};
 
 use super::{CmdResult, DynamicSetArgs};
@@ -31,8 +31,8 @@ pub struct ServerKeyOutput {
 pub struct ServerSessionOutput {
     action: String,
     server_id: String,
-    control_path: Option<String>,
-    persist: Option<String>,
+    #[serde(flatten)]
+    session: ServerSessionConfig,
     live: bool,
     stdout: String,
     stderr: String,
@@ -267,8 +267,7 @@ fn run_session_action(server_id: &str, action: &str) -> CmdResult<ServerOutput> 
                 session: Some(ServerSessionOutput {
                     action: action.to_string(),
                     server_id: server_id.to_string(),
-                    control_path: result.control_path,
-                    persist: result.persist,
+                    session: result.session,
                     live: result.live,
                     stdout: result.stdout,
                     stderr: result.stderr,

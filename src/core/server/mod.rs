@@ -5,12 +5,14 @@ mod connection;
 pub mod health;
 pub(crate) mod http;
 mod keys;
+mod session;
 pub mod transfer;
 
 pub use client::*;
 pub use connection::*;
 pub use health::*;
 pub use keys::*;
+pub use session::*;
 pub use transfer::*;
 
 use std::collections::HashMap;
@@ -48,6 +50,12 @@ pub struct Server {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerAuth {
     pub mode: ServerAuthMode,
+    #[serde(flatten)]
+    pub session: ServerSessionConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServerSessionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

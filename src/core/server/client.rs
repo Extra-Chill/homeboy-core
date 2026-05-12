@@ -11,7 +11,10 @@ use crate::engine::shell;
 use crate::error::{Error, Result};
 use chrono::Utc;
 
-use super::{Server, ServerAuthMode};
+use super::{
+    ensure_control_path_parent, ManagedSshSession, ManagedSshSessionOutput, Server, ServerAuthMode,
+    ServerSessionConfig,
+};
 use std::process::{Command, Stdio};
 
 #[cfg(unix)]
@@ -32,22 +35,6 @@ pub struct SshClient {
     /// Environment variables to inject before remote commands.
     /// Values are passed through the shell, so `$PATH`-style expansion works.
     pub env: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedSshSession {
-    pub control_path: String,
-    pub persist: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ManagedSshSessionOutput {
-    pub control_path: Option<String>,
-    pub persist: Option<String>,
-    pub live: bool,
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: i32,
 }
 
 pub struct CommandOutput {
@@ -85,14 +72,7 @@ impl SshClient {
 
         let auth = match &server.auth {
             Some(auth) if auth.mode == ServerAuthMode::KeyPlusPasswordControlmaster => {
-                Some(ManagedSshSession {
-                    control_path: expand_control_path(
-                        auth.control_path
-                            .as_deref()
-                            .unwrap_or("~/.ssh/controlmasters/%h-%p-%r"),
-                    ),
-                    persist: auth.persist.clone().unwrap_or_else(|| "4h".to_string()),
-                })
+                Some(ManagedSshSession::from_auth(auth))
             }
             _ => None,
         };
@@ -279,8 +259,7 @@ impl SshClient {
         let success = exit_code == 0;
 
         ManagedSshSessionOutput {
-            control_path: self.auth.as_ref().map(|auth| auth.control_path.clone()),
-            persist: self.auth.as_ref().map(|auth| auth.persist.clone()),
+            session: self.output_session_config(),
             live: success && expect_live_on_success,
             stdout,
             stderr,
@@ -290,12 +269,18 @@ impl SshClient {
 
     fn local_managed_session_output(&self, live: bool) -> ManagedSshSessionOutput {
         ManagedSshSessionOutput {
-            control_path: self.auth.as_ref().map(|auth| auth.control_path.clone()),
-            persist: self.auth.as_ref().map(|auth| auth.persist.clone()),
+            session: self.output_session_config(),
             live,
             stdout: String::new(),
             stderr: String::new(),
             exit_code: 0,
+        }
+    }
+
+    fn output_session_config(&self) -> ServerSessionConfig {
+        ServerSessionConfig {
+            control_path: self.auth.as_ref().map(|auth| auth.control_path.clone()),
+            persist: self.auth.as_ref().map(|auth| auth.persist.clone()),
         }
     }
 
@@ -446,26 +431,6 @@ impl SshClient {
             Err(_) => -1,
         }
     }
-}
-
-fn expand_control_path(path: &str) -> String {
-    shellexpand::tilde(path).to_string()
-}
-
-fn ensure_control_path_parent(control_path: &str) -> Result<()> {
-    let path = std::path::Path::new(control_path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            Error::internal_io(
-                err.to_string(),
-                Some(format!(
-                    "create SSH control path directory {}",
-                    parent.display()
-                )),
-            )
-        })?;
-    }
-    Ok(())
 }
 
 pub fn execute_local_command(command: &str) -> CommandOutput {
@@ -1287,8 +1252,10 @@ mod tests {
             kind: Some("password-gated".to_string()),
             auth: Some(super::super::ServerAuth {
                 mode: ServerAuthMode::KeyPlusPasswordControlmaster,
-                control_path: Some("/tmp/homeboy-test-%h-%p-%r".to_string()),
-                persist: Some("4h".to_string()),
+                session: ServerSessionConfig {
+                    control_path: Some("/tmp/homeboy-test-%h-%p-%r".to_string()),
+                    persist: Some("4h".to_string()),
+                },
             }),
             env: HashMap::new(),
         };
@@ -1331,6 +1298,115 @@ mod tests {
             args.last().map(String::as_str),
             Some("deploy@bastion.example.test")
         );
+    }
+
+    #[test]
+    fn test_from_server() {
+        let server = Server {
+            id: "local".to_string(),
+            aliases: Vec::new(),
+            host: "localhost".to_string(),
+            user: "tester".to_string(),
+            port: 22,
+            identity_file: None,
+            kind: Some("local".to_string()),
+            auth: Some(super::super::ServerAuth {
+                mode: ServerAuthMode::KeyPlusPasswordControlmaster,
+                session: ServerSessionConfig {
+                    control_path: Some("/tmp/homeboy-local-%h-%p-%r".to_string()),
+                    persist: Some("5m".to_string()),
+                },
+            }),
+            env: HashMap::new(),
+        };
+
+        let client = SshClient::from_server(&server, "local").expect("client");
+
+        assert!(client.is_local);
+        assert_eq!(client.host, "localhost");
+        assert_eq!(client.user, "tester");
+        assert_eq!(
+            client.auth.as_ref().map(|auth| auth.persist.as_str()),
+            Some("5m")
+        );
+    }
+
+    #[test]
+    fn test_connect_managed_session() {
+        let client = local_managed_session_client();
+
+        let output = client.connect_managed_session().expect("connect");
+
+        assert!(output.live);
+        assert_eq!(output.session.persist.as_deref(), Some("10m"));
+        assert_eq!(output.exit_code, 0);
+    }
+
+    #[test]
+    fn test_check_managed_session() {
+        let client = local_managed_session_client();
+
+        let output = client.check_managed_session().expect("check");
+
+        assert!(output.live);
+        assert_eq!(
+            output.session.control_path.as_deref(),
+            Some("/tmp/homeboy-local-control")
+        );
+        assert_eq!(output.exit_code, 0);
+    }
+
+    #[test]
+    fn test_disconnect_managed_session() {
+        let client = local_managed_session_client();
+
+        let output = client.disconnect_managed_session().expect("disconnect");
+
+        assert!(!output.live);
+        assert_eq!(output.exit_code, 0);
+    }
+
+    #[test]
+    fn test_execute_interactive() {
+        let client = SshClient {
+            host: "localhost".to_string(),
+            user: "tester".to_string(),
+            port: 22,
+            identity_file: None,
+            auth: None,
+            is_local: true,
+            env: HashMap::new(),
+        };
+
+        assert_eq!(client.execute_interactive(Some("true")), 0);
+    }
+
+    #[test]
+    fn test_execute_local_command_interactive() {
+        assert_eq!(execute_local_command_interactive("true", None, None), 0);
+    }
+
+    #[test]
+    fn test_execute_local_command_passthrough() {
+        let output = execute_local_command_passthrough("printf 'passthrough\\n'", None, None);
+
+        assert!(output.success);
+        assert_eq!(output.stdout, "passthrough\n");
+    }
+
+    fn local_managed_session_client() -> SshClient {
+        SshClient {
+            host: "localhost".to_string(),
+            user: "tester".to_string(),
+            port: 22,
+            identity_file: None,
+            auth: Some(ManagedSshSession {
+                control_path: "/tmp/homeboy-local-control".to_string(),
+                persist: "10m".to_string(),
+            }),
+            is_local: true,
+            env: HashMap::new(),
+        }
     }
 
     #[test]
