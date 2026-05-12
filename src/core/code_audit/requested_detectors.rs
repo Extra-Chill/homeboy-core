@@ -358,22 +358,18 @@ fn finding_from_derived_literal_site(
     suggestion: &str,
 ) -> Finding {
     let label = site.labels.join(", ");
+    let extra = |name: &str| match name {
+        "line" => site.line.to_string(),
+        "value" => site.value.clone(),
+        "label" => label.clone(),
+        _ => String::new(),
+    };
     Finding {
         convention: rule.convention.clone(),
         severity: severity_from_config(&rule.severity),
         file: site.file.clone(),
-        description: render_template_from_values(description, &site.captures, |name| match name {
-            "line" => site.line.to_string(),
-            "value" => site.value.clone(),
-            "label" => label.clone(),
-            _ => String::new(),
-        }),
-        suggestion: render_template_from_values(suggestion, &site.captures, |name| match name {
-            "line" => site.line.to_string(),
-            "value" => site.value.clone(),
-            "label" => label.clone(),
-            _ => String::new(),
-        }),
+        description: render_template_from_values(description, &site.captures, &extra),
+        suggestion: render_template_from_values(suggestion, &site.captures, extra),
         kind: AuditFinding::from_str(&rule.kind).unwrap_or(AuditFinding::LegacyComment),
     }
 }
