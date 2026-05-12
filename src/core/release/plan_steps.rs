@@ -5,17 +5,12 @@ use crate::release::pipeline_capabilities::{
     get_publish_targets, has_package_capability, has_prepare_capability,
 };
 use crate::release::types::{
-    ReleaseOptions, ReleasePlanStatus, ReleasePlanStep, ReleaseSemverRecommendation,
+    ReleaseChangelogPlan, ReleaseOptions, ReleasePlanStatus, ReleasePlanStep,
+    ReleaseSemverRecommendation,
 };
 use crate::Result;
 
 type StepConfig = std::collections::HashMap<String, serde_json::Value>;
-
-pub(super) fn changelog_entries_to_json(
-    entries: &std::collections::HashMap<String, Vec<String>>,
-) -> serde_json::Value {
-    serde_json::to_value(entries).unwrap_or_default()
-}
 
 /// Return true if this component should get a GitHub Release created.
 ///
@@ -254,6 +249,7 @@ pub(super) fn build_release_steps(
     extensions: &[ExtensionManifest],
     current_version: &str,
     new_version: &str,
+    changelog_plan: &ReleaseChangelogPlan,
     options: &ReleaseOptions,
     monorepo: Option<&git::MonorepoContext>,
     warnings: &mut Vec<String>,
@@ -270,13 +266,7 @@ pub(super) fn build_release_steps(
         );
     }
 
-    steps.push(ready_step(
-        "changelog.generate",
-        "changelog.generate",
-        "Generate changelog entries from commits",
-        vec!["preflight.changelog_bootstrap".to_string()],
-        string_config("policy", "generated"),
-    ));
+    steps.extend(build_changelog_steps(changelog_plan));
 
     let mut version_config = string_config("bump", options.bump_type.clone());
     version_config.insert(
@@ -294,7 +284,7 @@ pub(super) fn build_release_steps(
             "Bump version {} → {} ({})",
             current_version, new_version, options.bump_type
         ),
-        vec!["changelog.generate".to_string()],
+        vec!["changelog.finalize".to_string()],
         version_config,
     ));
 
@@ -434,6 +424,74 @@ pub(super) fn build_release_steps(
     Ok(steps)
 }
 
+fn build_changelog_steps(changelog_plan: &ReleaseChangelogPlan) -> Vec<ReleasePlanStep> {
+    let mut policy_config = StepConfig::new();
+    policy_config.insert(
+        "policy".to_string(),
+        serde_json::Value::String(changelog_plan.policy.clone()),
+    );
+    policy_config.insert(
+        "path".to_string(),
+        serde_json::Value::String(changelog_plan.path.clone()),
+    );
+    policy_config.insert(
+        "dry_run".to_string(),
+        serde_json::Value::Bool(changelog_plan.dry_run),
+    );
+
+    let mut generate_config = StepConfig::new();
+    generate_config.insert(
+        "source".to_string(),
+        serde_json::Value::String("commits".to_string()),
+    );
+    generate_config.insert(
+        "entry_count".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(changelog_plan.entry_count as u64)),
+    );
+
+    let mut finalize_config = StepConfig::new();
+    finalize_config.insert(
+        "path".to_string(),
+        serde_json::Value::String(changelog_plan.path.clone()),
+    );
+    finalize_config.insert(
+        "entries".to_string(),
+        serde_json::to_value(&changelog_plan.entries).unwrap_or_default(),
+    );
+    finalize_config.insert(
+        "entry_count".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(changelog_plan.entry_count as u64)),
+    );
+    finalize_config.insert(
+        "mode".to_string(),
+        serde_json::Value::String("version-step".to_string()),
+    );
+
+    vec![
+        ready_step(
+            "changelog.policy",
+            "changelog.policy",
+            "Resolve changelog policy",
+            vec!["preflight.changelog_bootstrap".to_string()],
+            policy_config,
+        ),
+        ready_step(
+            "changelog.generate",
+            "changelog.generate",
+            "Generate changelog entries from commits",
+            vec!["changelog.policy".to_string()],
+            generate_config,
+        ),
+        ready_step(
+            "changelog.finalize",
+            "changelog.finalize",
+            "Finalize changelog entries into release section",
+            vec!["changelog.generate".to_string()],
+            finalize_config,
+        ),
+    ]
+}
+
 fn string_array_config(key: &str, values: &[String]) -> StepConfig {
     let mut config = StepConfig::new();
     config.insert(
@@ -450,12 +508,11 @@ fn string_array_config(key: &str, values: &[String]) -> StepConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_preflight_steps, build_release_steps, changelog_entries_to_json,
-        github_release_applies,
-    };
+    use super::{build_preflight_steps, build_release_steps, github_release_applies};
     use crate::component::Component;
-    use crate::release::types::{ReleaseOptions, ReleasePlanStatus, ReleaseSemverRecommendation};
+    use crate::release::types::{
+        ReleaseChangelogPlan, ReleaseOptions, ReleasePlanStatus, ReleaseSemverRecommendation,
+    };
 
     #[test]
     fn test_build_preflight_steps() {
@@ -672,6 +729,7 @@ mod tests {
             &[extension],
             "1.0.0",
             "1.0.1",
+            &fixture_changelog_plan(),
             &options,
             None,
             &mut warnings,
@@ -680,17 +738,94 @@ mod tests {
         .expect("steps");
 
         let ids: Vec<&str> = steps.iter().map(|step| step.id.as_str()).collect();
+        let changelog_policy_index = step_index(&ids, "changelog.policy");
         let changelog_index = step_index(&ids, "changelog.generate");
+        let changelog_finalize_index = step_index(&ids, "changelog.finalize");
         let version_index = step_index(&ids, "version");
         let prepare_index = step_index(&ids, "release.prepare");
         let commit_index = step_index(&ids, "git.commit");
 
+        assert!(changelog_policy_index < changelog_index);
         assert!(changelog_index < version_index);
+        assert!(changelog_finalize_index < version_index);
         assert!(version_index < prepare_index);
         assert!(prepare_index < commit_index);
-        assert_eq!(steps[version_index].needs, vec!["changelog.generate"]);
+        assert_eq!(steps[changelog_index].needs, vec!["changelog.policy"]);
+        assert_eq!(
+            steps[changelog_finalize_index].needs,
+            vec!["changelog.generate"]
+        );
+        assert_eq!(steps[version_index].needs, vec!["changelog.finalize"]);
         assert_eq!(steps[prepare_index].needs, vec!["version"]);
         assert_eq!(steps[commit_index].needs, vec!["release.prepare"]);
+    }
+
+    #[test]
+    fn release_plan_records_changelog_contract() {
+        let component = fixture_component();
+        let mut warnings = Vec::new();
+        let mut hints = Vec::new();
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            ..Default::default()
+        };
+        let changelog_plan = fixture_changelog_plan();
+
+        let steps = build_release_steps(
+            &component,
+            &[],
+            "1.0.0",
+            "1.0.1",
+            &changelog_plan,
+            &options,
+            None,
+            &mut warnings,
+            &mut hints,
+        )
+        .expect("steps");
+
+        let policy = steps
+            .iter()
+            .find(|step| step.id == "changelog.policy")
+            .expect("changelog policy step");
+        let generate = steps
+            .iter()
+            .find(|step| step.id == "changelog.generate")
+            .expect("changelog generate step");
+        let finalize = steps
+            .iter()
+            .find(|step| step.id == "changelog.finalize")
+            .expect("changelog finalize step");
+
+        assert_eq!(
+            policy.config.get("policy").and_then(|value| value.as_str()),
+            Some("generated")
+        );
+        assert_eq!(
+            policy.config.get("path").and_then(|value| value.as_str()),
+            Some("CHANGELOG.md")
+        );
+        assert_eq!(
+            generate
+                .config
+                .get("entry_count")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        assert_eq!(
+            finalize.config.get("mode").and_then(|value| value.as_str()),
+            Some("version-step")
+        );
+        assert_eq!(
+            finalize
+                .config
+                .get("entries")
+                .and_then(|value| value.as_object())
+                .and_then(|entries| entries.get("Fixed"))
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1)
+        );
     }
 
     #[test]
@@ -709,6 +844,7 @@ mod tests {
             &[],
             "1.0.0",
             "1.0.1",
+            &fixture_changelog_plan(),
             &options,
             None,
             &mut warnings,
@@ -731,18 +867,6 @@ mod tests {
     }
 
     #[test]
-    fn test_changelog_entries_to_json() {
-        let entries = std::collections::HashMap::from([(
-            "added".to_string(),
-            vec!["release plan previews".to_string()],
-        )]);
-
-        let json = changelog_entries_to_json(&entries);
-
-        assert_eq!(json["added"][0], "release plan previews");
-    }
-
-    #[test]
     fn test_github_release_applies() {
         let mut github_component = fixture_component();
         github_component.remote_url =
@@ -760,6 +884,19 @@ mod tests {
             id: "fixture".to_string(),
             local_path: "/tmp/fixture".to_string(),
             ..Default::default()
+        }
+    }
+
+    fn fixture_changelog_plan() -> ReleaseChangelogPlan {
+        ReleaseChangelogPlan {
+            policy: "generated".to_string(),
+            path: "CHANGELOG.md".to_string(),
+            dry_run: false,
+            entries: std::collections::HashMap::from([(
+                "Fixed".to_string(),
+                vec!["Correct release output".to_string()],
+            )]),
+            entry_count: 1,
         }
     }
 

@@ -19,10 +19,10 @@ use super::execution_dispatch::{
     execute_release_plan_step, release_step_is_show_stopper, ReleaseExecutionContext,
 };
 use super::pipeline_summary::{build_summary, derive_overall_status};
-use super::plan_steps::{build_preflight_steps, build_release_steps, changelog_entries_to_json};
+use super::plan_steps::{build_preflight_steps, build_release_steps};
 use super::types::{
-    ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseSemverCommit,
-    ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
+    ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult,
+    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -104,14 +104,14 @@ pub(crate) fn run_with_plan(
     ))
 }
 
-/// Read the auto-generated changelog entries embedded in the plan's dedicated
-/// changelog step. `plan()` computes them during validation and stashes them
-/// here so `run()` can hand them straight to [`executor::run_version`]
+/// Read the auto-generated changelog entries embedded in the plan's explicit
+/// finalization contract. `plan()` computes them during validation and stashes
+/// them here so `run()` can hand them straight to [`executor::run_version`]
 /// without recomputing.
 fn extract_pending_entries(
     plan: &ReleasePlan,
 ) -> Option<std::collections::HashMap<String, Vec<String>>> {
-    let changelog_step = plan.steps.iter().find(|s| s.id == "changelog.generate")?;
+    let changelog_step = plan.steps.iter().find(|s| s.id == "changelog.finalize")?;
     let value = changelog_step.config.get("entries")?;
     serde_json::from_value(value.clone()).ok()
 }
@@ -345,6 +345,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     let mut warnings = Vec::new();
     let mut hints = Vec::new();
+    let changelog_plan = build_changelog_plan(&component, options, pending_entries)?;
 
     let mut steps = build_preflight_steps(options, semver_recommendation.as_ref());
     steps.extend(build_release_steps(
@@ -352,24 +353,12 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         &extensions,
         &version_info.version,
         &new_version,
+        &changelog_plan,
         options,
         monorepo.as_ref(),
         &mut warnings,
         &mut hints,
     )?);
-
-    if let Some(changelog_step) = steps.iter_mut().find(|s| s.id == "changelog.generate") {
-        changelog_step.config.insert(
-            "entries".to_string(),
-            changelog_entries_to_json(&pending_entries),
-        );
-        changelog_step.config.insert(
-            "entry_count".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(
-                pending_entries.values().map(Vec::len).sum::<usize>() as u64,
-            )),
-        );
-    }
 
     if options.dry_run {
         hints.push("Dry run: no changes will be made".to_string());
@@ -382,6 +371,23 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         semver_recommendation,
         warnings,
         hints,
+    })
+}
+
+fn build_changelog_plan(
+    component: &Component,
+    options: &ReleaseOptions,
+    entries: std::collections::HashMap<String, Vec<String>>,
+) -> Result<ReleaseChangelogPlan> {
+    let path = changelog::resolve_changelog_path(component)?;
+    let entry_count = entries.values().map(Vec::len).sum();
+
+    Ok(ReleaseChangelogPlan {
+        policy: "generated".to_string(),
+        path: path.to_string_lossy().to_string(),
+        dry_run: options.dry_run,
+        entries,
+        entry_count,
     })
 }
 
