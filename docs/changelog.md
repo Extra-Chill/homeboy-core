@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.170.0] - 2026-05-12
+
+### Added
+- return executed release plans
+
+### Fixed
+- wire nested audit coverage tests
+- dedupe derived literal sites
+
 ## [0.169.0] - 2026-05-12
 
 ### Added
