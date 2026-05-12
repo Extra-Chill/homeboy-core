@@ -41,6 +41,20 @@ pub struct ReleaseSemverRecommendation {
     pub reasons: Vec<String>,
 }
 
+/// Explicit changelog contract carried by the release plan.
+///
+/// Changelog entries are generated during planning so dry-run output and real
+/// release execution share one source of truth. The release executor consumes
+/// this contract when the version step finalizes the changelog on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseChangelogPlan {
+    pub policy: String,
+    pub path: String,
+    pub dry_run: bool,
+    pub entries: HashMap<String, Vec<String>>,
+    pub entry_count: usize,
+}
+
 /// Run result for a single release. Shape is preserved from the pre-refactor
 /// `ReleaseRun { component_id, enabled, result: PipelineRunResult }` so `--json`
 /// consumers see no change.

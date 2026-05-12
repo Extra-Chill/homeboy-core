@@ -126,7 +126,9 @@ pub(super) fn execute_release_plan_step(
 
 fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
     (step.step_type.starts_with("preflight.") && step.step_type != "preflight.git_identity")
+        || step.step_type == "changelog.policy"
         || step.step_type == "changelog.generate"
+        || step.step_type == "changelog.finalize"
 }
 
 fn configure_git_identity(
@@ -218,7 +220,9 @@ mod tests {
             plan_step("preflight.audit"),
             plan_step("preflight.lint"),
             plan_step("preflight.test"),
+            plan_step("changelog.policy"),
             plan_step("changelog.generate"),
+            plan_step("changelog.finalize"),
         ];
 
         assert!(steps.iter().all(release_step_is_plan_only));
