@@ -23,14 +23,12 @@ use crate::release::changelog;
 use crate::version;
 
 use super::executor;
-use super::pipeline_capabilities::{get_publish_targets, has_prepare_capability};
 use super::pipeline_summary::{build_summary, derive_overall_status};
-use super::plan_steps::{
-    build_preflight_steps, build_release_steps, changelog_entries_to_json, github_release_applies,
-};
+use super::plan_steps::{build_preflight_steps, build_release_steps, changelog_entries_to_json};
 use super::types::{
-    ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseSemverCommit,
-    ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult, ReleaseStepStatus,
+    ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun, ReleaseRunResult,
+    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
+    ReleaseStepStatus,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -74,132 +72,169 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     let component = load_component(component_id, options)?;
     let extensions = resolve_extensions(&component)?;
     let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
-    let pending_entries = extract_pending_entries(&release_plan);
-
-    let mut state = ReleaseState::default();
+    let mut context = ReleaseExecutionContext {
+        component: &component,
+        extensions: &extensions,
+        component_id,
+        options,
+        pending_entries: extract_pending_entries(&release_plan),
+        state: ReleaseState::default(),
+        publish_failed: false,
+    };
     let mut results: Vec<ReleaseStepResult> = Vec::new();
 
-    // Helper: return early if the last step we pushed failed. Tag/push failures
-    // are genuinely show-stopping for the release so we bail; publish/github
-    // failures are handled below with their own per-target logic.
-    macro_rules! bail_on_failure {
-        () => {
-            if matches!(
-                results.last().map(|r| &r.status),
-                Some(ReleaseStepStatus::Failed)
-            ) {
+    for step in &release_plan.steps {
+        if let Some(result) = execute_release_plan_step(step, &mut context)? {
+            let should_stop = release_step_is_show_stopper(&result);
+            results.push(result);
+            if should_stop {
                 return Ok(finalize(component_id, results, monorepo.as_ref()));
             }
-        };
-    }
-
-    // 1. Version bump (+ optional changelog generation)
-    results.push(executor::run_version(
-        &component,
-        &mut state,
-        &options.bump_type,
-        pending_entries.as_ref(),
-    )?);
-    bail_on_failure!();
-
-    // 2. Optional release preparation. Extension-owned ecosystems can sync
-    //    generated release files after the version bump and before the commit.
-    if has_prepare_capability(&extensions) {
-        match executor::run_prepare(&extensions, &state, component_id, &component.local_path) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("release.prepare", "release.prepare", err)),
-        }
-        bail_on_failure!();
-    }
-
-    // 3. Git commit
-    results.push(executor::run_git_commit(&component, component_id, &state)?);
-    bail_on_failure!();
-
-    // 4. Optional packaging (runs BEFORE tag so build failures don't leave
-    //    orphan tags on the remote).
-    let has_publish_targets = !get_publish_targets(&extensions).is_empty();
-    let want_publish = !options.skip_publish && has_publish_targets;
-    if want_publish {
-        match executor::run_package(&extensions, &mut state, component_id, &component.local_path) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("package", "package", err)),
-        }
-        bail_on_failure!();
-    }
-
-    // 5. Git tag
-    let tag_name = match monorepo.as_ref() {
-        Some(ctx) => ctx.format_tag(state.version.as_deref().unwrap_or("")),
-        None => format!("v{}", state.version.as_deref().unwrap_or("")),
-    };
-    results.push(executor::run_git_tag(
-        &component,
-        component_id,
-        &mut state,
-        &tag_name,
-    )?);
-    bail_on_failure!();
-
-    // 6. Git push (commits + tags)
-    results.push(executor::run_git_push(&component, component_id)?);
-    bail_on_failure!();
-
-    // 7. GitHub Release (soft-fails on gh issues; skipped for non-GitHub remotes).
-    if !options.skip_github_release && github_release_applies(&component) {
-        match executor::run_github_release(&component, &state) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("github.release", "github.release", err)),
-        }
-    }
-
-    // 8. Publish to each configured target. Failures here mark the step failed
-    //    but don't halt — other targets may still succeed.
-    let mut publish_failed = false;
-    if want_publish {
-        for target in get_publish_targets(&extensions) {
-            match executor::run_publish(
-                &extensions,
-                &state,
-                component_id,
-                &component.local_path,
-                &target,
-            ) {
-                Ok(result) => {
-                    if matches!(result.status, ReleaseStepStatus::Failed) {
-                        publish_failed = true;
-                    }
-                    results.push(result);
-                }
-                Err(err) => {
-                    publish_failed = true;
-                    let step_id = format!("publish.{}", target);
-                    results.push(failed_result(&step_id, &step_id, err));
-                }
-            }
-        }
-    }
-
-    // 9. Cleanup staging dir. Skipped when --deploy is set (deploy needs the
-    //    build artifact) and when publishing was skipped entirely.
-    if want_publish && !options.deploy && !publish_failed {
-        match executor::run_cleanup(&component) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("cleanup", "cleanup", err)),
-        }
-    }
-
-    // 9. Post-release hooks (always run if configured — not gated by --skip-publish).
-    let post_release_hooks =
-        crate::engine::hooks::resolve_hooks(&component, crate::engine::hooks::events::POST_RELEASE);
-    if !post_release_hooks.is_empty() {
-        match executor::run_post_release(&component, &post_release_hooks) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("post_release", "post_release", err)),
         }
     }
 
     Ok(finalize(component_id, results, monorepo.as_ref()))
+}
+
+struct ReleaseExecutionContext<'a> {
+    component: &'a Component,
+    extensions: &'a [ExtensionManifest],
+    component_id: &'a str,
+    options: &'a ReleaseOptions,
+    pending_entries: Option<std::collections::HashMap<String, Vec<String>>>,
+    state: ReleaseState,
+    publish_failed: bool,
+}
+
+fn execute_release_plan_step(
+    step: &ReleasePlanStep,
+    context: &mut ReleaseExecutionContext,
+) -> Result<Option<ReleaseStepResult>> {
+    if matches!(step.status, ReleasePlanStatus::Disabled) || release_step_is_plan_only(step) {
+        return Ok(None);
+    }
+
+    match step.step_type.as_str() {
+        "version" => executor::run_version(
+            context.component,
+            &mut context.state,
+            &context.options.bump_type,
+            context.pending_entries.as_ref(),
+        )
+        .map(Some),
+        "release.prepare" => Ok(Some(
+            executor::run_prepare(
+                context.extensions,
+                &context.state,
+                context.component_id,
+                &context.component.local_path,
+            )
+            .unwrap_or_else(|err| failed_result("release.prepare", "release.prepare", err)),
+        )),
+        "git.commit" => {
+            executor::run_git_commit(context.component, context.component_id, &context.state)
+                .map(Some)
+        }
+        "package" => Ok(Some(
+            executor::run_package(
+                context.extensions,
+                &mut context.state,
+                context.component_id,
+                &context.component.local_path,
+            )
+            .unwrap_or_else(|err| failed_result("package", "package", err)),
+        )),
+        "git.tag" => {
+            let tag_name = step
+                .config
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("v{}", context.state.version.as_deref().unwrap_or("")));
+            executor::run_git_tag(
+                context.component,
+                context.component_id,
+                &mut context.state,
+                &tag_name,
+            )
+            .map(Some)
+        }
+        "git.push" => executor::run_git_push(context.component, context.component_id).map(Some),
+        "github.release" => Ok(Some(
+            executor::run_github_release(context.component, &context.state)
+                .unwrap_or_else(|err| failed_result("github.release", "github.release", err)),
+        )),
+        "cleanup" => {
+            if context.publish_failed {
+                return Ok(None);
+            }
+            Ok(Some(
+                executor::run_cleanup(context.component)
+                    .unwrap_or_else(|err| failed_result("cleanup", "cleanup", err)),
+            ))
+        }
+        "post_release" => {
+            let commands = step_config_string_array(step, "commands");
+            Ok(Some(
+                executor::run_post_release(context.component, &commands)
+                    .unwrap_or_else(|err| failed_result("post_release", "post_release", err)),
+            ))
+        }
+        step_type if step_type.starts_with("publish.") => {
+            let target = step_type.strip_prefix("publish.").unwrap_or_default();
+            let result = executor::run_publish(
+                context.extensions,
+                &context.state,
+                context.component_id,
+                &context.component.local_path,
+                target,
+            )
+            .unwrap_or_else(|err| {
+                context.publish_failed = true;
+                failed_result(step_type, step_type, err)
+            });
+
+            if matches!(result.status, ReleaseStepStatus::Failed) {
+                context.publish_failed = true;
+            }
+
+            Ok(Some(result))
+        }
+        _ => Err(Error::internal_unexpected(format!(
+            "release plan contains unsupported executable step '{}'",
+            step.step_type
+        ))),
+    }
+}
+
+fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
+    step.step_type.starts_with("preflight.")
+        || step.step_type == "changelog.generate"
+        || step.step_type == "deploy"
+}
+
+fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
+    if !matches!(result.status, ReleaseStepStatus::Failed) {
+        return false;
+    }
+
+    matches!(
+        result.step_type.as_str(),
+        "version" | "release.prepare" | "git.commit" | "package" | "git.tag" | "git.push"
+    )
+}
+
+fn step_config_string_array(step: &ReleasePlanStep, key: &str) -> Vec<String> {
+    step.config
+        .get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Convert a step error into a failed `ReleaseStepResult`.
@@ -1229,6 +1264,7 @@ mod tests {
     use crate::component::Component;
     use crate::extension::RunnerOutput;
     use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
+    use crate::release::types::ReleaseOptions;
 
     fn commit(subject: &str, category: CommitCategory) -> CommitInfo {
         CommitInfo {
@@ -1523,6 +1559,102 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn release_dispatch_treats_preflight_changelog_and_deploy_as_plan_only() {
+        let steps = [
+            crate::release::ReleasePlanStep {
+                id: "preflight.quality".to_string(),
+                step_type: "preflight.quality".to_string(),
+                label: None,
+                needs: vec![],
+                config: std::collections::HashMap::new(),
+                status: crate::release::ReleasePlanStatus::Ready,
+                missing: vec![],
+            },
+            crate::release::ReleasePlanStep {
+                id: "changelog.generate".to_string(),
+                step_type: "changelog.generate".to_string(),
+                label: None,
+                needs: vec![],
+                config: std::collections::HashMap::new(),
+                status: crate::release::ReleasePlanStatus::Ready,
+                missing: vec![],
+            },
+            crate::release::ReleasePlanStep {
+                id: "deploy".to_string(),
+                step_type: "deploy".to_string(),
+                label: None,
+                needs: vec![],
+                config: std::collections::HashMap::new(),
+                status: crate::release::ReleasePlanStatus::Ready,
+                missing: vec![],
+            },
+        ];
+
+        assert!(steps.iter().all(super::release_step_is_plan_only));
+    }
+
+    #[test]
+    fn release_dispatch_skips_cleanup_after_publish_failure() {
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: "/tmp/fixture".to_string(),
+            ..Default::default()
+        };
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            ..Default::default()
+        };
+        let mut context = super::ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            pending_entries: None,
+            state: super::ReleaseState::default(),
+            publish_failed: true,
+        };
+        let step = crate::release::ReleasePlanStep {
+            id: "cleanup".to_string(),
+            step_type: "cleanup".to_string(),
+            label: None,
+            needs: vec![],
+            config: std::collections::HashMap::new(),
+            status: crate::release::ReleasePlanStatus::Ready,
+            missing: vec![],
+        };
+
+        let result = super::execute_release_plan_step(&step, &mut context).expect("dispatch");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn release_dispatch_keeps_only_core_failures_show_stopping() {
+        let version_failure = crate::release::ReleaseStepResult {
+            id: "version".to_string(),
+            step_type: "version".to_string(),
+            status: crate::release::ReleaseStepStatus::Failed,
+            missing: vec![],
+            warnings: vec![],
+            hints: vec![],
+            data: None,
+            error: Some("failed".to_string()),
+        };
+        let publish_failure = crate::release::ReleaseStepResult {
+            id: "publish.crates".to_string(),
+            step_type: "publish.crates".to_string(),
+            status: crate::release::ReleaseStepStatus::Failed,
+            missing: vec![],
+            warnings: vec![],
+            hints: vec![],
+            data: None,
+            error: Some("failed".to_string()),
+        };
+
+        assert!(super::release_step_is_show_stopper(&version_failure));
+        assert!(!super::release_step_is_show_stopper(&publish_failure));
     }
 
     fn component_with_changelog_target(
