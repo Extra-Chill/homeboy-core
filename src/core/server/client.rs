@@ -221,7 +221,30 @@ impl SshClient {
         }
 
         let args = self.build_session_connect_args()?;
-        Ok(self.run_managed_session_command(args, true))
+        let output = self.run_managed_session_command(args, true);
+        if output.exit_code == 0 {
+            return Ok(output);
+        }
+
+        Ok(self.with_per_command_connect_fallback(output, self.execute("true")))
+    }
+
+    fn with_per_command_connect_fallback(
+        &self,
+        mut output: ManagedSshSessionOutput,
+        probe: CommandOutput,
+    ) -> ManagedSshSessionOutput {
+        if !probe.success {
+            return output;
+        }
+
+        output.live = false;
+        output.exit_code = 0;
+        output.stderr = append_session_note(
+            output.stderr,
+            "Persistent SSH control-master setup failed, but per-command SSH succeeded. This server may close master sessions after authentication; Homeboy will continue without a live control socket.",
+        );
+        output
     }
 
     pub fn check_managed_session(&self) -> Result<ManagedSshSessionOutput> {
@@ -431,6 +454,14 @@ impl SshClient {
             Err(_) => -1,
         }
     }
+}
+
+fn append_session_note(mut stderr: String, note: &str) -> String {
+    if !stderr.is_empty() && !stderr.ends_with('\n') {
+        stderr.push('\n');
+    }
+    stderr.push_str(note);
+    stderr
 }
 
 pub fn execute_local_command(command: &str) -> CommandOutput {
@@ -1364,6 +1395,57 @@ mod tests {
 
         assert!(!output.live);
         assert_eq!(output.exit_code, 0);
+    }
+
+    #[test]
+    fn managed_session_connect_reports_per_command_fallback() {
+        let client = local_managed_session_client();
+        let master_output = ManagedSshSessionOutput {
+            session: client.output_session_config(),
+            live: false,
+            stdout: String::new(),
+            stderr: "Connection closed by 192.0.96.181 port 22".to_string(),
+            exit_code: 255,
+        };
+        let probe_output = CommandOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            success: true,
+            exit_code: 0,
+            child_resource: None,
+        };
+
+        let output = client.with_per_command_connect_fallback(master_output, probe_output);
+
+        assert!(!output.live);
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stderr.contains("Connection closed"));
+        assert!(output.stderr.contains("per-command SSH succeeded"));
+    }
+
+    #[test]
+    fn managed_session_connect_keeps_failure_when_probe_fails() {
+        let client = local_managed_session_client();
+        let master_output = ManagedSshSessionOutput {
+            session: client.output_session_config(),
+            live: false,
+            stdout: String::new(),
+            stderr: "Connection closed by host".to_string(),
+            exit_code: 255,
+        };
+        let probe_output = CommandOutput {
+            stdout: String::new(),
+            stderr: "Permission denied".to_string(),
+            success: false,
+            exit_code: 255,
+            child_resource: None,
+        };
+
+        let output = client.with_per_command_connect_fallback(master_output, probe_output);
+
+        assert!(!output.live);
+        assert_eq!(output.exit_code, 255);
+        assert_eq!(output.stderr, "Connection closed by host");
     }
 
     #[test]
