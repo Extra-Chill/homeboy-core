@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.167.0] - 2026-05-12
+
+### Added
+- add managed SSH server sessions
+
+### Fixed
+- scope rename duplicate identifier warnings
+
 ## [0.166.0] - 2026-05-12
 
 ### Added
