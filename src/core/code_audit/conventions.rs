@@ -335,6 +335,11 @@ pub fn discover_conventions_with_config(
 
     let total = fingerprints.len();
     let threshold = (total as f32 * 0.6).ceil() as usize;
+    let typed_count = fingerprints
+        .iter()
+        .filter(|fp| declares_type_subject(fp))
+        .count();
+    let typed_subject_convention = typed_count >= threshold;
 
     // Count method frequency
     let mut method_counts: HashMap<String, usize> = HashMap::new();
@@ -437,6 +442,10 @@ pub fn discover_conventions_with_config(
     let mut outliers = Vec::new();
 
     for fp in fingerprints {
+        if typed_subject_convention && !declares_type_subject(fp) {
+            continue;
+        }
+
         // A file is "helper-like" only if NONE of its types match the convention suffix.
         // This prevents false positives where the primary type_name doesn't match but
         // the file contains another type that does (e.g., VersionOutput + VersionArgs).
@@ -617,6 +626,10 @@ fn declared_trait_name(fp: &FileFingerprint) -> Option<String> {
     re.captures(&fp.content)
         .and_then(|cap| cap.get(1))
         .map(|m| m.as_str().to_string())
+}
+
+fn declares_type_subject(fp: &FileFingerprint) -> bool {
+    fp.type_name.is_some() || !fp.type_names.is_empty()
 }
 
 fn is_utility_like_file(fp: &FileFingerprint, audit_config: &AuditConfig) -> bool {
@@ -1177,6 +1190,64 @@ mod tests {
                 .all(|d| d.kind != AuditFinding::MissingRegistration
                     && d.kind != AuditFinding::MissingMethod),
             "utility classes should not be treated as runtime endpoint registrants"
+        );
+    }
+
+    #[test]
+    fn typeless_files_do_not_need_type_subject_methods_or_registration() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "abilities/CreateAbility.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                registrations: vec!["runtime_dispatch".to_string()],
+                type_name: Some("CreateAbility".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/UpdateAbility.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                registrations: vec!["runtime_dispatch".to_string()],
+                type_name: Some("UpdateAbility".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/DeleteAbility.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                registrations: vec!["runtime_dispatch".to_string()],
+                type_name: Some("DeleteAbility".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/bootstrap.php".to_string(),
+                language: Language::Php,
+                methods: vec![],
+                type_name: None,
+                type_names: vec![],
+                ..Default::default()
+            },
+        ];
+
+        let convention = discover_conventions_with_config(
+            "Abilities",
+            "abilities/*.php",
+            &fingerprints,
+            &AuditConfig::default(),
+        )
+        .unwrap();
+
+        assert!(
+            convention.outliers.is_empty(),
+            "typeless composition files should not inherit type-subject conventions: {:?}",
+            convention.outliers
+        );
+        assert!(
+            !convention
+                .conforming
+                .contains(&"abilities/bootstrap.php".to_string()),
+            "typeless composition files are skipped rather than counted as convention members"
         );
     }
 
