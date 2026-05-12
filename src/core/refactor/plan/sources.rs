@@ -222,6 +222,11 @@ struct ReleaseOwnedFileSnapshot {
     bytes: Vec<u8>,
 }
 
+struct LintFixScopeOutcome {
+    changed_files: Vec<String>,
+    warnings: Vec<String>,
+}
+
 pub fn collect_refactor_sources(
     request: RefactorSourceRequest,
 ) -> crate::Result<RefactorSourceRun> {
@@ -907,6 +912,60 @@ fn restore_release_owned_files(
     Ok(())
 }
 
+fn constrain_lint_fix_changes(
+    root: &Path,
+    selected_files: Option<&[String]>,
+    before_dirty: &[String],
+    after_dirty: Vec<String>,
+    release_owned: &[ReleaseOwnedFileSnapshot],
+) -> crate::Result<LintFixScopeOutcome> {
+    let before_set: HashSet<&str> = before_dirty.iter().map(|file| file.as_str()).collect();
+    let release_owned_set: HashSet<&str> = release_owned
+        .iter()
+        .map(|snapshot| snapshot.relative.as_str())
+        .collect();
+    let newly_changed: Vec<String> = after_dirty
+        .into_iter()
+        .filter(|file| {
+            !before_set.contains(file.as_str()) && !release_owned_set.contains(file.as_str())
+        })
+        .collect();
+
+    let Some(selected_files) = selected_files else {
+        return Ok(LintFixScopeOutcome {
+            changed_files: newly_changed,
+            warnings: Vec::new(),
+        });
+    };
+
+    let selected_set: HashSet<&str> = selected_files.iter().map(|file| file.as_str()).collect();
+    let mut allowed = Vec::new();
+    let mut out_of_scope = Vec::new();
+
+    for file in newly_changed {
+        if selected_set.contains(file.as_str()) {
+            allowed.push(file);
+        } else {
+            out_of_scope.push(file);
+        }
+    }
+
+    let mut warnings = Vec::new();
+    if !out_of_scope.is_empty() {
+        git::discard_worktree_changes(&root.to_string_lossy(), &out_of_scope)?;
+        warnings.push(format!(
+            "Discarded {} lint autofix change(s) outside selected scope: {}",
+            out_of_scope.len(),
+            out_of_scope.join(", ")
+        ));
+    }
+
+    Ok(LintFixScopeOutcome {
+        changed_files: allowed,
+        warnings,
+    })
+}
+
 fn release_owned_file_paths(component: &Component) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
 
@@ -1041,7 +1100,7 @@ fn run_lint_stage(
     // The engine controls fix application. The extension's fix-mode
     // invocation runs ONLY the fixers, not the diagnostic pass. The engine
     // tracks what changed via undo snapshots and git diff.
-    let (stage_changed_files, fix_results) = if write && !lint_findings.is_empty() {
+    let (stage_changed_files, fix_results, stage_warnings) = if write && !lint_findings.is_empty() {
         let before_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
 
         // Save undo snapshot before applying lint fixes.
@@ -1066,20 +1125,22 @@ fn run_lint_stage(
         fix_output?;
 
         let after_dirty = git::get_dirty_files(&root_str).unwrap_or_default();
-        let before_set: HashSet<&str> = before_dirty.iter().map(|s| s.as_str()).collect();
-        let release_owned_set: HashSet<&str> = release_owned
-            .iter()
-            .map(|snapshot| snapshot.relative.as_str())
-            .collect();
-        let changed: Vec<String> = after_dirty
-            .into_iter()
-            .filter(|f| !before_set.contains(f.as_str()) && !release_owned_set.contains(f.as_str()))
-            .collect();
+        let scope_outcome = constrain_lint_fix_changes(
+            root,
+            selected_files,
+            &before_dirty,
+            after_dirty,
+            &release_owned,
+        )?;
 
         let fix_results = fix_sidecars.consume_fix_results();
-        (changed, fix_results)
+        (
+            scope_outcome.changed_files,
+            fix_results,
+            scope_outcome.warnings,
+        )
     } else {
-        (Vec::new(), Vec::new())
+        (Vec::new(), Vec::new(), Vec::new())
     };
 
     let edit_count = fix_results.len();
@@ -1095,7 +1156,7 @@ fn run_lint_stage(
             detected_findings: Some(lint_findings.len()),
             changed_files: stage_changed_files,
             fix_summary: auto::summarize_optional_fix_results(&fix_results),
-            warnings: Vec::new(),
+            warnings: stage_warnings,
         },
         fix_results,
     })
@@ -1372,6 +1433,7 @@ mod tests {
     use super::*;
     use crate::component::{Component, VersionTarget};
     use std::fs;
+    use std::process::Command;
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1395,6 +1457,20 @@ mod tests {
             remote_path: String::new(),
             ..Default::default()
         }
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .expect("git command should run");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -1639,6 +1715,47 @@ mod tests {
             "before\n"
         );
         assert!(!root.join("Cargo.toml").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lint_fix_scope_discards_changes_outside_selected_files() {
+        let root = tmp_dir("lint-fix-scope");
+        fs::create_dir_all(root.join("src")).unwrap();
+        run_git(&root, &["init", "-q"]);
+        run_git(&root, &["config", "user.email", "test@example.com"]);
+        run_git(&root, &["config", "user.name", "test"]);
+
+        fs::write(root.join("src/scoped.rs"), "before scoped\n").unwrap();
+        fs::write(root.join("src/unrelated.rs"), "before unrelated\n").unwrap();
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-q", "-m", "init"]);
+
+        fs::write(root.join("src/scoped.rs"), "after scoped\n").unwrap();
+        fs::write(root.join("src/unrelated.rs"), "after unrelated\n").unwrap();
+        fs::write(root.join("src/generated.rs"), "generated\n").unwrap();
+
+        let after_dirty = git::get_dirty_files(&root.to_string_lossy()).unwrap();
+        let selected_files = vec!["src/scoped.rs".to_string()];
+        let outcome =
+            constrain_lint_fix_changes(&root, Some(&selected_files), &[], after_dirty, &[])
+                .unwrap();
+
+        assert_eq!(outcome.changed_files, vec!["src/scoped.rs"]);
+        assert_eq!(
+            fs::read_to_string(root.join("src/scoped.rs")).unwrap(),
+            "after scoped\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("src/unrelated.rs")).unwrap(),
+            "before unrelated\n"
+        );
+        assert!(!root.join("src/generated.rs").exists());
+        assert!(outcome
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("outside selected scope")));
 
         let _ = fs::remove_dir_all(root);
     }

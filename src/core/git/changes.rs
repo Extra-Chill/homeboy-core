@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::path::{Component, Path};
 
 use serde::Serialize;
 
@@ -242,6 +243,79 @@ pub fn get_dirty_files(path: &str) -> Result<Vec<String>> {
     files.extend(changes.unstaged);
     files.extend(changes.untracked);
     Ok(files.into_iter().collect())
+}
+
+/// Discard worktree changes for repo-relative files.
+///
+/// Tracked files are restored from `HEAD`; untracked files created by the
+/// operation are removed. Callers should only pass files they just dirtied.
+pub fn discard_worktree_changes(path: &str, files: &[String]) -> Result<()> {
+    for file in files {
+        validate_repo_relative_path(file)?;
+
+        if is_tracked_file(path, file)? {
+            let output = execute_git(path, &["checkout", "--", file])
+                .map_err(|e| Error::git_command_failed(e.to_string()))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(Error::git_command_failed(format!(
+                    "git checkout -- {} failed: {}",
+                    file,
+                    stderr.trim()
+                )));
+            }
+        } else {
+            let target = Path::new(path).join(file);
+            if target.is_dir() {
+                std::fs::remove_dir_all(&target).map_err(|error| {
+                    Error::internal_io(
+                        error.to_string(),
+                        Some(format!(
+                            "Failed to remove untracked directory {}",
+                            target.display()
+                        )),
+                    )
+                })?;
+            } else if target.exists() {
+                std::fs::remove_file(&target).map_err(|error| {
+                    Error::internal_io(
+                        error.to_string(),
+                        Some(format!(
+                            "Failed to remove untracked file {}",
+                            target.display()
+                        )),
+                    )
+                })?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn is_tracked_file(path: &str, file: &str) -> Result<bool> {
+    let output = execute_git(path, &["ls-files", "--error-unmatch", "--", file])
+        .map_err(|e| Error::git_command_failed(e.to_string()))?;
+    Ok(output.status.success())
+}
+
+fn validate_repo_relative_path(file: &str) -> Result<()> {
+    let path = Path::new(file);
+    let safe = !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+
+    if safe {
+        Ok(())
+    } else {
+        Err(Error::validation_invalid_argument(
+            "file",
+            format!("Expected repo-relative path, got {}", file),
+            None,
+            None,
+        ))
+    }
 }
 
 /// Parse `git diff --name-only` output into a list of file paths.
