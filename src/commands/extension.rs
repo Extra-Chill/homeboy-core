@@ -70,6 +70,9 @@ enum ExtensionCommand {
         /// Override extension id
         #[arg(long)]
         id: Option<String>,
+        /// Git ref to check out for URL installs (branch, tag, or commit)
+        #[arg(long = "ref", alias = "revision")]
+        revision: Option<String>,
         /// Replace an existing extension install/link
         #[arg(long)]
         replace: bool,
@@ -176,8 +179,9 @@ pub fn run(
         ExtensionCommand::Install {
             source,
             id,
+            revision,
             replace,
-        } => install_extension(&source, id, replace),
+        } => install_extension(&source, id, revision, replace),
         ExtensionCommand::Relink {
             extension_id,
             source,
@@ -521,10 +525,12 @@ fn run_extension(
 fn install_extension(
     source: &str,
     id: Option<String>,
+    revision: Option<String>,
     replace: bool,
 ) -> CmdResult<ExtensionOutput> {
     if replace {
-        let result = homeboy::extension::replace(source, id.as_deref())?;
+        let result =
+            homeboy::extension::replace_with_revision(source, id.as_deref(), revision.as_deref())?;
         return Ok((
             ExtensionOutput::Replace {
                 extension_id: result.extension_id,
@@ -538,7 +544,8 @@ fn install_extension(
         ));
     }
 
-    let result = homeboy::extension::install(source, id.as_deref())?;
+    let result =
+        homeboy::extension::install_with_revision(source, id.as_deref(), revision.as_deref())?;
     let linked = is_extension_linked(&result.extension_id);
 
     Ok((

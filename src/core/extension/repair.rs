@@ -22,8 +22,16 @@ pub struct ReplaceResult {
 }
 
 pub fn replace(source: &str, id_override: Option<&str>) -> Result<ReplaceResult> {
+    replace_with_revision(source, id_override, None)
+}
+
+pub fn replace_with_revision(
+    source: &str,
+    id_override: Option<&str>,
+    revision: Option<&str>,
+) -> Result<ReplaceResult> {
     if is_git_url(source) {
-        replace_from_url(source, id_override)
+        replace_from_url(source, id_override, revision)
     } else {
         replace_from_path(source, id_override, false)
     }
@@ -33,7 +41,11 @@ pub fn relink(extension_id: &str, source: &str) -> Result<ReplaceResult> {
     replace_from_path(source, Some(extension_id), true)
 }
 
-fn replace_from_url(url: &str, id_override: Option<&str>) -> Result<ReplaceResult> {
+fn replace_from_url(
+    url: &str,
+    id_override: Option<&str>,
+    revision: Option<&str>,
+) -> Result<ReplaceResult> {
     let extension_id = match id_override {
         Some(id) => slugify_id(id)?,
         None => derive_id_from_url(url)?,
@@ -56,7 +68,7 @@ fn replace_from_url(url: &str, id_override: Option<&str>) -> Result<ReplaceResul
     clean_replace_temp(&staged_dir)?;
     clean_replace_temp(&backup_dir)?;
 
-    git::clone_repo(url, &clone_dir)?;
+    git::clone_repo_at_ref(url, &clone_dir, revision)?;
     let source_revision = get_short_head_revision(&clone_dir);
 
     let result = resolve_cloned_extension(&clone_dir, &extension_id, &staged_dir, url);

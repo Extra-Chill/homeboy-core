@@ -15,6 +15,23 @@ pub fn clone_repo(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Clone a git repository to a target directory and check out a requested ref.
+pub fn clone_repo_at_ref(url: &str, target_dir: &Path, revision: Option<&str>) -> Result<()> {
+    clone_repo(url, target_dir)?;
+
+    if let Some(revision) = revision {
+        command::run_in(
+            &target_dir.to_string_lossy(),
+            "git",
+            &["checkout", "--quiet", revision],
+            "git checkout",
+        )
+        .map_err(|e| Error::git_command_failed(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
 /// Pull latest changes in a git repository.
 pub fn pull_repo(repo_dir: &Path) -> Result<()> {
     command::run_in(&repo_dir.to_string_lossy(), "git", &["pull"], "git pull")

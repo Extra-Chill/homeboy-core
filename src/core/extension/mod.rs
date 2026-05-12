@@ -58,11 +58,11 @@ pub use scope::ExtensionScope;
 // Re-export lifecycle types and functions
 pub use lifecycle::source_metadata::SourceMetadataRepair;
 pub use lifecycle::{
-    check_update_available, derive_id_from_url, install, install_for_component, is_git_url,
-    read_source_revision, slugify_id, uninstall, update, InstallForComponentResult, InstallResult,
-    UpdateAvailable, UpdateResult,
+    check_update_available, derive_id_from_url, install, install_for_component,
+    install_with_revision, is_git_url, read_source_revision, slugify_id, uninstall, update,
+    InstallForComponentResult, InstallResult, UpdateAvailable, UpdateResult,
 };
-pub use repair::{relink, replace, ReplaceResult};
+pub use repair::{relink, replace, replace_with_revision, ReplaceResult};
 
 pub(crate) fn stderr_tail(stderr: &str) -> String {
     const MAX_LINES: usize = 20;
