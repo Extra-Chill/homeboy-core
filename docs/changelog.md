@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.173.0] - 2026-05-12
+
+### Added
+- execute default branch release preflight
+- execute release changelog finalization
+
+### Changed
+- Support pinned extension installs
+
+### Fixed
+- surface unresolved triage targets
+
 ## [0.172.0] - 2026-05-12
 
 ### Added
