@@ -23,14 +23,14 @@ use crate::release::changelog;
 use crate::version;
 
 use super::executor;
-use super::pipeline_capabilities::{
-    get_publish_targets, has_package_capability, has_prepare_capability,
-};
+use super::pipeline_capabilities::{get_publish_targets, has_prepare_capability};
 use super::pipeline_summary::{build_summary, derive_overall_status};
+use super::plan_steps::{
+    build_preflight_steps, build_release_steps, changelog_entries_to_json, github_release_applies,
+};
 use super::types::{
-    ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseRun, ReleaseRunResult,
-    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
-    ReleaseStepStatus,
+    ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseSemverCommit,
+    ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult, ReleaseStepStatus,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -216,15 +216,15 @@ fn failed_result(id: &str, step_type: &str, err: Error) -> ReleaseStepResult {
     }
 }
 
-/// Read the auto-generated changelog entries embedded in the plan's `version`
-/// step. `plan()` computes them during validation and stashes them here so
-/// `execute()` can hand them straight to [`executor::run_version`] without
-/// recomputing.
+/// Read the auto-generated changelog entries embedded in the plan's dedicated
+/// changelog step. `plan()` computes them during validation and stashes them
+/// here so `execute()` can hand them straight to [`executor::run_version`]
+/// without recomputing.
 fn extract_pending_entries(
     plan: &ReleasePlan,
 ) -> Option<std::collections::HashMap<String, Vec<String>>> {
-    let version_step = plan.steps.iter().find(|s| s.id == "version")?;
-    let value = version_step.config.get("changelog_entries")?;
+    let changelog_step = plan.steps.iter().find(|s| s.id == "changelog.generate")?;
+    let value = changelog_step.config.get("entries")?;
     serde_json::from_value(value.clone()).ok()
 }
 
@@ -438,7 +438,8 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let mut warnings = Vec::new();
     let mut hints = Vec::new();
 
-    let mut steps = build_release_steps(
+    let mut steps = build_preflight_steps(options);
+    steps.extend(build_release_steps(
         &component,
         &extensions,
         &version_info.version,
@@ -447,18 +448,19 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         monorepo.as_ref(),
         &mut warnings,
         &mut hints,
-    )?;
+    )?);
 
-    // Embed the generated changelog entries in the version step config so the
-    // executor can finalize them directly into a `## [X.Y.Z]` section — no
-    // `## Unreleased` round-trip.
-    if !pending_entries.is_empty() {
-        if let Some(version_step) = steps.iter_mut().find(|s| s.id == "version") {
-            version_step.config.insert(
-                "changelog_entries".to_string(),
-                changelog_entries_to_json(&pending_entries),
-            );
-        }
+    if let Some(changelog_step) = steps.iter_mut().find(|s| s.id == "changelog.generate") {
+        changelog_step.config.insert(
+            "entries".to_string(),
+            changelog_entries_to_json(&pending_entries),
+        );
+        changelog_step.config.insert(
+            "entry_count".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                pending_entries.values().map(Vec::len).sum::<usize>() as u64,
+            )),
+        );
     }
 
     if options.dry_run {
@@ -1006,275 +1008,6 @@ fn group_commits_for_changelog(
     entries_by_type
 }
 
-/// Serialize changelog entries to JSON for embedding in step config.
-fn changelog_entries_to_json(
-    entries: &std::collections::HashMap<String, Vec<String>>,
-) -> serde_json::Value {
-    serde_json::to_value(entries).unwrap_or_default()
-}
-
-/// Return true if this component should get a GitHub Release created.
-///
-/// Resolves the remote URL from the component config (preferred) or from
-/// `git remote get-url origin` in the component's local_path, then parses
-/// it as a GitHub URL. Non-GitHub remotes (GitLab, self-hosted, etc.) fall
-/// through cleanly — the step simply isn't added to the plan.
-fn github_release_applies(component: &Component) -> bool {
-    let remote_url = component.remote_url.clone().or_else(|| {
-        crate::deploy::release_download::detect_remote_url(std::path::Path::new(
-            &component.local_path,
-        ))
-    });
-
-    remote_url
-        .as_deref()
-        .and_then(crate::deploy::release_download::parse_github_url)
-        .is_some()
-}
-
-/// Build all release steps: core steps (non-configurable) + publish steps (extension-derived).
-fn build_release_steps(
-    component: &Component,
-    extensions: &[ExtensionManifest],
-    current_version: &str,
-    new_version: &str,
-    options: &ReleaseOptions,
-    monorepo: Option<&git::MonorepoContext>,
-    warnings: &mut Vec<String>,
-    _hints: &mut Vec<String>,
-) -> Result<Vec<ReleasePlanStep>> {
-    let mut steps = Vec::new();
-    let publish_targets = get_publish_targets(extensions);
-
-    // === WARNING: No package capability ===
-    if !publish_targets.is_empty() && !has_package_capability(extensions) {
-        warnings.push(
-            "Publish targets derived from extensions but no extension provides 'release.package'. \
-             Add an extension that provides packaging."
-                .to_string(),
-        );
-    }
-
-    // === CORE STEPS (non-configurable, always present) ===
-
-    // 1. Version bump
-    steps.push(ReleasePlanStep {
-        id: "version".to_string(),
-        step_type: "version".to_string(),
-        label: Some(format!(
-            "Bump version {} → {} ({})",
-            current_version, new_version, options.bump_type
-        )),
-        needs: vec![],
-        config: {
-            let mut config = std::collections::HashMap::new();
-            config.insert(
-                "bump".to_string(),
-                serde_json::Value::String(options.bump_type.clone()),
-            );
-            config.insert(
-                "from".to_string(),
-                serde_json::Value::String(current_version.to_string()),
-            );
-            config.insert(
-                "to".to_string(),
-                serde_json::Value::String(new_version.to_string()),
-            );
-            config
-        },
-        status: ReleasePlanStatus::Ready,
-        missing: vec![],
-    });
-
-    let commit_needs = if has_prepare_capability(extensions) {
-        steps.push(ReleasePlanStep {
-            id: "release.prepare".to_string(),
-            step_type: "release.prepare".to_string(),
-            label: Some("Prepare release files".to_string()),
-            needs: vec!["version".to_string()],
-            config: std::collections::HashMap::new(),
-            status: ReleasePlanStatus::Ready,
-            missing: vec![],
-        });
-        vec!["release.prepare".to_string()]
-    } else {
-        vec!["version".to_string()]
-    };
-
-    // 2. Git commit
-    steps.push(ReleasePlanStep {
-        id: "git.commit".to_string(),
-        step_type: "git.commit".to_string(),
-        label: Some(format!("Commit release: v{}", new_version)),
-        needs: commit_needs,
-        config: std::collections::HashMap::new(),
-        status: ReleasePlanStatus::Ready,
-        missing: vec![],
-    });
-
-    // === PUBLISH STEPS (extension-derived, skipped with --skip-publish) ===
-    //
-    // Package runs BEFORE git.tag + git.push so that build failures don't
-    // leave orphan tags on the remote. The order is:
-    //   version → git.commit → package → git.tag → git.push → publish → cleanup
-    //
-    // If the build fails: the version is committed locally but no tag exists
-    // and nothing is pushed. The user can `git reset HEAD~1` to undo.
-    // If the build succeeds: tag + push + publish proceed normally.
-
-    let tag_needs = if !publish_targets.is_empty() && !options.skip_publish {
-        // 3. Package (produces artifacts — runs before tagging)
-        steps.push(ReleasePlanStep {
-            id: "package".to_string(),
-            step_type: "package".to_string(),
-            label: Some("Package release artifacts".to_string()),
-            needs: vec!["git.commit".to_string()],
-            config: std::collections::HashMap::new(),
-            status: ReleasePlanStatus::Ready,
-            missing: vec![],
-        });
-        vec!["package".to_string()]
-    } else {
-        vec!["git.commit".to_string()]
-    };
-
-    // 4. Git tag (after package succeeds, or after commit if no package)
-    let tag_name = match monorepo {
-        Some(ctx) => ctx.format_tag(new_version),
-        None => format!("v{}", new_version),
-    };
-    steps.push(ReleasePlanStep {
-        id: "git.tag".to_string(),
-        step_type: "git.tag".to_string(),
-        label: Some(format!("Tag {}", tag_name)),
-        needs: tag_needs,
-        config: {
-            let mut config = std::collections::HashMap::new();
-            config.insert("name".to_string(), serde_json::Value::String(tag_name));
-            config
-        },
-        status: ReleasePlanStatus::Ready,
-        missing: vec![],
-    });
-
-    // 5. Git push (commits AND tags)
-    steps.push(ReleasePlanStep {
-        id: "git.push".to_string(),
-        step_type: "git.push".to_string(),
-        label: Some("Push to remote".to_string()),
-        needs: vec!["git.tag".to_string()],
-        config: {
-            let mut config = std::collections::HashMap::new();
-            config.insert("tags".to_string(), serde_json::Value::Bool(true));
-            config
-        },
-        status: ReleasePlanStatus::Ready,
-        missing: vec![],
-    });
-
-    // 5a. GitHub Release (create tag+notes on github.com)
-    // Runs in parallel with publish/cleanup — it only needs the tag to be on
-    // the remote. Fails soft when `gh` isn't installed or authenticated.
-    // Skipped entirely for non-GitHub remotes (no remote_url, or non-github URL).
-    if !options.skip_github_release && github_release_applies(component) {
-        steps.push(ReleasePlanStep {
-            id: "github.release".to_string(),
-            step_type: "github.release".to_string(),
-            label: Some("Create GitHub Release".to_string()),
-            needs: vec!["git.push".to_string()],
-            config: std::collections::HashMap::new(),
-            status: ReleasePlanStatus::Ready,
-            missing: vec![],
-        });
-    }
-
-    let mut publish_step_ids: Vec<String> = Vec::new();
-
-    if !publish_targets.is_empty() && !options.skip_publish {
-        // 6. Publish steps (all run independently after git.push)
-        // Package already ran before tagging; publish needs the push to have
-        // completed (e.g., crates.io/Homebrew need the tag on the remote).
-        for target in &publish_targets {
-            let step_id = format!("publish.{}", target);
-            let step_type = format!("publish.{}", target);
-
-            publish_step_ids.push(step_id.clone());
-            steps.push(ReleasePlanStep {
-                id: step_id,
-                step_type,
-                label: Some(format!("Publish to {}", target)),
-                needs: vec!["git.push".to_string()],
-                config: std::collections::HashMap::new(),
-                status: ReleasePlanStatus::Ready,
-                missing: vec![],
-            });
-        }
-
-        // 7. Cleanup step (runs after all publish steps)
-        // Skip cleanup when --deploy is pending — the deploy step needs the
-        // build artifact (ZIP) that cleanup would delete. Cleanup runs after
-        // deployment completes instead.
-        if !options.deploy {
-            steps.push(ReleasePlanStep {
-                id: "cleanup".to_string(),
-                step_type: "cleanup".to_string(),
-                label: Some("Clean up release artifacts".to_string()),
-                needs: publish_step_ids.clone(),
-                config: std::collections::HashMap::new(),
-                status: ReleasePlanStatus::Ready,
-                missing: vec![],
-            });
-        }
-    } else if options.skip_publish && !publish_targets.is_empty() {
-        log_status!("release", "Skipping publish/package steps (--skip-publish)");
-    }
-
-    // === POST-RELEASE STEP (optional, runs after everything else) ===
-    // Always runs when hooks are configured — NOT gated on --skip-publish.
-    // Post-release hooks (e.g., moving floating tags) are distinct from publish
-    // targets (crates.io, npm, etc.). --skip-publish only skips publish/package steps.
-    let post_release_hooks =
-        crate::engine::hooks::resolve_hooks(component, crate::engine::hooks::events::POST_RELEASE);
-    if !post_release_hooks.is_empty() {
-        let post_release_needs = if !options.skip_publish && !publish_targets.is_empty() {
-            if options.deploy {
-                // When --deploy is set, cleanup was removed from the pipeline
-                // (deploy needs the build artifact). Depend on the last publish
-                // steps directly.
-                publish_step_ids.clone()
-            } else {
-                vec!["cleanup".to_string()]
-            }
-        } else {
-            vec!["git.push".to_string()]
-        };
-
-        steps.push(ReleasePlanStep {
-            id: "post_release".to_string(),
-            step_type: "post_release".to_string(),
-            label: Some("Run post-release hooks".to_string()),
-            needs: post_release_needs,
-            config: {
-                let mut config = std::collections::HashMap::new();
-                config.insert(
-                    "commands".to_string(),
-                    serde_json::Value::Array(
-                        post_release_hooks
-                            .iter()
-                            .map(|s: &String| serde_json::Value::String(s.clone()))
-                            .collect(),
-                    ),
-                );
-                config
-            },
-            status: ReleasePlanStatus::Ready,
-            missing: vec![],
-        });
-    }
-
-    Ok(steps)
-}
-
 /// Path prefixes that are always treated as homeboy-managed scratch space
 /// and should never count as "dirty" during release/version-bump checks.
 ///
@@ -1488,15 +1221,14 @@ fn get_unexpected_uncommitted_files(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_release_steps, code_quality_failure_message, ensure_changelog_initialized,
-        filter_homeboy_managed, get_release_allowed_files, get_unexpected_uncommitted_files,
-        is_homeboy_managed_path, is_runner_infrastructure_failure, read_changelog_for_release,
-        strip_pr_reference, validate_release_version_floor,
+        code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
+        get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
+        is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
+        validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
     use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
-    use crate::release::types::ReleaseOptions;
 
     fn commit(subject: &str, category: CommitCategory) -> CommitInfo {
         CommitInfo {
@@ -1791,53 +1523,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn release_prepare_runs_after_version_before_commit_when_extension_declares_action() {
-        let component = Component {
-            id: "fixture".to_string(),
-            local_path: "/tmp/fixture".to_string(),
-            ..Default::default()
-        };
-        let extension = serde_json::from_value(serde_json::json!({
-            "name": "Fixture",
-            "version": "1.0.0",
-            "actions": [
-                {
-                    "id": "release.prepare",
-                    "label": "Prepare release",
-                    "type": "command",
-                    "command": "true"
-                }
-            ]
-        }))
-        .expect("extension manifest");
-        let mut warnings = Vec::new();
-        let mut hints = Vec::new();
-        let options = ReleaseOptions {
-            bump_type: "patch".to_string(),
-            ..Default::default()
-        };
-
-        let steps = build_release_steps(
-            &component,
-            &[extension],
-            "1.0.0",
-            "1.0.1",
-            &options,
-            None,
-            &mut warnings,
-            &mut hints,
-        )
-        .expect("steps");
-
-        let ids: Vec<&str> = steps.iter().map(|step| step.id.as_str()).collect();
-        assert_eq!(ids[0], "version");
-        assert_eq!(ids[1], "release.prepare");
-        assert_eq!(ids[2], "git.commit");
-        assert_eq!(steps[1].needs, vec!["version"]);
-        assert_eq!(steps[2].needs, vec!["release.prepare"]);
     }
 
     fn component_with_changelog_target(

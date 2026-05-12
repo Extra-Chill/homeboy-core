@@ -3,6 +3,7 @@ mod executor;
 mod pipeline;
 mod pipeline_capabilities;
 mod pipeline_summary;
+mod plan_steps;
 mod types;
 mod utils;
 pub mod version;
