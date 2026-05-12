@@ -176,14 +176,22 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
             );
             return Ok((
                 ReleaseCommandResult {
-                    component_id: input.component_id,
+                    component_id: input.component_id.clone(),
                     bump_type: "major".to_string(),
                     dry_run: input.dry_run,
                     releasable_commits: releasable_count,
                     new_version: None,
                     tag: None,
                     skipped_reason: Some("major-requires-flag".to_string()),
-                    plan: None,
+                    plan: Some(skipped_release_plan(
+                        &input.component_id,
+                        "major-requires-flag",
+                        "Breaking changes require an explicit major bump",
+                        &format!(
+                            "Re-run with: homeboy release {} --bump major",
+                            input.component_id
+                        ),
+                    )),
                     run: None,
                     deployment: None,
                 },
