@@ -70,6 +70,8 @@ pub struct RawTestOutput {
 }
 
 const RAW_OUTPUT_TAIL_LINES: usize = 80;
+const PHPUNIT_NO_DISCOVERY_MARKER: &str = "NO PHPUNIT TEST FILES DISCOVERED";
+const REQUIRE_PHPUNIT_TESTS_SETTING: &str = "require_phpunit_tests";
 
 fn failed_tests_from_analysis_input(input: &TestAnalysisInput) -> Option<Vec<FailedTest>> {
     if input.failures.is_empty() {
@@ -119,9 +121,22 @@ fn tail_lines(s: &str, max_lines: usize) -> (String, bool) {
     }
 }
 
-fn test_run_status(runner_success: bool, test_counts: Option<&TestCounts>) -> &'static str {
+fn test_run_status(
+    runner_success: bool,
+    test_counts: Option<&TestCounts>,
+    phpunit_no_discovery: bool,
+    require_phpunit_tests: bool,
+) -> &'static str {
     if !runner_success {
         return "failed";
+    }
+
+    if phpunit_no_discovery {
+        return if require_phpunit_tests {
+            "failed"
+        } else {
+            "skipped"
+        };
     }
 
     if test_counts.map(|counts| counts.failed == 0).unwrap_or(true) {
@@ -129,6 +144,20 @@ fn test_run_status(runner_success: bool, test_counts: Option<&TestCounts>) -> &'
     } else {
         "failed"
     }
+}
+
+fn phpunit_no_discovery(stdout: &str, stderr: &str) -> bool {
+    stdout.contains(PHPUNIT_NO_DISCOVERY_MARKER) || stderr.contains(PHPUNIT_NO_DISCOVERY_MARKER)
+}
+
+fn setting_truthy(settings: &[(String, String)], key: &str) -> bool {
+    settings.iter().any(|(setting_key, value)| {
+        setting_key == key
+            && matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+    })
 }
 
 pub fn run_main_test_workflow(
@@ -210,17 +239,27 @@ pub fn run_main_test_workflow(
     .script_args(&args.passthrough_args)
     .run()?;
 
-    let test_counts = parse_test_results_file(&results_file).or_else(|| {
+    let mut test_counts = parse_test_results_file(&results_file).or_else(|| {
         result_parse
             .as_ref()
             .and_then(|spec| parse_test_results_text_with_spec(&output.stdout, spec))
             .or_else(|| parse_test_results_text(&output.stdout))
     });
+    let phpunit_no_discovery = phpunit_no_discovery(&output.stdout, &output.stderr);
+    if phpunit_no_discovery && test_counts.is_none() {
+        test_counts = Some(TestCounts::new(0, 0, 0, 0));
+    }
+    let require_phpunit_tests = setting_truthy(&args.settings, REQUIRE_PHPUNIT_TESTS_SETTING);
 
     // Autofix is owned by `refactor --from test --write`; the test command is read-only.
     let test_autofix: Option<AppliedRefactor> = None;
 
-    let status = test_run_status(output.success, test_counts.as_ref());
+    let status = test_run_status(
+        output.success,
+        test_counts.as_ref(),
+        phpunit_no_discovery,
+        require_phpunit_tests,
+    );
 
     let coverage = coverage_file
         .as_ref()
@@ -248,7 +287,7 @@ pub fn run_main_test_workflow(
         None
     };
 
-    if args.baseline_flags.baseline {
+    if args.baseline_flags.baseline && !phpunit_no_discovery {
         if let Some(ref counts) = test_counts {
             let _ = baseline::save_baseline(source_path, &args.component_id, counts)?;
         }
@@ -257,7 +296,10 @@ pub fn run_main_test_workflow(
     let mut baseline_comparison = None;
     let mut baseline_exit_override = None;
 
-    if !args.baseline_flags.baseline && !args.baseline_flags.ignore_baseline {
+    if !args.baseline_flags.baseline
+        && !args.baseline_flags.ignore_baseline
+        && !phpunit_no_discovery
+    {
         if let Some(ref counts) = test_counts {
             let resolved_baseline = baseline::load_baseline(source_path).or_else(|| {
                 args.changed_since.as_ref().and_then(|git_ref| {
@@ -290,6 +332,20 @@ pub fn run_main_test_workflow(
         ));
     }
 
+    if phpunit_no_discovery {
+        if require_phpunit_tests {
+            hints.push(format!(
+                "PHPUnit discovery is required by {}=true, but no PHPUnit test files were found.",
+                REQUIRE_PHPUNIT_TESTS_SETTING
+            ));
+        } else {
+            hints.push(format!(
+                "Set --setting {}=true when this component is expected to contain PHPUnit tests.",
+                REQUIRE_PHPUNIT_TESTS_SETTING
+            ));
+        }
+    }
+
     if !args.skip_lint {
         hints.push(format!(
             "Auto-fix lint issues: homeboy refactor {} --from lint --write",
@@ -304,7 +360,11 @@ pub fn run_main_test_workflow(
         ));
     }
 
-    if test_counts.is_some() && !args.baseline_flags.baseline && baseline_comparison.is_none() {
+    if test_counts.is_some()
+        && !phpunit_no_discovery
+        && !args.baseline_flags.baseline
+        && baseline_comparison.is_none()
+    {
         hints.push(format!(
             "Save test baseline: homeboy test {} --baseline",
             args.component_id
@@ -332,10 +392,10 @@ pub fn run_main_test_workflow(
     hints.push("Full options: homeboy docs commands/test".to_string());
 
     let hints = if hints.is_empty() { None } else { Some(hints) };
-    let test_exit_code = if status == "passed" {
-        0
-    } else {
-        output.exit_code
+    let test_exit_code = match status {
+        "passed" | "skipped" => 0,
+        "failed" if output.exit_code == 0 => 1,
+        _ => output.exit_code,
     };
     let exit_code = baseline_exit_override.unwrap_or(test_exit_code);
     let summary = if args.json_summary {
@@ -509,19 +569,47 @@ mod tests {
     #[test]
     fn status_requires_successful_runner_even_with_zero_failures() {
         let counts = TestCounts::new(3, 3, 0, 0);
-        assert_eq!(test_run_status(false, Some(&counts)), "failed");
+        assert_eq!(
+            test_run_status(false, Some(&counts), false, false),
+            "failed"
+        );
     }
 
     #[test]
     fn status_passes_successful_runner_with_zero_failures() {
         let counts = TestCounts::new(3, 3, 0, 0);
-        assert_eq!(test_run_status(true, Some(&counts)), "passed");
+        assert_eq!(test_run_status(true, Some(&counts), false, false), "passed");
     }
 
     #[test]
     fn status_fails_successful_runner_with_parsed_failures() {
         let counts = TestCounts::new(3, 2, 1, 0);
-        assert_eq!(test_run_status(true, Some(&counts)), "failed");
+        assert_eq!(test_run_status(true, Some(&counts), false, false), "failed");
+    }
+
+    #[test]
+    fn status_skips_successful_phpunit_no_discovery_by_default() {
+        assert_eq!(test_run_status(true, None, true, false), "skipped");
+    }
+
+    #[test]
+    fn status_fails_successful_phpunit_no_discovery_when_required() {
+        assert_eq!(test_run_status(true, None, true, true), "failed");
+    }
+
+    #[test]
+    fn detects_phpunit_no_discovery_marker() {
+        assert!(phpunit_no_discovery(
+            "NO PHPUNIT TEST FILES DISCOVERED\nSkipping PHPUnit tests",
+            ""
+        ));
+        assert!(!phpunit_no_discovery("smoke scripts passed", ""));
+    }
+
+    #[test]
+    fn setting_truthy_accepts_boolean_spellings() {
+        let settings = vec![(REQUIRE_PHPUNIT_TESTS_SETTING.to_string(), "yes".to_string())];
+        assert!(setting_truthy(&settings, REQUIRE_PHPUNIT_TESTS_SETTING));
     }
 
     #[test]

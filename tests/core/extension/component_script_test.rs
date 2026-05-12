@@ -43,6 +43,12 @@ fn test_command_args(root: &Path) -> TestArgs {
     }
 }
 
+fn test_command_args_with_setting(root: &Path, key: &str, value: &str) -> TestArgs {
+    let mut args = test_command_args(root);
+    args.setting_args.setting = vec![(key.to_string(), value.to_string())];
+    args
+}
+
 fn write_component_script(root: &Path, name: &str, body: &str) {
     let script_dir = root.join("scripts");
     fs::create_dir_all(&script_dir).expect("script dir should be created");
@@ -209,5 +215,123 @@ fn command_dispatch_falls_back_to_extension_when_component_script_is_absent() {
         assert_eq!(exit_code, 0);
         assert!(output.passed);
         assert!(dir.path().join("extension-marker").exists());
+    });
+}
+
+#[test]
+fn wordpress_phpunit_no_discovery_is_neutral_skipped() {
+    with_isolated_home(|home| {
+        let dir = tempfile::tempdir().expect("temp dir");
+        fs::write(
+            dir.path().join("homeboy.json"),
+            r#"{
+  "id": "fixture",
+  "extensions": { "wordpress": {} }
+}"#,
+        )
+        .expect("homeboy.json should be written");
+
+        let extension_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("extensions")
+            .join("wordpress");
+        fs::create_dir_all(&extension_dir).expect("extension dir should be created");
+        fs::write(
+            extension_dir.join("wordpress.json"),
+            r#"{
+  "name": "WordPress",
+  "version": "1.0.0",
+  "test": { "extension_script": "test.sh" }
+}"#,
+        )
+        .expect("extension manifest should be written");
+        let extension_script = extension_dir.join("test.sh");
+        fs::write(
+            &extension_script,
+            "#!/bin/sh\nprintf 'Plugin activation/install passed\\nNO PHPUNIT TEST FILES DISCOVERED\\nSkipping PHPUnit tests: no files matched the WordPress runner discovery contract.\\n'\n",
+        )
+        .expect("extension script should be written");
+        let mut perms = fs::metadata(&extension_script)
+            .expect("extension script metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&extension_script, perms)
+            .expect("extension script should be executable");
+
+        let (output, exit_code) = run_test(test_command_args(dir.path()), &GlobalArgs {})
+            .expect("extension test should run");
+
+        assert_eq!(exit_code, 0);
+        assert!(output.passed);
+        assert_eq!(output.status, "skipped");
+        assert_eq!(output.test_counts.expect("test counts").total, 0);
+        let phase = output.phase.expect("phase report");
+        assert_eq!(phase.status, crate::extension::PhaseStatus::Skipped);
+        assert_eq!(
+            phase.summary,
+            "activation/install passed; PHPUnit discovery found zero tests; no PHPUnit assertions ran"
+        );
+    });
+}
+
+#[test]
+fn wordpress_phpunit_no_discovery_can_be_required_as_failure() {
+    with_isolated_home(|home| {
+        let dir = tempfile::tempdir().expect("temp dir");
+        fs::write(
+            dir.path().join("homeboy.json"),
+            r#"{
+  "id": "fixture",
+  "extensions": { "wordpress": {} }
+}"#,
+        )
+        .expect("homeboy.json should be written");
+
+        let extension_dir = home
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("extensions")
+            .join("wordpress");
+        fs::create_dir_all(&extension_dir).expect("extension dir should be created");
+        fs::write(
+            extension_dir.join("wordpress.json"),
+            r#"{
+  "name": "WordPress",
+  "version": "1.0.0",
+  "test": { "extension_script": "test.sh" }
+}"#,
+        )
+        .expect("extension manifest should be written");
+        let extension_script = extension_dir.join("test.sh");
+        fs::write(
+            &extension_script,
+            "#!/bin/sh\nprintf 'NO PHPUNIT TEST FILES DISCOVERED\\n'\n",
+        )
+        .expect("extension script should be written");
+        let mut perms = fs::metadata(&extension_script)
+            .expect("extension script metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&extension_script, perms)
+            .expect("extension script should be executable");
+
+        let (output, exit_code) = run_test(
+            test_command_args_with_setting(dir.path(), "require_phpunit_tests", "true"),
+            &GlobalArgs {},
+        )
+        .expect("extension test should run");
+
+        assert_eq!(exit_code, 1);
+        assert!(!output.passed);
+        assert_eq!(output.status, "failed");
+        assert_eq!(output.test_counts.expect("test counts").total, 0);
+        let failure = output.failure.expect("failure report");
+        assert_eq!(
+            failure.category,
+            crate::extension::PhaseFailureCategory::Findings
+        );
     });
 }
