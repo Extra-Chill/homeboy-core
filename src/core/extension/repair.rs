@@ -22,8 +22,16 @@ pub struct ReplaceResult {
 }
 
 pub fn replace(source: &str, id_override: Option<&str>) -> Result<ReplaceResult> {
+    replace_with_revision(source, id_override, None)
+}
+
+pub fn replace_with_revision(
+    source: &str,
+    id_override: Option<&str>,
+    revision: Option<&str>,
+) -> Result<ReplaceResult> {
     if is_git_url(source) {
-        replace_from_url(source, id_override)
+        replace_from_url(source, id_override, revision)
     } else {
         replace_from_path(source, id_override, false)
     }
@@ -33,7 +41,11 @@ pub fn relink(extension_id: &str, source: &str) -> Result<ReplaceResult> {
     replace_from_path(source, Some(extension_id), true)
 }
 
-fn replace_from_url(url: &str, id_override: Option<&str>) -> Result<ReplaceResult> {
+fn replace_from_url(
+    url: &str,
+    id_override: Option<&str>,
+    revision: Option<&str>,
+) -> Result<ReplaceResult> {
     let extension_id = match id_override {
         Some(id) => slugify_id(id)?,
         None => derive_id_from_url(url)?,
@@ -56,7 +68,7 @@ fn replace_from_url(url: &str, id_override: Option<&str>) -> Result<ReplaceResul
     clean_replace_temp(&staged_dir)?;
     clean_replace_temp(&backup_dir)?;
 
-    git::clone_repo(url, &clone_dir)?;
+    git::clone_repo_at_ref(url, &clone_dir, revision)?;
     let source_revision = get_short_head_revision(&clone_dir);
 
     let result = resolve_cloned_extension(&clone_dir, &extension_id, &staged_dir, url);
@@ -287,7 +299,7 @@ fn clean_replace_temp(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{relink, replace};
+    use super::{relink, replace, replace_with_revision};
     use crate::extension::{install, load_extension};
     use crate::test_support::with_isolated_home;
     use std::fs;
@@ -338,6 +350,20 @@ mod tests {
                     message,
                 ],
             )
+    }
+
+    fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     fn prepare_git_extension_repo(repo: &Path, extension_id: &str) -> Option<TempDir> {
@@ -446,6 +472,45 @@ mod tests {
 
             let extension = load_extension("swift").expect("load replaced extension");
             assert_eq!(extension.version, "2.0.0");
+        });
+    }
+
+    #[test]
+    fn test_replace_with_revision() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let remote = match prepare_git_extension_repo(&source, "swift") {
+                Some(remote) => remote,
+                None => return,
+            };
+            let pinned_revision = match git_output(&source, &["rev-parse", "--short", "HEAD"]) {
+                Some(revision) => revision,
+                None => return,
+            };
+            let remote_url = remote.path().join("extension.git");
+
+            install(&remote_url.to_string_lossy(), Some("swift"))
+                .expect("install copied extension");
+
+            write_extension_fixture_with_version(&source, "swift", "2.0.0");
+            assert!(commit_all(&source, "update extension"));
+            assert!(run_git(&source, &["push", "origin", "HEAD"]));
+
+            let result = replace_with_revision(
+                &remote_url.to_string_lossy(),
+                Some("swift"),
+                Some(&pinned_revision),
+            )
+            .expect("replace copied extension at pinned revision");
+
+            let extension = load_extension("swift").expect("load replaced extension");
+            assert_eq!(extension.version, "1.0.0");
+            assert_eq!(
+                result.source_revision.as_deref(),
+                Some(pinned_revision.as_str())
+            );
         });
     }
 }

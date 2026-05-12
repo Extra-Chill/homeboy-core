@@ -192,8 +192,18 @@ fn manifest_path_for_extension(extension_dir: &Path, id: &str) -> PathBuf {
 /// Install a extension from a git URL or link a local directory.
 /// Automatically detects whether source is a URL (git clone) or local path (symlink).
 pub fn install(source: &str, id_override: Option<&str>) -> Result<InstallResult> {
+    install_with_revision(source, id_override, None)
+}
+
+/// Install a extension from a git URL or link a local directory.
+/// Git URL installs optionally check out a branch, tag, or commit after cloning.
+pub fn install_with_revision(
+    source: &str,
+    id_override: Option<&str>,
+    revision: Option<&str>,
+) -> Result<InstallResult> {
     if is_git_url(source) {
-        install_from_url(source, id_override)
+        install_from_url(source, id_override, revision)
     } else {
         install_from_path(source, id_override)
     }
@@ -270,7 +280,11 @@ fn install_configured_extension(source: &str, extension_id: &str) -> Result<Inst
 /// Handles both single-extension repos (manifest at repo root) and monorepos
 /// (manifest in a subdirectory matching the extension ID). For monorepos,
 /// extracts just the target subdirectory.
-fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResult> {
+fn install_from_url(
+    url: &str,
+    id_override: Option<&str>,
+    revision: Option<&str>,
+) -> Result<InstallResult> {
     let extension_id = match id_override {
         Some(id) => slugify_id(id)?,
         None => derive_id_from_url(url)?,
@@ -301,7 +315,7 @@ fn install_from_url(url: &str, id_override: Option<&str>) -> Result<InstallResul
         })?;
     }
 
-    git::clone_repo(url, &temp_dir)?;
+    git::clone_repo_at_ref(url, &temp_dir, revision)?;
 
     // Capture source revision before resolve_cloned_extension may discard .git
     // (monorepo installs extract only the subdirectory, losing git history).
@@ -880,8 +894,8 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        install, install_for_component, is_workdir_clean, load_extension, read_source_revision,
-        source_metadata, update,
+        install, install_for_component, install_with_revision, is_workdir_clean, load_extension,
+        read_source_revision, source_metadata, update,
     };
     use crate::component;
     use crate::extension::update_all;
@@ -972,6 +986,20 @@ mod tests {
                     message,
                 ],
             )
+    }
+
+    fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     fn prepare_git_extension_repo(repo: &Path, extension_id: &str) -> Option<TempDir> {
@@ -1207,6 +1235,82 @@ exec '{}' "$@"
                 read_source_revision("wordpress"),
                 result.source_revision,
                 "monorepo installs keep the stored source revision after .git is discarded"
+            );
+        });
+    }
+
+    #[test]
+    fn test_install_with_revision() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let remote = match prepare_git_extension_repo(&source, "wordpress") {
+                Some(remote) => remote,
+                None => return,
+            };
+            let pinned_revision = match git_output(&source, &["rev-parse", "--short", "HEAD"]) {
+                Some(revision) => revision,
+                None => return,
+            };
+
+            write_extension_fixture_with_version(&source, "wordpress", "2.0.0");
+            assert!(commit_all(&source, "update extension"));
+            assert!(run_git(&source, &["push", "origin", "HEAD"]));
+            let remote_url = remote.path().join("extension.git");
+
+            let result = install_with_revision(
+                &remote_url.to_string_lossy(),
+                Some("wordpress"),
+                Some(&pinned_revision),
+            )
+            .expect("install pinned revision");
+
+            let installed = load_extension("wordpress").expect("installed extension");
+            assert_eq!(installed.version, "1.0.0");
+            assert_eq!(
+                result.source_revision.as_deref(),
+                Some(pinned_revision.as_str())
+            );
+            assert_eq!(
+                read_source_revision("wordpress").as_deref(),
+                Some(pinned_revision.as_str())
+            );
+        });
+    }
+
+    #[test]
+    fn cloned_install_can_checkout_requested_branch() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let remote = match prepare_git_extension_repo(&source, "wordpress") {
+                Some(remote) => remote,
+                None => return,
+            };
+            assert!(run_git(&source, &["checkout", "-b", "next-extension"]));
+            write_extension_fixture_with_version(&source, "wordpress", "2.0.0");
+            assert!(commit_all(&source, "branch extension update"));
+            assert!(run_git(&source, &["push", "origin", "next-extension"]));
+            let branch_revision = match git_output(&source, &["rev-parse", "--short", "HEAD"]) {
+                Some(revision) => revision,
+                None => return,
+            };
+            let remote_url = remote.path().join("extension.git");
+
+            let result = install_with_revision(
+                &remote_url.to_string_lossy(),
+                Some("wordpress"),
+                Some("next-extension"),
+            )
+            .expect("install branch revision");
+
+            let installed = load_extension("wordpress").expect("installed extension");
+            assert_eq!(installed.version, "2.0.0");
+            assert_eq!(
+                result.source_revision.as_deref(),
+                Some(branch_revision.as_str())
             );
         });
     }
