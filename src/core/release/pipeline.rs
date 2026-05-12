@@ -1,16 +1,8 @@
 //! Release pipeline — planning, validation, and straight-line execution.
 //!
-//! Previously this module drove execution through a generic DAG pipeline in
-//! `engine::pipeline` with a trait-dispatched `ReleaseStepExecutor` and a
-//! capability `ReleaseCapabilityResolver`. In practice every release ran the
-//! same sequential order through a `Mutex<ReleaseContext>` shared between
-//! steps — the DAG bought nothing but indirection. See issue #1187.
-//!
-//! The layers collapsed into one function (`execute`) that calls the step
-//! implementations in [`super::executor`] directly. The `plan()` function
-//! still returns a serializable `ReleasePlan` for `--dry-run` / `--json`
-//! consumers, but it's now a *description* of what `execute` will do, not
-//! the thing that drives execution.
+//! `plan()` returns a serializable `ReleasePlan` for `--dry-run` / `--json`
+//! consumers, and `run()` walks that same plan for real releases so the
+//! previewed steps match execution.
 
 use crate::component::{self, Component};
 use crate::engine::local_files::FileSystem;
@@ -65,6 +57,14 @@ fn resolve_extensions(component: &Component) -> Result<Vec<ExtensionManifest>> {
 ///
 /// What you preview with `--dry-run` is what executes.
 pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
+    run_with_plan(component_id, options).map(|(_plan, run)| run)
+}
+
+/// Execute a release and return the plan that drove it alongside the run.
+pub(crate) fn run_with_plan(
+    component_id: &str,
+    options: &ReleaseOptions,
+) -> Result<(ReleasePlan, ReleaseRun)> {
     // plan() performs all validations + bootstraps. Its output also tells us
     // which publish/cleanup/post_release steps should run for this component,
     // so we don't duplicate the capability checks below.
@@ -89,12 +89,18 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
             let should_stop = release_step_is_show_stopper(&result);
             results.push(result);
             if should_stop {
-                return Ok(finalize(component_id, results, monorepo.as_ref()));
+                return Ok((
+                    release_plan,
+                    finalize(component_id, results, monorepo.as_ref()),
+                ));
             }
         }
     }
 
-    Ok(finalize(component_id, results, monorepo.as_ref()))
+    Ok((
+        release_plan,
+        finalize(component_id, results, monorepo.as_ref()),
+    ))
 }
 
 /// Read the auto-generated changelog entries embedded in the plan's dedicated

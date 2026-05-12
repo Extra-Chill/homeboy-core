@@ -247,7 +247,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         ));
     }
 
-    let run_result = super::run(&input.component_id, &options)?;
+    let (plan, run_result) = super::pipeline::run_with_plan(&input.component_id, &options)?;
     display_release_summary(&run_result);
 
     let new_version = extract_new_version_from_run(&run_result);
@@ -295,7 +295,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
             new_version,
             tag,
             skipped_reason: None,
-            plan: None,
+            plan: Some(plan),
             run: Some(run_result),
             deployment,
         },
