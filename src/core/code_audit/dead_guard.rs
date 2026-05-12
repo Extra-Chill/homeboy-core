@@ -72,6 +72,7 @@ struct Guard {
     kind: GuardKind,
     symbol: String,
     line: usize,
+    offset: usize,
 }
 
 pub(super) fn run_with_config(
@@ -121,9 +122,121 @@ pub(super) fn run_with_config(
 
 fn guard_is_contextual(fp: &FileFingerprint, guard: &Guard, audit_config: &AuditConfig) -> bool {
     is_lifecycle_or_test_path(&fp.relative_path, audit_config)
+        || guard_has_context_comment(&fp.content, guard, audit_config)
         || guard_is_inside_registered_lifecycle_callback(&fp.content, guard)
         || guard_defines_stub(&fp.content, guard)
         || guard_loads_symbol_provider(&fp.content, guard)
+}
+
+fn guard_has_context_comment(content: &str, guard: &Guard, audit_config: &AuditConfig) -> bool {
+    if audit_config.dead_guard_context_comment_patterns.is_empty() {
+        return false;
+    }
+    let Some(comment_context) = guard_comment_context(content, guard) else {
+        return false;
+    };
+    audit_config
+        .dead_guard_context_comment_patterns
+        .iter()
+        .filter_map(|pattern| Regex::new(pattern).ok())
+        .any(|pattern| pattern.is_match(&comment_context))
+}
+
+fn guard_comment_context(content: &str, guard: &Guard) -> Option<String> {
+    let start = preceding_comment_block_start_offset(content, guard.line)
+        .unwrap_or_else(|| line_start_offset(content, guard.line));
+    let end = guard_if_arm_end_offset(content, guard)
+        .unwrap_or_else(|| line_end_offset(content, guard.line));
+    let comments = extract_comments(&content[start..end.min(content.len())]);
+    if comments.trim().is_empty() {
+        None
+    } else {
+        Some(comments)
+    }
+}
+
+fn preceding_comment_block_start_offset(content: &str, guard_line: usize) -> Option<usize> {
+    let mut line = guard_line.checked_sub(1)?;
+    let trimmed = line_text(content, line)?.trim();
+    if trimmed.starts_with("*/") {
+        loop {
+            let current = line_text(content, line)?.trim();
+            if current.contains("/*") || line == 1 {
+                return Some(line_start_offset(content, line));
+            }
+            line -= 1;
+        }
+    }
+    if !is_line_comment_like(trimmed) {
+        return None;
+    }
+    while line > 1 {
+        let Some(previous) = line_text(content, line - 1) else {
+            break;
+        };
+        if !is_line_comment_like(previous.trim()) {
+            break;
+        }
+        line -= 1;
+    }
+    Some(line_start_offset(content, line))
+}
+
+fn is_line_comment_like(trimmed: &str) -> bool {
+    trimmed.starts_with("//")
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with("*/")
+}
+
+fn guard_if_arm_end_offset(content: &str, guard: &Guard) -> Option<usize> {
+    let remainder = content.get(guard.offset..)?;
+    let brace_offset = remainder.find('{')? + guard.offset;
+    let semicolon_offset = remainder.find(';').map(|offset| offset + guard.offset);
+    if semicolon_offset.is_some_and(|semicolon| semicolon < brace_offset) {
+        return None;
+    }
+    matching_brace_offset(content, brace_offset).map(|offset| offset + 1)
+}
+
+fn extract_comments(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let mut comments = String::new();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx] == b'/' && bytes.get(idx + 1) == Some(&b'/') {
+            let start = idx + 2;
+            let end = content[start..]
+                .find('\n')
+                .map(|offset| start + offset)
+                .unwrap_or(content.len());
+            comments.push_str(&content[start..end]);
+            comments.push('\n');
+            idx = end;
+        } else if bytes[idx] == b'#' {
+            let start = idx + 1;
+            let end = content[start..]
+                .find('\n')
+                .map(|offset| start + offset)
+                .unwrap_or(content.len());
+            comments.push_str(&content[start..end]);
+            comments.push('\n');
+            idx = end;
+        } else if bytes[idx] == b'/' && bytes.get(idx + 1) == Some(&b'*') {
+            let start = idx + 2;
+            let end = content[start..]
+                .find("*/")
+                .map(|offset| start + offset)
+                .unwrap_or(content.len());
+            comments.push_str(&content[start..end]);
+            comments.push('\n');
+            idx = end.saturating_add(2);
+        } else {
+            idx += 1;
+        }
+    }
+    comments
 }
 
 fn is_lifecycle_or_test_path(path: &str, audit_config: &AuditConfig) -> bool {
@@ -304,8 +417,14 @@ fn extract_guards(content: &str) -> Vec<Guard> {
             "defined" => GuardKind::Constant,
             _ => continue,
         };
-        let line = line_of_offset(content, cap.get(0).map(|m| m.start()).unwrap_or(0));
-        out.push(Guard { kind, symbol, line });
+        let offset = cap.get(0).map(|m| m.start()).unwrap_or(0);
+        let line = line_of_offset(content, offset);
+        out.push(Guard {
+            kind,
+            symbol,
+            line,
+            offset,
+        });
     }
     out
 }
@@ -332,6 +451,26 @@ fn line_start_offset(content: &str, line: usize) -> usize {
         }
     }
     content.len()
+}
+
+fn line_end_offset(content: &str, line: usize) -> usize {
+    let start = line_start_offset(content, line);
+    content[start..]
+        .find('\n')
+        .map(|offset| start + offset)
+        .unwrap_or(content.len())
+}
+
+fn line_text(content: &str, line: usize) -> Option<&str> {
+    if line == 0 {
+        return None;
+    }
+    let start = line_start_offset(content, line);
+    if start >= content.len() {
+        return None;
+    }
+    let end = line_end_offset(content, line);
+    Some(&content[start..end])
 }
 
 #[cfg(test)]
@@ -641,6 +780,95 @@ function runtime_normal_request() {
         let findings = run(&[&fp], tmp.path());
         assert_eq!(findings.len(), 1);
         assert!(findings[0].description.contains("runtime_unschedule_all"));
+    }
+
+    #[test]
+    fn configured_comment_context_suppresses_dead_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin_main(tmp.path(), Some("6.0"), "");
+        let fp = make_fp(
+            "inc/DualContext.php",
+            r#"<?php
+// Fallback when runtime is not loaded by the smoke harness.
+if ( function_exists('runtime_unschedule_all') ) {
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+        let config = AuditConfig {
+            dead_guard_context_comment_patterns: vec![
+                "(?i)runtime is not loaded by the smoke harness".to_string(),
+            ],
+            known_symbols: test_config().known_symbols,
+            ..Default::default()
+        };
+
+        let findings = run_with_config(&[&fp], tmp.path(), &config);
+        assert!(findings.is_empty(), "matched comment context is exempt");
+    }
+
+    #[test]
+    fn configured_comment_context_can_match_guard_arm_comments() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin_main(tmp.path(), Some("6.0"), "");
+        let fp = make_fp(
+            "inc/DualContext.php",
+            r#"<?php
+if ( function_exists('runtime_unschedule_all') ) {
+    // Dual-context fallback path for the standalone runner.
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+        let config = AuditConfig {
+            dead_guard_context_comment_patterns: vec!["standalone runner".to_string()],
+            known_symbols: test_config().known_symbols,
+            ..Default::default()
+        };
+
+        let findings = run_with_config(&[&fp], tmp.path(), &config);
+        assert!(findings.is_empty(), "guard-arm comment context is exempt");
+    }
+
+    #[test]
+    fn unconfigured_comment_context_still_reports_dead_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin_main(tmp.path(), Some("6.0"), "");
+        let fp = make_fp(
+            "inc/DualContext.php",
+            r#"<?php
+// Fallback when runtime is not loaded by the smoke harness.
+if ( function_exists('runtime_unschedule_all') ) {
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+
+        let findings = run(&[&fp], tmp.path());
+        assert_eq!(findings.len(), 1, "comments are not magic without config");
+    }
+
+    #[test]
+    fn configured_comment_context_ignores_non_comment_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_plugin_main(tmp.path(), Some("6.0"), "");
+        let fp = make_fp(
+            "inc/DualContext.php",
+            r#"<?php
+$message = 'standalone runner';
+if ( function_exists('runtime_unschedule_all') ) {
+    runtime_unschedule_all('demo');
+}
+"#,
+        );
+        let config = AuditConfig {
+            dead_guard_context_comment_patterns: vec!["standalone runner".to_string()],
+            known_symbols: test_config().known_symbols,
+            ..Default::default()
+        };
+
+        let findings = run_with_config(&[&fp], tmp.path(), &config);
+        assert_eq!(findings.len(), 1, "only comment context is matched");
     }
 
     #[test]

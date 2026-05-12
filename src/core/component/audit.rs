@@ -11,6 +11,10 @@ pub struct AuditConfig {
     /// Paths whose guards run outside normal production runtime assumptions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lifecycle_path_globs: Vec<String>,
+    /// Extension-owned regexes matched against nearby guard comments. Core only
+    /// applies the patterns; extensions own the contextual language.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dead_guard_context_comment_patterns: Vec<String>,
     /// Type suffixes that mark convention outliers as intentional utilities.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub utility_suffixes: Vec<String>,
@@ -261,6 +265,7 @@ impl AuditConfig {
         self.runtime_entrypoint_extends.is_empty()
             && self.runtime_entrypoint_markers.is_empty()
             && self.lifecycle_path_globs.is_empty()
+            && self.dead_guard_context_comment_patterns.is_empty()
             && self.utility_suffixes.is_empty()
             && self.convention_exception_globs.is_empty()
             && self.convention_tag_globs.is_empty()
@@ -280,6 +285,10 @@ impl AuditConfig {
             &other.runtime_entrypoint_markers,
         );
         extend_unique(&mut self.lifecycle_path_globs, &other.lifecycle_path_globs);
+        extend_unique(
+            &mut self.dead_guard_context_comment_patterns,
+            &other.dead_guard_context_comment_patterns,
+        );
         extend_unique(&mut self.utility_suffixes, &other.utility_suffixes);
         extend_unique(
             &mut self.convention_exception_globs,
@@ -328,6 +337,16 @@ mod tests {
     }
 
     #[test]
+    fn dead_guard_comment_patterns_mark_audit_config_non_empty() {
+        let config = AuditConfig {
+            dead_guard_context_comment_patterns: vec!["dual context".to_string()],
+            ..Default::default()
+        };
+
+        assert!(!config.is_empty());
+    }
+
+    #[test]
     fn merge_dedupes_core_boundary_leak_config() {
         let mut config = AuditConfig {
             core_boundary_leaks: CoreBoundaryLeakConfig {
@@ -339,6 +358,7 @@ mod tests {
         };
 
         config.merge(&AuditConfig {
+            dead_guard_context_comment_patterns: vec!["dual context".to_string()],
             core_boundary_leaks: CoreBoundaryLeakConfig {
                 terms: vec!["florpstack".to_string(), "widgetlang".to_string()],
                 scan_path_contains: vec!["src/core/".to_string(), "src/commands/".to_string()],
@@ -355,6 +375,10 @@ mod tests {
         assert_eq!(
             config.core_boundary_leaks.scan_path_contains,
             vec!["src/core/", "src/commands/"]
+        );
+        assert_eq!(
+            config.dead_guard_context_comment_patterns,
+            vec!["dual context"]
         );
         assert_eq!(
             config.core_boundary_leaks.allow_line_contains,
