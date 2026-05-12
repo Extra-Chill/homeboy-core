@@ -33,6 +33,13 @@
 //!           "first_assistant_message_ms": 800.0
 //!         }
 //!       },
+//!       "timeline": [
+//!         { "t_ms": 0, "source": "runner", "event": "start" },
+//!         { "t_ms": 120, "source": "runner", "event": "ready" }
+//!       ],
+//!       "span_definitions": [
+//!         { "id": "startup", "from": "runner.start", "to": "runner.ready" }
+//!       ],
 //!       "memory": { "peak_bytes": 41943040 },
 //!       "artifacts": {
 //!         "transcript": {
@@ -52,6 +59,10 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::observation::timeline::{
+    reporting_timeline, summarize_spans, ObservationEvent, ObservationSpanDefinition,
+    ObservationSpanResult,
+};
 
 use super::artifact::BenchArtifact;
 use super::artifact_validation;
@@ -170,6 +181,20 @@ pub struct BenchScenario {
     /// flattening those groups in the source JSON.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metric_groups: BTreeMap<String, BTreeMap<String, f64>>,
+    /// Optional scenario timeline for causal evidence.
+    ///
+    /// Bench scenarios use the shared observation timeline contract so
+    /// runners can emit phase/span evidence without flattening everything
+    /// into metrics. Homeboy derives `span_results` from this timeline when
+    /// `span_definitions` are present.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timeline: Vec<ObservationEvent>,
+    /// Optional span definitions over `source.event` timeline keys.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub span_definitions: Vec<ObservationSpanDefinition>,
+    /// Computed span outcomes, populated by Homeboy after parsing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub span_results: Vec<ObservationSpanResult>,
     /// Scenario-level semantic gates. Unlike metric policies, gates are
     /// correctness checks: any failure invalidates the scenario even if
     /// timing metrics improved.
@@ -311,11 +336,28 @@ pub fn evaluate_gates(results: &mut BenchResults) -> Vec<String> {
     failures
 }
 
+/// Derive scenario span results from the shared observation timeline contract.
+pub fn evaluate_spans(results: &mut BenchResults) {
+    for scenario in &mut results.scenarios {
+        if scenario.span_definitions.is_empty() {
+            continue;
+        }
+        let timeline = reporting_timeline(&scenario.timeline);
+        scenario.span_results = summarize_spans(&timeline, &scenario.span_definitions);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BenchRunSnapshot {
     pub metrics: BenchMetrics,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metric_groups: BTreeMap<String, BTreeMap<String, f64>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timeline: Vec<ObservationEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub span_definitions: Vec<ObservationSpanDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub span_results: Vec<ObservationSpanResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<BenchMemory>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -471,7 +513,7 @@ fn parse_bench_results_str_with_artifact_context(
     raw: &str,
     rig_id: Option<&str>,
 ) -> Result<BenchResults> {
-    let parsed: BenchResults = serde_json::from_str(raw).map_err(|e| {
+    let mut parsed: BenchResults = serde_json::from_str(raw).map_err(|e| {
         Error::internal_json(
             format!("Failed to parse bench results JSON: {}", e),
             Some("bench.parsing.deserialize".to_string()),
@@ -479,6 +521,7 @@ fn parse_bench_results_str_with_artifact_context(
     })?;
     validate_unique_scenario_ids(&parsed)?;
     validate_variance_policies(&parsed)?;
+    evaluate_spans(&mut parsed);
     artifact_validation::validate_artifact_paths(&parsed, rig_id)?;
     Ok(parsed)
 }
@@ -631,6 +674,50 @@ mod tests {
             metadata["design"]["motifs"][0].as_str(),
             Some("terminal_window")
         );
+    }
+
+    #[test]
+    fn derives_scenario_span_results_from_timeline() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 1,
+            "scenarios": [
+                {
+                    "id": "agent_loop",
+                    "iterations": 1,
+                    "metrics": { "success_rate": 1.0 },
+                    "timeline": [
+                        { "t_ms": 10, "source": "runner", "event": "start" },
+                        { "t_ms": 45, "source": "runner", "event": "ready" }
+                    ],
+                    "span_definitions": [
+                        { "id": "startup", "from": "runner.start", "to": "runner.ready" }
+                    ]
+                }
+            ]
+        }"#;
+
+        let parsed = parse_bench_results_str(raw).unwrap();
+        let scenario = &parsed.scenarios[0];
+
+        assert_eq!(scenario.timeline.len(), 2);
+        assert_eq!(scenario.span_definitions.len(), 1);
+        assert_eq!(scenario.span_results.len(), 1);
+        assert_eq!(
+            scenario.span_results[0].status,
+            crate::observation::timeline::ObservationSpanStatus::Ok
+        );
+        assert_eq!(scenario.span_results[0].duration_ms, Some(35));
+    }
+
+    #[test]
+    fn omits_empty_timeline_and_spans_on_serialize() {
+        let parsed = parse_bench_results_str(VALID_RESULTS).unwrap();
+        let raw = serde_json::to_string(&parsed.scenarios[0]).unwrap();
+
+        assert!(!raw.contains("timeline"));
+        assert!(!raw.contains("span_definitions"));
+        assert!(!raw.contains("span_results"));
     }
 
     #[test]

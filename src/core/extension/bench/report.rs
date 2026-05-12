@@ -1139,6 +1139,9 @@ mod tests {
                 distributions: BTreeMap::new(),
             },
             metric_groups: BTreeMap::new(),
+            timeline: Vec::new(),
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
             gates: Vec::new(),
             gate_results: Vec::new(),
             metadata: BTreeMap::new(),
@@ -1505,6 +1508,9 @@ mod tests {
             BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
                 metric_groups: BTreeMap::new(),
+                timeline: Vec::new(),
+                span_definitions: Vec::new(),
+                span_results: Vec::new(),
                 memory: None,
                 artifacts: [(
                     "raw_result".to_string(),
@@ -1516,6 +1522,9 @@ mod tests {
             BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
                 metric_groups: BTreeMap::new(),
+                timeline: Vec::new(),
+                span_definitions: Vec::new(),
+                span_results: Vec::new(),
                 memory: None,
                 artifacts: [(
                     "raw_result".to_string(),
@@ -1572,6 +1581,9 @@ mod tests {
         ref_scenario.runs = Some(vec![BenchRunSnapshot {
             metrics: ref_scenario.metrics.clone(),
             metric_groups: BTreeMap::new(),
+            timeline: Vec::new(),
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
             memory: None,
             artifacts: [(
                 "raw_result".to_string(),
@@ -1584,6 +1596,9 @@ mod tests {
         candidate_scenario.runs = Some(vec![BenchRunSnapshot {
             metrics: candidate_scenario.metrics.clone(),
             metric_groups: BTreeMap::new(),
+            timeline: Vec::new(),
+            span_definitions: Vec::new(),
+            span_results: Vec::new(),
             memory: None,
             artifacts: [(
                 "raw_result".to_string(),

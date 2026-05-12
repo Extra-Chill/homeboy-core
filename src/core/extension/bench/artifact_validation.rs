@@ -152,6 +152,9 @@ mod tests {
                 iterations: 1,
                 metrics: BenchMetrics::default(),
                 metric_groups: BTreeMap::new(),
+                timeline: Vec::new(),
+                span_definitions: Vec::new(),
+                span_results: Vec::new(),
                 gates: Vec::new(),
                 gate_results: Vec::new(),
                 metadata: BTreeMap::new(),
@@ -162,6 +165,9 @@ mod tests {
                 runs: Some(vec![BenchRunSnapshot {
                     metrics: BenchMetrics::default(),
                     metric_groups: BTreeMap::new(),
+                    timeline: Vec::new(),
+                    span_definitions: Vec::new(),
+                    span_results: Vec::new(),
                     memory: None,
                     artifacts: BTreeMap::from([(
                         "visual_comparison_dir".to_string(),
