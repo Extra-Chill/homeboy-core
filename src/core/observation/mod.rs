@@ -7,6 +7,7 @@
 mod lifecycle;
 pub mod records;
 pub mod store;
+pub mod timeline;
 
 pub use lifecycle::{merge_metadata, run_owner_pid, running_status_note, ActiveObservation};
 
@@ -19,3 +20,7 @@ pub use records::{
     TraceSpanRecord, TriageItemRecord, TriagePullRequestSignals,
 };
 pub use store::{ObservationDbStatus, ObservationStore, CURRENT_SCHEMA_VERSION};
+pub use timeline::{
+    ObservationEvent, ObservationPhaseMilestone, ObservationSpanDefinition, ObservationSpanResult,
+    ObservationSpanStatus,
+};

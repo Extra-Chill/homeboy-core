@@ -1,12 +1,19 @@
 //! Trace runner JSON output parsing.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::observation::timeline::{
+    ObservationEvent, ObservationSpanDefinition, ObservationSpanResult, ObservationSpanStatus,
+};
 use crate::rig::RigStateSnapshot;
+
+pub type TraceEvent = ObservationEvent;
+pub type TraceSpanDefinition = ObservationSpanDefinition;
+pub type TraceSpanResult = ObservationSpanResult;
+pub type TraceSpanStatus = ObservationSpanStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -58,56 +65,6 @@ pub struct TraceResults {
     pub temporal_assertions: Vec<TraceTemporalAssertionDefinition>,
     #[serde(default)]
     pub artifacts: Vec<TraceArtifact>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct TraceSpanDefinition {
-    pub id: String,
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceSpanStatus {
-    Ok,
-    Skipped,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TraceSpanResult {
-    pub id: String,
-    pub from: String,
-    pub to: String,
-    pub status: TraceSpanStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub from_t_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to_t_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub missing: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
-
-impl TraceSpanResult {
-    pub fn is_ok(&self) -> bool {
-        self.status == TraceSpanStatus::Ok
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TraceEvent {
-    pub t_ms: u64,
-    pub source: String,
-    pub event: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub data: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
