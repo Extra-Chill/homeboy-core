@@ -1033,7 +1033,7 @@ fn pr_comment_sticky_whole(
 ///
 /// Flow:
 /// 1. List the PR's issue-comments, filter to those carrying the comment-key
-///    marker (new OR legacy format — see [`parse_comment_sections`] contract).
+///    marker.
 /// 2. If none: create one with a single section block.
 /// 3. If one: parse existing sections, merge this invocation's section, render.
 ///    Byte-compare to the existing body — if equal, emit `pr.comment.section.noop`
@@ -1333,23 +1333,12 @@ fn find_sticky_comment_id(repo: &GitHubRepo, pr_number: u64, key: &str) -> Resul
 // Sectioned-comment primitive: pure parser / renderer / merger
 // ---------------------------------------------------------------------------
 //
-// Marker contract recognized by the parser (both formats, for rollout compat):
+// Marker contract recognized by the parser:
 //
-//   NEW (written on render):
-//     <!-- homeboy:comment-key=<outer> -->
-//     <!-- homeboy:section-key=<inner>:start -->
-//     ...
-//     <!-- homeboy:section-key=<inner>:end -->
-//
-//   LEGACY (homeboy-action scripts wrote these before the primitive shipped):
-//     <!-- homeboy-action-results:key=<outer> -->
-//     <!-- homeboy-action-section:key=<inner>:start -->
-//     ...
-//     <!-- homeboy-action-section:key=<inner>:end -->
-//
-// The parser accepts both so the primitive can adopt in-flight comments that
-// the action wrote under legacy markers. The renderer writes only new markers;
-// re-parsing the output migrates legacy → new on the next invocation.
+//   <!-- homeboy:comment-key=<outer> -->
+//   <!-- homeboy:section-key=<inner>:start -->
+//   ...
+//   <!-- homeboy:section-key=<inner>:end -->
 
 /// Minimal shape for a fetched PR comment (id + body).
 struct FetchedComment {
@@ -1357,22 +1346,18 @@ struct FetchedComment {
     body: String,
 }
 
-/// Outer-key marker formats (start-of-body anchor for the shared comment).
-fn comment_key_markers(comment_key: &str) -> [String; 2] {
-    [
-        format!("<!-- homeboy:comment-key={} -->", comment_key),
-        format!("<!-- homeboy-action-results:key={} -->", comment_key),
-    ]
+/// Outer-key marker (start-of-body anchor for the shared comment).
+fn comment_key_markers(comment_key: &str) -> [String; 1] {
+    [format!("<!-- homeboy:comment-key={} -->", comment_key)]
 }
 
-/// Does `body` carry the comment-key marker under either format?
+/// Does `body` carry the comment-key marker?
 fn comment_matches_key(body: &str, comment_key: &str) -> bool {
     let markers = comment_key_markers(comment_key);
     markers.iter().any(|m| body.contains(m.as_str()))
 }
 
-/// Parse section blocks out of a comment body. Honors BOTH new and legacy
-/// marker formats.
+/// Parse section blocks out of a comment body.
 ///
 /// Returns an ordered `Vec<(key, body)>` in the order encountered. Keys are
 /// trimmed; bodies have leading/trailing newlines stripped. Unpaired or
@@ -1380,13 +1365,10 @@ fn comment_matches_key(body: &str, comment_key: &str) -> bool {
 /// loop can always make forward progress even if a comment body was hand-
 /// edited.
 pub fn parse_comment_sections(body: &str) -> Vec<(String, String)> {
-    // Single regex that matches either marker format. The `regex` crate does
-    // not support backreferences, so we capture both start-key and end-key
-    // and verify equality post-match. Both formats:
-    //   <!-- homeboy:section-key=KEY:start -->       (new)
-    //   <!-- homeboy-action-section:key=KEY:start --> (legacy)
+    // The `regex` crate does not support backreferences, so we capture both
+    // start-key and end-key and verify equality post-match.
     let re = regex::Regex::new(
-        r"(?s)<!-- homeboy(?:-action-section:key|:section-key)=([^:]*?):start -->\n?(.*?)\n?<!-- homeboy(?:-action-section:key|:section-key)=([^:]*?):end -->",
+        r"(?s)<!-- homeboy:section-key=([^:]*?):start -->\n?(.*?)\n?<!-- homeboy:section-key=([^:]*?):end -->",
     )
     .expect("section-marker regex is valid");
 
@@ -1411,13 +1393,10 @@ pub fn parse_comment_sections(body: &str) -> Vec<(String, String)> {
 /// Used to preserve an existing header when merging (so we don't clobber
 /// `## Homeboy Results — <component>` that an earlier invocation wrote).
 fn extract_header(body: &str) -> Option<String> {
-    // Find the end of the outer marker line. Either format.
+    // Find the end of the outer marker line.
     let outer_end = body.find("-->\n")?;
     let after_outer = &body[outer_end + 4..];
-    // First section marker (either format).
-    let first_section_idx = after_outer
-        .find("<!-- homeboy:section-key=")
-        .or_else(|| after_outer.find("<!-- homeboy-action-section:key="))?;
+    let first_section_idx = after_outer.find("<!-- homeboy:section-key=")?;
     let header = after_outer[..first_section_idx].trim_matches('\n').trim();
     if header.is_empty() {
         None
@@ -1429,10 +1408,7 @@ fn extract_header(body: &str) -> Option<String> {
 /// Extract the footer block of a comment — content between
 /// `<!-- homeboy:footer:start -->` and `<!-- homeboy:footer:end -->`.
 ///
-/// Used to preserve an existing footer when merging. Only the NEW marker
-/// format is recognized; legacy `homeboy-action-*` bodies have no footer
-/// convention, so legacy-parse → `None` (no regression — footer is simply
-/// absent and the next render will omit it unless the caller opts in).
+/// Used to preserve an existing footer when merging.
 fn extract_footer(body: &str) -> Option<String> {
     const START: &str = "<!-- homeboy:footer:start -->";
     const END: &str = "<!-- homeboy:footer:end -->";
@@ -1473,9 +1449,7 @@ pub fn merge_section(
 ///   in the given order, and any remaining keys follow alphabetically.
 /// - `footer` → optional block written after the last section, wrapped in
 ///   dedicated `<!-- homeboy:footer:start|end -->` markers.
-/// - Output is always newline-normalized with a trailing newline and uses the
-///   **new** marker format. Re-rendering a legacy-parsed body produces
-///   new-format output (migration path).
+/// - Output is always newline-normalized with a trailing newline.
 pub fn render_comment(
     comment_key: &str,
     header: Option<&str>,
@@ -1571,8 +1545,8 @@ fn order_sections<'a>(
     }
 }
 
-/// List all PR issue-comments that carry the given comment-key marker (either
-/// format). Returns `(id, body)` pairs so the merge step can parse each body.
+/// List all PR issue-comments that carry the given comment-key marker. Returns
+/// `(id, body)` pairs so the merge step can parse each body.
 fn list_matching_comments(
     repo: &GitHubRepo,
     pr_number: u64,
@@ -1994,49 +1968,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_sections_legacy_markers() {
-        // Body shape written by homeboy-action today (merge-pr-comment.py).
-        let body = "\
-<!-- homeboy-action-results:key=ci:homeboy -->
-## Homeboy Results — `homeboy`
-
-<!-- homeboy-action-section:key=lint:start -->
-:white_check_mark: **lint**
-<!-- homeboy-action-section:key=lint:end -->
-
-<!-- homeboy-action-section:key=test:start -->
-:x: **test**
-<!-- homeboy-action-section:key=test:end -->
-";
-        let sections = parse_comment_sections(body);
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].0, "lint");
-        assert!(sections[0].1.contains("white_check_mark"));
-        assert_eq!(sections[1].0, "test");
-    }
-
-    #[test]
-    fn parse_sections_mixed_markers() {
-        // Edge: a body that was rendered half-new, half-legacy (shouldn't
-        // happen in practice, but the parser must not die if it does).
-        let body = "\
-<!-- homeboy:comment-key=ci:homeboy -->
-
-<!-- homeboy:section-key=lint:start -->
-new-style lint
-<!-- homeboy:section-key=lint:end -->
-
-<!-- homeboy-action-section:key=test:start -->
-legacy-style test
-<!-- homeboy-action-section:key=test:end -->
-";
-        let sections = parse_comment_sections(body);
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].1, "new-style lint");
-        assert_eq!(sections[1].1, "legacy-style test");
-    }
-
-    #[test]
     fn parse_sections_returns_empty_for_unmarkered_body() {
         let body = "Just a regular PR comment.\n\nNo markers here.\n";
         assert!(parse_comment_sections(body).is_empty());
@@ -2064,9 +1995,6 @@ never-ends
         assert!(out.contains("<!-- homeboy:section-key=lint:start -->"));
         assert!(out.contains("<!-- homeboy:section-key=lint:end -->"));
         assert!(out.contains("<!-- homeboy:section-key=test:start -->"));
-        // No legacy markers in rendered output.
-        assert!(!out.contains("homeboy-action-results"));
-        assert!(!out.contains("homeboy-action-section"));
     }
 
     #[test]
@@ -2175,54 +2103,12 @@ never-ends
     }
 
     #[test]
-    fn legacy_markers_rerender_as_new_markers() {
-        // This is the rollout compat path: an existing homeboy-action comment
-        // is read, parsed, re-rendered. The output must use ONLY new markers
-        // so subsequent reads are self-consistent.
-        let legacy_body = "\
-<!-- homeboy-action-results:key=ci:homeboy -->
-## Homeboy Results — `homeboy`
-
-<!-- homeboy-action-section:key=lint:start -->
-:white_check_mark: lint passed
-<!-- homeboy-action-section:key=lint:end -->
-
-<!-- homeboy-action-section:key=test:start -->
-:x: 1 test failure
-<!-- homeboy-action-section:key=test:end -->
-";
-        let sections = parse_comment_sections(legacy_body);
-        assert_eq!(sections.len(), 2);
-
-        let rendered = render_comment(
-            "ci:homeboy",
-            Some("## Homeboy Results — `homeboy`"),
-            &sections,
-            None,
-            None,
-        );
-
-        // New markers only.
-        assert!(rendered.contains("<!-- homeboy:comment-key=ci:homeboy -->"));
-        assert!(rendered.contains("<!-- homeboy:section-key=lint:start -->"));
-        assert!(rendered.contains("<!-- homeboy:section-key=test:end -->"));
-        assert!(!rendered.contains("homeboy-action-results"));
-        assert!(!rendered.contains("homeboy-action-section"));
-
-        // Content preserved.
-        assert!(rendered.contains(":white_check_mark: lint passed"));
-        assert!(rendered.contains(":x: 1 test failure"));
-    }
-
-    #[test]
-    fn comment_matches_key_recognizes_both_marker_formats() {
+    fn comment_matches_key_recognizes_comment_key_marker() {
         let new_body = "<!-- homeboy:comment-key=ci:x -->\nbody\n";
-        let legacy_body = "<!-- homeboy-action-results:key=ci:x -->\nbody\n";
         let unrelated = "<!-- homeboy:comment-key=ci:y -->\nbody\n";
         let unmarked = "just a comment\n";
 
         assert!(comment_matches_key(new_body, "ci:x"));
-        assert!(comment_matches_key(legacy_body, "ci:x"));
         assert!(!comment_matches_key(unrelated, "ci:x"));
         assert!(!comment_matches_key(unmarked, "ci:x"));
     }
@@ -2255,32 +2141,18 @@ body
     }
 
     #[test]
-    fn extract_header_legacy_markers() {
-        let body = "\
-<!-- homeboy-action-results:key=ci:x -->
-## Legacy Header
-
-<!-- homeboy-action-section:key=lint:start -->
-body
-<!-- homeboy-action-section:key=lint:end -->
-";
-        assert_eq!(extract_header(body), Some("## Legacy Header".to_string()));
-    }
-
-    #[test]
     fn parse_comments_list_filters_by_key_and_handles_pagination() {
         // Two pages: gh --paginate concatenates JSON arrays with no separator.
         let raw = r#"[
             {"id": 1, "body": "<!-- homeboy:comment-key=ci:x -->\nsection"},
             {"id": 2, "body": "unrelated"}
         ][
-            {"id": 3, "body": "<!-- homeboy-action-results:key=ci:x -->\nlegacy section"},
+            {"id": 3, "body": "<!-- homeboy:comment-key=ci:y -->\nother key"},
             {"id": 4, "body": "<!-- homeboy:comment-key=other -->\nother"}
         ]"#;
         let got = parse_comments_list_json(raw, "ci:x").unwrap();
-        assert_eq!(got.len(), 2);
+        assert_eq!(got.len(), 1);
         assert_eq!(got[0].id, 1);
-        assert_eq!(got[1].id, 3);
     }
 
     #[test]
@@ -2373,21 +2245,6 @@ tooling block line 2
 <!-- homeboy:section-key=lint:start -->
 body
 <!-- homeboy:section-key=lint:end -->
-";
-        assert_eq!(extract_footer(body), None);
-    }
-
-    #[test]
-    fn extract_footer_returns_none_for_legacy_marker_bodies() {
-        // Legacy homeboy-action bodies had no footer convention. Parse →
-        // None so the renderer omits the footer block unless the caller opts in.
-        let body = "\
-<!-- homeboy-action-results:key=ci:x -->
-## Legacy Header
-
-<!-- homeboy-action-section:key=lint:start -->
-body
-<!-- homeboy-action-section:key=lint:end -->
 ";
         assert_eq!(extract_footer(body), None);
     }
