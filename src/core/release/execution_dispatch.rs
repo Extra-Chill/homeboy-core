@@ -13,7 +13,6 @@ pub(super) struct ReleaseExecutionContext<'a> {
     pub(super) extensions: &'a [ExtensionManifest],
     pub(super) component_id: &'a str,
     pub(super) options: &'a ReleaseOptions,
-    pub(super) pending_entries: Option<std::collections::HashMap<String, Vec<String>>>,
     pub(super) state: ReleaseState,
     pub(super) publish_failed: bool,
 }
@@ -28,15 +27,18 @@ pub(super) fn execute_release_plan_step(
 
     match step.step_type.as_str() {
         "preflight.git_identity" => configure_git_identity(step, context).map(Some),
+        "changelog.finalize" => {
+            executor::changelog::run_changelog_finalize(step, context.component, &mut context.state)
+                .map(Some)
+        }
         "version" => executor::run_version(
             context.component,
             &mut context.state,
             &context.options.bump_type,
-            context.pending_entries.as_ref(),
         )
         .map(Some),
         "release.prepare" => Ok(Some(
-            executor::run_prepare(
+            executor::prepare::run_prepare(
                 context.extensions,
                 &context.state,
                 context.component_id,
@@ -128,7 +130,6 @@ fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
     (step.step_type.starts_with("preflight.") && step.step_type != "preflight.git_identity")
         || step.step_type == "changelog.policy"
         || step.step_type == "changelog.generate"
-        || step.step_type == "changelog.finalize"
 }
 
 fn configure_git_identity(
@@ -171,7 +172,13 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
 
     matches!(
         result.step_type.as_str(),
-        "version" | "release.prepare" | "git.commit" | "package" | "git.tag" | "git.push"
+        "changelog.finalize"
+            | "version"
+            | "release.prepare"
+            | "git.commit"
+            | "package"
+            | "git.tag"
+            | "git.push"
     )
 }
 
@@ -222,13 +229,13 @@ mod tests {
             plan_step("preflight.test"),
             plan_step("changelog.policy"),
             plan_step("changelog.generate"),
-            plan_step("changelog.finalize"),
         ];
 
         assert!(steps.iter().all(release_step_is_plan_only));
         assert!(!release_step_is_plan_only(&plan_step(
             "preflight.git_identity"
         )));
+        assert!(!release_step_is_plan_only(&plan_step("changelog.finalize")));
         assert!(!release_step_is_plan_only(&plan_step("deploy")));
     }
 
@@ -248,7 +255,6 @@ mod tests {
             extensions: &[],
             component_id: "fixture",
             options: &options,
-            pending_entries: None,
             state: ReleaseState::default(),
             publish_failed: true,
         };
@@ -261,9 +267,11 @@ mod tests {
     #[test]
     fn test_release_step_is_show_stopper() {
         let version_failure = failed_step_result("version");
+        let changelog_failure = failed_step_result("changelog.finalize");
         let publish_failure = failed_step_result("publish.crates");
 
         assert!(release_step_is_show_stopper(&version_failure));
+        assert!(release_step_is_show_stopper(&changelog_failure));
         assert!(!release_step_is_show_stopper(&publish_failure));
     }
 

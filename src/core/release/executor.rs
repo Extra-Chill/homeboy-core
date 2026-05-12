@@ -17,13 +17,13 @@ use crate::engine::local_files::FileSystem;
 use crate::engine::validation;
 use crate::error::{Error, Result};
 use crate::extension::{self, ExtensionManifest};
-use crate::{changelog, version};
+use crate::{changelog as release_changelog, version};
 
 use super::types::{ReleaseArtifact, ReleaseState, ReleaseStepResult, ReleaseStepStatus};
 use super::utils::{extract_latest_notes, parse_release_artifacts};
 
-mod prepare;
-pub(crate) use prepare::run_prepare;
+pub(crate) mod changelog;
+pub(crate) mod prepare;
 
 /// Build a successful step result with optional data and hints.
 pub(crate) fn step_success(
@@ -106,9 +106,13 @@ pub(crate) fn run_version(
     component: &Component,
     state: &mut ReleaseState,
     bump_type: &str,
-    changelog_entries: Option<&std::collections::HashMap<String, Vec<String>>>,
 ) -> Result<ReleaseStepResult> {
-    let result = version::bump_component_version(component, bump_type, changelog_entries)?;
+    let result = version::bump_component_version_with_changelog(
+        component,
+        bump_type,
+        None,
+        state.changelog_validation.as_ref(),
+    )?;
     let data = serde_json::to_value(&result)
         .map_err(|e| Error::internal_json(e.to_string(), Some("version output".to_string())))?;
 
@@ -1009,7 +1013,7 @@ pub(crate) fn run_github_release(
 // ---------------------------------------------------------------------------
 
 fn load_release_notes(component: &Component) -> Result<String> {
-    let changelog_path = changelog::resolve_changelog_path(component)?;
+    let changelog_path = release_changelog::resolve_changelog_path(component)?;
     let changelog_content = crate::engine::local_files::local().read(&changelog_path)?;
     validation::require(
         extract_latest_notes(&changelog_content),

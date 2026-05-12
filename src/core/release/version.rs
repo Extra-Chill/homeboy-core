@@ -136,7 +136,29 @@ pub(crate) fn read_local_version(
 /// Pre-validate all version targets match the expected version.
 /// This is a read-only operation that ensures all targets are in sync
 /// BEFORE any file modifications (like changelog finalization) occur.
-fn pre_validate_version_targets(
+pub(crate) fn validate_version_targets_at(
+    component: &Component,
+    expected_version: &str,
+) -> Result<Vec<VersionTargetInfo>> {
+    component::validate_local_path(component)?;
+
+    let targets = component
+        .version_targets
+        .as_ref()
+        .ok_or_else(|| Error::config_missing_key("versionTargets", Some(component.id.clone())))?;
+
+    if targets.is_empty() {
+        return Err(Error::config_invalid_value(
+            "versionTargets",
+            None,
+            format!("Component '{}' has empty versionTargets", component.id),
+        ));
+    }
+
+    validate_version_targets(targets, &component.local_path, expected_version)
+}
+
+fn validate_version_targets(
     targets: &[VersionTarget],
     local_path: &str,
     expected_version: &str,
@@ -363,12 +385,11 @@ pub fn validate_baseline_alignment(
     }
 }
 
-/// Bump a component's version and finalize changelog.
-/// bump_type: "patch", "minor", or "major"
-pub(crate) fn bump_component_version(
+pub(crate) fn bump_component_version_with_changelog(
     component: &Component,
     bump_type: &str,
     changelog_entries: Option<&std::collections::HashMap<String, Vec<String>>>,
+    finalized_changelog: Option<&ChangelogValidationResult>,
 ) -> Result<BumpResult> {
     // Validate local_path is absolute and exists before any file operations
     component::validate_local_path(component)?;
@@ -421,11 +442,20 @@ pub(crate) fn bump_component_version(
 
     // Pre-validate ALL version targets BEFORE any file modifications.
     // This prevents changelog finalization when version files are out of sync.
-    let target_infos = pre_validate_version_targets(targets, &component.local_path, &old_version)?;
+    let target_infos = validate_version_targets(targets, &component.local_path, &old_version)?;
 
-    // Now safe to finalize changelog - all targets validated
-    let changelog_validation =
-        validate_and_finalize_changelog(component, &old_version, &new_version, changelog_entries)?;
+    // Now safe to finalize changelog - all targets validated. Release execution
+    // can provide an already-finalized changelog result from the executable
+    // changelog.finalize step.
+    let changelog_validation = match finalized_changelog {
+        Some(result) => result.clone(),
+        None => validate_and_finalize_changelog(
+            component,
+            &old_version,
+            &new_version,
+            changelog_entries,
+        )?,
+    };
 
     // Update all version files (validation already done, just write new versions)
     for info in &target_infos {
@@ -606,8 +636,9 @@ mod tests {
             vec!["release hook contract".to_string()],
         );
 
-        let result = bump_component_version(&component, "patch", Some(&entries))
-            .expect("post-version hook should run after version write");
+        let result =
+            bump_component_version_with_changelog(&component, "patch", Some(&entries), None)
+                .expect("post-version hook should run after version write");
 
         assert_eq!(result.new_version, "0.1.1");
         let generated = fs::read_to_string(temp_dir.path().join("generated.lock")).unwrap();

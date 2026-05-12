@@ -138,6 +138,7 @@ pub struct ReleaseState {
     pub tag: Option<String>,
     pub notes: Option<String>,
     pub artifacts: Vec<ReleaseArtifact>,
+    pub changelog_validation: Option<crate::version::ChangelogValidationResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
