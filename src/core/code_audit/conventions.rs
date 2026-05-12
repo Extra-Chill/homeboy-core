@@ -653,7 +653,11 @@ fn is_convention_exception(fp: &FileFingerprint, audit_config: &AuditConfig) -> 
 /// position-by-position. Positions where tokens vary across files are treated
 /// as "type parameters" (expected to differ). Only structural differences
 /// (different token count, different constant tokens) are flagged.
-pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) {
+pub fn check_signature_consistency(
+    conventions: &mut [Convention],
+    root: &Path,
+    audit_config: &AuditConfig,
+) {
     for conv in conventions.iter_mut() {
         if conv.expected_methods.is_empty() {
             continue;
@@ -680,6 +684,12 @@ pub fn check_signature_consistency(conventions: &mut [Convention], root: &Path) 
             .conforming
             .iter()
             .chain(conv.outliers.iter().map(|o| &o.file))
+            .filter(|file| {
+                !audit_config
+                    .convention_exception_globs
+                    .iter()
+                    .any(|pattern| glob_match::glob_match(pattern, file))
+            })
             .cloned()
             .collect();
 
@@ -1345,7 +1355,7 @@ mod tests {
         }];
 
         for _ in 0..5 {
-            check_signature_consistency(&mut conventions, &dir);
+            check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
             if conventions[0]
                 .outliers
                 .iter()
@@ -1419,7 +1429,7 @@ mod tests {
         }];
 
         for _ in 0..5 {
-            check_signature_consistency(&mut conventions, &dir);
+            check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
             if conventions[0].outliers[0]
                 .deviations
                 .iter()
@@ -1480,12 +1490,65 @@ mod tests {
             confidence: 1.0,
         }];
 
-        check_signature_consistency(&mut conventions, &dir);
+        check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
 
         let conv = &conventions[0];
         assert_eq!(conv.conforming.len(), 2);
         assert!(conv.outliers.is_empty());
         assert!((conv.confidence - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn signature_check_skips_convention_exception_files() {
+        let _audit_guard = crate::test_support::AuditGuard::new();
+        require_rust_grammar!("signature_check_skips_convention_exception_files");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+        std::fs::create_dir_all(dir.join("handlers")).unwrap();
+
+        std::fs::write(
+            dir.join("handlers/a.rs"),
+            "pub fn execute(config: &Config) -> Vec<Item> { vec![] }\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.join("handlers/b.rs"),
+            "pub fn execute(config: &Config) -> Vec<Item> { vec![] }\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.join("handlers/register.rs"),
+            "pub fn execute(config: &Config, context: &Context) -> Vec<Item> { vec![] }\n",
+        )
+        .unwrap();
+
+        let mut conventions = vec![Convention {
+            name: "Handlers".to_string(),
+            glob: "handlers/*".to_string(),
+            expected_methods: vec!["execute".to_string()],
+            expected_registrations: vec![],
+            expected_interfaces: vec![],
+            expected_namespace: None,
+            expected_imports: vec![],
+            conforming: vec![
+                "handlers/a.rs".to_string(),
+                "handlers/b.rs".to_string(),
+                "handlers/register.rs".to_string(),
+            ],
+            outliers: vec![],
+            total_files: 3,
+            confidence: 1.0,
+        }];
+        let audit_config = AuditConfig {
+            convention_exception_globs: vec!["**/register.rs".to_string()],
+            ..Default::default()
+        };
+
+        check_signature_consistency(&mut conventions, &dir, &audit_config);
+
+        assert!(conventions[0].outliers.is_empty());
     }
 
     #[test]
@@ -1511,7 +1574,7 @@ mod tests {
             confidence: 1.0,
         }];
 
-        check_signature_consistency(&mut conventions, &dir);
+        check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
 
         // Should not change anything for unknown language
         assert_eq!(conventions[0].conforming.len(), 2);
@@ -1564,7 +1627,7 @@ mod tests {
             confidence: 1.0,
         }];
 
-        check_signature_consistency(&mut conventions, &dir);
+        check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
 
         let conv = &conventions[0];
         assert_eq!(conv.conforming.len(), 2);
@@ -1607,7 +1670,7 @@ mod tests {
             confidence: 1.0,
         }];
 
-        check_signature_consistency(&mut conventions, &dir);
+        check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
 
         let conv = &conventions[0];
         assert_eq!(conv.conforming.len(), 2);
@@ -1648,7 +1711,7 @@ mod tests {
             confidence: 1.0,
         }];
 
-        check_signature_consistency(&mut conventions, &dir);
+        check_signature_consistency(&mut conventions, &dir, &AuditConfig::default());
 
         let conv = &conventions[0];
         // Both files should remain conforming — return type is not structural
