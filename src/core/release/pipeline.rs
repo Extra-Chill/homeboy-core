@@ -216,15 +216,15 @@ fn failed_result(id: &str, step_type: &str, err: Error) -> ReleaseStepResult {
     }
 }
 
-/// Read the auto-generated changelog entries embedded in the plan's `version`
-/// step. `plan()` computes them during validation and stashes them here so
-/// `execute()` can hand them straight to [`executor::run_version`] without
-/// recomputing.
+/// Read the auto-generated changelog entries embedded in the plan's dedicated
+/// changelog step. `plan()` computes them during validation and stashes them
+/// here so `execute()` can hand them straight to [`executor::run_version`]
+/// without recomputing.
 fn extract_pending_entries(
     plan: &ReleasePlan,
 ) -> Option<std::collections::HashMap<String, Vec<String>>> {
-    let version_step = plan.steps.iter().find(|s| s.id == "version")?;
-    let value = version_step.config.get("changelog_entries")?;
+    let changelog_step = plan.steps.iter().find(|s| s.id == "changelog.generate")?;
+    let value = changelog_step.config.get("entries")?;
     serde_json::from_value(value.clone()).ok()
 }
 
@@ -438,7 +438,8 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let mut warnings = Vec::new();
     let mut hints = Vec::new();
 
-    let mut steps = build_release_steps(
+    let mut steps = build_preflight_steps(options);
+    steps.extend(build_release_steps(
         &component,
         &extensions,
         &version_info.version,
@@ -447,18 +448,19 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         monorepo.as_ref(),
         &mut warnings,
         &mut hints,
-    )?;
+    )?);
 
-    // Embed the generated changelog entries in the version step config so the
-    // executor can finalize them directly into a `## [X.Y.Z]` section — no
-    // `## Unreleased` round-trip.
-    if !pending_entries.is_empty() {
-        if let Some(version_step) = steps.iter_mut().find(|s| s.id == "version") {
-            version_step.config.insert(
-                "changelog_entries".to_string(),
-                changelog_entries_to_json(&pending_entries),
-            );
-        }
+    if let Some(changelog_step) = steps.iter_mut().find(|s| s.id == "changelog.generate") {
+        changelog_step.config.insert(
+            "entries".to_string(),
+            changelog_entries_to_json(&pending_entries),
+        );
+        changelog_step.config.insert(
+            "entry_count".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                pending_entries.values().map(Vec::len).sum::<usize>() as u64,
+            )),
+        );
     }
 
     if options.dry_run {
@@ -1032,6 +1034,97 @@ fn github_release_applies(component: &Component) -> bool {
         .is_some()
 }
 
+fn ready_step(
+    id: &str,
+    step_type: &str,
+    label: impl Into<String>,
+    needs: Vec<String>,
+    config: std::collections::HashMap<String, serde_json::Value>,
+) -> ReleasePlanStep {
+    ReleasePlanStep {
+        id: id.to_string(),
+        step_type: step_type.to_string(),
+        label: Some(label.into()),
+        needs,
+        config,
+        status: ReleasePlanStatus::Ready,
+        missing: vec![],
+    }
+}
+
+fn disabled_step(
+    id: &str,
+    step_type: &str,
+    label: impl Into<String>,
+    config: std::collections::HashMap<String, serde_json::Value>,
+) -> ReleasePlanStep {
+    ReleasePlanStep {
+        id: id.to_string(),
+        step_type: step_type.to_string(),
+        label: Some(label.into()),
+        needs: vec![],
+        config,
+        status: ReleasePlanStatus::Disabled,
+        missing: vec![],
+    }
+}
+
+fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
+    let mut steps = vec![
+        ready_step(
+            "preflight.working_tree",
+            "preflight.working_tree",
+            "Validate working tree",
+            vec![],
+            std::collections::HashMap::new(),
+        ),
+        ready_step(
+            "preflight.remote_sync",
+            "preflight.remote_sync",
+            "Validate remote sync",
+            vec!["preflight.working_tree".to_string()],
+            std::collections::HashMap::new(),
+        ),
+    ];
+
+    if options.skip_checks {
+        let mut config = std::collections::HashMap::new();
+        config.insert(
+            "reason".to_string(),
+            serde_json::Value::String("--skip-checks".to_string()),
+        );
+        steps.push(disabled_step(
+            "preflight.quality",
+            "preflight.quality",
+            "Run release quality checks",
+            config,
+        ));
+    } else {
+        steps.push(ready_step(
+            "preflight.quality",
+            "preflight.quality",
+            "Run release quality checks",
+            vec!["preflight.remote_sync".to_string()],
+            std::collections::HashMap::new(),
+        ));
+    }
+
+    let mut changelog_config = std::collections::HashMap::new();
+    changelog_config.insert(
+        "dry_run".to_string(),
+        serde_json::Value::Bool(options.dry_run),
+    );
+    steps.push(ready_step(
+        "preflight.changelog_bootstrap",
+        "preflight.changelog_bootstrap",
+        "Ensure changelog exists",
+        vec!["preflight.quality".to_string()],
+        changelog_config,
+    ));
+
+    steps
+}
+
 /// Build all release steps: core steps (non-configurable) + publish steps (extension-derived).
 fn build_release_steps(
     component: &Component,
@@ -1057,6 +1150,23 @@ fn build_release_steps(
 
     // === CORE STEPS (non-configurable, always present) ===
 
+    steps.push(ReleasePlanStep {
+        id: "changelog.generate".to_string(),
+        step_type: "changelog.generate".to_string(),
+        label: Some("Generate changelog entries from commits".to_string()),
+        needs: vec!["preflight.changelog_bootstrap".to_string()],
+        config: {
+            let mut config = std::collections::HashMap::new();
+            config.insert(
+                "policy".to_string(),
+                serde_json::Value::String("generated".to_string()),
+            );
+            config
+        },
+        status: ReleasePlanStatus::Ready,
+        missing: vec![],
+    });
+
     // 1. Version bump
     steps.push(ReleasePlanStep {
         id: "version".to_string(),
@@ -1065,7 +1175,7 @@ fn build_release_steps(
             "Bump version {} → {} ({})",
             current_version, new_version, options.bump_type
         )),
-        needs: vec![],
+        needs: vec!["changelog.generate".to_string()],
         config: {
             let mut config = std::collections::HashMap::new();
             config.insert(
@@ -1264,6 +1374,33 @@ fn build_release_steps(
                             .map(|s: &String| serde_json::Value::String(s.clone()))
                             .collect(),
                     ),
+                );
+                config
+            },
+            status: ReleasePlanStatus::Ready,
+            missing: vec![],
+        });
+    }
+
+    if options.deploy {
+        let deploy_needs = if !post_release_hooks.is_empty() {
+            vec!["post_release".to_string()]
+        } else if !options.skip_publish && !publish_step_ids.is_empty() {
+            publish_step_ids
+        } else {
+            vec!["git.push".to_string()]
+        };
+
+        steps.push(ReleasePlanStep {
+            id: "deploy".to_string(),
+            step_type: "deploy".to_string(),
+            label: Some("Deploy released component".to_string()),
+            needs: deploy_needs,
+            config: {
+                let mut config = std::collections::HashMap::new();
+                config.insert(
+                    "execution".to_string(),
+                    serde_json::Value::String("after_release_run".to_string()),
                 );
                 config
             },
@@ -1488,10 +1625,11 @@ fn get_unexpected_uncommitted_files(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_release_steps, code_quality_failure_message, ensure_changelog_initialized,
-        filter_homeboy_managed, get_release_allowed_files, get_unexpected_uncommitted_files,
-        is_homeboy_managed_path, is_runner_infrastructure_failure, read_changelog_for_release,
-        strip_pr_reference, validate_release_version_floor,
+        build_preflight_steps, build_release_steps, code_quality_failure_message,
+        ensure_changelog_initialized, filter_homeboy_managed, get_release_allowed_files,
+        get_unexpected_uncommitted_files, is_homeboy_managed_path,
+        is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
+        validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
@@ -1833,11 +1971,116 @@ mod tests {
         .expect("steps");
 
         let ids: Vec<&str> = steps.iter().map(|step| step.id.as_str()).collect();
-        assert_eq!(ids[0], "version");
-        assert_eq!(ids[1], "release.prepare");
-        assert_eq!(ids[2], "git.commit");
-        assert_eq!(steps[1].needs, vec!["version"]);
-        assert_eq!(steps[2].needs, vec!["release.prepare"]);
+        let changelog_index = ids
+            .iter()
+            .position(|id| *id == "changelog.generate")
+            .expect("changelog step");
+        let version_index = ids
+            .iter()
+            .position(|id| *id == "version")
+            .expect("version step");
+        let prepare_index = ids
+            .iter()
+            .position(|id| *id == "release.prepare")
+            .expect("prepare step");
+        let commit_index = ids
+            .iter()
+            .position(|id| *id == "git.commit")
+            .expect("commit step");
+
+        assert!(changelog_index < version_index);
+        assert!(version_index < prepare_index);
+        assert!(prepare_index < commit_index);
+        assert_eq!(steps[version_index].needs, vec!["changelog.generate"]);
+        assert_eq!(steps[prepare_index].needs, vec!["version"]);
+        assert_eq!(steps[commit_index].needs, vec!["release.prepare"]);
+    }
+
+    #[test]
+    fn release_plan_exposes_preflight_steps() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            ..Default::default()
+        };
+
+        let steps = build_preflight_steps(&options);
+        let ids: Vec<&str> = steps.iter().map(|step| step.id.as_str()).collect();
+
+        assert_eq!(
+            ids,
+            vec![
+                "preflight.working_tree",
+                "preflight.remote_sync",
+                "preflight.quality",
+                "preflight.changelog_bootstrap"
+            ]
+        );
+        assert_eq!(steps[2].status, crate::release::ReleasePlanStatus::Ready);
+    }
+
+    #[test]
+    fn release_plan_marks_quality_preflight_disabled_when_checks_are_skipped() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            skip_checks: true,
+            ..Default::default()
+        };
+
+        let steps = build_preflight_steps(&options);
+        let quality = steps
+            .iter()
+            .find(|step| step.id == "preflight.quality")
+            .expect("quality step");
+
+        assert_eq!(quality.status, crate::release::ReleasePlanStatus::Disabled);
+        assert_eq!(
+            quality
+                .config
+                .get("reason")
+                .and_then(|value| value.as_str()),
+            Some("--skip-checks")
+        );
+    }
+
+    #[test]
+    fn release_plan_includes_deploy_intent_when_requested() {
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: "/tmp/fixture".to_string(),
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        let mut hints = Vec::new();
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            deploy: true,
+            ..Default::default()
+        };
+
+        let steps = build_release_steps(
+            &component,
+            &[],
+            "1.0.0",
+            "1.0.1",
+            &options,
+            None,
+            &mut warnings,
+            &mut hints,
+        )
+        .expect("steps");
+
+        let deploy = steps
+            .iter()
+            .find(|step| step.id == "deploy")
+            .expect("deploy step");
+        assert_eq!(deploy.needs, vec!["git.push"]);
+        assert_eq!(
+            deploy
+                .config
+                .get("execution")
+                .and_then(|value| value.as_str()),
+            Some("after_release_run")
+        );
     }
 
     fn component_with_changelog_target(
