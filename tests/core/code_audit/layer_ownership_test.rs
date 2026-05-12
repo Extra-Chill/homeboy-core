@@ -33,8 +33,7 @@ fn test_analyze_layer_ownership() {
     let findings = super::analyze_layer_ownership(root);
     assert!(findings.iter().any(|f| {
         f.convention == "layer_ownership"
-            && f.description
-                .contains("engine-owns-terminal-status")
+            && f.description.contains("engine-owns-terminal-status")
             && f.description.contains("JobStatus::")
     }));
 }
