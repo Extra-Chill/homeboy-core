@@ -129,22 +129,7 @@ pub(super) fn build_preflight_steps(
         );
     }
 
-    if options.skip_checks {
-        steps.push(disabled_step(
-            "preflight.quality",
-            "preflight.quality",
-            "Run release quality checks",
-            string_config("reason", "--skip-checks"),
-        ));
-    } else {
-        steps.push(ready_step(
-            "preflight.quality",
-            "preflight.quality",
-            "Run release quality checks",
-            vec!["preflight.bump_policy".to_string()],
-            StepConfig::new(),
-        ));
-    }
+    steps.extend(build_quality_steps(options));
 
     let mut changelog_config = StepConfig::new();
     changelog_config.insert(
@@ -155,11 +140,59 @@ pub(super) fn build_preflight_steps(
         "preflight.changelog_bootstrap",
         "preflight.changelog_bootstrap",
         "Ensure changelog exists",
-        vec!["preflight.quality".to_string()],
+        vec!["preflight.test".to_string()],
         changelog_config,
     ));
 
     steps
+}
+
+fn build_quality_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
+    if options.skip_checks {
+        return vec![
+            disabled_step(
+                "preflight.audit",
+                "preflight.audit",
+                "Run release audit",
+                string_config("reason", "--skip-checks"),
+            ),
+            disabled_step(
+                "preflight.lint",
+                "preflight.lint",
+                "Run release lint",
+                string_config("reason", "--skip-checks"),
+            ),
+            disabled_step(
+                "preflight.test",
+                "preflight.test",
+                "Run release tests",
+                string_config("reason", "--skip-checks"),
+            ),
+        ];
+    }
+
+    vec![
+        disabled_step(
+            "preflight.audit",
+            "preflight.audit",
+            "Run release audit",
+            string_config("reason", "no-release-audit-policy"),
+        ),
+        ready_step(
+            "preflight.lint",
+            "preflight.lint",
+            "Run release lint",
+            vec!["preflight.bump_policy".to_string()],
+            StepConfig::new(),
+        ),
+        ready_step(
+            "preflight.test",
+            "preflight.test",
+            "Run release tests",
+            vec!["preflight.lint".to_string()],
+            StepConfig::new(),
+        ),
+    ]
 }
 
 fn build_bump_policy_step(
@@ -442,7 +475,9 @@ mod tests {
                 "preflight.working_tree",
                 "preflight.remote_sync",
                 "preflight.bump_policy",
-                "preflight.quality",
+                "preflight.audit",
+                "preflight.lint",
+                "preflight.test",
                 "preflight.changelog_bootstrap"
             ]
         );
@@ -477,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn release_plan_marks_quality_preflight_disabled_when_checks_are_skipped() {
+    fn release_plan_marks_quality_preflights_disabled_when_checks_are_skipped() {
         let options = ReleaseOptions {
             bump_type: "patch".to_string(),
             skip_checks: true,
@@ -485,19 +520,58 @@ mod tests {
         };
 
         let steps = build_preflight_steps(&options, None);
-        let quality = steps
-            .iter()
-            .find(|step| step.id == "preflight.quality")
-            .expect("quality step");
+        for step_id in ["preflight.audit", "preflight.lint", "preflight.test"] {
+            let quality = steps
+                .iter()
+                .find(|step| step.id == step_id)
+                .expect("quality step");
 
-        assert_eq!(quality.status, ReleasePlanStatus::Disabled);
+            assert_eq!(quality.status, ReleasePlanStatus::Disabled);
+            assert_eq!(
+                quality
+                    .config
+                    .get("reason")
+                    .and_then(|value| value.as_str()),
+                Some("--skip-checks")
+            );
+        }
+    }
+
+    #[test]
+    fn release_plan_records_explicit_quality_preflights() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            ..Default::default()
+        };
+
+        let steps = build_preflight_steps(&options, None);
+        let audit = steps
+            .iter()
+            .find(|step| step.id == "preflight.audit")
+            .expect("audit step");
+        let lint = steps
+            .iter()
+            .find(|step| step.id == "preflight.lint")
+            .expect("lint step");
+        let test = steps
+            .iter()
+            .find(|step| step.id == "preflight.test")
+            .expect("test step");
+        let changelog_bootstrap = steps
+            .iter()
+            .find(|step| step.id == "preflight.changelog_bootstrap")
+            .expect("changelog bootstrap step");
+
+        assert_eq!(audit.status, ReleasePlanStatus::Disabled);
         assert_eq!(
-            quality
-                .config
-                .get("reason")
-                .and_then(|value| value.as_str()),
-            Some("--skip-checks")
+            audit.config.get("reason").and_then(|value| value.as_str()),
+            Some("no-release-audit-policy")
         );
+        assert_eq!(lint.status, ReleasePlanStatus::Ready);
+        assert_eq!(lint.needs, vec!["preflight.bump_policy"]);
+        assert_eq!(test.status, ReleasePlanStatus::Ready);
+        assert_eq!(test.needs, vec!["preflight.lint"]);
+        assert_eq!(changelog_bootstrap.needs, vec!["preflight.test"]);
     }
 
     #[test]

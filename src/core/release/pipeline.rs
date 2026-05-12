@@ -190,11 +190,23 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     // === Stage 0.5: Remote sync check (preflight) ===
     v.capture(validate_remote_sync(&component), "remote_sync");
 
-    // === Stage 0.6: Code quality checks (lint + test) ===
+    // === Stage 0.6: Code quality checks ===
     if options.skip_checks {
         log_status!("release", "Skipping code quality checks (--skip-checks)");
     } else {
-        v.capture(validate_code_quality(&component), "code_quality");
+        let lint_ran = v
+            .capture(validate_lint_quality(&component), "lint")
+            .unwrap_or(false);
+        let tests_ran = v
+            .capture(validate_test_quality(&component), "test")
+            .unwrap_or(false);
+
+        if !lint_ran && !tests_ran {
+            log_status!(
+                "release",
+                "No linked extensions provide lint/test scripts — skipping code quality checks"
+            );
+        }
     }
 
     // === Stage 0.7: Auto-initialize changelog (first-release bootstrap) ===
@@ -625,152 +637,131 @@ pub(crate) fn validate_default_branch(component: &Component) -> Result<()> {
     ))
 }
 
-/// Run code quality checks (lint + test) via the component's extension.
+/// Run release lint via the component's extension.
 ///
-/// Resolves the extension for the component, then runs lint and test scripts
-/// if the extension provides them. If no extension is configured or the extension
-/// doesn't provide lint/test, those checks are silently skipped.
-///
-/// This is the pre-release quality gate — ensures code passes lint and tests
-/// before any version bump or tag is created.
-fn validate_code_quality(component: &Component) -> Result<()> {
+/// Returns whether a lint command was available and executed. Missing lint
+/// support is not a release blocker because not every extension provides it.
+fn validate_lint_quality(component: &Component) -> Result<bool> {
     let lint_context = extension::lint::resolve_lint_command(component);
+
+    let Ok(lint_context) = lint_context else {
+        return Ok(false);
+    };
+
+    log_status!("release", "Running lint ({})...", lint_context.extension_id);
+
+    let release_run_dir = RunDir::create()?;
+    let lint_findings_file = release_run_dir.step_file(run_dir::files::LINT_FINDINGS);
+
+    let output = extension::lint::build_lint_runner(
+        component,
+        None,
+        &[],
+        false,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+        &release_run_dir,
+    )
+    .and_then(|runner| runner.run())
+    .map_err(|e| quality_error("lint", format!("Lint runner error: {}", e)))?;
+
+    let lint_passed = if output.success {
+        true
+    } else {
+        let source_path = std::path::Path::new(&component.local_path);
+        let findings = crate::extension::lint::baseline::parse_findings_file(&lint_findings_file)
+            .unwrap_or_default();
+
+        if let Some(baseline) = crate::extension::lint::baseline::load_baseline(source_path) {
+            let comparison = crate::extension::lint::baseline::compare(&findings, &baseline);
+            if comparison.drift_increased {
+                log_status!(
+                    "release",
+                    "Lint baseline drift increased: {} new finding(s)",
+                    comparison.new_items.len()
+                );
+                false
+            } else {
+                log_status!(
+                    "release",
+                    "Lint has known findings but no new drift (baseline honored)"
+                );
+                true
+            }
+        } else {
+            false
+        }
+    };
+
+    if lint_passed {
+        log_status!("release", "Lint passed");
+        Ok(true)
+    } else {
+        Err(quality_error(
+            "lint",
+            code_quality_failure_message("Lint", &output),
+        ))
+    }
+}
+
+/// Run release tests via the component's extension.
+///
+/// Returns whether a test command was available and executed. Missing test
+/// support is not a release blocker because not every extension provides it.
+fn validate_test_quality(component: &Component) -> Result<bool> {
     let test_context = extension::test::resolve_test_command(component);
 
-    let mut checks_run = 0;
-    let mut failures = Vec::new();
+    let Ok(test_context) = test_context else {
+        return Ok(false);
+    };
 
-    if let Ok(lint_context) = lint_context {
-        log_status!("release", "Running lint ({})...", lint_context.extension_id);
+    log_status!(
+        "release",
+        "Running tests ({})...",
+        test_context.extension_id
+    );
+    let test_run_dir = RunDir::create()?;
+    let output = extension::test::build_test_runner(
+        component,
+        None,
+        &[],
+        false,
+        false,
+        None,
+        None,
+        &test_run_dir,
+    )
+    .and_then(|runner| runner.run())
+    .map_err(|e| quality_error("test", format!("Test runner error: {}", e)))?;
 
-        let release_run_dir = RunDir::create()?;
-        let lint_findings_file = release_run_dir.step_file(run_dir::files::LINT_FINDINGS);
-
-        match extension::lint::build_lint_runner(
-            component,
-            None,
-            &[],
-            false,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            &release_run_dir,
-        )
-        .and_then(|runner| runner.run())
-        {
-            Ok(output) => {
-                checks_run += 1;
-
-                // Check baseline before declaring pass/fail
-                let lint_passed = if output.success {
-                    true
-                } else {
-                    // Lint failed — but check if baseline says drift didn't increase
-                    let source_path = std::path::Path::new(&component.local_path);
-                    let findings =
-                        crate::extension::lint::baseline::parse_findings_file(&lint_findings_file)
-                            .unwrap_or_default();
-
-                    if let Some(baseline) =
-                        crate::extension::lint::baseline::load_baseline(source_path)
-                    {
-                        let comparison =
-                            crate::extension::lint::baseline::compare(&findings, &baseline);
-                        if comparison.drift_increased {
-                            log_status!(
-                                "release",
-                                "Lint baseline drift increased: {} new finding(s)",
-                                comparison.new_items.len()
-                            );
-                            false
-                        } else {
-                            log_status!(
-                                "release",
-                                "Lint has known findings but no new drift (baseline honored)"
-                            );
-                            true
-                        }
-                    } else {
-                        // No baseline — raw exit code is authoritative
-                        false
-                    }
-                };
-
-                if lint_passed {
-                    log_status!("release", "Lint passed");
-                } else {
-                    failures.push(code_quality_failure_message("Lint", &output));
-                }
-            }
-            Err(e) => {
-                failures.push(format!("Lint runner error: {}", e));
-            }
-        }
+    if output.success {
+        log_status!("release", "Tests passed");
+        Ok(true)
+    } else {
+        Err(quality_error(
+            "test",
+            code_quality_failure_message("Tests", &output),
+        ))
     }
+}
 
-    if let Ok(test_context) = test_context {
-        log_status!(
-            "release",
-            "Running tests ({})...",
-            test_context.extension_id
-        );
-        let test_run_dir = RunDir::create()?;
-        match extension::test::build_test_runner(
-            component,
-            None,
-            &[],
-            false,
-            false,
-            None,
-            None,
-            &test_run_dir,
-        )
-        .and_then(|runner| runner.run())
-        {
-            Ok(output) if output.success => {
-                log_status!("release", "Tests passed");
-                checks_run += 1;
-            }
-            Ok(output) => {
-                checks_run += 1;
-                failures.push(code_quality_failure_message("Tests", &output));
-            }
-            Err(e) => {
-                failures.push(format!("Test runner error: {}", e));
-            }
-        }
-    }
+fn quality_error(field: &str, message: String) -> Error {
+    log_status!("release", "Code quality check failed: {}", message);
 
-    if checks_run == 0 {
-        log_status!(
-            "release",
-            "No linked extensions provide lint/test scripts — skipping code quality checks"
-        );
-        return Ok(());
-    }
-
-    if failures.is_empty() {
-        return Ok(());
-    }
-
-    log_status!("release", "Code quality check summary:");
-    for failure in &failures {
-        log_status!("release", "  - {}", failure);
-    }
-
-    Err(Error::validation_invalid_argument(
-        "code_quality",
-        failures.join("; "),
+    Error::validation_invalid_argument(
+        field,
+        message,
         None,
         Some(vec![
-            "Fix the issues above before releasing".to_string(),
+            "Fix the issue above before releasing".to_string(),
             "To bypass: homeboy release <component> --skip-checks".to_string(),
         ]),
-    ))
+    )
 }
 
 fn code_quality_failure_message(check: &str, output: &extension::RunnerOutput) -> String {
