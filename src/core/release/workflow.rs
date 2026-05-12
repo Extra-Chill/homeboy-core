@@ -6,7 +6,8 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use super::pipeline::load_component;
 use super::types::{
     BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseCommandInput,
-    ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleaseRun,
+    ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep,
+    ReleaseRun,
 };
 
 pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32)> {
@@ -53,14 +54,19 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
                     );
                     return Ok((
                         ReleaseCommandResult {
-                            component_id: input.component_id,
+                            component_id: input.component_id.clone(),
                             bump_type: "none".to_string(),
                             dry_run: input.dry_run,
                             releasable_commits: 0,
                             new_version: None,
                             tag: None,
                             skipped_reason: Some("no-releasable-commits".to_string()),
-                            plan: None,
+                            plan: Some(skipped_release_plan(
+                                &input.component_id,
+                                "no-releasable-commits",
+                                "No releasable commits since last tag",
+                                "Use --bump to force a release when this is intentional",
+                            )),
                             run: None,
                             deployment: None,
                         },
@@ -367,6 +373,28 @@ fn extract_new_version_from_plan(plan: &ReleasePlan) -> Option<String> {
         .and_then(|s| s.config.get("to"))
         .and_then(|v| v.as_str())
         .map(String::from)
+}
+
+fn skipped_release_plan(component_id: &str, reason: &str, label: &str, hint: &str) -> ReleasePlan {
+    ReleasePlan {
+        component_id: component_id.to_string(),
+        enabled: false,
+        steps: vec![ReleasePlanStep {
+            id: "release.skip".to_string(),
+            step_type: "release.skip".to_string(),
+            label: Some(label.to_string()),
+            needs: vec![],
+            config: std::collections::HashMap::from([(
+                "reason".to_string(),
+                serde_json::Value::String(reason.to_string()),
+            )]),
+            status: ReleasePlanStatus::Disabled,
+            missing: vec![],
+        }],
+        semver_recommendation: None,
+        warnings: vec![],
+        hints: vec![hint.to_string()],
+    }
 }
 
 fn extract_new_version_from_run(run: &ReleaseRun) -> Option<String> {
@@ -854,6 +882,34 @@ mod tests {
         assert_eq!(
             extract_new_version_from_plan(&plan).as_deref(),
             Some("1.2.3")
+        );
+    }
+
+    #[test]
+    fn skipped_release_plan_records_disabled_reason() {
+        let plan = skipped_release_plan(
+            "demo",
+            "no-releasable-commits",
+            "No releasable commits since last tag",
+            "Use --bump to force a release when this is intentional",
+        );
+
+        assert!(!plan.enabled);
+        assert_eq!(plan.component_id, "demo");
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].id, "release.skip");
+        assert_eq!(plan.steps[0].step_type, "release.skip");
+        assert_eq!(
+            plan.steps[0].status,
+            crate::release::ReleasePlanStatus::Disabled
+        );
+        assert_eq!(
+            plan.steps[0].config.get("reason").and_then(|v| v.as_str()),
+            Some("no-releasable-commits")
+        );
+        assert_eq!(
+            plan.hints,
+            vec!["Use --bump to force a release when this is intentional"]
         );
     }
 
