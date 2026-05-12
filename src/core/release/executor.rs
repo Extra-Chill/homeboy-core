@@ -3,8 +3,8 @@
 //! Each step is a free function that takes the component, the mutable
 //! [`ReleaseState`] threaded through the release, and whatever step-specific
 //! inputs it needs, then returns a [`ReleaseStepResult`]. The caller
-//! ([`super::pipeline::execute`]) runs them in order and handles skip-on-failure
-//! logic for subsequent steps.
+//! ([`super::pipeline::run`], via the release plan dispatcher) runs them in
+//! order and handles skip-on-failure logic for subsequent steps.
 //!
 //! This used to be a trait-object-dispatched `PipelineStepExecutor` driving a
 //! generic DAG (`engine::pipeline`). In practice every release runs the same
