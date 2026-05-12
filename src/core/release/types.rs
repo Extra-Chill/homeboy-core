@@ -171,6 +171,9 @@ pub struct ReleaseOptions {
     /// Use when another pipeline (CI, semantic-release, etc.) already owns that step.
     #[serde(default)]
     pub skip_github_release: bool,
+    /// Git identity for release commits: "bot", "Name <email>", or None (use existing config).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

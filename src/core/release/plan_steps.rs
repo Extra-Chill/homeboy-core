@@ -78,10 +78,17 @@ fn string_config(key: &str, value: impl Into<String>) -> StepConfig {
 pub(super) fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
     let mut steps = vec![
         ready_step(
+            "preflight.default_branch",
+            "preflight.default_branch",
+            "Validate default branch",
+            vec![],
+            StepConfig::new(),
+        ),
+        ready_step(
             "preflight.working_tree",
             "preflight.working_tree",
             "Validate working tree",
-            vec![],
+            vec!["preflight.git_identity".to_string()],
             StepConfig::new(),
         ),
         ready_step(
@@ -92,6 +99,29 @@ pub(super) fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlan
             StepConfig::new(),
         ),
     ];
+
+    if let Some(identity) = options.git_identity.as_ref() {
+        steps.insert(
+            1,
+            ready_step(
+                "preflight.git_identity",
+                "preflight.git_identity",
+                "Configure git identity",
+                vec!["preflight.default_branch".to_string()],
+                string_config("identity", identity.as_str()),
+            ),
+        );
+    } else {
+        steps.insert(
+            1,
+            disabled_step(
+                "preflight.git_identity",
+                "preflight.git_identity",
+                "Configure git identity",
+                string_config("reason", "not-requested"),
+            ),
+        );
+    }
 
     if options.skip_checks {
         steps.push(disabled_step(
@@ -348,13 +378,42 @@ mod tests {
         assert_eq!(
             ids,
             vec![
+                "preflight.default_branch",
+                "preflight.git_identity",
                 "preflight.working_tree",
                 "preflight.remote_sync",
                 "preflight.quality",
                 "preflight.changelog_bootstrap"
             ]
         );
-        assert_eq!(steps[2].status, ReleasePlanStatus::Ready);
+        assert_eq!(steps[0].status, ReleasePlanStatus::Ready);
+        assert_eq!(steps[1].status, ReleasePlanStatus::Disabled);
+        assert_eq!(steps[2].needs, vec!["preflight.git_identity"]);
+    }
+
+    #[test]
+    fn release_plan_marks_git_identity_ready_when_requested() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            git_identity: Some("Release Bot <bot@example.com>".to_string()),
+            ..Default::default()
+        };
+
+        let steps = build_preflight_steps(&options);
+        let identity = steps
+            .iter()
+            .find(|step| step.id == "preflight.git_identity")
+            .expect("git identity step");
+
+        assert_eq!(identity.status, ReleasePlanStatus::Ready);
+        assert_eq!(identity.needs, vec!["preflight.default_branch"]);
+        assert_eq!(
+            identity
+                .config
+                .get("identity")
+                .and_then(|value| value.as_str()),
+            Some("Release Bot <bot@example.com>")
+        );
     }
 
     #[test]
