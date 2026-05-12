@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, path::Path};
 
-use crate::budget::BudgetFinding;
 use crate::code_audit::{self, report::finding_kind_key};
 use crate::extension::lint::LintFinding;
 
@@ -198,40 +197,6 @@ pub fn finding_records_from_audit(
     findings
         .iter()
         .map(|finding| finding_record_from_audit(run_id, finding))
-        .collect()
-}
-
-pub fn finding_record_from_budget(run_id: &str, finding: &BudgetFinding) -> NewFindingRecord {
-    NewFindingRecord {
-        run_id: run_id.to_string(),
-        tool: "budget".to_string(),
-        rule: Some(finding.code.clone()),
-        file: finding.file.clone(),
-        line: None,
-        severity: Some(finding.severity.clone()),
-        fingerprint: Some(finding.fingerprint()),
-        message: finding.message.clone(),
-        fixable: None,
-        metadata_json: serde_json::json!({
-            "category": finding.category,
-            "context_label": finding.context_label,
-            "actual": finding.actual,
-            "expected": finding.expected,
-            "unit": finding.unit,
-            "subject": finding.subject,
-            "passed": finding.passed,
-            "raw": finding,
-        }),
-    }
-}
-
-pub fn finding_records_from_budget(
-    run_id: &str,
-    findings: &[BudgetFinding],
-) -> Vec<NewFindingRecord> {
-    findings
-        .iter()
-        .map(|finding| finding_record_from_budget(run_id, finding))
         .collect()
 }
 
@@ -513,30 +478,6 @@ mod tests {
         assert_eq!(record.metadata_json["source_sidecar"], "audit-findings");
         assert_eq!(record.metadata_json["convention"], "command modules");
         assert_eq!(record.metadata_json["kind"], "missing_method");
-    }
-
-    #[test]
-    fn test_finding_record_from_budget() {
-        let finding = BudgetFinding::failure(
-            "rest.max_response_bytes",
-            "profile:wordpress-rest",
-            "REST response exceeded 250 KB budget",
-            4378195.0,
-            250000.0,
-            "bytes",
-            Some("/wp-json/datamachine/v1/pipelines?per_page=100".to_string()),
-        );
-
-        let record = finding_record_from_budget("run-1", &finding);
-
-        assert_eq!(record.tool, "budget");
-        assert_eq!(record.rule.as_deref(), Some("rest.max_response_bytes"));
-        assert_eq!(record.severity.as_deref(), Some("error"));
-        assert_eq!(record.metadata_json["actual"], 4378195.0);
-        assert_eq!(
-            record.fingerprint.as_deref(),
-            Some("rest.max_response_bytes:/wp-json/datamachine/v1/pipelines?per_page=100")
-        );
     }
 
     #[test]

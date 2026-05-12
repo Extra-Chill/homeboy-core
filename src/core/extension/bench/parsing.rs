@@ -309,31 +309,6 @@ impl BenchGate {
     }
 }
 
-impl BenchGateResult {
-    fn budget_finding(&self, scenario_id: &str) -> Option<BudgetFinding> {
-        if self.passed {
-            return None;
-        }
-        Some(BudgetFinding::failure(
-            format!("bench.gate.{}", self.metric),
-            format!("bench:{}", scenario_id),
-            self.reason.clone().unwrap_or_else(|| {
-                format!(
-                    "scenario `{}` gate failed: {} {} {}",
-                    scenario_id,
-                    self.metric,
-                    self.op.as_str(),
-                    self.expected
-                )
-            }),
-            self.actual,
-            self.expected,
-            "value",
-            Some(self.metric.clone()),
-        ))
-    }
-}
-
 impl BenchGateOp {
     fn as_str(self) -> &'static str {
         match self {
@@ -358,7 +333,26 @@ pub fn evaluate_gates(results: &mut BenchResults) -> Vec<String> {
             scenario
                 .gate_results
                 .iter()
-                .filter_map(|result| result.budget_finding(&scenario.id)),
+                .filter(|result| !result.passed)
+                .map(|result| {
+                    BudgetFinding::failure(
+                        format!("bench.gate.{}", result.metric),
+                        format!("bench:{}", scenario.id),
+                        result.reason.clone().unwrap_or_else(|| {
+                            format!(
+                                "scenario `{}` gate failed: {} {} {}",
+                                scenario.id,
+                                result.metric,
+                                result.op.as_str(),
+                                result.expected
+                            )
+                        }),
+                        result.actual,
+                        result.expected,
+                        "value",
+                        Some(result.metric.clone()),
+                    )
+                }),
         );
         failures.extend(
             scenario
@@ -1179,9 +1173,7 @@ mod tests {
                     "subject": "/wp-json/datamachine/v1/pipelines?per_page=100"
                 }
             ],
-            "scenarios": [
-                { "id": "wordpress-rest", "iterations": 1, "metrics": { "p95_ms": 50.0 } }
-            ]
+            "scenarios": [{ "id": "wordpress-rest", "iterations": 1, "metrics": { "p95_ms": 50.0 } }]
         }"#;
 
         let mut parsed = parse_bench_results_str(raw).unwrap();

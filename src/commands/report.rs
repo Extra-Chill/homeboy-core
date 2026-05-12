@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use super::CmdResult;
+use super::{escape_markdown_table_cell, CmdResult};
 
 #[derive(Args, Debug, Clone)]
 pub struct ReportArgs {
@@ -538,12 +538,12 @@ fn render_budget_findings(out: &mut String, data: &Map<String, Value>) {
         let _ = writeln!(
             out,
             "| `{}` | {} | {} | {} | {} | {} |",
-            escape_table_cell(&code),
-            escape_table_cell(&subject),
+            escape_markdown_table_cell(&code),
+            escape_markdown_table_cell(&subject),
             actual,
             expected,
-            escape_table_cell(&unit),
-            escape_table_cell(&message)
+            escape_markdown_table_cell(&unit),
+            escape_markdown_table_cell(&message)
         );
     }
     out.push('\n');
@@ -555,10 +555,6 @@ fn format_report_number(value: f64) -> String {
     } else {
         format!("{value:.2}")
     }
-}
-
-fn escape_table_cell(value: &str) -> String {
-    value.replace('|', "\\|")
 }
 
 fn format_bench_summary_row(row: &Value) -> Option<String> {

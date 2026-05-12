@@ -7,7 +7,7 @@ use serde_json::Value;
 use homeboy::observation::{ObservationStore, RunListFilter};
 use homeboy::Error;
 
-use crate::commands::CmdResult;
+use crate::commands::{escape_markdown_table_cell, CmdResult};
 
 use super::{bench_numeric_metrics, run_contains_scenario, run_summary, RunSummary, RunsOutput};
 
@@ -218,7 +218,7 @@ fn render_compare_table(output: &RunsCompareOutput) -> String {
 
     out.push_str("\n| Run | Status | Started | Git SHA | Rig | Artifacts | Scenario |");
     for metric in &output.metrics {
-        out.push_str(&format!(" {} |", escape_table_cell(metric)));
+        out.push_str(&format!(" {} |", escape_markdown_table_cell(metric)));
     }
     out.push('\n');
     out.push_str("|---|---|---|---|---|---:|---|");
@@ -265,10 +265,6 @@ fn fmt_metric(value: Option<f64>) -> String {
             }
         })
         .unwrap_or_else(|| "-".to_string())
-}
-
-fn escape_table_cell(value: &str) -> String {
-    value.replace('|', "\\|")
 }
 
 #[cfg(test)]

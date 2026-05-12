@@ -97,9 +97,34 @@ mod tests {
         assert_eq!(finding.actual, Some(4378195.0));
         assert!(!finding.passed);
         assert!(finding.is_gate_failure());
+    }
+
+    #[test]
+    fn test_fingerprint() {
+        let finding = BudgetFinding::failure(
+            "rest.max_response_bytes",
+            "profile:wordpress-rest",
+            "REST response exceeded 250 KB budget",
+            4378195.0,
+            250000.0,
+            "bytes",
+            Some("/wp-json/datamachine/v1/pipelines?per_page=100".to_string()),
+        );
+
         assert_eq!(
             finding.fingerprint(),
             "rest.max_response_bytes:/wp-json/datamachine/v1/pipelines?per_page=100"
         );
+
+        let without_subject = BudgetFinding::failure(
+            "page.ready_ms",
+            "profile:page-ready",
+            "Page ready time exceeded budget",
+            1200.0,
+            1000.0,
+            "ms",
+            None,
+        );
+        assert_eq!(without_subject.fingerprint(), "page.ready_ms");
     }
 }

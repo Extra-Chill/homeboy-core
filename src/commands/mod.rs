@@ -4,6 +4,10 @@ use serde_json::{json, Map, Value};
 
 pub type CmdResult<T> = homeboy::Result<(T, i32)>;
 
+pub(crate) fn escape_markdown_table_cell(value: &str) -> String {
+    value.replace('|', "\\|")
+}
+
 /// Parse a `KEY=value` string into a (key, value) tuple.
 /// Used by clap `value_parser` attributes on `--setting` and `--input` flags.
 pub fn parse_key_val(s: &str) -> Result<(String, String), String> {
