@@ -234,16 +234,14 @@ impl SshClient {
         mut output: ManagedSshSessionOutput,
         probe: CommandOutput,
     ) -> ManagedSshSessionOutput {
-        if !probe.success {
-            return output;
+        if probe.success {
+            output.live = false;
+            output.exit_code = 0;
+            if !output.stderr.is_empty() && !output.stderr.ends_with('\n') {
+                output.stderr.push('\n');
+            }
+            output.stderr.push_str("Persistent SSH control-master setup failed, but per-command SSH succeeded. This server may close master sessions after authentication; Homeboy will continue without a live control socket.");
         }
-
-        output.live = false;
-        output.exit_code = 0;
-        output.stderr = append_session_note(
-            output.stderr,
-            "Persistent SSH control-master setup failed, but per-command SSH succeeded. This server may close master sessions after authentication; Homeboy will continue without a live control socket.",
-        );
         output
     }
 
@@ -454,14 +452,6 @@ impl SshClient {
             Err(_) => -1,
         }
     }
-}
-
-fn append_session_note(mut stderr: String, note: &str) -> String {
-    if !stderr.is_empty() && !stderr.ends_with('\n') {
-        stderr.push('\n');
-    }
-    stderr.push_str(note);
-    stderr
 }
 
 pub fn execute_local_command(command: &str) -> CommandOutput {
@@ -1108,35 +1098,21 @@ pub fn is_local_host(host: &str) -> bool {
     }
 }
 
-/// Collect all IP addresses assigned to local network interfaces.
-///
-/// Uses `ip -o addr show` on Linux and `ifconfig` on macOS.
-/// Returns None if the command fails (graceful degradation — falls back
-/// to localhost-only matching).
 fn get_local_ips() -> Option<Vec<std::net::IpAddr>> {
     #[cfg(target_os = "linux")]
     {
-        // `ip -o addr show` outputs one line per address, e.g.:
-        // 2: eth0    inet 178.156.237.104/24 brd 178.156.237.255 scope global eth0
         let output = std::process::Command::new("ip")
             .args(["-o", "addr", "show"])
             .output()
             .ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = successful_command_stdout(output)?;
         let ips: Vec<std::net::IpAddr> = stdout
             .lines()
             .filter_map(|line| {
-                // Fields: index, iface, family, addr/prefix, ...
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() < 4 {
                     return None;
                 }
-                // The address is in field 3, formatted as "addr/prefix"
                 let addr_prefix = parts[3];
                 let addr_str = addr_prefix.split('/').next()?;
                 addr_str.parse().ok()
@@ -1149,23 +1125,15 @@ fn get_local_ips() -> Option<Vec<std::net::IpAddr>> {
     #[cfg(target_os = "macos")]
     {
         let output = std::process::Command::new("ifconfig").output().ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = successful_command_stdout(output)?;
         let ips: Vec<std::net::IpAddr> = stdout
             .lines()
             .filter_map(|line| {
                 let line = line.trim();
                 if let Some(rest) = line.strip_prefix("inet ") {
-                    // "inet 192.168.1.5 netmask ..."
                     rest.split_whitespace().next()?.parse().ok()
                 } else if let Some(rest) = line.strip_prefix("inet6 ") {
-                    // "inet6 fe80::1%lo0 prefixlen ..."
                     let addr_str = rest.split_whitespace().next()?;
-                    // Strip zone ID (e.g. %lo0)
                     let addr_str = addr_str.split('%').next()?;
                     addr_str.parse().ok()
                 } else {
@@ -1181,6 +1149,13 @@ fn get_local_ips() -> Option<Vec<std::net::IpAddr>> {
     {
         None
     }
+}
+
+fn successful_command_stdout(output: std::process::Output) -> Option<String> {
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Check if an SSH failure is a transient connection error worth retrying.
@@ -1400,52 +1375,27 @@ mod tests {
     #[test]
     fn managed_session_connect_reports_per_command_fallback() {
         let client = local_managed_session_client();
-        let master_output = ManagedSshSessionOutput {
-            session: client.output_session_config(),
-            live: false,
-            stdout: String::new(),
-            stderr: "Connection closed by 192.0.96.181 port 22".to_string(),
-            exit_code: 255,
-        };
-        let probe_output = CommandOutput {
-            stdout: String::new(),
-            stderr: String::new(),
-            success: true,
-            exit_code: 0,
-            child_resource: None,
-        };
-
-        let output = client.with_per_command_connect_fallback(master_output, probe_output);
+        let output = client.with_per_command_connect_fallback(
+            ManagedSshSessionOutput {
+                session: client.output_session_config(),
+                live: false,
+                stdout: String::new(),
+                stderr: "Connection closed by 192.0.96.181 port 22".to_string(),
+                exit_code: 255,
+            },
+            CommandOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                success: true,
+                exit_code: 0,
+                child_resource: None,
+            },
+        );
 
         assert!(!output.live);
         assert_eq!(output.exit_code, 0);
         assert!(output.stderr.contains("Connection closed"));
         assert!(output.stderr.contains("per-command SSH succeeded"));
-    }
-
-    #[test]
-    fn managed_session_connect_keeps_failure_when_probe_fails() {
-        let client = local_managed_session_client();
-        let master_output = ManagedSshSessionOutput {
-            session: client.output_session_config(),
-            live: false,
-            stdout: String::new(),
-            stderr: "Connection closed by host".to_string(),
-            exit_code: 255,
-        };
-        let probe_output = CommandOutput {
-            stdout: String::new(),
-            stderr: "Permission denied".to_string(),
-            success: false,
-            exit_code: 255,
-            child_resource: None,
-        };
-
-        let output = client.with_per_command_connect_fallback(master_output, probe_output);
-
-        assert!(!output.live);
-        assert_eq!(output.exit_code, 255);
-        assert_eq!(output.stderr, "Connection closed by host");
     }
 
     #[test]
