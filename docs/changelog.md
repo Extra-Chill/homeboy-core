@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.172.0] - 2026-05-12
+
+### Added
+- expose release changelog contract
+- expose release quality plan steps
+
+### Fixed
+- keep autofix inside changed scope
+
 ## [0.171.0] - 2026-05-12
 
 ### Added
