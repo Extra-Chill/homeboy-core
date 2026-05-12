@@ -6,9 +6,10 @@
 //!
 //! See: https://github.com/Extra-Chill/homeboy/issues/436
 
-use clap::Args;
+use clap::{Arg, ArgAction, Args, Command, CommandFactory};
 use std::path::PathBuf;
 
+use crate::cli_surface::Cli;
 use homeboy::component::{self, Component};
 
 /// Normalize version command arguments.
@@ -38,147 +39,13 @@ pub(crate) fn normalize_version_show(args: Vec<String>) -> Vec<String> {
     result
 }
 
-/// Flags declared on the top-level `Cli` struct as `#[arg(global = true)]`.
-///
-/// These can appear at any position in the argv (clap routes them to the
-/// parent struct regardless), so the trailing-flag normalizer below must
-/// treat them as known — otherwise it inserts a `--` separator before them
-/// and the value gets eaten by a subcommand's `last = true` capture
-/// instead of binding to `Cli::output`. The bug surfaced as homeboy#1532
-/// for `--output`.
-///
-/// Adding a new global flag to `Cli` requires adding the long form here
-/// and the equals-form lookup happens automatically.
-const GLOBAL_FLAGS: &[&str] = &["--output", "--force-hot", "-h", "--help"];
-const COMPONENT_SET_MERGE_FLAGS: &[&str] = &[
-    "--json",
-    "--base64",
-    "--replace",
-    "--version-target",
-    "--extension",
-    "--help",
-    "-h",
-];
-const TEST_FLAGS: &[&str] = &[
-    "--skip-lint",
-    "--coverage",
-    "--coverage-min",
-    "--baseline",
-    "--ignore-baseline",
-    "--ratchet",
-    "--analyze",
-    "--drift",
-    "--write",
-    "--since",
-    "--changed-since",
-    "--setting",
-    "--path",
-    "--extension",
-    "--json-summary",
-    "--json",
-    "--help",
-    "-h",
-];
-const TEST_PASSTHROUGH_BOOL_FLAGS: &[&str] = &[
-    "--skip-lint",
-    "--coverage",
-    "--baseline",
-    "--ignore-baseline",
-    "--ratchet",
-    "--analyze",
-    "--drift",
-    "--write",
-    "--force-hot",
-    "--json-summary",
-    "--json",
-];
-const TEST_PASSTHROUGH_VALUE_FLAGS: &[&str] = &[
-    "--coverage-min",
-    "--since",
-    "--changed-since",
-    "--setting",
-    "--path",
-    "--extension",
-];
-const BENCH_FLAGS: &[&str] = &[
-    "--iterations",
-    "--warmup",
-    "--runs",
-    "--baseline",
-    "--ignore-baseline",
-    "--ignore-default-baseline",
-    "--ratchet",
-    "--regression-threshold",
-    "--shared-state",
-    "--concurrency",
-    "--rig-concurrency",
-    "--rig",
-    "--scenario",
-    "--profile",
-    "--setting",
-    "--path",
-    "--json-summary",
-    "--extension",
-    "--json",
-    "--help",
-    "-h",
-];
-const BENCH_PASSTHROUGH_BOOL_FLAGS: &[&str] = &[
-    "--baseline",
-    "--ignore-baseline",
-    "--ignore-default-baseline",
-    "--ratchet",
-    "--force-hot",
-    "--json-summary",
-    "--json",
-];
-const BENCH_PASSTHROUGH_VALUE_FLAGS: &[&str] = &[
-    "--iterations",
-    "--warmup",
-    "--runs",
-    "--shared-state",
-    "--concurrency",
-    "--regression-threshold",
-    "--rig-concurrency",
-    "--scenario",
-    "--profile",
-    "--rig-order",
-    "--report",
-    "--rig",
-    "--setting",
-    "--path",
-    "--extension",
-];
-const DOCS_AUDIT_FLAGS: &[&str] = &[
-    "--path",
-    "--docs-dir",
-    "--baseline",
-    "--ignore-baseline",
-    "--features",
-    "--help",
-    "-h",
-];
-const LINT_FLAGS: &[&str] = &[
-    "--baseline",
-    "--ignore-baseline",
-    "--summary",
-    "--file",
-    "--glob",
-    "--changed-only",
-    "--changed-since",
-    "--errors-only",
-    "--sniffs",
-    "--exclude-sniffs",
-    "--category",
-    "--fix",
-    "--setting",
-    "--path",
-    "--json-summary",
-    "--extension",
-    "--json",
-    "--help",
-    "-h",
-];
+const EXPLICIT_PASSTHROUGH_SENTINEL: &str = "__homeboy_explicit_passthrough__";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliFlagSpec {
+    flag: String,
+    takes_value: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PassthroughCommand {
@@ -187,17 +54,10 @@ pub(crate) enum PassthroughCommand {
 }
 
 impl PassthroughCommand {
-    fn owned_bool_flags(self) -> &'static [&'static str] {
+    fn path(self) -> &'static [&'static str] {
         match self {
-            PassthroughCommand::Bench => BENCH_PASSTHROUGH_BOOL_FLAGS,
-            PassthroughCommand::Test => TEST_PASSTHROUGH_BOOL_FLAGS,
-        }
-    }
-
-    fn owned_value_flags(self) -> &'static [&'static str] {
-        match self {
-            PassthroughCommand::Bench => BENCH_PASSTHROUGH_VALUE_FLAGS,
-            PassthroughCommand::Test => TEST_PASSTHROUGH_VALUE_FLAGS,
+            PassthroughCommand::Bench => &["bench"],
+            PassthroughCommand::Test => &["test"],
         }
     }
 }
@@ -209,8 +69,14 @@ impl PassthroughCommand {
 /// policy next to the trailing-arg normalizer makes command-owned flags easier
 /// to update without drifting separate bench/test filters.
 pub(crate) fn filter_passthrough_args(command: PassthroughCommand, args: &[String]) -> Vec<String> {
-    let bool_flags = command.owned_bool_flags();
-    let value_flags = command.owned_value_flags();
+    if let Some(index) = args
+        .iter()
+        .position(|arg| arg == EXPLICIT_PASSTHROUGH_SENTINEL)
+    {
+        return args[index + 1..].to_vec();
+    }
+
+    let owned_flags = known_cli_flags_for_path(command.path()).unwrap_or_default();
     let mut filtered = Vec::new();
     let mut skip_next = false;
 
@@ -220,15 +86,21 @@ pub(crate) fn filter_passthrough_args(command: PassthroughCommand, args: &[Strin
             continue;
         }
 
-        if bool_flags.contains(&arg.as_str()) {
+        if owned_flags
+            .iter()
+            .any(|flag| !flag.takes_value && flag.flag == *arg)
+        {
             continue;
         }
 
-        let is_value_flag = value_flags.iter().any(|flag| {
-            if arg.starts_with(&format!("{}=", flag)) {
+        let is_value_flag = owned_flags.iter().any(|flag| {
+            if !flag.takes_value {
+                return false;
+            }
+            if arg.starts_with(&format!("{}=", flag.flag)) {
                 return true;
             }
-            if arg == *flag {
+            if arg == &flag.flag {
                 skip_next = true;
                 return true;
             }
@@ -247,70 +119,12 @@ pub(crate) fn filter_passthrough_args(command: PassthroughCommand, args: &[Strin
 
 /// Auto-insert '--' separator before unknown flags for trailing_var_arg commands.
 pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
-    let commands: &[(&str, &str, &[&str])] = &[
-        ("component", "set", COMPONENT_SET_MERGE_FLAGS),
-        (
-            "component",
-            "edit",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        ("component", "merge", COMPONENT_SET_MERGE_FLAGS),
-        (
-            "server",
-            "set",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        (
-            "server",
-            "edit",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        (
-            "server",
-            "merge",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        (
-            "fleet",
-            "set",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        (
-            "fleet",
-            "edit",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        (
-            "fleet",
-            "merge",
-            &["--json", "--base64", "--replace", "--help", "-h"],
-        ),
-        ("test", "", TEST_FLAGS),
-        ("bench", "", BENCH_FLAGS),
-        (
-            "scaffold",
-            "test",
-            &["--file", "--write", "--path", "--json", "--help", "-h"],
-        ),
-        ("docs", "audit", DOCS_AUDIT_FLAGS),
-        ("lint", "", LINT_FLAGS),
-    ];
+    let Some(path) = trailing_normalization_path(&args) else {
+        return args;
+    };
+    let explicit_passthrough = path == ["test"] || path == ["bench"];
 
-    let known_flags = commands.iter().find_map(|(cmd, subcmd, flags)| {
-        let matches = if subcmd.is_empty() {
-            args.get(1).map(|s| s == *cmd).unwrap_or(false)
-        } else {
-            args.get(1).map(|s| s == *cmd).unwrap_or(false)
-                && args.get(2).map(|s| s == *subcmd).unwrap_or(false)
-        };
-        if matches {
-            Some(*flags)
-        } else {
-            None
-        }
-    });
-
-    let Some(known_flags) = known_flags else {
+    let Some(known_flags) = known_cli_flags_for_path(&path) else {
         return args;
     };
 
@@ -318,30 +132,20 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
     let mut found_separator = false;
     let mut insert_position: Option<usize> = None;
 
-    // A flag is "known" if the per-subcommand list owns it, OR if it's a
-    // top-level Cli global (which clap routes to the parent struct
-    // regardless of position). Without the global merge, `--output PATH`
-    // placed after the subcommand triggers the `--` insertion and gets
-    // eaten by the subcommand's `last = true` capture (homeboy#1532).
     let is_known = |flag: &str| -> bool {
-        if known_flags.contains(&flag)
-            || known_flags
-                .iter()
-                .any(|f| flag.starts_with(&format!("{}=", f)))
-        {
-            return true;
-        }
-        if GLOBAL_FLAGS.contains(&flag) {
-            return true;
-        }
-        GLOBAL_FLAGS
+        known_flags
             .iter()
-            .any(|f| flag.starts_with(&format!("{}=", f)))
+            .any(|f| flag == f.flag || flag.starts_with(&format!("{}=", f.flag)))
     };
 
     for (i, arg) in args.iter().enumerate() {
         if arg == "--" {
             found_separator = true;
+            result.push(arg.clone());
+            if explicit_passthrough {
+                result.push(EXPLICIT_PASSTHROUGH_SENTINEL.to_string());
+            }
+            continue;
         }
         if !found_separator
             && arg.starts_with("--")
@@ -358,6 +162,78 @@ pub(crate) fn normalize_trailing_flags(args: Vec<String>) -> Vec<String> {
     }
 
     result
+}
+
+fn trailing_normalization_path(args: &[String]) -> Option<Vec<&'static str>> {
+    let path = match (
+        args.get(1).map(String::as_str),
+        args.get(2).map(String::as_str),
+    ) {
+        (Some("component"), Some("set" | "edit" | "merge")) => vec!["component", "set"],
+        (Some("server"), Some("set" | "edit" | "merge")) => vec!["server", "set"],
+        (Some("fleet"), Some("set" | "edit" | "merge")) => vec!["fleet", "set"],
+        (Some("test"), _) => vec!["test"],
+        (Some("bench"), _) => vec!["bench"],
+        (Some("lint"), _) => vec!["lint"],
+        _ => return None,
+    };
+    Some(path)
+}
+
+fn known_cli_flags_for_path(path: &[&str]) -> Option<Vec<CliFlagSpec>> {
+    let root = Cli::command();
+    let mut flags = command_flag_specs(&root);
+    let mut command = &root;
+
+    for segment in path {
+        command = find_subcommand(command, segment)?;
+        flags.extend(command_flag_specs(command));
+    }
+
+    Some(flags)
+}
+
+fn find_subcommand<'a>(command: &'a Command, name: &str) -> Option<&'a Command> {
+    command
+        .get_subcommands()
+        .find(|subcommand| subcommand.get_name() == name)
+}
+
+fn command_flag_specs(command: &Command) -> Vec<CliFlagSpec> {
+    command
+        .get_arguments()
+        .flat_map(|arg| {
+            let takes_value = arg_takes_value(arg);
+            let mut flags = Vec::new();
+            if let Some(long) = arg.get_long() {
+                flags.push(CliFlagSpec {
+                    flag: format!("--{}", long),
+                    takes_value,
+                });
+            }
+            if let Some(short) = arg.get_short() {
+                flags.push(CliFlagSpec {
+                    flag: format!("-{}", short),
+                    takes_value,
+                });
+            }
+            flags
+        })
+        .chain([
+            CliFlagSpec {
+                flag: "--help".to_string(),
+                takes_value: false,
+            },
+            CliFlagSpec {
+                flag: "-h".to_string(),
+                takes_value: false,
+            },
+        ])
+        .collect()
+}
+
+fn arg_takes_value(arg: &Arg) -> bool {
+    matches!(arg.get_action(), ArgAction::Set | ArgAction::Append)
 }
 
 /// Apply all argument normalizations in sequence.
@@ -529,7 +405,7 @@ mod positional_tests {
 
 #[cfg(test)]
 mod normalize_tests {
-    use super::{normalize, normalize_trailing_flags};
+    use super::{normalize, normalize_trailing_flags, EXPLICIT_PASSTHROUGH_SENTINEL};
 
     fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
@@ -762,7 +638,16 @@ mod normalize_tests {
             "--",
             "--filter=SmokeTest",
         ]);
-        let expected = input.clone();
+        let expected = argv(&[
+            "homeboy",
+            "test",
+            "my-comp",
+            "--changed-since",
+            "origin/main",
+            "--",
+            EXPLICIT_PASSTHROUGH_SENTINEL,
+            "--filter=SmokeTest",
+        ]);
         assert_eq!(normalize_trailing_flags(input), expected);
     }
 
@@ -777,8 +662,32 @@ mod normalize_tests {
             "--",
             "--filter=Scenario",
         ]);
-        let expected = input.clone();
+        let expected = argv(&[
+            "homeboy",
+            "bench",
+            "my-comp",
+            "--iterations",
+            "1",
+            "--",
+            EXPLICIT_PASSTHROUGH_SENTINEL,
+            "--filter=Scenario",
+        ]);
         assert_eq!(normalize_trailing_flags(input), expected);
+    }
+
+    #[test]
+    fn explicit_passthrough_preserves_homeboy_like_runner_flags() {
+        let args = argv(&[
+            EXPLICIT_PASSTHROUGH_SENTINEL,
+            "--coverage",
+            "--baseline",
+            "runner-value",
+        ]);
+
+        assert_eq!(
+            super::filter_passthrough_args(super::PassthroughCommand::Test, &args),
+            argv(&["--coverage", "--baseline", "runner-value"])
+        );
     }
 
     /// A genuinely unknown flag (not on the per-subcommand allow-list,
