@@ -57,6 +57,7 @@ fn run_rule(rule: &RequestedDetectorRule, fingerprints: &[&FileFingerprint]) -> 
             value_capture,
             label,
             literal_pattern,
+            exclude_match_context_patterns,
             description,
             suggestion,
         } => run_derived_literal_rule(
@@ -66,6 +67,7 @@ fn run_rule(rule: &RequestedDetectorRule, fingerprints: &[&FileFingerprint]) -> 
             value_capture,
             label,
             literal_pattern,
+            exclude_match_context_patterns,
             description,
             suggestion,
         ),
@@ -152,6 +154,7 @@ fn run_derived_literal_rule(
     value_capture: &str,
     label: &str,
     literal_pattern: &str,
+    exclude_match_context_patterns: &[String],
     description: &str,
     suggestion: &str,
 ) -> Vec<Finding> {
@@ -179,11 +182,25 @@ fn run_derived_literal_rule(
         let Ok(literal_regex) = Regex::new(&concrete_pattern) else {
             continue;
         };
+        let exclude_regexes = exclude_match_context_patterns
+            .iter()
+            .filter_map(|pattern| {
+                let concrete_pattern = render_template(pattern, None, |name| match name {
+                    "value" => value.value.clone(),
+                    "label" => value.label.clone(),
+                    _ => String::new(),
+                });
+                Regex::new(&concrete_pattern).ok()
+            })
+            .collect::<Vec<_>>();
         for fp in eligible_files(rule, fingerprints) {
             if fp.relative_path == value.file {
                 continue;
             }
             for captures in literal_regex.captures_iter(&fp.content) {
+                if match_context_is_excluded(&fp.content, &captures, &exclude_regexes) {
+                    continue;
+                }
                 findings.push(finding_from_captures_with_extra(
                     rule,
                     fp,
@@ -200,6 +217,18 @@ fn run_derived_literal_rule(
         }
     }
     findings
+}
+
+fn match_context_is_excluded(
+    content: &str,
+    captures: &Captures,
+    exclude_regexes: &[Regex],
+) -> bool {
+    let Some(match_) = captures.get(0) else {
+        return false;
+    };
+    let context = line_at_offset(content, match_.start());
+    exclude_regexes.iter().any(|regex| regex.is_match(context))
 }
 
 fn collect_derived_values(
@@ -353,6 +382,15 @@ fn line_of_offset(content: &str, offset: usize) -> usize {
         + 1
 }
 
+fn line_at_offset(content: &str, offset: usize) -> &str {
+    let offset = offset.min(content.len());
+    let start = content[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let end = content[offset..]
+        .find('\n')
+        .map_or(content.len(), |index| offset + index);
+    &content[start..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,6 +478,7 @@ register_item( array( 'category' => 'content-item' ) );
                 value_capture: "value".to_string(),
                 label: "{class}::{const}".to_string(),
                 literal_pattern: r#"['\"]{value}['\"]"#.to_string(),
+                exclude_match_context_patterns: vec![],
                 description: "Raw slug literal `{value}` at line {line} duplicates constant {label}".to_string(),
                 suggestion: "Use {label} instead.".to_string(),
             },
@@ -450,6 +489,47 @@ register_item( array( 'category' => 'content-item' ) );
         assert_eq!(findings[0].kind, AuditFinding::ConstantBackedSlugLiteral);
         assert_eq!(findings[0].severity, Severity::Info);
         assert!(findings[0].description.contains("Categories::CONTENT"));
+    }
+
+    #[test]
+    fn derived_literal_rules_drop_excluded_match_contexts() {
+        let constants = php_fp(
+            "src/categories.php",
+            r#"<?php
+final class Categories {
+    public const CONTENT = 'content-item';
+}
+"#,
+        );
+        let caller = php_fp(
+            "src/caller.php",
+            r#"<?php
+$items = array( 'content-item' => true );
+if ( $slug === 'content-item' ) { return true; }
+"#,
+        );
+        let rule = RequestedDetectorRule {
+            id: "slug-constant".to_string(),
+            kind: "constant_backed_slug_literal".to_string(),
+            severity: "info".to_string(),
+            convention: "requested_detectors".to_string(),
+            language: Some("php".to_string()),
+            file_extensions: vec!["php".to_string()],
+            exclude_path_contains: vec![],
+            rule: RequestedDetectorRuleBody::DerivedLiteral {
+                source_pattern: r#"(?s)\b(?:final\s+|abstract\s+)?class\s+(?P<class>[A-Za-z_][A-Za-z0-9_]*)\b.*?\b(?:(?:public|protected|private)\s+)?const\s+(?P<const>[A-Z][A-Z0-9_]*)\s*=\s*['\"](?P<value>[a-z][a-z0-9]*(?:[-_/:][a-z0-9]+)+)['\"]"#.to_string(),
+                value_capture: "value".to_string(),
+                label: "{class}::{const}".to_string(),
+                literal_pattern: r#"['\"]{value}['\"]"#.to_string(),
+                exclude_match_context_patterns: vec![r#"['\"]{value}['\"]\s*=>"#.to_string()],
+                description: "Raw slug literal `{value}` at line {line} duplicates constant {label}".to_string(),
+                suggestion: "Use {label} instead.".to_string(),
+            },
+        };
+
+        let findings = run(&[&constants, &caller], &config(rule));
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].description.contains("line 3"));
     }
 
     #[test]
