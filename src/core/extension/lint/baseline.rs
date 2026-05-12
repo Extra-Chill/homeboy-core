@@ -13,6 +13,10 @@ use crate::engine::baseline::{self as generic, BaselineConfig, Fingerprintable};
 
 const BASELINE_KEY: &str = "lint";
 
+#[cfg(test)]
+#[path = "../../../../tests/core/lint_baseline_test.rs"]
+mod lint_baseline_test;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LintFinding {
     pub id: String,

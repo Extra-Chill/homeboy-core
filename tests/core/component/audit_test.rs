@@ -20,6 +20,7 @@ fn test_merge() {
         lifecycle_path_globs: vec!["lifecycle/*.php".to_string()],
         utility_suffixes: vec!["Verifier".to_string()],
         convention_exception_globs: vec!["generated/**".to_string()],
+        ..Default::default()
     };
 
     config.merge(&AuditConfig {
@@ -28,6 +29,7 @@ fn test_merge() {
         lifecycle_path_globs: vec!["lifecycle/*.php".to_string(), "bin/*".to_string()],
         utility_suffixes: vec!["Verifier".to_string(), "Resolver".to_string()],
         convention_exception_globs: vec!["generated/**".to_string(), "fixtures/**".to_string()],
+        ..Default::default()
     });
 
     assert_eq!(
