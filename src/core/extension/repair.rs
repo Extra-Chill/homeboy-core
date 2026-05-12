@@ -299,7 +299,7 @@ fn clean_replace_temp(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{relink, replace};
+    use super::{relink, replace, replace_with_revision};
     use crate::extension::{install, load_extension};
     use crate::test_support::with_isolated_home;
     use std::fs;
@@ -350,6 +350,20 @@ mod tests {
                     message,
                 ],
             )
+    }
+
+    fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     fn prepare_git_extension_repo(repo: &Path, extension_id: &str) -> Option<TempDir> {
@@ -458,6 +472,45 @@ mod tests {
 
             let extension = load_extension("swift").expect("load replaced extension");
             assert_eq!(extension.version, "2.0.0");
+        });
+    }
+
+    #[test]
+    fn test_replace_with_revision() {
+        with_isolated_home(|home| {
+            let home = home.path();
+            let source = home.join("source-repo");
+            fs::create_dir_all(&source).expect("source repo");
+            let remote = match prepare_git_extension_repo(&source, "swift") {
+                Some(remote) => remote,
+                None => return,
+            };
+            let pinned_revision = match git_output(&source, &["rev-parse", "--short", "HEAD"]) {
+                Some(revision) => revision,
+                None => return,
+            };
+            let remote_url = remote.path().join("extension.git");
+
+            install(&remote_url.to_string_lossy(), Some("swift"))
+                .expect("install copied extension");
+
+            write_extension_fixture_with_version(&source, "swift", "2.0.0");
+            assert!(commit_all(&source, "update extension"));
+            assert!(run_git(&source, &["push", "origin", "HEAD"]));
+
+            let result = replace_with_revision(
+                &remote_url.to_string_lossy(),
+                Some("swift"),
+                Some(&pinned_revision),
+            )
+            .expect("replace copied extension at pinned revision");
+
+            let extension = load_extension("swift").expect("load replaced extension");
+            assert_eq!(extension.version, "1.0.0");
+            assert_eq!(
+                result.source_revision.as_deref(),
+                Some(pinned_revision.as_str())
+            );
         });
     }
 }

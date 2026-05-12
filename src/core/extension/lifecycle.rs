@@ -1240,7 +1240,7 @@ exec '{}' "$@"
     }
 
     #[test]
-    fn cloned_install_can_checkout_requested_revision() {
+    fn test_install_with_revision() {
         with_isolated_home(|home| {
             let home = home.path();
             let source = home.join("source-repo");
