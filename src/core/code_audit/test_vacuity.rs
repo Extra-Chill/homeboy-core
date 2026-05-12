@@ -92,7 +92,10 @@ fn classify_vacuous_rust_test(
     if compact.contains("assert!(true)") {
         return Some("it contains only placeholder assertion logic".to_string());
     }
-    if lower.contains("audit") && (lower.contains("mapping") || lower.contains("coverage")) {
+    let comment_text = collect_rust_comments(body).to_ascii_lowercase();
+    if comment_text.contains("audit")
+        && (comment_text.contains("mapping") || comment_text.contains("coverage"))
+    {
         return Some(
             "its comments describe audit coverage mapping instead of behavior".to_string(),
         );
@@ -318,6 +321,61 @@ fn strip_rust_comments(content: &str) -> String {
         .join("\n")
 }
 
+fn collect_rust_comments(content: &str) -> String {
+    let mut comments = String::new();
+    let mut iter = content.char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
+        match ch {
+            '/' if iter.peek().is_some_and(|(_, next)| *next == '/') => {
+                iter.next();
+                collect_line_comment(&mut iter, &mut comments);
+            }
+            '/' if iter.peek().is_some_and(|(_, next)| *next == '*') => {
+                iter.next();
+                collect_block_comment(&mut iter, &mut comments);
+            }
+            'r' if raw_string_hashes(content, idx).is_some() => {
+                if let Some(hashes) = raw_string_hashes(content, idx) {
+                    skip_raw_string(&mut iter, hashes);
+                }
+            }
+            '"' => skip_quoted_string(&mut iter),
+            '\'' => skip_char_literal(&mut iter),
+            _ => {}
+        }
+    }
+    comments
+}
+
+fn collect_line_comment(
+    iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    comments: &mut String,
+) {
+    for (_, ch) in iter.by_ref() {
+        if ch == '\n' {
+            comments.push('\n');
+            break;
+        }
+        comments.push(ch);
+    }
+}
+
+fn collect_block_comment(
+    iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
+    comments: &mut String,
+) {
+    let mut previous = '\0';
+    for (_, ch) in iter.by_ref() {
+        if previous == '*' && ch == '/' {
+            comments.pop();
+            comments.push('\n');
+            break;
+        }
+        comments.push(ch);
+        previous = ch;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,5 +411,34 @@ fn parse_json() {
         let body = extract_rust_function_body(content, "parse_json").expect("body");
 
         assert!(body.contains("assert!"));
+    }
+
+    #[test]
+    fn vacuity_mapping_comment_heuristic_ignores_code_and_string_literals() {
+        let body = r#"
+            let finding = Finding {
+                convention: "test_coverage".to_string(),
+                kind: AuditFinding::MissingTestFile,
+            };
+            assert_eq!(finding.convention, "test_coverage");
+        "#;
+
+        assert_eq!(
+            classify_vacuous_rust_test(body, &HashSet::new(), &HashSet::new(), None),
+            None
+        );
+    }
+
+    #[test]
+    fn vacuity_mapping_comment_heuristic_flags_comment_only_mapping_tests() {
+        let body = r#"
+            // Keep this audit coverage mapping test wired.
+            assert_eq!(1, 1);
+        "#;
+
+        assert_eq!(
+            classify_vacuous_rust_test(body, &HashSet::new(), &HashSet::new(), None),
+            Some("its comments describe audit coverage mapping instead of behavior".to_string())
+        );
     }
 }
