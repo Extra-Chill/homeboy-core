@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::component::{self, Component, ScopedExtensionConfig};
-use crate::error::Result;
+use crate::error::{Error, ErrorCode, Result};
 use crate::extension::{self, ExtensionCapability};
 
 /// Unified execution context for extension-backed commands.
@@ -156,6 +156,44 @@ fn apply_extension_overrides(component: &mut Component, extension_overrides: &[S
     component.extensions = Some(extensions);
 }
 
+fn declared_extension_ids(component: &Component) -> Vec<String> {
+    let mut ids: Vec<String> = component
+        .extensions
+        .as_ref()
+        .map(|extensions| extensions.keys().cloned().collect())
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+fn add_extension_override_hints(
+    mut err: Error,
+    extension_overrides: &[String],
+    declared_extension_ids: &[String],
+) -> Error {
+    if extension_overrides.is_empty() || err.code != ErrorCode::ExtensionNotFound {
+        return err;
+    }
+
+    match declared_extension_ids {
+        [extension_id] => {
+            err = err.with_hint(format!(
+                "Component declares extension '{}'; retry with --extension {} or omit --extension",
+                extension_id, extension_id
+            ));
+        }
+        [] => {}
+        extension_ids => {
+            err = err.with_hint(format!(
+                "Component declares extensions: {}",
+                extension_ids.join(", ")
+            ));
+        }
+    }
+
+    err
+}
+
 /// Resolve a unified execution context.
 ///
 /// This is the canonical entry point. All extension-backed commands should call this
@@ -196,6 +234,7 @@ pub fn resolve_with_component(
         )?
     };
 
+    let declared_extension_ids = declared_extension_ids(&component);
     apply_extension_overrides(&mut component, &options.extension_overrides);
 
     // 2. Resolve source path
@@ -211,7 +250,14 @@ pub fn resolve_with_component(
 
     // 4. Optionally resolve extension context
     let (extension_id, extension_path, settings) = if let Some(capability) = options.capability {
-        let ext_context = extension::resolve_execution_context(&component, capability)?;
+        let ext_context =
+            extension::resolve_execution_context(&component, capability).map_err(|err| {
+                add_extension_override_hints(
+                    err,
+                    &options.extension_overrides,
+                    &declared_extension_ids,
+                )
+            })?;
         let mut settings = ext_context.settings.clone();
         // Merge CLI string overrides on top (CLI string values stay strings).
         for (key, value) in &options.settings_overrides {
@@ -640,6 +686,43 @@ mod tests {
                 .extensions
                 .as_ref()
                 .is_some_and(|extensions| extensions.contains_key("wordpress")));
+        });
+    }
+
+    #[test]
+    fn unknown_extension_override_suggests_single_declared_extension() {
+        with_isolated_home(|home| {
+            write_extension(
+                home,
+                "wordpress",
+                r#""lint": { "extension_script": "lint.sh" }"#,
+            );
+            let dir = TempDir::new().expect("component dir");
+            let configured =
+                HashMap::from([("wordpress".to_string(), ScopedExtensionConfig::default())]);
+            let component = Component {
+                id: "plugin".to_string(),
+                local_path: dir.path().to_string_lossy().to_string(),
+                extensions: Some(configured),
+                ..Component::default()
+            };
+
+            let mut options = ResolveOptions::with_capability(
+                "plugin",
+                Some(dir.path().to_string_lossy().to_string()),
+                ExtensionCapability::Lint,
+                Vec::new(),
+            );
+            options.extension_overrides = vec!["php".to_string()];
+
+            let err = resolve_with_component(&options, Some(component))
+                .expect_err("unknown override should fail");
+
+            assert_eq!(err.code, ErrorCode::ExtensionNotFound);
+            assert!(err.hints.iter().any(|hint| {
+                hint.message.contains("--extension wordpress")
+                    && hint.message.contains("omit --extension")
+            }));
         });
     }
 
