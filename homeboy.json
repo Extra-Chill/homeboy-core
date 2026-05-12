@@ -3,7 +3,7 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-11T13:42:42Z",
+      "created_at": "2026-05-12T02:30:50Z",
       "item_count": 546,
       "known_fingerprints": [
         "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
@@ -418,7 +418,6 @@
         "test_coverage::src/core/paths.rs::MissingTestMethod",
         "test_coverage::src/core/paths.rs::MissingTestMethod",
         "test_coverage::src/core/paths.rs::MissingTestMethod",
-        "test_coverage::src/core/paths.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
@@ -551,7 +550,8 @@
         "test_coverage::src/core/triage.rs::MissingTestMethod",
         "test_coverage::src/core/triage.rs::MissingTestMethod",
         "test_coverage::src/core/upgrade/constants.rs::MissingTestFile",
-        "test_coverage::src/core/upgrade/update_check.rs::MissingTestMethod"
+        "test_coverage::src/core/upgrade/update_check.rs::MissingTestMethod",
+        "test_coverage::tests/core/code_audit/report_test.rs::VacuousTest"
       ],
       "metadata": {
         "alignment_score": 0.930232584476471,
