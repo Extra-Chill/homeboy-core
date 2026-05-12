@@ -5,6 +5,7 @@ use crate::extension::bench::distribution::{distribution, percentile};
 use crate::extension::bench::parsing::{
     BenchMetrics, BenchResults, BenchRunSnapshot, BenchScenario,
 };
+use crate::observation::timeline::{ObservationSpanResult, ObservationSpanStatus};
 
 pub fn aggregate_runs(runs: &[BenchResults]) -> Result<BenchResults> {
     let first = runs
@@ -105,6 +106,7 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
             (group, aggregated)
         })
         .collect();
+    template.span_results = aggregate_span_results(&template.span_results, &scenarios);
     template.memory = None;
     template.runs = Some(
         scenarios
@@ -112,6 +114,9 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
             .map(|scenario| BenchRunSnapshot {
                 metrics: scenario.metrics.clone(),
                 metric_groups: scenario.metric_groups.clone(),
+                timeline: scenario.timeline.clone(),
+                span_definitions: scenario.span_definitions.clone(),
+                span_results: scenario.span_results.clone(),
                 memory: scenario.memory.clone(),
                 artifacts: scenario.artifacts.clone(),
                 diagnostics: scenario.diagnostics.clone(),
@@ -120,6 +125,80 @@ fn aggregate_scenario(mut template: BenchScenario, scenarios: Vec<BenchScenario>
     );
     template.runs_summary = Some(summary);
     template
+}
+
+fn aggregate_span_results(
+    template_results: &[ObservationSpanResult],
+    scenarios: &[BenchScenario],
+) -> Vec<ObservationSpanResult> {
+    let mut by_id: BTreeMap<String, Vec<&ObservationSpanResult>> = BTreeMap::new();
+    for scenario in scenarios {
+        for span in &scenario.span_results {
+            by_id.entry(span.id.clone()).or_default().push(span);
+        }
+    }
+
+    let template_by_id = template_results
+        .iter()
+        .map(|span| (span.id.as_str(), span))
+        .collect::<BTreeMap<_, _>>();
+
+    by_id
+        .into_iter()
+        .map(|(id, spans)| {
+            aggregate_span_result(&id, spans, template_by_id.get(id.as_str()).copied())
+        })
+        .collect()
+}
+
+fn aggregate_span_result(
+    id: &str,
+    spans: Vec<&ObservationSpanResult>,
+    template: Option<&ObservationSpanResult>,
+) -> ObservationSpanResult {
+    let ok_durations = spans
+        .iter()
+        .filter_map(|span| {
+            (span.status == ObservationSpanStatus::Ok)
+                .then_some(span.duration_ms)
+                .flatten()
+                .map(|duration| duration as f64)
+        })
+        .collect::<Vec<_>>();
+    let base = template.or_else(|| spans.first().copied());
+    let from = base.map(|span| span.from.clone()).unwrap_or_default();
+    let to = base.map(|span| span.to.clone()).unwrap_or_default();
+
+    if !ok_durations.is_empty() {
+        let duration_ms = percentile(&ok_durations, 50.0).round() as u64;
+        return ObservationSpanResult {
+            id: id.to_string(),
+            from,
+            to,
+            status: ObservationSpanStatus::Ok,
+            duration_ms: Some(duration_ms),
+            from_t_ms: None,
+            to_t_ms: None,
+            missing: Vec::new(),
+            message: None,
+        };
+    }
+
+    let missing = spans
+        .iter()
+        .flat_map(|span| span.missing.clone())
+        .collect::<Vec<_>>();
+    ObservationSpanResult {
+        id: id.to_string(),
+        from,
+        to,
+        status: ObservationSpanStatus::Skipped,
+        duration_ms: None,
+        from_t_ms: None,
+        to_t_ms: None,
+        missing,
+        message: Some("span missing from every aggregated run".to_string()),
+    }
 }
 
 #[cfg(test)]
