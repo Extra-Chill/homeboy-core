@@ -71,11 +71,8 @@ fn test_compare() {
 fn test_parse_findings_file() {
     let dir = tempfile::tempdir().expect("temp dir");
     let file = dir.path().join("lint-findings.json");
-    std::fs::write(
-        &file,
-        r#"[{"id":"a","message":"m1","category":"cat1"}]"#,
-    )
-    .expect("should write JSON");
+    std::fs::write(&file, r#"[{"id":"a","message":"m1","category":"cat1"}]"#)
+        .expect("should write JSON");
 
     let parsed = lint_baseline::parse_findings_file(&file).expect("should parse findings");
     assert_eq!(parsed.len(), 1);
