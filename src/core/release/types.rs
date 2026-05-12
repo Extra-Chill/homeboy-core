@@ -203,7 +203,8 @@ pub struct ReleaseCommandInput {
     pub git_identity: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct ReleaseDeploymentSummary {
     pub total_projects: u32,
     pub succeeded: u32,
@@ -214,7 +215,7 @@ pub struct ReleaseDeploymentSummary {
     pub planned: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseProjectDeployResult {
     pub project_id: String,
     pub status: String,
@@ -224,7 +225,7 @@ pub struct ReleaseProjectDeployResult {
     pub component_result: Option<crate::deploy::ComponentDeployResult>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseDeploymentResult {
     pub projects: Vec<ReleaseProjectDeployResult>,
     pub summary: ReleaseDeploymentSummary,

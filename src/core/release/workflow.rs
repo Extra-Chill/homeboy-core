@@ -1,5 +1,3 @@
-use crate::component;
-use crate::deploy::{self, DeployConfig};
 use crate::engine::command;
 use crate::error::{Error, Result};
 use crate::git;
@@ -8,8 +6,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use super::pipeline::load_component;
 use super::types::{
     BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseCommandInput,
-    ReleaseCommandResult, ReleaseDeploymentResult, ReleaseDeploymentSummary, ReleaseOptions,
-    ReleasePlan, ReleaseProjectDeployResult, ReleaseRun,
+    ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleaseRun,
 };
 
 pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32)> {
@@ -215,7 +212,9 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         let tag = new_version
             .as_ref()
             .map(|v| format_tag(v, monorepo.as_ref()));
-        let deployment = input.deploy.then(|| plan_deployment(&input.component_id));
+        let deployment = input
+            .deploy
+            .then(|| super::deployment::plan_deployment(&input.component_id));
 
         return Ok((
             ReleaseCommandResult {
@@ -246,11 +245,12 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     } else {
         0
     };
-    let (deployment, deploy_exit_code) = if input.deploy {
-        execute_deployment(&input.component_id, &component.local_path)
-    } else {
-        (None, 0)
-    };
+    let deployment = super::deployment::extract_deployment_from_run(&run_result);
+    let deploy_exit_code = deployment
+        .as_ref()
+        .filter(|deployment| deployment.summary.failed > 0)
+        .map(|_| 1)
+        .unwrap_or(0);
     let exit_code = if deploy_exit_code != 0 {
         // Deploy failed after the release was already tagged and pushed.
         // The tag cannot be rolled back safely, so warn the user to retry.
@@ -401,174 +401,6 @@ fn has_post_release_warnings(run: &ReleaseRun) -> bool {
                 .and_then(|v| v.as_bool())
                 == Some(false)
     })
-}
-
-fn empty_deployment_summary(total_projects: u32) -> ReleaseDeploymentSummary {
-    ReleaseDeploymentSummary {
-        total_projects,
-        succeeded: 0,
-        failed: 0,
-        skipped: 0,
-        planned: 0,
-    }
-}
-
-fn plan_deployment(component_id: &str) -> ReleaseDeploymentResult {
-    let projects = component::projects_using(component_id).unwrap_or_default();
-
-    if projects.is_empty() {
-        log_status!(
-            "release",
-            "Warning: No projects use component '{}'. Nothing to deploy.",
-            component_id
-        );
-    }
-
-    let project_results: Vec<ReleaseProjectDeployResult> = projects
-        .iter()
-        .map(|project_id| ReleaseProjectDeployResult {
-            project_id: project_id.clone(),
-            status: "planned".to_string(),
-            error: None,
-            component_result: None,
-        })
-        .collect();
-
-    ReleaseDeploymentResult {
-        projects: project_results,
-        summary: empty_deployment_summary(projects.len() as u32),
-    }
-}
-
-fn execute_deployment(
-    component_id: &str,
-    local_path: &str,
-) -> (Option<ReleaseDeploymentResult>, i32) {
-    let projects = component::projects_using(component_id).unwrap_or_default();
-
-    if projects.is_empty() {
-        log_status!(
-            "release",
-            "Warning: No projects use component '{}'. Nothing to deploy.",
-            component_id
-        );
-        return (
-            Some(ReleaseDeploymentResult {
-                projects: vec![],
-                summary: empty_deployment_summary(0),
-            }),
-            0,
-        );
-    }
-
-    log_status!(
-        "release",
-        "Deploying '{}' to {} project(s)...",
-        component_id,
-        projects.len()
-    );
-
-    let mut project_results = Vec::new();
-    let mut succeeded: u32 = 0;
-    let mut failed: u32 = 0;
-
-    for project_id in &projects {
-        log_status!("release", "Deploying to project '{}'...", project_id);
-
-        let config = DeployConfig {
-            component_ids: vec![component_id.to_string()],
-            all: false,
-            outdated: false,
-            behind_upstream: false,
-            dry_run: false,
-            check: false,
-            // Force: the release pipeline just committed and tagged, so the
-            // workspace is clean by definition. Skipping the uncommitted changes
-            // check avoids false positives that silently block deployment.
-            force: true,
-            // Always rebuild to guarantee the artifact matches the just-tagged
-            // commit. Reusing a stale artifact is a silent production bug (#991).
-            skip_build: false,
-            keep_deps: false,
-            expected_version: None,
-            no_pull: true,
-            head: true,
-            tagged: true,
-        };
-
-        match deploy::run(project_id, &config) {
-            Ok(result) => {
-                let component_result = result.results.into_iter().next();
-                let deploy_failed = result.summary.failed > 0;
-
-                if deploy_failed {
-                    let error_msg = component_result
-                        .as_ref()
-                        .and_then(|r| r.error.clone())
-                        .unwrap_or_else(|| "Deployment failed".to_string());
-
-                    project_results.push(ReleaseProjectDeployResult {
-                        project_id: project_id.clone(),
-                        status: "failed".to_string(),
-                        error: Some(error_msg),
-                        component_result,
-                    });
-                    failed += 1;
-                } else {
-                    project_results.push(ReleaseProjectDeployResult {
-                        project_id: project_id.clone(),
-                        status: "deployed".to_string(),
-                        error: None,
-                        component_result,
-                    });
-                    succeeded += 1;
-                }
-            }
-            Err(e) => {
-                project_results.push(ReleaseProjectDeployResult {
-                    project_id: project_id.clone(),
-                    status: "failed".to_string(),
-                    error: Some(e.to_string()),
-                    component_result: None,
-                });
-                failed += 1;
-            }
-        }
-    }
-
-    let total = project_results.len() as u32;
-    let exit_code = if failed > 0 { 1 } else { 0 };
-
-    // Clean up build artifacts now that deployment is complete.
-    // The release pipeline skipped cleanup when --deploy was set so the
-    // deploy step could find the ZIP artifact.
-    let distrib_path = format!("{}/target/distrib", local_path);
-    if std::path::Path::new(&distrib_path).exists() {
-        if let Err(e) = std::fs::remove_dir_all(&distrib_path) {
-            log_status!(
-                "release",
-                "Warning: failed to clean up {}: {}",
-                distrib_path,
-                e
-            );
-        } else {
-            log_status!("release", "Cleaned up {}", distrib_path);
-        }
-    }
-
-    (
-        Some(ReleaseDeploymentResult {
-            projects: project_results,
-            summary: ReleaseDeploymentSummary {
-                total_projects: total,
-                succeeded,
-                failed,
-                skipped: 0,
-                planned: 0,
-            },
-        }),
-        exit_code,
-    )
 }
 
 fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32)> {
