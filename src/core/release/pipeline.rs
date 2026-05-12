@@ -99,7 +99,7 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
 
 /// Read the auto-generated changelog entries embedded in the plan's dedicated
 /// changelog step. `plan()` computes them during validation and stashes them
-/// here so `execute()` can hand them straight to [`executor::run_version`]
+/// here so `run()` can hand them straight to [`executor::run_version`]
 /// without recomputing.
 fn extract_pending_entries(
     plan: &ReleasePlan,

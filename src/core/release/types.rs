@@ -3,12 +3,10 @@ use std::collections::HashMap;
 
 use crate::is_zero_u32;
 
-/// Dry-run description of a release step.
+/// Ordered release plan shared by dry-run output and release execution.
 ///
-/// `ReleasePlan` is a *preview* shape — it exists to render human-readable
-/// step lists in `--dry-run` mode and in `--json` output. It does NOT drive
-/// execution. The actual release runs through a straight-line function in
-/// `pipeline::execute()` that calls each step directly.
+/// `ReleasePlan` is rendered in `--dry-run` and `--json` output, then walked by
+/// `pipeline::run()` for real releases so the previewed steps match execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleasePlan {
     pub component_id: String,
@@ -113,7 +111,7 @@ pub struct ReleaseArtifact {
     pub platform: Option<String>,
 }
 
-/// Mutable state threaded through the straight-line release execution.
+/// Mutable state threaded through sequential release execution.
 ///
 /// Every step that produces a downstream value (the new version, the tag name,
 /// the release notes, the built artifacts) stores it here and the next step
