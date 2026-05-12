@@ -45,6 +45,35 @@ fn test_build_audit_summary_counts_severities() {
 }
 
 #[test]
+fn test_build_audit_summary_prioritizes_warnings_in_top_findings() {
+    let mut result = empty_result();
+    result.findings.push(Finding {
+        convention: "test_coverage".to_string(),
+        severity: Severity::Info,
+        file: "src/missing-test.rs".to_string(),
+        description: "No test file found".to_string(),
+        suggestion: "Create test file".to_string(),
+        kind: AuditFinding::MissingTestFile,
+    });
+    result.findings.push(Finding {
+        convention: "duplication".to_string(),
+        severity: Severity::Warning,
+        file: "src/duplicate.rs".to_string(),
+        description: "Duplicate function".to_string(),
+        suggestion: "Extract shared helper".to_string(),
+        kind: AuditFinding::DuplicateFunction,
+    });
+
+    let summary = build_audit_summary(&result, 1);
+
+    assert_eq!(summary.top_findings[0].severity, Severity::Warning);
+    assert_eq!(
+        summary.top_findings[0].kind,
+        AuditFinding::DuplicateFunction
+    );
+}
+
+#[test]
 fn test_build_audit_summary_groups_findings_for_drilldown() {
     let mut result = empty_result();
     result.component_id = "homeboy".to_string();

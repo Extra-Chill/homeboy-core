@@ -173,9 +173,17 @@ pub fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSum
         .filter(|f| matches!(f.severity, Severity::Info))
         .count();
 
-    let top_findings = result
-        .findings
-        .iter()
+    let mut top_finding_refs: Vec<_> = result.findings.iter().collect();
+    top_finding_refs.sort_by(|a, b| {
+        severity_rank(&a.severity)
+            .cmp(&severity_rank(&b.severity))
+            .then_with(|| finding_kind_key(&a.kind).cmp(&finding_kind_key(&b.kind)))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.description.cmp(&b.description))
+    });
+
+    let top_findings = top_finding_refs
+        .into_iter()
         .take(20)
         .map(|f| AuditSummaryFinding {
             file: f.file.clone(),
@@ -199,6 +207,13 @@ pub fn build_audit_summary(result: &CodeAuditResult, exit_code: i32) -> AuditSum
         fixability: None,
         changed_since: None,
         exit_code,
+    }
+}
+
+fn severity_rank(severity: &Severity) -> u8 {
+    match severity {
+        Severity::Warning => 0,
+        Severity::Info => 1,
     }
 }
 
