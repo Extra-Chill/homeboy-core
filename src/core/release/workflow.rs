@@ -557,14 +557,101 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
             dry_run: false,
             releasable_commits: 0,
             new_version: None,
-            tag: None,
+            tag: Some(tag_name.clone()),
             skipped_reason: None,
-            plan: None,
+            plan: Some(recovery_release_plan(
+                &input.component_id,
+                current_version,
+                &tag_name,
+                uncommitted.has_changes,
+                !tag_exists_local,
+                !tag_exists_remote,
+                &actions,
+            )),
             run: None,
             deployment: None,
         },
         0,
     ))
+}
+
+fn recovery_release_plan(
+    component_id: &str,
+    version: &str,
+    tag_name: &str,
+    commit_needed: bool,
+    tag_needed: bool,
+    push_needed: bool,
+    actions: &[String],
+) -> ReleasePlan {
+    let mut steps = Vec::new();
+    steps.push(recovery_step(
+        "recover.commit",
+        "Commit recovery changes",
+        commit_needed,
+        vec![],
+    ));
+    steps.push(recovery_step(
+        "recover.tag",
+        format!("Create tag {}", tag_name),
+        tag_needed,
+        vec!["recover.commit".to_string()],
+    ));
+    steps.push(recovery_step(
+        "recover.push",
+        "Push recovery state",
+        push_needed,
+        vec!["recover.tag".to_string()],
+    ));
+
+    for step in &mut steps {
+        step.config.insert(
+            "version".to_string(),
+            serde_json::Value::String(version.to_string()),
+        );
+        step.config.insert(
+            "tag".to_string(),
+            serde_json::Value::String(tag_name.to_string()),
+        );
+    }
+
+    ReleasePlan {
+        component_id: component_id.to_string(),
+        enabled: !actions.is_empty(),
+        steps,
+        semver_recommendation: None,
+        warnings: vec![],
+        hints: actions.to_vec(),
+    }
+}
+
+fn recovery_step(
+    id: &str,
+    label: impl Into<String>,
+    needed: bool,
+    needs: Vec<String>,
+) -> ReleasePlanStep {
+    let mut config = std::collections::HashMap::new();
+    if !needed {
+        config.insert(
+            "reason".to_string(),
+            serde_json::Value::String("already-complete".to_string()),
+        );
+    }
+
+    ReleasePlanStep {
+        id: id.to_string(),
+        step_type: id.to_string(),
+        label: Some(label.into()),
+        needs,
+        config,
+        status: if needed {
+            ReleasePlanStatus::Ready
+        } else {
+            ReleasePlanStatus::Disabled
+        },
+        missing: vec![],
+    }
 }
 
 /// Resolve the most recent release-shaped tag for the component, honoring
@@ -919,6 +1006,59 @@ mod tests {
             plan.hints,
             vec!["Use --bump to force a release when this is intentional"]
         );
+    }
+
+    #[test]
+    fn recovery_release_plan_marks_needed_steps_ready() {
+        let actions = vec![
+            "committed version files".to_string(),
+            "created tag v1.2.3".to_string(),
+        ];
+        let plan = recovery_release_plan("demo", "1.2.3", "v1.2.3", true, true, false, &actions);
+
+        assert!(plan.enabled);
+        assert_eq!(plan.component_id, "demo");
+        assert_eq!(plan.hints, actions);
+        assert_eq!(plan.steps.len(), 3);
+        assert_eq!(plan.steps[0].id, "recover.commit");
+        assert_eq!(
+            plan.steps[0].status,
+            crate::release::ReleasePlanStatus::Ready
+        );
+        assert_eq!(plan.steps[1].id, "recover.tag");
+        assert_eq!(
+            plan.steps[1].status,
+            crate::release::ReleasePlanStatus::Ready
+        );
+        assert_eq!(plan.steps[2].id, "recover.push");
+        assert_eq!(
+            plan.steps[2].status,
+            crate::release::ReleasePlanStatus::Disabled
+        );
+        assert_eq!(
+            plan.steps[2].config.get("reason").and_then(|v| v.as_str()),
+            Some("already-complete")
+        );
+        assert_eq!(
+            plan.steps[0].config.get("version").and_then(|v| v.as_str()),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            plan.steps[0].config.get("tag").and_then(|v| v.as_str()),
+            Some("v1.2.3")
+        );
+    }
+
+    #[test]
+    fn recovery_release_plan_is_disabled_when_nothing_needed() {
+        let plan = recovery_release_plan("demo", "1.2.3", "v1.2.3", false, false, false, &[]);
+
+        assert!(!plan.enabled);
+        assert!(plan.hints.is_empty());
+        assert!(plan
+            .steps
+            .iter()
+            .all(|step| step.status == crate::release::ReleasePlanStatus::Disabled));
     }
 
     #[test]
