@@ -59,6 +59,30 @@ Deletion is safety-checked:
 homeboy server list
 ```
 
+### `connect`
+
+```sh
+homeboy server connect <server_id>
+```
+
+Opens an operator-authenticated SSH control-master session for servers configured with `auth.mode = "key_plus_password_controlmaster"`. Homeboy reuses the session for later server-backed commands without storing the password.
+
+### `status`
+
+```sh
+homeboy server status <server_id>
+```
+
+Checks whether the configured control-master session is live.
+
+### `disconnect`
+
+```sh
+homeboy server disconnect <server_id>
+```
+
+Closes the configured control-master session.
+
 ### `key`
 
 ```sh
@@ -86,6 +110,7 @@ Top-level fields:
 - `updated`: list of updated field names (values are command-specific)
 - `deleted`: list of deleted IDs
 - `key`: object for key actions
+- `session`: object for managed SSH session actions
 
 Key payload (`key`):
 
@@ -94,6 +119,16 @@ Key payload (`key`):
 - `public_key` (when available)
 - `identity_file` (when set/known)
 - `imported` (original path used for import; `~` is expanded)
+
+Session payload (`session`):
+
+- `action`: `connect` | `status` | `disconnect`
+- `server_id`
+- `control_path`
+- `persist`
+- `live`
+- `stdout`
+- `stderr`
 
 ## Related
 

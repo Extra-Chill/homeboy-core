@@ -110,6 +110,17 @@ fn build_scp_args(client: &SshClient) -> Vec<String> {
         args.push(identity_file.clone());
     }
 
+    if let Some(session) = &client.auth {
+        args.extend([
+            "-o".to_string(),
+            "ControlMaster=auto".to_string(),
+            "-o".to_string(),
+            format!("ControlPath={}", session.control_path),
+            "-o".to_string(),
+            format!("ControlPersist={}", session.persist),
+        ]);
+    }
+
     if client.port != 22 {
         args.push("-P".to_string()); // scp uses -P (uppercase) for port
         args.push(client.port.to_string());
@@ -126,6 +137,12 @@ fn build_ssh_args(client: &SshClient) -> String {
 
     if let Some(identity_file) = &client.identity_file {
         args.push(format!("-i {}", identity_file));
+    }
+
+    if let Some(session) = &client.auth {
+        args.push("-o ControlMaster=auto".to_string());
+        args.push(format!("-o ControlPath={}", session.control_path));
+        args.push(format!("-o ControlPersist={}", session.persist));
     }
 
     if client.port != 22 {
@@ -477,6 +494,8 @@ mod tests {
             user: "deploy".to_string(),
             port: 22,
             identity_file: None,
+            kind: None,
+            auth: None,
             env: HashMap::new(),
         })
         .expect("save server");

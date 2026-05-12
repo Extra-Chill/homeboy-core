@@ -5,12 +5,14 @@ mod connection;
 pub mod health;
 pub(crate) mod http;
 mod keys;
+mod session;
 pub mod transfer;
 
 pub use client::*;
 pub use connection::*;
 pub use health::*;
 pub use keys::*;
+pub use session::*;
 pub use transfer::*;
 
 use std::collections::HashMap;
@@ -35,10 +37,35 @@ pub struct Server {
     pub port: u16,
     #[serde(default)]
     pub identity_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<ServerAuth>,
     /// Environment variables to set before executing commands on this server.
     /// Values support `$PATH`-style expansion — the shell handles it.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServerAuth {
+    pub mode: ServerAuthMode,
+    #[serde(flatten)]
+    pub session: ServerSessionConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServerSessionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persist: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServerAuthMode {
+    KeyPlusPasswordControlmaster,
 }
 
 fn default_port() -> u16 {
