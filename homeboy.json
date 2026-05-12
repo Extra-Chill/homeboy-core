@@ -3,15 +3,9 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-12T15:18:31Z",
-      "item_count": 546,
+      "created_at": "2026-05-12T18:53:54Z",
+      "item_count": 535,
       "known_fingerprints": [
-        "Rust test discovery::tests/commands/supports_test.rs::UnwiredNestedRustTest",
-        "Rust test discovery::tests/commands/test_scope_test.rs::UnwiredNestedRustTest",
-        "Rust test discovery::tests/core/code_audit/layer_ownership_test.rs::UnwiredNestedRustTest",
-        "Rust test discovery::tests/core/component/audit_test.rs::UnwiredNestedRustTest",
-        "Rust test discovery::tests/core/lint_baseline_test.rs::UnwiredNestedRustTest",
-        "Rust test discovery::tests/utils/autofix_test.rs::UnwiredNestedRustTest",
         "dead_code::src/commands/utils/response.rs::UnreferencedExport",
         "dead_code::src/commands/utils/tty.rs::UnreferencedExport",
         "dead_code::src/core/code_audit/run.rs::UnreferencedExport",
@@ -424,7 +418,6 @@
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/attachments.rs::MissingTestMethod",
-        "test_coverage::src/core/project/component/discovery.rs::MissingTestFile",
         "test_coverage::src/core/project/component/overrides.rs::MissingTestMethod",
         "test_coverage::src/core/project/component/resolution.rs::MissingTestFile",
         "test_coverage::src/core/project/readiness.rs::MissingTestFile",
@@ -504,6 +497,7 @@
         "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
         "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
         "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
+        "test_coverage::src/core/release/pipeline.rs::MissingTestMethod",
         "test_coverage::src/core/release/version.rs::MissingTestMethod",
         "test_coverage::src/core/release/version.rs::MissingTestMethod",
         "test_coverage::src/core/release/version.rs::MissingTestMethod",
@@ -527,10 +521,6 @@
         "test_coverage::src/core/rig/state.rs::MissingTestMethod",
         "test_coverage::src/core/rig/state.rs::MissingTestMethod",
         "test_coverage::src/core/server/auth.rs::MissingTestFile",
-        "test_coverage::src/core/server/client.rs::MissingTestMethod",
-        "test_coverage::src/core/server/client.rs::MissingTestMethod",
-        "test_coverage::src/core/server/client.rs::MissingTestMethod",
-        "test_coverage::src/core/server/client.rs::MissingTestMethod",
         "test_coverage::src/core/server/health.rs::MissingTestMethod",
         "test_coverage::src/core/stack/apply.rs::MissingTestMethod",
         "test_coverage::src/core/stack/apply.rs::MissingTestMethod",
@@ -550,8 +540,7 @@
         "test_coverage::src/core/triage.rs::MissingTestMethod",
         "test_coverage::src/core/triage.rs::MissingTestMethod",
         "test_coverage::src/core/upgrade/constants.rs::MissingTestFile",
-        "test_coverage::src/core/upgrade/update_check.rs::MissingTestMethod",
-        "test_coverage::tests/core/code_audit/report_test.rs::VacuousTest"
+        "test_coverage::src/core/upgrade/update_check.rs::MissingTestMethod"
       ],
       "metadata": {
         "alignment_score": 0.930232584476471,
