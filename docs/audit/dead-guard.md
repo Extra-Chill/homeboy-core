@@ -33,6 +33,15 @@ if ( function_exists( 'as_schedule_single_action' ) ) { … }  // flagged when A
 
 Dead-guard findings participate in baseline comparisons like any other audit finding.
 
+## Context comments
+
+Extensions can configure `audit.detector_rules.dead_guard_context_comment_patterns` with regexes that
+mark a specific guard as intentionally dual-context. Core only matches the configured regexes against
+comments near the guard; extensions own the wording and domain conventions.
+
+The comment context is the guard line plus the guarded `if` arm when it has braces, optionally prefixed
+by the immediately preceding comment block. Non-comment code and string literals are not matched.
+
 ## Extending the symbol table
 
 The WP-core symbol table lives in `src/core/code_audit/requirements.rs`. Add new rows as
