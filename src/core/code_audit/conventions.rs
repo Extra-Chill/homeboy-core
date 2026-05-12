@@ -13,6 +13,16 @@ use super::naming::{detect_naming_suffix, suffix_matches};
 use super::signatures::{compute_signature_skeleton, tokenize_signature};
 use crate::component::AuditConfig;
 
+const GENERIC_UTILITY_SUFFIXES: &[&str] = &[
+    "Base",
+    "Handler",
+    "Handlers",
+    "Helper",
+    "Helpers",
+    "Projector",
+    "Projectors",
+];
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -628,10 +638,13 @@ fn is_utility_like_file(fp: &FileFingerprint, audit_config: &AuditConfig) -> boo
 
     declared_trait_name(fp).is_some()
         || names_to_check.iter().any(|name| {
-            audit_config
-                .utility_suffixes
+            GENERIC_UTILITY_SUFFIXES
                 .iter()
                 .any(|suffix| name.ends_with(suffix))
+                || audit_config
+                    .utility_suffixes
+                    .iter()
+                    .any(|suffix| name.ends_with(suffix))
         })
 }
 
@@ -1008,6 +1021,66 @@ mod tests {
             "recognized helper files are intentional utilities, got: {:?}",
             convention.outliers
         );
+    }
+
+    #[test]
+    fn generic_scaffolding_suffixes_are_not_promoted_to_naming_mismatch() {
+        let fingerprints = vec![
+            FileFingerprint {
+                relative_path: "abilities/CreateAbility.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                type_name: Some("CreateAbility".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/UpdateAbility.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                type_name: Some("UpdateAbility".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/DeleteAbility.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                type_name: Some("DeleteAbility".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/WikiAbilityBase.php".to_string(),
+                language: Language::Php,
+                methods: vec!["execute".to_string(), "register".to_string()],
+                type_name: Some("WikiAbilityBase".to_string()),
+                ..Default::default()
+            },
+            FileFingerprint {
+                relative_path: "abilities/WikiActionHandlers.php".to_string(),
+                language: Language::Php,
+                methods: vec!["register".to_string()],
+                type_name: Some("WikiActionHandlers".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        let convention =
+            discover_conventions("Abilities", "abilities/*.php", &fingerprints).unwrap();
+
+        assert!(
+            convention.outliers.is_empty(),
+            "generic scaffolding suffixes are utility-like, got: {:?}",
+            convention.outliers
+        );
+
+        let projector = FileFingerprint {
+            relative_path: "handlers/McpPacketProjector.php".to_string(),
+            language: Language::Php,
+            methods: vec!["project".to_string()],
+            type_name: Some("McpPacketProjector".to_string()),
+            ..Default::default()
+        };
+
+        assert!(is_utility_like_file(&projector, &AuditConfig::default()));
     }
 
     #[test]
