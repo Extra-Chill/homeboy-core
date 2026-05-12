@@ -266,7 +266,11 @@ pub(super) fn build_release_steps(
         );
     }
 
-    steps.extend(build_changelog_steps(changelog_plan));
+    steps.extend(build_changelog_steps(
+        changelog_plan,
+        current_version,
+        new_version,
+    ));
 
     let mut version_config = string_config("bump", options.bump_type.clone());
     version_config.insert(
@@ -424,7 +428,11 @@ pub(super) fn build_release_steps(
     Ok(steps)
 }
 
-fn build_changelog_steps(changelog_plan: &ReleaseChangelogPlan) -> Vec<ReleasePlanStep> {
+fn build_changelog_steps(
+    changelog_plan: &ReleaseChangelogPlan,
+    current_version: &str,
+    new_version: &str,
+) -> Vec<ReleasePlanStep> {
     let mut policy_config = StepConfig::new();
     policy_config.insert(
         "policy".to_string(),
@@ -453,6 +461,14 @@ fn build_changelog_steps(changelog_plan: &ReleaseChangelogPlan) -> Vec<ReleasePl
     finalize_config.insert(
         "path".to_string(),
         serde_json::Value::String(changelog_plan.path.clone()),
+    );
+    finalize_config.insert(
+        "from".to_string(),
+        serde_json::Value::String(current_version.to_string()),
+    );
+    finalize_config.insert(
+        "to".to_string(),
+        serde_json::Value::String(new_version.to_string()),
     );
     finalize_config.insert(
         "entries".to_string(),

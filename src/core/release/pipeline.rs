@@ -79,7 +79,6 @@ pub(crate) fn run_with_plan(
         extensions: &extensions,
         component_id,
         options,
-        pending_entries: extract_pending_entries(&release_plan),
         state: ReleaseState::default(),
         publish_failed: false,
     };
@@ -102,18 +101,6 @@ pub(crate) fn run_with_plan(
         release_plan,
         finalize(component_id, results, monorepo.as_ref()),
     ))
-}
-
-/// Read the auto-generated changelog entries embedded in the plan's explicit
-/// finalization contract. `plan()` computes them during validation and stashes
-/// them here so `run()` can hand them straight to [`executor::run_version`]
-/// without recomputing.
-fn extract_pending_entries(
-    plan: &ReleasePlan,
-) -> Option<std::collections::HashMap<String, Vec<String>>> {
-    let changelog_step = plan.steps.iter().find(|s| s.id == "changelog.finalize")?;
-    let value = changelog_step.config.get("entries")?;
-    serde_json::from_value(value.clone()).ok()
 }
 
 /// Wrap the accumulated step results into a `ReleaseRun` with an overall
