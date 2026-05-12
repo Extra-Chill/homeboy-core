@@ -215,7 +215,9 @@ mod tests {
     #[test]
     fn test_release_step_is_plan_only() {
         let steps = [
-            plan_step("preflight.quality"),
+            plan_step("preflight.audit"),
+            plan_step("preflight.lint"),
+            plan_step("preflight.test"),
             plan_step("changelog.generate"),
         ];
 
