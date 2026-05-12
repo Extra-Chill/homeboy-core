@@ -967,7 +967,7 @@ fn filter_homeboy_managed(files: Vec<String>) -> Vec<String> {
 /// allow only homeboy-managed scratch space. If anything else is dirty we bail
 /// before lint/test/build can dump tens of thousands of lines and drown out
 /// the real error.
-fn validate_working_tree_fail_fast(component: &Component) -> Result<()> {
+pub(crate) fn validate_working_tree_fail_fast(component: &Component) -> Result<()> {
     let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
     if !uncommitted.has_changes {
         return Ok(());
