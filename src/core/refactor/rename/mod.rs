@@ -1542,6 +1542,14 @@ mod tests {
     }
 
     #[test]
+    fn detect_duplicate_identifiers_scopes_sibling_object_literals() {
+        let content = "const tasks = [\n    {\n        promptFile: 'a.md',\n        graderFile: 'a.test.md',\n    },\n    {\n        promptFile: 'b.md',\n        graderFile: 'b.test.md',\n    },\n];\n";
+        let mut warnings = Vec::new();
+        detect_duplicate_identifiers("test.js", content, &mut warnings);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
     fn collision_detection_file_rename_target_exists() {
         let dir = std::env::temp_dir().join("homeboy_collision_file_test");
         let _ = std::fs::create_dir_all(&dir);
