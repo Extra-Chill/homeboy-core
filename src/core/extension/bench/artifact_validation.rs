@@ -143,6 +143,7 @@ mod tests {
             iterations: 1,
             run_metadata: None,
             diagnostics: Vec::new(),
+            budget_findings: Vec::new(),
             scenarios: vec![BenchScenario {
                 id: "site_build".to_string(),
                 file: Some("bench/site-build.bench.mjs".to_string()),

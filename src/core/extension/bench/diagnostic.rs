@@ -101,6 +101,7 @@ mod tests {
             iterations: 1,
             run_metadata: None,
             diagnostics: vec![run_diagnostic],
+            budget_findings: Vec::new(),
             scenarios: vec![BenchScenario {
                 id: "scenario-a".to_string(),
                 file: None,

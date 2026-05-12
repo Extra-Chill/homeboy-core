@@ -58,6 +58,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::budget::BudgetFinding;
 use crate::error::{Error, Result};
 use crate::observation::timeline::{
     reporting_timeline, summarize_spans, ObservationEvent, ObservationSpanDefinition,
@@ -87,6 +88,8 @@ pub struct BenchResults {
     pub run_metadata: Option<BenchRunMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<BenchDiagnostic>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budget_findings: Vec<BudgetFinding>,
     pub scenarios: Vec<BenchScenario>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metric_policies: BTreeMap<String, BenchMetricPolicy>,
@@ -306,6 +309,31 @@ impl BenchGate {
     }
 }
 
+impl BenchGateResult {
+    fn budget_finding(&self, scenario_id: &str) -> Option<BudgetFinding> {
+        if self.passed {
+            return None;
+        }
+        Some(BudgetFinding::failure(
+            format!("bench.gate.{}", self.metric),
+            format!("bench:{}", scenario_id),
+            self.reason.clone().unwrap_or_else(|| {
+                format!(
+                    "scenario `{}` gate failed: {} {} {}",
+                    scenario_id,
+                    self.metric,
+                    self.op.as_str(),
+                    self.expected
+                )
+            }),
+            self.actual,
+            self.expected,
+            "value",
+            Some(self.metric.clone()),
+        ))
+    }
+}
+
 impl BenchGateOp {
     fn as_str(self) -> &'static str {
         match self {
@@ -326,6 +354,12 @@ pub fn evaluate_gates(results: &mut BenchResults) -> Vec<String> {
             .map(|gate| gate.evaluate(&scenario.id, &scenario.metrics))
             .collect();
         scenario.passed = scenario.gate_results.iter().all(|result| result.passed);
+        results.budget_findings.extend(
+            scenario
+                .gate_results
+                .iter()
+                .filter_map(|result| result.budget_finding(&scenario.id)),
+        );
         failures.extend(
             scenario
                 .gate_results
@@ -333,6 +367,15 @@ pub fn evaluate_gates(results: &mut BenchResults) -> Vec<String> {
                 .filter_map(|result| result.reason.clone()),
         );
     }
+    failures.extend(
+        results
+            .budget_findings
+            .iter()
+            .filter(|finding| finding.is_gate_failure())
+            .map(|finding| finding.message.clone()),
+    );
+    failures.sort();
+    failures.dedup();
     failures
 }
 
@@ -1109,6 +1152,45 @@ mod tests {
         assert_eq!(failures.len(), 1);
         assert!(failures[0].contains("assistant_message_count gte 1"));
         assert_eq!(scenario.gate_results[0].actual, Some(0.0));
+        assert_eq!(parsed.budget_findings.len(), 1);
+        assert_eq!(parsed.budget_findings[0].category, "budget");
+        assert_eq!(
+            parsed.budget_findings[0].code,
+            "bench.gate.assistant_message_count"
+        );
+        assert!(!parsed.budget_findings[0].passed);
+    }
+
+    #[test]
+    fn emitted_budget_findings_gate_bench_runs() {
+        let raw = r#"{
+            "component_id": "example",
+            "iterations": 1,
+            "budget_findings": [
+                {
+                    "category": "budget",
+                    "code": "rest.max_response_bytes",
+                    "severity": "error",
+                    "context_label": "profile:wordpress-rest",
+                    "message": "REST response exceeded 250 KB budget",
+                    "actual": 4378195,
+                    "expected": 250000,
+                    "unit": "bytes",
+                    "subject": "/wp-json/datamachine/v1/pipelines?per_page=100"
+                }
+            ],
+            "scenarios": [
+                { "id": "wordpress-rest", "iterations": 1, "metrics": { "p95_ms": 50.0 } }
+            ]
+        }"#;
+
+        let mut parsed = parse_bench_results_str(raw).unwrap();
+        let failures = evaluate_gates(&mut parsed);
+
+        assert_eq!(failures, vec!["REST response exceeded 250 KB budget"]);
+        assert_eq!(parsed.budget_findings[0].actual, Some(4378195.0));
+        assert_eq!(parsed.budget_findings[0].expected, 250000.0);
+        assert_eq!(parsed.budget_findings[0].unit, "bytes");
     }
 
     #[test]

@@ -63,6 +63,10 @@ pub fn aggregate_runs(runs: &[BenchResults]) -> Result<BenchResults> {
             .iter()
             .flat_map(|result| result.diagnostics.clone())
             .collect(),
+        budget_findings: runs
+            .iter()
+            .flat_map(|result| result.budget_findings.clone())
+            .collect(),
         scenarios,
         metric_policies,
     })

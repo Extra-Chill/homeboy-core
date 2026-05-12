@@ -465,6 +465,7 @@ fn render_bench_section(out: &mut String, output_dir: &Path, run_url: &str) {
     }
 
     render_bench_summary(out, &data);
+    render_budget_findings(out, &data);
 
     let artifacts = collect_bench_artifacts(&data);
     if !artifacts.is_empty() {
@@ -503,6 +504,61 @@ fn render_bench_summary(out: &mut String, data: &Map<String, Value>) {
         let _ = writeln!(out, "- `{}` (`{}`): {}", scenario, metric, rows.join("; "));
     }
     out.push('\n');
+}
+
+fn render_budget_findings(out: &mut String, data: &Map<String, Value>) {
+    let mut findings = array_value(data, "budget_findings");
+    let results = object_value(data, "results");
+    if findings.is_empty() {
+        findings = array_value(&results, "budget_findings");
+    }
+    if findings.is_empty() {
+        return;
+    }
+
+    out.push_str("**Budget findings**\n");
+    out.push_str("| Code | Subject | Actual | Expected | Unit | Message |\n");
+    out.push_str("| --- | --- | ---: | ---: | --- | --- |\n");
+    for finding in findings.iter().take(10) {
+        let Some(finding) = finding.as_object() else {
+            continue;
+        };
+        let code = string_value(finding, "code").unwrap_or_else(|| "budget".to_string());
+        let subject = string_value(finding, "subject")
+            .or_else(|| string_value(finding, "context_label"))
+            .unwrap_or_else(|| "-".to_string());
+        let actual = number_value(finding, "actual")
+            .map(format_report_number)
+            .unwrap_or_else(|| "-".to_string());
+        let expected = number_value(finding, "expected")
+            .map(format_report_number)
+            .unwrap_or_else(|| "-".to_string());
+        let unit = string_value(finding, "unit").unwrap_or_else(|| "-".to_string());
+        let message = string_value(finding, "message").unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "| `{}` | {} | {} | {} | {} | {} |",
+            escape_table_cell(&code),
+            escape_table_cell(&subject),
+            actual,
+            expected,
+            escape_table_cell(&unit),
+            escape_table_cell(&message)
+        );
+    }
+    out.push('\n');
+}
+
+fn format_report_number(value: f64) -> String {
+    if value.fract().abs() < f64::EPSILON {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+fn escape_table_cell(value: &str) -> String {
+    value.replace('|', "\\|")
 }
 
 fn format_bench_summary_row(row: &Value) -> Option<String> {

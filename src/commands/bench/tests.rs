@@ -1438,6 +1438,7 @@ fn bench_output_single_serializes_without_wrapper_key() {
         iterations: 10,
         artifacts: Vec::new(),
         results: None,
+        budget_findings: Vec::new(),
         gate_failures: Vec::new(),
         baseline_comparison: None,
         hints: None,

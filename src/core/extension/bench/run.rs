@@ -1134,6 +1134,7 @@ fn run_concurrent_instances(
 
     // Read & merge per-instance results files.
     let mut merged_scenarios: Vec<BenchScenario> = Vec::new();
+    let mut budget_findings = Vec::new();
     let mut component_id_seen: Option<String> = None;
     let mut iterations_seen: Option<u64> = None;
     let mut metric_policies_seen: std::collections::BTreeMap<String, parsing::BenchMetricPolicy> =
@@ -1162,6 +1163,7 @@ fn run_concurrent_instances(
         for (k, v) in parsed.metric_policies.into_iter() {
             metric_policies_seen.entry(k).or_insert(v);
         }
+        budget_findings.extend(parsed.budget_findings);
         for mut scenario in parsed.scenarios {
             scenario.id = format!("{}:i{}", scenario.id, instance_id);
             merged_scenarios.push(scenario);
@@ -1176,6 +1178,7 @@ fn run_concurrent_instances(
             iterations: iterations_seen.unwrap_or(args.iterations),
             run_metadata: None,
             diagnostics: Vec::new(),
+            budget_findings,
             scenarios: merged_scenarios,
             metric_policies: metric_policies_seen,
         })
@@ -1366,6 +1369,7 @@ mod tests {
             iterations: 7,
             run_metadata: None,
             diagnostics: Vec::new(),
+            budget_findings: Vec::new(),
             scenarios: vec![BenchScenario {
                 id: "boot".to_string(),
                 file: Some("tests/bench/boot.rs".to_string()),

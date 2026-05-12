@@ -397,6 +397,7 @@ mod tests {
             iterations: 10,
             run_metadata: None,
             diagnostics: Vec::new(),
+            budget_findings: Vec::new(),
             scenarios,
             metric_policies: BTreeMap::new(),
         }
@@ -411,6 +412,7 @@ mod tests {
             iterations: 10,
             run_metadata: None,
             diagnostics: Vec::new(),
+            budget_findings: Vec::new(),
             scenarios,
             metric_policies,
         }

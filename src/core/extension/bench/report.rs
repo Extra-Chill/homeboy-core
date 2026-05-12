@@ -10,6 +10,7 @@ use super::diagnostic::BenchDiagnostic;
 use super::distribution::BenchRunDistribution;
 use super::parsing::{BenchMetricPhase, BenchResults, BenchScenario};
 use super::run::{BenchRunFailure, BenchRunWorkflowResult};
+use crate::budget::BudgetFinding;
 use crate::rig::RigStateSnapshot;
 
 #[derive(Serialize)]
@@ -23,6 +24,8 @@ pub struct BenchCommandOutput {
     pub artifacts: Vec<BenchArtifactRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<BenchResults>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub budget_findings: Vec<BudgetFinding>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub gate_failures: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -54,6 +57,11 @@ pub fn from_main_workflow_with_rig(
     rig_state: Option<RigStateSnapshot>,
 ) -> (BenchCommandOutput, i32) {
     let exit_code = result.exit_code;
+    let budget_findings = result
+        .results
+        .as_ref()
+        .map(|results| results.budget_findings.clone())
+        .unwrap_or_default();
     (
         BenchCommandOutput {
             passed: exit_code == 0,
@@ -67,6 +75,7 @@ pub fn from_main_workflow_with_rig(
                 .map(collect_artifacts)
                 .unwrap_or_default(),
             results: result.results,
+            budget_findings,
             gate_failures: result.gate_failures,
             baseline_comparison: result.baseline_comparison,
             hints: result.hints,
@@ -1213,6 +1222,7 @@ mod tests {
             iterations: 10,
             run_metadata: None,
             diagnostics: Vec::new(),
+            budget_findings: Vec::new(),
             scenarios,
             metric_policies: BTreeMap::new(),
         }

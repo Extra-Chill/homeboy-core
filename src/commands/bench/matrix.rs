@@ -247,6 +247,7 @@ fn merge_matrix_results(
     outputs: &[BenchCommandOutput],
 ) -> Option<BenchResults> {
     let mut merged_scenarios = Vec::new();
+    let mut budget_findings = Vec::new();
     let mut component_id_seen: Option<String> = None;
     let mut iterations_seen: Option<u64> = None;
     let mut metric_policies_seen = std::collections::BTreeMap::new();
@@ -265,6 +266,7 @@ fn merge_matrix_results(
         for (key, policy) in suffixed.metric_policies {
             metric_policies_seen.entry(key).or_insert(policy);
         }
+        budget_findings.extend(suffixed.budget_findings);
         merged_scenarios.extend(suffixed.scenarios);
     }
 
@@ -282,6 +284,7 @@ fn merge_matrix_results(
                 .flat_map(|output| output.results.as_ref().map(|r| r.diagnostics.clone()))
                 .flatten()
                 .collect(),
+            budget_findings,
             scenarios: merged_scenarios,
             metric_policies: metric_policies_seen,
         })
@@ -349,6 +352,10 @@ pub(super) fn run_single_rig(
         .as_ref()
         .map(collect_artifacts)
         .unwrap_or_default();
+    let budget_findings = merged_results
+        .as_ref()
+        .map(|results| results.budget_findings.clone())
+        .unwrap_or_default();
 
     Ok((
         BenchCommandOutput {
@@ -359,6 +366,7 @@ pub(super) fn run_single_rig(
             iterations: args.iterations,
             artifacts,
             results: merged_results,
+            budget_findings,
             gate_failures: outputs
                 .iter()
                 .flat_map(|output| output.gate_failures.clone())
@@ -859,6 +867,10 @@ mod tests {
             exit_code: 0,
             iterations: 10,
             artifacts: results.as_ref().map(collect_artifacts).unwrap_or_default(),
+            budget_findings: results
+                .as_ref()
+                .map(|results| results.budget_findings.clone())
+                .unwrap_or_default(),
             results,
             gate_failures: Vec::new(),
             baseline_comparison: None,
