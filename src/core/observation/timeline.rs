@@ -588,6 +588,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_phase_milestone() {
+        let labeled = parse_phase_milestone("ready:runner.ready").unwrap();
+        assert_eq!(labeled.label, "ready");
+        assert_eq!(labeled.key, "runner.ready");
+
+        let unlabeled = parse_phase_milestone("runner.done").unwrap();
+        assert_eq!(unlabeled.label, "runner.done");
+        assert_eq!(unlabeled.key, "runner.done");
+    }
+
+    #[test]
     fn test_phase_span_definitions() {
         let phases = vec![
             ObservationPhaseMilestone {
@@ -640,5 +651,35 @@ mod tests {
 
         assert_eq!(results[0].status, ObservationSpanStatus::Skipped);
         assert_eq!(results[0].missing, vec!["runner.done"]);
+    }
+
+    #[test]
+    fn test_event_matches_key() {
+        let event = event(0, "desktop", "window.closed");
+
+        assert!(event_matches_key(&event, "desktop.window.closed"));
+        assert!(!event_matches_key(&event, "desktop.window"));
+        assert!(!event_matches_key(&event, "runner.window.closed"));
+        assert!(!event_matches_key(&event, "desktop.window.closed.extra"));
+    }
+
+    #[test]
+    fn test_merge_span_definitions() {
+        let runner = ObservationSpanDefinition {
+            id: "total".to_string(),
+            from: "runner.start".to_string(),
+            to: "runner.done".to_string(),
+        };
+        let cli = ObservationSpanDefinition {
+            id: "total".to_string(),
+            from: "cli.start".to_string(),
+            to: "cli.done".to_string(),
+        };
+
+        let merged = merge_span_definitions(&[runner], &[cli]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].from, "cli.start");
+        assert_eq!(merged[0].to, "cli.done");
     }
 }
