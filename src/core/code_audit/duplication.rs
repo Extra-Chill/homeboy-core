@@ -18,6 +18,7 @@ use super::conventions::AuditFinding;
 use super::findings::{Finding, Severity};
 use super::fingerprint::FileFingerprint;
 use super::idiomatic::is_trivial_method;
+use super::walker::is_test_path;
 use crate::component::DuplicationDetectorConfig;
 
 /// Minimum number of locations for a function to count as duplicated.
@@ -135,12 +136,26 @@ pub(crate) fn detect_duplicates(
             continue;
         }
 
-        let suggestion = format!(
-            "Function `{}` has identical body in {} files. \
+        let test_only_duplicate = locations.iter().all(|file| is_test_path(file));
+        let severity = if test_only_duplicate {
+            Severity::Info
+        } else {
+            Severity::Warning
+        };
+        let suggestion = if test_only_duplicate {
+            format!(
+                "Function `{}` has identical body in {} test files. Consider a shared test helper if the duplication grows or starts obscuring test intent.",
+                method_name,
+                locations.len()
+            )
+        } else {
+            format!(
+                "Function `{}` has identical body in {} files. \
              Extract to a shared module and import it.",
-            method_name,
-            locations.len()
-        );
+                method_name,
+                locations.len()
+            )
+        };
 
         // Emit one finding per file that has the duplicate
         for file in locations {
@@ -151,7 +166,7 @@ pub(crate) fn detect_duplicates(
 
             findings.push(Finding {
                 convention: "duplication".to_string(),
-                severity: Severity::Warning,
+                severity: severity.clone(),
                 file: file.clone(),
                 description: format!("Duplicate function `{}` — also in {}", method_name, also_in),
                 suggestion: suggestion.clone(),
@@ -1678,6 +1693,30 @@ mod tests {
         assert!(findings.iter().any(|f| f.file == "src/utils/io.rs"));
         assert!(findings.iter().any(|f| f.file == "src/utils/validation.rs"));
         assert!(findings[0].description.contains("is_zero"));
+    }
+
+    #[test]
+    fn duplicate_functions_under_tests_are_info_findings() {
+        let fp1 = make_fingerprint(
+            "tests/import/ability-smoke.php",
+            &["imp_assert"],
+            &[("imp_assert", "abc123")],
+        );
+        let fp2 = make_fingerprint(
+            "tests/import/adapter-smoke.php",
+            &["imp_assert"],
+            &[("imp_assert", "abc123")],
+        );
+
+        let findings = detect_duplicates(&[&fp1, &fp2], &std::collections::HashSet::new());
+
+        assert_eq!(findings.len(), 2);
+        assert!(findings
+            .iter()
+            .all(|finding| finding.severity == Severity::Info));
+        assert!(findings
+            .iter()
+            .all(|finding| finding.suggestion.contains("shared test helper")));
     }
 
     #[test]

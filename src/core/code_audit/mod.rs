@@ -677,7 +677,7 @@ fn audit_internal(
     }
 
     // Phase 2b: Check signature consistency within conventions
-    conventions::check_signature_consistency(&mut discovered_conventions, root);
+    conventions::check_signature_consistency(&mut discovered_conventions, root, &audit_config);
 
     // Phase 3: Check all conventions
     let check_results = checks::check_conventions(&discovered_conventions);
