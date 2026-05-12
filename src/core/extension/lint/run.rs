@@ -150,7 +150,10 @@ pub fn run_main_lint_workflow(
     if !lint_clean {
         hints.push(build_autofix_hint(&args));
         if args.changed_only {
-            hints.push(changed_only_file_scope_hint());
+            hints.push(
+                "--changed-only is file-scoped: findings may be outside the changed hunks in modified files."
+                    .to_string(),
+            );
         }
         hints.push("Some issues may require manual fixes".to_string());
     }
@@ -461,7 +464,10 @@ fn resolve_scoped_lint_runs(
             return Ok(Some(Vec::new()));
         }
 
-        eprintln!("{}", changed_only_file_scope_message(changed_files.len()));
+        eprintln!(
+            "Linting {} changed file(s) (--changed-only is file-scoped; findings may be outside changed hunks)",
+            changed_files.len()
+        );
 
         Ok(Some(build_changed_lint_runs(component, &changed_files)))
     } else if let Some(ref git_ref) = args.changed_since {
@@ -476,17 +482,6 @@ fn resolve_scoped_lint_runs(
     } else {
         Ok(None)
     }
-}
-
-fn changed_only_file_scope_message(file_count: usize) -> String {
-    format!(
-        "Linting {file_count} changed file(s) (--changed-only is file-scoped; findings may be outside changed hunks)"
-    )
-}
-
-fn changed_only_file_scope_hint() -> String {
-    "--changed-only is file-scoped: findings may be outside the changed hunks in modified files."
-        .to_string()
 }
 
 fn build_changed_lint_runs(component: &Component, changed_files: &[String]) -> Vec<ScopedLintRun> {
@@ -695,23 +690,6 @@ mod tests {
 
         assert!(hint.contains("homeboy lint demo --file src/lib.rs --changed-only --fix"));
         assert!(!hint.contains("homeboy refactor"));
-    }
-
-    #[test]
-    fn changed_only_scope_message_describes_file_scope() {
-        let message = changed_only_file_scope_message(4);
-
-        assert!(message.contains("Linting 4 changed file(s)"));
-        assert!(message.contains("--changed-only is file-scoped"));
-        assert!(message.contains("outside changed hunks"));
-    }
-
-    #[test]
-    fn changed_only_scope_hint_warns_findings_may_be_outside_hunks() {
-        let hint = changed_only_file_scope_hint();
-
-        assert!(hint.contains("--changed-only is file-scoped"));
-        assert!(hint.contains("outside the changed hunks"));
     }
 
     #[test]
