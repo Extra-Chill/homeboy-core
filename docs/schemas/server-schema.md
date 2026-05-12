@@ -12,6 +12,12 @@ Server configuration defines SSH server connections stored in `servers/<id>.json
   "port": number,
   "user": "string",
   "identity_file": "string",
+  "kind": "string",
+  "auth": {
+    "mode": "key_plus_password_controlmaster",
+    "control_path": "string",
+    "persist": "string"
+  },
   "forward_agent": boolean
 }
 ```
@@ -29,6 +35,8 @@ Server configuration defines SSH server connections stored in `servers/<id>.json
 
 - **`port`** (number): SSH port (default: 22)
 - **`identity_file`** (string): Path to SSH private key file for authentication
+- **`kind`** (string): Optional server classification for extensions and project-specific behavior
+- **`auth`** (object): Optional SSH authentication/session policy
 - **`forward_agent`** (boolean): Enable SSH agent forwarding (default: false)
 
 ## Example
@@ -41,9 +49,31 @@ Server configuration defines SSH server connections stored in `servers/<id>.json
   "port": 22,
   "user": "deploy",
   "identity_file": "/Users/dev/.ssh/id_rsa",
+  "kind": "password-gated",
+  "auth": {
+    "mode": "key_plus_password_controlmaster",
+    "control_path": "~/.ssh/controlmasters/%h-%p-%r",
+    "persist": "4h"
+  },
   "forward_agent": true
 }
 ```
+
+## Managed SSH Sessions
+
+Servers that accept a key and then require an operator-entered password can opt into managed control-master reuse:
+
+```json
+{
+  "auth": {
+    "mode": "key_plus_password_controlmaster",
+    "control_path": "~/.ssh/controlmasters/%h-%p-%r",
+    "persist": "4h"
+  }
+}
+```
+
+Homeboy never stores the password. Run `homeboy server connect <server_id>` to establish the interactive session, then later `homeboy ssh`, file transfer, deploy, logs, and other server-backed commands reuse the active SSH control master.
 
 ## SSH Key Management
 

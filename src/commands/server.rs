@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use homeboy::server::{self, Server};
+use homeboy::server::{self, Server, SshClient};
 use homeboy::{EntityCrudOutput, MergeOutput};
 
 use super::{CmdResult, DynamicSetArgs};
@@ -11,6 +11,8 @@ use super::{CmdResult, DynamicSetArgs};
 pub struct ServerExtra {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<ServerKeyOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<ServerSessionOutput>,
 }
 
 pub type ServerOutput = EntityCrudOutput<Server, ServerExtra>;
@@ -23,6 +25,17 @@ pub struct ServerKeyOutput {
     public_key: Option<String>,
     identity_file: Option<String>,
     imported: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServerSessionOutput {
+    action: String,
+    server_id: String,
+    control_path: Option<String>,
+    persist: Option<String>,
+    live: bool,
+    stdout: String,
+    stderr: String,
 }
 
 #[derive(Args)]
@@ -73,6 +86,21 @@ enum ServerCommand {
     },
     /// List all configured servers
     List,
+    /// Open a managed SSH control-master session for this server
+    Connect {
+        /// Server ID
+        server_id: String,
+    },
+    /// Check whether a managed SSH session is live
+    Status {
+        /// Server ID
+        server_id: String,
+    },
+    /// Close a managed SSH control-master session
+    Disconnect {
+        /// Server ID
+        server_id: String,
+    },
     /// Manage SSH keys
     Key(KeyArgs),
 }
@@ -163,6 +191,8 @@ pub fn run(args: ServerArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
                     user,
                     port: port.unwrap_or(22),
                     identity_file: None,
+                    kind: None,
+                    auth: None,
                     env: std::collections::HashMap::new(),
                 };
 
@@ -197,8 +227,58 @@ pub fn run(args: ServerArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
         ServerCommand::Set { args } => set(args),
         ServerCommand::Delete { server_id } => delete(&server_id),
         ServerCommand::List => list(),
+        ServerCommand::Connect { server_id } => session_connect(&server_id),
+        ServerCommand::Status { server_id } => session_status(&server_id),
+        ServerCommand::Disconnect { server_id } => session_disconnect(&server_id),
         ServerCommand::Key(key_args) => run_key(key_args),
     }
+}
+
+fn session_connect(server_id: &str) -> CmdResult<ServerOutput> {
+    run_session_action(server_id, "connect")
+}
+
+fn session_status(server_id: &str) -> CmdResult<ServerOutput> {
+    run_session_action(server_id, "status")
+}
+
+fn session_disconnect(server_id: &str) -> CmdResult<ServerOutput> {
+    run_session_action(server_id, "disconnect")
+}
+
+fn run_session_action(server_id: &str, action: &str) -> CmdResult<ServerOutput> {
+    let svr = server::load(server_id)?;
+    let client = SshClient::from_server(&svr, server_id)?;
+    let result = match action {
+        "connect" => client.connect_managed_session(),
+        "status" => client.check_managed_session(),
+        "disconnect" => client.disconnect_managed_session(),
+        _ => unreachable!(),
+    }?;
+
+    let exit_code = result.exit_code;
+
+    Ok((
+        ServerOutput {
+            command: format!("server.{}", action),
+            id: Some(server_id.to_string()),
+            entity: Some(svr),
+            extra: ServerExtra {
+                session: Some(ServerSessionOutput {
+                    action: action.to_string(),
+                    server_id: server_id.to_string(),
+                    control_path: result.control_path,
+                    persist: result.persist,
+                    live: result.live,
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        exit_code,
+    ))
 }
 
 fn run_key(args: KeyArgs) -> CmdResult<ServerOutput> {
@@ -315,6 +395,7 @@ fn key_generate(server_id: &str) -> CmdResult<ServerOutput> {
                     identity_file: Some(result.identity_file),
                     imported: None,
                 }),
+                ..Default::default()
             },
             ..Default::default()
         },
@@ -337,6 +418,7 @@ fn key_show(server_id: &str) -> CmdResult<ServerOutput> {
                     identity_file: None,
                     imported: None,
                 }),
+                ..Default::default()
             },
             ..Default::default()
         },
@@ -362,6 +444,7 @@ fn key_use(server_id: &str, private_key_path: &str) -> CmdResult<ServerOutput> {
                     identity_file,
                     imported: None,
                 }),
+                ..Default::default()
             },
             ..Default::default()
         },
@@ -386,6 +469,7 @@ fn key_unset(server_id: &str) -> CmdResult<ServerOutput> {
                     identity_file: None,
                     imported: None,
                 }),
+                ..Default::default()
             },
             ..Default::default()
         },
@@ -410,6 +494,7 @@ fn key_import(server_id: &str, private_key_path: &str) -> CmdResult<ServerOutput
                     identity_file: Some(result.identity_file),
                     imported: Some(result.imported_from),
                 }),
+                ..Default::default()
             },
             ..Default::default()
         },

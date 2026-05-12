@@ -270,6 +270,7 @@ mod tests {
             user: "test".to_string(),
             port: 22,
             identity_file: None,
+            auth: None,
             is_local: true,
             env: HashMap::new(),
         }
