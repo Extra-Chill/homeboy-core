@@ -28,6 +28,7 @@ pub(super) fn execute_release_plan_step(
     match step.step_type.as_str() {
         "preflight.default_branch" => Ok(Some(run_default_branch_preflight(step, context))),
         "preflight.git_identity" => configure_git_identity(step, context).map(Some),
+        "preflight.working_tree" => Ok(Some(run_working_tree_preflight(step, context))),
         "changelog.finalize" => {
             executor::changelog::run_changelog_finalize(step, context.component, &mut context.state)
                 .map(Some)
@@ -130,7 +131,8 @@ pub(super) fn execute_release_plan_step(
 fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
     (step.step_type.starts_with("preflight.")
         && step.step_type != "preflight.default_branch"
-        && step.step_type != "preflight.git_identity")
+        && step.step_type != "preflight.git_identity"
+        && step.step_type != "preflight.working_tree")
         || step.step_type == "changelog.policy"
         || step.step_type == "changelog.generate"
 }
@@ -140,6 +142,25 @@ fn run_default_branch_preflight(
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
     match super::pipeline::validate_default_branch(context.component) {
+        Ok(()) => ReleaseStepResult {
+            id: step.id.clone(),
+            step_type: step.step_type.clone(),
+            status: ReleaseStepStatus::Success,
+            missing: Vec::new(),
+            warnings: Vec::new(),
+            hints: Vec::new(),
+            data: None,
+            error: None,
+        },
+        Err(err) => failed_result(&step.id, &step.step_type, err),
+    }
+}
+
+fn run_working_tree_preflight(
+    step: &ReleasePlanStep,
+    context: &ReleaseExecutionContext,
+) -> ReleaseStepResult {
+    match super::pipeline::validate_working_tree_fail_fast(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
             step_type: step.step_type.clone(),
@@ -196,6 +217,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
         result.step_type.as_str(),
         "changelog.finalize"
             | "preflight.default_branch"
+            | "preflight.working_tree"
             | "version"
             | "release.prepare"
             | "git.commit"
@@ -260,6 +282,9 @@ mod tests {
         )));
         assert!(!release_step_is_plan_only(&plan_step(
             "preflight.git_identity"
+        )));
+        assert!(!release_step_is_plan_only(&plan_step(
+            "preflight.working_tree"
         )));
         assert!(!release_step_is_plan_only(&plan_step("changelog.finalize")));
         assert!(!release_step_is_plan_only(&plan_step("deploy")));
@@ -337,14 +362,55 @@ mod tests {
     }
 
     #[test]
+    fn preflight_working_tree_returns_success_step_for_clean_tree() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        run_in(temp.path(), &["git", "init", "-q"]);
+        run_in(
+            temp.path(),
+            &["git", "config", "user.email", "test@example.com"],
+        );
+        run_in(temp.path(), &["git", "config", "user.name", "Test"]);
+        std::fs::write(temp.path().join("README.md"), "fixture\n").expect("write fixture");
+        run_in(temp.path(), &["git", "add", "."]);
+        run_in(
+            temp.path(),
+            &["git", "commit", "-q", "-m", "Initial commit"],
+        );
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: temp.path().to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        let options = ReleaseOptions::default();
+        let mut context = ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            state: ReleaseState::default(),
+            publish_failed: false,
+        };
+
+        let result = execute_release_plan_step(&plan_step("preflight.working_tree"), &mut context)
+            .expect("dispatch")
+            .expect("result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Success);
+        assert!(!release_step_is_show_stopper(&result));
+    }
+
+    #[test]
     fn test_release_step_is_show_stopper() {
         let version_failure = failed_step_result("version");
         let default_branch_failure = failed_step_result("preflight.default_branch");
+        let working_tree_failure = failed_step_result("preflight.working_tree");
         let changelog_failure = failed_step_result("changelog.finalize");
         let publish_failure = failed_step_result("publish.crates");
 
         assert!(release_step_is_show_stopper(&version_failure));
         assert!(release_step_is_show_stopper(&default_branch_failure));
+        assert!(release_step_is_show_stopper(&working_tree_failure));
         assert!(release_step_is_show_stopper(&changelog_failure));
         assert!(!release_step_is_show_stopper(&publish_failure));
     }
