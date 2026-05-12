@@ -1,4 +1,3 @@
-use crate::engine::command;
 use crate::error::{Error, Result};
 use crate::git;
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -24,19 +23,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     )?;
 
     if !input.dry_run {
-        ensure_release_on_default_branch(&component.local_path)?;
-
-        // Configure git identity for release commits/tags
-        if let Some(ref identity_str) = input.git_identity {
-            let identity = git::parse_git_identity(Some(identity_str));
-            git::configure_identity(&component.local_path, &identity)?;
-            log_status!(
-                "release",
-                "Git identity: {} <{}>",
-                identity.name,
-                identity.email
-            );
-        }
+        super::pipeline::validate_default_branch(&component)?;
     }
 
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
@@ -218,6 +205,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         skip_publish: input.skip_publish,
         deploy: input.deploy,
         skip_github_release: input.skip_github_release,
+        git_identity: input.git_identity.clone(),
     };
 
     if options.dry_run {
@@ -331,47 +319,6 @@ fn format_tag(version: &str, monorepo: Option<&git::MonorepoContext>) -> String 
         Some(ctx) => ctx.format_tag(version),
         None => format!("v{}", version),
     }
-}
-
-fn ensure_release_on_default_branch(local_path: &str) -> Result<()> {
-    let current_branch =
-        command::run_in_optional(local_path, "git", &["symbolic-ref", "--short", "HEAD"])
-            .ok_or_else(|| {
-                Error::validation_invalid_argument(
-                    "release",
-                    "Refusing to release from detached HEAD",
-                    None,
-                    Some(vec![
-                        "Check out the default branch before releasing".to_string()
-                    ]),
-                )
-            })?;
-
-    let default_branch = command::run_in_optional(
-        local_path,
-        "git",
-        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    )
-    .map(|value| value.trim().trim_start_matches("origin/").to_string())
-    .filter(|value| !value.is_empty())
-    .unwrap_or_else(|| "main".to_string());
-
-    if current_branch == default_branch {
-        return Ok(());
-    }
-
-    Err(Error::validation_invalid_argument(
-        "release",
-        format!(
-            "Refusing to release from non-default branch '{}' (default: '{}')",
-            current_branch, default_branch
-        ),
-        None,
-        Some(vec![
-            format!("Check out '{}' before releasing", default_branch),
-            "If you only want a preview, use --dry-run".to_string(),
-        ]),
-    ))
 }
 
 fn extract_new_version_from_plan(plan: &ReleasePlan) -> Option<String> {

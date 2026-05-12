@@ -5,6 +5,7 @@
 //! previewed steps match execution.
 
 use crate::component::{self, Component};
+use crate::engine::command;
 use crate::engine::local_files::FileSystem;
 use crate::engine::run_dir::{self, RunDir};
 use crate::engine::validation::ValidationCollector;
@@ -162,6 +163,14 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let extensions = resolve_extensions(&component)?;
 
     let mut v = ValidationCollector::new();
+
+    // === Stage -0.5: Default branch guard ===
+    // Real releases must happen from the default branch. Dry-runs are allowed
+    // from feature branches so operators can preview a release before merging.
+    if !options.dry_run {
+        v.capture(validate_default_branch(&component), "default_branch");
+        v.finish_if_errors()?;
+    }
 
     // === Stage 0: Working-tree check (fail-fast) ===
     //
@@ -570,6 +579,50 @@ fn validate_remote_sync(component: &Component) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) fn validate_default_branch(component: &Component) -> Result<()> {
+    let current_branch = command::run_in_optional(
+        &component.local_path,
+        "git",
+        &["symbolic-ref", "--short", "HEAD"],
+    )
+    .ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "release",
+            "Refusing to release from detached HEAD",
+            None,
+            Some(vec![
+                "Check out the default branch before releasing".to_string()
+            ]),
+        )
+    })?;
+
+    let default_branch = command::run_in_optional(
+        &component.local_path,
+        "git",
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .map(|value| value.trim().trim_start_matches("origin/").to_string())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "main".to_string());
+
+    if current_branch == default_branch {
+        return Ok(());
+    }
+
+    Err(Error::validation_invalid_argument(
+        "release",
+        format!(
+            "Refusing to release from non-default branch '{}' (default: '{}')",
+            current_branch, default_branch
+        ),
+        None,
+        Some(vec![
+            format!("Check out '{}' before releasing", default_branch),
+            "If you only want a preview, use --dry-run".to_string(),
+        ]),
+    ))
 }
 
 /// Run code quality checks (lint + test) via the component's extension.
@@ -1111,7 +1164,7 @@ mod tests {
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
         get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
         is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
-        validate_release_version_floor,
+        validate_default_branch, validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
@@ -1123,6 +1176,52 @@ mod tests {
             subject: subject.to_string(),
             category,
         }
+    }
+
+    fn run_git(dir: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: stdout={} stderr={}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_component(dir: &std::path::Path) -> Component {
+        Component {
+            id: "fixture".to_string(),
+            local_path: dir.to_string_lossy().to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_validate_default_branch_allows_default_branch() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path();
+        run_git(dir, &["init", "-q"]);
+        run_git(dir, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+        validate_default_branch(&git_component(dir)).expect("main should be allowed");
+    }
+
+    #[test]
+    fn test_validate_default_branch_blocks_non_default_branch() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path();
+        run_git(dir, &["init", "-q"]);
+        run_git(dir, &["symbolic-ref", "HEAD", "refs/heads/feature"]);
+
+        let err = validate_default_branch(&git_component(dir)).expect_err("feature should fail");
+
+        assert_eq!(err.code.as_str(), "validation.invalid_argument");
+        assert!(err.message.contains("non-default branch 'feature'"));
     }
 
     #[test]

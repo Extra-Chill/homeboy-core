@@ -1,6 +1,7 @@
 use crate::component::Component;
 use crate::error::{Error, Result};
 use crate::extension::ExtensionManifest;
+use crate::git;
 use crate::release::executor;
 use crate::release::types::{
     ReleaseOptions, ReleasePlanStatus, ReleasePlanStep, ReleaseState, ReleaseStepResult,
@@ -26,6 +27,7 @@ pub(super) fn execute_release_plan_step(
     }
 
     match step.step_type.as_str() {
+        "preflight.git_identity" => configure_git_identity(step, context).map(Some),
         "version" => executor::run_version(
             context.component,
             &mut context.state,
@@ -123,7 +125,41 @@ pub(super) fn execute_release_plan_step(
 }
 
 fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
-    step.step_type.starts_with("preflight.") || step.step_type == "changelog.generate"
+    (step.step_type.starts_with("preflight.") && step.step_type != "preflight.git_identity")
+        || step.step_type == "changelog.generate"
+}
+
+fn configure_git_identity(
+    step: &ReleasePlanStep,
+    context: &ReleaseExecutionContext,
+) -> Result<ReleaseStepResult> {
+    let identity_value = step
+        .config
+        .get("identity")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| Error::internal_unexpected("release git identity step missing identity"))?;
+    let identity = git::parse_git_identity(Some(identity_value));
+    git::configure_identity(&context.component.local_path, &identity)?;
+    log_status!(
+        "release",
+        "Git identity: {} <{}>",
+        identity.name,
+        identity.email
+    );
+
+    Ok(ReleaseStepResult {
+        id: step.id.clone(),
+        step_type: step.step_type.clone(),
+        status: ReleaseStepStatus::Success,
+        missing: Vec::new(),
+        warnings: Vec::new(),
+        hints: Vec::new(),
+        data: Some(serde_json::json!({
+            "name": identity.name,
+            "email": identity.email,
+        })),
+        error: None,
+    })
 }
 
 pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
@@ -184,6 +220,9 @@ mod tests {
         ];
 
         assert!(steps.iter().all(release_step_is_plan_only));
+        assert!(!release_step_is_plan_only(&plan_step(
+            "preflight.git_identity"
+        )));
         assert!(!release_step_is_plan_only(&plan_step("deploy")));
     }
 
