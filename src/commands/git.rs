@@ -104,6 +104,25 @@ enum GitCommand {
         #[arg(long)]
         force_with_lease: bool,
 
+        /// Push to this remote URL directly instead of the configured upstream.
+        /// Prefer this without credentials plus --token; embedding tokens in
+        /// the URL can expose them in process listings.
+        #[arg(long, value_name = "URL")]
+        remote_url: Option<String>,
+
+        /// GitHub token to inject into --remote-url for this invocation.
+        /// Requires a https://github.com/... remote URL.
+        #[arg(long, value_name = "TOKEN", requires = "remote_url")]
+        token: Option<String>,
+
+        /// Explicit push refspec, e.g. HEAD:refs/heads/my-branch.
+        #[arg(long, value_name = "REFSPEC")]
+        refspec: Option<String>,
+
+        /// Clear GitHub Actions checkout's auth extraheader so URL auth wins.
+        #[arg(long)]
+        strip_extraheader: bool,
+
         /// Workspace path to operate on directly. Useful for unregistered
         /// checkouts (CI runners, ad-hoc clones, worktrees).
         #[arg(long, value_name = "PATH")]
@@ -761,6 +780,10 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
             component_id,
             tags,
             force_with_lease,
+            remote_url,
+            token,
+            refspec,
+            strip_extraheader,
             path,
         } => {
             if let Some(spec) = json {
@@ -774,6 +797,10 @@ pub fn run(args: GitArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<Gi
                 PushOptions {
                     tags,
                     force_with_lease,
+                    remote_url,
+                    token,
+                    refspec,
+                    strip_extraheader,
                 },
                 path.as_deref(),
             )?;
@@ -1285,5 +1312,66 @@ fn parse_pr_state(s: &str) -> homeboy::Result<PrState> {
             None,
             Some(vec!["Use one of: open, closed, merged, all".into()]),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: GitCommand,
+    }
+
+    #[test]
+    fn push_override_flags_parse() {
+        let cli = TestCli::try_parse_from([
+            "git",
+            "push",
+            "homeboy",
+            "--remote-url",
+            "https://github.com/Extra-Chill/homeboy",
+            "--token",
+            "secret-token",
+            "--refspec",
+            "HEAD:refs/heads/autofix",
+            "--strip-extraheader",
+        ])
+        .expect("push flags parse");
+
+        match cli.command {
+            GitCommand::Push {
+                component_id,
+                remote_url,
+                token,
+                refspec,
+                strip_extraheader,
+                ..
+            } => {
+                assert_eq!(component_id.as_deref(), Some("homeboy"));
+                assert_eq!(
+                    remote_url.as_deref(),
+                    Some("https://github.com/Extra-Chill/homeboy")
+                );
+                assert_eq!(token.as_deref(), Some("secret-token"));
+                assert_eq!(refspec.as_deref(), Some("HEAD:refs/heads/autofix"));
+                assert!(strip_extraheader);
+            }
+            _ => panic!("expected push command"),
+        }
+    }
+
+    #[test]
+    fn push_token_requires_remote_url_at_parse_time() {
+        let err =
+            match TestCli::try_parse_from(["git", "push", "homeboy", "--token", "secret-token"]) {
+                Ok(_) => panic!("--token should require --remote-url"),
+                Err(err) => err,
+            };
+
+        assert!(err.to_string().contains("--remote-url"));
     }
 }

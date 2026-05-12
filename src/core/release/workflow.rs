@@ -471,6 +471,7 @@ fn run_recover(input: &ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32
             git::PushOptions {
                 tags: true,
                 force_with_lease: false,
+                ..Default::default()
             },
         )?;
         if !push_result.success {

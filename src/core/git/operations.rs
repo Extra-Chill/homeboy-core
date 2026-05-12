@@ -73,10 +73,32 @@ impl GitOutput {
             action: action.to_string(),
             success: output.status.success(),
             exit_code: output.status.code().unwrap_or(1),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            stdout: scrub_git_secrets(&String::from_utf8_lossy(&output.stdout)),
+            stderr: scrub_git_secrets(&String::from_utf8_lossy(&output.stderr)),
         }
     }
+}
+
+fn scrub_git_secrets(value: &str) -> String {
+    let mut scrubbed = String::with_capacity(value.len());
+    let mut rest = value;
+    const NEEDLE: &str = "x-access-token:";
+
+    while let Some(start) = rest.find(NEEDLE) {
+        let token_start = start + NEEDLE.len();
+        scrubbed.push_str(&rest[..token_start]);
+        if let Some(end) = rest[token_start..].find('@') {
+            scrubbed.push_str("[REDACTED]");
+            scrubbed.push('@');
+            rest = &rest[token_start + end + 1..];
+        } else {
+            scrubbed.push_str("[REDACTED]");
+            rest = "";
+        }
+    }
+
+    scrubbed.push_str(rest);
+    scrubbed
 }
 
 // === Changes Output Types ===
@@ -267,6 +289,14 @@ struct BulkIdsInput {
     tags: bool,
     #[serde(default)]
     force_with_lease: bool,
+    #[serde(default)]
+    remote_url: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default)]
+    refspec: Option<String>,
+    #[serde(default)]
+    strip_extraheader: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -747,6 +777,14 @@ pub struct PushOptions {
     /// Use `--force-with-lease` for safe force-pushes (e.g. after a rebase).
     /// Deliberately the only force flavour exposed — never plain `--force`.
     pub force_with_lease: bool,
+    /// Push to a remote URL directly instead of the configured upstream.
+    pub remote_url: Option<String>,
+    /// GitHub App/user token injected into `remote_url` for this invocation.
+    pub token: Option<String>,
+    /// Explicit source/destination refspec, e.g. `HEAD:refs/heads/branch`.
+    pub refspec: Option<String>,
+    /// Clear the GitHub Actions checkout extraheader so URL auth wins.
+    pub strip_extraheader: bool,
 }
 
 /// Push local commits for a component.
@@ -761,15 +799,63 @@ pub fn push_at(
     path_override: Option<&str>,
 ) -> Result<GitOutput> {
     let (id, path) = resolve_target(component_id, path_override)?;
-    let mut args: Vec<&str> = vec!["push"];
+    let remote_url =
+        resolve_push_remote_url(options.remote_url.as_deref(), options.token.as_deref())?;
+    let mut args: Vec<String> = Vec::new();
+    if options.strip_extraheader {
+        args.push("-c".to_string());
+        args.push("http.https://github.com/.extraheader=".to_string());
+    }
+    args.push("push".to_string());
     if options.tags {
-        args.push("--follow-tags");
+        args.push("--follow-tags".to_string());
     }
     if options.force_with_lease {
-        args.push("--force-with-lease");
+        args.push("--force-with-lease".to_string());
     }
-    let output = execute_git(&path, &args).map_err(|e| Error::git_command_failed(e.to_string()))?;
+    if let Some(remote) = remote_url {
+        args.push(remote);
+    } else if options.refspec.is_some() {
+        args.push("origin".to_string());
+    }
+    if let Some(refspec) = options.refspec {
+        args.push(refspec);
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let output =
+        execute_git(&path, &arg_refs).map_err(|e| Error::git_command_failed(e.to_string()))?;
     Ok(GitOutput::from_output(id, path, "push", output))
+}
+
+fn resolve_push_remote_url(
+    remote_url: Option<&str>,
+    token: Option<&str>,
+) -> Result<Option<String>> {
+    match (remote_url, token) {
+        (Some(url), Some(token)) => {
+            if !url.starts_with("https://github.com/") {
+                return Err(Error::validation_invalid_argument(
+                    "token",
+                    "--token requires --remote-url to start with https://github.com/",
+                    None,
+                    None,
+                ));
+            }
+            Ok(Some(format!(
+                "https://x-access-token:{}@{}",
+                token,
+                &url["https://".len()..]
+            )))
+        }
+        (Some(url), None) => Ok(Some(url.to_string())),
+        (None, Some(_)) => Err(Error::validation_invalid_argument(
+            "token",
+            "--token requires --remote-url",
+            None,
+            None,
+        )),
+        (None, None) => Ok(None),
+    }
 }
 
 /// Push multiple components from JSON spec.
@@ -784,12 +870,20 @@ pub fn push_bulk(json_spec: &str) -> Result<BulkResult<GitOutput>> {
     })?;
     let push_tags = input.tags;
     let force_with_lease = input.force_with_lease;
+    let remote_url = input.remote_url;
+    let token = input.token;
+    let refspec = input.refspec;
+    let strip_extraheader = input.strip_extraheader;
     Ok(run_bulk_ids(&input.component_ids, "push", |id| {
         push(
             Some(id),
             PushOptions {
                 tags: push_tags,
                 force_with_lease,
+                remote_url: remote_url.clone(),
+                token: token.clone(),
+                refspec: refspec.clone(),
+                strip_extraheader,
             },
         )
     }))
@@ -1662,6 +1756,7 @@ mod tests {
             PushOptions {
                 tags: false,
                 force_with_lease: true,
+                ..Default::default()
             },
             Some(&path),
         )
@@ -1676,6 +1771,67 @@ mod tests {
             "--force-with-lease should be a known flag, got: {}",
             out.stderr
         );
+    }
+
+    #[test]
+    fn push_options_remote_url_refspec_and_strip_extraheader_push_to_bare_remote() {
+        let (_dir, path) = init_repo_with_initial_commit();
+        let remote = tempfile::TempDir::new().expect("bare remote tempdir");
+        Command::new("git")
+            .args(["init", "-q", "--bare"])
+            .current_dir(remote.path())
+            .output()
+            .expect("git init --bare");
+
+        let remote_url = remote.path().to_string_lossy().to_string();
+        let out = push_at(
+            None,
+            PushOptions {
+                remote_url: Some(remote_url.clone()),
+                refspec: Some("HEAD:refs/heads/autofix".to_string()),
+                strip_extraheader: true,
+                ..Default::default()
+            },
+            Some(&path),
+        )
+        .expect("push_at");
+
+        assert!(out.success, "push should succeed: stderr={}", out.stderr);
+        let verify = Command::new("git")
+            .args(["show-ref", "--verify", "refs/heads/autofix"])
+            .current_dir(remote.path())
+            .output()
+            .expect("git show-ref");
+        assert!(verify.status.success(), "expected autofix branch on remote");
+    }
+
+    #[test]
+    fn push_token_requires_github_remote_url() {
+        let (_dir, path) = init_repo_with_initial_commit();
+
+        let err = push_at(
+            None,
+            PushOptions {
+                remote_url: Some("https://example.com/owner/repo".to_string()),
+                token: Some("secret-token".to_string()),
+                ..Default::default()
+            },
+            Some(&path),
+        )
+        .expect_err("non-GitHub token push should fail validation");
+
+        assert!(err.to_string().contains("https://github.com/"));
+        assert!(!err.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn scrub_git_secrets_redacts_x_access_token_urls() {
+        let output = scrub_git_secrets(
+            "fatal: could not read https://x-access-token:ghs_secret123@github.com/owner/repo.git",
+        );
+
+        assert!(!output.contains("ghs_secret123"));
+        assert!(output.contains("https://x-access-token:[REDACTED]@github.com/owner/repo.git"));
     }
 
     #[test]
