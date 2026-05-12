@@ -995,21 +995,24 @@ fn detect_duplicate_identifiers(file: &str, content: &str, warnings: &mut Vec<Re
                 continue;
             }
 
-            // Collect identifiers at this indent level until block closes
+            // Collect identifiers at this indent level until the current block
+            // closes. Track nested brace depth so keys in separate nested
+            // object literals are not treated as siblings of the outer block.
             let mut seen: HashMap<String, usize> = HashMap::new();
             let mut j = i + 1;
+            let mut nested_depth = 0isize;
 
             while j < lines.len() {
                 let block_line = lines[j];
                 let block_trimmed = block_line.trim();
 
-                // Block ended
-                if block_trimmed == "}" || block_trimmed == "}," {
+                // Block ended.
+                if nested_depth == 0 && (block_trimmed == "}" || block_trimmed == "},") {
                     break;
                 }
 
-                // Only check lines at this exact indent level
-                if leading_spaces(block_line) == block_indent {
+                // Only check direct child declarations at this exact indent level.
+                if nested_depth == 0 && leading_spaces(block_line) == block_indent {
                     if let Some(ident) = extract_field_identifier(block_trimmed) {
                         if let Some(&first_line) = seen.get(&ident) {
                             warnings.push(RenameWarning {
@@ -1029,6 +1032,8 @@ fn detect_duplicate_identifiers(file: &str, content: &str, warnings: &mut Vec<Re
                     }
                 }
 
+                nested_depth += brace_delta(block_trimmed);
+
                 j += 1;
             }
 
@@ -1037,6 +1042,46 @@ fn detect_duplicate_identifiers(file: &str, content: &str, warnings: &mut Vec<Re
             i += 1;
         }
     }
+}
+
+/// Return the net brace change for a line, ignoring braces inside quoted
+/// strings. This is intentionally lightweight; it only supports collision
+/// detection heuristics, not full language parsing.
+fn brace_delta(line: &str) -> isize {
+    let mut delta = 0isize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for ch in line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && (in_single || in_double) {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            continue;
+        }
+        if in_single || in_double {
+            continue;
+        }
+
+        match ch {
+            '{' => delta += 1,
+            '}' => delta -= 1,
+            _ => {}
+        }
+    }
+
+    delta
 }
 
 /// Count leading spaces on a line.
@@ -1473,6 +1518,26 @@ mod tests {
         let content = "struct Foo {\n    pub name: String,\n    pub age: u32,\n}\n";
         let mut warnings = Vec::new();
         detect_duplicate_identifiers("test.rs", content, &mut warnings);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn detect_duplicate_identifiers_ignores_separate_nested_object_literals() {
+        let content = r#"function build() {
+  tasks.set(smoke.id, {
+    id: smoke.id,
+    promptFile: smoke.prompt,
+    graderFile: smoke.check,
+  });
+  tasks.set(scenario.id, {
+    id: scenario.id,
+    promptFile: scenario.prompt,
+    graderFile: scenario.check,
+  });
+}
+"#;
+        let mut warnings = Vec::new();
+        detect_duplicate_identifiers("workflow.yml", content, &mut warnings);
         assert!(warnings.is_empty());
     }
 
