@@ -149,6 +149,12 @@ pub fn run_main_lint_workflow(
     // invocation follows for users who want the longer form.
     if !lint_clean {
         hints.push(build_autofix_hint(&args));
+        if args.changed_only {
+            hints.push(
+                "--changed-only is file-scoped: findings may be outside the changed hunks in modified files."
+                    .to_string(),
+            );
+        }
         hints.push("Some issues may require manual fixes".to_string());
     }
 
@@ -457,6 +463,11 @@ fn resolve_scoped_lint_runs(
             println!("No files in working tree changes");
             return Ok(Some(Vec::new()));
         }
+
+        eprintln!(
+            "Linting {} changed file(s) (--changed-only is file-scoped; findings may be outside changed hunks)",
+            changed_files.len()
+        );
 
         Ok(Some(build_changed_lint_runs(component, &changed_files)))
     } else if let Some(ref git_ref) = args.changed_since {

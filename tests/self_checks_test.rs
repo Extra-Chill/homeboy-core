@@ -48,6 +48,7 @@ fn lint_args(root: &Path) -> LintArgs {
         exclude_sniffs: None,
         category: None,
         fix: false,
+        force: false,
         setting_args: SettingArgs::default(),
         baseline_args: BaselineArgs::default(),
         _json: HiddenJsonArgs::default(),

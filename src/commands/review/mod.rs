@@ -591,6 +591,7 @@ fn build_lint_args(args: &ReviewArgs) -> lint::LintArgs {
         exclude_sniffs: None,
         category: None,
         fix: false,
+        force: false,
         extension_override: args.extension_override.clone(),
         setting_args: Default::default(),
         baseline_args: args.baseline_args.clone(),

@@ -23,7 +23,7 @@ The `lint` command resolves the component's linked extension with `lint` capabil
 - `--path <PATH>`: Override component `local_path` for this run
 - `--file <path>`: Lint only a single file (path relative to component root)
 - `--glob <pattern>`: Lint only files matching glob pattern (e.g., "inc/**/*.php")
-- `--changed-only`: Lint only files modified in the working tree (staged, unstaged, untracked)
+- `--changed-only`: Lint only files modified in the working tree (staged, unstaged, untracked). This scope is file-scoped, not hunk-scoped; findings can come from unchanged lines inside those files.
 - `--changed-since <REF>`: Lint only files changed since a git ref
 - `--errors-only`: Show only errors, suppress warnings
 - `--summary`: Show compact summary instead of full output
@@ -31,6 +31,7 @@ The `lint` command resolves the component's linked extension with `lint` capabil
 - `--exclude-sniffs <SNIFFS>`: Exclude comma-separated linter sniffs or rules when supported
 - `--category <CATEGORY>`: Restrict to a named linter category when supported
 - `--fix`: Apply auto-fixable lint findings in place. Thin alias for `homeboy refactor <component> --from lint --write` — dispatches to the existing fixer pipeline so a single ergonomic flag resolves the auto-fix CTA.
+- `--force`: With `--fix`, allow the fixer to edit the current dirty working tree for unbounded runs. `--changed-only --fix` is already bounded to the changed-file scope and does not require this opt-in.
 - `--setting <key=value>`: Override extension settings (can be used multiple times)
 - `--setting-json <key=json>`: Override extension settings with typed JSON values
 
@@ -48,6 +49,9 @@ homeboy refactor extrachill-api --from lint --write
 
 # Lint only modified files in the working tree
 homeboy lint extrachill-api --changed-only
+
+# Auto-fix modified files before the first commit
+homeboy lint extrachill-api --changed-only --fix
 
 # Lint only a single file
 homeboy lint extrachill-api --file inc/core/api.php
@@ -102,6 +106,8 @@ run `homeboy lint --fix`.
 
 When extensions write `HOMEBOY_LINT_FINDINGS_FILE`, Homeboy exposes `lint_findings` in JSON output and
 supports baseline ratchet checks (`--baseline`, `--ignore-baseline`).
+
+When `--changed-only` is used, Homeboy prints the changed-file count and labels the run as file-scoped. It lints the full contents of each modified file, not just changed hunks, so reported findings may be outside the specific diff lines.
 
 ## Exit Codes
 

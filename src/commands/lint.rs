@@ -36,7 +36,7 @@ pub struct LintArgs {
     #[arg(long)]
     pub glob: Option<String>,
 
-    /// Lint only files modified in the working tree (staged, unstaged, untracked)
+    /// Lint modified files in the working tree (file-scoped, not hunk-scoped)
     #[arg(long, conflicts_with = "changed_since")]
     pub changed_only: bool,
 
@@ -67,6 +67,10 @@ pub struct LintArgs {
     /// resolves the auto-fix CTA without re-typing the canonical invocation.
     #[arg(long)]
     pub fix: bool,
+
+    /// Allow --fix to edit the current dirty working tree for unbounded runs
+    #[arg(long)]
+    pub force: bool,
 
     #[command(flatten)]
     pub setting_args: SettingArgs,
@@ -270,6 +274,9 @@ fn lint_command_label(component_id: &str, args: &LintArgs) -> String {
         parts.push("--changed-since".to_string());
         parts.push(changed_since.clone());
     }
+    if args.force {
+        parts.push("--force".to_string());
+    }
     parts.join(" ")
 }
 
@@ -318,6 +325,7 @@ fn run_fix(
         true,
     );
     request.changed_since = args.changed_since.clone();
+    request.force = args.force;
 
     let run = collect_refactor_sources(request)?;
 
