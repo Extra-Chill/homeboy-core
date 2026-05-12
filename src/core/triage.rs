@@ -99,6 +99,8 @@ pub struct TriageOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<TriageObservationOutput>,
     pub summary: TriageSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved_summary: Option<String>,
     pub components: Vec<TriageComponentReport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unresolved: Vec<TriageUnresolved>,
@@ -360,6 +362,7 @@ pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput>
     }
 
     let summary = summarize(&components, &unresolved);
+    let unresolved_summary = summarize_unresolved(&unresolved);
     let mut output = TriageOutput {
         command: target.command(),
         target: TriageTargetOutput {
@@ -368,6 +371,7 @@ pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput>
         },
         observation: None,
         summary,
+        unresolved_summary,
         components,
         unresolved,
     };
@@ -1848,6 +1852,26 @@ fn summarize(
     summary
 }
 
+fn summarize_unresolved(unresolved: &[TriageUnresolved]) -> Option<String> {
+    if unresolved.is_empty() {
+        return None;
+    }
+
+    let mut summary = format!("{} unresolved component target(s):", unresolved.len());
+    for target in unresolved {
+        let path = if target.local_path.is_empty() {
+            "<no local_path>"
+        } else {
+            target.local_path.as_str()
+        };
+        summary.push_str(&format!(
+            " {} ({}) - {};",
+            target.component_id, path, target.reason
+        ));
+    }
+    Some(summary)
+}
+
 pub fn parse_stale_days(input: &str) -> Result<i64> {
     let trimmed = input.trim();
     let digits = trimmed.strip_suffix('d').unwrap_or(trimmed);
@@ -1998,6 +2022,21 @@ mod tests {
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().any(|r| r.component_id == "data-machine"));
         assert!(refs.iter().any(|r| r.component_id == "local-only"));
+    }
+
+    #[test]
+    fn unresolved_summary_is_visible_when_targets_fail_to_resolve() {
+        let unresolved = vec![TriageUnresolved {
+            component_id: "missing".to_string(),
+            local_path: "/tmp/missing".to_string(),
+            reason: "local path does not exist".to_string(),
+            sources: vec!["workspace".to_string()],
+        }];
+
+        assert_eq!(
+            summarize_unresolved(&unresolved).as_deref(),
+            Some("1 unresolved component target(s): missing (/tmp/missing) - local path does not exist;")
+        );
     }
 
     #[test]
