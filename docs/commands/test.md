@@ -82,16 +82,21 @@ Returns JSON with test results:
 
 ```json
 {
-  "status": "passed|failed",
+  "status": "passed|failed|skipped",
   "component": "component-name",
   "output": "test output...",
   "exit_code": 0
 }
 ```
 
+For WordPress components, a successful activation/install smoke run with zero discovered PHPUnit files is reported as `status: "skipped"` with exit code `0`. The phase summary states that activation/install passed, PHPUnit discovery found zero tests, and no PHPUnit assertions ran. This preserves the smoke-script workflow while making the absence of PHPUnit assertions explicit.
+
+If a component is expected to contain PHPUnit tests, set `require_phpunit_tests=true` through the existing settings surface, for example `--setting require_phpunit_tests=true` or the component's extension settings. With that setting enabled, zero PHPUnit discovery is treated as a test failure.
+
 ## Exit Codes
 
 - `0`: Tests passed
+- `0`: PHPUnit discovery skipped because no tests were found, when not required
 - `1`: Tests failed
 - `2`: Infrastructure error (component not found, missing scripts, etc.)
 

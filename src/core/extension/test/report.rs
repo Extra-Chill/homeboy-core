@@ -10,7 +10,7 @@ use crate::extension::test::{
 };
 use crate::extension::{
     phase_failure_category_from_exit_code, phase_status_from_exit_code, PhaseFailure,
-    PhaseFailureCategory, PhaseReport, VerificationPhase,
+    PhaseFailureCategory, PhaseReport, PhaseStatus, VerificationPhase,
 };
 use crate::refactor::AppliedRefactor;
 use serde::Serialize;
@@ -73,7 +73,11 @@ pub struct TestCommandOutput {
 /// Build output from a main test workflow result.
 pub fn from_main_workflow(result: TestRunWorkflowResult) -> (TestCommandOutput, i32) {
     let exit_code = result.exit_code;
-    let phase = Some(test_phase_report(exit_code, result.test_counts.as_ref()));
+    let phase = Some(test_phase_report(
+        &result.status,
+        exit_code,
+        result.test_counts.as_ref(),
+    ));
     let failure = if exit_code == 0 {
         None
     } else {
@@ -173,7 +177,16 @@ pub fn from_auto_fix_drift_workflow(
     )
 }
 
-fn test_phase_report(exit_code: i32, counts: Option<&TestCounts>) -> PhaseReport {
+fn test_phase_report(status: &str, exit_code: i32, counts: Option<&TestCounts>) -> PhaseReport {
+    if status == "skipped" {
+        return PhaseReport {
+            phase: VerificationPhase::Test,
+            status: PhaseStatus::Skipped,
+            exit_code: Some(exit_code),
+            summary: "activation/install passed; PHPUnit discovery found zero tests; no PHPUnit assertions ran".to_string(),
+        };
+    }
+
     PhaseReport {
         phase: VerificationPhase::Test,
         status: phase_status_from_exit_code(exit_code),
@@ -187,6 +200,8 @@ fn test_phase_report(exit_code: i32, counts: Option<&TestCounts>) -> PhaseReport
             } else {
                 "test phase passed".to_string()
             }
+        } else if counts.map(|counts| counts.total == 0).unwrap_or(false) {
+            "PHPUnit discovery found zero tests; no PHPUnit assertions ran".to_string()
         } else if exit_code >= 2 {
             format!("test harness infrastructure failure (exit {})", exit_code)
         } else if counts.map(|counts| counts.failed == 0).unwrap_or(false) {
@@ -209,7 +224,9 @@ fn test_phase_report(exit_code: i32, counts: Option<&TestCounts>) -> PhaseReport
 }
 
 fn test_phase_failure(exit_code: i32, counts: Option<&TestCounts>) -> PhaseFailure {
-    let category = if exit_code != 0 && counts.map(|counts| counts.failed == 0).unwrap_or(false) {
+    let category = if exit_code != 0 && counts.map(|counts| counts.total == 0).unwrap_or(false) {
+        PhaseFailureCategory::Findings
+    } else if exit_code != 0 && counts.map(|counts| counts.failed == 0).unwrap_or(false) {
         PhaseFailureCategory::Infrastructure
     } else {
         phase_failure_category_from_exit_code(exit_code)
@@ -218,7 +235,9 @@ fn test_phase_failure(exit_code: i32, counts: Option<&TestCounts>) -> PhaseFailu
         phase: VerificationPhase::Test,
         summary: match category {
             PhaseFailureCategory::Infrastructure => {
-                if counts.map(|counts| counts.failed == 0).unwrap_or(false) {
+                if counts.map(|counts| counts.total == 0).unwrap_or(false) {
+                    "PHPUnit discovery found zero tests; no PHPUnit assertions ran".to_string()
+                } else if counts.map(|counts| counts.failed == 0).unwrap_or(false) {
                     format!(
                         "test runner failed after reporting zero test failures (exit {})",
                         exit_code
@@ -268,6 +287,25 @@ mod tests {
             component: "homeboy".to_string(),
             exit_code,
             test_counts: Some(counts),
+            failed_tests: None,
+            failure_analysis_input: None,
+            coverage: None,
+            baseline_comparison: None,
+            analysis: None,
+            autofix: None,
+            hints: None,
+            test_scope: None,
+            summary: None,
+            raw_output: None,
+        }
+    }
+
+    fn skipped_workflow_result() -> TestRunWorkflowResult {
+        TestRunWorkflowResult {
+            status: "skipped".to_string(),
+            component: "wordpress-plugin".to_string(),
+            exit_code: 0,
+            test_counts: Some(TestCounts::new(0, 0, 0, 0)),
             failed_tests: None,
             failure_analysis_input: None,
             coverage: None,
@@ -353,6 +391,23 @@ mod tests {
         assert_eq!(json["passed"], true);
         assert_eq!(json["status"], "passed");
         assert_eq!(json["exit_code"], 0);
+        assert!(json.get("failure").is_none());
+    }
+
+    #[test]
+    fn phpunit_no_discovery_is_structured_as_skipped() {
+        let (output, exit_code) = from_main_workflow(skipped_workflow_result());
+
+        let json = serde_json::to_value(output).expect("serialize test command output");
+        assert_eq!(exit_code, 0);
+        assert_eq!(json["passed"], true);
+        assert_eq!(json["status"], "skipped");
+        assert_eq!(json["test_counts"]["total"], 0);
+        assert_eq!(json["phase"]["status"], "skipped");
+        assert_eq!(
+            json["phase"]["summary"],
+            "activation/install passed; PHPUnit discovery found zero tests; no PHPUnit assertions ran"
+        );
         assert!(json.get("failure").is_none());
     }
 }
