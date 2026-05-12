@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::component::Component;
 use crate::config;
@@ -59,7 +59,7 @@ pub struct DeployConfig {
 }
 
 /// Reason why a component was selected for deployment.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeployReason {
     /// Component was explicitly specified by ID
@@ -75,7 +75,7 @@ pub enum DeployReason {
 }
 
 /// Status indicator for component version comparison.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentStatus {
     /// Local and remote versions match
@@ -92,7 +92,7 @@ pub enum ComponentStatus {
 
 /// Release state tracking for deployment decisions.
 /// Captures git state relative to the last version tag.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseState {
     /// Number of commits since the last version tag
     pub commits_since_version: u32,
@@ -159,7 +159,7 @@ pub struct ReleaseStateBuckets {
 }
 
 /// Result for a single component deployment.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub struct ComponentDeployResult {
     pub id: String,

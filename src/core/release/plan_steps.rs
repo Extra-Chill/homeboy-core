@@ -305,7 +305,7 @@ pub(super) fn build_release_steps(
             "deploy",
             "Deploy released component",
             deploy_needs,
-            string_config("execution", "after_release_run"),
+            string_config("execution", "release_plan"),
         ));
     }
 
@@ -463,7 +463,7 @@ mod tests {
                 .config
                 .get("execution")
                 .and_then(|value| value.as_str()),
-            Some("after_release_run")
+            Some("release_plan")
         );
     }
 

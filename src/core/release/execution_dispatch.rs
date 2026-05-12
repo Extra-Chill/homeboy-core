@@ -91,6 +91,10 @@ pub(super) fn execute_release_plan_step(
                     .unwrap_or_else(|err| failed_result("post_release", "post_release", err)),
             ))
         }
+        "deploy" => Ok(Some(super::deployment::run_deployment_step(
+            context.component_id,
+            &context.component.local_path,
+        ))),
         step_type if step_type.starts_with("publish.") => {
             let target = step_type.strip_prefix("publish.").unwrap_or_default();
             let result = executor::run_publish(
@@ -119,9 +123,7 @@ pub(super) fn execute_release_plan_step(
 }
 
 fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
-    step.step_type.starts_with("preflight.")
-        || step.step_type == "changelog.generate"
-        || step.step_type == "deploy"
+    step.step_type.starts_with("preflight.") || step.step_type == "changelog.generate"
 }
 
 pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
@@ -179,10 +181,10 @@ mod tests {
         let steps = [
             plan_step("preflight.quality"),
             plan_step("changelog.generate"),
-            plan_step("deploy"),
         ];
 
         assert!(steps.iter().all(release_step_is_plan_only));
+        assert!(!release_step_is_plan_only(&plan_step("deploy")));
     }
 
     #[test]
