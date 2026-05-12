@@ -233,7 +233,7 @@ pub fn collect_refactor_sources(
     // Refactoring operates directly on the working tree, so mixing auto-generated
     // fixes with uncommitted manual changes makes rollback difficult.
     // Dry runs (no --write) are always safe — they don't modify files.
-    if request.write && !request.force {
+    if request.write && !request.force && !allows_dirty_worktree_write(&request) {
         if let Some(ref changes) = original_changes {
             if changes.has_changes {
                 return Err(crate::Error::validation_invalid_argument(
@@ -242,7 +242,7 @@ pub fn collect_refactor_sources(
                     None,
                     Some(vec![
                         "Commit or stash your changes first".to_string(),
-                        "Or use --force to proceed anyway".to_string(),
+                        "Rerun with --force to allow the fixer to edit the current dirty working tree".to_string(),
                     ]),
                 ));
             }
@@ -443,6 +443,16 @@ pub fn collect_refactor_sources(
         hints,
         guard_block: None,
     })
+}
+
+fn allows_dirty_worktree_write(request: &RefactorSourceRequest) -> bool {
+    request.write
+        && request.sources == ["lint"]
+        && request
+            .lint
+            .selected_files
+            .as_ref()
+            .is_some_and(|files| !files.is_empty())
 }
 
 pub fn normalize_sources(sources: &[String]) -> crate::Result<Vec<String>> {
@@ -1548,6 +1558,37 @@ mod tests {
 
         assert_eq!(request.sources, vec!["lint".to_string()]);
         assert!(request.write);
+    }
+
+    #[test]
+    fn bounded_lint_write_allows_dirty_worktree() {
+        let root = PathBuf::from("/tmp/homeboy-bounded-lint-write");
+        let request = lint_refactor_request(
+            test_component(&root),
+            root,
+            Vec::new(),
+            LintSourceOptions {
+                selected_files: Some(vec!["src/lib.rs".to_string()]),
+                ..Default::default()
+            },
+            true,
+        );
+
+        assert!(allows_dirty_worktree_write(&request));
+    }
+
+    #[test]
+    fn broad_lint_write_still_requires_clean_worktree() {
+        let root = PathBuf::from("/tmp/homeboy-broad-lint-write");
+        let request = lint_refactor_request(
+            test_component(&root),
+            root,
+            Vec::new(),
+            LintSourceOptions::default(),
+            true,
+        );
+
+        assert!(!allows_dirty_worktree_write(&request));
     }
 
     #[test]
