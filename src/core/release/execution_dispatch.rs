@@ -26,6 +26,7 @@ pub(super) fn execute_release_plan_step(
     }
 
     match step.step_type.as_str() {
+        "preflight.default_branch" => Ok(Some(run_default_branch_preflight(step, context))),
         "preflight.git_identity" => configure_git_identity(step, context).map(Some),
         "changelog.finalize" => {
             executor::changelog::run_changelog_finalize(step, context.component, &mut context.state)
@@ -127,9 +128,30 @@ pub(super) fn execute_release_plan_step(
 }
 
 fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
-    (step.step_type.starts_with("preflight.") && step.step_type != "preflight.git_identity")
+    (step.step_type.starts_with("preflight.")
+        && step.step_type != "preflight.default_branch"
+        && step.step_type != "preflight.git_identity")
         || step.step_type == "changelog.policy"
         || step.step_type == "changelog.generate"
+}
+
+fn run_default_branch_preflight(
+    step: &ReleasePlanStep,
+    context: &ReleaseExecutionContext,
+) -> ReleaseStepResult {
+    match super::pipeline::validate_default_branch(context.component) {
+        Ok(()) => ReleaseStepResult {
+            id: step.id.clone(),
+            step_type: step.step_type.clone(),
+            status: ReleaseStepStatus::Success,
+            missing: Vec::new(),
+            warnings: Vec::new(),
+            hints: Vec::new(),
+            data: None,
+            error: None,
+        },
+        Err(err) => failed_result(&step.id, &step.step_type, err),
+    }
 }
 
 fn configure_git_identity(
@@ -173,6 +195,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
     matches!(
         result.step_type.as_str(),
         "changelog.finalize"
+            | "preflight.default_branch"
             | "version"
             | "release.prepare"
             | "git.commit"
@@ -233,6 +256,9 @@ mod tests {
 
         assert!(steps.iter().all(release_step_is_plan_only));
         assert!(!release_step_is_plan_only(&plan_step(
+            "preflight.default_branch"
+        )));
+        assert!(!release_step_is_plan_only(&plan_step(
             "preflight.git_identity"
         )));
         assert!(!release_step_is_plan_only(&plan_step("changelog.finalize")));
@@ -265,12 +291,60 @@ mod tests {
     }
 
     #[test]
+    fn preflight_default_branch_returns_failed_step_on_feature_branch() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        run_in(temp.path(), &["git", "init", "-q"]);
+        run_in(
+            temp.path(),
+            &["git", "config", "user.email", "test@example.com"],
+        );
+        run_in(temp.path(), &["git", "config", "user.name", "Test"]);
+        std::fs::write(temp.path().join("README.md"), "fixture\n").expect("write fixture");
+        run_in(temp.path(), &["git", "add", "."]);
+        run_in(
+            temp.path(),
+            &["git", "commit", "-q", "-m", "Initial commit"],
+        );
+        run_in(temp.path(), &["git", "checkout", "-q", "-b", "feature"]);
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: temp.path().to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        let options = ReleaseOptions::default();
+        let mut context = ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            state: ReleaseState::default(),
+            publish_failed: false,
+        };
+
+        let result =
+            execute_release_plan_step(&plan_step("preflight.default_branch"), &mut context)
+                .expect("dispatch")
+                .expect("result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Failed);
+        assert!(release_step_is_show_stopper(&result));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("non-default branch"));
+    }
+
+    #[test]
     fn test_release_step_is_show_stopper() {
         let version_failure = failed_step_result("version");
+        let default_branch_failure = failed_step_result("preflight.default_branch");
         let changelog_failure = failed_step_result("changelog.finalize");
         let publish_failure = failed_step_result("publish.crates");
 
         assert!(release_step_is_show_stopper(&version_failure));
+        assert!(release_step_is_show_stopper(&default_branch_failure));
         assert!(release_step_is_show_stopper(&changelog_failure));
         assert!(!release_step_is_show_stopper(&publish_failure));
     }
@@ -323,5 +397,20 @@ mod tests {
             data: None,
             error: Some("failed".to_string()),
         }
+    }
+
+    fn run_in(dir: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(dir)
+            .output()
+            .expect("spawn command");
+        assert!(
+            output.status.success(),
+            "command {:?} failed: stdout={:?} stderr={:?}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

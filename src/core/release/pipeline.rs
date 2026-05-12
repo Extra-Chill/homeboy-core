@@ -151,14 +151,6 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     let mut v = ValidationCollector::new();
 
-    // === Stage -0.5: Default branch guard ===
-    // Real releases must happen from the default branch. Dry-runs are allowed
-    // from feature branches so operators can preview a release before merging.
-    if !options.dry_run {
-        v.capture(validate_default_branch(&component), "default_branch");
-        v.finish_if_errors()?;
-    }
-
     // === Stage 0: Working-tree check (fail-fast) ===
     //
     // Run this BEFORE remote sync (which fast-forwards and mutates the tree)
