@@ -4,7 +4,9 @@ use crate::git;
 use crate::release::pipeline_capabilities::{
     get_publish_targets, has_package_capability, has_prepare_capability,
 };
-use crate::release::types::{ReleaseOptions, ReleasePlanStatus, ReleasePlanStep};
+use crate::release::types::{
+    ReleaseOptions, ReleasePlanStatus, ReleasePlanStep, ReleaseSemverRecommendation,
+};
 use crate::Result;
 
 type StepConfig = std::collections::HashMap<String, serde_json::Value>;
@@ -75,7 +77,10 @@ fn string_config(key: &str, value: impl Into<String>) -> StepConfig {
     config
 }
 
-pub(super) fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
+pub(super) fn build_preflight_steps(
+    options: &ReleaseOptions,
+    semver_recommendation: Option<&ReleaseSemverRecommendation>,
+) -> Vec<ReleasePlanStep> {
     let mut steps = vec![
         ready_step(
             "preflight.default_branch",
@@ -98,6 +103,7 @@ pub(super) fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlan
             vec!["preflight.working_tree".to_string()],
             StepConfig::new(),
         ),
+        build_bump_policy_step(options, semver_recommendation),
     ];
 
     if let Some(identity) = options.git_identity.as_ref() {
@@ -135,7 +141,7 @@ pub(super) fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlan
             "preflight.quality",
             "preflight.quality",
             "Run release quality checks",
-            vec!["preflight.remote_sync".to_string()],
+            vec!["preflight.bump_policy".to_string()],
             StepConfig::new(),
         ));
     }
@@ -154,6 +160,59 @@ pub(super) fn build_preflight_steps(options: &ReleaseOptions) -> Vec<ReleasePlan
     ));
 
     steps
+}
+
+fn build_bump_policy_step(
+    options: &ReleaseOptions,
+    semver_recommendation: Option<&ReleaseSemverRecommendation>,
+) -> ReleasePlanStep {
+    let Some(recommendation) = semver_recommendation else {
+        return disabled_step(
+            "preflight.bump_policy",
+            "preflight.bump_policy",
+            "Validate bump policy",
+            string_config("reason", "no-releasable-commits"),
+        );
+    };
+
+    let mut config = StepConfig::new();
+    config.insert(
+        "requested".to_string(),
+        serde_json::Value::String(recommendation.requested_bump.clone()),
+    );
+    if let Some(recommended) = recommendation.recommended_bump.as_ref() {
+        config.insert(
+            "recommended".to_string(),
+            serde_json::Value::String(recommended.clone()),
+        );
+    }
+    config.insert(
+        "underbump".to_string(),
+        serde_json::Value::Bool(recommendation.is_underbump),
+    );
+    config.insert(
+        "force_lower_bump".to_string(),
+        serde_json::Value::Bool(recommendation.is_underbump && !options.dry_run),
+    );
+
+    if recommendation.is_underbump {
+        config.insert(
+            "policy".to_string(),
+            serde_json::Value::String(if !options.dry_run {
+                "forced-lower-bump".to_string()
+            } else {
+                "preview-lower-bump".to_string()
+            }),
+        );
+    }
+
+    ready_step(
+        "preflight.bump_policy",
+        "preflight.bump_policy",
+        "Validate bump policy",
+        vec!["preflight.remote_sync".to_string()],
+        config,
+    )
 }
 
 /// Build all release steps: core steps (non-configurable) + publish steps (extension-derived).
@@ -363,7 +422,7 @@ mod tests {
         github_release_applies,
     };
     use crate::component::Component;
-    use crate::release::types::{ReleaseOptions, ReleasePlanStatus};
+    use crate::release::types::{ReleaseOptions, ReleasePlanStatus, ReleaseSemverRecommendation};
 
     #[test]
     fn test_build_preflight_steps() {
@@ -372,7 +431,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = build_preflight_steps(&options);
+        let steps = build_preflight_steps(&options, None);
         let ids: Vec<&str> = steps.iter().map(|step| step.id.as_str()).collect();
 
         assert_eq!(
@@ -382,6 +441,7 @@ mod tests {
                 "preflight.git_identity",
                 "preflight.working_tree",
                 "preflight.remote_sync",
+                "preflight.bump_policy",
                 "preflight.quality",
                 "preflight.changelog_bootstrap"
             ]
@@ -399,7 +459,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = build_preflight_steps(&options);
+        let steps = build_preflight_steps(&options, None);
         let identity = steps
             .iter()
             .find(|step| step.id == "preflight.git_identity")
@@ -424,7 +484,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = build_preflight_steps(&options);
+        let steps = build_preflight_steps(&options, None);
         let quality = steps
             .iter()
             .find(|step| step.id == "preflight.quality")
@@ -437,6 +497,76 @@ mod tests {
                 .get("reason")
                 .and_then(|value| value.as_str()),
             Some("--skip-checks")
+        );
+    }
+
+    #[test]
+    fn release_plan_records_forced_lower_bump_policy() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            ..Default::default()
+        };
+        let recommendation = semver_recommendation("minor", "patch", true);
+
+        let steps = build_preflight_steps(&options, Some(&recommendation));
+        let bump_policy = steps
+            .iter()
+            .find(|step| step.id == "preflight.bump_policy")
+            .expect("bump policy step");
+
+        assert_eq!(bump_policy.status, ReleasePlanStatus::Ready);
+        assert_eq!(bump_policy.needs, vec!["preflight.remote_sync"]);
+        assert_eq!(
+            bump_policy
+                .config
+                .get("recommended")
+                .and_then(|value| value.as_str()),
+            Some("minor")
+        );
+        assert_eq!(
+            bump_policy
+                .config
+                .get("requested")
+                .and_then(|value| value.as_str()),
+            Some("patch")
+        );
+        assert_eq!(
+            bump_policy
+                .config
+                .get("policy")
+                .and_then(|value| value.as_str()),
+            Some("forced-lower-bump")
+        );
+        assert_eq!(
+            bump_policy
+                .config
+                .get("force_lower_bump")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn release_plan_records_dry_run_lower_bump_preview() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            dry_run: true,
+            ..Default::default()
+        };
+        let recommendation = semver_recommendation("minor", "patch", true);
+
+        let steps = build_preflight_steps(&options, Some(&recommendation));
+        let bump_policy = steps
+            .iter()
+            .find(|step| step.id == "preflight.bump_policy")
+            .expect("bump policy step");
+
+        assert_eq!(
+            bump_policy
+                .config
+                .get("policy")
+                .and_then(|value| value.as_str()),
+            Some("preview-lower-bump")
         );
     }
 
@@ -556,6 +686,22 @@ mod tests {
             id: "fixture".to_string(),
             local_path: "/tmp/fixture".to_string(),
             ..Default::default()
+        }
+    }
+
+    fn semver_recommendation(
+        recommended: &str,
+        requested: &str,
+        is_underbump: bool,
+    ) -> ReleaseSemverRecommendation {
+        ReleaseSemverRecommendation {
+            latest_tag: Some("v1.0.0".to_string()),
+            range: "v1.0.0..HEAD".to_string(),
+            commits: vec![],
+            recommended_bump: Some(recommended.to_string()),
+            requested_bump: requested.to_string(),
+            is_underbump,
+            reasons: vec![],
         }
     }
 

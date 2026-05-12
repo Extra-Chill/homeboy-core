@@ -334,7 +334,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let mut warnings = Vec::new();
     let mut hints = Vec::new();
 
-    let mut steps = build_preflight_steps(options);
+    let mut steps = build_preflight_steps(options, semver_recommendation.as_ref());
     steps.extend(build_release_steps(
         &component,
         &extensions,
