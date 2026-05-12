@@ -1,6 +1,7 @@
 //! Extension-owned requested detector rule-pack execution.
 
 use regex::{Captures, Regex};
+use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 
 use crate::component::{AuditConfig, RequestedDetectorRule, RequestedDetectorRuleBody};
@@ -15,6 +16,15 @@ struct DerivedValue {
     value: String,
     label: String,
     file: String,
+}
+
+#[derive(Debug, Clone)]
+struct DerivedLiteralSite {
+    file: String,
+    line: usize,
+    value: String,
+    captures: HashMap<String, String>,
+    labels: Vec<String>,
 }
 
 pub(super) fn run(fingerprints: &[&FileFingerprint], audit_config: &AuditConfig) -> Vec<Finding> {
@@ -169,7 +179,7 @@ fn run_derived_literal_rule(
         return Vec::new();
     }
 
-    let mut findings = Vec::new();
+    let mut sites: BTreeMap<(String, usize, String), DerivedLiteralSite> = BTreeMap::new();
     for value in values {
         let concrete_pattern = render_template(literal_pattern, None, |name| match name {
             "value" => value.value.clone(),
@@ -184,22 +194,26 @@ fn run_derived_literal_rule(
                 continue;
             }
             for captures in literal_regex.captures_iter(&fp.content) {
-                findings.push(finding_from_captures_with_extra(
-                    rule,
-                    fp,
-                    &captures,
-                    description,
-                    suggestion,
-                    |name| match name {
-                        "value" => value.value.clone(),
-                        "label" => value.label.clone(),
-                        _ => String::new(),
-                    },
-                ));
+                let offset = captures.get(0).map(|m| m.start()).unwrap_or(0);
+                let line = line_of_offset(&fp.content, offset);
+                let key = (fp.relative_path.clone(), line, value.value.clone());
+                let site = sites.entry(key).or_insert_with(|| DerivedLiteralSite {
+                    file: fp.relative_path.clone(),
+                    line,
+                    value: value.value.clone(),
+                    captures: capture_values(&literal_regex, &captures),
+                    labels: Vec::new(),
+                });
+                if !site.labels.contains(&value.label) {
+                    site.labels.push(value.label.clone());
+                }
             }
         }
     }
-    findings
+    sites
+        .into_values()
+        .map(|site| finding_from_derived_literal_site(rule, &site, description, suggestion))
+        .collect()
 }
 
 fn collect_derived_values(
@@ -306,6 +320,70 @@ where
         suggestion: render_template(suggestion, Some(captures), extra),
         kind: AuditFinding::from_str(&rule.kind).unwrap_or(AuditFinding::LegacyComment),
     }
+}
+
+fn finding_from_derived_literal_site(
+    rule: &RequestedDetectorRule,
+    site: &DerivedLiteralSite,
+    description: &str,
+    suggestion: &str,
+) -> Finding {
+    let label = site.labels.join(", ");
+    Finding {
+        convention: rule.convention.clone(),
+        severity: severity_from_config(&rule.severity),
+        file: site.file.clone(),
+        description: render_template_from_values(description, &site.captures, |name| match name {
+            "line" => site.line.to_string(),
+            "value" => site.value.clone(),
+            "label" => label.clone(),
+            _ => String::new(),
+        }),
+        suggestion: render_template_from_values(suggestion, &site.captures, |name| match name {
+            "line" => site.line.to_string(),
+            "value" => site.value.clone(),
+            "label" => label.clone(),
+            _ => String::new(),
+        }),
+        kind: AuditFinding::from_str(&rule.kind).unwrap_or(AuditFinding::LegacyComment),
+    }
+}
+
+fn capture_values(regex: &Regex, captures: &Captures) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for (index, capture) in captures.iter().enumerate() {
+        if let Some(capture) = capture {
+            values.insert(index.to_string(), capture.as_str().to_string());
+        }
+    }
+    for name in regex.capture_names().flatten() {
+        if let Some(capture) = captures.name(name) {
+            values.insert(name.to_string(), capture.as_str().to_string());
+        }
+    }
+    values
+}
+
+fn render_template_from_values<F>(
+    template: &str,
+    values: &HashMap<String, String>,
+    extra: F,
+) -> String
+where
+    F: Fn(&str) -> String,
+{
+    let token =
+        Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\}").expect("template regex compiles");
+    token
+        .replace_all(template, |caps: &Captures| {
+            let name = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+            values
+                .get(name)
+                .filter(|value| !value.is_empty())
+                .cloned()
+                .unwrap_or_else(|| extra(name))
+        })
+        .to_string()
 }
 
 fn severity_from_config(value: &str) -> Severity {
@@ -450,6 +528,52 @@ register_item( array( 'category' => 'content-item' ) );
         assert_eq!(findings[0].kind, AuditFinding::ConstantBackedSlugLiteral);
         assert_eq!(findings[0].severity, Severity::Info);
         assert!(findings[0].description.contains("Categories::CONTENT"));
+    }
+
+    #[test]
+    fn derived_literal_rules_dedupe_same_site_and_value_with_multiple_labels() {
+        let constants = php_fp(
+            "src/categories.php",
+            r#"<?php
+final class Categories {
+    public const CONTENT = 'content-item';
+}
+final class CategoryAliases {
+    public const CONTENT = 'content-item';
+}
+"#,
+        );
+        let caller = php_fp(
+            "src/caller.php",
+            r#"<?php
+register_item( array( 'category' => 'content-item' ) );
+"#,
+        );
+        let rule = RequestedDetectorRule {
+            id: "slug-constant".to_string(),
+            kind: "constant_backed_slug_literal".to_string(),
+            severity: "info".to_string(),
+            convention: "requested_detectors".to_string(),
+            language: Some("php".to_string()),
+            file_extensions: vec!["php".to_string()],
+            exclude_path_contains: vec![],
+            rule: RequestedDetectorRuleBody::DerivedLiteral {
+                source_pattern: r#"(?s)\b(?:final\s+|abstract\s+)?class\s+(?P<class>[A-Za-z_][A-Za-z0-9_]*)\b.*?\b(?:(?:public|protected|private)\s+)?const\s+(?P<const>[A-Z][A-Z0-9_]*)\s*=\s*['\"](?P<value>[a-z][a-z0-9]*(?:[-_/:][a-z0-9]+)+)['\"]"#.to_string(),
+                value_capture: "value".to_string(),
+                label: "{class}::{const}".to_string(),
+                literal_pattern: r#"['\"]{value}['\"]"#.to_string(),
+                description: "Raw slug literal `{value}` at line {line} duplicates constant(s) {label}".to_string(),
+                suggestion: "Use one of: {label}.".to_string(),
+            },
+        };
+
+        let findings = run(&[&constants, &caller], &config(rule));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, "src/caller.php");
+        assert!(findings[0].description.contains("Categories::CONTENT"));
+        assert!(findings[0].description.contains("CategoryAliases::CONTENT"));
+        assert!(findings[0].suggestion.contains("Categories::CONTENT"));
+        assert!(findings[0].suggestion.contains("CategoryAliases::CONTENT"));
     }
 
     #[test]
