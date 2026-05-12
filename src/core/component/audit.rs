@@ -247,6 +247,9 @@ pub enum RequestedDetectorRuleBody {
         value_capture: String,
         label: String,
         literal_pattern: String,
+        /// Optional extension-owned regexes matched against the candidate's source line.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        exclude_match_context_patterns: Vec<String>,
         description: String,
         suggestion: String,
     },
