@@ -22,15 +22,14 @@ use crate::git::{self, UncommittedChanges};
 use crate::release::changelog;
 use crate::version;
 
-use super::executor;
-use super::pipeline_capabilities::{get_publish_targets, has_prepare_capability};
-use super::pipeline_summary::{build_summary, derive_overall_status};
-use super::plan_steps::{
-    build_preflight_steps, build_release_steps, changelog_entries_to_json, github_release_applies,
+use super::execution_dispatch::{
+    execute_release_plan_step, release_step_is_show_stopper, ReleaseExecutionContext,
 };
+use super::pipeline_summary::{build_summary, derive_overall_status};
+use super::plan_steps::{build_preflight_steps, build_release_steps, changelog_entries_to_json};
 use super::types::{
     ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseSemverCommit,
-    ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult, ReleaseStepStatus,
+    ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -74,146 +73,28 @@ pub fn run(component_id: &str, options: &ReleaseOptions) -> Result<ReleaseRun> {
     let component = load_component(component_id, options)?;
     let extensions = resolve_extensions(&component)?;
     let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
-    let pending_entries = extract_pending_entries(&release_plan);
-
-    let mut state = ReleaseState::default();
+    let mut context = ReleaseExecutionContext {
+        component: &component,
+        extensions: &extensions,
+        component_id,
+        options,
+        pending_entries: extract_pending_entries(&release_plan),
+        state: ReleaseState::default(),
+        publish_failed: false,
+    };
     let mut results: Vec<ReleaseStepResult> = Vec::new();
 
-    // Helper: return early if the last step we pushed failed. Tag/push failures
-    // are genuinely show-stopping for the release so we bail; publish/github
-    // failures are handled below with their own per-target logic.
-    macro_rules! bail_on_failure {
-        () => {
-            if matches!(
-                results.last().map(|r| &r.status),
-                Some(ReleaseStepStatus::Failed)
-            ) {
+    for step in &release_plan.steps {
+        if let Some(result) = execute_release_plan_step(step, &mut context)? {
+            let should_stop = release_step_is_show_stopper(&result);
+            results.push(result);
+            if should_stop {
                 return Ok(finalize(component_id, results, monorepo.as_ref()));
             }
-        };
-    }
-
-    // 1. Version bump (+ optional changelog generation)
-    results.push(executor::run_version(
-        &component,
-        &mut state,
-        &options.bump_type,
-        pending_entries.as_ref(),
-    )?);
-    bail_on_failure!();
-
-    // 2. Optional release preparation. Extension-owned ecosystems can sync
-    //    generated release files after the version bump and before the commit.
-    if has_prepare_capability(&extensions) {
-        match executor::run_prepare(&extensions, &state, component_id, &component.local_path) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("release.prepare", "release.prepare", err)),
-        }
-        bail_on_failure!();
-    }
-
-    // 3. Git commit
-    results.push(executor::run_git_commit(&component, component_id, &state)?);
-    bail_on_failure!();
-
-    // 4. Optional packaging (runs BEFORE tag so build failures don't leave
-    //    orphan tags on the remote).
-    let has_publish_targets = !get_publish_targets(&extensions).is_empty();
-    let want_publish = !options.skip_publish && has_publish_targets;
-    if want_publish {
-        match executor::run_package(&extensions, &mut state, component_id, &component.local_path) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("package", "package", err)),
-        }
-        bail_on_failure!();
-    }
-
-    // 5. Git tag
-    let tag_name = match monorepo.as_ref() {
-        Some(ctx) => ctx.format_tag(state.version.as_deref().unwrap_or("")),
-        None => format!("v{}", state.version.as_deref().unwrap_or("")),
-    };
-    results.push(executor::run_git_tag(
-        &component,
-        component_id,
-        &mut state,
-        &tag_name,
-    )?);
-    bail_on_failure!();
-
-    // 6. Git push (commits + tags)
-    results.push(executor::run_git_push(&component, component_id)?);
-    bail_on_failure!();
-
-    // 7. GitHub Release (soft-fails on gh issues; skipped for non-GitHub remotes).
-    if !options.skip_github_release && github_release_applies(&component) {
-        match executor::run_github_release(&component, &state) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("github.release", "github.release", err)),
-        }
-    }
-
-    // 8. Publish to each configured target. Failures here mark the step failed
-    //    but don't halt — other targets may still succeed.
-    let mut publish_failed = false;
-    if want_publish {
-        for target in get_publish_targets(&extensions) {
-            match executor::run_publish(
-                &extensions,
-                &state,
-                component_id,
-                &component.local_path,
-                &target,
-            ) {
-                Ok(result) => {
-                    if matches!(result.status, ReleaseStepStatus::Failed) {
-                        publish_failed = true;
-                    }
-                    results.push(result);
-                }
-                Err(err) => {
-                    publish_failed = true;
-                    let step_id = format!("publish.{}", target);
-                    results.push(failed_result(&step_id, &step_id, err));
-                }
-            }
-        }
-    }
-
-    // 9. Cleanup staging dir. Skipped when --deploy is set (deploy needs the
-    //    build artifact) and when publishing was skipped entirely.
-    if want_publish && !options.deploy && !publish_failed {
-        match executor::run_cleanup(&component) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("cleanup", "cleanup", err)),
-        }
-    }
-
-    // 9. Post-release hooks (always run if configured — not gated by --skip-publish).
-    let post_release_hooks =
-        crate::engine::hooks::resolve_hooks(&component, crate::engine::hooks::events::POST_RELEASE);
-    if !post_release_hooks.is_empty() {
-        match executor::run_post_release(&component, &post_release_hooks) {
-            Ok(result) => results.push(result),
-            Err(err) => results.push(failed_result("post_release", "post_release", err)),
         }
     }
 
     Ok(finalize(component_id, results, monorepo.as_ref()))
-}
-
-/// Convert a step error into a failed `ReleaseStepResult`.
-fn failed_result(id: &str, step_type: &str, err: Error) -> ReleaseStepResult {
-    ReleaseStepResult {
-        id: id.to_string(),
-        step_type: step_type.to_string(),
-        status: ReleaseStepStatus::Failed,
-        missing: Vec::new(),
-        warnings: Vec::new(),
-        hints: err.hints.clone(),
-        data: Some(serde_json::json!({ "error_details": err.details })),
-        error: Some(err.message),
-    }
 }
 
 /// Read the auto-generated changelog entries embedded in the plan's dedicated
