@@ -513,6 +513,7 @@ pub(crate) fn run_git_push(component: &Component, component_id: &str) -> Result<
         crate::git::PushOptions {
             tags: true,
             force_with_lease: false,
+            ..Default::default()
         },
         Some(&component.local_path),
     )?;
