@@ -18,7 +18,7 @@ pub use audit::{
 };
 pub use inventory::{
     exists, extension_provides_artifact_pattern, inventory, list, list_ids, load,
-    write_standalone_registration,
+    reconcile_standalone_registration, write_standalone_registration, ComponentReconcileReport,
 };
 pub use mutations::{delete_safe, merge, rename, set_changelog_target};
 pub use portable::{

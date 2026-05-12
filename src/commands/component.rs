@@ -148,6 +148,14 @@ enum ComponentCommand {
         /// Regex pattern with capture group for version
         pattern: String,
     },
+    /// Inspect and optionally repair stale standalone registry local_path data
+    Reconcile {
+        /// Component ID
+        id: String,
+        /// Apply a safe discovered repair instead of reporting only
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 /// Entity-specific fields for component commands.
@@ -327,7 +335,53 @@ pub fn run(
         ComponentCommand::AddVersionTarget { id, file, pattern } => {
             add_version_target(&id, &file, &pattern)
         }
+        ComponentCommand::Reconcile { id, apply } => reconcile(&id, apply),
     }
+}
+
+fn reconcile(id: &str, apply: bool) -> CmdResult<ComponentOutput> {
+    let report = component::reconcile_standalone_registration(id, apply)?;
+    let hint = if report.applied {
+        Some("Standalone registration repaired".to_string())
+    } else if report.repair.is_some() {
+        Some(format!(
+            "Safe repair available. Run `homeboy component reconcile {} --apply` to update the standalone registration.",
+            id
+        ))
+    } else if report.status == "ok" {
+        Some(
+            "Standalone registration local_path is present and points to a git checkout"
+                .to_string(),
+        )
+    } else {
+        Some(
+            "No safe repair path discovered; update the component registration manually"
+                .to_string(),
+        )
+    };
+
+    Ok((
+        ComponentOutput {
+            command: "component.reconcile".to_string(),
+            id: Some(id.to_string()),
+            entity: Some(serde_json::to_value(&report).map_err(|error| {
+                homeboy::Error::validation_invalid_argument(
+                    "component.reconcile",
+                    "Failed to serialize reconcile report",
+                    Some(error.to_string()),
+                    None,
+                )
+            })?),
+            hint,
+            updated_fields: if report.applied {
+                vec!["local_path".to_string()]
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        },
+        0,
+    ))
 }
 
 /// Suggest a project for a newly created component based on sibling components.

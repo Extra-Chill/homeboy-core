@@ -6,6 +6,19 @@ use crate::project;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ComponentReconcileReport {
+    pub component_id: String,
+    pub registration_path: String,
+    pub registered_local_path: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovered_local_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repair: Option<String>,
+    pub applied: bool,
+}
+
 /// Derive a runtime component inventory from project attachments, standalone
 /// registrations, and portable components.
 ///
@@ -255,6 +268,129 @@ pub fn load(id: &str) -> Result<Component> {
 
 pub fn exists(id: &str) -> bool {
     load(id).is_ok()
+}
+
+pub fn reconcile_standalone_registration(
+    id: &str,
+    apply: bool,
+) -> Result<ComponentReconcileReport> {
+    let dir = crate::paths::components()?;
+    let registration_path = dir.join(format!("{}.json", id));
+    let content = std::fs::read_to_string(&registration_path).map_err(|e| {
+        Error::validation_invalid_argument(
+            "component_id",
+            format!("No standalone registration found for component '{id}': {e}"),
+            Some(id.to_string()),
+            Some(vec![
+                "Run `homeboy component list` to inspect registered components".to_string(),
+                "Run `homeboy component create --local-path <path>` to register a checkout"
+                    .to_string(),
+            ]),
+        )
+    })?;
+    let mut json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        Error::validation_invalid_json(
+            e,
+            Some(format!("parse {}", registration_path.display())),
+            Some(content.chars().take(200).collect()),
+        )
+    })?;
+    let registered_local_path = json
+        .get("local_path")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let registered_path = Path::new(&registered_local_path);
+    let status = reconcile_status(registered_path);
+    let discovered_local_path = if status == "ok" {
+        None
+    } else {
+        discover_reconcile_candidate(id, registered_path)
+    };
+    let repair = discovered_local_path
+        .as_ref()
+        .map(|path| format!("Update local_path to {path}"));
+    let mut applied = false;
+
+    if apply {
+        let discovered = discovered_local_path.as_ref().ok_or_else(|| {
+            Error::validation_invalid_argument(
+                "apply",
+                "No safe repair path was discovered",
+                Some(id.to_string()),
+                Some(vec![
+                    "Run without --apply to inspect the current registry state".to_string(),
+                ]),
+            )
+        })?;
+        if let Some(obj) = json.as_object_mut() {
+            obj.insert(
+                "local_path".to_string(),
+                serde_json::Value::String(discovered.clone()),
+            );
+        }
+        crate::component::portable::validate_component_remote_urls(&json)?;
+        let updated = crate::config::to_string_pretty(&json)?;
+        crate::engine::local_files::write_file_atomic(
+            &registration_path,
+            &updated,
+            &format!(
+                "write standalone registration {}",
+                registration_path.display()
+            ),
+        )?;
+        applied = true;
+    }
+
+    Ok(ComponentReconcileReport {
+        component_id: id.to_string(),
+        registration_path: registration_path.display().to_string(),
+        registered_local_path,
+        status,
+        discovered_local_path,
+        repair,
+        applied,
+    })
+}
+
+fn reconcile_status(path: &Path) -> String {
+    if path.as_os_str().is_empty() {
+        return "missing_local_path".to_string();
+    }
+    if !path.exists() {
+        return "missing".to_string();
+    }
+    if !path.join(".git").exists() {
+        return "non_git".to_string();
+    }
+    "ok".to_string()
+}
+
+fn discover_reconcile_candidate(id: &str, registered_path: &Path) -> Option<String> {
+    let parent = registered_path.parent()?;
+    let entries = std::fs::read_dir(parent).ok()?;
+    let mut candidates = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || !path.join(".git").exists() {
+            continue;
+        }
+        let Some(component) = discover_from_portable(&path) else {
+            continue;
+        };
+        if component.id == id {
+            candidates.push(path);
+        }
+    }
+
+    if candidates.len() == 1 {
+        candidates
+            .pop()
+            .map(|path| path.to_string_lossy().to_string())
+    } else {
+        None
+    }
 }
 
 /// Read a standalone registration file for a component ID without loading
@@ -688,6 +824,76 @@ mod tests {
                 .iter()
                 .any(|component| component.id == "old-plugin"),
             "stale standalone path should not re-register the old component id"
+        );
+    }
+
+    #[test]
+    fn reconcile_reports_safe_sibling_repair_without_applying() {
+        let dir = TempDir::new().unwrap();
+        let config_components = dir
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("components");
+        fs::create_dir_all(&config_components).unwrap();
+
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let stale_path = workspace.join("old-homeboy");
+        let checkout = workspace.join("homeboy");
+        fs::create_dir_all(checkout.join(".git")).unwrap();
+        fs::write(
+            checkout.join("homeboy.json"),
+            serde_json::to_string_pretty(&serde_json::json!({ "id": "homeboy" })).unwrap(),
+        )
+        .unwrap();
+        write_standalone_json(&config_components, "homeboy", &stale_path.to_string_lossy());
+
+        let _home = with_home_override(dir.path());
+        let report = reconcile_standalone_registration("homeboy", false).unwrap();
+
+        assert_eq!(report.status, "missing");
+        assert_eq!(
+            report.discovered_local_path.as_deref(),
+            Some(checkout.to_string_lossy().as_ref())
+        );
+        assert!(!report.applied);
+
+        let raw = fs::read_to_string(config_components.join("homeboy.json")).unwrap();
+        assert!(raw.contains(stale_path.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn reconcile_apply_updates_stale_local_path_when_candidate_is_unique() {
+        let dir = TempDir::new().unwrap();
+        let config_components = dir
+            .path()
+            .join(".config")
+            .join("homeboy")
+            .join("components");
+        fs::create_dir_all(&config_components).unwrap();
+
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let stale_path = workspace.join("old-homeboy");
+        let checkout = workspace.join("homeboy");
+        fs::create_dir_all(checkout.join(".git")).unwrap();
+        fs::write(
+            checkout.join("homeboy.json"),
+            serde_json::to_string_pretty(&serde_json::json!({ "id": "homeboy" })).unwrap(),
+        )
+        .unwrap();
+        write_standalone_json(&config_components, "homeboy", &stale_path.to_string_lossy());
+
+        let _home = with_home_override(dir.path());
+        let report = reconcile_standalone_registration("homeboy", true).unwrap();
+
+        assert!(report.applied);
+        let raw = fs::read_to_string(config_components.join("homeboy.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            json.get("local_path").and_then(|value| value.as_str()),
+            Some(checkout.to_string_lossy().as_ref())
         );
     }
 
