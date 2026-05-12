@@ -4,6 +4,20 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.169.0] - 2026-05-12
+
+### Added
+- support requested detector context exclusions
+- support dead guard comment exemptions
+- include major release gate plans
+- include no-releasable release plans
+
+### Fixed
+- discount corpus-common call scaffolding
+- exclude generic helper suffixes from leaf naming
+- skip typeless files for typed conventions
+- limit vacuous mapping checks to comments
+
 ## [0.168.0] - 2026-05-12
 
 ### Added
