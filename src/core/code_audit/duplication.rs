@@ -967,6 +967,14 @@ const MIN_LCS_RATIO: f64 = 0.5;
 /// from methods that share only 1-2 trivial calls like `to_string`.
 const MIN_SHARED_CALLS: usize = 3;
 
+/// Minimum number of methods a call name must appear in before it can be
+/// treated as corpus-common scaffolding for parallel-implementation scoring.
+const MIN_COMMON_CALL_METHODS: usize = 8;
+
+/// Minimum share of methods a call name must appear in before it can be
+/// treated as corpus-common scaffolding for parallel-implementation scoring.
+const COMMON_CALL_METHOD_RATIO: f64 = 0.10;
+
 /// Raised Jaccard floor for two `StraightLine` bodies that share calls.
 ///
 /// Without a loop or recursion two functions that overlap on stdlib
@@ -1273,11 +1281,39 @@ fn extract_calls_from_body(body: &str, extra_trivial: &HashSet<&str>) -> Vec<Str
     calls
 }
 
-fn signal_calls(calls: &[String], extra_plumbing: &HashSet<&str>) -> Vec<String> {
+fn corpus_common_calls(sequences: &[MethodCallSequence]) -> HashSet<String> {
+    if sequences.len() < MIN_COMMON_CALL_METHODS {
+        return HashSet::new();
+    }
+
+    let mut method_counts: HashMap<&str, usize> = HashMap::new();
+    for sequence in sequences {
+        let unique_calls: HashSet<&str> = sequence.calls.iter().map(|call| call.as_str()).collect();
+        for call in unique_calls {
+            *method_counts.entry(call).or_insert(0) += 1;
+        }
+    }
+
+    let ratio_floor = (sequences.len() as f64 * COMMON_CALL_METHOD_RATIO).ceil() as usize;
+    let count_floor = MIN_COMMON_CALL_METHODS.max(ratio_floor);
+
+    method_counts
+        .into_iter()
+        .filter_map(|(call, count)| (count >= count_floor).then(|| call.to_string()))
+        .collect()
+}
+
+fn signal_calls(
+    calls: &[String],
+    extra_plumbing: &HashSet<&str>,
+    common_calls: &HashSet<String>,
+) -> Vec<String> {
     calls
         .iter()
         .filter(|call| {
-            !PLUMBING_CALLS.contains(&call.as_str()) && !extra_plumbing.contains(call.as_str())
+            !PLUMBING_CALLS.contains(&call.as_str())
+                && !extra_plumbing.contains(call.as_str())
+                && !common_calls.contains(call.as_str())
         })
         .cloned()
         .collect()
@@ -1479,6 +1515,7 @@ pub(crate) fn detect_parallel_implementations(
         .collect();
 
     let sequences = extract_call_sequences(fingerprints, &extra_trivial);
+    let common_calls = corpus_common_calls(&sequences);
 
     // Build sets of already-flagged pairs (exact + near duplicates) to avoid double-flagging
     let exact_groups = build_groups(fingerprints);
@@ -1534,8 +1571,8 @@ pub(crate) fn detect_parallel_implementations(
                 continue;
             }
 
-            let a_signal = signal_calls(&a.calls, &extra_plumbing);
-            let b_signal = signal_calls(&b.calls, &extra_plumbing);
+            let a_signal = signal_calls(&a.calls, &extra_plumbing, &common_calls);
+            let b_signal = signal_calls(&b.calls, &extra_plumbing, &common_calls);
 
             if a_signal.len() < MIN_CALL_COUNT || b_signal.len() < MIN_CALL_COUNT {
                 continue;
@@ -3338,6 +3375,104 @@ fn rebuild_twice(items: &[Item]) -> Result<()> {
         assert!(
             findings.is_empty(),
             "Built-in trivial floor must remain active even with extension config, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn corpus_common_calls_filter_broad_boilerplate_signal() {
+        // Generic regression for issue #2398: if a call tuple appears across a
+        // broad slice of the scanned component, it is scaffolding for this
+        // detector. The names are intentionally framework-neutral fixtures;
+        // extensions can still provide explicit trivial/plumbing lists.
+        let mut fingerprints = Vec::new();
+
+        for idx in 0..8 {
+            let method = format!("boilerplate_holder_{idx}");
+            let content = format!(
+                "fn {method}() {{\n    scaffold_response();\n    read_request();\n    default_payload();\n    validate_presence();\n    filler_{idx}();\n}}"
+            );
+            fingerprints.push(make_fingerprint_with_content(
+                &format!("src/common_{idx}.rs"),
+                &[method.as_str()],
+                &content,
+            ));
+        }
+
+        let first = make_fingerprint_with_content(
+            "src/a.rs",
+            &["create_item"],
+            "fn create_item() {\n    scaffold_response();\n    read_request();\n    default_payload();\n    validate_presence();\n    create_specific_step();\n}",
+        );
+        let second = make_fingerprint_with_content(
+            "src/b.rs",
+            &["delete_item"],
+            "fn delete_item() {\n    scaffold_response();\n    read_request();\n    default_payload();\n    validate_presence();\n    delete_specific_step();\n}",
+        );
+        fingerprints.push(first);
+        fingerprints.push(second);
+
+        let refs = fingerprints.iter().collect::<Vec<_>>();
+        let findings = detect_parallel_implementations(
+            &refs,
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
+
+        assert!(
+            findings.is_empty(),
+            "Corpus-common scaffolding calls should not produce a parallel implementation finding, got: {:?}",
+            findings.iter().map(|f| &f.description).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn corpus_common_calls_preserve_domain_specific_signal() {
+        let mut fingerprints = Vec::new();
+
+        for idx in 0..8 {
+            let method = format!("boilerplate_holder_{idx}");
+            let content = format!(
+                "fn {method}() {{\n    scaffold_response();\n    read_request();\n    default_payload();\n    validate_presence();\n    filler_{idx}();\n}}"
+            );
+            fingerprints.push(make_fingerprint_with_content(
+                &format!("src/common_{idx}.rs"),
+                &[method.as_str()],
+                &content,
+            ));
+        }
+
+        let first = make_fingerprint_with_content(
+            "src/deploy.rs",
+            &["deploy_item"],
+            "fn deploy_item() {\n    scaffold_response();\n    read_request();\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    verify_release();\n    deploy_specific_step();\n}",
+        );
+        let second = make_fingerprint_with_content(
+            "src/upgrade.rs",
+            &["upgrade_item"],
+            "fn upgrade_item() {\n    scaffold_response();\n    read_request();\n    validate_component();\n    build_artifact();\n    upload_to_host();\n    run_post_hooks();\n    verify_release();\n    upgrade_specific_step();\n}",
+        );
+        fingerprints.push(first);
+        fingerprints.push(second);
+
+        let refs = fingerprints.iter().collect::<Vec<_>>();
+        let findings = detect_parallel_implementations(
+            &refs,
+            &std::collections::HashSet::new(),
+            &DuplicationDetectorConfig::default(),
+        );
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "Domain-specific shared workflow calls should still flag after common scaffolding is discounted"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.description.contains("`build_artifact`")
+                    && !f.description.contains("`read_request`")),
+            "Findings should be driven by domain calls, got: {:?}",
             findings.iter().map(|f| &f.description).collect::<Vec<_>>()
         );
     }
