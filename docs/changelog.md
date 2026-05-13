@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.178.1] - 2026-05-13
+
+### Changed
+- extract release semver planning
+
 ## [0.178.0] - 2026-05-13
 
 ### Added
