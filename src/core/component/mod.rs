@@ -620,25 +620,9 @@ where
 mod tests {
     use super::*;
     use std::path::Path;
-    use std::sync::Mutex;
-
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_isolated_home<T>(f: impl FnOnce(&Path) -> T) -> T {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let old_home = std::env::var_os("HOME");
-        let home = tempfile::tempdir().expect("home tempdir");
-
-        std::env::set_var("HOME", home.path());
-        let result = f(home.path());
-
-        if let Some(value) = old_home {
-            std::env::set_var("HOME", value);
-        } else {
-            std::env::remove_var("HOME");
-        }
-
-        result
+        crate::test_support::with_isolated_home(|home| f(home.path()))
     }
 
     fn write_extension_fixture(home: &Path, id: &str, deploy_json: &str) {

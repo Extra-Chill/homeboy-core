@@ -1,18 +1,18 @@
 //! Read-only triage reports for component sets.
 //!
-//! The primitive resolves a target (component/project/fleet/rig) to component
+//! The primitive resolves a scope (component/project/fleet/rig/path/workspace) to component
 //! references, then overlays GitHub issue/PR state. It intentionally keeps the
 //! GitHub calls read-only so `homeboy triage ...` is safe as a dashboard verb.
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use crate::component;
+use crate::defaults;
 use crate::deploy::release_download::{detect_remote_url, parse_github_url, GitHubRepo};
 use crate::error::{Error, Result};
 use crate::git::gh_probe_succeeds;
@@ -20,62 +20,9 @@ use crate::observation::{
     NewRunRecord, NewTriageItemRecord, ObservationStore, RunListFilter, RunStatus,
     TriageItemRecord, TriagePullRequestSignals,
 };
-use crate::{defaults, fleet, project, rig};
+use crate::scope::{self, Scope, ScopeComponentRef, ScopeOutput};
 
-#[derive(Debug, Clone)]
-pub enum TriageTarget {
-    Component(String),
-    Project(String),
-    Fleet(String),
-    Rig(String),
-    Workspace,
-    /// Triage an unregistered checkout directly. Skips the component registry
-    /// and resolves the GitHub remote from `git remote get-url origin`.
-    Path {
-        path: String,
-        component_id: Option<String>,
-    },
-}
-
-impl TriageTarget {
-    fn kind(&self) -> &'static str {
-        match self {
-            TriageTarget::Component(_) => "component",
-            TriageTarget::Project(_) => "project",
-            TriageTarget::Fleet(_) => "fleet",
-            TriageTarget::Rig(_) => "rig",
-            TriageTarget::Workspace => "workspace",
-            TriageTarget::Path { .. } => "path",
-        }
-    }
-
-    fn id(&self) -> &str {
-        match self {
-            TriageTarget::Component(id)
-            | TriageTarget::Project(id)
-            | TriageTarget::Fleet(id)
-            | TriageTarget::Rig(id) => id,
-            TriageTarget::Workspace => "workspace",
-            TriageTarget::Path { path, component_id } => {
-                component_id.as_deref().unwrap_or(path.as_str())
-            }
-        }
-    }
-
-    fn command(&self) -> &'static str {
-        match self {
-            TriageTarget::Component(_) => "triage.component",
-            TriageTarget::Project(_) => "triage.project",
-            TriageTarget::Fleet(_) => "triage.fleet",
-            TriageTarget::Rig(_) => "triage.rig",
-            TriageTarget::Workspace => "triage.workspace",
-            // `--path` is an escape hatch on subcommands (currently `component`); keep
-            // the same command identity so JSON consumers don't see a phantom
-            // `triage.path` verb.
-            TriageTarget::Path { .. } => "triage.component",
-        }
-    }
-}
+pub use crate::scope::Scope as TriageTarget;
 
 #[derive(Debug, Clone, Default)]
 pub struct TriageOptions {
@@ -95,7 +42,7 @@ pub struct TriageOptions {
 #[derive(Debug, Clone, Serialize)]
 pub struct TriageOutput {
     pub command: &'static str,
-    pub target: TriageTargetOutput,
+    pub target: ScopeOutput,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<TriageObservationOutput>,
     pub summary: TriageSummary,
@@ -143,12 +90,6 @@ pub struct TriageObservationChangedItem {
     #[serde(flatten)]
     pub item: TriageObservationItemRef,
     pub changed_fields: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TriageTargetOutput {
-    pub kind: &'static str,
-    pub id: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -299,43 +240,7 @@ pub struct TriageUnresolved {
     pub sources: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-struct ComponentRef {
-    component_id: String,
-    local_path: String,
-    remote_url: Option<String>,
-    triage_remote_url: Option<String>,
-    priority_labels: Option<Vec<String>>,
-    sources: BTreeSet<String>,
-    usage: BTreeSet<String>,
-}
-
-impl ComponentRef {
-    fn new(
-        component_id: String,
-        local_path: String,
-        remote_url: Option<String>,
-        triage_remote_url: Option<String>,
-        source: String,
-    ) -> Self {
-        let mut sources = BTreeSet::new();
-        sources.insert(source);
-        Self {
-            component_id,
-            local_path,
-            remote_url,
-            triage_remote_url,
-            priority_labels: None,
-            sources,
-            usage: BTreeSet::new(),
-        }
-    }
-
-    fn with_priority_labels(mut self, priority_labels: Option<Vec<String>>) -> Self {
-        self.priority_labels = priority_labels;
-        self
-    }
-}
+type ComponentRef = ScopeComponentRef;
 
 pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput> {
     let observation = TriageObservation::start(&target, &options);
@@ -364,11 +269,8 @@ pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput>
     let summary = summarize(&components, &unresolved);
     let unresolved_summary = summarize_unresolved(&unresolved);
     let mut output = TriageOutput {
-        command: target.command(),
-        target: TriageTargetOutput {
-            kind: target.kind(),
-            id: target.id().to_string(),
-        },
+        command: triage_command(&target),
+        target: ScopeOutput::from(&target),
         observation: None,
         summary,
         unresolved_summary,
@@ -413,7 +315,7 @@ impl TriageObservation {
             .start_run(NewRunRecord {
                 kind: "triage".to_string(),
                 component_id: Some(component_id),
-                command: Some(target.command().to_string()),
+                command: Some(triage_command(target).to_string()),
                 cwd: std::env::current_dir()
                     .ok()
                     .map(|path| path.to_string_lossy().to_string()),
@@ -425,7 +327,7 @@ impl TriageObservation {
                 },
                 metadata_json: serde_json::json!({
                     "target": {
-                        "kind": target.kind(),
+                        "kind": target.kind_name(),
                         "id": target.id(),
                     },
                     "options": {
@@ -675,7 +577,7 @@ fn push_if_changed_unless_unknown(
 }
 
 fn triage_observation_component_id(target: &TriageTarget) -> String {
-    format!("{}:{}", target.kind(), target.id())
+    format!("{}:{}", target.kind_name(), target.id())
 }
 
 fn triage_observation_items(run_id: &str, output: &TriageOutput) -> Vec<NewTriageItemRecord> {
@@ -747,198 +649,25 @@ fn usize_to_i64(value: usize) -> Option<i64> {
 }
 
 fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>> {
+    let refs = scope::resolve_scope_components(target)?;
+    if matches!(target, Scope::Workspace) {
+        Ok(dedupe_refs_by_repo(refs))
+    } else {
+        Ok(refs)
+    }
+}
+
+fn triage_command(target: &TriageTarget) -> &'static str {
     match target {
-        TriageTarget::Component(component_id) => {
-            let comp = component::load(component_id)?;
-            let priority_labels = comp.priority_labels.clone();
-            Ok(vec![ComponentRef::new(
-                comp.id,
-                comp.local_path,
-                comp.remote_url,
-                comp.triage_remote_url,
-                format!("component:{component_id}"),
-            )
-            .with_priority_labels(priority_labels)])
-        }
-        TriageTarget::Project(project_id) => {
-            let proj = project::load(project_id)?;
-            Ok(proj
-                .components
-                .into_iter()
-                .map(|attachment| {
-                    let comp = component::load(&attachment.id).ok();
-                    let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
-                    let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
-                    ComponentRef::new(
-                        attachment.id.clone(),
-                        if attachment.local_path.is_empty() {
-                            comp.as_ref()
-                                .map(|c| c.local_path.clone())
-                                .unwrap_or_default()
-                        } else {
-                            attachment.local_path
-                        },
-                        remote_url,
-                        triage_remote_url,
-                        format!("project:{project_id}"),
-                    )
-                    .with_priority_labels(comp.and_then(|c| c.priority_labels))
-                })
-                .collect())
-        }
-        TriageTarget::Fleet(fleet_id) => resolve_fleet_components(fleet_id),
-        TriageTarget::Rig(rig_id) => {
-            let spec = rig::load(rig_id)?;
-            let mut refs = Vec::new();
-            for (component_id, component_spec) in spec.components.iter() {
-                let path = rig::expand::expand_vars(&spec, &component_spec.path);
-                let mut component_ref = ComponentRef::new(
-                    component_id.clone(),
-                    path,
-                    component_spec.remote_url.clone(),
-                    component_spec.triage_remote_url.clone(),
-                    format!("rig:{rig_id}"),
-                );
-                component_ref.usage.insert(rig_id.to_string());
-                refs.push(component_ref);
-            }
-            refs.sort_by(|a, b| a.component_id.cmp(&b.component_id));
-            Ok(refs)
-        }
-        TriageTarget::Workspace => resolve_workspace_components(),
-        TriageTarget::Path { path, component_id } => {
-            resolve_path_component(path, component_id.as_deref())
-        }
-    }
-}
-
-fn resolve_path_component(path: &str, component_id: Option<&str>) -> Result<Vec<ComponentRef>> {
-    let checkout = Path::new(path);
-    if !checkout.exists() {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            "Checkout path does not exist",
-            Some(path.to_string()),
-            None,
-        ));
-    }
-    if !checkout.join(".git").exists() {
-        return Err(Error::validation_invalid_argument(
-            "path",
-            "Checkout path is not a git repository (no `.git` entry)",
-            Some(path.to_string()),
-            None,
-        ));
-    }
-    let remote_url = detect_remote_url(checkout).ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "path",
-            "Could not read `git remote get-url origin` from checkout",
-            Some(path.to_string()),
-            None,
-        )
-    })?;
-    let canonical = checkout
-        .canonicalize()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| path.to_string());
-    let synthesized_id = component_id
-        .map(|id| id.to_string())
-        .or_else(|| {
-            checkout
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| name.to_string())
-        })
-        .unwrap_or_else(|| "path".to_string());
-    let source = format!("path:{canonical}");
-    Ok(vec![ComponentRef::new(
-        synthesized_id,
-        canonical,
-        Some(remote_url),
-        None,
-        source,
-    )])
-}
-
-fn resolve_workspace_components() -> Result<Vec<ComponentRef>> {
-    let mut refs = BTreeMap::new();
-
-    for proj in project::list()? {
-        for attachment in proj.components {
-            let comp = component::load(&attachment.id).ok();
-            let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
-            let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
-            let mut component_ref = ComponentRef::new(
-                attachment.id.clone(),
-                if attachment.local_path.is_empty() {
-                    comp.as_ref()
-                        .map(|c| c.local_path.clone())
-                        .unwrap_or_default()
-                } else {
-                    attachment.local_path
-                },
-                remote_url,
-                triage_remote_url,
-                format!("project:{}", proj.id),
-            )
-            .with_priority_labels(comp.and_then(|c| c.priority_labels));
-            component_ref.usage.insert(proj.id.clone());
-            merge_component_ref(&mut refs, component_ref);
-        }
-    }
-
-    for spec in rig::list()? {
-        for (component_id, component_spec) in spec.components.iter() {
-            let mut component_ref = ComponentRef::new(
-                component_id.clone(),
-                rig::expand::expand_vars(&spec, &component_spec.path),
-                component_spec.remote_url.clone(),
-                component_spec.triage_remote_url.clone(),
-                format!("rig:{}", spec.id),
-            );
-            component_ref.usage.insert(spec.id.clone());
-            merge_component_ref(&mut refs, component_ref);
-        }
-    }
-
-    for comp in component::list()? {
-        let source = format!("component:{}", comp.id);
-        let priority_labels = comp.priority_labels.clone();
-        merge_component_ref(
-            &mut refs,
-            ComponentRef::new(
-                comp.id,
-                comp.local_path,
-                comp.remote_url,
-                comp.triage_remote_url,
-                source,
-            )
-            .with_priority_labels(priority_labels),
-        );
-    }
-
-    Ok(dedupe_refs_by_repo(refs.into_values().collect()))
-}
-
-fn merge_component_ref(refs: &mut BTreeMap<String, ComponentRef>, component_ref: ComponentRef) {
-    let entry = refs
-        .entry(component_ref.component_id.clone())
-        .or_insert_with(|| component_ref.clone());
-    entry.sources.extend(component_ref.sources);
-    entry.usage.extend(component_ref.usage);
-    if entry.local_path.is_empty() && !component_ref.local_path.is_empty() {
-        entry.local_path = component_ref.local_path;
-    }
-    if entry.remote_url.is_none() {
-        entry.remote_url = component_ref.remote_url;
-    }
-    if entry.triage_remote_url.is_none() {
-        entry.triage_remote_url = component_ref.triage_remote_url;
-    }
-    if entry.priority_labels.is_none() {
-        entry.priority_labels = component_ref.priority_labels;
+        Scope::Component(_) => "triage.component",
+        Scope::Project(_) => "triage.project",
+        Scope::Fleet(_) => "triage.fleet",
+        Scope::Rig(_) => "triage.rig",
+        Scope::Workspace => "triage.workspace",
+        // `--path` is an escape hatch on subcommands (currently `component`); keep
+        // the same command identity so JSON consumers don't see a phantom
+        // `triage.path` verb.
+        Scope::Path { .. } => "triage.component",
     }
 }
 
@@ -978,59 +707,6 @@ fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
     refs.extend(unresolved);
     refs.sort_by(|a, b| a.component_id.cmp(&b.component_id));
     refs
-}
-
-fn resolve_fleet_components(fleet_id: &str) -> Result<Vec<ComponentRef>> {
-    let fl = fleet::load(fleet_id)?;
-    let fleet_priority_labels = fl.priority_labels.clone();
-    let mut refs: BTreeMap<String, ComponentRef> = BTreeMap::new();
-
-    for project_id in &fl.project_ids {
-        let Ok(proj) = project::load(project_id) else {
-            continue;
-        };
-        for attachment in proj.components {
-            let comp = component::load(&attachment.id).ok();
-            let remote_url = comp.as_ref().and_then(|c| c.remote_url.clone());
-            let triage_remote_url = comp.as_ref().and_then(|c| c.triage_remote_url.clone());
-            let priority_labels = comp
-                .as_ref()
-                .and_then(|c| c.priority_labels.clone())
-                .or_else(|| fleet_priority_labels.clone());
-            let entry = refs.entry(attachment.id.clone()).or_insert_with(|| {
-                ComponentRef::new(
-                    attachment.id.clone(),
-                    if attachment.local_path.is_empty() {
-                        comp.as_ref()
-                            .map(|c| c.local_path.clone())
-                            .unwrap_or_default()
-                    } else {
-                        attachment.local_path.clone()
-                    },
-                    remote_url.clone(),
-                    triage_remote_url.clone(),
-                    format!("fleet:{fleet_id}"),
-                )
-                .with_priority_labels(priority_labels.clone())
-            });
-            entry.sources.insert(format!("project:{project_id}"));
-            entry.usage.insert(project_id.clone());
-            if entry.remote_url.is_none() {
-                entry.remote_url = remote_url;
-            }
-            if entry.triage_remote_url.is_none() {
-                entry.triage_remote_url = triage_remote_url;
-            }
-            if entry.local_path.is_empty() && !attachment.local_path.is_empty() {
-                entry.local_path = attachment.local_path;
-            }
-            if entry.priority_labels.is_none() {
-                entry.priority_labels = priority_labels;
-            }
-        }
-    }
-
-    Ok(refs.into_values().collect())
 }
 
 #[derive(Debug, Clone)]
