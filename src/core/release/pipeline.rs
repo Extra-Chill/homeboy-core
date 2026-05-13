@@ -21,10 +21,10 @@ use super::execution_plan::{
 };
 use super::pipeline_summary::{build_summary, derive_overall_status};
 use super::plan_steps::{build_preflight_steps, build_release_steps};
+use super::planning_policy::release_skip_plan;
 use super::types::{
-    ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep,
-    ReleaseRun, ReleaseRunResult, ReleaseSemverCommit, ReleaseSemverRecommendation,
-    ReleaseStepResult,
+    ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult,
+    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseStepResult,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -176,24 +176,9 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let semver_recommendation =
         build_semver_recommendation(&component, &options.bump_type, monorepo.as_ref())?;
 
-    if semver_recommendation.is_none() && !options.bump_policy.force_empty_release {
-        return Ok(skipped_release_plan(
-            component_id,
-            "no-releasable-commits",
-            "No releasable commits since last tag",
-            "Use --bump to force a release when this is intentional",
-            None,
-        ));
-    }
-
-    if options.bump_policy.require_explicit_major {
-        return Ok(skipped_release_plan(
-            component_id,
-            "major-requires-flag",
-            "Breaking changes require an explicit major bump",
-            &format!("Re-run with: homeboy release {} --bump major", component_id),
-            semver_recommendation,
-        ));
+    if let Some(skip_plan) = release_skip_plan(component_id, options, semver_recommendation.clone())
+    {
+        return Ok(skip_plan);
     }
 
     // === Stage 1: Generate changelog entries from conventional commits ===
@@ -330,34 +315,6 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         warnings,
         hints,
     })
-}
-
-fn skipped_release_plan(
-    component_id: &str,
-    reason: &str,
-    label: &str,
-    hint: &str,
-    semver_recommendation: Option<ReleaseSemverRecommendation>,
-) -> ReleasePlan {
-    ReleasePlan {
-        component_id: component_id.to_string(),
-        enabled: false,
-        steps: vec![ReleasePlanStep {
-            id: "release.skip".to_string(),
-            step_type: "release.skip".to_string(),
-            label: Some(label.to_string()),
-            needs: vec![],
-            config: std::collections::HashMap::from([(
-                "reason".to_string(),
-                serde_json::Value::String(reason.to_string()),
-            )]),
-            status: ReleasePlanStatus::Disabled,
-            missing: vec![],
-        }],
-        semver_recommendation,
-        warnings: vec![],
-        hints: vec![hint.to_string()],
-    }
 }
 
 fn build_changelog_plan(
@@ -1151,13 +1108,12 @@ mod tests {
     use super::{
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
         get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
-        is_runner_infrastructure_failure, read_changelog_for_release, skipped_release_plan,
-        strip_pr_reference, validate_default_branch, validate_release_version_floor,
+        is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
+        validate_default_branch, validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
     use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
-    use crate::release::types::ReleasePlanStatus;
 
     fn commit(subject: &str, category: CommitCategory) -> CommitInfo {
         CommitInfo {
@@ -1227,32 +1183,6 @@ mod tests {
         assert_eq!(
             strip_pr_reference("has parens (not a pr ref)"),
             "has parens (not a pr ref)"
-        );
-    }
-
-    #[test]
-    fn skipped_release_plan_records_disabled_reason() {
-        let plan = skipped_release_plan(
-            "demo",
-            "no-releasable-commits",
-            "No releasable commits since last tag",
-            "Use --bump to force a release when this is intentional",
-            None,
-        );
-
-        assert!(!plan.enabled);
-        assert_eq!(plan.component_id, "demo");
-        assert_eq!(plan.steps.len(), 1);
-        assert_eq!(plan.steps[0].id, "release.skip");
-        assert_eq!(plan.steps[0].step_type, "release.skip");
-        assert_eq!(plan.steps[0].status, ReleasePlanStatus::Disabled);
-        assert_eq!(
-            plan.steps[0].config.get("reason").and_then(|v| v.as_str()),
-            Some("no-releasable-commits")
-        );
-        assert_eq!(
-            plan.hints,
-            vec!["Use --bump to force a release when this is intentional"]
         );
     }
 
