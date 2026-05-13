@@ -153,7 +153,7 @@ fn run_default_branch_preflight(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
-    match super::pipeline::validate_default_branch(context.component) {
+    match super::planning_git::validate_default_branch(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
             step_type: step.step_type.clone(),
@@ -191,7 +191,7 @@ fn run_remote_sync_preflight(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
-    match super::pipeline::validate_remote_sync(context.component) {
+    match super::planning_git::validate_remote_sync(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
             step_type: step.step_type.clone(),
