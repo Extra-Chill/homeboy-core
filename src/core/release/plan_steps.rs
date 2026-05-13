@@ -220,16 +220,18 @@ fn build_bump_policy_step(
     );
     config.insert(
         "force_lower_bump".to_string(),
-        serde_json::Value::Bool(recommendation.is_underbump && !options.dry_run),
+        serde_json::Value::Bool(options.bump_policy.force_lower_bump),
     );
 
     if recommendation.is_underbump {
         config.insert(
             "policy".to_string(),
-            serde_json::Value::String(if !options.dry_run {
+            serde_json::Value::String(if options.dry_run {
+                "preview-lower-bump".to_string()
+            } else if options.bump_policy.force_lower_bump {
                 "forced-lower-bump".to_string()
             } else {
-                "preview-lower-bump".to_string()
+                "requires-force-lower-bump".to_string()
             }),
         );
     }
@@ -527,7 +529,8 @@ mod tests {
     use super::{build_preflight_steps, build_release_steps, github_release_applies};
     use crate::component::Component;
     use crate::release::types::{
-        ReleaseChangelogPlan, ReleaseOptions, ReleasePlanStatus, ReleaseSemverRecommendation,
+        ReleaseBumpPolicyOptions, ReleaseChangelogPlan, ReleaseOptions, ReleasePlanStatus,
+        ReleaseSemverRecommendation,
     };
 
     #[test]
@@ -648,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn release_plan_records_forced_lower_bump_policy() {
+    fn release_plan_records_unforced_lower_bump_policy() {
         let options = ReleaseOptions {
             bump_type: "patch".to_string(),
             ..Default::default()
@@ -677,6 +680,39 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("patch")
         );
+        assert_eq!(
+            bump_policy
+                .config
+                .get("policy")
+                .and_then(|value| value.as_str()),
+            Some("requires-force-lower-bump")
+        );
+        assert_eq!(
+            bump_policy
+                .config
+                .get("force_lower_bump")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn release_plan_records_forced_lower_bump_policy() {
+        let options = ReleaseOptions {
+            bump_type: "patch".to_string(),
+            bump_policy: ReleaseBumpPolicyOptions {
+                force_lower_bump: true,
+            },
+            ..Default::default()
+        };
+        let recommendation = semver_recommendation("minor", "patch", true);
+
+        let steps = build_preflight_steps(&options, Some(&recommendation));
+        let bump_policy = steps
+            .iter()
+            .find(|step| step.id == "preflight.bump_policy")
+            .expect("bump policy step");
+
         assert_eq!(
             bump_policy
                 .config

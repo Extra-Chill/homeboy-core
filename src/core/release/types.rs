@@ -189,6 +189,22 @@ pub struct ReleaseOptions {
     /// Git identity for release commits: "bot", "Name <email>", or None (use existing config).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_identity: Option<String>,
+    /// Bump policy controls that affect release plan validation.
+    #[serde(default, skip_serializing_if = "ReleaseBumpPolicyOptions::is_default")]
+    pub bump_policy: ReleaseBumpPolicyOptions,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReleaseBumpPolicyOptions {
+    /// Permit a keyword bump lower than the commit-derived recommendation.
+    #[serde(default)]
+    pub force_lower_bump: bool,
+}
+
+impl ReleaseBumpPolicyOptions {
+    fn is_default(value: &Self) -> bool {
+        value == &Self::default()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
