@@ -143,7 +143,8 @@ impl SshClient {
                 "Server is not configured for managed SSH sessions",
                 None,
                 Some(vec![
-                    "Set auth.mode to key_plus_password_controlmaster".to_string(),
+                    "Run: homeboy server set <server> auth.mode=key_plus_password_controlmaster"
+                        .to_string(),
                     "Then run: homeboy server connect <server>".to_string(),
                 ]),
             )
@@ -179,7 +180,8 @@ impl SshClient {
                 "Server is not configured for managed SSH sessions",
                 None,
                 Some(vec![
-                    "Set auth.mode to key_plus_password_controlmaster".to_string(),
+                    "Run: homeboy server set <server> auth.mode=key_plus_password_controlmaster"
+                        .to_string(),
                     "Then run: homeboy server connect <server>".to_string(),
                 ]),
             )
