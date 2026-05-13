@@ -4,9 +4,9 @@ use std::io::{self, BufRead, IsTerminal, Write};
 
 use super::pipeline::load_component;
 use super::types::{
-    BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseCommandInput,
-    ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep,
-    ReleaseRun,
+    BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseBumpPolicyOptions,
+    ReleaseCommandInput, ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleasePlanStatus,
+    ReleasePlanStep, ReleaseRun,
 };
 
 pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32)> {
@@ -202,6 +202,9 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         deploy: input.deploy,
         skip_github_release: input.skip_github_release,
         git_identity: input.git_identity.clone(),
+        bump_policy: ReleaseBumpPolicyOptions {
+            force_lower_bump: input.force_lower_bump,
+        },
     };
 
     if options.dry_run {

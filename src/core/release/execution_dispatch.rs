@@ -30,6 +30,7 @@ pub(super) fn execute_release_plan_step(
         "preflight.git_identity" => configure_git_identity(step, context).map(Some),
         "preflight.working_tree" => Ok(Some(run_working_tree_preflight(step, context))),
         "preflight.remote_sync" => Ok(Some(run_remote_sync_preflight(step, context))),
+        "preflight.bump_policy" => Ok(Some(run_bump_policy_preflight(step))),
         "preflight.lint" => Ok(Some(run_lint_preflight(step, context))),
         "preflight.test" => Ok(Some(run_test_preflight(step, context))),
         "preflight.changelog_bootstrap" => {
@@ -140,6 +141,7 @@ fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
         && step.step_type != "preflight.git_identity"
         && step.step_type != "preflight.working_tree"
         && step.step_type != "preflight.remote_sync"
+        && step.step_type != "preflight.bump_policy"
         && step.step_type != "preflight.lint"
         && step.step_type != "preflight.test"
         && step.step_type != "preflight.changelog_bootstrap")
@@ -201,6 +203,61 @@ fn run_remote_sync_preflight(
             error: None,
         },
         Err(err) => failed_result(&step.id, &step.step_type, err),
+    }
+}
+
+fn run_bump_policy_preflight(step: &ReleasePlanStep) -> ReleaseStepResult {
+    let requested = step
+        .config
+        .get("requested")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let recommended = step
+        .config
+        .get("recommended")
+        .and_then(|value| value.as_str())
+        .unwrap_or(requested);
+    let underbump = step
+        .config
+        .get("underbump")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let force_lower_bump = step
+        .config
+        .get("force_lower_bump")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    if underbump && !force_lower_bump {
+        let err = Error::validation_invalid_argument(
+            "bump",
+            format!(
+                "Requested {} bump is lower than detected {} impact",
+                requested, recommended
+            ),
+            Some(requested.to_string()),
+            None,
+        )
+        .with_hint(format!("Use the detected bump: --bump {}", recommended))
+        .with_hint("If the lower release is intentional, re-run with --force-lower-bump");
+
+        return failed_result(&step.id, &step.step_type, err);
+    }
+
+    ReleaseStepResult {
+        id: step.id.clone(),
+        step_type: step.step_type.clone(),
+        status: ReleaseStepStatus::Success,
+        missing: Vec::new(),
+        warnings: Vec::new(),
+        hints: Vec::new(),
+        data: Some(serde_json::json!({
+            "requested": requested,
+            "recommended": recommended,
+            "underbump": underbump,
+            "force_lower_bump": force_lower_bump,
+        })),
+        error: None,
     }
 }
 
@@ -300,6 +357,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
             | "preflight.default_branch"
             | "preflight.working_tree"
             | "preflight.remote_sync"
+            | "preflight.bump_policy"
             | "preflight.lint"
             | "preflight.test"
             | "preflight.changelog_bootstrap"
@@ -371,6 +429,9 @@ mod tests {
         )));
         assert!(!release_step_is_plan_only(&plan_step(
             "preflight.remote_sync"
+        )));
+        assert!(!release_step_is_plan_only(&plan_step(
+            "preflight.bump_policy"
         )));
         assert!(!release_step_is_plan_only(&plan_step("preflight.lint")));
         assert!(!release_step_is_plan_only(&plan_step("preflight.test")));
@@ -582,6 +643,85 @@ mod tests {
     }
 
     #[test]
+    fn bump_policy_preflight_blocks_unforced_underbump() {
+        let mut step = plan_step("preflight.bump_policy");
+        step.config
+            .insert("requested".to_string(), serde_json::json!("patch"));
+        step.config
+            .insert("recommended".to_string(), serde_json::json!("minor"));
+        step.config
+            .insert("underbump".to_string(), serde_json::json!(true));
+        step.config
+            .insert("force_lower_bump".to_string(), serde_json::json!(false));
+
+        let component = Component::default();
+        let options = ReleaseOptions::default();
+        let mut context = ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            state: ReleaseState::default(),
+            publish_failed: false,
+        };
+
+        let result = execute_release_plan_step(&step, &mut context)
+            .expect("dispatch")
+            .expect("result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Failed);
+        assert!(release_step_is_show_stopper(&result));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Requested patch bump is lower"));
+        assert!(result
+            .hints
+            .iter()
+            .any(|hint| hint.message.contains("--force-lower-bump")));
+    }
+
+    #[test]
+    fn bump_policy_preflight_allows_forced_underbump() {
+        let mut step = plan_step("preflight.bump_policy");
+        step.config
+            .insert("requested".to_string(), serde_json::json!("patch"));
+        step.config
+            .insert("recommended".to_string(), serde_json::json!("minor"));
+        step.config
+            .insert("underbump".to_string(), serde_json::json!(true));
+        step.config
+            .insert("force_lower_bump".to_string(), serde_json::json!(true));
+
+        let component = Component::default();
+        let options = ReleaseOptions::default();
+        let mut context = ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            state: ReleaseState::default(),
+            publish_failed: false,
+        };
+
+        let result = execute_release_plan_step(&step, &mut context)
+            .expect("dispatch")
+            .expect("result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Success);
+        assert_eq!(
+            result.data,
+            Some(serde_json::json!({
+                "requested": "patch",
+                "recommended": "minor",
+                "underbump": true,
+                "force_lower_bump": true,
+            }))
+        );
+    }
+
+    #[test]
     fn changelog_bootstrap_preflight_initializes_missing_changelog() {
         let temp = tempfile::tempdir().expect("tempdir");
         let changelog_path = temp.path().join("CHANGELOG.md");
@@ -616,6 +756,7 @@ mod tests {
         let default_branch_failure = failed_step_result("preflight.default_branch");
         let working_tree_failure = failed_step_result("preflight.working_tree");
         let remote_sync_failure = failed_step_result("preflight.remote_sync");
+        let bump_policy_failure = failed_step_result("preflight.bump_policy");
         let lint_failure = failed_step_result("preflight.lint");
         let test_failure = failed_step_result("preflight.test");
         let bootstrap_failure = failed_step_result("preflight.changelog_bootstrap");
@@ -626,6 +767,7 @@ mod tests {
         assert!(release_step_is_show_stopper(&default_branch_failure));
         assert!(release_step_is_show_stopper(&working_tree_failure));
         assert!(release_step_is_show_stopper(&remote_sync_failure));
+        assert!(release_step_is_show_stopper(&bump_policy_failure));
         assert!(release_step_is_show_stopper(&lint_failure));
         assert!(release_step_is_show_stopper(&test_failure));
         assert!(release_step_is_show_stopper(&bootstrap_failure));
