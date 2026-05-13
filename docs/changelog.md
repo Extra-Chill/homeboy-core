@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.179.3] - 2026-05-13
+
+### Changed
+- extract release quality preflight policy
+
+### Fixed
+- enable native macOS keychain backend
+
 ## [0.179.2] - 2026-05-13
 
 ### Changed
