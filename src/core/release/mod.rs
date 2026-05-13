@@ -8,6 +8,7 @@ mod pipeline_capabilities;
 mod pipeline_summary;
 mod plan_steps;
 mod planning_changelog;
+mod planning_git;
 mod planning_policy;
 mod planning_quality;
 mod planning_semver;
