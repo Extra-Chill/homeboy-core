@@ -4,6 +4,15 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.178.0] - 2026-05-13
+
+### Added
+- support proxied form API requests
+
+### Changed
+- cover API client request helpers
+- extract release planning skip policy
+
 ## [0.177.0] - 2026-05-13
 
 ### Added
