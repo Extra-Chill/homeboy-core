@@ -267,6 +267,21 @@ pub enum ExtensionOutput {
         extension_id: String,
         url: String,
         path: String,
+        linked: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        git_root: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        old_source_revision: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        new_source_revision: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        old_branch: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        new_branch: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        update_note: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         old_version: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -650,6 +665,18 @@ fn update_extension(
             extension_id: result.extension_id,
             url: result.url,
             path: result.path.to_string_lossy().to_string(),
+            linked: result.linked,
+            source_path: result
+                .source_path
+                .map(|path| path.to_string_lossy().to_string()),
+            git_root: result
+                .git_root
+                .map(|path| path.to_string_lossy().to_string()),
+            old_source_revision: result.old_source_revision,
+            new_source_revision: result.new_source_revision,
+            old_branch: result.old_branch,
+            new_branch: result.new_branch,
+            update_note: result.update_note,
             old_version,
             new_version,
             repaired_source_metadata: result.repaired_source_metadata,

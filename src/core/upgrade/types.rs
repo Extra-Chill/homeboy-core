@@ -44,6 +44,21 @@ pub struct ExtensionUpgradeEntry {
     pub extension_id: String,
     pub old_version: String,
     pub new_version: String,
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_source_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_source_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

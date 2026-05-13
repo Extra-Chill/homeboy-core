@@ -944,6 +944,21 @@ pub struct UpdateEntry {
     pub extension_id: String,
     pub old_version: String,
     pub new_version: String,
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_source_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_source_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repaired_source_metadata: Option<SourceMetadataRepair>,
 }
@@ -993,6 +1008,18 @@ pub fn update_all(force: bool) -> UpdateAllResult {
                     extension_id: id.clone(),
                     old_version: old_version.unwrap_or_default(),
                     new_version,
+                    linked: result.linked,
+                    source_path: result
+                        .source_path
+                        .map(|path| path.to_string_lossy().to_string()),
+                    git_root: result
+                        .git_root
+                        .map(|path| path.to_string_lossy().to_string()),
+                    old_source_revision: result.old_source_revision,
+                    new_source_revision: result.new_source_revision,
+                    old_branch: result.old_branch,
+                    new_branch: result.new_branch,
+                    update_note: result.update_note,
                     repaired_source_metadata: repaired,
                 });
             }

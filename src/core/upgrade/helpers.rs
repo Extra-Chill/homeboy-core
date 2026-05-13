@@ -294,13 +294,27 @@ fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
             .unwrap_or_default();
 
         match extension::update(id, false) {
-            Ok(_) => {
+            Ok(result) => {
                 let new_version = extension::load_extension(id)
                     .ok()
                     .map(|m| m.version.clone())
                     .unwrap_or_default();
 
-                if old_version != new_version {
+                if result.linked {
+                    let branch_detail = match (&result.old_branch, &result.new_branch) {
+                        (Some(old), Some(new)) if old != new => format!(" ({} → {})", old, new),
+                        (Some(branch), _) => format!(" ({})", branch),
+                        _ => String::new(),
+                    };
+                    log_status!(
+                        "upgrade",
+                        "  {} {} → {} linked source updated{}",
+                        id,
+                        old_version,
+                        new_version,
+                        branch_detail
+                    );
+                } else if old_version != new_version {
                     log_status!("upgrade", "  {} {} → {}", id, old_version, new_version);
                 } else {
                     log_status!("upgrade", "  {} {} (up to date)", id, new_version);
@@ -310,6 +324,18 @@ fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
                     extension_id: id.clone(),
                     old_version,
                     new_version,
+                    linked: result.linked,
+                    source_path: result
+                        .source_path
+                        .map(|path| path.to_string_lossy().to_string()),
+                    git_root: result
+                        .git_root
+                        .map(|path| path.to_string_lossy().to_string()),
+                    old_source_revision: result.old_source_revision,
+                    new_source_revision: result.new_source_revision,
+                    old_branch: result.old_branch,
+                    new_branch: result.new_branch,
+                    update_note: result.update_note,
                 });
             }
             Err(e) => {

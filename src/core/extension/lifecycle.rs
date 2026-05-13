@@ -34,6 +34,14 @@ pub struct UpdateResult {
     pub extension_id: String,
     pub url: String,
     pub path: PathBuf,
+    pub linked: bool,
+    pub source_path: Option<PathBuf>,
+    pub git_root: Option<PathBuf>,
+    pub old_source_revision: Option<String>,
+    pub new_source_revision: Option<String>,
+    pub old_branch: Option<String>,
+    pub new_branch: Option<String>,
+    pub update_note: Option<String>,
     pub repaired_source_metadata: Option<source_metadata::SourceMetadataRepair>,
 }
 
@@ -606,6 +614,14 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
             extension_id: extension_id.to_string(),
             url: source_url,
             path: extension_dir,
+            linked: false,
+            source_path: None,
+            git_root: None,
+            old_source_revision: None,
+            new_source_revision: None,
+            old_branch: None,
+            new_branch: None,
+            update_note: None,
             repaired_source_metadata: source_repair.take(),
         });
     }
@@ -618,6 +634,14 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         extension_id: extension_id.to_string(),
         url: source_url,
         path: extension_dir,
+        linked: false,
+        source_path: None,
+        git_root: None,
+        old_source_revision: None,
+        new_source_revision: None,
+        old_branch: None,
+        new_branch: None,
+        update_note: None,
         repaired_source_metadata: source_repair,
     })
 }
@@ -713,6 +737,8 @@ fn update_linked_extension(
     let git_root = PathBuf::from(&git_root_str)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(git_root_str));
+    let old_branch = git_current_branch(&git_root);
+    let old_source_revision = get_short_head_revision(&git_root);
 
     static UPDATED_ROOTS: OnceLock<Mutex<HashMap<PathBuf, Option<String>>>> = OnceLock::new();
     let updated_roots = UPDATED_ROOTS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -743,25 +769,130 @@ fn update_linked_extension(
                     ));
                 }
 
-                git::pull_repo(&git_root)?;
+                update_linked_git_root(&git_root)?;
 
                 Ok(())
             })();
             updated_roots
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(git_root, result.as_ref().err().map(|e| e.message.clone()));
+                .insert(
+                    git_root.clone(),
+                    result.as_ref().err().map(|e| e.message.clone()),
+                );
             result?;
         }
     };
     run_setup_if_configured(extension_id);
     let url = format!("linked:{}", source_dir.display());
+    let new_branch = git_current_branch(&git_root);
+    let new_source_revision = get_short_head_revision(&git_root);
     Ok(UpdateResult {
         extension_id: extension_id.to_string(),
         url,
-        path: source_dir,
+        path: source_dir.clone(),
+        linked: true,
+        source_path: Some(source_dir.clone()),
+        git_root: Some(git_root),
+        old_source_revision,
+        new_source_revision,
+        old_branch,
+        new_branch,
+        update_note: Some(
+            "Linked extension source updated in place; clean linked repos switch to the remote default branch before pulling.".to_string(),
+        ),
         repaired_source_metadata: None,
     })
+}
+
+fn update_linked_git_root(git_root: &Path) -> Result<()> {
+    let old_branch = git_current_branch(git_root);
+    git_run(git_root, &["fetch", "origin"], "git fetch origin")?;
+    let mut detached_default_branch: Option<String> = None;
+
+    if let Some(remote_branch) = git_default_remote_branch(git_root) {
+        let local_branch = remote_branch
+            .strip_prefix("origin/")
+            .unwrap_or(&remote_branch)
+            .to_string();
+
+        if old_branch.as_deref() != Some(local_branch.as_str()) {
+            if git_run(
+                git_root,
+                &["switch", &local_branch],
+                "git switch default branch",
+            )
+            .is_err()
+            {
+                git_run(
+                    git_root,
+                    &["switch", "--detach", &remote_branch],
+                    "git switch detached default branch",
+                )?;
+                detached_default_branch = Some(local_branch);
+            }
+        }
+    }
+
+    if let Some(branch) = detached_default_branch {
+        git_run(
+            git_root,
+            &["pull", "--ff-only", "origin", &branch],
+            "git pull detached default branch --ff-only",
+        )?;
+    } else {
+        git_run(git_root, &["pull", "--ff-only"], "git pull --ff-only")?;
+    }
+    Ok(())
+}
+
+fn git_default_remote_branch(git_root: &Path) -> Option<String> {
+    git_run(
+        git_root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+        "git default remote branch",
+    )
+    .ok()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+fn git_current_branch(git_root: &Path) -> Option<String> {
+    git_run(
+        git_root,
+        &["branch", "--show-current"],
+        "git current branch",
+    )
+    .ok()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+fn git_run(git_root: &Path, args: &[&str], context: &str) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(git_root)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| Error::internal_io(e.to_string(), Some(context.to_string())))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(Error::git_command_failed(if detail.is_empty() {
+            context.to_string()
+        } else {
+            detail
+        }));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Uninstall a extension. Automatically detects symlinks vs cloned directories.
@@ -1404,7 +1535,7 @@ exec '{}' "$@"
     }
 
     #[test]
-    fn linked_update_pulls_current_worktree_branch_without_switching_to_default_branch() {
+    fn linked_update_switches_clean_worktree_to_default_branch_or_detached_default() {
         with_isolated_home(|home| {
             let home = home.path();
             let source = home.join("source-repo");
@@ -1450,17 +1581,30 @@ exec '{}' "$@"
             )
             .expect("install linked extension");
 
-            update("wordpress", false).expect("feature worktree update should pull current branch");
+            let result =
+                update("wordpress", false).expect("linked update should use default branch");
+            assert!(result.linked);
+            assert_eq!(
+                result.old_branch.as_deref(),
+                Some("feature-linked-extension")
+            );
 
             let branch_output = Command::new("git")
                 .args(["branch", "--show-current"])
                 .current_dir(&source)
                 .output()
                 .expect("current branch");
+            let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string();
             assert_eq!(
-                String::from_utf8_lossy(&branch_output.stdout).trim(),
-                "feature-linked-extension",
-                "linked update must not checkout the default branch in the feature worktree"
+                current_branch,
+                result.new_branch.unwrap_or_default(),
+                "linked update metadata should report the resulting branch"
+            );
+            assert!(
+                current_branch == default_branch || current_branch.is_empty(),
+                "linked update should use the default branch, or detached origin/default when the branch is checked out in another worktree"
             );
         });
     }
