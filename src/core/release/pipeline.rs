@@ -22,8 +22,9 @@ use super::execution_plan::{
 use super::pipeline_summary::{build_summary, derive_overall_status};
 use super::plan_steps::{build_preflight_steps, build_release_steps};
 use super::types::{
-    ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult,
-    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseStepResult,
+    ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep,
+    ReleaseRun, ReleaseRunResult, ReleaseSemverCommit, ReleaseSemverRecommendation,
+    ReleaseStepResult,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -175,6 +176,26 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let semver_recommendation =
         build_semver_recommendation(&component, &options.bump_type, monorepo.as_ref())?;
 
+    if semver_recommendation.is_none() && !options.bump_policy.force_empty_release {
+        return Ok(skipped_release_plan(
+            component_id,
+            "no-releasable-commits",
+            "No releasable commits since last tag",
+            "Use --bump to force a release when this is intentional",
+            None,
+        ));
+    }
+
+    if options.bump_policy.require_explicit_major {
+        return Ok(skipped_release_plan(
+            component_id,
+            "major-requires-flag",
+            "Breaking changes require an explicit major bump",
+            &format!("Re-run with: homeboy release {} --bump major", component_id),
+            semver_recommendation,
+        ));
+    }
+
     // === Stage 1: Generate changelog entries from conventional commits ===
     //
     // Homeboy owns the changelog end-to-end: entries come from commits, get
@@ -185,12 +206,7 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     // sense in the automation model, so the generator errors out.
     let pending_entries = v
         .capture(
-            generate_changelog_entries(
-                &component,
-                component_id,
-                options.dry_run,
-                monorepo.as_ref(),
-            ),
+            generate_changelog_entries(&component, component_id, options, monorepo.as_ref()),
             "commits",
         )
         .unwrap_or_default();
@@ -314,6 +330,34 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         warnings,
         hints,
     })
+}
+
+fn skipped_release_plan(
+    component_id: &str,
+    reason: &str,
+    label: &str,
+    hint: &str,
+    semver_recommendation: Option<ReleaseSemverRecommendation>,
+) -> ReleasePlan {
+    ReleasePlan {
+        component_id: component_id.to_string(),
+        enabled: false,
+        steps: vec![ReleasePlanStep {
+            id: "release.skip".to_string(),
+            step_type: "release.skip".to_string(),
+            label: Some(label.to_string()),
+            needs: vec![],
+            config: std::collections::HashMap::from([(
+                "reason".to_string(),
+                serde_json::Value::String(reason.to_string()),
+            )]),
+            status: ReleasePlanStatus::Disabled,
+            missing: vec![],
+        }],
+        semver_recommendation,
+        warnings: vec![],
+        hints: vec![hint.to_string()],
+    }
 }
 
 fn build_changelog_plan(
@@ -755,7 +799,7 @@ fn is_runner_infrastructure_failure(output: &extension::RunnerOutput) -> bool {
 fn generate_changelog_entries(
     component: &Component,
     component_id: &str,
-    dry_run: bool,
+    options: &ReleaseOptions,
     monorepo: Option<&git::MonorepoContext>,
 ) -> Result<std::collections::HashMap<String, Vec<String>>> {
     let (latest_tag, commits) = resolve_tag_and_commits(&component.local_path, monorepo)?;
@@ -764,6 +808,10 @@ fn generate_changelog_entries(
     // anymore (the homeboy changelog add path is deprecated — see #1205), so
     // "commits = no release" is the only correct answer.
     if commits.is_empty() {
+        if options.bump_policy.force_empty_release {
+            return Ok(std::collections::HashMap::new());
+        }
+
         let tag_desc = latest_tag
             .as_deref()
             .map(|t| format!("tag '{}'", t))
@@ -789,7 +837,8 @@ fn generate_changelog_entries(
     // tagging. No new entries to generate; let the rest of the pipeline
     // (tag + push) finish the job.
     let changelog_path = changelog::resolve_changelog_path(component)?;
-    let changelog_content = read_changelog_for_release(component, &changelog_path, dry_run)?;
+    let changelog_content =
+        read_changelog_for_release(component, &changelog_path, options.dry_run)?;
     let latest_changelog_version = changelog::get_latest_finalized_version(&changelog_content);
     if let (Some(latest_tag), Some(changelog_ver_str)) = (&latest_tag, latest_changelog_version) {
         let tag_version = latest_tag.trim_start_matches('v');
@@ -821,7 +870,7 @@ fn generate_changelog_entries(
     log_status!(
         "release",
         "{} auto-generate {} changelog entries from commits",
-        if dry_run { "Would" } else { "Will" },
+        if options.dry_run { "Would" } else { "Will" },
         count,
     );
 
@@ -1102,12 +1151,13 @@ mod tests {
     use super::{
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
         get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
-        is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
-        validate_default_branch, validate_release_version_floor,
+        is_runner_infrastructure_failure, read_changelog_for_release, skipped_release_plan,
+        strip_pr_reference, validate_default_branch, validate_release_version_floor,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
     use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
+    use crate::release::types::ReleasePlanStatus;
 
     fn commit(subject: &str, category: CommitCategory) -> CommitInfo {
         CommitInfo {
@@ -1177,6 +1227,32 @@ mod tests {
         assert_eq!(
             strip_pr_reference("has parens (not a pr ref)"),
             "has parens (not a pr ref)"
+        );
+    }
+
+    #[test]
+    fn skipped_release_plan_records_disabled_reason() {
+        let plan = skipped_release_plan(
+            "demo",
+            "no-releasable-commits",
+            "No releasable commits since last tag",
+            "Use --bump to force a release when this is intentional",
+            None,
+        );
+
+        assert!(!plan.enabled);
+        assert_eq!(plan.component_id, "demo");
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].id, "release.skip");
+        assert_eq!(plan.steps[0].step_type, "release.skip");
+        assert_eq!(plan.steps[0].status, ReleasePlanStatus::Disabled);
+        assert_eq!(
+            plan.steps[0].config.get("reason").and_then(|v| v.as_str()),
+            Some("no-releasable-commits")
+        );
+        assert_eq!(
+            plan.hints,
+            vec!["Use --bump to force a release when this is intentional"]
         );
     }
 
