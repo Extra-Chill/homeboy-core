@@ -32,6 +32,9 @@ pub(super) fn execute_release_plan_step(
         "preflight.remote_sync" => Ok(Some(run_remote_sync_preflight(step, context))),
         "preflight.lint" => Ok(Some(run_lint_preflight(step, context))),
         "preflight.test" => Ok(Some(run_test_preflight(step, context))),
+        "preflight.changelog_bootstrap" => {
+            Ok(Some(run_changelog_bootstrap_preflight(step, context)))
+        }
         "changelog.finalize" => {
             executor::changelog::run_changelog_finalize(step, context.component, &mut context.state)
                 .map(Some)
@@ -138,7 +141,8 @@ fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
         && step.step_type != "preflight.working_tree"
         && step.step_type != "preflight.remote_sync"
         && step.step_type != "preflight.lint"
-        && step.step_type != "preflight.test")
+        && step.step_type != "preflight.test"
+        && step.step_type != "preflight.changelog_bootstrap")
         || step.step_type == "changelog.policy"
         || step.step_type == "changelog.generate"
 }
@@ -233,6 +237,25 @@ fn successful_quality_result(step: &ReleasePlanStep, ran: bool) -> ReleaseStepRe
     }
 }
 
+fn run_changelog_bootstrap_preflight(
+    step: &ReleasePlanStep,
+    context: &ReleaseExecutionContext,
+) -> ReleaseStepResult {
+    match super::pipeline::ensure_changelog_initialized(context.component) {
+        Ok(()) => ReleaseStepResult {
+            id: step.id.clone(),
+            step_type: step.step_type.clone(),
+            status: ReleaseStepStatus::Success,
+            missing: Vec::new(),
+            warnings: Vec::new(),
+            hints: Vec::new(),
+            data: None,
+            error: None,
+        },
+        Err(err) => failed_result(&step.id, &step.step_type, err),
+    }
+}
+
 fn configure_git_identity(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
@@ -279,6 +302,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
             | "preflight.remote_sync"
             | "preflight.lint"
             | "preflight.test"
+            | "preflight.changelog_bootstrap"
             | "version"
             | "release.prepare"
             | "git.commit"
@@ -350,6 +374,9 @@ mod tests {
         )));
         assert!(!release_step_is_plan_only(&plan_step("preflight.lint")));
         assert!(!release_step_is_plan_only(&plan_step("preflight.test")));
+        assert!(!release_step_is_plan_only(&plan_step(
+            "preflight.changelog_bootstrap"
+        )));
         assert!(!release_step_is_plan_only(&plan_step("changelog.finalize")));
         assert!(!release_step_is_plan_only(&plan_step("deploy")));
     }
@@ -555,6 +582,35 @@ mod tests {
     }
 
     #[test]
+    fn changelog_bootstrap_preflight_initializes_missing_changelog() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let changelog_path = temp.path().join("CHANGELOG.md");
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: temp.path().to_string_lossy().to_string(),
+            changelog_target: Some("CHANGELOG.md".to_string()),
+            ..Default::default()
+        };
+        let options = ReleaseOptions::default();
+        let mut context = ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            state: ReleaseState::default(),
+            publish_failed: false,
+        };
+
+        let result =
+            execute_release_plan_step(&plan_step("preflight.changelog_bootstrap"), &mut context)
+                .expect("dispatch")
+                .expect("result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Success);
+        assert!(changelog_path.exists());
+    }
+
+    #[test]
     fn test_release_step_is_show_stopper() {
         let version_failure = failed_step_result("version");
         let default_branch_failure = failed_step_result("preflight.default_branch");
@@ -562,6 +618,7 @@ mod tests {
         let remote_sync_failure = failed_step_result("preflight.remote_sync");
         let lint_failure = failed_step_result("preflight.lint");
         let test_failure = failed_step_result("preflight.test");
+        let bootstrap_failure = failed_step_result("preflight.changelog_bootstrap");
         let changelog_failure = failed_step_result("changelog.finalize");
         let publish_failure = failed_step_result("publish.crates");
 
@@ -571,6 +628,7 @@ mod tests {
         assert!(release_step_is_show_stopper(&remote_sync_failure));
         assert!(release_step_is_show_stopper(&lint_failure));
         assert!(release_step_is_show_stopper(&test_failure));
+        assert!(release_step_is_show_stopper(&bootstrap_failure));
         assert!(release_step_is_show_stopper(&changelog_failure));
         assert!(!release_step_is_show_stopper(&publish_failure));
     }

@@ -1,6 +1,7 @@
 pub mod changelog;
 mod deployment;
 mod execution_dispatch;
+mod execution_plan;
 mod executor;
 mod pipeline;
 mod pipeline_capabilities;

@@ -14,15 +14,16 @@ use crate::extension::{self, ExtensionManifest};
 use crate::git::{self, UncommittedChanges};
 use crate::release::changelog;
 use crate::version;
+use std::collections::HashSet;
 
-use super::execution_dispatch::{
-    execute_release_plan_step, release_step_is_show_stopper, ReleaseExecutionContext,
+use super::execution_plan::{
+    build_initial_preflight_plan, execute_plan_steps, initial_executable_preflight_ids,
 };
 use super::pipeline_summary::{build_summary, derive_overall_status};
 use super::plan_steps::{build_preflight_steps, build_release_steps};
 use super::types::{
     ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult,
-    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseState, ReleaseStepResult,
+    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseStepResult,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -32,7 +33,7 @@ pub(crate) fn load_component(component_id: &str, options: &ReleaseOptions) -> Re
 }
 
 /// Resolve the component's declared extensions (for publish/package dispatch).
-fn resolve_extensions(component: &Component) -> Result<Vec<ExtensionManifest>> {
+pub(super) fn resolve_extensions(component: &Component) -> Result<Vec<ExtensionManifest>> {
     let mut extensions = Vec::new();
     if let Some(configured) = component.extensions.as_ref() {
         let mut extension_ids: Vec<String> = configured.keys().cloned().collect();
@@ -66,35 +67,50 @@ pub(crate) fn run_with_plan(
     component_id: &str,
     options: &ReleaseOptions,
 ) -> Result<(ReleasePlan, ReleaseRun)> {
-    // plan() performs all validations + bootstraps. Its output also tells us
-    // which publish/cleanup/post_release steps should run for this component,
-    // so we don't duplicate the capability checks below.
-    let release_plan = plan(component_id, options)?;
-
-    let component = load_component(component_id, options)?;
-    let extensions = resolve_extensions(&component)?;
-    let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
-    let mut context = ReleaseExecutionContext {
-        component: &component,
-        extensions: &extensions,
-        component_id,
-        options,
-        state: ReleaseState::default(),
-        publish_failed: false,
-    };
     let mut results: Vec<ReleaseStepResult> = Vec::new();
 
-    for step in &release_plan.steps {
-        if let Some(result) = execute_release_plan_step(step, &mut context)? {
-            let should_stop = release_step_is_show_stopper(&result);
-            results.push(result);
-            if should_stop {
-                return Ok((
-                    release_plan,
-                    finalize(component_id, results, monorepo.as_ref()),
-                ));
-            }
-        }
+    let initial_plan = build_initial_preflight_plan(component_id, options);
+    let initial_stop = execute_plan_steps(
+        &initial_plan.steps,
+        component_id,
+        options,
+        &mut results,
+        &HashSet::new(),
+    )?;
+
+    if initial_stop {
+        let component = load_component(component_id, options)?;
+        let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
+        return Ok((
+            initial_plan,
+            finalize(component_id, results, monorepo.as_ref()),
+        ));
+    }
+
+    // Rebuild the full plan after executable preflights. `preflight.remote_sync`
+    // may fast-forward HEAD and `preflight.changelog_bootstrap` may create the
+    // first changelog file; changelog/version planning must observe those
+    // changes instead of stale checkout state.
+    let release_plan = plan(component_id, options)?;
+    let completed_preflights: HashSet<&'static str> =
+        initial_executable_preflight_ids().iter().copied().collect();
+
+    let full_stop = execute_plan_steps(
+        &release_plan.steps,
+        component_id,
+        options,
+        &mut results,
+        &completed_preflights,
+    )?;
+
+    let component = load_component(component_id, options)?;
+    let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
+
+    if full_stop {
+        return Ok((
+            release_plan,
+            finalize(component_id, results, monorepo.as_ref()),
+        ));
     }
 
     Ok((
@@ -150,59 +166,6 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     let extensions = resolve_extensions(&component)?;
 
     let mut v = ValidationCollector::new();
-
-    // === Stage 0: Working-tree check (fail-fast) ===
-    //
-    // Run this BEFORE remote sync (which fast-forwards and mutates the tree)
-    // and BEFORE the lint/test gate (which can dump tens of thousands of lines
-    // to stdout, drowning out the real reason a release was blocked).
-    //
-    // The full file-list comparison still happens in Stage 3 once we know the
-    // resolved changelog and version-target paths — at this stage we only know
-    // there's *some* dirty file we can't account for, but that's enough to
-    // bail before doing expensive work. We filter out homeboy-managed
-    // scratch paths (.homeboy-build/, .homeboy-bin/, .homeboy/) here too so
-    // noisy build artifacts don't trigger the early exit.
-    v.capture(validate_working_tree_fail_fast(&component), "working_tree");
-    v.finish_if_errors()?;
-
-    // === Stage 0.5: Remote sync check (preflight) ===
-    v.capture(validate_remote_sync(&component), "remote_sync");
-
-    // === Stage 0.6: Code quality checks ===
-    if options.skip_checks {
-        log_status!("release", "Skipping code quality checks (--skip-checks)");
-    } else {
-        let lint_ran = v
-            .capture(validate_lint_quality(&component), "lint")
-            .unwrap_or(false);
-        let tests_ran = v
-            .capture(validate_test_quality(&component), "test")
-            .unwrap_or(false);
-
-        if !lint_ran && !tests_ran {
-            log_status!(
-                "release",
-                "No linked extensions provide lint/test scripts — skipping code quality checks"
-            );
-        }
-    }
-
-    // === Stage 0.7: Auto-initialize changelog (first-release bootstrap) ===
-    //
-    // If `changelog_target` is configured but the file doesn't exist on disk,
-    // synthesize a minimal changelog so downstream stages have something to
-    // read and finalize. Without this, three stages below all fail with
-    // "File not found" for the same root cause instead of teaching the
-    // component-owned `changelog_target` setup path. See #1172.
-    //
-    // Skipped in dry-run to avoid mutating the working tree during a preview.
-    if !options.dry_run {
-        v.capture(
-            ensure_changelog_initialized(&component),
-            "changelog_bootstrap",
-        );
-    }
 
     // Detect monorepo context for path-scoped commits and component-prefixed tags.
     let monorepo = git::MonorepoContext::detect(&component.local_path, component_id);
@@ -1053,7 +1016,7 @@ fn is_file_not_found_error(err: &Error) -> bool {
 /// - `changelog_target` is unset (resolver emits a teaching error downstream),
 /// - the configured path exists,
 /// - a fallback candidate exists (resolver's discovery covers this case).
-fn ensure_changelog_initialized(component: &Component) -> Result<()> {
+pub(crate) fn ensure_changelog_initialized(component: &Component) -> Result<()> {
     let Some(ref target) = component.changelog_target else {
         return Ok(());
     };
