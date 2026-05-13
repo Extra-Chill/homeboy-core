@@ -616,7 +616,7 @@ const BASELINE: &[ViolationKey] = &[
         term: "npm",
     },
     ViolationKey {
-        path: "src/core/release/pipeline.rs",
+        path: "src/core/release/planning_quality.rs",
         term: "php",
     },
     ViolationKey {

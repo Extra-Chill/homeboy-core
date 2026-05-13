@@ -265,7 +265,7 @@ fn run_lint_preflight(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
-    match super::pipeline::validate_lint_quality(context.component) {
+    match super::planning_quality::validate_lint_quality(context.component) {
         Ok(ran) => successful_quality_result(step, ran),
         Err(err) => failed_result(&step.id, &step.step_type, err),
     }
@@ -275,7 +275,7 @@ fn run_test_preflight(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
-    match super::pipeline::validate_test_quality(context.component) {
+    match super::planning_quality::validate_test_quality(context.component) {
         Ok(ran) => successful_quality_result(step, ran),
         Err(err) => failed_result(&step.id, &step.step_type, err),
     }
