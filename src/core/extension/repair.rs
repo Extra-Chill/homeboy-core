@@ -6,8 +6,8 @@ use crate::paths;
 use std::path::{Path, PathBuf};
 
 use super::lifecycle::{
-    derive_id_from_url, get_short_head_revision, is_git_url, rename_dir, resolve_cloned_extension,
-    run_setup_if_configured, slugify_id, write_source_metadata,
+    derive_id_from_url, is_git_url, rename_dir, resolve_cloned_extension, run_setup_if_configured,
+    slugify_id, write_source_metadata,
 };
 use super::manifest::ExtensionManifest;
 
@@ -69,7 +69,7 @@ fn replace_from_url(
     clean_replace_temp(&backup_dir)?;
 
     git::clone_repo_at_ref(url, &clone_dir, revision)?;
-    let source_revision = get_short_head_revision(&clone_dir);
+    let source_revision = git::short_head_revision(&clone_dir);
 
     let result = resolve_cloned_extension(&clone_dir, &extension_id, &staged_dir, url);
     if clone_dir.exists() {
@@ -128,7 +128,7 @@ fn replace_from_path(
     local_files::ensure_app_dirs()?;
 
     let old_path = installed_source_path(&extension_dir);
-    let source_revision = get_short_head_revision(&source);
+    let source_revision = git::short_head_revision(&source);
     let staged_link = extension_dir.with_file_name(format!(".replace-link-tmp-{}", extension_id));
     clean_replace_temp(&staged_link)?;
 

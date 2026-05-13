@@ -16,6 +16,7 @@ pub mod self_check;
 pub mod test;
 pub mod trace;
 pub mod update_check;
+mod update_output;
 pub mod version;
 
 pub mod exec_context;
@@ -63,6 +64,10 @@ pub use lifecycle::{
     InstallForComponentResult, InstallResult, UpdateAvailable, UpdateResult,
 };
 pub use repair::{relink, replace, replace_with_revision, ReplaceResult};
+pub use update_output::{
+    ExtensionSourceUpdate, SourceMetadataRepairEntry, UpdateAllResult, UpdateEntry,
+    UpdateSkippedEntry,
+};
 
 pub(crate) fn stderr_tail(stderr: &str) -> String {
     const MAX_LINES: usize = 20;
@@ -72,7 +77,7 @@ pub(crate) fn stderr_tail(stderr: &str) -> String {
 }
 
 // Re-export aggregate query types
-// (ActionSummary, ExtensionSummary, UpdateAllResult, UpdateEntry defined below in this file)
+// (ActionSummary, ExtensionSummary, and update output types are re-exported from sibling modules.)
 
 // Extension loader functions
 
@@ -927,42 +932,6 @@ pub fn list_summaries(project: Option<&crate::project::Project>) -> Vec<Extensio
         .collect()
 }
 
-/// Result of updating all extensions.
-#[derive(Debug, Clone, Serialize)]
-pub struct UpdateAllResult {
-    pub updated: Vec<UpdateEntry>,
-    pub skipped: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub skipped_details: Vec<UpdateSkippedEntry>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub repaired_source_metadata: Vec<SourceMetadataRepairEntry>,
-}
-
-/// A single extension update entry with before/after versions.
-#[derive(Debug, Clone, Serialize)]
-pub struct UpdateEntry {
-    pub extension_id: String,
-    pub old_version: String,
-    pub new_version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repaired_source_metadata: Option<SourceMetadataRepair>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SourceMetadataRepairEntry {
-    pub extension_id: String,
-    #[serde(flatten)]
-    pub repair: SourceMetadataRepair,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UpdateSkippedEntry {
-    pub extension_id: String,
-    pub reason: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub hints: Vec<String>,
-}
-
 /// Update all installed extensions through the same path used by single-extension updates.
 pub fn update_all(force: bool) -> UpdateAllResult {
     let extension_ids = available_extension_ids();
@@ -993,6 +962,14 @@ pub fn update_all(force: bool) -> UpdateAllResult {
                     extension_id: id.clone(),
                     old_version: old_version.unwrap_or_default(),
                     new_version,
+                    linked: result.linked,
+                    source_path: result
+                        .source_path
+                        .map(|path| path.to_string_lossy().to_string()),
+                    git_root: result
+                        .git_root
+                        .map(|path| path.to_string_lossy().to_string()),
+                    source_update: result.source_update,
                     repaired_source_metadata: repaired,
                 });
             }

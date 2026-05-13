@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::extension::ExtensionSourceUpdate;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InstallMethod {
@@ -44,6 +46,13 @@ pub struct ExtensionUpgradeEntry {
     pub extension_id: String,
     pub old_version: String,
     pub new_version: String,
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_root: Option<String>,
+    #[serde(flatten)]
+    pub source_update: ExtensionSourceUpdate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

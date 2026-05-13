@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::execution::run_setup;
 use super::manifest::ExtensionManifest;
-use super::{is_extension_linked, load_extension};
+use super::{is_extension_linked, load_extension, ExtensionSourceUpdate};
 
 #[derive(Debug, Clone)]
 pub struct InstallResult {
@@ -34,6 +34,10 @@ pub struct UpdateResult {
     pub extension_id: String,
     pub url: String,
     pub path: PathBuf,
+    pub linked: bool,
+    pub source_path: Option<PathBuf>,
+    pub git_root: Option<PathBuf>,
+    pub source_update: ExtensionSourceUpdate,
     pub repaired_source_metadata: Option<source_metadata::SourceMetadataRepair>,
 }
 
@@ -154,34 +158,6 @@ pub fn is_git_url(source: &str) -> bool {
         || source.starts_with("git@")
         || source.starts_with("ssh://")
         || source.ends_with(".git")
-}
-
-fn is_workdir_clean(path: &Path) -> bool {
-    // If the directory is not a git working tree, there is nothing that can
-    // be "uncommitted". Short-circuit to clean before running `git status`.
-    let inside_tree = Command::new("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(path)
-        .output();
-
-    match inside_tree {
-        Ok(output) if output.status.success() => {
-            // Fall through: this is a git working tree; check for changes.
-        }
-        _ => return true,
-    }
-
-    let status = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(path)
-        .output();
-
-    match status {
-        Ok(output) => output.status.success() && output.stdout.is_empty(),
-        // If `status` unexpectedly fails after `rev-parse` succeeded, err on
-        // the side of blocking an overwrite so the user can investigate.
-        Err(_) => false,
-    }
 }
 
 /// Returns the path to a extension's manifest file: {extension_dir}/{id}.json
@@ -319,7 +295,7 @@ fn install_from_url(
 
     // Capture source revision before resolve_cloned_extension may discard .git
     // (monorepo installs extract only the subdirectory, losing git history).
-    let source_revision = get_short_head_revision(&temp_dir);
+    let source_revision = git::short_head_revision(&temp_dir);
 
     // Determine what was cloned and install accordingly.
     let result = resolve_cloned_extension(&temp_dir, &extension_id, &extension_dir, url);
@@ -553,7 +529,7 @@ fn install_from_path(source_path: &str, id_override: Option<&str>) -> Result<Ins
         .map_err(|e| Error::internal_io(e.to_string(), Some("create symlink".to_string())))?;
 
     // For linked (local) extensions, read revision from the source dir if it's a git repo
-    let source_revision = get_short_head_revision(&source);
+    let source_revision = git::short_head_revision(&source);
 
     Ok(InstallResult {
         extension_id,
@@ -577,7 +553,7 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         return update_linked_extension(extension_id, &extension_dir, force);
     }
 
-    if !force && !is_workdir_clean(&extension_dir) {
+    if !force && !git::is_workdir_clean_or_not_git(&extension_dir) {
         return Err(Error::validation_invalid_argument(
             "extension_id",
             "Extension has uncommitted changes; update may overwrite them. Use --force to proceed.",
@@ -597,7 +573,7 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         write_source_metadata(
             &extension_dir,
             &source_url,
-            get_short_head_revision(&extension_dir),
+            git::short_head_revision(&extension_dir),
         );
 
         run_setup_if_configured(extension_id);
@@ -606,6 +582,10 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
             extension_id: extension_id.to_string(),
             url: source_url,
             path: extension_dir,
+            linked: false,
+            source_path: None,
+            git_root: None,
+            source_update: ExtensionSourceUpdate::default(),
             repaired_source_metadata: source_repair.take(),
         });
     }
@@ -618,6 +598,10 @@ pub fn update(extension_id: &str, force: bool) -> Result<UpdateResult> {
         extension_id: extension_id.to_string(),
         url: source_url,
         path: extension_dir,
+        linked: false,
+        source_path: None,
+        git_root: None,
+        source_update: ExtensionSourceUpdate::default(),
         repaired_source_metadata: source_repair,
     })
 }
@@ -644,7 +628,7 @@ fn update_extracted_extension(
     }
 
     git::clone_repo(source_url, &clone_dir)?;
-    let source_revision = get_short_head_revision(&clone_dir);
+    let source_revision = git::short_head_revision(&clone_dir);
 
     let result = resolve_cloned_extension(&clone_dir, extension_id, &staged_dir, source_url);
     if clone_dir.exists() {
@@ -713,6 +697,8 @@ fn update_linked_extension(
     let git_root = PathBuf::from(&git_root_str)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(git_root_str));
+    let old_branch = git::current_branch(&git_root);
+    let old_source_revision = git::short_head_revision(&git_root);
 
     static UPDATED_ROOTS: OnceLock<Mutex<HashMap<PathBuf, Option<String>>>> = OnceLock::new();
     let updated_roots = UPDATED_ROOTS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -731,7 +717,7 @@ fn update_linked_extension(
         )),
         None => {
             let result = (|| {
-                if !force && !is_workdir_clean(&git_root) {
+                if !force && !git::is_workdir_clean_or_not_git(&git_root) {
                     return Err(Error::validation_invalid_argument(
                         "extension_id",
                         format!(
@@ -743,23 +729,40 @@ fn update_linked_extension(
                     ));
                 }
 
-                git::pull_repo(&git_root)?;
+                git::update_to_remote_default_branch(&git_root)?;
 
                 Ok(())
             })();
             updated_roots
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(git_root, result.as_ref().err().map(|e| e.message.clone()));
+                .insert(
+                    git_root.clone(),
+                    result.as_ref().err().map(|e| e.message.clone()),
+                );
             result?;
         }
     };
     run_setup_if_configured(extension_id);
     let url = format!("linked:{}", source_dir.display());
+    let new_branch = git::current_branch(&git_root);
+    let new_source_revision = git::short_head_revision(&git_root);
     Ok(UpdateResult {
         extension_id: extension_id.to_string(),
         url,
-        path: source_dir,
+        path: source_dir.clone(),
+        linked: true,
+        source_path: Some(source_dir.clone()),
+        git_root: Some(git_root),
+        source_update: ExtensionSourceUpdate {
+            old_source_revision,
+            new_source_revision,
+            old_branch,
+            new_branch,
+            update_note: Some(
+                "Linked extension source updated in place; clean linked repos switch to the remote default branch before pulling.".to_string(),
+            ),
+        },
         repaired_source_metadata: None,
     })
 }
@@ -847,29 +850,6 @@ pub struct UpdateAvailable {
     pub behind_count: usize,
 }
 
-/// Get the short HEAD revision from a git directory.
-/// Returns None if the directory is not a git repo or the command fails.
-pub(crate) fn get_short_head_revision(dir: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(dir)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let rev = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if rev.is_empty() {
-        None
-    } else {
-        Some(rev)
-    }
-}
-
 /// Read the source revision for an installed extension.
 /// Checks (in order): .git directory (git rev-parse), then .source-revision file.
 pub fn read_source_revision(extension_id: &str) -> Option<String> {
@@ -879,7 +859,7 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
     }
 
     // Try .git first (single-extension repos and linked extensions)
-    if let Some(rev) = get_short_head_revision(&extension_dir) {
+    if let Some(rev) = git::short_head_revision(&extension_dir) {
         return Some(rev);
     }
 
@@ -894,7 +874,7 @@ pub fn read_source_revision(extension_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        install, install_for_component, install_with_revision, is_workdir_clean, load_extension,
+        install, install_for_component, install_with_revision, load_extension,
         read_source_revision, source_metadata, update,
     };
     use crate::component;
@@ -1404,7 +1384,7 @@ exec '{}' "$@"
     }
 
     #[test]
-    fn linked_update_pulls_current_worktree_branch_without_switching_to_default_branch() {
+    fn linked_update_switches_clean_worktree_to_default_branch_or_detached_default() {
         with_isolated_home(|home| {
             let home = home.path();
             let source = home.join("source-repo");
@@ -1450,17 +1430,30 @@ exec '{}' "$@"
             )
             .expect("install linked extension");
 
-            update("wordpress", false).expect("feature worktree update should pull current branch");
+            let result =
+                update("wordpress", false).expect("linked update should use default branch");
+            assert!(result.linked);
+            assert_eq!(
+                result.source_update.old_branch.as_deref(),
+                Some("feature-linked-extension")
+            );
 
             let branch_output = Command::new("git")
                 .args(["branch", "--show-current"])
                 .current_dir(&source)
                 .output()
                 .expect("current branch");
+            let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string();
             assert_eq!(
-                String::from_utf8_lossy(&branch_output.stdout).trim(),
-                "feature-linked-extension",
-                "linked update must not checkout the default branch in the feature worktree"
+                current_branch,
+                result.source_update.new_branch.unwrap_or_default(),
+                "linked update metadata should report the resulting branch"
+            );
+            assert!(
+                current_branch == default_branch || current_branch.is_empty(),
+                "linked update should use the default branch, or detached origin/default when the branch is checked out in another worktree"
             );
         });
     }
@@ -1650,7 +1643,7 @@ exec '{}' "$@"
         std::fs::write(temp.path().join("some-file.txt"), "content").expect("write file");
 
         assert!(
-            is_workdir_clean(temp.path()),
+            crate::git::is_workdir_clean_or_not_git(temp.path()),
             "non-git directory should be treated as clean"
         );
     }
@@ -1669,7 +1662,7 @@ exec '{}' "$@"
         }
 
         assert!(
-            is_workdir_clean(temp.path()),
+            crate::git::is_workdir_clean_or_not_git(temp.path()),
             "freshly-initialized git repo with no changes should be clean"
         );
     }
@@ -1690,7 +1683,7 @@ exec '{}' "$@"
         std::fs::write(temp.path().join("untracked.txt"), "hi").expect("write untracked file");
 
         assert!(
-            !is_workdir_clean(temp.path()),
+            !crate::git::is_workdir_clean_or_not_git(temp.path()),
             "git repo with untracked file should be reported as dirty"
         );
     }

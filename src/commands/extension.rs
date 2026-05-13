@@ -267,6 +267,13 @@ pub enum ExtensionOutput {
         extension_id: String,
         url: String,
         path: String,
+        linked: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        git_root: Option<String>,
+        #[serde(flatten)]
+        source_update: homeboy::extension::ExtensionSourceUpdate,
         #[serde(skip_serializing_if = "Option::is_none")]
         old_version: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -650,6 +657,14 @@ fn update_extension(
             extension_id: result.extension_id,
             url: result.url,
             path: result.path.to_string_lossy().to_string(),
+            linked: result.linked,
+            source_path: result
+                .source_path
+                .map(|path| path.to_string_lossy().to_string()),
+            git_root: result
+                .git_root
+                .map(|path| path.to_string_lossy().to_string()),
+            source_update: result.source_update,
             old_version,
             new_version,
             repaired_source_metadata: result.repaired_source_metadata,
