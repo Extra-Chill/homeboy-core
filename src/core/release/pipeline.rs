@@ -21,14 +21,10 @@ use super::execution_plan::{
 };
 use super::pipeline_summary::{build_summary, derive_overall_status};
 use super::plan_steps::{build_preflight_steps, build_release_steps};
+use super::planning_changelog::{build_changelog_plan, generate_changelog_entries};
 use super::planning_policy::release_skip_plan;
-use super::planning_semver::{
-    build_semver_recommendation, resolve_tag_and_commits, validate_release_version_floor,
-};
-use super::types::{
-    ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult,
-    ReleaseStepResult,
-};
+use super::planning_semver::{build_semver_recommendation, validate_release_version_floor};
+use super::types::{ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseStepResult};
 
 /// Load a component with portable config fallback when path_override is set.
 /// In CI environments, the component may not be registered — only homeboy.json exists.
@@ -320,23 +316,6 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
     })
 }
 
-fn build_changelog_plan(
-    component: &Component,
-    options: &ReleaseOptions,
-    entries: std::collections::HashMap<String, Vec<String>>,
-) -> Result<ReleaseChangelogPlan> {
-    let path = changelog::resolve_changelog_path(component)?;
-    let entry_count = entries.values().map(Vec::len).sum();
-
-    Ok(ReleaseChangelogPlan {
-        policy: "generated".to_string(),
-        path: path.to_string_lossy().to_string(),
-        dry_run: options.dry_run,
-        entries,
-        entry_count,
-    })
-}
-
 /// Fetch from remote and fast-forward if behind.
 ///
 /// Ensures the release commit is created on top of the actual remote HEAD,
@@ -556,157 +535,6 @@ fn is_runner_infrastructure_failure(output: &extension::RunnerOutput) -> bool {
     .any(|needle| combined.contains(needle))
 }
 
-/// Generate changelog entries from the commits since the last tag.
-///
-/// Returns `Ok(Some(entries))` when commits produced entries to finalize.
-/// Returns `Ok(Some(empty_map))` when the changelog is already ahead of the
-/// latest tag (fully-automated repos that commit the release *before* tagging)
-/// — nothing to generate but the release still proceeds.
-/// Returns `Err` when there are no commits since the last tag at all — a zero-
-/// commit release is a clean gate, no special cases.
-///
-/// Pure computation: never writes to disk. The writes happen in
-/// `bump_component_version` → `finalize_with_generated_entries`.
-fn generate_changelog_entries(
-    component: &Component,
-    component_id: &str,
-    options: &ReleaseOptions,
-    monorepo: Option<&git::MonorepoContext>,
-) -> Result<std::collections::HashMap<String, Vec<String>>> {
-    let (latest_tag, commits) = resolve_tag_and_commits(&component.local_path, monorepo)?;
-
-    // Clean gate: no commits → no release. Users never hand-curate changelogs
-    // anymore (the homeboy changelog add path is deprecated — see #1205), so
-    // "commits = no release" is the only correct answer.
-    if commits.is_empty() {
-        if options.bump_policy.force_empty_release {
-            return Ok(std::collections::HashMap::new());
-        }
-
-        let tag_desc = latest_tag
-            .as_deref()
-            .map(|t| format!("tag '{}'", t))
-            .unwrap_or_else(|| "the initial commit".to_string());
-        return Err(Error::validation_invalid_argument(
-            "commits",
-            format!("No commits since {} — nothing to release", tag_desc),
-            Some(format!("Component: {}", component_id)),
-            Some(vec![
-                "Homeboy releases are driven by commits. Commit a change, then re-run.".to_string(),
-                format!(
-                    "Check status: git log {}..HEAD --oneline",
-                    latest_tag.as_deref().unwrap_or("")
-                )
-                .trim_end_matches(' ')
-                .to_string(),
-            ]),
-        ));
-    }
-
-    // If the changelog is already finalized ahead of the latest tag, the
-    // release commit was produced in a prior run that got interrupted before
-    // tagging. No new entries to generate; let the rest of the pipeline
-    // (tag + push) finish the job.
-    let changelog_path = changelog::resolve_changelog_path(component)?;
-    let changelog_content =
-        read_changelog_for_release(component, &changelog_path, options.dry_run)?;
-    let latest_changelog_version = changelog::get_latest_finalized_version(&changelog_content);
-    if let (Some(latest_tag), Some(changelog_ver_str)) = (&latest_tag, latest_changelog_version) {
-        let tag_version = latest_tag.trim_start_matches('v');
-        if let (Ok(tag_ver), Ok(cl_ver)) = (
-            semver::Version::parse(tag_version),
-            semver::Version::parse(&changelog_ver_str),
-        ) {
-            if cl_ver > tag_ver {
-                log_status!(
-                    "release",
-                    "Changelog already finalized at {} (ahead of tag {})",
-                    changelog_ver_str,
-                    latest_tag
-                );
-                return Ok(std::collections::HashMap::new());
-            }
-        }
-    }
-
-    // Filter to commits that produce changelog entries (skip docs/chore/merge).
-    let releasable: Vec<git::CommitInfo> = commits
-        .into_iter()
-        .filter(|c| c.category.to_changelog_entry_type().is_some())
-        .collect();
-
-    let entries = group_commits_for_changelog(&releasable);
-    let count: usize = entries.values().map(|v| v.len()).sum();
-
-    log_status!(
-        "release",
-        "{} auto-generate {} changelog entries from commits",
-        if options.dry_run { "Would" } else { "Will" },
-        count,
-    );
-
-    Ok(entries)
-}
-
-/// Strip trailing PR/issue references like "(#123)" or "(#123, #456)" from text.
-fn strip_pr_reference(value: &str) -> String {
-    let trimmed = value.trim();
-    if let Some(pos) = trimmed.rfind('(') {
-        let after = &trimmed[pos..];
-        // Match patterns like (#123) or (#123, #456)
-        if after.ends_with(')')
-            && after[1..after.len() - 1]
-                .split(',')
-                .all(|part| part.trim().starts_with('#'))
-        {
-            return trimmed[..pos].trim().to_string();
-        }
-    }
-    trimmed.to_string()
-}
-
-/// Generate changelog entries from conventional commit messages.
-/// Group conventional commits into changelog entries by type.
-/// Returns a map of entry_type -> messages (e.g. "added" -> ["feature X", "feature Y"]).
-/// Pure function — no I/O. Skips docs, chore, and merge commits.
-fn group_commits_for_changelog(
-    commits: &[git::CommitInfo],
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut entries_by_type: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-
-    for commit in commits {
-        if let Some(entry_type) = commit.category.to_changelog_entry_type() {
-            let message = strip_pr_reference(git::strip_conventional_prefix(&commit.subject));
-            entries_by_type
-                .entry(entry_type.to_string())
-                .or_default()
-                .push(message);
-        }
-    }
-
-    // If no entries generated (all docs/chore/merge/release), use first non-skip commit or fallback
-    if entries_by_type.is_empty() {
-        let fallback = commits
-            .iter()
-            .find(|c| {
-                !matches!(
-                    c.category,
-                    git::CommitCategory::Docs
-                        | git::CommitCategory::Chore
-                        | git::CommitCategory::Merge
-                        | git::CommitCategory::Release
-                )
-            })
-            .map(|c| strip_pr_reference(git::strip_conventional_prefix(&c.subject)))
-            .unwrap_or_else(|| "Internal improvements".to_string());
-
-        entries_by_type.insert("changed".to_string(), vec![fallback]);
-    }
-
-    entries_by_type
-}
-
 /// Path prefixes that are always treated as homeboy-managed scratch space
 /// and should never count as "dirty" during release/version-bump checks.
 ///
@@ -788,39 +616,6 @@ pub(crate) fn validate_working_tree_fail_fast(component: &Component) -> Result<(
             ),
         ]),
     ))
-}
-
-fn read_changelog_for_release(
-    component: &Component,
-    changelog_path: &std::path::Path,
-    dry_run: bool,
-) -> Result<String> {
-    match crate::engine::local_files::local().read(changelog_path) {
-        Ok(content) => Ok(content),
-        Err(err) if dry_run && is_file_not_found_error(&err) => {
-            log_status!(
-                "release",
-                "Would initialize changelog at {} (first release for {})",
-                changelog_path.display(),
-                component.id
-            );
-            Ok(changelog::INITIAL_CHANGELOG_CONTENT.to_string())
-        }
-        Err(err) => Err(err),
-    }
-}
-
-fn is_file_not_found_error(err: &Error) -> bool {
-    let detail = err
-        .details
-        .get("error")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-
-    err.message.contains("File not found")
-        || err.message.contains("No such file")
-        || detail.contains("File not found")
-        || detail.contains("No such file")
 }
 
 /// First-release bootstrap: if the component's configured `changelog_target`
@@ -922,20 +717,11 @@ mod tests {
     use super::{
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
         get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
-        is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
-        validate_default_branch,
+        is_runner_infrastructure_failure, validate_default_branch,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
-    use crate::git::{CommitCategory, CommitInfo, UncommittedChanges};
-
-    fn commit(subject: &str, category: CommitCategory) -> CommitInfo {
-        CommitInfo {
-            hash: "abc1234".to_string(),
-            subject: subject.to_string(),
-            category,
-        }
-    }
+    use crate::git::UncommittedChanges;
 
     fn run_git(dir: &std::path::Path, args: &[&str]) {
         let output = std::process::Command::new("git")
@@ -981,49 +767,6 @@ mod tests {
 
         assert_eq!(err.code.as_str(), "validation.invalid_argument");
         assert!(err.message.contains("non-default branch 'feature'"));
-    }
-
-    #[test]
-    fn test_strip_pr_reference() {
-        assert_eq!(strip_pr_reference("fix something (#526)"), "fix something");
-        assert_eq!(
-            strip_pr_reference("feat: add feature (#123, #456)"),
-            "feat: add feature"
-        );
-        assert_eq!(
-            strip_pr_reference("no pr reference here"),
-            "no pr reference here"
-        );
-        assert_eq!(
-            strip_pr_reference("has parens (not a pr ref)"),
-            "has parens (not a pr ref)"
-        );
-    }
-
-    #[test]
-    fn test_group_commits_strips_conventional_prefix_with_issue_scope() {
-        use super::group_commits_for_changelog;
-
-        let commits = vec![
-            commit(
-                "feat(#741): delete AgentType class — replace with string literals",
-                CommitCategory::Feature,
-            ),
-            commit(
-                "fix(#730): queue-add uses unified check-duplicate",
-                CommitCategory::Fix,
-            ),
-        ];
-
-        let entries = group_commits_for_changelog(&commits);
-        let added = &entries["added"];
-        let fixed = &entries["fixed"];
-
-        assert_eq!(
-            added[0],
-            "delete AgentType class — replace with string literals"
-        );
-        assert_eq!(fixed[0], "queue-add uses unified check-duplicate");
     }
 
     fn runner_output(exit_code: i32, stdout: &str, stderr: &str) -> RunnerOutput {
@@ -1358,44 +1101,5 @@ mod tests {
             let path = entry.unwrap().path();
             panic!("should have created nothing, but found: {}", path.display());
         }
-    }
-
-    #[test]
-    fn read_changelog_for_release_uses_seed_for_missing_dry_run_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let component = component_with_changelog_target(&temp, Some("CHANGELOG.md"));
-        let changelog_path = temp.path().join("CHANGELOG.md");
-
-        let content = read_changelog_for_release(&component, &changelog_path, true)
-            .expect("dry-run should simulate first-run seed");
-
-        assert_eq!(content, super::changelog::INITIAL_CHANGELOG_CONTENT);
-        assert!(
-            !changelog_path.exists(),
-            "dry-run must not create the changelog on disk"
-        );
-    }
-
-    #[test]
-    fn test_group_commits_strips_pr_references() {
-        use super::group_commits_for_changelog;
-
-        let commits = vec![
-            commit(
-                "feat: agent-first scoping — Phase 1 schema (#738)",
-                CommitCategory::Feature,
-            ),
-            commit(
-                "fix: rename $class param — fixes bootstrap crash (#711)",
-                CommitCategory::Fix,
-            ),
-        ];
-
-        let entries = group_commits_for_changelog(&commits);
-        let added = &entries["added"];
-        let fixed = &entries["fixed"];
-
-        assert_eq!(added[0], "agent-first scoping — Phase 1 schema");
-        assert_eq!(fixed[0], "rename $class param — fixes bootstrap crash");
     }
 }
