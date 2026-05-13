@@ -34,23 +34,42 @@ API client configuration lives in `projects/<project_id>.json`:
 
 Authentication credentials are stored securely in the OS keychain using `homeboy auth`.
 
+Project auth variables choose their source in `api.auth.variables`:
+
+```json
+{
+  "api": {
+    "enabled": true,
+    "base_url": "https://atomic-api.wordpress.com/api/v1.0",
+    "auth": {
+      "header": "Auth: {{token}}",
+      "variables": {
+        "token": {
+          "source": "keychain"
+        }
+      }
+    }
+  }
+}
+```
+
 ### Store Credentials
 
 ```bash
-homeboy auth <project_id>
+homeboy auth set --project <project_id> token
 ```
 
-This prompts for authentication token which is stored in keychain associated with the project ID.
+This prompts for the token and stores it in the keychain for the configured project variable.
 
 ### Keychain Storage
 
-- **macOS**: Keychain Access (service: `homeboy`, account: `homeboy_api_<project_id>`)
+- **macOS**: Keychain Access (service: `homeboy`, account: `<project-id>:<variable-name>`)
 - **Linux**: libsecret / gnome-keyring
 - **Windows**: Windows Credential Manager
 
 ### Retrieved Credentials
 
-Credentials are automatically retrieved from keychain when API requests are made. No manual token management required.
+Credentials are automatically retrieved from keychain when API requests are made. `source: "env"` remains the recommended path for CI and headless environments, and `source: "config"` remains available for non-secret values.
 
 ## Template Variables
 
@@ -58,14 +77,11 @@ API client templates support variables for constructing dynamic requests.
 
 ### Available Variables
 
-- **`{{projectId}}`**: Project ID
-- **`{{domain}}`**: Project domain
-- **`{{apiUrl}}`**: Full API URL (base_url + endpoint)
-- **`{{token}}`**: Authentication token from keychain
+- Header variables are the keys defined in `api.auth.variables`, such as `{{token}}`.
 
 ### Template Usage
 
-Templates use standard Homeboy template syntax (both `{var}` and `{{var}}` supported).
+Authentication header templates use `{{var}}` placeholders.
 
 ## API Commands
 
@@ -245,7 +261,7 @@ homeboy api myproject GET /users
 
 ## Security Considerations
 
-1. **Never store tokens in project JSON**: Always use `homeboy auth` command
+1. **Never store tokens in project JSON**: Use `source: "keychain"` locally and `homeboy auth set`, or use `source: "env"` in CI/headless environments
 2. **Use HTTPS**: API base URLs should use HTTPS for secure communication
 3. **Keychain storage**: Tokens are encrypted in OS keychain
 4. **Token rotation**: Use `homeboy auth` to update tokens when they change

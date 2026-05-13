@@ -2,7 +2,9 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use std::collections::HashMap;
 
-use homeboy::server::auth::{self, AuthStatus, LoginResult, LogoutResult};
+use homeboy::server::auth::{
+    self, AuthStatus, GetResult, LoginResult, LogoutResult, RemoveResult, SetResult,
+};
 
 use super::{CmdResult, GlobalArgs};
 use crate::commands::utils::tty::{prompt, prompt_password};
@@ -30,6 +32,43 @@ enum AuthCommand {
         password: Option<String>,
     },
 
+    /// Store a project API variable in the OS keychain
+    Set {
+        /// Project ID
+        #[arg(long)]
+        project: String,
+
+        /// Variable name
+        variable: String,
+
+        /// Secret value (or read from stdin)
+        value: Option<String>,
+    },
+
+    /// Read a project API variable from the OS keychain
+    Get {
+        /// Project ID
+        #[arg(long)]
+        project: String,
+
+        /// Variable name
+        variable: String,
+
+        /// Return a redacted marker instead of the secret value
+        #[arg(long)]
+        redacted: bool,
+    },
+
+    /// Remove a project API variable from the OS keychain
+    Remove {
+        /// Project ID
+        #[arg(long)]
+        project: String,
+
+        /// Variable name
+        variable: String,
+    },
+
     /// Clear stored authentication for a project
     Logout {
         /// Project ID
@@ -49,6 +88,9 @@ enum AuthCommand {
 #[serde(untagged)]
 pub enum AuthOutput {
     Login(LoginResult),
+    Set(SetResult),
+    Get(GetResult),
+    Remove(RemoveResult),
     Logout(LogoutResult),
     Status(AuthStatus),
 }
@@ -60,6 +102,17 @@ pub fn run(args: AuthArgs, _global: &GlobalArgs) -> CmdResult<AuthOutput> {
             identifier,
             password,
         } => run_login(&project, identifier, password),
+        AuthCommand::Set {
+            project,
+            variable,
+            value,
+        } => run_set(&project, &variable, value),
+        AuthCommand::Get {
+            project,
+            variable,
+            redacted,
+        } => run_get(&project, &variable, redacted),
+        AuthCommand::Remove { project, variable } => run_remove(&project, &variable),
         AuthCommand::Logout { project } => run_logout(&project),
         AuthCommand::Status { project } => run_status(&project),
     }
@@ -86,6 +139,26 @@ fn run_login(
 
     let result = auth::login(project_id, credentials)?;
     Ok((AuthOutput::Login(result), 0))
+}
+
+fn run_set(project_id: &str, variable: &str, value: Option<String>) -> CmdResult<AuthOutput> {
+    let value = match value {
+        Some(value) => value,
+        None => prompt_password("Value: ")?,
+    };
+
+    let result = auth::set(project_id, variable, &value)?;
+    Ok((AuthOutput::Set(result), 0))
+}
+
+fn run_get(project_id: &str, variable: &str, redacted: bool) -> CmdResult<AuthOutput> {
+    let result = auth::get(project_id, variable, redacted)?;
+    Ok((AuthOutput::Get(result), 0))
+}
+
+fn run_remove(project_id: &str, variable: &str) -> CmdResult<AuthOutput> {
+    let result = auth::remove(project_id, variable)?;
+    Ok((AuthOutput::Remove(result), 0))
 }
 
 fn run_logout(project_id: &str) -> CmdResult<AuthOutput> {

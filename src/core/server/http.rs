@@ -5,6 +5,7 @@
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::extension::HttpMethod;
+use crate::keychain;
 use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
 use reqwest::blocking::{Client, ClientBuilder, RequestBuilder, Response};
 use reqwest::Proxy;
@@ -225,12 +226,6 @@ impl ApiClient {
         Ok(Some(header))
     }
 
-    /// Clears stored auth data for this project.
-    /// No-op in CLI mode (credentials are not persisted).
-    pub fn logout(&self) -> Result<()> {
-        Ok(())
-    }
-
     /// Checks if authenticated (has required variables available).
     pub fn is_authenticated(&self) -> bool {
         let auth = match &self.auth {
@@ -308,7 +303,7 @@ fn build_client(api_config: &ApiConfig) -> Result<Client> {
 }
 
 /// Resolves a variable from its source.
-fn resolve_variable(_project_id: &str, var_name: &str, source: &VariableSource) -> Result<String> {
+fn resolve_variable(project_id: &str, var_name: &str, source: &VariableSource) -> Result<String> {
     match source.source.as_str() {
         "config" => source
             .value
@@ -320,10 +315,8 @@ fn resolve_variable(_project_id: &str, var_name: &str, source: &VariableSource) 
             std::env::var(env_var)
                 .map_err(|_| not_found_error(format!("Environment variable '{}' not set", env_var)))
         }
-        "keychain" => Err(config_error(format!(
-            "Variable source 'keychain' is not supported in the CLI. Use 'env' or 'config' instead for '{}'",
-            var_name
-        ))),
+        "keychain" => keychain::get(project_id, var_name)?
+            .ok_or_else(|| keychain::missing_error(project_id, var_name)),
         _ => Err(config_error(format!(
             "Unknown variable source: {}",
             source.source
@@ -635,12 +628,6 @@ mod tests {
                 "chris".to_string(),
             )]))
             .expect("login response");
-    }
-
-    #[test]
-    fn test_logout() {
-        let client = test_client("http://127.0.0.1:1".to_string());
-        client.logout().expect("logout is a no-op");
     }
 
     #[test]

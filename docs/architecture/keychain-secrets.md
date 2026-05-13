@@ -16,7 +16,7 @@ Homeboy never stores secrets in plaintext configuration files. All sensitive dat
 
 Uses **Keychain Access**:
 - Service: `homeboy`
-- Account: `<key_name>` (e.g., `homeboy_api_<project_id>`)
+- Account: `<key_name>` (for API variables: `<project-id>:<variable-name>`)
 - Type: Generic password
 
 ### Linux
@@ -39,12 +39,12 @@ Uses **Windows Credential Manager**:
 
 Stored for project API authentication.
 
-**Key naming:** `homeboy_api_<project_id>`
+**Key naming:** `<project-id>:<variable-name>`
 
 **Usage:**
 ```bash
 # Store API token
-homeboy auth <project_id>
+homeboy auth set --project <project_id> token
 
 # Token is automatically retrieved during API requests
 homeboy api <project_id> GET /posts
@@ -80,7 +80,7 @@ Stored for encrypted SSH private keys.
 ### API Tokens
 
 ```bash
-homeboy auth <project_id>
+homeboy auth set --project <project_id> token
 ```
 
 Prompts for authentication token which is stored securely.
@@ -114,7 +114,7 @@ No manual retrieval is required.
 ### Update API Token
 
 ```bash
-homeboy auth <project_id>
+homeboy auth set --project <project_id> token
 ```
 
 Re-running the auth command prompts for new token and updates the keychain entry.
@@ -137,13 +137,13 @@ SSH key passphrases cannot be updated directly. If you change a key's passphrase
 
 ```bash
 # macOS
-security delete-generic-password -s homeboy -a homeboy_api_<project_id>
+security delete-generic-password -s homeboy -a <project_id>:token
 
 # Linux
-secret-tool clear homeboy homeboy_api_<project_id>
+secret-tool clear homeboy <project_id>:token
 
 # Windows
-cmdkey /delete:homeboy_api_<project_id>
+cmdkey /delete:<project_id>:token
 ```
 
 ### Delete Database Password

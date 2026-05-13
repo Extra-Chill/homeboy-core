@@ -776,6 +776,7 @@ dependencies = [
  "glob",
  "glob-match",
  "heck",
+ "keyring",
  "libc",
  "regex",
  "reqwest",
@@ -1135,6 +1136,16 @@ dependencies = [
  "futures-util",
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "keyring"
+version = "3.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
+dependencies = [
+ "log",
+ "zeroize",
 ]
 
 [[package]]
