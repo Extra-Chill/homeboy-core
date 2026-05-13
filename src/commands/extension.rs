@@ -272,16 +272,8 @@ pub enum ExtensionOutput {
         source_path: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         git_root: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        old_source_revision: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        new_source_revision: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        old_branch: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        new_branch: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        update_note: Option<String>,
+        #[serde(flatten)]
+        source_update: homeboy::extension::ExtensionSourceUpdate,
         #[serde(skip_serializing_if = "Option::is_none")]
         old_version: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -672,11 +664,7 @@ fn update_extension(
             git_root: result
                 .git_root
                 .map(|path| path.to_string_lossy().to_string()),
-            old_source_revision: result.old_source_revision,
-            new_source_revision: result.new_source_revision,
-            old_branch: result.old_branch,
-            new_branch: result.new_branch,
-            update_note: result.update_note,
+            source_update: result.source_update,
             old_version,
             new_version,
             repaired_source_metadata: result.repaired_source_metadata,

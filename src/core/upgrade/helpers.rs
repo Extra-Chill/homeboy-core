@@ -301,7 +301,10 @@ fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
                     .unwrap_or_default();
 
                 if result.linked {
-                    let branch_detail = match (&result.old_branch, &result.new_branch) {
+                    let branch_detail = match (
+                        &result.source_update.old_branch,
+                        &result.source_update.new_branch,
+                    ) {
                         (Some(old), Some(new)) if old != new => format!(" ({} → {})", old, new),
                         (Some(branch), _) => format!(" ({})", branch),
                         _ => String::new(),
@@ -331,11 +334,7 @@ fn update_all_extensions() -> (Vec<ExtensionUpgradeEntry>, Vec<String>) {
                     git_root: result
                         .git_root
                         .map(|path| path.to_string_lossy().to_string()),
-                    old_source_revision: result.old_source_revision,
-                    new_source_revision: result.new_source_revision,
-                    old_branch: result.old_branch,
-                    new_branch: result.new_branch,
-                    update_note: result.update_note,
+                    source_update: result.source_update,
                 });
             }
             Err(e) => {

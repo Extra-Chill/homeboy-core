@@ -56,6 +56,133 @@ pub fn is_workdir_clean(path: &Path) -> bool {
     }
 }
 
+/// Check if a path is either not a git worktree or is a clean git worktree.
+pub fn is_workdir_clean_or_not_git(path: &Path) -> bool {
+    let inside_tree = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(path)
+        .output();
+
+    match inside_tree {
+        Ok(output) if output.status.success() => is_workdir_clean(path),
+        _ => true,
+    }
+}
+
+/// Run a git command in a repository and return stdout.
+pub fn run_git(git_root: &Path, args: &[&str], context: &str) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(git_root)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| Error::internal_io(e.to_string(), Some(context.to_string())))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(Error::git_command_failed(if detail.is_empty() {
+            context.to_string()
+        } else {
+            detail
+        }));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+pub fn current_branch(git_root: &Path) -> Option<String> {
+    run_git(
+        git_root,
+        &["branch", "--show-current"],
+        "git current branch",
+    )
+    .ok()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+fn default_remote_branch(git_root: &Path) -> Option<String> {
+    run_git(
+        git_root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+        "git default remote branch",
+    )
+    .ok()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+/// Update a clean linked repo to the latest remote default-branch revision.
+pub fn update_to_remote_default_branch(git_root: &Path) -> Result<()> {
+    let old_branch = current_branch(git_root);
+    run_git(git_root, &["fetch", "origin"], "git fetch origin")?;
+    let mut detached_default_branch: Option<String> = None;
+
+    if let Some(remote_branch) = default_remote_branch(git_root) {
+        let local_branch = remote_branch
+            .strip_prefix("origin/")
+            .unwrap_or(&remote_branch)
+            .to_string();
+
+        if old_branch.as_deref() != Some(local_branch.as_str())
+            && run_git(
+                git_root,
+                &["switch", &local_branch],
+                "git switch default branch",
+            )
+            .is_err()
+        {
+            run_git(
+                git_root,
+                &["switch", "--detach", &remote_branch],
+                "git switch detached default branch",
+            )?;
+            detached_default_branch = Some(local_branch);
+        }
+    }
+
+    if let Some(branch) = detached_default_branch {
+        run_git(
+            git_root,
+            &["pull", "--ff-only", "origin", &branch],
+            "git pull detached default branch --ff-only",
+        )?;
+    } else {
+        run_git(git_root, &["pull", "--ff-only"], "git pull --ff-only")?;
+    }
+
+    Ok(())
+}
+
+/// Get the short HEAD revision from a git directory.
+pub fn short_head_revision(dir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let rev = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if rev.is_empty() {
+        None
+    } else {
+        Some(rev)
+    }
+}
+
 /// List all git-tracked markdown files in a directory.
 /// Uses `git ls-files` to respect .gitignore and only include tracked/staged files.
 /// Returns relative paths from the repository root.
