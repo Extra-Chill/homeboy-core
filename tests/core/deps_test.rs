@@ -122,7 +122,7 @@ fn status_filters_to_one_package() {
 }
 
 #[test]
-fn update_command_args_are_composer_first_and_package_scoped() {
+fn test_composer_command_args() {
     assert_eq!(
         deps::composer_command_args(
             "fixture/package",

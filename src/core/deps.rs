@@ -1,4 +1,4 @@
-use crate::component::{self, Component, DependencyStackEdge};
+use crate::component::{self, Component};
 use crate::{Error, Result};
 use serde::Serialize;
 use serde_json::Value;
@@ -6,6 +6,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod stack;
+
+pub use stack::{
+    stack_apply, stack_plan, stack_plan_from_components, stack_status, DependencyStackApplyResult,
+    DependencyStackApplyStep, DependencyStackCommandResult, DependencyStackEdgeStatus,
+    DependencyStackPlan, DependencyStackPlanStep, DependencyStackStatus,
+};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DependencyPackage {
@@ -41,69 +49,6 @@ pub struct DependencyUpdateResult {
     pub before: Option<DependencyPackage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<DependencyPackage>,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackStatus {
-    pub edge_count: usize,
-    pub edges: Vec<DependencyStackEdgeStatus>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackEdgeStatus {
-    pub declaring_component_id: String,
-    pub upstream: String,
-    pub downstream: String,
-    pub package: String,
-    pub update_command: String,
-    pub post_update: Vec<String>,
-    pub test: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackPlan {
-    pub upstream: String,
-    pub step_count: usize,
-    pub steps: Vec<DependencyStackPlanStep>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackPlanStep {
-    pub sequence: usize,
-    pub declaring_component_id: String,
-    pub upstream: String,
-    pub downstream: String,
-    pub downstream_path: String,
-    pub package: String,
-    pub update_command: String,
-    pub post_update: Vec<String>,
-    pub test: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackApplyResult {
-    pub upstream: String,
-    pub dry_run: bool,
-    pub step_count: usize,
-    pub steps: Vec<DependencyStackApplyStep>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackApplyStep {
-    pub sequence: usize,
-    pub downstream: String,
-    pub command_results: Vec<DependencyStackCommandResult>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DependencyStackCommandResult {
-    pub phase: String,
-    pub command: String,
-    pub skipped: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<i32>,
     pub stdout: String,
     pub stderr: String,
 }
@@ -201,226 +146,6 @@ pub fn update(
         stdout,
         stderr,
     })
-}
-
-pub fn stack_status() -> Result<DependencyStackStatus> {
-    let mut edges = Vec::new();
-    for component in component::list()? {
-        for edge in &component.dependency_stack {
-            edges.push(edge_status(&component, edge));
-        }
-    }
-
-    edges.sort_by(|a, b| {
-        a.upstream
-            .cmp(&b.upstream)
-            .then_with(|| a.downstream.cmp(&b.downstream))
-            .then_with(|| a.package.cmp(&b.package))
-    });
-
-    Ok(DependencyStackStatus {
-        edge_count: edges.len(),
-        edges,
-    })
-}
-
-pub fn stack_plan(upstream: &str) -> Result<DependencyStackPlan> {
-    let components = component::list()?;
-    stack_plan_from_components(upstream, &components)
-}
-
-pub fn stack_apply(upstream: &str, dry_run: bool) -> Result<DependencyStackApplyResult> {
-    let plan = stack_plan(upstream)?;
-    let mut steps = Vec::new();
-
-    for step in &plan.steps {
-        let mut command_results = Vec::new();
-        command_results.push(run_stack_command(
-            "update",
-            &step.update_command,
-            &step.downstream_path,
-            dry_run,
-        )?);
-        for command in &step.post_update {
-            command_results.push(run_stack_command(
-                "post_update",
-                command,
-                &step.downstream_path,
-                dry_run,
-            )?);
-        }
-        for command in &step.test {
-            command_results.push(run_stack_command(
-                "test",
-                command,
-                &step.downstream_path,
-                dry_run,
-            )?);
-        }
-        steps.push(DependencyStackApplyStep {
-            sequence: step.sequence,
-            downstream: step.downstream.clone(),
-            command_results,
-        });
-    }
-
-    Ok(DependencyStackApplyResult {
-        upstream: plan.upstream,
-        dry_run,
-        step_count: steps.len(),
-        steps,
-    })
-}
-
-pub fn stack_plan_from_components(
-    upstream: &str,
-    components: &[Component],
-) -> Result<DependencyStackPlan> {
-    let mut steps = Vec::new();
-    let mut queue = vec![upstream.to_string()];
-    let mut visited_edges = BTreeSet::new();
-    let component_paths: BTreeMap<String, String> = components
-        .iter()
-        .map(|component| (component.id.clone(), component.local_path.clone()))
-        .collect();
-
-    while let Some(current_upstream) = queue.pop() {
-        let mut matching_edges = Vec::new();
-        for component in components {
-            for edge in &component.dependency_stack {
-                if edge.upstream == current_upstream {
-                    matching_edges.push((component, edge));
-                }
-            }
-        }
-        matching_edges.sort_by(|(a_component, a_edge), (b_component, b_edge)| {
-            a_edge
-                .downstream
-                .cmp(&b_edge.downstream)
-                .then_with(|| a_edge.package.cmp(&b_edge.package))
-                .then_with(|| a_component.id.cmp(&b_component.id))
-        });
-
-        for (component, edge) in matching_edges {
-            let key = format!("{}>{}:{}", edge.upstream, edge.downstream, edge.package);
-            if !visited_edges.insert(key) {
-                continue;
-            }
-            let Some(downstream_path) = component_paths.get(&edge.downstream) else {
-                return Err(Error::validation_invalid_argument(
-                    "dependency_stack.downstream",
-                    format!(
-                        "Dependency stack edge {} -> {} references an unknown downstream component",
-                        edge.upstream, edge.downstream
-                    ),
-                    Some(edge.downstream.clone()),
-                    Some(vec![
-                        "Add the downstream component to Homeboy inventory".to_string(),
-                        "Or fix dependency_stack[].downstream in homeboy.json".to_string(),
-                    ]),
-                ));
-            };
-            steps.push(DependencyStackPlanStep {
-                sequence: steps.len() + 1,
-                declaring_component_id: component.id.clone(),
-                upstream: edge.upstream.clone(),
-                downstream: edge.downstream.clone(),
-                downstream_path: downstream_path.clone(),
-                package: edge.package.clone(),
-                update_command: update_command(edge, downstream_path),
-                post_update: edge.post_update.clone(),
-                test: edge.test.clone(),
-            });
-            queue.push(edge.downstream.clone());
-        }
-    }
-
-    Ok(DependencyStackPlan {
-        upstream: upstream.to_string(),
-        step_count: steps.len(),
-        steps,
-    })
-}
-
-fn edge_status(component: &Component, edge: &DependencyStackEdge) -> DependencyStackEdgeStatus {
-    DependencyStackEdgeStatus {
-        declaring_component_id: component.id.clone(),
-        upstream: edge.upstream.clone(),
-        downstream: edge.downstream.clone(),
-        package: edge.package.clone(),
-        update_command: update_command(edge, &component.local_path),
-        post_update: edge.post_update.clone(),
-        test: edge.test.clone(),
-    }
-}
-
-fn update_command(edge: &DependencyStackEdge, downstream_path: &str) -> String {
-    edge.update.clone().unwrap_or_else(|| {
-        format!(
-            "homeboy deps update {} --path {}",
-            shell_word(&edge.package),
-            shell_word(downstream_path)
-        )
-    })
-}
-
-fn run_stack_command(
-    phase: &str,
-    command: &str,
-    cwd: &str,
-    dry_run: bool,
-) -> Result<DependencyStackCommandResult> {
-    if dry_run {
-        return Ok(DependencyStackCommandResult {
-            phase: phase.to_string(),
-            command: command.to_string(),
-            skipped: true,
-            status: None,
-            stdout: String::new(),
-            stderr: String::new(),
-        });
-    }
-
-    let output = Command::new("sh")
-        .args(["-c", command])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| Error::internal_io(e.to_string(), Some(format!("run {phase} command"))))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !output.status.success() {
-        return Err(Error::validation_invalid_argument(
-            "dependency_stack.command",
-            format!(
-                "Dependency stack {phase} command failed with status {}: {}",
-                output.status,
-                first_non_empty_line(&stderr)
-                    .or_else(|| first_non_empty_line(&stdout))
-                    .unwrap_or("no output")
-            ),
-            Some(command.to_string()),
-            Some(vec![format!("Run manually in {cwd}: {command}")]),
-        ));
-    }
-
-    Ok(DependencyStackCommandResult {
-        phase: phase.to_string(),
-        command: command.to_string(),
-        skipped: false,
-        status: output.status.code(),
-        stdout,
-        stderr,
-    })
-}
-
-fn shell_word(value: &str) -> String {
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':' | '@'))
-    {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn resolve_component_path(
