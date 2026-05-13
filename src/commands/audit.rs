@@ -10,13 +10,16 @@ use homeboy::observation::{
     finding_records_from_audit, NewRunRecord, ObservationStore, RunRecord, RunStatus,
 };
 
-use super::utils::args::{BaselineArgs, PositionalComponentArgs};
+use super::utils::args::{BaselineArgs, ExtensionOverrideArgs, PositionalComponentArgs};
 use super::{CmdResult, GlobalArgs};
 
 #[derive(Args)]
 pub struct AuditArgs {
     #[command(flatten)]
     pub comp: PositionalComponentArgs,
+
+    #[command(flatten)]
+    pub extension_override: ExtensionOverrideArgs,
 
     /// Only show discovered conventions (skip findings)
     #[arg(long)]
@@ -229,6 +232,9 @@ fn audit_observation_command(component_id: &str, args: &AuditArgs) -> String {
     for kind in &args.exclude {
         parts.push(format!("--exclude={kind}"));
     }
+    for extension in &args.extension_override.extensions {
+        parts.push(format!("--extension={extension}"));
+    }
     if let Some(changed_since) = &args.changed_since {
         parts.push(format!("--changed-since={changed_since}"));
     }
@@ -247,6 +253,7 @@ fn audit_observation_initial_metadata(source_path: &str, args: &AuditArgs) -> se
         "mode": if args.conventions { "conventions" } else { "audit" },
         "only": args.only,
         "exclude": args.exclude,
+        "extensions": args.extension_override.extensions,
         "baseline": {
             "baseline": args.baseline_args.baseline,
             "ignore_baseline": args.baseline_args.ignore_baseline,
@@ -426,8 +433,9 @@ fn run_audit_reference_setup(component_id_or_path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::utils::args::BaselineArgs;
+    use crate::commands::utils::args::{BaselineArgs, ExtensionOverrideArgs};
     use crate::test_support::with_isolated_home;
+    use clap::Parser;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -473,6 +481,7 @@ mod tests {
                 component: Some("homeboy".to_string()),
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             conventions: false,
             only: vec![],
             exclude: vec![],
@@ -485,6 +494,29 @@ mod tests {
             json_summary: true,
             fixability: false,
         }
+    }
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        audit: AuditArgs,
+    }
+
+    #[test]
+    fn parses_one_shot_extension_override() {
+        let cli = TestCli::try_parse_from([
+            "audit",
+            "--path",
+            "/tmp/repo",
+            "--extension",
+            "rust",
+            "--changed-since",
+            "origin/main",
+        ])
+        .expect("audit should parse --extension override");
+
+        assert_eq!(cli.audit.extension_override.extensions, vec!["rust"]);
+        assert_eq!(cli.audit.changed_since.as_deref(), Some("origin/main"));
     }
 
     #[test]
@@ -632,6 +664,7 @@ mod tests {
                 component: Some(root.to_string_lossy().to_string()),
                 path: None,
             },
+            extension_override: ExtensionOverrideArgs::default(),
             conventions: false,
             only: vec![],
             exclude: vec![],
