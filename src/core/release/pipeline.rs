@@ -11,7 +11,7 @@ use crate::engine::run_dir::{self, RunDir};
 use crate::engine::validation::ValidationCollector;
 use crate::error::{Error, Result};
 use crate::extension::{self, ExtensionManifest};
-use crate::git::{self, UncommittedChanges};
+use crate::git;
 use crate::release::changelog;
 use crate::version;
 use std::collections::HashSet;
@@ -24,6 +24,7 @@ use super::plan_steps::{build_preflight_steps, build_release_steps};
 use super::planning_changelog::{build_changelog_plan, generate_changelog_entries};
 use super::planning_policy::release_skip_plan;
 use super::planning_semver::{build_semver_recommendation, validate_release_version_floor};
+use super::planning_worktree::{filter_homeboy_managed, validate_release_worktree};
 use super::types::{ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseStepResult};
 
 /// Load a component with portable config fallback when path_override is set.
@@ -228,49 +229,12 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
 
     // === Stage 3: Working tree check ===
     if let Some(ref info) = version_info {
-        let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
-        if uncommitted.has_changes {
-            let changelog_path = changelog::resolve_changelog_path(&component)?;
-            let version_targets: Vec<String> =
-                info.targets.iter().map(|t| t.full_path.clone()).collect();
-
-            let allowed = get_release_allowed_files(
-                &changelog_path,
-                &version_targets,
-                std::path::Path::new(&component.local_path),
+        if let Some(details) = validate_release_worktree(&component, options, info)? {
+            v.push(
+                "working_tree",
+                "Uncommitted changes detected",
+                Some(details),
             );
-            let unexpected = get_unexpected_uncommitted_files(&uncommitted, &allowed);
-
-            if !unexpected.is_empty() {
-                v.push(
-                    "working_tree",
-                    "Uncommitted changes detected",
-                    Some(serde_json::json!({
-                        "files": unexpected,
-                        "hint": "Commit changes or stash before release"
-                    })),
-                );
-            } else if uncommitted.has_changes && !options.dry_run {
-                // Only changelog/version files are uncommitted — auto-stage them
-                // so the release commit includes them (auto-generated from commits).
-                // Skip in dry-run mode to avoid mutating working tree.
-                log_status!(
-                    "release",
-                    "Auto-staging changelog/version files for release commit"
-                );
-                let all_files: Vec<&String> = uncommitted
-                    .staged
-                    .iter()
-                    .chain(uncommitted.unstaged.iter())
-                    .collect();
-                for file in all_files {
-                    let full_path = std::path::Path::new(&component.local_path).join(file);
-                    let _ = std::process::Command::new("git")
-                        .args(["add", &full_path.to_string_lossy()])
-                        .current_dir(&component.local_path)
-                        .output();
-                }
-            }
         }
     }
 
@@ -535,41 +499,6 @@ fn is_runner_infrastructure_failure(output: &extension::RunnerOutput) -> bool {
     .any(|needle| combined.contains(needle))
 }
 
-/// Path prefixes that are always treated as homeboy-managed scratch space
-/// and should never count as "dirty" during release/version-bump checks.
-///
-/// These are tool-owned artifacts a release should be able to leave on disk
-/// without blocking the next run. Components are not required to gitignore
-/// them (and many don't), so the release pipeline filters them out itself.
-///
-/// Currently:
-/// - `.homeboy-build/` — build staging directory
-/// - `.homeboy-bin/` — locally-built binaries
-/// - `.homeboy/` — generic per-repo scratch directory
-const HOMEBOY_MANAGED_PREFIXES: &[&str] = &[
-    ".homeboy-build/",
-    ".homeboy-build",
-    ".homeboy-bin/",
-    ".homeboy-bin",
-    ".homeboy/",
-    ".homeboy",
-];
-
-/// Returns true if a repo-relative path lives under homeboy-managed scratch space.
-fn is_homeboy_managed_path(rel_path: &str) -> bool {
-    HOMEBOY_MANAGED_PREFIXES
-        .iter()
-        .any(|prefix| rel_path == *prefix || rel_path.starts_with(prefix))
-}
-
-/// Filter out homeboy-managed scratch paths from a list of uncommitted files.
-fn filter_homeboy_managed(files: Vec<String>) -> Vec<String> {
-    files
-        .into_iter()
-        .filter(|f| !is_homeboy_managed_path(f))
-        .collect()
-}
-
 /// Stage 0 fail-fast: refuse to run any release work when the working tree
 /// has unexplained dirty files.
 ///
@@ -665,63 +594,14 @@ pub(crate) fn ensure_changelog_initialized(component: &Component) -> Result<()> 
     Ok(())
 }
 
-/// Get list of files allowed to be dirty during release (relative paths).
-fn get_release_allowed_files(
-    changelog_path: &std::path::Path,
-    version_targets: &[String],
-    repo_root: &std::path::Path,
-) -> Vec<String> {
-    let mut allowed = Vec::new();
-
-    // Add changelog (convert to relative path)
-    if let Ok(relative) = changelog_path.strip_prefix(repo_root) {
-        allowed.push(relative.to_string_lossy().to_string());
-    }
-
-    // Add version targets (convert to relative paths)
-    for target in version_targets {
-        if let Ok(relative) = std::path::Path::new(target).strip_prefix(repo_root) {
-            let rel_str = relative.to_string_lossy().to_string();
-            allowed.push(rel_str.clone());
-        }
-    }
-
-    allowed
-}
-
-/// Get uncommitted files that are NOT in the allowed list.
-///
-/// Homeboy-managed scratch paths (`.homeboy-build/`, `.homeboy-bin/`, etc.)
-/// are filtered out here too, mirroring the Stage 0 fail-fast filter.
-fn get_unexpected_uncommitted_files(
-    uncommitted: &UncommittedChanges,
-    allowed: &[String],
-) -> Vec<String> {
-    let all_uncommitted: Vec<&String> = uncommitted
-        .staged
-        .iter()
-        .chain(uncommitted.unstaged.iter())
-        .chain(uncommitted.untracked.iter())
-        .collect();
-
-    all_uncommitted
-        .into_iter()
-        .filter(|f| !is_homeboy_managed_path(f))
-        .filter(|f| !allowed.iter().any(|a| f.ends_with(a) || a.ends_with(*f)))
-        .cloned()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
-        get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
+        code_quality_failure_message, ensure_changelog_initialized,
         is_runner_infrastructure_failure, validate_default_branch,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
-    use crate::git::UncommittedChanges;
 
     fn run_git(dir: &std::path::Path, args: &[&str]) {
         let output = std::process::Command::new("git")
@@ -814,78 +694,6 @@ mod tests {
         );
     }
 
-    // ---- homeboy-managed scratch path filtering (issue #1162) ----
-
-    #[test]
-    fn homeboy_build_dir_is_managed_path() {
-        assert!(is_homeboy_managed_path(".homeboy-build/artifact.zip"));
-        assert!(is_homeboy_managed_path(".homeboy-build/"));
-        assert!(is_homeboy_managed_path(".homeboy-build"));
-    }
-
-    #[test]
-    fn homeboy_bin_dir_is_managed_path() {
-        assert!(is_homeboy_managed_path(".homeboy-bin/homeboy"));
-        assert!(is_homeboy_managed_path(".homeboy-bin"));
-    }
-
-    #[test]
-    fn homeboy_scratch_dir_is_managed_path() {
-        assert!(is_homeboy_managed_path(".homeboy/cache"));
-    }
-
-    #[test]
-    fn user_paths_are_not_managed() {
-        assert!(!is_homeboy_managed_path("src/main.rs"));
-        assert!(!is_homeboy_managed_path("docs/changelog.md"));
-        assert!(!is_homeboy_managed_path("homeboy.json"));
-        assert!(!is_homeboy_managed_path(".gitignore"));
-        // Defensive — a file that merely contains the string should not match.
-        assert!(!is_homeboy_managed_path("src/.homeboy-build/foo"));
-    }
-
-    #[test]
-    fn filter_homeboy_managed_drops_only_managed_paths() {
-        let files = vec![
-            ".homeboy-build/artifact.zip".to_string(),
-            "src/main.rs".to_string(),
-            ".homeboy-bin/homeboy".to_string(),
-            "manifest.toml".to_string(),
-        ];
-        let filtered = filter_homeboy_managed(files);
-        assert_eq!(filtered, vec!["src/main.rs", "manifest.toml"]);
-    }
-
-    fn uncommitted(staged: &[&str], unstaged: &[&str], untracked: &[&str]) -> UncommittedChanges {
-        UncommittedChanges {
-            has_changes: !staged.is_empty() || !unstaged.is_empty() || !untracked.is_empty(),
-            staged: staged.iter().map(|s| s.to_string()).collect(),
-            unstaged: unstaged.iter().map(|s| s.to_string()).collect(),
-            untracked: untracked.iter().map(|s| s.to_string()).collect(),
-            hint: None,
-        }
-    }
-
-    /// The headline regression for #1162: a stale `.homeboy-build/` directory
-    /// from a previous build must not block the next release.
-    #[test]
-    fn unexpected_files_skip_homeboy_build_dir() {
-        let changes = uncommitted(&[], &[], &[".homeboy-build/data-machine-0.70.1.zip"]);
-        let unexpected = get_unexpected_uncommitted_files(&changes, &[]);
-        assert!(
-            unexpected.is_empty(),
-            "homeboy-managed scratch should never trigger working_tree error, got: {:?}",
-            unexpected
-        );
-    }
-
-    #[test]
-    fn unexpected_files_still_catch_user_changes() {
-        let changes = uncommitted(&["src/lib.rs"], &[], &[".homeboy-build/foo"]);
-        let unexpected = get_unexpected_uncommitted_files(&changes, &[]);
-        assert_eq!(unexpected, vec!["src/lib.rs"]);
-    }
-
     /// Regression for the homeboy-action release blocker:
     /// `validate_working_tree_fail_fast` builds an Error with a hint vec
     /// listing the dirty files. That error flows through ValidationCollector,
@@ -935,38 +743,6 @@ mod tests {
             joined.contains("Cargo.lock"),
             "dirty file list must reach the JSON envelope, got: {joined}"
         );
-    }
-
-    #[test]
-    fn unexpected_files_honor_allowed_list_alongside_homeboy_filter() {
-        let changes = uncommitted(
-            &["docs/changelog.md", "manifest.toml"],
-            &[],
-            &[".homeboy-build/foo"],
-        );
-        let allowed = vec!["docs/changelog.md".to_string(), "manifest.toml".to_string()];
-        let unexpected = get_unexpected_uncommitted_files(&changes, &allowed);
-        assert!(
-            unexpected.is_empty(),
-            "allowed files + homeboy scratch should yield clean result, got: {:?}",
-            unexpected
-        );
-    }
-
-    #[test]
-    fn release_allowed_files_are_only_declared_targets() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let repo_root = temp_dir.path();
-        let changelog = repo_root.join("docs/changelog.md");
-        let manifest = repo_root.join("manifest.toml");
-
-        let allowed = get_release_allowed_files(
-            &changelog,
-            &[manifest.to_string_lossy().to_string()],
-            repo_root,
-        );
-
-        assert_eq!(allowed, vec!["docs/changelog.md", "manifest.toml"]);
     }
 
     #[test]
