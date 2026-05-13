@@ -626,7 +626,7 @@ pub(crate) fn validate_default_branch(component: &Component) -> Result<()> {
 ///
 /// Returns whether a lint command was available and executed. Missing lint
 /// support is not a release blocker because not every extension provides it.
-fn validate_lint_quality(component: &Component) -> Result<bool> {
+pub(crate) fn validate_lint_quality(component: &Component) -> Result<bool> {
     let lint_context = extension::lint::resolve_lint_command(component);
 
     let Ok(lint_context) = lint_context else {
@@ -698,7 +698,7 @@ fn validate_lint_quality(component: &Component) -> Result<bool> {
 ///
 /// Returns whether a test command was available and executed. Missing test
 /// support is not a release blocker because not every extension provides it.
-fn validate_test_quality(component: &Component) -> Result<bool> {
+pub(crate) fn validate_test_quality(component: &Component) -> Result<bool> {
     let test_context = extension::test::resolve_test_command(component);
 
     let Ok(test_context) = test_context else {
