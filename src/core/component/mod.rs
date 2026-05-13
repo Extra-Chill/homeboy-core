@@ -143,6 +143,19 @@ pub struct ComponentScriptsConfig {
     pub trace: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct DependencyStackEdge {
+    pub upstream: String,
+    pub downstream: String,
+    pub package: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_update: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(from = "RawComponent", into = "RawComponent")]
 pub struct Component {
@@ -185,6 +198,8 @@ pub struct Component {
     pub scripts: Option<ComponentScriptsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit: Option<AuditConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependency_stack: Vec<DependencyStackEdge>,
     /// Override the CLI path used by extension deploy install steps.
     /// For example, Studio sites need "studio wp" instead of the default "wp".
     pub cli_path: Option<String>,
@@ -266,6 +281,8 @@ struct RawComponent {
     scripts: Option<ComponentScriptsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     audit: Option<AuditConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dependency_stack: Vec<DependencyStackEdge>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cli_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -320,6 +337,7 @@ impl From<RawComponent> for Component {
             self_checks: raw.self_checks,
             scripts: raw.scripts,
             audit: raw.audit,
+            dependency_stack: raw.dependency_stack,
             cli_path: raw.cli_path,
             extra_drift_files: raw.extra_drift_files,
         }
@@ -357,6 +375,7 @@ impl From<Component> for RawComponent {
             self_checks: c.self_checks,
             scripts: c.scripts,
             audit: c.audit,
+            dependency_stack: c.dependency_stack,
             cli_path: c.cli_path,
             extra_drift_files: c.extra_drift_files,
         }
@@ -431,6 +450,7 @@ impl Component {
             self_checks: None,
             scripts: None,
             audit: None,
+            dependency_stack: Vec::new(),
             cli_path: None,
             extra_drift_files: Vec::new(),
         }

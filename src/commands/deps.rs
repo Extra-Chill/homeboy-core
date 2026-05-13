@@ -1,6 +1,9 @@
 use clap::{Args, Subcommand};
 
-use homeboy::deps::{self, DependencyStatus, DependencyUpdateResult};
+use homeboy::deps::{
+    self, DependencyStackApplyResult, DependencyStackPlan, DependencyStackStatus, DependencyStatus,
+    DependencyUpdateResult,
+};
 
 use super::CmdResult;
 
@@ -40,6 +43,31 @@ enum DepsCommand {
         /// Workspace path to operate on directly.
         #[arg(long, value_name = "PATH")]
         path: Option<String>,
+    },
+    /// Work with declared downstream dependency stacks
+    Stack {
+        #[command(subcommand)]
+        command: DepsStackCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum DepsStackCommand {
+    /// List declared dependency stack edges
+    Status,
+    /// Plan downstream updates for an upstream component/repo
+    Plan {
+        /// Upstream component or repository identifier from dependency_stack[].upstream.
+        upstream: String,
+    },
+    /// Run downstream update commands for an upstream component/repo
+    Apply {
+        /// Upstream component or repository identifier from dependency_stack[].upstream.
+        upstream: String,
+
+        /// Print the command plan without running commands.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -84,5 +112,43 @@ pub fn run(args: DepsArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<s
                 0,
             ))
         }
+        DepsCommand::Stack { command } => match command {
+            DepsStackCommand::Status => {
+                let output: DependencyStackStatus = deps::stack_status()?;
+                Ok((
+                    serde_json::to_value(output).map_err(|e| {
+                        homeboy::Error::internal_json(
+                            e.to_string(),
+                            Some("serialize deps stack status".to_string()),
+                        )
+                    })?,
+                    0,
+                ))
+            }
+            DepsStackCommand::Plan { upstream } => {
+                let output: DependencyStackPlan = deps::stack_plan(&upstream)?;
+                Ok((
+                    serde_json::to_value(output).map_err(|e| {
+                        homeboy::Error::internal_json(
+                            e.to_string(),
+                            Some("serialize deps stack plan".to_string()),
+                        )
+                    })?,
+                    0,
+                ))
+            }
+            DepsStackCommand::Apply { upstream, dry_run } => {
+                let output: DependencyStackApplyResult = deps::stack_apply(&upstream, dry_run)?;
+                Ok((
+                    serde_json::to_value(output).map_err(|e| {
+                        homeboy::Error::internal_json(
+                            e.to_string(),
+                            Some("serialize deps stack apply".to_string()),
+                        )
+                    })?,
+                    0,
+                ))
+            }
+        },
     }
 }

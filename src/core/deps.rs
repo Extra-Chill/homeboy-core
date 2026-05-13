@@ -7,6 +7,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod stack;
+
+pub use stack::{
+    stack_apply, stack_plan, stack_plan_from_components, stack_status, DependencyStackApplyResult,
+    DependencyStackApplyStep, DependencyStackCommandResult, DependencyStackEdgeStatus,
+    DependencyStackPlan, DependencyStackPlanStep, DependencyStackStatus,
+};
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DependencyPackage {
     pub name: String,
