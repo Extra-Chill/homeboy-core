@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.179.0] - 2026-05-13
+
+### Added
+- add dependency stack propagation
+- restore keychain API auth variables
+
+### Changed
+- split dependency stack helpers
+- extract release working tree planning
+- cover keychain auth helpers
+- extract release changelog planning
+
 ## [0.178.1] - 2026-05-13
 
 ### Changed
