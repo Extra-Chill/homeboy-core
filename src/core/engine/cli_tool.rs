@@ -212,10 +212,12 @@ fn build_project_command(
         ]));
     }
 
-    let cli_path = cli_config
-        .default_cli_path
-        .clone()
-        .unwrap_or_else(|| cli_config.tool.clone());
+    let cli_path = project::project_cli_path(project).unwrap_or_else(|| {
+        cli_config
+            .default_cli_path
+            .clone()
+            .unwrap_or_else(|| cli_config.tool.clone())
+    });
 
     let mut variables = HashMap::new();
     variables.insert(TemplateVars::PROJECT_ID.to_string(), project.id.clone());
@@ -451,5 +453,38 @@ mod tests {
             Some("root")
         );
         assert_eq!(config.auto_flags[0].flag, "--allow-root");
+    }
+
+    #[test]
+    fn project_cli_path_overrides_manifest_default() {
+        let mut project = Project {
+            id: "sandbox".to_string(),
+            domain: Some("example.com".to_string()),
+            base_path: Some("/home/wpdev/public_html".to_string()),
+            cli_path: Some("/home/wpdev/public_html/bin/wp".to_string()),
+            ..Default::default()
+        };
+
+        let config = cli_config(Vec::new());
+        let (_, command) = build_project_command(
+            &project,
+            &config,
+            "wordpress",
+            &["core".into(), "version".into()],
+        )
+        .expect("build command");
+
+        assert!(command.starts_with("/home/wpdev/public_html/bin/wp core version"));
+
+        project.cli_path = None;
+        let (_, command) = build_project_command(
+            &project,
+            &config,
+            "wordpress",
+            &["core".into(), "version".into()],
+        )
+        .expect("build command");
+
+        assert!(command.starts_with("wp core version"));
     }
 }

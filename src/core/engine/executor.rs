@@ -39,7 +39,7 @@ use crate::context::resolve_project_ssh;
 use crate::engine::shell;
 use crate::error::{Error, Result};
 use crate::extension::CliConfig;
-use crate::project::Project;
+use crate::project::{self, Project};
 use crate::server::{execute_local_command, execute_local_command_interactive, CommandOutput};
 use std::process::Command;
 
@@ -110,7 +110,7 @@ pub fn execute_for_project_direct(
     }
 
     // Fallback to shell execution
-    let command = build_shell_command(&base_path, cli_config, args, target_domain)?;
+    let command = build_shell_command(&base_path, cli_config, project, args, target_domain)?;
     execute_for_project(project, &command)
 }
 
@@ -199,10 +199,12 @@ fn parse_direct_template(
     let mut template = cli_config.command_template.clone();
 
     // Expand {{cliPath}}
-    let cli_path = cli_config
-        .default_cli_path
-        .clone()
-        .unwrap_or_else(|| cli_config.tool.clone());
+    let cli_path = project::project_cli_path(project).unwrap_or_else(|| {
+        cli_config
+            .default_cli_path
+            .clone()
+            .unwrap_or_else(|| cli_config.tool.clone())
+    });
     template = template.replace("{{cliPath}}", &cli_path);
 
     // Expand {{extension_path}}
@@ -279,16 +281,19 @@ fn parse_direct_template(
 fn build_shell_command(
     base_path: &str,
     cli_config: &CliConfig,
+    project: &Project,
     args: &[String],
     target_domain: &str,
 ) -> Result<String> {
     let mut template = cli_config.command_template.clone();
 
     // Expand {{cliPath}}
-    let cli_path = cli_config
-        .default_cli_path
-        .clone()
-        .unwrap_or_else(|| cli_config.tool.clone());
+    let cli_path = project::project_cli_path(project).unwrap_or_else(|| {
+        cli_config
+            .default_cli_path
+            .clone()
+            .unwrap_or_else(|| cli_config.tool.clone())
+    });
     template = template.replace("{{cliPath}}", &cli_path);
 
     // Expand {{sitePath}}
