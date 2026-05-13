@@ -1,6 +1,5 @@
 use crate::error::{Error, Result};
 use crate::git;
-use std::io::{self, BufRead, IsTerminal, Write};
 
 use super::pipeline::load_component;
 use super::types::{
@@ -23,41 +22,10 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
     )?;
 
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
-    let (auto_bump_type, releasable_count) =
-        match resolve_bump(&component.local_path, monorepo.as_ref())? {
-            Some(result) => result,
-            None => {
-                // No releasable commits, but --bump can still force a release
-                if input.bump_override.is_some() {
-                    ("none".to_string(), 0)
-                } else {
-                    log_status!(
-                        "release",
-                        "No releasable commits since last tag — nothing to release"
-                    );
-                    return Ok((
-                        ReleaseCommandResult {
-                            component_id: input.component_id.clone(),
-                            bump_type: "none".to_string(),
-                            dry_run: input.dry_run,
-                            releasable_commits: 0,
-                            new_version: None,
-                            tag: None,
-                            skipped_reason: Some("no-releasable-commits".to_string()),
-                            plan: Some(skipped_release_plan(
-                                &input.component_id,
-                                "no-releasable-commits",
-                                "No releasable commits since last tag",
-                                "Use --bump to force a release when this is intentional",
-                            )),
-                            run: None,
-                            deployment: None,
-                        },
-                        0,
-                    ));
-                }
-            }
-        };
+    let resolved_bump = resolve_bump(&component.local_path, monorepo.as_ref())?;
+    let (auto_bump_type, releasable_count) = resolved_bump
+        .clone()
+        .unwrap_or_else(|| ("none".to_string(), 0));
 
     let has_breaking_commits = auto_bump_type == "major";
 
@@ -91,36 +59,16 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
                 ));
             }
 
-            let mut forced_lower_bump = false;
-            if let Some(under_bump) =
-                detect_lower_bump_override(&bump, &auto_bump_type, releasable_count)?
-            {
-                guard_lower_bump_override(
-                    &input.component_id,
-                    &under_bump,
-                    input.force_lower_bump,
-                    input.dry_run,
-                )?;
-                forced_lower_bump = input.force_lower_bump && !input.dry_run;
-            }
-
-            if forced_lower_bump {
+            if resolved_bump.is_some() {
                 log_status!(
                     "release",
-                    "Forced lower bump: requested {} while commits indicate {}",
+                    "Using --bump {} (overriding auto-detected {} from {} commit{})",
                     bump,
-                    auto_bump_type
+                    auto_bump_type,
+                    releasable_count,
+                    if releasable_count == 1 { "" } else { "s" }
                 );
             }
-
-            log_status!(
-                "release",
-                "Using --bump {} (overriding auto-detected {} from {} commit{})",
-                bump,
-                auto_bump_type,
-                releasable_count,
-                if releasable_count == 1 { "" } else { "s" }
-            );
             bump
         }
     } else {
@@ -146,52 +94,20 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
             }
         }
 
-        // Gate: auto-detected major requires explicit --bump major
-        if bump_type == "major" {
+        if bump_type != "none" {
             log_status!(
                 "release",
-                "⚠ Breaking changes detected — this requires a major version bump"
+                "Detected {} bump from {} releasable commit{}",
+                bump_type,
+                releasable_count,
+                if releasable_count == 1 { "" } else { "s" }
             );
-            log_status!(
-                "release",
-                "Re-run with: homeboy release {} --bump major",
-                input.component_id
-            );
-            return Ok((
-                ReleaseCommandResult {
-                    component_id: input.component_id.clone(),
-                    bump_type: "major".to_string(),
-                    dry_run: input.dry_run,
-                    releasable_commits: releasable_count,
-                    new_version: None,
-                    tag: None,
-                    skipped_reason: Some("major-requires-flag".to_string()),
-                    plan: Some(skipped_release_plan(
-                        &input.component_id,
-                        "major-requires-flag",
-                        "Breaking changes require an explicit major bump",
-                        &format!(
-                            "Re-run with: homeboy release {} --bump major",
-                            input.component_id
-                        ),
-                    )),
-                    run: None,
-                    deployment: None,
-                },
-                0,
-            ));
         }
-
-        log_status!(
-            "release",
-            "Detected {} bump from {} releasable commit{}",
-            bump_type,
-            releasable_count,
-            if releasable_count == 1 { "" } else { "s" }
-        );
 
         bump_type
     };
+
+    let require_explicit_major = input.bump_override.is_none() && bump_type == "major";
 
     let options = ReleaseOptions {
         bump_type: bump_type.clone(),
@@ -204,6 +120,8 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         git_identity: input.git_identity.clone(),
         bump_policy: ReleaseBumpPolicyOptions {
             force_lower_bump: input.force_lower_bump,
+            force_empty_release: input.bump_override.is_some(),
+            require_explicit_major,
         },
     };
 
@@ -225,7 +143,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
                 releasable_commits: releasable_count,
                 new_version,
                 tag,
-                skipped_reason: None,
+                skipped_reason: skipped_reason_from_plan(&plan),
                 plan: Some(plan),
                 run: None,
                 deployment,
@@ -247,6 +165,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         0
     };
     let deployment = super::deployment::extract_deployment_from_run(&run_result);
+    let skipped_reason = skipped_reason_from_plan(&plan);
     let deploy_exit_code = deployment
         .as_ref()
         .filter(|deployment| deployment.summary.failed > 0)
@@ -281,7 +200,7 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
             releasable_commits: releasable_count,
             new_version,
             tag,
-            skipped_reason: None,
+            skipped_reason,
             plan: Some(plan),
             run: Some(run_result),
             deployment,
@@ -329,26 +248,17 @@ fn extract_new_version_from_plan(plan: &ReleasePlan) -> Option<String> {
         .map(String::from)
 }
 
-fn skipped_release_plan(component_id: &str, reason: &str, label: &str, hint: &str) -> ReleasePlan {
-    ReleasePlan {
-        component_id: component_id.to_string(),
-        enabled: false,
-        steps: vec![ReleasePlanStep {
-            id: "release.skip".to_string(),
-            step_type: "release.skip".to_string(),
-            label: Some(label.to_string()),
-            needs: vec![],
-            config: std::collections::HashMap::from([(
-                "reason".to_string(),
-                serde_json::Value::String(reason.to_string()),
-            )]),
-            status: ReleasePlanStatus::Disabled,
-            missing: vec![],
-        }],
-        semver_recommendation: None,
-        warnings: vec![],
-        hints: vec![hint.to_string()],
+fn skipped_reason_from_plan(plan: &ReleasePlan) -> Option<String> {
+    if plan.enabled {
+        return None;
     }
+
+    plan.steps
+        .iter()
+        .find(|step| step.id == "release.skip")
+        .and_then(|step| step.config.get("reason"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }
 
 fn extract_new_version_from_run(run: &ReleaseRun) -> Option<String> {
@@ -741,163 +651,11 @@ pub fn run_batch(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LowerBumpOverride {
-    requested: String,
-    detected: String,
-    releasable_count: usize,
-}
-
-impl LowerBumpOverride {
-    fn commit_suffix(&self) -> &'static str {
-        if self.releasable_count == 1 {
-            ""
-        } else {
-            "s"
-        }
-    }
-
-    fn message(&self) -> String {
-        format!(
-            "Requested {} bump is lower than detected {} impact from {} releasable commit{}",
-            self.requested,
-            self.detected,
-            self.releasable_count,
-            self.commit_suffix()
-        )
-    }
-}
-
-fn detect_lower_bump_override(
-    requested_bump: &str,
-    detected_bump: &str,
-    releasable_count: usize,
-) -> Result<Option<LowerBumpOverride>> {
-    let Some(requested) = git::SemverBump::parse(requested_bump) else {
-        return Ok(None);
-    };
-    let Some(detected) = git::SemverBump::parse(detected_bump) else {
-        return Ok(None);
-    };
-
-    if requested.rank() >= detected.rank() {
-        return Ok(None);
-    }
-
-    Ok(Some(LowerBumpOverride {
-        requested: requested.as_str().to_string(),
-        detected: detected.as_str().to_string(),
-        releasable_count,
-    }))
-}
-
-fn guard_lower_bump_override(
-    component_id: &str,
-    under_bump: &LowerBumpOverride,
-    force_lower_bump: bool,
-    dry_run: bool,
-) -> Result<()> {
-    if dry_run {
-        log_status!("release", "{}", under_bump.message());
-        return Ok(());
-    }
-
-    if force_lower_bump {
-        return Ok(());
-    }
-
-    if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        log_status!("release", "{}.", under_bump.message());
-        eprint!("Continue with lower bump? [y/N] ");
-        io::stderr().flush().ok();
-
-        let mut answer = String::new();
-        io::stdin().lock().read_line(&mut answer).map_err(|e| {
-            Error::internal_unexpected(format!("Failed to read confirmation: {}", e))
-        })?;
-
-        if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-            return Ok(());
-        }
-    }
-
-    Err(lower_bump_error(component_id, under_bump))
-}
-
-fn lower_bump_error(component_id: &str, under_bump: &LowerBumpOverride) -> Error {
-    Error::validation_invalid_argument(
-        "bump",
-        under_bump.message(),
-        Some(under_bump.requested.clone()),
-        None,
-    )
-    .with_hint(format!(
-        "Use the detected bump: homeboy release {} --bump {}",
-        component_id, under_bump.detected
-    ))
-    .with_hint("If the lower release is intentional, re-run with --force-lower-bump")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::release::{ReleaseRunResult, ReleaseStepResult, ReleaseStepStatus};
     use std::collections::HashMap;
-
-    #[test]
-    fn detects_keyword_under_bump_override() {
-        let under_bump = detect_lower_bump_override("patch", "minor", 3)
-            .expect("valid bump comparison")
-            .expect("patch should under-bump minor");
-
-        assert_eq!(under_bump.requested, "patch");
-        assert_eq!(under_bump.detected, "minor");
-        assert_eq!(under_bump.releasable_count, 3);
-    }
-
-    #[test]
-    fn lower_bump_detection_allows_equal_or_higher_bump() {
-        assert!(detect_lower_bump_override("minor", "minor", 1)
-            .unwrap()
-            .is_none());
-        assert!(detect_lower_bump_override("major", "minor", 1)
-            .unwrap()
-            .is_none());
-    }
-
-    #[test]
-    fn lower_bump_detection_ignores_explicit_versions_and_none() {
-        assert!(detect_lower_bump_override("2.0.0", "minor", 1)
-            .unwrap()
-            .is_none());
-        assert!(detect_lower_bump_override("patch", "none", 0)
-            .unwrap()
-            .is_none());
-    }
-
-    #[test]
-    fn lower_bump_error_points_to_detected_bump_and_force_flag() {
-        let under_bump = LowerBumpOverride {
-            requested: "patch".to_string(),
-            detected: "minor".to_string(),
-            releasable_count: 2,
-        };
-
-        let err = lower_bump_error("demo", &under_bump);
-
-        assert_eq!(err.code.as_str(), "validation.invalid_argument");
-        assert!(err
-            .message
-            .contains("Requested patch bump is lower than detected minor impact"));
-        assert!(err
-            .hints
-            .iter()
-            .any(|hint| hint.message.contains("homeboy release demo --bump minor")));
-        assert!(err
-            .hints
-            .iter()
-            .any(|hint| hint.message.contains("--force-lower-bump")));
-    }
 
     #[test]
     fn extracts_new_version_from_plan() {
@@ -924,34 +682,6 @@ mod tests {
         assert_eq!(
             extract_new_version_from_plan(&plan).as_deref(),
             Some("1.2.3")
-        );
-    }
-
-    #[test]
-    fn skipped_release_plan_records_disabled_reason() {
-        let plan = skipped_release_plan(
-            "demo",
-            "no-releasable-commits",
-            "No releasable commits since last tag",
-            "Use --bump to force a release when this is intentional",
-        );
-
-        assert!(!plan.enabled);
-        assert_eq!(plan.component_id, "demo");
-        assert_eq!(plan.steps.len(), 1);
-        assert_eq!(plan.steps[0].id, "release.skip");
-        assert_eq!(plan.steps[0].step_type, "release.skip");
-        assert_eq!(
-            plan.steps[0].status,
-            crate::release::ReleasePlanStatus::Disabled
-        );
-        assert_eq!(
-            plan.steps[0].config.get("reason").and_then(|v| v.as_str()),
-            Some("no-releasable-commits")
-        );
-        assert_eq!(
-            plan.hints,
-            vec!["Use --bump to force a release when this is intentional"]
         );
     }
 
