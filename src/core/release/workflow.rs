@@ -213,7 +213,8 @@ fn resolve_bump(
     local_path: &str,
     monorepo: Option<&git::MonorepoContext>,
 ) -> Result<Option<(String, usize)>> {
-    let (_latest_tag, commits) = super::pipeline::resolve_tag_and_commits(local_path, monorepo)?;
+    let (_latest_tag, commits) =
+        super::planning_semver::resolve_tag_and_commits(local_path, monorepo)?;
 
     if commits.is_empty() {
         return Ok(None);

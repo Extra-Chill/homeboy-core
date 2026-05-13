@@ -22,9 +22,12 @@ use super::execution_plan::{
 use super::pipeline_summary::{build_summary, derive_overall_status};
 use super::plan_steps::{build_preflight_steps, build_release_steps};
 use super::planning_policy::release_skip_plan;
+use super::planning_semver::{
+    build_semver_recommendation, resolve_tag_and_commits, validate_release_version_floor,
+};
 use super::types::{
     ReleaseChangelogPlan, ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult,
-    ReleaseSemverCommit, ReleaseSemverRecommendation, ReleaseStepResult,
+    ReleaseStepResult,
 };
 
 /// Load a component with portable config fallback when path_override is set.
@@ -332,195 +335,6 @@ fn build_changelog_plan(
         entries,
         entry_count,
     })
-}
-
-fn build_semver_recommendation(
-    component: &Component,
-    requested_bump: &str,
-    monorepo: Option<&git::MonorepoContext>,
-) -> Result<Option<ReleaseSemverRecommendation>> {
-    let (latest_tag, commits) = resolve_tag_and_commits(&component.local_path, monorepo)?;
-
-    if commits.is_empty() {
-        return Ok(None);
-    }
-
-    // Explicit version strings (e.g. "2.0.0") skip semver keyword parsing.
-    // The version is used verbatim — no underbump check, no rank comparison.
-    let is_explicit_version =
-        requested_bump.contains('.') && requested_bump.split('.').all(|p| p.parse::<u32>().is_ok());
-
-    if is_explicit_version {
-        let range = latest_tag
-            .as_ref()
-            .map(|t| format!("{}..HEAD", t))
-            .unwrap_or_else(|| "HEAD".to_string());
-
-        let commit_rows: Vec<ReleaseSemverCommit> = commits
-            .iter()
-            .map(|c| ReleaseSemverCommit {
-                sha: c.hash.clone(),
-                subject: c.subject.clone(),
-                commit_type: match c.category {
-                    git::CommitCategory::Breaking => "breaking",
-                    git::CommitCategory::Feature => "feature",
-                    git::CommitCategory::Fix => "fix",
-                    git::CommitCategory::Docs => "docs",
-                    git::CommitCategory::Chore => "chore",
-                    git::CommitCategory::Merge => "merge",
-                    git::CommitCategory::Release => "release",
-                    git::CommitCategory::Other => "other",
-                }
-                .to_string(),
-                breaking: c.category == git::CommitCategory::Breaking,
-            })
-            .collect();
-
-        let recommended = git::recommended_bump_from_commits(&commits);
-
-        return Ok(Some(ReleaseSemverRecommendation {
-            latest_tag,
-            range,
-            commits: commit_rows,
-            recommended_bump: recommended.map(|r| r.as_str().to_string()),
-            requested_bump: requested_bump.to_string(),
-            is_underbump: false,
-            reasons: Vec::new(),
-        }));
-    }
-
-    let requested = git::SemverBump::parse(requested_bump).ok_or_else(|| {
-        Error::validation_invalid_argument(
-            "bump_type",
-            format!("Invalid bump type: {}", requested_bump),
-            None,
-            Some(vec![
-                "Use one of: patch, minor, major, or an explicit version like 2.0.0".to_string(),
-            ]),
-        )
-    })?;
-
-    let recommended = git::recommended_bump_from_commits(&commits);
-    let is_underbump = recommended
-        .map(|r| requested.rank() < r.rank())
-        .unwrap_or(false);
-
-    let commit_rows: Vec<ReleaseSemverCommit> = commits
-        .iter()
-        .map(|c| ReleaseSemverCommit {
-            sha: c.hash.clone(),
-            subject: c.subject.clone(),
-            commit_type: match c.category {
-                git::CommitCategory::Breaking => "breaking",
-                git::CommitCategory::Feature => "feature",
-                git::CommitCategory::Fix => "fix",
-                git::CommitCategory::Docs => "docs",
-                git::CommitCategory::Chore => "chore",
-                git::CommitCategory::Merge => "merge",
-                git::CommitCategory::Release => "release",
-                git::CommitCategory::Other => "other",
-            }
-            .to_string(),
-            breaking: c.category == git::CommitCategory::Breaking,
-        })
-        .collect();
-
-    let reasons: Vec<String> = commits
-        .iter()
-        .filter(|c| {
-            if let Some(rec) = recommended {
-                match rec {
-                    git::SemverBump::Major => c.category == git::CommitCategory::Breaking,
-                    git::SemverBump::Minor => {
-                        c.category == git::CommitCategory::Breaking
-                            || c.category == git::CommitCategory::Feature
-                    }
-                    git::SemverBump::Patch => {
-                        matches!(
-                            c.category,
-                            git::CommitCategory::Breaking
-                                | git::CommitCategory::Feature
-                                | git::CommitCategory::Fix
-                                | git::CommitCategory::Other
-                        )
-                    }
-                }
-            } else {
-                false
-            }
-        })
-        .take(10)
-        .map(|c| format!("{} {}", c.hash, c.subject))
-        .collect();
-
-    let range = latest_tag
-        .as_ref()
-        .map(|t| format!("{}..HEAD", t))
-        .unwrap_or_else(|| "HEAD".to_string());
-
-    Ok(Some(ReleaseSemverRecommendation {
-        latest_tag,
-        range,
-        commits: commit_rows,
-        recommended_bump: recommended.map(|r| r.as_str().to_string()),
-        requested_bump: requested.as_str().to_string(),
-        is_underbump,
-        reasons,
-    }))
-}
-
-fn validate_release_version_floor(
-    latest_tag: Option<&str>,
-    current_version: &str,
-    next_version: &str,
-) -> Option<String> {
-    let latest_tag = latest_tag?;
-    let tag_version = git::extract_version_from_tag(latest_tag)?;
-    let tag_version = semver::Version::parse(&tag_version).ok()?;
-    let current_version = semver::Version::parse(current_version).ok()?;
-    let next_version = semver::Version::parse(next_version).ok()?;
-
-    if tag_version > current_version {
-        return Some(format!(
-            "Latest release tag {} is ahead of source version {}. Refusing to release {} because this usually means a bad or misplaced tag needs cleanup.",
-            latest_tag, current_version, next_version
-        ));
-    }
-
-    if next_version <= tag_version {
-        return Some(format!(
-            "Next release version {} is not greater than latest release tag {}. Refusing to create a non-advancing release.",
-            next_version, latest_tag
-        ));
-    }
-
-    None
-}
-
-/// Resolve the latest tag and commits since that tag for a component.
-///
-/// In a monorepo, uses component-prefixed tags and path-scoped commits.
-/// In a single-repo, uses standard global tags and all commits.
-pub(super) fn resolve_tag_and_commits(
-    local_path: &str,
-    monorepo: Option<&git::MonorepoContext>,
-) -> Result<(Option<String>, Vec<git::CommitInfo>)> {
-    match monorepo {
-        Some(ctx) => {
-            let latest_tag = git::get_latest_tag_with_prefix(&ctx.git_root, Some(&ctx.tag_prefix))?;
-            let commits = git::get_commits_since_tag_for_path(
-                &ctx.git_root,
-                latest_tag.as_deref(),
-                Some(&ctx.path_prefix),
-            )?;
-            Ok((latest_tag, commits))
-        }
-        None => {
-            let latest_tag = git::get_latest_tag(local_path)?;
-            let commits = git::get_commits_since_tag(local_path, latest_tag.as_deref())?;
-            Ok((latest_tag, commits))
-        }
-    }
 }
 
 /// Fetch from remote and fast-forward if behind.
@@ -1109,7 +923,7 @@ mod tests {
         code_quality_failure_message, ensure_changelog_initialized, filter_homeboy_managed,
         get_release_allowed_files, get_unexpected_uncommitted_files, is_homeboy_managed_path,
         is_runner_infrastructure_failure, read_changelog_for_release, strip_pr_reference,
-        validate_default_branch, validate_release_version_floor,
+        validate_default_branch,
     };
     use crate::component::Component;
     use crate::extension::RunnerOutput;
@@ -1255,30 +1069,6 @@ mod tests {
             code_quality_failure_message("Tests", &output),
             "Tests runner infrastructure failure (exit code 1)"
         );
-    }
-
-    #[test]
-    fn release_version_floor_blocks_tag_ahead_of_source_version() {
-        let message = validate_release_version_floor(Some("v0.125.0"), "0.124.9", "0.124.10")
-            .expect("ahead tag should block release");
-
-        assert!(message.contains("Latest release tag v0.125.0 is ahead of source version 0.124.9"));
-        assert!(message.contains("bad or misplaced tag"));
-    }
-
-    #[test]
-    fn release_version_floor_blocks_non_advancing_next_version() {
-        let message = validate_release_version_floor(Some("v0.125.0"), "0.125.0", "0.125.0")
-            .expect("same version should block release");
-
-        assert!(message.contains(
-            "Next release version 0.125.0 is not greater than latest release tag v0.125.0"
-        ));
-    }
-
-    #[test]
-    fn release_version_floor_allows_advancing_release() {
-        assert!(validate_release_version_floor(Some("v0.124.9"), "0.124.9", "0.124.10").is_none());
     }
 
     // ---- homeboy-managed scratch path filtering (issue #1162) ----

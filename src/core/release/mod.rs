@@ -8,6 +8,7 @@ mod pipeline_capabilities;
 mod pipeline_summary;
 mod plan_steps;
 mod planning_policy;
+mod planning_semver;
 mod types;
 mod utils;
 pub mod version;
