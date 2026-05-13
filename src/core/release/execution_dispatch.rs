@@ -29,6 +29,7 @@ pub(super) fn execute_release_plan_step(
         "preflight.default_branch" => Ok(Some(run_default_branch_preflight(step, context))),
         "preflight.git_identity" => configure_git_identity(step, context).map(Some),
         "preflight.working_tree" => Ok(Some(run_working_tree_preflight(step, context))),
+        "preflight.remote_sync" => Ok(Some(run_remote_sync_preflight(step, context))),
         "changelog.finalize" => {
             executor::changelog::run_changelog_finalize(step, context.component, &mut context.state)
                 .map(Some)
@@ -132,7 +133,8 @@ fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
     (step.step_type.starts_with("preflight.")
         && step.step_type != "preflight.default_branch"
         && step.step_type != "preflight.git_identity"
-        && step.step_type != "preflight.working_tree")
+        && step.step_type != "preflight.working_tree"
+        && step.step_type != "preflight.remote_sync")
         || step.step_type == "changelog.policy"
         || step.step_type == "changelog.generate"
 }
@@ -161,6 +163,25 @@ fn run_working_tree_preflight(
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
     match super::pipeline::validate_working_tree_fail_fast(context.component) {
+        Ok(()) => ReleaseStepResult {
+            id: step.id.clone(),
+            step_type: step.step_type.clone(),
+            status: ReleaseStepStatus::Success,
+            missing: Vec::new(),
+            warnings: Vec::new(),
+            hints: Vec::new(),
+            data: None,
+            error: None,
+        },
+        Err(err) => failed_result(&step.id, &step.step_type, err),
+    }
+}
+
+fn run_remote_sync_preflight(
+    step: &ReleasePlanStep,
+    context: &ReleaseExecutionContext,
+) -> ReleaseStepResult {
+    match super::pipeline::validate_remote_sync(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
             step_type: step.step_type.clone(),
@@ -218,6 +239,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
         "changelog.finalize"
             | "preflight.default_branch"
             | "preflight.working_tree"
+            | "preflight.remote_sync"
             | "version"
             | "release.prepare"
             | "git.commit"
@@ -285,6 +307,9 @@ mod tests {
         )));
         assert!(!release_step_is_plan_only(&plan_step(
             "preflight.working_tree"
+        )));
+        assert!(!release_step_is_plan_only(&plan_step(
+            "preflight.remote_sync"
         )));
         assert!(!release_step_is_plan_only(&plan_step("changelog.finalize")));
         assert!(!release_step_is_plan_only(&plan_step("deploy")));
@@ -401,16 +426,79 @@ mod tests {
     }
 
     #[test]
+    fn preflight_remote_sync_fast_forwards_and_returns_success_step() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let remote = temp.path().join("remote.git");
+        let seed = temp.path().join("seed");
+        let checkout = temp.path().join("checkout");
+        let remote_str = remote.to_string_lossy().to_string();
+
+        run_in(
+            temp.path(),
+            &[
+                "git",
+                "init",
+                "--bare",
+                "--initial-branch",
+                "main",
+                &remote_str,
+            ],
+        );
+        run_in(temp.path(), &["git", "clone", &remote_str, "seed"]);
+        configure_git_user(&seed);
+        std::fs::write(seed.join("README.md"), "fixture\n").expect("write fixture");
+        run_in(&seed, &["git", "add", "."]);
+        run_in(&seed, &["git", "commit", "-q", "-m", "Initial commit"]);
+        run_in(&seed, &["git", "push", "-q", "origin", "main"]);
+
+        run_in(temp.path(), &["git", "clone", &remote_str, "checkout"]);
+        configure_git_user(&checkout);
+
+        std::fs::write(seed.join("README.md"), "fixture\nsecond\n").expect("write update");
+        run_in(&seed, &["git", "add", "."]);
+        run_in(&seed, &["git", "commit", "-q", "-m", "Second commit"]);
+        run_in(&seed, &["git", "push", "-q", "origin", "main"]);
+
+        let component = Component {
+            id: "fixture".to_string(),
+            local_path: checkout.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        let options = ReleaseOptions::default();
+        let mut context = ReleaseExecutionContext {
+            component: &component,
+            extensions: &[],
+            component_id: "fixture",
+            options: &options,
+            state: ReleaseState::default(),
+            publish_failed: false,
+        };
+
+        let result = execute_release_plan_step(&plan_step("preflight.remote_sync"), &mut context)
+            .expect("dispatch")
+            .expect("result");
+
+        assert_eq!(result.status, ReleaseStepStatus::Success);
+        assert!(!release_step_is_show_stopper(&result));
+        assert_eq!(
+            run_output(&checkout, &["git", "rev-parse", "HEAD"]),
+            run_output(&checkout, &["git", "rev-parse", "origin/main"])
+        );
+    }
+
+    #[test]
     fn test_release_step_is_show_stopper() {
         let version_failure = failed_step_result("version");
         let default_branch_failure = failed_step_result("preflight.default_branch");
         let working_tree_failure = failed_step_result("preflight.working_tree");
+        let remote_sync_failure = failed_step_result("preflight.remote_sync");
         let changelog_failure = failed_step_result("changelog.finalize");
         let publish_failure = failed_step_result("publish.crates");
 
         assert!(release_step_is_show_stopper(&version_failure));
         assert!(release_step_is_show_stopper(&default_branch_failure));
         assert!(release_step_is_show_stopper(&working_tree_failure));
+        assert!(release_step_is_show_stopper(&remote_sync_failure));
         assert!(release_step_is_show_stopper(&changelog_failure));
         assert!(!release_step_is_show_stopper(&publish_failure));
     }
@@ -478,5 +566,26 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
+    }
+
+    fn run_output(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(dir)
+            .output()
+            .expect("spawn command");
+        assert!(
+            output.status.success(),
+            "command {:?} failed: stdout={:?} stderr={:?}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn configure_git_user(dir: &std::path::Path) {
+        run_in(dir, &["git", "config", "user.email", "test@example.com"]);
+        run_in(dir, &["git", "config", "user.name", "Test"]);
     }
 }
