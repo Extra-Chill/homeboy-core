@@ -3,8 +3,8 @@
   "baselines": {
     "audit": {
       "context_id": "homeboy",
-      "created_at": "2026-05-13T20:35:12Z",
-      "item_count": 541,
+      "created_at": "2026-05-13T21:18:44Z",
+      "item_count": 546,
       "known_fingerprints": [
         "dead_code::src/commands/utils/response.rs::UnreferencedExport",
         "dead_code::src/commands/utils/tty.rs::UnreferencedExport",
@@ -66,6 +66,8 @@
         "intra-method-duplication::src/core/rig/source.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/server/connection.rs::IntraMethodDuplicate",
         "intra-method-duplication::src/core/stack/sync.rs::IntraMethodDuplicate",
+        "parallel-implementation::src/core/scope.rs::ParallelImplementation",
+        "parallel-implementation::src/core/triage.rs::ParallelImplementation",
         "structural::src/commands/bench/tests.rs::HighItemCount",
         "structural::src/commands/refactor.rs::GodFile",
         "structural::src/commands/refactor.rs::HighItemCount",
@@ -217,7 +219,6 @@
         "test_coverage::src/core/deploy/release_download.rs::MissingTestMethod",
         "test_coverage::src/core/deploy/release_download.rs::MissingTestMethod",
         "test_coverage::src/core/deploy/version_overrides.rs::MissingTestFile",
-        "test_coverage::src/core/deps.rs::MissingTestMethod",
         "test_coverage::src/core/engine/cli_tool.rs::MissingTestMethod",
         "test_coverage::src/core/engine/codebase_scan.rs::MissingTestMethod",
         "test_coverage::src/core/engine/codebase_scan.rs::MissingTestMethod",
@@ -527,6 +528,10 @@
         "test_coverage::src/core/rig/state.rs::MissingTestMethod",
         "test_coverage::src/core/rig/state.rs::MissingTestMethod",
         "test_coverage::src/core/rig/state.rs::MissingTestMethod",
+        "test_coverage::src/core/scope.rs::MissingTestMethod",
+        "test_coverage::src/core/scope.rs::MissingTestMethod",
+        "test_coverage::src/core/scope.rs::MissingTestMethod",
+        "test_coverage::src/core/scope.rs::MissingTestMethod",
         "test_coverage::src/core/server/health.rs::MissingTestMethod",
         "test_coverage::src/core/stack/apply.rs::MissingTestMethod",
         "test_coverage::src/core/stack/apply.rs::MissingTestMethod",
