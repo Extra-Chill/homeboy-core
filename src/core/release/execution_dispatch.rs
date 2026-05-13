@@ -172,7 +172,7 @@ fn run_working_tree_preflight(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
-    match super::pipeline::validate_working_tree_fail_fast(context.component) {
+    match super::planning_worktree::validate_working_tree_fail_fast(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
             step_type: step.step_type.clone(),
