@@ -1,3 +1,4 @@
+use homeboy::component::{Component, DependencyStackEdge};
 use homeboy::deps::{self, ComposerAction};
 use std::fs;
 use tempfile::tempdir;
@@ -8,6 +9,12 @@ fn write_file(path: &std::path::Path, contents: &str) {
 
 fn fixture_component(path: &std::path::Path) -> (&'static str, String) {
     ("fixture", path.display().to_string())
+}
+
+fn stack_component(id: &str, path: &str, edges: Vec<DependencyStackEdge>) -> Component {
+    let mut component = Component::new(id.to_string(), path.to_string(), String::new(), None);
+    component.dependency_stack = edges;
+    component
 }
 
 #[test]
@@ -140,6 +147,88 @@ fn update_command_args_are_composer_first_and_package_scoped() {
             "--no-interaction",
         ]
     );
+}
+
+#[test]
+fn stack_plan_walks_declared_downstream_edges_in_order() {
+    let components = vec![
+        stack_component(
+            "block-format-bridge",
+            "/repo/block-format-bridge",
+            vec![DependencyStackEdge {
+                upstream: "chubes4/html-to-blocks-converter".to_string(),
+                downstream: "block-format-bridge".to_string(),
+                package: "chubes4/html-to-blocks-converter".to_string(),
+                update: None,
+                post_update: vec!["composer build".to_string()],
+                test: vec!["homeboy test --path . --extension wordpress".to_string()],
+            }],
+        ),
+        stack_component(
+            "static-site-importer",
+            "/repo/static-site-importer",
+            vec![DependencyStackEdge {
+                upstream: "block-format-bridge".to_string(),
+                downstream: "static-site-importer".to_string(),
+                package: "chubes4/block-format-bridge".to_string(),
+                update: Some("composer update chubes4/block-format-bridge".to_string()),
+                post_update: Vec::new(),
+                test: vec!["homeboy test --path . --extension wordpress".to_string()],
+            }],
+        ),
+    ];
+
+    let plan = deps::stack_plan_from_components("chubes4/html-to-blocks-converter", &components).unwrap();
+
+    assert_eq!(plan.step_count, 2);
+    assert_eq!(plan.steps[0].downstream, "block-format-bridge");
+    assert_eq!(plan.steps[0].package, "chubes4/html-to-blocks-converter");
+    assert_eq!(
+        plan.steps[0].update_command,
+        "homeboy deps update chubes4/html-to-blocks-converter --path /repo/block-format-bridge"
+    );
+    assert_eq!(plan.steps[0].post_update, vec!["composer build"]);
+    assert_eq!(plan.steps[1].downstream, "static-site-importer");
+    assert_eq!(
+        plan.steps[1].update_command,
+        "composer update chubes4/block-format-bridge"
+    );
+}
+
+#[test]
+fn stack_plan_dedupes_cycles_by_edge_identity() {
+    let components = vec![
+        stack_component(
+            "a",
+            "/repo/a",
+            vec![DependencyStackEdge {
+                upstream: "a".to_string(),
+                downstream: "b".to_string(),
+                package: "fixture/b".to_string(),
+                update: None,
+                post_update: Vec::new(),
+                test: Vec::new(),
+            }],
+        ),
+        stack_component(
+            "b",
+            "/repo/b",
+            vec![DependencyStackEdge {
+                upstream: "b".to_string(),
+                downstream: "a".to_string(),
+                package: "fixture/a".to_string(),
+                update: None,
+                post_update: Vec::new(),
+                test: Vec::new(),
+            }],
+        ),
+    ];
+
+    let plan = deps::stack_plan_from_components("a", &components).unwrap();
+
+    assert_eq!(plan.step_count, 2);
+    assert_eq!(plan.steps[0].downstream, "b");
+    assert_eq!(plan.steps[1].downstream, "a");
 }
 
 #[test]
