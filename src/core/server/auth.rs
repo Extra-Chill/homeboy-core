@@ -190,3 +190,98 @@ fn redact(value: &str) -> String {
     }
     "********".to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::project::VariableSource;
+
+    #[test]
+    fn test_redact() {
+        assert_eq!(redact("secret"), "********");
+        assert_eq!(redact(""), "");
+    }
+
+    #[test]
+    fn test_variable_available_config() {
+        let source = VariableSource {
+            source: "config".to_string(),
+            value: Some("value".to_string()),
+            env_var: None,
+        };
+
+        assert!(variable_available("project", "token", &source));
+    }
+
+    #[test]
+    fn test_variable_available_missing_config() {
+        let source = VariableSource {
+            source: "config".to_string(),
+            value: None,
+            env_var: None,
+        };
+
+        assert!(!variable_available("project", "token", &source));
+    }
+
+    #[test]
+    fn test_variable_available_unknown_source() {
+        let source = VariableSource {
+            source: "unknown".to_string(),
+            value: None,
+            env_var: None,
+        };
+
+        assert!(!variable_available("project", "token", &source));
+    }
+
+    #[test]
+    #[ignore]
+    fn test_login() {
+        let credentials = HashMap::new();
+        let _ = login("homeboy-auth-test", credentials);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_logout() {
+        let _ = logout("homeboy-auth-test");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_set() {
+        let result = set("homeboy-auth-test", "token", "secret-value").expect("store value");
+
+        assert!(result.stored);
+        assert_eq!(result.project_id, "homeboy-auth-test");
+        assert_eq!(result.variable, "token");
+        remove("homeboy-auth-test", "token").expect("cleanup value");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_get() {
+        set("homeboy-auth-test", "token", "secret-value").expect("store value");
+        let result = get("homeboy-auth-test", "token", true).expect("read value");
+
+        assert_eq!(result.value.as_deref(), Some("********"));
+        assert!(result.redacted);
+        remove("homeboy-auth-test", "token").expect("cleanup value");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_remove() {
+        set("homeboy-auth-test", "token", "secret-value").expect("store value");
+        let result = remove("homeboy-auth-test", "token").expect("remove value");
+
+        assert!(result.removed);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_status() {
+        let _ = status("homeboy-auth-test");
+    }
+}

@@ -18,7 +18,7 @@ fn keyring_error(e: keyring::Error) -> Error {
     .with_hint("Use source: \"env\" for CI/headless environments, or unlock/configure the OS keychain for local use")
 }
 
-pub fn account_key(project_id: &str, variable_name: &str) -> String {
+fn account_key(project_id: &str, variable_name: &str) -> String {
     format!("{}:{}", project_id, variable_name)
 }
 
@@ -92,6 +92,96 @@ mod tests {
     #[test]
     fn account_key_uses_project_and_variable() {
         assert_eq!(account_key("wpcloud-api", "token"), "wpcloud-api:token");
+    }
+
+    #[test]
+    fn test_missing_error() {
+        let err = missing_error("wpcloud-api", "token");
+
+        assert!(err.message.contains("token"));
+        assert!(err.message.contains("wpcloud-api"));
+        assert_eq!(err.hints.len(), 2);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_set() {
+        let project_id = "homeboy-keychain-test-set";
+        let variable_name = "token";
+
+        remove(project_id, variable_name).expect("clean old value");
+        set(project_id, variable_name, "secret-value").expect("store value");
+        assert_eq!(
+            get(project_id, variable_name)
+                .expect("read value")
+                .as_deref(),
+            Some("secret-value")
+        );
+        remove(project_id, variable_name).expect("cleanup value");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_get() {
+        let project_id = "homeboy-keychain-test-get";
+        let variable_name = "token";
+
+        remove(project_id, variable_name).expect("clean old value");
+        assert_eq!(
+            get(project_id, variable_name).expect("read missing value"),
+            None
+        );
+        set(project_id, variable_name, "secret-value").expect("store value");
+        assert_eq!(
+            get(project_id, variable_name)
+                .expect("read value")
+                .as_deref(),
+            Some("secret-value")
+        );
+        remove(project_id, variable_name).expect("cleanup value");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_remove() {
+        let project_id = "homeboy-keychain-test-remove";
+        let variable_name = "token";
+
+        set(project_id, variable_name, "secret-value").expect("store value");
+        remove(project_id, variable_name).expect("remove value");
+        assert_eq!(
+            get(project_id, variable_name).expect("read missing value"),
+            None
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn test_exists() {
+        let project_id = "homeboy-keychain-test-exists";
+        let variable_name = "token";
+
+        remove(project_id, variable_name).expect("clean old value");
+        assert!(!exists(project_id, variable_name));
+        set(project_id, variable_name, "secret-value").expect("store value");
+        assert!(exists(project_id, variable_name));
+        remove(project_id, variable_name).expect("cleanup value");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_remove_many() {
+        let project_id = "homeboy-keychain-test-remove-many";
+        let variables = vec!["token".to_string(), "refresh".to_string()];
+
+        set(project_id, "token", "secret-value").expect("store token");
+        set(project_id, "refresh", "refresh-value").expect("store refresh");
+        assert_eq!(
+            remove_many(project_id, &variables).expect("remove values"),
+            2
+        );
+        assert!(!exists(project_id, "token"));
+        assert!(!exists(project_id, "refresh"));
     }
 
     #[test]
