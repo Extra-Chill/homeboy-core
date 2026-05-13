@@ -568,6 +568,7 @@ fn git_ref(path: &str, git_ref: &str) -> Option<String> {
 fn build_audit_args(args: &ReviewArgs) -> audit::AuditArgs {
     audit::AuditArgs {
         comp: args.comp.clone(),
+        extension_override: args.extension_override.clone(),
         conventions: false,
         only: Vec::new(),
         exclude: Vec::new(),
