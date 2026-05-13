@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.174.1] - 2026-05-13
+
+### Fixed
+- accept key=value set paths
+
 ## [0.174.0] - 2026-05-12
 
 ### Added
