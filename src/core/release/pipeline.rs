@@ -24,7 +24,7 @@ use super::plan_steps::{build_preflight_steps, build_release_steps};
 use super::planning_changelog::{build_changelog_plan, generate_changelog_entries};
 use super::planning_policy::release_skip_plan;
 use super::planning_semver::{build_semver_recommendation, validate_release_version_floor};
-use super::planning_worktree::{filter_homeboy_managed, validate_release_worktree};
+use super::planning_worktree::validate_release_worktree;
 use super::types::{ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseStepResult};
 
 /// Load a component with portable config fallback when path_override is set.
@@ -497,54 +497,6 @@ fn is_runner_infrastructure_failure(output: &extension::RunnerOutput) -> bool {
     ]
     .iter()
     .any(|needle| combined.contains(needle))
-}
-
-/// Stage 0 fail-fast: refuse to run any release work when the working tree
-/// has unexplained dirty files.
-///
-/// At this stage we don't yet know the resolved changelog path or version-target
-/// paths (Stage 3 does the precise allow-list comparison), so we conservatively
-/// allow only homeboy-managed scratch space. If anything else is dirty we bail
-/// before lint/test/build can dump tens of thousands of lines and drown out
-/// the real error.
-pub(crate) fn validate_working_tree_fail_fast(component: &Component) -> Result<()> {
-    let uncommitted = crate::git::get_uncommitted_changes(&component.local_path)?;
-    if !uncommitted.has_changes {
-        return Ok(());
-    }
-
-    let all_files: Vec<String> = uncommitted
-        .staged
-        .iter()
-        .chain(uncommitted.unstaged.iter())
-        .chain(uncommitted.untracked.iter())
-        .cloned()
-        .collect();
-
-    let unexpected = filter_homeboy_managed(all_files);
-    if unexpected.is_empty() {
-        return Ok(());
-    }
-
-    Err(Error::validation_invalid_argument(
-        "working_tree",
-        "Uncommitted changes detected — refusing to release",
-        None,
-        Some(vec![
-            "Commit, stash, or discard changes before releasing".to_string(),
-            format!(
-                "Unexpected dirty files ({}): {}{}",
-                unexpected.len(),
-                unexpected
-                    .iter()
-                    .take(10)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                if unexpected.len() > 10 { ", …" } else { "" }
-            ),
-        ]),
-    ))
 }
 
 /// First-release bootstrap: if the component's configured `changelog_target`
