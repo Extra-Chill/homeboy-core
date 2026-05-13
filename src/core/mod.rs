@@ -27,6 +27,7 @@ pub mod project;
 pub mod refactor;
 pub mod release;
 pub mod rig;
+pub mod scope;
 pub mod self_status;
 pub mod server;
 pub mod stack;

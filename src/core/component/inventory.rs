@@ -534,31 +534,23 @@ pub fn rename_standalone_registration(old_id: &str, component: &Component) -> Re
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use tempfile::TempDir;
 
     // Tests that override `HOME` to redirect `paths::components()` are
     // inherently racy when run in parallel because environment variables
     // are process-wide. Rather than `#[ignore]`-ing them (which skips
     // coverage in default `cargo test` runs), we serialize every test in
-    // this module that touches `HOME` through `HOME_LOCK`. Acquire the
-    // guard via `with_home_override()` before any `set_var("HOME", ...)`
-    // and the guard's `Drop` restores the previous value — parallel test
-    // runners block on the mutex instead of racing on the env var.
+    // every module that touches `HOME` through `test_support::home_env_guard()`.
+    // Acquire the guard via `with_home_override()` before any `set_var("HOME", ...)`
+    // and the guard's `Drop` restores the previous value; parallel test runners
+    // block on the mutex instead of racing on the env var.
     //
-    // The lock is process-local to this module because `HOME` is not
-    // consulted from any other test module in the crate today. If that
-    // changes, the lock should move somewhere more shared (or the
-    // affected code paths should accept an injected config directory so
-    // no env override is needed at all).
-
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
     /// Serialized guard for tests that override `HOME`.
     ///
-    /// Acquires `HOME_LOCK`, snapshots the current `HOME`, and installs
-    /// the test-supplied override. When the guard is dropped the previous
-    /// `HOME` is restored and the lock is released.
+    /// Acquires the shared HOME env guard, snapshots the current `HOME`, and
+    /// installs the test-supplied override. When the guard is dropped the
+    /// previous `HOME` is restored and the lock is released.
     ///
     /// Panics on a poisoned mutex, which can only happen if a previous
     /// test panicked while holding the guard — in that case the test
@@ -579,9 +571,7 @@ mod tests {
     }
 
     fn with_home_override(new_home: &std::path::Path) -> HomeGuard {
-        let lock = HOME_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let lock = crate::test_support::home_env_guard();
         let previous = std::env::var("HOME").ok();
         unsafe { std::env::set_var("HOME", new_home.to_string_lossy().as_ref()) };
         HomeGuard {

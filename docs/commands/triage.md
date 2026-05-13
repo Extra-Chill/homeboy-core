@@ -5,6 +5,10 @@ GitHub access is read-only; each run also records a local observation in the
 Homeboy SQLite database so later runs can compare against the previous
 observation for the same target.
 
+`triage` is the reference consumer of Homeboy's shared scope model: it accepts
+component, project/target, fleet, rig, workspace, and direct path scopes, then
+normalizes each scope to component references before reading GitHub state.
+
 ## Synopsis
 
 ```sh
@@ -20,6 +24,9 @@ When no command is provided, `homeboy triage` defaults to `homeboy triage worksp
 - `fleet` — triage unique components used across a fleet
 - `rig` — triage components declared in a local rig spec
 - `workspace` — triage every configured project, rig, and registered component once per repo
+
+See [Scope model](../architecture/scope-model.md) for how these scopes relate to
+component-first, target-first, environment, and workspace commands.
 
 ## Useful filters
 
