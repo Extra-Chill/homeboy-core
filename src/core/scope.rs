@@ -464,7 +464,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scope_reports_kind_and_id() {
+    fn test_kind_name() {
         let scope = Scope::Rig("studio-combined".to_string());
 
         assert_eq!(scope.kind(), ScopeKind::Rig);
@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn command_scope_class_descriptions_are_stable() {
+    fn test_description() {
         assert!(CommandScopeClass::Component
             .description()
             .contains("component IDs"));
@@ -500,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn path_component_records_preserve_portable_config() {
+    fn test_resolve_scope_component_records() {
         let tmp = tempfile::TempDir::new().expect("checkout tempdir");
         std::fs::create_dir(tmp.path().join(".git")).expect("git marker");
         std::fs::write(
@@ -536,5 +536,41 @@ mod tests {
             .as_ref()
             .is_some_and(|extensions| extensions.contains_key("rust")));
         assert!(records[0].version_targets.is_some());
+    }
+
+    #[test]
+    fn test_resolve_scope_components() {
+        let tmp = tempfile::TempDir::new().expect("checkout tempdir");
+        std::fs::create_dir(tmp.path().join(".git")).expect("git marker");
+
+        let refs = resolve_scope_components(&Scope::Path {
+            path: tmp.path().to_string_lossy().to_string(),
+            component_id: Some("explicit-component".to_string()),
+        })
+        .expect("path scope refs");
+
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].component_id, "explicit-component");
+        assert!(refs[0]
+            .sources
+            .iter()
+            .any(|source| source.starts_with("path:")));
+    }
+
+    #[test]
+    fn test_with_priority_labels() {
+        let component_ref = ScopeComponentRef::new(
+            "component".to_string(),
+            "/tmp/component".to_string(),
+            None,
+            None,
+            "component:component".to_string(),
+        )
+        .with_priority_labels(Some(vec!["urgent".to_string()]));
+
+        assert_eq!(
+            component_ref.priority_labels,
+            Some(vec!["urgent".to_string()])
+        );
     }
 }
