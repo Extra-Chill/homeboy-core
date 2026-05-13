@@ -6,7 +6,8 @@
 use crate::error::{Error, ErrorCode, Result};
 use crate::extension::HttpMethod;
 use crate::project::{ApiConfig, AuthConfig, AuthFlowConfig, VariableSource};
-use reqwest::blocking::{Client, RequestBuilder, Response};
+use reqwest::blocking::{Client, ClientBuilder, RequestBuilder, Response};
+use reqwest::Proxy;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -57,8 +58,10 @@ impl ApiClient {
             return Err(config_error("API base URL is not configured"));
         }
 
+        let client = build_client(api_config)?;
+
         Ok(Self {
-            client: Client::new(),
+            client,
             base_url: api_config.base_url.clone(),
             project_id: project_id.to_string(),
             auth: api_config.auth.clone(),
@@ -71,6 +74,7 @@ impl ApiClient {
         method: HttpMethod,
         endpoint: &str,
         body: Option<&Value>,
+        body_format: BodyFormat,
     ) -> Result<Value> {
         let url = format!("{}{}", self.base_url, endpoint);
 
@@ -83,7 +87,10 @@ impl ApiClient {
         };
 
         let request = if let Some(body) = body {
-            request.json(body)
+            match body_format {
+                BodyFormat::Json => request.json(body),
+                BodyFormat::Form => request.form(&form_fields(body)?),
+            }
         } else {
             request
         };
@@ -101,27 +108,42 @@ impl ApiClient {
 
     /// Makes a GET request.
     pub fn get(&self, endpoint: &str) -> Result<Value> {
-        self.execute_request(HttpMethod::Get, endpoint, None)
+        self.execute_request(HttpMethod::Get, endpoint, None, BodyFormat::Json)
     }
 
     /// Makes a POST request with JSON body.
     pub fn post(&self, endpoint: &str, body: &Value) -> Result<Value> {
-        self.execute_request(HttpMethod::Post, endpoint, Some(body))
+        self.execute_request(HttpMethod::Post, endpoint, Some(body), BodyFormat::Json)
+    }
+
+    /// Makes a POST request with form fields.
+    pub fn post_form(&self, endpoint: &str, body: &Value) -> Result<Value> {
+        self.execute_request(HttpMethod::Post, endpoint, Some(body), BodyFormat::Form)
     }
 
     /// Makes a PUT request with JSON body.
     pub fn put(&self, endpoint: &str, body: &Value) -> Result<Value> {
-        self.execute_request(HttpMethod::Put, endpoint, Some(body))
+        self.execute_request(HttpMethod::Put, endpoint, Some(body), BodyFormat::Json)
+    }
+
+    /// Makes a PUT request with form fields.
+    pub fn put_form(&self, endpoint: &str, body: &Value) -> Result<Value> {
+        self.execute_request(HttpMethod::Put, endpoint, Some(body), BodyFormat::Form)
     }
 
     /// Makes a PATCH request with JSON body.
     pub fn patch(&self, endpoint: &str, body: &Value) -> Result<Value> {
-        self.execute_request(HttpMethod::Patch, endpoint, Some(body))
+        self.execute_request(HttpMethod::Patch, endpoint, Some(body), BodyFormat::Json)
+    }
+
+    /// Makes a PATCH request with form fields.
+    pub fn patch_form(&self, endpoint: &str, body: &Value) -> Result<Value> {
+        self.execute_request(HttpMethod::Patch, endpoint, Some(body), BodyFormat::Form)
     }
 
     /// Makes a DELETE request.
     pub fn delete(&self, endpoint: &str) -> Result<Value> {
-        self.execute_request(HttpMethod::Delete, endpoint, None)
+        self.execute_request(HttpMethod::Delete, endpoint, None, BodyFormat::Json)
     }
 
     /// Makes a POST request without auth (for login flows).
@@ -227,6 +249,64 @@ impl ApiClient {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyFormat {
+    Json,
+    Form,
+}
+
+fn form_fields(body: &Value) -> Result<Vec<(String, String)>> {
+    if let Some(pairs) = body.as_array() {
+        return pairs
+            .iter()
+            .map(|pair| {
+                let pair = pair.as_array().ok_or_else(|| {
+                    config_error("Form body array entries must be [key, value] pairs")
+                })?;
+                if pair.len() != 2 {
+                    return Err(config_error(
+                        "Form body array entries must be [key, value] pairs",
+                    ));
+                }
+                let key = pair[0]
+                    .as_str()
+                    .ok_or_else(|| config_error("Form field key must be a string"))?;
+                let value = pair[1]
+                    .as_str()
+                    .ok_or_else(|| config_error("Form field value must be a string"))?;
+                Ok((key.to_string(), value.to_string()))
+            })
+            .collect();
+    }
+
+    let object = body.as_object().ok_or_else(|| {
+        config_error("Form body must be a JSON object or an array of [key, value] pairs")
+    })?;
+
+    object
+        .iter()
+        .map(|(key, value)| {
+            value
+                .as_str()
+                .map(|value| (key.clone(), value.to_string()))
+                .ok_or_else(|| config_error(format!("Form field '{}' must be a string", key)))
+        })
+        .collect()
+}
+
+fn build_client(api_config: &ApiConfig) -> Result<Client> {
+    let mut builder = ClientBuilder::new();
+
+    if let Some(proxy_url) = api_config.proxy_url.as_deref() {
+        builder =
+            builder.proxy(Proxy::all(proxy_url).map_err(|e| {
+                config_error(format!("Invalid API proxy URL '{}': {}", proxy_url, e))
+            })?);
+    }
+
+    builder.build().map_err(http_error)
+}
+
 /// Resolves a variable from its source.
 fn resolve_variable(_project_id: &str, var_name: &str, source: &VariableSource) -> Result<String> {
     match source.source.as_str() {
@@ -285,4 +365,53 @@ fn parse_json_response(response: Response) -> Result<Value> {
     }
 
     serde_json::from_str(&body).map_err(|e| parse_error(format!("Invalid JSON response: {}", e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_client_with_socks_proxy() {
+        let config = ApiConfig {
+            enabled: true,
+            base_url: "https://atomic-api.wordpress.com/api/v1.0".to_string(),
+            proxy_url: Some("socks5://127.0.0.1:8080".to_string()),
+            auth: None,
+        };
+
+        build_client(&config).expect("socks proxy should be accepted");
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_url() {
+        let config = ApiConfig {
+            enabled: true,
+            base_url: "https://example.com".to_string(),
+            proxy_url: Some("not a proxy".to_string()),
+            auth: None,
+        };
+
+        let err = build_client(&config).expect_err("invalid proxy should fail");
+        assert!(err.to_string().contains("Invalid API proxy URL"));
+    }
+
+    #[test]
+    fn form_fields_preserve_duplicate_keys() {
+        let fields = form_fields(&serde_json::json!([
+            ["provision[]", "base"],
+            ["provision[]", "install-wp"],
+            ["provision[]", "dereference"]
+        ]))
+        .expect("form fields");
+
+        assert_eq!(
+            fields,
+            vec![
+                ("provision[]".to_string(), "base".to_string()),
+                ("provision[]".to_string(), "install-wp".to_string()),
+                ("provision[]".to_string(), "dereference".to_string()),
+            ]
+        );
+    }
 }

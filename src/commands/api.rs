@@ -26,6 +26,9 @@ enum ApiCommand {
         /// JSON body
         #[arg(long)]
         body: Option<String>,
+        /// Form field as key=value. May be repeated.
+        #[arg(long)]
+        form: Vec<String>,
     },
     /// Make a PUT request
     Put {
@@ -34,6 +37,9 @@ enum ApiCommand {
         /// JSON body
         #[arg(long)]
         body: Option<String>,
+        /// Form field as key=value. May be repeated.
+        #[arg(long)]
+        form: Vec<String>,
     },
     /// Make a PATCH request
     Patch {
@@ -42,6 +48,9 @@ enum ApiCommand {
         /// JSON body
         #[arg(long)]
         body: Option<String>,
+        /// Form field as key=value. May be repeated.
+        #[arg(long)]
+        form: Vec<String>,
     },
     /// Make a DELETE request
     Delete {
@@ -56,22 +65,69 @@ pub fn run(args: ApiArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<ap
 }
 
 fn build_api_json(args: &ApiArgs) -> String {
-    let (method, endpoint, body) = match &args.command {
-        ApiCommand::Get { endpoint } => ("GET", endpoint.clone(), None),
-        ApiCommand::Post { endpoint, body } => ("POST", endpoint.clone(), body.clone()),
-        ApiCommand::Put { endpoint, body } => ("PUT", endpoint.clone(), body.clone()),
-        ApiCommand::Patch { endpoint, body } => ("PATCH", endpoint.clone(), body.clone()),
-        ApiCommand::Delete { endpoint } => ("DELETE", endpoint.clone(), None),
+    let (method, endpoint, body, body_format) = match &args.command {
+        ApiCommand::Get { endpoint } => ("GET", endpoint.clone(), None, "json"),
+        ApiCommand::Post {
+            endpoint,
+            body,
+            form,
+        } => (
+            "POST",
+            endpoint.clone(),
+            build_body(body, form),
+            body_format(form),
+        ),
+        ApiCommand::Put {
+            endpoint,
+            body,
+            form,
+        } => (
+            "PUT",
+            endpoint.clone(),
+            build_body(body, form),
+            body_format(form),
+        ),
+        ApiCommand::Patch {
+            endpoint,
+            body,
+            form,
+        } => (
+            "PATCH",
+            endpoint.clone(),
+            build_body(body, form),
+            body_format(form),
+        ),
+        ApiCommand::Delete { endpoint } => ("DELETE", endpoint.clone(), None, "json"),
     };
-
-    let body_value: Option<serde_json::Value> =
-        body.as_ref().and_then(|b| serde_json::from_str(b).ok());
 
     serde_json::json!({
         "projectId": args.project_id,
         "method": method,
         "endpoint": endpoint,
-        "body": body_value,
+        "body": body,
+        "bodyFormat": body_format,
     })
     .to_string()
+}
+
+fn build_body(body: &Option<String>, form: &[String]) -> Option<serde_json::Value> {
+    if !form.is_empty() {
+        let mut pairs = Vec::new();
+        for item in form {
+            if let Some((key, value)) = item.split_once('=') {
+                pairs.push(serde_json::json!([key, value]));
+            }
+        }
+        return Some(serde_json::Value::Array(pairs));
+    }
+
+    body.as_ref().and_then(|b| serde_json::from_str(b).ok())
+}
+
+fn body_format(form: &[String]) -> &'static str {
+    if form.is_empty() {
+        "json"
+    } else {
+        "form"
+    }
 }

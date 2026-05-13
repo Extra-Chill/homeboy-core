@@ -308,6 +308,8 @@ pub struct ApiConfig {
     #[serde(default)]
     pub base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthConfig>,
 }
 
