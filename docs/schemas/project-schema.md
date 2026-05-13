@@ -49,6 +49,7 @@ Project configuration defines deployable environments stored in `projects/<id>.j
   - **`base_url`** (string): API base URL
   - **`enabled`** (boolean): Whether API client is enabled
   - **`proxy_url`** (string): Optional HTTP/SOCKS proxy URL for API requests, e.g. `socks5://127.0.0.1:8080`
+  - **`auth`** (object): Optional API auth configuration with a header template and variables sourced from `keychain`, `env`, or `config`
   - API POST/PUT/PATCH calls can send form data with `homeboy api <project> post <endpoint> --form key=value`.
 - **`database`** (object): Database connection settings
   - **`host`** (string): Database host
@@ -109,7 +110,15 @@ Project configuration defines deployable environments stored in `projects/<id>.j
   "api": {
     "base_url": "https://extrachill.com/wp-json",
     "enabled": true,
-    "proxy_url": "socks5://127.0.0.1:8080"
+    "proxy_url": "socks5://127.0.0.1:8080",
+    "auth": {
+      "header": "Authorization: Bearer {{token}}",
+      "variables": {
+        "token": {
+          "source": "keychain"
+        }
+      }
+    }
   },
   "database": {
     "host": "localhost",
