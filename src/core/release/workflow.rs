@@ -22,10 +22,6 @@ pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, 
         },
     )?;
 
-    if !input.dry_run {
-        super::pipeline::validate_default_branch(&component)?;
-    }
-
     let monorepo = git::MonorepoContext::detect(&component.local_path, &input.component_id);
     let (auto_bump_type, releasable_count) =
         match resolve_bump(&component.local_path, monorepo.as_ref())? {
