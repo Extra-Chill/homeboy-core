@@ -31,10 +31,13 @@ homeboy server show <server_id>
 ```sh
 homeboy server set <server_id> --json <JSON>
 homeboy server set <server_id> '<JSON>'
+homeboy server set <server_id> auth.mode=key_plus_password_controlmaster
 homeboy server set --json <JSON>   # server_id may be provided in JSON body
 ```
 
 Updates a server by merging a JSON object into `servers/<id>.json`.
+
+`key=value` arguments support dotted paths, so `auth.mode=value` is equivalent to `{"auth":{"mode":"value"}}`.
 
 Use `null` in JSON to clear a field (for example, `{"identity_file": null}`).
 

@@ -51,7 +51,8 @@ pub struct GlobalArgs {}
 /// Shared arguments for dynamic set commands.
 ///
 /// Allows arbitrary `--key value` pairs that map directly to JSON keys.
-/// Flag names become JSON keys with no case conversion.
+/// Also accepts positional `key=value` pairs for copy-pasteable remediation
+/// commands. Flag names become JSON keys with no case conversion.
 ///
 /// # Combining --json with dynamic flags
 ///
@@ -125,9 +126,9 @@ impl DynamicSetArgs {
             })?;
             return Ok(Some(decoded_str));
         }
-        // If spec looks like a flag (--key), it was misrouted — not a JSON spec
+        // If spec looks like a dynamic set argument, it was misrouted — not a JSON spec
         if let Some(ref s) = self.spec {
-            if s.starts_with("--") {
+            if is_dynamic_set_arg(s) {
                 return Ok(self.json.clone());
             }
         }
@@ -138,11 +139,11 @@ impl DynamicSetArgs {
     /// that was misrouted into the `spec` positional by clap.
     ///
     /// When `--` separates trailing args, clap assigns the first positional
-    /// after the ID to `spec`. If that value starts with `--`, it's a flag
-    /// key that belongs with `extra`.
+    /// after the ID to `spec`. If that value is a dynamic set argument, it
+    /// belongs with `extra`.
     pub fn effective_extra(&self) -> Vec<String> {
         match &self.spec {
-            Some(s) if s.starts_with("--") => {
+            Some(s) if is_dynamic_set_arg(s) => {
                 let mut combined = vec![s.clone()];
                 combined.extend(self.extra.iter().cloned());
                 combined
@@ -152,17 +153,23 @@ impl DynamicSetArgs {
     }
 }
 
+fn is_dynamic_set_arg(arg: &str) -> bool {
+    arg.starts_with("--") || parse_key_value_arg(arg).is_some()
+}
+
 // ============================================================================
 // JSON Input Parsing (CLI layer)
 // ============================================================================
 
-/// Parse --key value pairs into a JSON object.
+/// Parse --key value and key=value pairs into a JSON object.
 fn parse_kv_flags(extra: &[String]) -> homeboy::Result<Value> {
     let mut obj = Map::new();
     let mut iter = extra.iter().peekable();
 
     while let Some(arg) = iter.next() {
-        if let Some(key) = arg.strip_prefix("--") {
+        if let Some((key, value)) = parse_key_value_arg(arg) {
+            insert_path_value(&mut obj, &key, parse_value(&value));
+        } else if let Some(key) = arg.strip_prefix("--") {
             let value = iter.next().ok_or_else(|| {
                 homeboy::Error::validation_invalid_argument(
                     key,
@@ -172,11 +179,54 @@ fn parse_kv_flags(extra: &[String]) -> homeboy::Result<Value> {
                 )
             })?;
             let parsed = parse_value(value);
-            obj.insert(key.to_string(), parsed);
+            insert_path_value(&mut obj, key, parsed);
         }
     }
 
     Ok(Value::Object(obj))
+}
+
+fn parse_key_value_arg(arg: &str) -> Option<(String, String)> {
+    let (key, value) = arg.split_once('=')?;
+    if key.is_empty() || key.starts_with('-') {
+        return None;
+    }
+    Some((key.to_string(), value.to_string()))
+}
+
+fn insert_path_value(obj: &mut Map<String, Value>, key: &str, value: Value) {
+    let mut parts = key.split('.').filter(|part| !part.is_empty()).peekable();
+    let Some(first) = parts.next() else {
+        return;
+    };
+
+    if parts.peek().is_none() {
+        obj.insert(first.to_string(), value);
+        return;
+    }
+
+    let mut current = obj
+        .entry(first.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            if let Value::Object(map) = current {
+                map.insert(part.to_string(), value);
+            }
+            return;
+        }
+
+        if !current.is_object() {
+            *current = Value::Object(Map::new());
+        }
+        let Value::Object(map) = current else {
+            return;
+        };
+        current = map
+            .entry(part.to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+    }
 }
 
 /// Parse a string value into appropriate JSON type.
@@ -429,5 +479,44 @@ pub fn run_json(
             );
             crate::commands::utils::response::map_cmd_result_to_json::<serde_json::Value>(Err(err))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn merge_dynamic_args_accepts_positional_key_value_pair() {
+        let args = DynamicSetArgs {
+            id: Some("sandbox".to_string()),
+            spec: Some("auth.mode=key_plus_password_controlmaster".to_string()),
+            ..Default::default()
+        };
+
+        let merged = merge_dynamic_args(&args).unwrap().unwrap();
+
+        assert_eq!(
+            merged,
+            json!({"auth": {"mode": "key_plus_password_controlmaster"}})
+        );
+    }
+
+    #[test]
+    fn merge_dynamic_args_accepts_dotted_flag_path() {
+        let args = DynamicSetArgs {
+            id: Some("sandbox".to_string()),
+            spec: Some("--auth.mode".to_string()),
+            extra: vec!["key_plus_password_controlmaster".to_string()],
+            ..Default::default()
+        };
+
+        let merged = merge_dynamic_args(&args).unwrap().unwrap();
+
+        assert_eq!(
+            merged,
+            json!({"auth": {"mode": "key_plus_password_controlmaster"}})
+        );
     }
 }
