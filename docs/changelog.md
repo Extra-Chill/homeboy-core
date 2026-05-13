@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.179.2] - 2026-05-13
+
+### Changed
+- move release worktree preflight policy
+
+### Fixed
+- accept audit extension override
+
 ## [0.179.1] - 2026-05-13
 
 ### Changed
