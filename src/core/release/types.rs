@@ -199,6 +199,12 @@ pub struct ReleaseBumpPolicyOptions {
     /// Permit a keyword bump lower than the commit-derived recommendation.
     #[serde(default)]
     pub force_lower_bump: bool,
+    /// Permit a release when no releasable commits were detected.
+    #[serde(default)]
+    pub force_empty_release: bool,
+    /// Require an explicit `--bump major` for stable major releases.
+    #[serde(default)]
+    pub require_explicit_major: bool,
 }
 
 impl ReleaseBumpPolicyOptions {

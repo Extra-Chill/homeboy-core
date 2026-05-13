@@ -702,6 +702,7 @@ mod tests {
             bump_type: "patch".to_string(),
             bump_policy: ReleaseBumpPolicyOptions {
                 force_lower_bump: true,
+                ..Default::default()
             },
             ..Default::default()
         };
