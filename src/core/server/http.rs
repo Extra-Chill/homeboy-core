@@ -370,6 +370,96 @@ fn parse_json_response(response: Response) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::{AuthConfig, AuthFlowConfig};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn test_client(base_url: String) -> ApiClient {
+        ApiClient::new(
+            "test-project",
+            &ApiConfig {
+                enabled: true,
+                base_url,
+                proxy_url: None,
+                auth: None,
+            },
+        )
+        .expect("api client")
+    }
+
+    fn test_client_with_auth(base_url: String, auth: AuthConfig) -> ApiClient {
+        ApiClient::new(
+            "test-project",
+            &ApiConfig {
+                enabled: true,
+                base_url,
+                proxy_url: None,
+                auth: Some(auth),
+            },
+        )
+        .expect("api client")
+    }
+
+    fn with_test_server<F>(assert_request: F) -> String
+    where
+        F: FnOnce(&str) + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            loop {
+                let read = stream.read(&mut temp).expect("read request");
+                if read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&temp[..read]);
+
+                let request = String::from_utf8_lossy(&buffer);
+                if let Some(header_end) = request.find("\r\n\r\n") {
+                    let headers = &request[..header_end];
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("Content-Length: ")
+                                .and_then(|value| value.parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let body_len = buffer.len().saturating_sub(header_end + 4);
+                    if body_len >= content_length {
+                        break;
+                    }
+                }
+            }
+
+            let request = String::from_utf8_lossy(&buffer).to_string();
+            assert_request(&request);
+            let response = concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "Content-Type: application/json\r\n",
+                "Content-Length: 11\r\n",
+                "Connection: close\r\n\r\n",
+                "{\"ok\":true}"
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+
+        format!("http://{}", addr)
+    }
+
+    fn assert_method_path(request: &str, method: &str, path: &str) {
+        assert!(
+            request.starts_with(&format!("{} {} HTTP/1.1", method, path)),
+            "unexpected request: {}",
+            request
+        );
+    }
 
     #[test]
     fn builds_client_with_socks_proxy() {
@@ -413,5 +503,149 @@ mod tests {
                 ("provision[]".to_string(), "dereference".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn test_get() {
+        let base_url = with_test_server(|request| assert_method_path(request, "GET", "/items"));
+        let response = test_client(base_url).get("/items").expect("get response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_post() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "POST", "/items");
+            assert!(request.contains("content-type: application/json"));
+            assert!(request.contains("\"name\":\"soup\""));
+        });
+        let response = test_client(base_url)
+            .post("/items", &serde_json::json!({ "name": "soup" }))
+            .expect("post response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_post_form() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "POST", "/items");
+            assert!(request.contains("content-type: application/x-www-form-urlencoded"));
+            assert!(request.contains("name=soup"));
+        });
+        let response = test_client(base_url)
+            .post_form("/items", &serde_json::json!([["name", "soup"]]))
+            .expect("post form response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_post_unauthenticated() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "POST", "/login");
+            assert!(request.contains("\"username\":\"chris\""));
+        });
+        let response = test_client(base_url)
+            .post_unauthenticated("/login", &serde_json::json!({ "username": "chris" }))
+            .expect("unauthenticated post response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_put() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "PUT", "/items/1");
+            assert!(request.contains("\"name\":\"stew\""));
+        });
+        let response = test_client(base_url)
+            .put("/items/1", &serde_json::json!({ "name": "stew" }))
+            .expect("put response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_put_form() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "PUT", "/items/1");
+            assert!(request.contains("name=stew"));
+        });
+        let response = test_client(base_url)
+            .put_form("/items/1", &serde_json::json!([["name", "stew"]]))
+            .expect("put form response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_patch() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "PATCH", "/items/1");
+            assert!(request.contains("\"name\":\"bisque\""));
+        });
+        let response = test_client(base_url)
+            .patch("/items/1", &serde_json::json!({ "name": "bisque" }))
+            .expect("patch response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_patch_form() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "PATCH", "/items/1");
+            assert!(request.contains("name=bisque"));
+        });
+        let response = test_client(base_url)
+            .patch_form("/items/1", &serde_json::json!([["name", "bisque"]]))
+            .expect("patch form response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_delete() {
+        let base_url =
+            with_test_server(|request| assert_method_path(request, "DELETE", "/items/1"));
+        let response = test_client(base_url)
+            .delete("/items/1")
+            .expect("delete response");
+        assert_eq!(response["ok"], true);
+    }
+
+    #[test]
+    fn test_login() {
+        let base_url = with_test_server(|request| {
+            assert_method_path(request, "POST", "/login");
+            assert!(request.contains("\"username\":\"chris\""));
+        });
+        let client = test_client_with_auth(
+            base_url,
+            AuthConfig {
+                header: "Auth: {{token}}".to_string(),
+                variables: HashMap::new(),
+                login: Some(AuthFlowConfig {
+                    endpoint: "/login".to_string(),
+                    method: "POST".to_string(),
+                    body: HashMap::from([("username".to_string(), "{{username}}".to_string())]),
+                    store: HashMap::new(),
+                }),
+                refresh: None,
+            },
+        );
+
+        client
+            .login(&HashMap::from([(
+                "username".to_string(),
+                "chris".to_string(),
+            )]))
+            .expect("login response");
+    }
+
+    #[test]
+    fn test_logout() {
+        let client = test_client("http://127.0.0.1:1".to_string());
+        client.logout().expect("logout is a no-op");
+    }
+
+    #[test]
+    fn test_refresh_if_needed() {
+        let client = test_client("http://127.0.0.1:1".to_string());
+        assert!(!client.refresh_if_needed().expect("refresh is unsupported"));
     }
 }
