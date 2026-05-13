@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::http::ApiClient;
+use super::http::{ApiClient, BodyFormat};
 use crate::error::{Error, Result};
 use crate::project;
 
@@ -38,8 +38,17 @@ pub fn run(input: &str) -> Result<(ApiOutput, i32)> {
 
     let response = match parsed.method.to_uppercase().as_str() {
         "GET" => client.get(&parsed.endpoint)?,
+        "POST" if parsed.body_format == BodyFormat::Form => {
+            client.post_form(&parsed.endpoint, &body)?
+        }
         "POST" => client.post(&parsed.endpoint, &body)?,
+        "PUT" if parsed.body_format == BodyFormat::Form => {
+            client.put_form(&parsed.endpoint, &body)?
+        }
         "PUT" => client.put(&parsed.endpoint, &body)?,
+        "PATCH" if parsed.body_format == BodyFormat::Form => {
+            client.patch_form(&parsed.endpoint, &body)?
+        }
         "PATCH" => client.patch(&parsed.endpoint, &body)?,
         "DELETE" => client.delete(&parsed.endpoint)?,
         _ => {
@@ -72,8 +81,34 @@ pub fn run(input: &str) -> Result<(ApiOutput, i32)> {
 #[derive(Debug, Deserialize)]
 
 struct ApiInput {
+    #[serde(rename = "projectId")]
     project_id: String,
     method: String,
     endpoint: String,
     body: Option<Value>,
+    #[serde(default, rename = "bodyFormat")]
+    body_format: BodyFormat,
+}
+
+impl Default for BodyFormat {
+    fn default() -> Self {
+        Self::Json
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BodyFormat {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "" | "json" => Ok(Self::Json),
+            "form" => Ok(Self::Form),
+            other => Err(serde::de::Error::custom(format!(
+                "invalid bodyFormat '{}'",
+                other
+            ))),
+        }
+    }
 }
