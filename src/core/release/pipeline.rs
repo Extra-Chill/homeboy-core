@@ -564,7 +564,7 @@ pub(super) fn resolve_tag_and_commits(
 /// Ensures the release commit is created on top of the actual remote HEAD,
 /// preventing detached release tags when PRs merge during a CI quality gate.
 /// Returns Err if the branch has diverged and can't be fast-forwarded.
-fn validate_remote_sync(component: &Component) -> Result<()> {
+pub(crate) fn validate_remote_sync(component: &Component) -> Result<()> {
     let synced = git::fetch_and_fast_forward(&component.local_path)?;
 
     if let Some(n) = synced {
