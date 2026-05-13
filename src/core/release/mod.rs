@@ -7,6 +7,7 @@ mod pipeline;
 mod pipeline_capabilities;
 mod pipeline_summary;
 mod plan_steps;
+mod planning_changelog;
 mod planning_policy;
 mod planning_semver;
 mod types;
