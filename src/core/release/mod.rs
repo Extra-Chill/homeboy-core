@@ -10,6 +10,7 @@ mod plan_steps;
 mod planning_changelog;
 mod planning_policy;
 mod planning_semver;
+mod planning_worktree;
 mod types;
 mod utils;
 pub mod version;
