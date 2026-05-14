@@ -298,7 +298,7 @@ fn run_changelog_bootstrap_preflight(
     step: &ReleasePlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
-    match super::pipeline::ensure_changelog_initialized(context.component) {
+    match super::planning_changelog::ensure_changelog_initialized(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
             step_type: step.step_type.clone(),
