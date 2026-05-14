@@ -334,6 +334,75 @@ mod tests {
     }
 
     #[test]
+    fn test_profile_scope() {
+        assert_eq!(profile_scope("matticspace"), "profile:matticspace");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_set_profile_basic() {
+        let profile = "homeboy-auth-profile-basic-test";
+        let _ = remove_profile(profile);
+
+        let result = set_profile_basic(profile, "user", "secret").expect("store basic profile");
+
+        assert!(result.stored);
+        assert_eq!(result.kind, "basic");
+        remove_profile(profile).expect("cleanup profile");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_set_profile_bearer() {
+        let profile = "homeboy-auth-profile-bearer-test";
+        let _ = remove_profile(profile);
+
+        let result = set_profile_bearer(profile, "token").expect("store bearer profile");
+
+        assert!(result.stored);
+        assert_eq!(result.kind, "bearer");
+        remove_profile(profile).expect("cleanup profile");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_profile_status() {
+        let profile = "homeboy-auth-profile-status-test";
+        let _ = remove_profile(profile);
+        set_profile_bearer(profile, "token").expect("store bearer profile");
+
+        let result = profile_status(profile).expect("profile status");
+
+        assert!(result.available);
+        assert_eq!(result.kind.as_deref(), Some("bearer"));
+        remove_profile(profile).expect("cleanup profile");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_profile_authorization_header() {
+        let profile = "homeboy-auth-profile-header-test";
+        let _ = remove_profile(profile);
+        set_profile_basic(profile, "user", "secret").expect("store basic profile");
+
+        let header = profile_authorization_header(profile).expect("authorization header");
+
+        assert_eq!(header, "Basic dXNlcjpzZWNyZXQ=");
+        remove_profile(profile).expect("cleanup profile");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_remove_profile() {
+        let profile = "homeboy-auth-profile-remove-test";
+        set_profile_bearer(profile, "token").expect("store bearer profile");
+
+        let result = remove_profile(profile).expect("remove profile");
+
+        assert!(result.removed > 0);
+    }
+
+    #[test]
     fn test_variable_available_config() {
         let source = VariableSource {
             source: "config".to_string(),

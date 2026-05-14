@@ -459,6 +459,12 @@ mod tests {
     }
 
     #[test]
+    fn test_build_client_with_proxy() {
+        build_client_with_proxy(Some("socks5://127.0.0.1:8080"))
+            .expect("socks proxy should be accepted");
+    }
+
+    #[test]
     fn builds_client_with_socks_proxy() {
         let config = ApiConfig {
             enabled: true,
