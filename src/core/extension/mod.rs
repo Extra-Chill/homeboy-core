@@ -37,9 +37,10 @@ pub use manifest::{
     DiscoveryConfig, DiscoveryMarkerConfig, DocTarget, ExecutableCapability, ExtensionManifest,
     FeatureContextRule, FileContainsCondition, HttpMethod, InputConfig, LintChangedFileRoute,
     LintConfig, OutputConfig, OutputSchema, PlatformCapability, ProvidesConfig,
-    RemotePathInferenceRule, RequirementsConfig, RuntimeConfig, RuntimeRequirementsConfig,
-    ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig, StructuredSidecarDeclaration,
-    TestConfig, TestDriftConfig, TestMappingConfig, TraceConfig, VersionPatternConfig,
+    RemotePathInferenceRule, RemotePathRootRule, RequirementsConfig, RuntimeConfig,
+    RuntimeRequirementsConfig, ScriptsConfig, SelectOption, SettingConfig, SinceTagConfig,
+    StructuredSidecarDeclaration, TestConfig, TestDriftConfig, TestMappingConfig, TraceConfig,
+    VersionPatternConfig,
 };
 
 // Re-export version types

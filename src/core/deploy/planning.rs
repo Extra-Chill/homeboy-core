@@ -12,7 +12,7 @@ use crate::version;
 use super::types::{
     ComponentStatus, DeployConfig, ReleaseState, ReleaseStateBuckets, ReleaseStateStatus,
 };
-use super::version_overrides::fetch_remote_versions;
+use super::version_overrides::fetch_remote_versions_for_project;
 
 pub(super) fn calculate_directory_size(path: &Path) -> std::io::Result<u64> {
     let mut total_size = 0;
@@ -62,6 +62,7 @@ pub(super) fn plan_components(
     config: &DeployConfig,
     all_components: &[Component],
     skipped_component_ids: &[String],
+    project: &Project,
     base_path: &str,
     client: &SshClient,
 ) -> Result<Vec<Component>> {
@@ -130,7 +131,8 @@ pub(super) fn plan_components(
     }
 
     if config.outdated {
-        let remote_versions = fetch_remote_versions(all_components, base_path, client);
+        let remote_versions =
+            fetch_remote_versions_for_project(all_components, Some(project), base_path, client);
 
         let selected: Vec<Component> = all_components
             .iter()

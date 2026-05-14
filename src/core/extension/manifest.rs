@@ -53,6 +53,8 @@ pub struct DeployCapability {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_path_inference: Vec<RemotePathInferenceRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_roots: Vec<RemotePathRootRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub version_patterns: Vec<VersionPatternConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since_tag: Option<SinceTagConfig>,
@@ -855,6 +857,16 @@ pub struct DeployOverride {
 pub struct RemotePathInferenceRule {
     pub when_file_contains: FileContainsCondition,
     pub remote_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemotePathRootRule {
+    pub path_prefix: String,
+    pub root: String,
+    #[serde(default)]
+    pub strip_prefix: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detect_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

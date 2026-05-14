@@ -88,6 +88,8 @@ pub struct Project {
     pub server_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_path: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub path_roots: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table_prefix: Option<String>,
 
