@@ -20,7 +20,7 @@ fn not_found_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::ExtensionNotFound, msg, Value::Null)
 }
 
-fn http_error(e: reqwest::Error) -> Error {
+pub(crate) fn http_error(e: reqwest::Error) -> Error {
     Error::new(
         ErrorCode::RemoteCommandFailed,
         format!("HTTP request failed: {}", e),

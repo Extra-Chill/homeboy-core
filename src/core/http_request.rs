@@ -1,10 +1,10 @@
-use crate::error::{Error, ErrorCode, Result};
-use crate::server::{auth, http};
+use crate::error::{Error, Result};
+use crate::server::{auth_profiles, http};
 use reqwest::blocking::Response;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
@@ -52,7 +52,7 @@ pub fn run(input: HttpRequestInput) -> Result<HttpRequestOutput> {
         request = request.form(&input.form_body);
     }
 
-    let response = request.send().map_err(http_error)?;
+    let response = request.send().map_err(http::http_error)?;
     response_output(method.as_str(), &input.url, response)
 }
 
@@ -60,7 +60,7 @@ fn build_headers(input: &HttpRequestInput) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
 
     if let Some(profile) = input.auth_profile.as_deref() {
-        let value = auth::profile_authorization_header(profile)?;
+        let value = auth_profiles::profile_authorization_header(profile)?;
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&value).map_err(|e| {
@@ -103,7 +103,7 @@ fn parse_header(header: &str) -> Result<(HeaderName, HeaderValue)> {
 fn response_output(method: &str, url: &str, response: Response) -> Result<HttpRequestOutput> {
     let status = response.status().as_u16();
     let headers = response_headers(response.headers());
-    let text = response.text().map_err(http_error)?;
+    let text = response.text().map_err(http::http_error)?;
     let body = serde_json::from_str(&text).unwrap_or_else(|_| Value::String(text));
 
     Ok(HttpRequestOutput {
@@ -125,20 +125,18 @@ fn response_headers(headers: &HeaderMap) -> BTreeMap<String, Vec<String>> {
     out
 }
 
-fn http_error(error: reqwest::Error) -> Error {
-    Error::new(
-        ErrorCode::InternalUnexpected,
-        format!("HTTP request failed: {}", error),
-        json!({ "error": error.to_string() }),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ErrorCode;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+
+    #[test]
+    fn test_run() {
+        get_returns_status_headers_and_json_body();
+    }
 
     #[test]
     fn get_returns_status_headers_and_json_body() {

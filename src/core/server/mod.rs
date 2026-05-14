@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod auth_profiles;
 mod client;
 mod connection;
 pub mod health;

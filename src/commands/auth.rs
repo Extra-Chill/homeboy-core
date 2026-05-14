@@ -3,8 +3,10 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 use homeboy::server::auth::{
-    self, AuthStatus, GetResult, LoginResult, LogoutResult, ProfileRemoveResult, ProfileSetResult,
-    ProfileStatusResult, RemoveResult, SetResult,
+    self, AuthStatus, GetResult, LoginResult, LogoutResult, RemoveResult, SetResult,
+};
+use homeboy::server::auth_profiles::{
+    self, ProfileRemoveResult, ProfileSetResult, ProfileStatusResult,
 };
 
 use super::{CmdResult, GlobalArgs};
@@ -184,7 +186,9 @@ fn run_profile(command: ProfileCommand) -> CmdResult<AuthOutput> {
                 None => prompt_password("Password: ")?,
             };
             Ok((
-                AuthOutput::ProfileSet(auth::set_profile_basic(&profile, &username, &password)?),
+                AuthOutput::ProfileSet(auth_profiles::set_profile_basic(
+                    &profile, &username, &password,
+                )?),
                 0,
             ))
         }
@@ -194,16 +198,16 @@ fn run_profile(command: ProfileCommand) -> CmdResult<AuthOutput> {
                 None => prompt_password("Token: ")?,
             };
             Ok((
-                AuthOutput::ProfileSet(auth::set_profile_bearer(&profile, &token)?),
+                AuthOutput::ProfileSet(auth_profiles::set_profile_bearer(&profile, &token)?),
                 0,
             ))
         }
         ProfileCommand::Status { profile } => Ok((
-            AuthOutput::ProfileStatus(auth::profile_status(&profile)?),
+            AuthOutput::ProfileStatus(auth_profiles::profile_status(&profile)?),
             0,
         )),
         ProfileCommand::Remove { profile } => Ok((
-            AuthOutput::ProfileRemove(auth::remove_profile(&profile)?),
+            AuthOutput::ProfileRemove(auth_profiles::remove_profile(&profile)?),
             0,
         )),
     }
