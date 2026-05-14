@@ -41,7 +41,23 @@ pub struct ListResult {
 pub struct ReadResult {
     pub base_path: Option<String>,
     pub path: String,
+    pub size: Option<i64>,
     pub content: String,
+}
+
+fn parse_file_size(output: &str) -> Option<i64> {
+    output.trim().parse().ok()
+}
+
+fn file_size(project: &project::Project, full_path: &str) -> Option<i64> {
+    let command = format!("wc -c < {}", shell::quote_path(full_path));
+    let output = execute_for_project(project, &command).ok()?;
+
+    if !output.success {
+        return None;
+    }
+
+    parse_file_size(&output.stdout)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,10 +163,12 @@ pub fn read(project_id: &str, path: &str) -> Result<ReadResult> {
     let command = format!("cat {}", shell::quote_path(&full_path));
     let output = execute_for_project(&project, &command)?;
     command::require_success(output.success, &output.stderr, "READ")?;
+    let size = file_size(&project, &full_path);
 
     Ok(ReadResult {
         base_path: Some(project_base_path),
         path: full_path,
+        size,
         content: output.stdout,
     })
 }
@@ -964,5 +982,21 @@ pub fn download(
             exit_code: 1,
             error: Some(err.to_string()),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_file_size_accepts_wc_output() {
+        assert_eq!(parse_file_size("      123\n"), Some(123));
+    }
+
+    #[test]
+    fn parse_file_size_rejects_unavailable_output() {
+        assert_eq!(parse_file_size(""), None);
+        assert_eq!(parse_file_size("not a size"), None);
     }
 }
