@@ -145,6 +145,7 @@ mod tests {
     use super::*;
     use crate::component::{Component, ScopedExtensionConfig};
     use crate::extension::{DeployCapability, ExtensionManifest};
+    use crate::server::SshClient;
     use crate::test_support::with_isolated_home;
     use std::collections::HashMap;
 
@@ -175,6 +176,10 @@ mod tests {
     }
 
     fn install_extension() {
+        install_extension_with_detect_command(None);
+    }
+
+    fn install_extension_with_detect_command(detect_command: Option<&str>) {
         crate::extension::save_manifest(&ExtensionManifest {
             id: "wordpress".to_string(),
             name: "WordPress".to_string(),
@@ -187,7 +192,7 @@ mod tests {
                     path_prefix: "wp-content".to_string(),
                     root: "wp_content".to_string(),
                     strip_prefix: true,
-                    detect_command: None,
+                    detect_command: detect_command.map(str::to_string),
                 }],
                 version_patterns: Vec::new(),
                 since_tag: None,
@@ -201,8 +206,36 @@ mod tests {
         .expect("save extension");
     }
 
+    fn local_client() -> SshClient {
+        SshClient {
+            host: "localhost".to_string(),
+            user: "local".to_string(),
+            port: 22,
+            identity_file: None,
+            auth: None,
+            is_local: true,
+            env: HashMap::new(),
+        }
+    }
+
     #[test]
-    fn resolves_matching_remote_path_under_project_root() {
+    fn test_component_remote_path() {
+        assert_eq!(
+            component_remote_path(&component("explicit/path")),
+            "explicit/path"
+        );
+
+        with_isolated_home(|_| {
+            install_extension();
+            let mut auto = component("");
+            auto.local_path = std::env::temp_dir().to_string_lossy().to_string();
+
+            assert_eq!(component_remote_path(&auto), "");
+        });
+    }
+
+    #[test]
+    fn test_resolve_effective_remote_path() {
         with_isolated_home(|_| {
             install_extension();
 
@@ -214,6 +247,29 @@ mod tests {
             .expect("resolve path");
 
             assert_eq!(resolved, "/htdocs/wp-content/plugins/foo");
+        });
+    }
+
+    #[test]
+    fn test_project_with_detected_path_roots() {
+        with_isolated_home(|_| {
+            install_extension_with_detect_command(Some("printf /detected/wp-content"));
+            let project = Project {
+                id: "site".to_string(),
+                ..Project::default()
+            };
+
+            let detected = project_with_detected_path_roots(
+                &project,
+                &[component("wp-content/plugins/foo")],
+                "/tmp",
+                &local_client(),
+            );
+
+            assert_eq!(
+                detected.path_roots.get("wp_content").map(String::as_str),
+                Some("/detected/wp-content")
+            );
         });
     }
 
