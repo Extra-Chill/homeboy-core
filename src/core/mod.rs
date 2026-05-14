@@ -24,6 +24,7 @@ pub mod issues;
 pub mod keychain;
 pub mod observation;
 pub mod output;
+pub mod plan;
 pub mod project;
 pub mod refactor;
 pub mod release;
