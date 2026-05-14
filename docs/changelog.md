@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.180.1] - 2026-05-14
+
+### Changed
+- drive release plans with generic substrate
+
 ## [0.180.0] - 2026-05-14
 
 ### Added
