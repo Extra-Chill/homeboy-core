@@ -40,12 +40,17 @@ fn ready_step(
 ) -> ReleasePlanStep {
     ReleasePlanStep {
         id: id.to_string(),
-        step_type: step_type.to_string(),
+        kind: step_type.to_string(),
         label: Some(label.into()),
+        blocking: true,
+        scope: Vec::new(),
         needs,
-        config,
         status: ReleasePlanStatus::Ready,
-        missing: vec![],
+        inputs: config,
+        outputs: StepConfig::new(),
+        skip_reason: None,
+        policy: StepConfig::new(),
+        missing: Vec::new(),
     }
 }
 
@@ -57,12 +62,17 @@ fn disabled_step(
 ) -> ReleasePlanStep {
     ReleasePlanStep {
         id: id.to_string(),
-        step_type: step_type.to_string(),
+        kind: step_type.to_string(),
         label: Some(label.into()),
-        needs: vec![],
-        config,
+        blocking: true,
+        scope: Vec::new(),
+        needs: Vec::new(),
         status: ReleasePlanStatus::Disabled,
-        missing: vec![],
+        inputs: config,
+        outputs: StepConfig::new(),
+        skip_reason: None,
+        policy: StepConfig::new(),
+        missing: Vec::new(),
     }
 }
 
@@ -580,7 +590,7 @@ mod tests {
         assert_eq!(identity.needs, vec!["preflight.default_branch"]);
         assert_eq!(
             identity
-                .config
+                .inputs
                 .get("identity")
                 .and_then(|value| value.as_str()),
             Some("Release Bot <bot@example.com>")
@@ -605,7 +615,7 @@ mod tests {
             assert_eq!(quality.status, ReleasePlanStatus::Disabled);
             assert_eq!(
                 quality
-                    .config
+                    .inputs
                     .get("reason")
                     .and_then(|value| value.as_str()),
                 Some("--skip-checks")
@@ -640,7 +650,7 @@ mod tests {
 
         assert_eq!(audit.status, ReleasePlanStatus::Disabled);
         assert_eq!(
-            audit.config.get("reason").and_then(|value| value.as_str()),
+            audit.inputs.get("reason").and_then(|value| value.as_str()),
             Some("no-release-audit-policy")
         );
         assert_eq!(lint.status, ReleasePlanStatus::Ready);
@@ -668,28 +678,28 @@ mod tests {
         assert_eq!(bump_policy.needs, vec!["preflight.remote_sync"]);
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("recommended")
                 .and_then(|value| value.as_str()),
             Some("minor")
         );
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("requested")
                 .and_then(|value| value.as_str()),
             Some("patch")
         );
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("policy")
                 .and_then(|value| value.as_str()),
             Some("requires-force-lower-bump")
         );
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("force_lower_bump")
                 .and_then(|value| value.as_bool()),
             Some(false)
@@ -716,14 +726,14 @@ mod tests {
 
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("policy")
                 .and_then(|value| value.as_str()),
             Some("forced-lower-bump")
         );
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("force_lower_bump")
                 .and_then(|value| value.as_bool()),
             Some(true)
@@ -747,7 +757,7 @@ mod tests {
 
         assert_eq!(
             bump_policy
-                .config
+                .inputs
                 .get("policy")
                 .and_then(|value| value.as_str()),
             Some("preview-lower-bump")
@@ -851,27 +861,27 @@ mod tests {
             .expect("changelog finalize step");
 
         assert_eq!(
-            policy.config.get("policy").and_then(|value| value.as_str()),
+            policy.inputs.get("policy").and_then(|value| value.as_str()),
             Some("generated")
         );
         assert_eq!(
-            policy.config.get("path").and_then(|value| value.as_str()),
+            policy.inputs.get("path").and_then(|value| value.as_str()),
             Some("CHANGELOG.md")
         );
         assert_eq!(
             generate
-                .config
+                .inputs
                 .get("entry_count")
                 .and_then(|value| value.as_u64()),
             Some(1)
         );
         assert_eq!(
-            finalize.config.get("mode").and_then(|value| value.as_str()),
+            finalize.inputs.get("mode").and_then(|value| value.as_str()),
             Some("version-step")
         );
         assert_eq!(
             finalize
-                .config
+                .inputs
                 .get("entries")
                 .and_then(|value| value.as_object())
                 .and_then(|entries| entries.get("Fixed"))
@@ -912,7 +922,7 @@ mod tests {
         assert_eq!(deploy.needs, vec!["git.push"]);
         assert_eq!(
             deploy
-                .config
+                .inputs
                 .get("execution")
                 .and_then(|value| value.as_str()),
             Some("release_plan")

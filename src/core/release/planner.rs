@@ -109,14 +109,14 @@ pub fn plan(component_id: &str, options: &ReleaseOptions) -> Result<ReleasePlan>
         hints.push("Dry run: no changes will be made".to_string());
     }
 
-    Ok(ReleasePlan {
-        component_id: component_id.to_string(),
-        enabled: true,
+    Ok(ReleasePlan::new(
+        component_id,
+        true,
         steps,
         semver_recommendation,
         warnings,
         hints,
-    })
+    ))
 }
 
 #[cfg(test)]

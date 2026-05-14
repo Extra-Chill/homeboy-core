@@ -18,14 +18,7 @@ pub(super) fn build_initial_preflight_plan(
         .filter(|step| initial_executable_preflight_ids().contains(&step.id.as_str()))
         .collect();
 
-    ReleasePlan {
-        component_id: component_id.to_string(),
-        enabled: true,
-        steps,
-        semver_recommendation: None,
-        warnings: Vec::new(),
-        hints: Vec::new(),
-    }
+    ReleasePlan::new(component_id, true, steps, None, Vec::new(), Vec::new())
 }
 
 pub(super) fn initial_executable_preflight_ids() -> &'static [&'static str] {

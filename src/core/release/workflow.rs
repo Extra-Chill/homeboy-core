@@ -243,8 +243,8 @@ fn format_tag(version: &str, monorepo: Option<&git::MonorepoContext>) -> String 
 fn extract_new_version_from_plan(plan: &ReleasePlan) -> Option<String> {
     plan.steps
         .iter()
-        .find(|s| s.step_type == "version")
-        .and_then(|s| s.config.get("to"))
+        .find(|s| s.kind == "version")
+        .and_then(|s| s.inputs.get("to"))
         .and_then(|v| v.as_str())
         .map(String::from)
 }
@@ -257,7 +257,7 @@ fn skipped_reason_from_plan(plan: &ReleasePlan) -> Option<String> {
     plan.steps
         .iter()
         .find(|step| step.id == "release.skip")
-        .and_then(|step| step.config.get("reason"))
+        .and_then(|step| step.inputs.get("reason"))
         .and_then(|value| value.as_str())
         .map(str::to_string)
 }
@@ -463,24 +463,24 @@ fn recovery_release_plan(
     ));
 
     for step in &mut steps {
-        step.config.insert(
+        step.inputs.insert(
             "version".to_string(),
             serde_json::Value::String(version.to_string()),
         );
-        step.config.insert(
+        step.inputs.insert(
             "tag".to_string(),
             serde_json::Value::String(tag_name.to_string()),
         );
     }
 
-    ReleasePlan {
-        component_id: component_id.to_string(),
-        enabled: !actions.is_empty(),
+    ReleasePlan::new(
+        component_id,
+        !actions.is_empty(),
         steps,
-        semver_recommendation: None,
-        warnings: vec![],
-        hints: actions.to_vec(),
-    }
+        None,
+        Vec::new(),
+        actions.to_vec(),
+    )
 }
 
 fn recovery_step(
@@ -499,16 +499,25 @@ fn recovery_step(
 
     ReleasePlanStep {
         id: id.to_string(),
-        step_type: id.to_string(),
+        kind: id.to_string(),
         label: Some(label.into()),
+        blocking: true,
+        scope: Vec::new(),
         needs,
-        config,
         status: if needed {
             ReleasePlanStatus::Ready
         } else {
             ReleasePlanStatus::Disabled
         },
-        missing: vec![],
+        inputs: config,
+        outputs: std::collections::HashMap::new(),
+        skip_reason: if needed {
+            None
+        } else {
+            Some("already-complete".to_string())
+        },
+        policy: std::collections::HashMap::new(),
+        missing: Vec::new(),
     }
 }
 
@@ -660,25 +669,30 @@ mod tests {
 
     #[test]
     fn extracts_new_version_from_plan() {
-        let plan = ReleasePlan {
-            component_id: "demo".to_string(),
-            enabled: true,
-            steps: vec![crate::release::ReleasePlanStep {
+        let plan = ReleasePlan::new(
+            "demo",
+            true,
+            vec![crate::release::ReleasePlanStep {
                 id: "version".to_string(),
-                step_type: "version".to_string(),
+                kind: "version".to_string(),
                 label: None,
-                needs: vec![],
-                config: HashMap::from([(
+                blocking: true,
+                scope: Vec::new(),
+                needs: Vec::new(),
+                status: crate::release::ReleasePlanStatus::Ready,
+                inputs: HashMap::from([(
                     "to".to_string(),
                     serde_json::Value::String("1.2.3".to_string()),
                 )]),
-                status: crate::release::ReleasePlanStatus::Ready,
-                missing: vec![],
+                outputs: HashMap::new(),
+                skip_reason: None,
+                policy: HashMap::new(),
+                missing: Vec::new(),
             }],
-            semver_recommendation: None,
-            warnings: vec![],
-            hints: vec![],
-        };
+            None,
+            Vec::new(),
+            Vec::new(),
+        );
 
         assert_eq!(
             extract_new_version_from_plan(&plan).as_deref(),
@@ -714,15 +728,15 @@ mod tests {
             crate::release::ReleasePlanStatus::Disabled
         );
         assert_eq!(
-            plan.steps[2].config.get("reason").and_then(|v| v.as_str()),
+            plan.steps[2].inputs.get("reason").and_then(|v| v.as_str()),
             Some("already-complete")
         );
         assert_eq!(
-            plan.steps[0].config.get("version").and_then(|v| v.as_str()),
+            plan.steps[0].inputs.get("version").and_then(|v| v.as_str()),
             Some("1.2.3")
         );
         assert_eq!(
-            plan.steps[0].config.get("tag").and_then(|v| v.as_str()),
+            plan.steps[0].inputs.get("tag").and_then(|v| v.as_str()),
             Some("v1.2.3")
         );
     }

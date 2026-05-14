@@ -25,7 +25,7 @@ pub(super) fn execute_release_plan_step(
         return Ok(None);
     }
 
-    match step.step_type.as_str() {
+    match step.kind.as_str() {
         "preflight.default_branch" => Ok(Some(run_default_branch_preflight(step, context))),
         "preflight.git_identity" => configure_git_identity(step, context).map(Some),
         "preflight.working_tree" => Ok(Some(run_working_tree_preflight(step, context))),
@@ -70,7 +70,7 @@ pub(super) fn execute_release_plan_step(
         )),
         "git.tag" => {
             let tag_name = step
-                .config
+                .inputs
                 .get("name")
                 .and_then(|value| value.as_str())
                 .map(str::to_string)
@@ -108,8 +108,8 @@ pub(super) fn execute_release_plan_step(
             context.component_id,
             &context.component.local_path,
         ))),
-        step_type if step_type.starts_with("publish.") => {
-            let target = step_type.strip_prefix("publish.").unwrap_or_default();
+        step_kind if step_kind.starts_with("publish.") => {
+            let target = step_kind.strip_prefix("publish.").unwrap_or_default();
             let result = executor::run_publish(
                 context.extensions,
                 &context.state,
@@ -119,7 +119,7 @@ pub(super) fn execute_release_plan_step(
             )
             .unwrap_or_else(|err| {
                 context.publish_failed = true;
-                failed_result(step_type, step_type, err)
+                failed_result(step_kind, step_kind, err)
             });
 
             if matches!(result.status, ReleaseStepStatus::Failed) {
@@ -130,23 +130,23 @@ pub(super) fn execute_release_plan_step(
         }
         _ => Err(Error::internal_unexpected(format!(
             "release plan contains unsupported executable step '{}'",
-            step.step_type
+            step.kind
         ))),
     }
 }
 
 fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
-    (step.step_type.starts_with("preflight.")
-        && step.step_type != "preflight.default_branch"
-        && step.step_type != "preflight.git_identity"
-        && step.step_type != "preflight.working_tree"
-        && step.step_type != "preflight.remote_sync"
-        && step.step_type != "preflight.bump_policy"
-        && step.step_type != "preflight.lint"
-        && step.step_type != "preflight.test"
-        && step.step_type != "preflight.changelog_bootstrap")
-        || step.step_type == "changelog.policy"
-        || step.step_type == "changelog.generate"
+    (step.kind.starts_with("preflight.")
+        && step.kind != "preflight.default_branch"
+        && step.kind != "preflight.git_identity"
+        && step.kind != "preflight.working_tree"
+        && step.kind != "preflight.remote_sync"
+        && step.kind != "preflight.bump_policy"
+        && step.kind != "preflight.lint"
+        && step.kind != "preflight.test"
+        && step.kind != "preflight.changelog_bootstrap")
+        || step.kind == "changelog.policy"
+        || step.kind == "changelog.generate"
 }
 
 fn run_default_branch_preflight(
@@ -156,7 +156,7 @@ fn run_default_branch_preflight(
     match super::planning_git::validate_default_branch(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
-            step_type: step.step_type.clone(),
+            step_type: step.kind.clone(),
             status: ReleaseStepStatus::Success,
             missing: Vec::new(),
             warnings: Vec::new(),
@@ -164,7 +164,7 @@ fn run_default_branch_preflight(
             data: None,
             error: None,
         },
-        Err(err) => failed_result(&step.id, &step.step_type, err),
+        Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
@@ -175,7 +175,7 @@ fn run_working_tree_preflight(
     match super::planning_worktree::validate_working_tree_fail_fast(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
-            step_type: step.step_type.clone(),
+            step_type: step.kind.clone(),
             status: ReleaseStepStatus::Success,
             missing: Vec::new(),
             warnings: Vec::new(),
@@ -183,7 +183,7 @@ fn run_working_tree_preflight(
             data: None,
             error: None,
         },
-        Err(err) => failed_result(&step.id, &step.step_type, err),
+        Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
@@ -194,7 +194,7 @@ fn run_remote_sync_preflight(
     match super::planning_git::validate_remote_sync(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
-            step_type: step.step_type.clone(),
+            step_type: step.kind.clone(),
             status: ReleaseStepStatus::Success,
             missing: Vec::new(),
             warnings: Vec::new(),
@@ -202,28 +202,28 @@ fn run_remote_sync_preflight(
             data: None,
             error: None,
         },
-        Err(err) => failed_result(&step.id, &step.step_type, err),
+        Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
 fn run_bump_policy_preflight(step: &ReleasePlanStep) -> ReleaseStepResult {
     let requested = step
-        .config
+        .inputs
         .get("requested")
         .and_then(|value| value.as_str())
         .unwrap_or("unknown");
     let recommended = step
-        .config
+        .inputs
         .get("recommended")
         .and_then(|value| value.as_str())
         .unwrap_or(requested);
     let underbump = step
-        .config
+        .inputs
         .get("underbump")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
     let force_lower_bump = step
-        .config
+        .inputs
         .get("force_lower_bump")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
@@ -241,12 +241,12 @@ fn run_bump_policy_preflight(step: &ReleasePlanStep) -> ReleaseStepResult {
         .with_hint(format!("Use the detected bump: --bump {}", recommended))
         .with_hint("If the lower release is intentional, re-run with --force-lower-bump");
 
-        return failed_result(&step.id, &step.step_type, err);
+        return failed_result(&step.id, &step.kind, err);
     }
 
     ReleaseStepResult {
         id: step.id.clone(),
-        step_type: step.step_type.clone(),
+        step_type: step.kind.clone(),
         status: ReleaseStepStatus::Success,
         missing: Vec::new(),
         warnings: Vec::new(),
@@ -267,7 +267,7 @@ fn run_lint_preflight(
 ) -> ReleaseStepResult {
     match super::planning_quality::validate_lint_quality(context.component) {
         Ok(ran) => successful_quality_result(step, ran),
-        Err(err) => failed_result(&step.id, &step.step_type, err),
+        Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
@@ -277,14 +277,14 @@ fn run_test_preflight(
 ) -> ReleaseStepResult {
     match super::planning_quality::validate_test_quality(context.component) {
         Ok(ran) => successful_quality_result(step, ran),
-        Err(err) => failed_result(&step.id, &step.step_type, err),
+        Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
 fn successful_quality_result(step: &ReleasePlanStep, ran: bool) -> ReleaseStepResult {
     ReleaseStepResult {
         id: step.id.clone(),
-        step_type: step.step_type.clone(),
+        step_type: step.kind.clone(),
         status: ReleaseStepStatus::Success,
         missing: Vec::new(),
         warnings: Vec::new(),
@@ -301,7 +301,7 @@ fn run_changelog_bootstrap_preflight(
     match super::planning_changelog::ensure_changelog_initialized(context.component) {
         Ok(()) => ReleaseStepResult {
             id: step.id.clone(),
-            step_type: step.step_type.clone(),
+            step_type: step.kind.clone(),
             status: ReleaseStepStatus::Success,
             missing: Vec::new(),
             warnings: Vec::new(),
@@ -309,7 +309,7 @@ fn run_changelog_bootstrap_preflight(
             data: None,
             error: None,
         },
-        Err(err) => failed_result(&step.id, &step.step_type, err),
+        Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
@@ -318,7 +318,7 @@ fn configure_git_identity(
     context: &ReleaseExecutionContext,
 ) -> Result<ReleaseStepResult> {
     let identity_value = step
-        .config
+        .inputs
         .get("identity")
         .and_then(|value| value.as_str())
         .ok_or_else(|| Error::internal_unexpected("release git identity step missing identity"))?;
@@ -333,7 +333,7 @@ fn configure_git_identity(
 
     Ok(ReleaseStepResult {
         id: step.id.clone(),
-        step_type: step.step_type.clone(),
+        step_type: step.kind.clone(),
         status: ReleaseStepStatus::Success,
         missing: Vec::new(),
         warnings: Vec::new(),
@@ -371,7 +371,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
 }
 
 fn step_config_string_array(step: &ReleasePlanStep, key: &str) -> Vec<String> {
-    step.config
+    step.inputs
         .get(key)
         .and_then(|value| value.as_array())
         .map(|items| {
@@ -645,13 +645,13 @@ mod tests {
     #[test]
     fn bump_policy_preflight_blocks_unforced_underbump() {
         let mut step = plan_step("preflight.bump_policy");
-        step.config
+        step.inputs
             .insert("requested".to_string(), serde_json::json!("patch"));
-        step.config
+        step.inputs
             .insert("recommended".to_string(), serde_json::json!("minor"));
-        step.config
+        step.inputs
             .insert("underbump".to_string(), serde_json::json!(true));
-        step.config
+        step.inputs
             .insert("force_lower_bump".to_string(), serde_json::json!(false));
 
         let component = Component::default();
@@ -685,13 +685,13 @@ mod tests {
     #[test]
     fn bump_policy_preflight_allows_forced_underbump() {
         let mut step = plan_step("preflight.bump_policy");
-        step.config
+        step.inputs
             .insert("requested".to_string(), serde_json::json!("patch"));
-        step.config
+        step.inputs
             .insert("recommended".to_string(), serde_json::json!("minor"));
-        step.config
+        step.inputs
             .insert("underbump".to_string(), serde_json::json!(true));
-        step.config
+        step.inputs
             .insert("force_lower_bump".to_string(), serde_json::json!(true));
 
         let component = Component::default();
@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn test_step_config_string_array() {
         let mut step = plan_step("post_release");
-        step.config.insert(
+        step.inputs.insert(
             "commands".to_string(),
             serde_json::json!(["git tag -f stable", 123, "git push"]),
         );
@@ -803,12 +803,17 @@ mod tests {
     fn plan_step(step_type: &str) -> ReleasePlanStep {
         ReleasePlanStep {
             id: step_type.to_string(),
-            step_type: step_type.to_string(),
+            kind: step_type.to_string(),
             label: None,
-            needs: vec![],
-            config: std::collections::HashMap::new(),
+            blocking: true,
+            scope: Vec::new(),
+            needs: Vec::new(),
             status: ReleasePlanStatus::Ready,
-            missing: vec![],
+            inputs: std::collections::HashMap::new(),
+            outputs: std::collections::HashMap::new(),
+            skip_reason: None,
+            policy: std::collections::HashMap::new(),
+            missing: Vec::new(),
         }
     }
 
