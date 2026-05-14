@@ -289,10 +289,10 @@ fn form_fields(body: &Value) -> Result<Vec<(String, String)>> {
         .collect()
 }
 
-fn build_client(api_config: &ApiConfig) -> Result<Client> {
+pub(crate) fn build_client_with_proxy(proxy_url: Option<&str>) -> Result<Client> {
     let mut builder = ClientBuilder::new();
 
-    if let Some(proxy_url) = api_config.proxy_url.as_deref() {
+    if let Some(proxy_url) = proxy_url {
         builder =
             builder.proxy(Proxy::all(proxy_url).map_err(|e| {
                 config_error(format!("Invalid API proxy URL '{}': {}", proxy_url, e))
@@ -300,6 +300,10 @@ fn build_client(api_config: &ApiConfig) -> Result<Client> {
     }
 
     builder.build().map_err(http_error)
+}
+
+fn build_client(api_config: &ApiConfig) -> Result<Client> {
+    build_client_with_proxy(api_config.proxy_url.as_deref())
 }
 
 /// Resolves a variable from its source.

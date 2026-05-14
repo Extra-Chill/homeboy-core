@@ -20,6 +20,7 @@
 - [file](file.md) — remote file operations, downloads, uploads, copies, and syncs
 - [fleet](fleet.md)
 - [git](git.md)
+- [http](http.md) — generic proxied authenticated HTTP requests
 - [issues](issues.md) — reconcile findings against issue trackers
 - [lint](lint.md)
 - [list](list.md)

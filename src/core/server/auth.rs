@@ -7,8 +7,14 @@ use super::http::ApiClient;
 use crate::error::Result;
 use crate::keychain;
 use crate::project;
+use base64::Engine;
 use serde::Serialize;
 use std::collections::HashMap;
+
+const PROFILE_KIND: &str = "kind";
+const PROFILE_USERNAME: &str = "username";
+const PROFILE_PASSWORD: &str = "password";
+const PROFILE_TOKEN: &str = "token";
 
 #[derive(Debug, Serialize)]
 pub struct LoginResult {
@@ -56,6 +62,30 @@ pub struct AuthVariableStatus {
     pub name: String,
     pub source: String,
     pub available: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileSetResult {
+    pub profile: String,
+    pub kind: String,
+    pub stored: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileStatusResult {
+    pub profile: String,
+    pub kind: Option<String>,
+    pub available: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileRemoveResult {
+    pub profile: String,
+    pub removed: usize,
+}
+
+pub fn profile_scope(profile: &str) -> String {
+    format!("profile:{}", profile)
 }
 
 /// Authenticates with a project's API using provided credentials.
@@ -138,6 +168,107 @@ pub fn status(project_id: &str) -> Result<AuthStatus> {
         authenticated: client.is_authenticated(),
         variables: variable_statuses(project_id, &project),
     })
+}
+
+pub fn set_profile_basic(
+    profile: &str,
+    username: &str,
+    password: &str,
+) -> Result<ProfileSetResult> {
+    let scope = profile_scope(profile);
+    keychain::set(&scope, PROFILE_KIND, "basic")?;
+    keychain::set(&scope, PROFILE_USERNAME, username)?;
+    keychain::set(&scope, PROFILE_PASSWORD, password)?;
+    Ok(ProfileSetResult {
+        profile: profile.to_string(),
+        kind: "basic".to_string(),
+        stored: true,
+    })
+}
+
+pub fn set_profile_bearer(profile: &str, token: &str) -> Result<ProfileSetResult> {
+    let scope = profile_scope(profile);
+    keychain::set(&scope, PROFILE_KIND, "bearer")?;
+    keychain::set(&scope, PROFILE_TOKEN, token)?;
+    Ok(ProfileSetResult {
+        profile: profile.to_string(),
+        kind: "bearer".to_string(),
+        stored: true,
+    })
+}
+
+pub fn profile_status(profile: &str) -> Result<ProfileStatusResult> {
+    let scope = profile_scope(profile);
+    let kind = keychain::get(&scope, PROFILE_KIND)?;
+    let available = match kind.as_deref() {
+        Some("basic") => {
+            keychain::get(&scope, PROFILE_USERNAME)?.is_some()
+                && keychain::get(&scope, PROFILE_PASSWORD)?.is_some()
+        }
+        Some("bearer") => keychain::get(&scope, PROFILE_TOKEN)?.is_some(),
+        _ => false,
+    };
+
+    Ok(ProfileStatusResult {
+        profile: profile.to_string(),
+        kind,
+        available,
+    })
+}
+
+pub fn remove_profile(profile: &str) -> Result<ProfileRemoveResult> {
+    let scope = profile_scope(profile);
+    let variables = vec![
+        PROFILE_KIND.to_string(),
+        PROFILE_USERNAME.to_string(),
+        PROFILE_PASSWORD.to_string(),
+        PROFILE_TOKEN.to_string(),
+    ];
+    let removed = keychain::remove_many(&scope, &variables)?;
+    Ok(ProfileRemoveResult {
+        profile: profile.to_string(),
+        removed,
+    })
+}
+
+pub fn profile_authorization_header(profile: &str) -> Result<String> {
+    let scope = profile_scope(profile);
+    let kind =
+        keychain::get(&scope, PROFILE_KIND)?.ok_or_else(|| missing_profile_error(profile))?;
+    match kind.as_str() {
+        "basic" => {
+            let username = keychain::get(&scope, PROFILE_USERNAME)?
+                .ok_or_else(|| missing_profile_error(profile))?;
+            let password = keychain::get(&scope, PROFILE_PASSWORD)?
+                .ok_or_else(|| missing_profile_error(profile))?;
+            let encoded = base64::engine::general_purpose::STANDARD
+                .encode(format!("{}:{}", username, password));
+            Ok(format!("Basic {}", encoded))
+        }
+        "bearer" => {
+            let token = keychain::get(&scope, PROFILE_TOKEN)?
+                .ok_or_else(|| missing_profile_error(profile))?;
+            Ok(format!("Bearer {}", token))
+        }
+        other => Err(crate::error::Error::validation_invalid_argument(
+            "auth-profile",
+            format!("Unsupported auth profile kind '{}'", other),
+            Some(profile.to_string()),
+            Some(vec!["basic".to_string(), "bearer".to_string()]),
+        )),
+    }
+}
+
+fn missing_profile_error(profile: &str) -> crate::error::Error {
+    crate::error::Error::new(
+        crate::error::ErrorCode::ExtensionNotFound,
+        format!("Auth profile '{}' is not set", profile),
+        serde_json::Value::Null,
+    )
+    .with_hint(format!(
+        "Run 'homeboy auth profile set-basic {} --username <user>' or 'homeboy auth profile set-bearer {}'",
+        profile, profile
+    ))
 }
 
 fn keychain_variable_names(project: &project::Project) -> Vec<String> {
