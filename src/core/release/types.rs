@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 use crate::is_zero_u32;
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSubject};
 
 /// Ordered release plan shared by dry-run output and release execution.
 ///
@@ -9,15 +11,60 @@ use crate::is_zero_u32;
 /// `pipeline::run()` for real releases so the previewed steps match execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleasePlan {
+    #[serde(flatten)]
+    pub plan: HomeboyPlan,
     pub component_id: String,
     pub enabled: bool,
-    pub steps: Vec<ReleasePlanStep>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semver_recommendation: Option<ReleaseSemverRecommendation>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hints: Vec<String>,
+}
+
+impl ReleasePlan {
+    pub fn new(
+        component_id: impl Into<String>,
+        enabled: bool,
+        steps: Vec<ReleasePlanStep>,
+        semver_recommendation: Option<ReleaseSemverRecommendation>,
+        warnings: Vec<String>,
+        hints: Vec<String>,
+    ) -> Self {
+        let component_id = component_id.into();
+        Self {
+            plan: HomeboyPlan {
+                id: format!("release.{component_id}"),
+                kind: PlanKind::Release,
+                subject: PlanSubject {
+                    component_id: Some(component_id.clone()),
+                    ..PlanSubject::default()
+                },
+                mode: None,
+                inputs: HashMap::new(),
+                policy: HashMap::new(),
+                steps,
+                artifacts: Vec::new(),
+                summary: None,
+                warnings: warnings.clone(),
+                hints: hints.clone(),
+            },
+            component_id,
+            enabled,
+            semver_recommendation,
+        }
+    }
+}
+
+impl Deref for ReleasePlan {
+    type Target = HomeboyPlan;
+
+    fn deref(&self) -> &Self::Target {
+        &self.plan
+    }
+}
+
+impl DerefMut for ReleasePlan {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.plan
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,29 +188,8 @@ pub struct ReleaseState {
     pub changelog_validation: Option<crate::version::ChangelogValidationResult>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReleasePlanStep {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub step_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub needs: Vec<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub config: HashMap<String, serde_json::Value>,
-    pub status: ReleasePlanStatus,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub missing: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReleasePlanStatus {
-    Ready,
-    Missing,
-    Disabled,
-}
+pub type ReleasePlanStep = PlanStep;
+pub type ReleasePlanStatus = PlanStepStatus;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReleaseOptions {

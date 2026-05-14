@@ -11,17 +11,17 @@ pub(crate) fn run_changelog_finalize(
     state: &mut ReleaseState,
 ) -> Result<ReleaseStepResult> {
     let current_version = step
-        .config
+        .inputs
         .get("from")
         .and_then(|value| value.as_str())
         .ok_or_else(|| Error::internal_unexpected("changelog.finalize step missing from"))?;
     let new_version = step
-        .config
+        .inputs
         .get("to")
         .and_then(|value| value.as_str())
         .ok_or_else(|| Error::internal_unexpected("changelog.finalize step missing to"))?;
     let entries = step
-        .config
+        .inputs
         .get("entries")
         .cloned()
         .map(serde_json::from_value)
@@ -81,18 +81,23 @@ mod tests {
         };
         let mut step = ReleasePlanStep {
             id: "changelog.finalize".to_string(),
-            step_type: "changelog.finalize".to_string(),
+            kind: "changelog.finalize".to_string(),
             label: None,
-            needs: vec![],
-            config: std::collections::HashMap::new(),
+            blocking: true,
+            scope: Vec::new(),
+            needs: Vec::new(),
             status: ReleasePlanStatus::Ready,
-            missing: vec![],
+            inputs: std::collections::HashMap::new(),
+            outputs: std::collections::HashMap::new(),
+            skip_reason: None,
+            policy: std::collections::HashMap::new(),
+            missing: Vec::new(),
         };
-        step.config
+        step.inputs
             .insert("from".to_string(), serde_json::json!("0.6.12"));
-        step.config
+        step.inputs
             .insert("to".to_string(), serde_json::json!("0.6.13"));
-        step.config.insert(
+        step.inputs.insert(
             "entries".to_string(),
             serde_json::json!({ "Fixed": ["Close release plan gap"] }),
         );

@@ -37,25 +37,30 @@ fn skipped_release_plan(
     hint: &str,
     semver_recommendation: Option<ReleaseSemverRecommendation>,
 ) -> ReleasePlan {
-    ReleasePlan {
-        component_id: component_id.to_string(),
-        enabled: false,
-        steps: vec![ReleasePlanStep {
+    ReleasePlan::new(
+        component_id,
+        false,
+        vec![ReleasePlanStep {
             id: "release.skip".to_string(),
-            step_type: "release.skip".to_string(),
+            kind: "release.skip".to_string(),
             label: Some(label.to_string()),
-            needs: vec![],
-            config: std::collections::HashMap::from([(
+            blocking: true,
+            scope: Vec::new(),
+            needs: Vec::new(),
+            status: ReleasePlanStatus::Disabled,
+            inputs: std::collections::HashMap::from([(
                 "reason".to_string(),
                 serde_json::Value::String(reason.to_string()),
             )]),
-            status: ReleasePlanStatus::Disabled,
-            missing: vec![],
+            outputs: std::collections::HashMap::new(),
+            skip_reason: Some(reason.to_string()),
+            policy: std::collections::HashMap::new(),
+            missing: Vec::new(),
         }],
         semver_recommendation,
-        warnings: vec![],
-        hints: vec![hint.to_string()],
-    }
+        Vec::new(),
+        vec![hint.to_string()],
+    )
 }
 
 #[cfg(test)]
@@ -74,10 +79,10 @@ mod tests {
         assert_eq!(plan.component_id, "demo");
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(plan.steps[0].id, "release.skip");
-        assert_eq!(plan.steps[0].step_type, "release.skip");
+        assert_eq!(plan.steps[0].kind, "release.skip");
         assert_eq!(plan.steps[0].status, ReleasePlanStatus::Disabled);
         assert_eq!(
-            plan.steps[0].config.get("reason").and_then(|v| v.as_str()),
+            plan.steps[0].inputs.get("reason").and_then(|v| v.as_str()),
             Some("no-releasable-commits")
         );
         assert_eq!(
@@ -116,7 +121,7 @@ mod tests {
         assert!(!plan.enabled);
         assert!(plan.semver_recommendation.is_some());
         assert_eq!(
-            plan.steps[0].config.get("reason").and_then(|v| v.as_str()),
+            plan.steps[0].inputs.get("reason").and_then(|v| v.as_str()),
             Some("major-requires-flag")
         );
         assert_eq!(
