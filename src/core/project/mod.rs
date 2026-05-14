@@ -27,7 +27,8 @@ pub use component::{
 pub use files::{FileEntry, GrepMatch, LineChange};
 pub use logs::{LogContent, LogEntry, LogSearchResult, PinnedLogsContent};
 pub use pins::{
-    add_pin, list_pins, remove_pin, ProjectPinChange, ProjectPinListItem, ProjectPinOutput,
+    add_pin, list_pins, remove_pin, rename_pin, update_pin, PinUpdateOptions, ProjectPinChange,
+    ProjectPinListItem, ProjectPinOutput,
 };
 pub use readiness::calculate_deploy_readiness;
 pub use report::{
