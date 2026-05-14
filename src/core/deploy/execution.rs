@@ -6,9 +6,9 @@ use crate::context::RemoteProjectContext;
 use crate::error::Result;
 use crate::extension::build::resolve_artifact_path_from_root;
 use crate::git;
-use crate::paths as base_path;
 use crate::project::Project;
 
+use super::path_roots::{component_remote_path, resolve_effective_remote_path};
 use super::planning::{calculate_directory_size, format_bytes};
 use super::policy::{owner_hint_for_path, protected_path_suffixes, validate_deploy_target};
 use super::release_download;
@@ -65,16 +65,14 @@ pub(super) fn execute_component_deploy(
     // Auto-resolve remote_path from linked extension deploy policy when not explicitly set.
     // This is a deploy-time safety net; the primary resolution happens in
     // resolve_project_component (#812).
-    let effective_remote_path = if component.remote_path.trim().is_empty() {
-        if let Some(resolved) = component.auto_resolve_remote_path() {
-            log_status!("deploy", "Auto-resolved remote path: {}", resolved);
-            resolved
-        } else {
-            component.remote_path.clone()
-        }
-    } else {
-        component.remote_path.clone()
-    };
+    let effective_remote_path = component_remote_path(component);
+    if component.remote_path.trim().is_empty() && !effective_remote_path.trim().is_empty() {
+        log_status!(
+            "deploy",
+            "Auto-resolved remote path: {}",
+            effective_remote_path
+        );
+    }
 
     if component.remote_owner.is_none() {
         if let Some(suggested_owner) = owner_hint_for_path(component, &effective_remote_path) {
@@ -92,8 +90,8 @@ pub(super) fn execute_component_deploy(
     }
 
     // Resolve and validate install directory before any destructive operation.
-    let install_dir = match base_path::join_remote_path(Some(base_path), &effective_remote_path)
-        .and_then(|install_dir| {
+    let install_dir =
+        match resolve_effective_remote_path(project, component, base_path).and_then(|install_dir| {
             validate_deploy_target(
                 &install_dir,
                 base_path,
@@ -102,18 +100,18 @@ pub(super) fn execute_component_deploy(
             )?;
             Ok(install_dir)
         }) {
-        Ok(install_dir) => install_dir,
-        Err(err) => {
-            return failed_component_deploy_result(
-                component,
-                base_path,
-                local_version,
-                remote_version,
-                build_exit_code,
-                err.to_string(),
-            );
-        }
-    };
+            Ok(install_dir) => install_dir,
+            Err(err) => {
+                return failed_component_deploy_result(
+                    component,
+                    base_path,
+                    local_version,
+                    remote_version,
+                    build_exit_code,
+                    err.to_string(),
+                );
+            }
+        };
 
     // Dispatch by deploy strategy
     let strategy = component.deploy_strategy.as_deref().unwrap_or("rsync");

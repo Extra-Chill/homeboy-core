@@ -9,13 +9,14 @@ use crate::project::Project;
 use crate::version;
 
 use super::execution::execute_component_deploy;
+use super::path_roots::project_with_detected_path_roots;
 use super::planning::{
     calculate_component_status, calculate_release_state, load_project_components, plan_components,
 };
 use super::types::{
     ComponentDeployResult, ComponentStatus, DeployConfig, DeployOrchestrationResult, DeploySummary,
 };
-use super::version_overrides::fetch_remote_versions;
+use super::version_overrides::fetch_remote_versions_for_project;
 
 /// Main deploy orchestration entry point.
 /// Handles component selection, building, and deployment.
@@ -47,10 +48,14 @@ pub(super) fn deploy_components(
         ));
     }
 
+    let project =
+        project_with_detected_path_roots(project, &loaded.deployable, base_path, &ctx.client);
+
     let components = plan_components(
         config,
         &loaded.deployable,
         &loaded.skipped,
+        &project,
         base_path,
         &ctx.client,
     )?;
@@ -74,7 +79,7 @@ pub(super) fn deploy_components(
         .collect();
     let remote_versions =
         if config.outdated || config.behind_upstream || config.dry_run || config.check {
-            fetch_remote_versions(&components, base_path, &ctx.client)
+            fetch_remote_versions_for_project(&components, Some(&project), base_path, &ctx.client)
         } else {
             HashMap::new()
         };
@@ -85,6 +90,7 @@ pub(super) fn deploy_components(
             &components,
             &local_versions,
             &remote_versions,
+            &project,
             base_path,
         ));
     }
@@ -93,6 +99,7 @@ pub(super) fn deploy_components(
             &components,
             &local_versions,
             &remote_versions,
+            &project,
             base_path,
             config,
         ));
@@ -136,7 +143,7 @@ pub(super) fn deploy_components(
 
     for component in &components {
         // Apply per-project overrides (e.g. different extract_command or remote_owner)
-        let component = crate::project::apply_component_overrides(component, project);
+        let component = crate::project::apply_component_overrides(component, &project);
 
         let effective_config = clone_config(config);
 
@@ -145,7 +152,7 @@ pub(super) fn deploy_components(
             &effective_config,
             ctx,
             base_path,
-            project,
+            &project,
             local_versions.get(&component.id).cloned(),
             remote_versions.get(&component.id).cloned(),
         );
@@ -196,6 +203,7 @@ fn run_check_mode(
     components: &[Component],
     local_versions: &HashMap<String, String>,
     remote_versions: &HashMap<String, String>,
+    project: &Project,
     base_path: &str,
 ) -> DeployOrchestrationResult {
     let results: Vec<ComponentDeployResult> = components
@@ -203,7 +211,7 @@ fn run_check_mode(
         .map(|c| {
             let status = calculate_component_status(c, remote_versions);
             let release_state = calculate_release_state(c);
-            let mut result = ComponentDeployResult::new(c, base_path)
+            let mut result = ComponentDeployResult::new_for_project(c, project, base_path)
                 .with_status("checked")
                 .with_versions(
                     local_versions.get(&c.id).cloned(),
@@ -234,6 +242,7 @@ fn run_dry_run_mode(
     components: &[Component],
     local_versions: &HashMap<String, String>,
     remote_versions: &HashMap<String, String>,
+    project: &Project,
     base_path: &str,
     config: &DeployConfig,
 ) -> DeployOrchestrationResult {
@@ -245,7 +254,7 @@ fn run_dry_run_mode(
             } else {
                 ComponentStatus::Unknown
             };
-            let mut result = ComponentDeployResult::new(c, base_path)
+            let mut result = ComponentDeployResult::new_for_project(c, project, base_path)
                 .with_status("planned")
                 .with_versions(
                     local_versions.get(&c.id).cloned(),

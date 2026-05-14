@@ -1,5 +1,6 @@
 mod execution;
 mod orchestration;
+mod path_roots;
 pub(crate) mod permissions;
 mod planning;
 mod policy;
