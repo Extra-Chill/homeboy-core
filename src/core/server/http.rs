@@ -459,6 +459,19 @@ mod tests {
     }
 
     #[test]
+    fn test_http_error() {
+        let reqwest_error = Client::new()
+            .get("http://")
+            .send()
+            .expect_err("invalid URL should fail before network I/O");
+
+        let err = http_error(reqwest_error);
+
+        assert_eq!(err.code, ErrorCode::RemoteCommandFailed);
+        assert!(err.message.contains("HTTP request failed"));
+    }
+
+    #[test]
     fn test_build_client_with_proxy() {
         build_client_with_proxy(Some("socks5://127.0.0.1:8080"))
             .expect("socks proxy should be accepted");
