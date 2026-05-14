@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::error::Result;
 
+use super::context::{load_component, resolve_extensions};
 use super::execution_dispatch::{
     execute_release_plan_step, release_step_is_show_stopper, ReleaseExecutionContext,
 };
@@ -50,8 +51,8 @@ pub(super) fn execute_plan_steps(
         return Ok(false);
     }
 
-    let component = super::pipeline::load_component(component_id, options)?;
-    let extensions = super::pipeline::resolve_extensions(&component)?;
+    let component = load_component(component_id, options)?;
+    let extensions = resolve_extensions(&component)?;
     let mut context = ReleaseExecutionContext {
         component: &component,
         extensions: &extensions,

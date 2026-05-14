@@ -4,14 +4,13 @@
 //! consumers, and `run()` walks that same plan for real releases so the
 //! previewed steps match execution.
 
-use crate::component::{self, Component};
 use crate::engine::validation::ValidationCollector;
 use crate::error::{Error, Result};
-use crate::extension::{self, ExtensionManifest};
 use crate::git;
 use crate::version;
 use std::collections::HashSet;
 
+use super::context::{load_component, resolve_extensions};
 use super::execution_plan::{
     build_initial_preflight_plan, execute_plan_steps, initial_executable_preflight_ids,
 };
@@ -22,29 +21,6 @@ use super::planning_policy::release_skip_plan;
 use super::planning_semver::{build_semver_recommendation, validate_release_version_floor};
 use super::planning_worktree::validate_release_worktree;
 use super::types::{ReleaseOptions, ReleasePlan, ReleaseRun, ReleaseRunResult, ReleaseStepResult};
-
-/// Load a component with portable config fallback when path_override is set.
-/// In CI environments, the component may not be registered — only homeboy.json exists.
-pub(crate) fn load_component(component_id: &str, options: &ReleaseOptions) -> Result<Component> {
-    component::resolve_effective(Some(component_id), options.path_override.as_deref(), None)
-}
-
-/// Resolve the component's declared extensions (for publish/package dispatch).
-pub(super) fn resolve_extensions(component: &Component) -> Result<Vec<ExtensionManifest>> {
-    let mut extensions = Vec::new();
-    if let Some(configured) = component.extensions.as_ref() {
-        let mut extension_ids: Vec<String> = configured.keys().cloned().collect();
-        extension_ids.sort();
-        let suggestions = extension::available_extension_ids();
-        for extension_id in extension_ids {
-            let manifest = extension::load_extension(&extension_id).map_err(|_| {
-                Error::extension_not_found(extension_id.to_string(), suggestions.clone())
-            })?;
-            extensions.push(manifest);
-        }
-    }
-    Ok(extensions)
-}
 
 /// Execute a release end-to-end.
 ///

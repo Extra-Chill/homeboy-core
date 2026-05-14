@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::git;
 
-use super::pipeline::load_component;
+use super::context::load_component;
 use super::types::{
     BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseBumpPolicyOptions,
     ReleaseCommandInput, ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleasePlanStatus,
