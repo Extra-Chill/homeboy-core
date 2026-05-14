@@ -39,6 +39,13 @@ enum FileCommand {
         /// Remote file path
         path: String,
     },
+    /// Create a directory
+    Mkdir {
+        /// Project ID
+        project_id: String,
+        /// Remote directory path
+        path: String,
+    },
     /// Delete a file or directory
     Delete {
         /// Project ID
@@ -361,6 +368,10 @@ pub fn run(args: FileArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<F
             let (out, code) = write(&project_id, &path)?;
             Ok((FileCommandOutput::Standard(out), code))
         }
+        FileCommand::Mkdir { project_id, path } => {
+            let (out, code) = mkdir(&project_id, &path)?;
+            Ok((FileCommandOutput::Standard(out), code))
+        }
         FileCommand::Delete {
             project_id,
             path,
@@ -527,6 +538,30 @@ fn write(project_id: &str, path: &str) -> CmdResult<FileOutput> {
             entries: None,
             content: None,
             bytes_written: Some(result.bytes_written),
+            stdout: None,
+            stderr: None,
+            exit_code: 0,
+            success: true,
+        },
+        0,
+    ))
+}
+
+fn mkdir(project_id: &str, path: &str) -> CmdResult<FileOutput> {
+    let result = files::mkdir(project_id, path)?;
+
+    Ok((
+        FileOutput {
+            command: "file.mkdir".to_string(),
+            project_id: project_id.to_string(),
+            base_path: result.base_path,
+            path: Some(result.path),
+            old_path: None,
+            new_path: None,
+            recursive: None,
+            entries: None,
+            content: None,
+            bytes_written: None,
             stdout: None,
             stderr: None,
             exit_code: 0,
