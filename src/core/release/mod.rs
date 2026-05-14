@@ -4,6 +4,7 @@ mod deployment;
 mod execution_dispatch;
 mod execution_plan;
 mod executor;
+mod orchestrator;
 mod pipeline;
 mod pipeline_capabilities;
 mod pipeline_summary;
