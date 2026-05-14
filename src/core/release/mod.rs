@@ -8,6 +8,7 @@ mod pipeline;
 mod pipeline_capabilities;
 mod pipeline_summary;
 mod plan_steps;
+mod planner;
 mod planning_changelog;
 mod planning_git;
 mod planning_policy;
@@ -19,7 +20,8 @@ mod utils;
 pub mod version;
 mod workflow;
 
-pub use pipeline::{plan, run};
+pub use pipeline::run;
+pub use planner::plan;
 pub use types::{
     BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseArtifact,
     ReleaseCommandInput, ReleaseCommandResult, ReleaseDeploymentResult, ReleaseDeploymentSummary,
