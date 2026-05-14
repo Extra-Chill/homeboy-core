@@ -54,13 +54,6 @@ pub struct WriteResult {
 
 #[derive(Debug, Clone, Serialize)]
 
-pub struct MkdirResult {
-    pub base_path: Option<String>,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-
 pub struct DeleteResult {
     pub base_path: Option<String>,
     pub path: String,
@@ -193,21 +186,6 @@ pub fn write(project_id: &str, path: &str, content: &str) -> Result<WriteResult>
         base_path: Some(project_base_path),
         path: full_path,
         bytes_written: content.len(),
-    })
-}
-
-/// Create a directory.
-pub fn mkdir(project_id: &str, path: &str) -> Result<MkdirResult> {
-    let project = project::load(project_id)?;
-    let project_base_path = require_project_base_path(project_id, &project)?;
-    let full_path = base_path::join_remote_path(Some(&project_base_path), path)?;
-    let command = format!("mkdir {}", shell::quote_path(&full_path));
-    let output = execute_for_project(&project, &command)?;
-    command::require_success(output.success, &output.stderr, "MKDIR")?;
-
-    Ok(MkdirResult {
-        base_path: Some(project_base_path),
-        path: full_path,
     })
 }
 
@@ -986,49 +964,5 @@ pub fn download(
             exit_code: 1,
             error: Some(err.to_string()),
         }),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::project::{self, Project};
-    use crate::test_support::with_isolated_home;
-
-    #[test]
-    fn mkdir_creates_directory_under_project_base_path() {
-        with_isolated_home(|home| {
-            let base = home.path().join("site root");
-            std::fs::create_dir_all(&base).expect("create project base");
-            project::save(&Project {
-                id: "site".to_string(),
-                base_path: Some(base.to_string_lossy().to_string()),
-                ..Project::default()
-            })
-            .expect("save project");
-
-            let result = mkdir("site", "uploads").expect("mkdir succeeds");
-
-            let expected = base.join("uploads");
-            assert!(expected.is_dir());
-            assert_eq!(result.base_path, Some(base.to_string_lossy().to_string()));
-            assert_eq!(result.path, expected.to_string_lossy().to_string());
-        });
-    }
-
-    #[test]
-    fn mkdir_uses_existing_path_validation() {
-        with_isolated_home(|home| {
-            let base = home.path().join("site");
-            std::fs::create_dir_all(&base).expect("create project base");
-            project::save(&Project {
-                id: "site".to_string(),
-                base_path: Some(base.to_string_lossy().to_string()),
-                ..Project::default()
-            })
-            .expect("save project");
-
-            assert!(mkdir("site", "   ").is_err());
-        });
     }
 }

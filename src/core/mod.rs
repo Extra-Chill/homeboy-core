@@ -67,3 +67,8 @@ pub use output::{
 pub fn set_artifact_root_override(path: Option<std::path::PathBuf>) {
     paths::set_artifact_root_override(path);
 }
+
+/// Resolve a remote path against an optional project base path.
+pub fn join_remote_path(base_path: Option<&str>, path: &str) -> Result<String> {
+    paths::join_remote_path(base_path, path)
+}
