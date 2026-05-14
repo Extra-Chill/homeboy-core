@@ -348,6 +348,7 @@ pub mod extension;
 pub mod file;
 pub mod fleet;
 pub mod git;
+pub mod http;
 pub mod issues;
 pub mod lint;
 pub mod logs;
@@ -467,6 +468,7 @@ pub fn run_json(
         crate::cli_surface::Commands::Undo(args) => dispatch!(args, global, undo),
         crate::cli_surface::Commands::Auth(args) => dispatch!(args, global, auth),
         crate::cli_surface::Commands::Api(args) => dispatch!(args, global, api),
+        crate::cli_surface::Commands::Http(args) => dispatch!(args, global, http),
         crate::cli_surface::Commands::Upgrade(args) => dispatch!(args, global, upgrade),
 
         // Special case: List uses raw output mode
