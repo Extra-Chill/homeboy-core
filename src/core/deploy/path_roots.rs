@@ -1,6 +1,6 @@
 use crate::component::Component;
 use crate::engine::shell;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::extension::{self, RemotePathRootRule};
 use crate::paths as base_path;
 use crate::project::Project;
@@ -82,17 +82,30 @@ fn resolve_with_project_root(
     component: &Component,
     remote_path: &str,
 ) -> Result<Option<String>> {
-    if project.path_roots.is_empty() {
-        return Ok(None);
-    }
-
     for rule in component_remote_path_root_rules(component) {
         if !path_matches_prefix(remote_path, &rule.path_prefix) {
             continue;
         }
 
         let Some(root) = project.path_roots.get(&rule.root) else {
-            continue;
+            return Err(Error::validation_invalid_argument(
+                "remotePath",
+                format!(
+                    "Component '{}' remote path '{}' matches managed path root '{}' ({}) but that root was not configured or detected",
+                    component.id, remote_path, rule.root, rule.path_prefix
+                ),
+                Some(remote_path.to_string()),
+                Some(vec![
+                    format!(
+                        "Configure project path_roots.{} to the active remote root for {}",
+                        rule.root, rule.path_prefix
+                    ),
+                    format!(
+                        "Use an explicit absolute/relative remote path if '{}' should not be root-managed",
+                        remote_path
+                    ),
+                ]),
+            ));
         };
 
         let path = if rule.strip_prefix {
@@ -302,6 +315,28 @@ mod tests {
             .expect("resolve path");
 
             assert_eq!(resolved, "/srv/site/var/log/app.log");
+        });
+    }
+
+    #[test]
+    fn matching_path_root_without_detected_root_fails_instead_of_falling_back() {
+        with_isolated_home(|_| {
+            install_extension();
+
+            let err = resolve_effective_remote_path(
+                &Project {
+                    id: "site".to_string(),
+                    base_path: Some("/srv/site".to_string()),
+                    ..Project::default()
+                },
+                &component("wp-content/plugins/foo"),
+                "/srv/site",
+            )
+            .expect_err("missing managed root should fail");
+
+            let message = err.to_string();
+            assert!(message.contains("matches managed path root"));
+            assert!(message.contains("wp_content"));
         });
     }
 }

@@ -9,7 +9,7 @@ use crate::project::Project;
 use crate::version;
 
 use super::execution::execute_component_deploy;
-use super::path_roots::project_with_detected_path_roots;
+use super::path_roots::{project_with_detected_path_roots, resolve_effective_remote_path};
 use super::planning::{
     calculate_component_status, calculate_release_state, load_project_components, plan_components,
 };
@@ -71,6 +71,8 @@ pub(super) fn deploy_components(
             },
         });
     }
+
+    validate_effective_remote_paths(&components, &project, base_path)?;
 
     // Gather versions
     let local_versions: HashMap<String, String> = components
@@ -196,6 +198,18 @@ pub(super) fn deploy_components(
             skipped: 0,
         },
     })
+}
+
+fn validate_effective_remote_paths(
+    components: &[Component],
+    project: &Project,
+    base_path: &str,
+) -> Result<()> {
+    for component in components {
+        resolve_effective_remote_path(project, component, base_path)?;
+    }
+
+    Ok(())
 }
 
 /// Check mode: return component status without building or deploying.
