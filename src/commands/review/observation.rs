@@ -257,6 +257,9 @@ mod tests {
         );
         let output = ReviewCommandOutput {
             command: "review".to_string(),
+            plan: homeboy::quality::build_quality_plan(
+                homeboy::quality::QualityPlanOptions::review("homeboy"),
+            ),
             observation: None,
             artifact,
             summary: super::super::ReviewSummary {

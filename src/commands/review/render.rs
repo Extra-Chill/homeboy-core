@@ -344,12 +344,14 @@ mod tests {
     use homeboy::extension::lint::{LintCommandOutput, LintFinding};
     use homeboy::extension::test::{FailedTest, TestCommandOutput, TestCounts};
     use homeboy::extension::{PhaseReport, PhaseStatus, VerificationPhase};
+    use homeboy::quality::{build_quality_plan, QualityPlanOptions};
 
     // ── Builders for fixture envelopes ──────────────────────────────────
 
     fn passing_envelope() -> ReviewCommandOutput {
         ReviewCommandOutput {
             command: "review".to_string(),
+            plan: build_quality_plan(QualityPlanOptions::review("my-comp")),
             observation: None,
             artifact: super::super::build_artifact("my-comp", "", "abc123", Vec::new()),
             summary: super::super::ReviewSummary {
@@ -623,6 +625,10 @@ mod tests {
     fn renders_all_stages_skipped() {
         let env = ReviewCommandOutput {
             command: "review".to_string(),
+            plan: build_quality_plan(QualityPlanOptions::skipped_review(
+                "my-comp",
+                "no files changed",
+            )),
             observation: None,
             artifact: super::super::build_artifact("my-comp", "main", "abc123", Vec::new()),
             summary: super::super::ReviewSummary {

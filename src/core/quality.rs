@@ -8,9 +8,13 @@ pub struct QualityPlanOptions {
     pub mode: Option<String>,
     pub step_prefix: String,
     pub skip_checks: bool,
+    pub skip_reason: String,
     pub lint_needs: Vec<String>,
     pub test_needs: Vec<String>,
     pub audit_policy_available: bool,
+    pub audit_label: String,
+    pub lint_label: String,
+    pub test_label: String,
 }
 
 impl QualityPlanOptions {
@@ -20,9 +24,37 @@ impl QualityPlanOptions {
             mode: Some("release-preflight".to_string()),
             step_prefix: "preflight".to_string(),
             skip_checks,
+            skip_reason: "--skip-checks".to_string(),
             lint_needs: vec!["preflight.bump_policy".to_string()],
             test_needs: vec!["preflight.lint".to_string()],
             audit_policy_available: false,
+            audit_label: "Run release audit".to_string(),
+            lint_label: "Run release lint".to_string(),
+            test_label: "Run release tests".to_string(),
+        }
+    }
+
+    pub fn review(component_id: impl Into<String>) -> Self {
+        Self {
+            component_id: component_id.into(),
+            mode: Some("review".to_string()),
+            step_prefix: "review".to_string(),
+            skip_checks: false,
+            skip_reason: "skipped".to_string(),
+            lint_needs: vec!["review.audit".to_string()],
+            test_needs: vec!["review.lint".to_string()],
+            audit_policy_available: true,
+            audit_label: "Run review audit".to_string(),
+            lint_label: "Run review lint".to_string(),
+            test_label: "Run review tests".to_string(),
+        }
+    }
+
+    pub fn skipped_review(component_id: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            skip_checks: true,
+            skip_reason: reason.into(),
+            ..Self::review(component_id)
         }
     }
 }
@@ -55,20 +87,20 @@ pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
             disabled_step(
                 &options.step_prefix,
                 "audit",
-                "Run release audit",
-                "--skip-checks",
+                &options.audit_label,
+                &options.skip_reason,
             ),
             disabled_step(
                 &options.step_prefix,
                 "lint",
-                "Run release lint",
-                "--skip-checks",
+                &options.lint_label,
+                &options.skip_reason,
             ),
             disabled_step(
                 &options.step_prefix,
                 "test",
-                "Run release tests",
-                "--skip-checks",
+                &options.test_label,
+                &options.skip_reason,
             ),
         ];
     }
@@ -77,14 +109,14 @@ pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
         ready_step(
             &options.step_prefix,
             "audit",
-            "Run release audit",
+            &options.audit_label,
             Vec::new(),
         )
     } else {
         disabled_step(
             &options.step_prefix,
             "audit",
-            "Run release audit",
+            &options.audit_label,
             "no-release-audit-policy",
         )
     };
@@ -94,13 +126,13 @@ pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
         ready_step(
             &options.step_prefix,
             "lint",
-            "Run release lint",
+            &options.lint_label,
             options.lint_needs.clone(),
         ),
         ready_step(
             &options.step_prefix,
             "test",
-            "Run release tests",
+            &options.test_label,
             options.test_needs.clone(),
         ),
     ]
@@ -159,9 +191,41 @@ mod tests {
         assert_eq!(options.component_id, "fixture");
         assert_eq!(options.mode.as_deref(), Some("release-preflight"));
         assert_eq!(options.step_prefix, "preflight");
+        assert_eq!(options.skip_reason, "--skip-checks");
         assert_eq!(options.lint_needs, vec!["preflight.bump_policy"]);
         assert_eq!(options.test_needs, vec!["preflight.lint"]);
         assert!(!options.audit_policy_available);
+    }
+
+    #[test]
+    fn test_review() {
+        let options = QualityPlanOptions::review("fixture");
+
+        assert_eq!(options.component_id, "fixture");
+        assert_eq!(options.mode.as_deref(), Some("review"));
+        assert_eq!(options.step_prefix, "review");
+        assert_eq!(options.lint_needs, vec!["review.audit"]);
+        assert_eq!(options.test_needs, vec!["review.lint"]);
+        assert!(options.audit_policy_available);
+    }
+
+    #[test]
+    fn test_skipped_review() {
+        let plan = build_quality_plan(QualityPlanOptions::skipped_review(
+            "fixture",
+            "no files changed",
+        ));
+
+        assert_eq!(plan.mode.as_deref(), Some("review"));
+        assert!(plan
+            .steps
+            .iter()
+            .all(|step| step.status == PlanStepStatus::Disabled));
+        assert!(plan.steps.iter().all(|step| step
+            .inputs
+            .get("reason")
+            .and_then(|value| value.as_str())
+            == Some("no files changed")));
     }
 
     #[test]
