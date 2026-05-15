@@ -31,6 +31,9 @@ enum FileCommand {
         project_id: String,
         /// Remote file path
         path: String,
+        /// Compatibility flag; file read emits JSON unless --raw is used.
+        #[arg(long, hide = true)]
+        _json: bool,
         /// Output raw content only (no JSON wrapper)
         #[arg(long)]
         raw: bool,
@@ -276,6 +279,7 @@ pub struct FileOutput {
     recursive: Option<bool>,
     entries: Option<Vec<FileEntry>>,
     content: Option<String>,
+    size: Option<i64>,
     bytes_written: Option<usize>,
     stdout: Option<String>,
     stderr: Option<String>,
@@ -357,6 +361,7 @@ pub fn run(args: FileArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<F
         FileCommand::Read {
             project_id,
             path,
+            _json: _,
             raw,
         } => {
             if raw {
@@ -517,6 +522,7 @@ fn list(project_id: &str, path: &str) -> CmdResult<FileOutput> {
             recursive: None,
             entries: Some(result.entries),
             content: None,
+            size: None,
             bytes_written: None,
             stdout: None,
             stderr: None,
@@ -541,6 +547,7 @@ fn read(project_id: &str, path: &str) -> CmdResult<FileOutput> {
             recursive: None,
             entries: None,
             content: Some(result.content),
+            size: result.size,
             bytes_written: None,
             stdout: None,
             stderr: None,
@@ -566,6 +573,7 @@ fn write(project_id: &str, path: &str) -> CmdResult<FileOutput> {
             recursive: None,
             entries: None,
             content: None,
+            size: None,
             bytes_written: Some(result.bytes_written),
             stdout: None,
             stderr: None,
@@ -590,6 +598,7 @@ fn delete(project_id: &str, path: &str, recursive: bool) -> CmdResult<FileOutput
             recursive: Some(result.recursive),
             entries: None,
             content: None,
+            size: None,
             bytes_written: None,
             stdout: None,
             stderr: None,
@@ -614,6 +623,7 @@ fn rename(project_id: &str, old_path: &str, new_path: &str) -> CmdResult<FileOut
             recursive: None,
             entries: None,
             content: None,
+            size: None,
             bytes_written: None,
             stdout: None,
             stderr: None,
@@ -784,3 +794,7 @@ fn edit(args: EditArgs) -> CmdResult<FileEditOutput> {
         0,
     ))
 }
+
+#[cfg(test)]
+#[path = "../../tests/commands/file_test.rs"]
+mod file_test;
