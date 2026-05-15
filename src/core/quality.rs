@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSubject};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualityPlanOptions {
@@ -61,24 +61,10 @@ impl QualityPlanOptions {
 
 pub fn build_quality_plan(options: QualityPlanOptions) -> HomeboyPlan {
     let steps = build_quality_steps(&options);
-    let component_id = options.component_id;
-
-    HomeboyPlan {
-        id: format!("quality.{component_id}"),
-        kind: PlanKind::Quality,
-        subject: PlanSubject {
-            component_id: Some(component_id),
-            ..PlanSubject::default()
-        },
-        mode: options.mode,
-        inputs: HashMap::new(),
-        policy: HashMap::new(),
-        steps,
-        artifacts: Vec::new(),
-        summary: None,
-        warnings: Vec::new(),
-        hints: Vec::new(),
-    }
+    let mut plan = HomeboyPlan::for_component(PlanKind::Quality, options.component_id);
+    plan.mode = options.mode;
+    plan.steps = steps;
+    plan
 }
 
 pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
