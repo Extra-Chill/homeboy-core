@@ -1,6 +1,7 @@
 use crate::component::Component;
 use crate::extension::ExtensionManifest;
 use crate::git;
+use crate::quality::{build_quality_steps as build_shared_quality_steps, QualityPlanOptions};
 use crate::release::pipeline_capabilities::{
     get_publish_targets, has_package_capability, has_prepare_capability,
 };
@@ -153,51 +154,10 @@ pub(super) fn build_preflight_steps(
 }
 
 fn build_quality_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
-    if options.skip_checks {
-        return vec![
-            disabled_step(
-                "preflight.audit",
-                "preflight.audit",
-                "Run release audit",
-                string_config("reason", "--skip-checks"),
-            ),
-            disabled_step(
-                "preflight.lint",
-                "preflight.lint",
-                "Run release lint",
-                string_config("reason", "--skip-checks"),
-            ),
-            disabled_step(
-                "preflight.test",
-                "preflight.test",
-                "Run release tests",
-                string_config("reason", "--skip-checks"),
-            ),
-        ];
-    }
-
-    vec![
-        disabled_step(
-            "preflight.audit",
-            "preflight.audit",
-            "Run release audit",
-            string_config("reason", "no-release-audit-policy"),
-        ),
-        ready_step(
-            "preflight.lint",
-            "preflight.lint",
-            "Run release lint",
-            vec!["preflight.bump_policy".to_string()],
-            StepConfig::new(),
-        ),
-        ready_step(
-            "preflight.test",
-            "preflight.test",
-            "Run release tests",
-            vec!["preflight.lint".to_string()],
-            StepConfig::new(),
-        ),
-    ]
+    build_shared_quality_steps(&QualityPlanOptions::release_preflight(
+        "release",
+        options.skip_checks,
+    ))
 }
 
 fn build_bump_policy_step(

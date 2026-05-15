@@ -26,6 +26,7 @@ pub mod observation;
 pub mod output;
 pub mod plan;
 pub mod project;
+pub mod quality;
 pub mod refactor;
 pub mod release;
 pub mod rig;
