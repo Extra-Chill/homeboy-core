@@ -1,6 +1,6 @@
-use super::types::{
-    ReleaseOptions, ReleasePlan, ReleasePlanStatus, ReleasePlanStep, ReleaseSemverRecommendation,
-};
+use crate::plan::{PlanStep, PlanStepStatus};
+
+use super::types::{ReleaseOptions, ReleasePlan, ReleaseSemverRecommendation};
 
 pub(super) fn release_skip_plan(
     component_id: &str,
@@ -40,14 +40,14 @@ fn skipped_release_plan(
     ReleasePlan::new(
         component_id,
         false,
-        vec![ReleasePlanStep {
+        vec![PlanStep {
             id: "release.skip".to_string(),
             kind: "release.skip".to_string(),
             label: Some(label.to_string()),
             blocking: true,
             scope: Vec::new(),
             needs: Vec::new(),
-            status: ReleasePlanStatus::Disabled,
+            status: PlanStepStatus::Disabled,
             inputs: std::collections::HashMap::from([(
                 "reason".to_string(),
                 serde_json::Value::String(reason.to_string()),
@@ -66,8 +66,9 @@ fn skipped_release_plan(
 #[cfg(test)]
 mod tests {
     use super::release_skip_plan;
+    use crate::plan::PlanStepStatus;
     use crate::release::types::{
-        ReleaseBumpPolicyOptions, ReleaseOptions, ReleasePlanStatus, ReleaseSemverRecommendation,
+        ReleaseBumpPolicyOptions, ReleaseOptions, ReleaseSemverRecommendation,
     };
 
     #[test]
@@ -80,7 +81,7 @@ mod tests {
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(plan.steps[0].id, "release.skip");
         assert_eq!(plan.steps[0].kind, "release.skip");
-        assert_eq!(plan.steps[0].status, ReleasePlanStatus::Disabled);
+        assert_eq!(plan.steps[0].status, PlanStepStatus::Disabled);
         assert_eq!(
             plan.steps[0].inputs.get("reason").and_then(|v| v.as_str()),
             Some("no-releasable-commits")

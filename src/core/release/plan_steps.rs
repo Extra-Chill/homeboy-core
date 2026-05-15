@@ -1,14 +1,12 @@
 use crate::component::Component;
 use crate::extension::ExtensionManifest;
 use crate::git;
+use crate::plan::{PlanStep, PlanStepStatus};
 use crate::quality::{build_quality_steps as build_shared_quality_steps, QualityPlanOptions};
 use crate::release::pipeline_capabilities::{
     get_publish_targets, has_package_capability, has_prepare_capability,
 };
-use crate::release::types::{
-    ReleaseChangelogPlan, ReleaseOptions, ReleasePlanStatus, ReleasePlanStep,
-    ReleaseSemverRecommendation,
-};
+use crate::release::types::{ReleaseChangelogPlan, ReleaseOptions, ReleaseSemverRecommendation};
 use crate::Result;
 
 type StepConfig = std::collections::HashMap<String, serde_json::Value>;
@@ -38,15 +36,15 @@ fn ready_step(
     label: impl Into<String>,
     needs: Vec<String>,
     config: StepConfig,
-) -> ReleasePlanStep {
-    ReleasePlanStep {
+) -> PlanStep {
+    PlanStep {
         id: id.to_string(),
         kind: step_type.to_string(),
         label: Some(label.into()),
         blocking: true,
         scope: Vec::new(),
         needs,
-        status: ReleasePlanStatus::Ready,
+        status: PlanStepStatus::Ready,
         inputs: config,
         outputs: StepConfig::new(),
         skip_reason: None,
@@ -60,15 +58,15 @@ fn disabled_step(
     step_type: &str,
     label: impl Into<String>,
     config: StepConfig,
-) -> ReleasePlanStep {
-    ReleasePlanStep {
+) -> PlanStep {
+    PlanStep {
         id: id.to_string(),
         kind: step_type.to_string(),
         label: Some(label.into()),
         blocking: true,
         scope: Vec::new(),
         needs: Vec::new(),
-        status: ReleasePlanStatus::Disabled,
+        status: PlanStepStatus::Disabled,
         inputs: config,
         outputs: StepConfig::new(),
         skip_reason: None,
@@ -86,7 +84,7 @@ fn string_config(key: &str, value: impl Into<String>) -> StepConfig {
 pub(super) fn build_preflight_steps(
     options: &ReleaseOptions,
     semver_recommendation: Option<&ReleaseSemverRecommendation>,
-) -> Vec<ReleasePlanStep> {
+) -> Vec<PlanStep> {
     let mut steps = vec![
         ready_step(
             "preflight.default_branch",
@@ -153,7 +151,7 @@ pub(super) fn build_preflight_steps(
     steps
 }
 
-fn build_quality_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
+fn build_quality_steps(options: &ReleaseOptions) -> Vec<PlanStep> {
     build_shared_quality_steps(&QualityPlanOptions::release_preflight(
         "release",
         options.skip_checks,
@@ -163,7 +161,7 @@ fn build_quality_steps(options: &ReleaseOptions) -> Vec<ReleasePlanStep> {
 fn build_bump_policy_step(
     options: &ReleaseOptions,
     semver_recommendation: Option<&ReleaseSemverRecommendation>,
-) -> ReleasePlanStep {
+) -> PlanStep {
     let Some(recommendation) = semver_recommendation else {
         return disabled_step(
             "preflight.bump_policy",
@@ -226,7 +224,7 @@ pub(super) fn build_release_steps(
     monorepo: Option<&git::MonorepoContext>,
     warnings: &mut Vec<String>,
     _hints: &mut Vec<String>,
-) -> Result<Vec<ReleasePlanStep>> {
+) -> Result<Vec<PlanStep>> {
     let mut steps = Vec::new();
     let publish_targets = get_publish_targets(extensions);
 
@@ -404,7 +402,7 @@ fn build_changelog_steps(
     changelog_plan: &ReleaseChangelogPlan,
     current_version: &str,
     new_version: &str,
-) -> Vec<ReleasePlanStep> {
+) -> Vec<PlanStep> {
     let mut policy_config = StepConfig::new();
     policy_config.insert(
         "policy".to_string(),
@@ -498,9 +496,9 @@ fn string_array_config(key: &str, values: &[String]) -> StepConfig {
 mod tests {
     use super::{build_preflight_steps, build_release_steps, github_release_applies};
     use crate::component::Component;
+    use crate::plan::PlanStepStatus;
     use crate::release::types::{
-        ReleaseBumpPolicyOptions, ReleaseChangelogPlan, ReleaseOptions, ReleasePlanStatus,
-        ReleaseSemverRecommendation,
+        ReleaseBumpPolicyOptions, ReleaseChangelogPlan, ReleaseOptions, ReleaseSemverRecommendation,
     };
 
     #[test]
@@ -527,8 +525,8 @@ mod tests {
                 "preflight.changelog_bootstrap"
             ]
         );
-        assert_eq!(steps[0].status, ReleasePlanStatus::Ready);
-        assert_eq!(steps[1].status, ReleasePlanStatus::Disabled);
+        assert_eq!(steps[0].status, PlanStepStatus::Ready);
+        assert_eq!(steps[1].status, PlanStepStatus::Disabled);
         assert_eq!(steps[2].needs, vec!["preflight.git_identity"]);
     }
 
@@ -546,7 +544,7 @@ mod tests {
             .find(|step| step.id == "preflight.git_identity")
             .expect("git identity step");
 
-        assert_eq!(identity.status, ReleasePlanStatus::Ready);
+        assert_eq!(identity.status, PlanStepStatus::Ready);
         assert_eq!(identity.needs, vec!["preflight.default_branch"]);
         assert_eq!(
             identity
@@ -572,7 +570,7 @@ mod tests {
                 .find(|step| step.id == step_id)
                 .expect("quality step");
 
-            assert_eq!(quality.status, ReleasePlanStatus::Disabled);
+            assert_eq!(quality.status, PlanStepStatus::Disabled);
             assert_eq!(
                 quality
                     .inputs
@@ -608,14 +606,14 @@ mod tests {
             .find(|step| step.id == "preflight.changelog_bootstrap")
             .expect("changelog bootstrap step");
 
-        assert_eq!(audit.status, ReleasePlanStatus::Disabled);
+        assert_eq!(audit.status, PlanStepStatus::Disabled);
         assert_eq!(
             audit.inputs.get("reason").and_then(|value| value.as_str()),
             Some("no-release-audit-policy")
         );
-        assert_eq!(lint.status, ReleasePlanStatus::Ready);
+        assert_eq!(lint.status, PlanStepStatus::Ready);
         assert_eq!(lint.needs, vec!["preflight.bump_policy"]);
-        assert_eq!(test.status, ReleasePlanStatus::Ready);
+        assert_eq!(test.status, PlanStepStatus::Ready);
         assert_eq!(test.needs, vec!["preflight.lint"]);
         assert_eq!(changelog_bootstrap.needs, vec!["preflight.test"]);
     }
@@ -634,7 +632,7 @@ mod tests {
             .find(|step| step.id == "preflight.bump_policy")
             .expect("bump policy step");
 
-        assert_eq!(bump_policy.status, ReleasePlanStatus::Ready);
+        assert_eq!(bump_policy.status, PlanStepStatus::Ready);
         assert_eq!(bump_policy.needs, vec!["preflight.remote_sync"]);
         assert_eq!(
             bump_policy

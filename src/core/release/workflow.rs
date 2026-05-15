@@ -1,11 +1,11 @@
 use crate::error::{Error, Result};
 use crate::git;
+use crate::plan::{PlanStep, PlanStepStatus};
 
 use super::context::load_component;
 use super::types::{
     BatchReleaseComponentResult, BatchReleaseResult, BatchReleaseSummary, ReleaseBumpPolicyOptions,
-    ReleaseCommandInput, ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleasePlanStatus,
-    ReleasePlanStep, ReleaseRun,
+    ReleaseCommandInput, ReleaseCommandResult, ReleaseOptions, ReleasePlan, ReleaseRun,
 };
 
 pub fn run_command(input: ReleaseCommandInput) -> Result<(ReleaseCommandResult, i32)> {
@@ -483,12 +483,7 @@ fn recovery_release_plan(
     )
 }
 
-fn recovery_step(
-    id: &str,
-    label: impl Into<String>,
-    needed: bool,
-    needs: Vec<String>,
-) -> ReleasePlanStep {
+fn recovery_step(id: &str, label: impl Into<String>, needed: bool, needs: Vec<String>) -> PlanStep {
     let mut config = std::collections::HashMap::new();
     if !needed {
         config.insert(
@@ -497,7 +492,7 @@ fn recovery_step(
         );
     }
 
-    ReleasePlanStep {
+    PlanStep {
         id: id.to_string(),
         kind: id.to_string(),
         label: Some(label.into()),
@@ -505,9 +500,9 @@ fn recovery_step(
         scope: Vec::new(),
         needs,
         status: if needed {
-            ReleasePlanStatus::Ready
+            PlanStepStatus::Ready
         } else {
-            ReleasePlanStatus::Disabled
+            PlanStepStatus::Disabled
         },
         inputs: config,
         outputs: std::collections::HashMap::new(),
@@ -664,6 +659,7 @@ pub fn run_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::{PlanStep, PlanStepStatus};
     use crate::release::{ReleaseRunResult, ReleaseStepResult, ReleaseStepStatus};
     use std::collections::HashMap;
 
@@ -672,14 +668,14 @@ mod tests {
         let plan = ReleasePlan::new(
             "demo",
             true,
-            vec![crate::release::ReleasePlanStep {
+            vec![PlanStep {
                 id: "version".to_string(),
                 kind: "version".to_string(),
                 label: None,
                 blocking: true,
                 scope: Vec::new(),
                 needs: Vec::new(),
-                status: crate::release::ReleasePlanStatus::Ready,
+                status: PlanStepStatus::Ready,
                 inputs: HashMap::from([(
                     "to".to_string(),
                     serde_json::Value::String("1.2.3".to_string()),
@@ -713,20 +709,11 @@ mod tests {
         assert_eq!(plan.hints, actions);
         assert_eq!(plan.steps.len(), 3);
         assert_eq!(plan.steps[0].id, "recover.commit");
-        assert_eq!(
-            plan.steps[0].status,
-            crate::release::ReleasePlanStatus::Ready
-        );
+        assert_eq!(plan.steps[0].status, PlanStepStatus::Ready);
         assert_eq!(plan.steps[1].id, "recover.tag");
-        assert_eq!(
-            plan.steps[1].status,
-            crate::release::ReleasePlanStatus::Ready
-        );
+        assert_eq!(plan.steps[1].status, PlanStepStatus::Ready);
         assert_eq!(plan.steps[2].id, "recover.push");
-        assert_eq!(
-            plan.steps[2].status,
-            crate::release::ReleasePlanStatus::Disabled
-        );
+        assert_eq!(plan.steps[2].status, PlanStepStatus::Disabled);
         assert_eq!(
             plan.steps[2].inputs.get("reason").and_then(|v| v.as_str()),
             Some("already-complete")
@@ -750,7 +737,7 @@ mod tests {
         assert!(plan
             .steps
             .iter()
-            .all(|step| step.status == crate::release::ReleasePlanStatus::Disabled));
+            .all(|step| step.status == PlanStepStatus::Disabled));
     }
 
     #[test]

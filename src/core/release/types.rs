@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 use crate::is_zero_u32;
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSubject};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanSubject};
 
 /// Ordered release plan shared by dry-run output and release execution.
 ///
@@ -23,7 +23,7 @@ impl ReleasePlan {
     pub fn new(
         component_id: impl Into<String>,
         enabled: bool,
-        steps: Vec<ReleasePlanStep>,
+        steps: Vec<PlanStep>,
         semver_recommendation: Option<ReleaseSemverRecommendation>,
         warnings: Vec<String>,
         hints: Vec<String>,
@@ -187,9 +187,6 @@ pub struct ReleaseState {
     pub artifacts: Vec<ReleaseArtifact>,
     pub changelog_validation: Option<crate::version::ChangelogValidationResult>,
 }
-
-pub type ReleasePlanStep = PlanStep;
-pub type ReleasePlanStatus = PlanStepStatus;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReleaseOptions {
