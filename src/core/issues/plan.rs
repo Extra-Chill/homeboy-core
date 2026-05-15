@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::code_audit::FindingConfidence;
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
 
 /// One row of incoming findings: "command produced N findings of category X
 /// for component Y." This is the input grain reconcile reasons over.
@@ -169,12 +170,41 @@ pub enum ReconcileSkipReason {
 }
 
 /// The full reconciliation plan: every action, in execution order.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReconcilePlan {
+    #[serde(flatten)]
+    pub plan: HomeboyPlan,
     pub actions: Vec<ReconcileAction>,
 }
 
 impl ReconcilePlan {
+    pub fn new(component_id: impl Into<String>, actions: Vec<ReconcileAction>) -> Self {
+        let component_id = component_id.into();
+        let mut plan = HomeboyPlan::for_component(PlanKind::IssueReconcile, component_id);
+        plan.steps = actions.iter().enumerate().map(action_step).collect();
+        plan.summary = Some(PlanSummary {
+            total_steps: plan.steps.len(),
+            ready: plan
+                .steps
+                .iter()
+                .filter(|step| step.status == PlanStepStatus::Ready)
+                .count(),
+            blocked: plan
+                .steps
+                .iter()
+                .filter(|step| step.status == PlanStepStatus::Missing)
+                .count(),
+            skipped: plan
+                .steps
+                .iter()
+                .filter(|step| step.status == PlanStepStatus::Skipped)
+                .count(),
+            next_actions: Vec::new(),
+        });
+
+        Self { plan, actions }
+    }
+
     /// Count actions by variant (file_new, update, etc.). Used by the CLI
     /// to render a one-line summary.
     pub fn counts(&self) -> ReconcilePlanCounts {
@@ -196,6 +226,86 @@ impl ReconcilePlan {
         self.actions
             .iter()
             .all(|a| matches!(a, ReconcileAction::Skip { .. }))
+    }
+}
+
+fn action_step((index, action): (usize, &ReconcileAction)) -> PlanStep {
+    let action_kind = action_kind(action);
+    let mut inputs = std::collections::HashMap::new();
+    inputs.insert(
+        "action".to_string(),
+        serde_json::to_value(action).unwrap_or(serde_json::Value::Null),
+    );
+
+    PlanStep {
+        id: format!("issues.reconcile.{:03}.{}", index + 1, action_kind),
+        kind: format!("issues.reconcile.{action_kind}"),
+        label: Some(action_label(action)),
+        blocking: !matches!(action, ReconcileAction::Skip { .. }),
+        scope: Vec::new(),
+        needs: Vec::new(),
+        status: if matches!(action, ReconcileAction::Skip { .. }) {
+            PlanStepStatus::Skipped
+        } else {
+            PlanStepStatus::Ready
+        },
+        inputs,
+        outputs: std::collections::HashMap::new(),
+        skip_reason: match action {
+            ReconcileAction::Skip { reason, .. } => Some(format!("{:?}", reason)),
+            _ => None,
+        },
+        policy: std::collections::HashMap::new(),
+        missing: Vec::new(),
+    }
+}
+
+fn action_kind(action: &ReconcileAction) -> &'static str {
+    match action {
+        ReconcileAction::FileNew { .. } => "file_new",
+        ReconcileAction::Update { .. } => "update",
+        ReconcileAction::UpdateClosed { .. } => "update_closed",
+        ReconcileAction::Close { .. } => "close",
+        ReconcileAction::CloseDuplicate { .. } => "close_duplicate",
+        ReconcileAction::Skip { .. } => "skip",
+    }
+}
+
+fn action_label(action: &ReconcileAction) -> String {
+    match action {
+        ReconcileAction::FileNew {
+            command,
+            component_id,
+            category,
+            count,
+            ..
+        } => format!("File new {command} issue for {category} in {component_id} ({count})"),
+        ReconcileAction::Update {
+            number,
+            category,
+            count,
+            ..
+        } => format!("Update {category} issue #{number} ({count})"),
+        ReconcileAction::UpdateClosed {
+            number,
+            category,
+            count,
+            ..
+        } => format!("Refresh closed {category} issue #{number} ({count})"),
+        ReconcileAction::Close {
+            number, category, ..
+        } => {
+            format!("Close resolved {category} issue #{number}")
+        }
+        ReconcileAction::CloseDuplicate {
+            number,
+            keep,
+            category,
+            ..
+        } => format!("Close duplicate {category} issue #{number}, keeping #{keep}"),
+        ReconcileAction::Skip {
+            category, reason, ..
+        } => format!("Skip {category} ({:?})", reason),
     }
 }
 

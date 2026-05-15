@@ -4,12 +4,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::extension::{self, grammar, grammar_items, ParsedItem};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
 use crate::Result;
 
 use super::move_items::{MoveOptions, MoveResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecomposePlan {
+    #[serde(flatten, default)]
+    pub plan: HomeboyPlan,
     pub file: String,
     pub strategy: String,
     pub total_items: usize,
@@ -80,6 +83,7 @@ pub fn build_plan(file: &str, root: &Path, strategy: &str) -> Result<DecomposePl
     ];
 
     Ok(DecomposePlan {
+        plan: decompose_homeboy_plan(file, strategy, items.len(), &groups, &warnings),
         file: file.to_string(),
         strategy: strategy.to_string(),
         total_items: items.len(),
@@ -88,6 +92,74 @@ pub fn build_plan(file: &str, root: &Path, strategy: &str) -> Result<DecomposePl
         checklist,
         warnings,
     })
+}
+
+fn decompose_homeboy_plan(
+    file: &str,
+    strategy: &str,
+    total_items: usize,
+    groups: &[DecomposeGroup],
+    warnings: &[String],
+) -> HomeboyPlan {
+    let mut plan = HomeboyPlan::for_description(PlanKind::Refactor, file.to_string());
+    plan.mode = Some("decompose".to_string());
+    plan.inputs.insert(
+        "file".to_string(),
+        serde_json::Value::String(file.to_string()),
+    );
+    plan.inputs.insert(
+        "strategy".to_string(),
+        serde_json::Value::String(strategy.to_string()),
+    );
+    plan.inputs.insert(
+        "total_items".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(total_items)),
+    );
+    plan.steps = groups.iter().map(decompose_group_step).collect();
+    plan.summary = Some(PlanSummary {
+        total_steps: plan.steps.len(),
+        ready: plan.steps.len(),
+        blocked: 0,
+        skipped: 0,
+        next_actions: Vec::new(),
+    });
+    plan.warnings = warnings.to_vec();
+    plan
+}
+
+fn decompose_group_step(group: &DecomposeGroup) -> PlanStep {
+    let mut inputs = std::collections::HashMap::new();
+    inputs.insert(
+        "group".to_string(),
+        serde_json::Value::String(group.name.clone()),
+    );
+    inputs.insert(
+        "suggested_target".to_string(),
+        serde_json::Value::String(group.suggested_target.clone()),
+    );
+    inputs.insert(
+        "item_names".to_string(),
+        serde_json::to_value(&group.item_names).unwrap_or(serde_json::Value::Null),
+    );
+
+    PlanStep {
+        id: format!("refactor.decompose.{}", group.name),
+        kind: "refactor.decompose.extract_group".to_string(),
+        label: Some(format!(
+            "Extract {} item(s) to {}",
+            group.item_names.len(),
+            group.suggested_target
+        )),
+        blocking: true,
+        scope: group.item_names.clone(),
+        needs: Vec::new(),
+        status: PlanStepStatus::Ready,
+        inputs,
+        outputs: std::collections::HashMap::new(),
+        skip_reason: None,
+        policy: std::collections::HashMap::new(),
+        missing: Vec::new(),
+    }
 }
 
 pub fn apply_plan(plan: &DecomposePlan, root: &Path, write: bool) -> Result<Vec<MoveResult>> {

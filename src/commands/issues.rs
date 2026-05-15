@@ -127,7 +127,7 @@ pub struct ReconcileOutput {
     pub command: String,
     pub applied: bool,
     /// Always populated — same shape regardless of dry-run vs apply.
-    pub plan_summary: PlanSummary,
+    pub plan_summary: ReconcileOutputSummary,
     /// Only populated when `applied = true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<ReconcileResult>,
@@ -136,7 +136,7 @@ pub struct ReconcileOutput {
 }
 
 #[derive(Serialize, Default)]
-pub struct PlanSummary {
+pub struct ReconcileOutputSummary {
     pub total_actions: usize,
     pub file_new: usize,
     pub update: usize,
@@ -484,9 +484,9 @@ fn render_plan_lines(plan: &ReconcilePlan) -> Vec<String> {
         .collect()
 }
 
-fn summarize_plan(plan: &ReconcilePlan) -> PlanSummary {
+fn summarize_plan(plan: &ReconcilePlan) -> ReconcileOutputSummary {
     let counts = plan.counts();
-    PlanSummary {
+    ReconcileOutputSummary {
         total_actions: plan.actions.len(),
         file_new: counts.file_new,
         update: counts.update,
