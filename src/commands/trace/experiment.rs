@@ -5,11 +5,13 @@ use std::process::Command;
 
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
+use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
 use homeboy::rig;
 
 use super::{TraceArgs, TraceRigContext};
 
 pub(super) struct TraceExperimentRunPlan<'a> {
+    plan: HomeboyPlan,
     name: String,
     spec: &'a rig::TraceExperimentSpec,
     context: &'a TraceRigContext,
@@ -59,10 +61,84 @@ pub(super) fn trace_experiment_plan_for_args<'a>(
             )
         })?;
     Ok(Some(TraceExperimentRunPlan {
+        plan: trace_experiment_plan(&context.rig_spec.id, name, experiment),
         name: name.to_string(),
         spec: experiment,
         context,
     }))
+}
+
+fn trace_experiment_plan(
+    rig_id: &str,
+    name: &str,
+    experiment: &rig::TraceExperimentSpec,
+) -> HomeboyPlan {
+    let mut plan = HomeboyPlan::for_description(PlanKind::Trace, format!("{rig_id} {name}"));
+    plan.mode = Some("experiment".to_string());
+    plan.inputs.insert(
+        "rig_id".to_string(),
+        serde_json::Value::String(rig_id.to_string()),
+    );
+    plan.inputs.insert(
+        "experiment".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+    plan.steps = trace_experiment_steps(name, experiment);
+    plan.summary = Some(PlanSummary {
+        total_steps: plan.steps.len(),
+        ready: plan.steps.len(),
+        blocked: 0,
+        skipped: 0,
+        next_actions: Vec::new(),
+    });
+    plan
+}
+
+fn trace_experiment_steps(name: &str, experiment: &rig::TraceExperimentSpec) -> Vec<PlanStep> {
+    let setup =
+        experiment.setup.iter().enumerate().map(|(index, command)| {
+            trace_experiment_step("setup", name, index + 1, &command.command)
+        });
+    let teardown = experiment
+        .teardown
+        .iter()
+        .enumerate()
+        .map(|(index, command)| {
+            trace_experiment_step("teardown", name, index + 1, &command.command)
+        });
+
+    setup.chain(teardown).collect()
+}
+
+fn trace_experiment_step(phase: &str, name: &str, index: usize, command: &str) -> PlanStep {
+    let mut inputs = std::collections::HashMap::new();
+    inputs.insert(
+        "experiment".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+    inputs.insert(
+        "phase".to_string(),
+        serde_json::Value::String(phase.to_string()),
+    );
+    inputs.insert(
+        "command".to_string(),
+        serde_json::Value::String(command.to_string()),
+    );
+
+    PlanStep {
+        id: format!("trace.experiment.{phase}.{index}"),
+        kind: format!("trace.experiment.{phase}"),
+        label: Some(format!("{phase} trace experiment {name}")),
+        blocking: true,
+        scope: vec![name.to_string()],
+        needs: Vec::new(),
+        status: PlanStepStatus::Ready,
+        inputs,
+        outputs: std::collections::HashMap::new(),
+        skip_reason: None,
+        policy: std::collections::HashMap::new(),
+        missing: Vec::new(),
+    }
 }
 
 pub(super) fn trace_experiment_settings(
@@ -113,6 +189,7 @@ pub(super) fn run_trace_experiment_setup_for_plan(
     let Some(plan) = plan else {
         return Ok(());
     };
+    validate_trace_experiment_plan_phase(&plan.plan, &plan.name, "setup", plan.spec.setup.len())?;
     run_trace_experiment_commands(
         plan.context,
         &plan.name,
@@ -130,6 +207,12 @@ pub(super) fn run_trace_experiment_teardown_for_plan(
     let Some(plan) = plan else {
         return Ok(());
     };
+    validate_trace_experiment_plan_phase(
+        &plan.plan,
+        &plan.name,
+        "teardown",
+        plan.spec.teardown.len(),
+    )?;
     run_trace_experiment_commands(
         plan.context,
         &plan.name,
@@ -138,6 +221,30 @@ pub(super) fn run_trace_experiment_teardown_for_plan(
         &plan.spec.env,
         run_dir,
     )
+}
+
+fn validate_trace_experiment_plan_phase(
+    plan: &HomeboyPlan,
+    experiment_name: &str,
+    phase: &str,
+    command_count: usize,
+) -> homeboy::Result<()> {
+    let planned_count = plan
+        .steps
+        .iter()
+        .filter(|step| {
+            step.kind == format!("trace.experiment.{phase}")
+                && step.inputs.get("phase").and_then(|value| value.as_str()) == Some(phase)
+        })
+        .count();
+    if planned_count == command_count {
+        return Ok(());
+    }
+
+    Err(homeboy::Error::internal_unexpected(format!(
+        "trace experiment '{}' {} plan has {} steps for {} commands",
+        experiment_name, phase, planned_count, command_count
+    )))
 }
 
 fn run_trace_experiment_commands(
