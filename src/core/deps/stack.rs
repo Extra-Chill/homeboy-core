@@ -1,4 +1,5 @@
 use crate::component::{self, Component, DependencyStackEdge};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,8 +22,10 @@ pub struct DependencyStackEdgeStatus {
     pub test: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DependencyStackPlan {
+    #[serde(flatten)]
+    pub plan: HomeboyPlan,
     pub upstream: String,
     pub step_count: usize,
     pub steps: Vec<DependencyStackPlanStep>,
@@ -199,11 +202,75 @@ pub fn stack_plan_from_components(
         }
     }
 
-    Ok(DependencyStackPlan {
-        upstream: upstream.to_string(),
-        step_count: steps.len(),
-        steps,
-    })
+    Ok(DependencyStackPlan::new(upstream, steps))
+}
+
+impl DependencyStackPlan {
+    pub fn new(upstream: impl Into<String>, steps: Vec<DependencyStackPlanStep>) -> Self {
+        let upstream = upstream.into();
+        let mut plan = HomeboyPlan::for_component(PlanKind::DependencyStack, upstream.clone());
+        plan.steps = steps.iter().map(stack_step).collect();
+        plan.summary = Some(PlanSummary {
+            total_steps: plan.steps.len(),
+            ready: plan.steps.len(),
+            blocked: 0,
+            skipped: 0,
+            next_actions: Vec::new(),
+        });
+
+        Self {
+            plan,
+            upstream,
+            step_count: steps.len(),
+            steps,
+        }
+    }
+}
+
+fn stack_step(step: &DependencyStackPlanStep) -> PlanStep {
+    let mut inputs = std::collections::HashMap::new();
+    inputs.insert(
+        "declaring_component_id".to_string(),
+        serde_json::Value::String(step.declaring_component_id.clone()),
+    );
+    inputs.insert(
+        "upstream".to_string(),
+        serde_json::Value::String(step.upstream.clone()),
+    );
+    inputs.insert(
+        "downstream".to_string(),
+        serde_json::Value::String(step.downstream.clone()),
+    );
+    inputs.insert(
+        "downstream_path".to_string(),
+        serde_json::Value::String(step.downstream_path.clone()),
+    );
+    inputs.insert(
+        "package".to_string(),
+        serde_json::Value::String(step.package.clone()),
+    );
+    inputs.insert(
+        "update_command".to_string(),
+        serde_json::Value::String(step.update_command.clone()),
+    );
+
+    PlanStep {
+        id: format!("deps.stack.{:03}.{}", step.sequence, step.downstream),
+        kind: "deps.stack.update_downstream".to_string(),
+        label: Some(format!(
+            "Update {} in {} from {}",
+            step.package, step.downstream, step.upstream
+        )),
+        blocking: true,
+        scope: vec![step.downstream.clone()],
+        needs: Vec::new(),
+        status: PlanStepStatus::Ready,
+        inputs,
+        outputs: std::collections::HashMap::new(),
+        skip_reason: None,
+        policy: std::collections::HashMap::new(),
+        missing: Vec::new(),
+    }
 }
 
 fn edge_status(component: &Component, edge: &DependencyStackEdge) -> DependencyStackEdgeStatus {

@@ -53,6 +53,32 @@ impl HomeboyPlan {
             hints: Vec::new(),
         }
     }
+
+    pub fn for_description(kind: PlanKind, description: impl Into<String>) -> Self {
+        let description = description.into();
+        Self {
+            id: format!("{}.{}", kind.slug(), slug_fragment(&description)),
+            kind,
+            subject: PlanSubject {
+                description: Some(description),
+                ..PlanSubject::default()
+            },
+            mode: None,
+            inputs: HashMap::new(),
+            policy: HashMap::new(),
+            steps: Vec::new(),
+            artifacts: Vec::new(),
+            summary: None,
+            warnings: Vec::new(),
+            hints: Vec::new(),
+        }
+    }
+}
+
+impl Default for HomeboyPlan {
+    fn default() -> Self {
+        Self::for_description(PlanKind::Custom, "unspecified")
+    }
 }
 
 /// High-level plan family. `Custom` gives extensions and future command
@@ -64,9 +90,13 @@ pub enum PlanKind {
     Build,
     Release,
     Deploy,
+    DependencyStack,
+    IssueReconcile,
     PullRequest,
     Ci,
     Refactor,
+    StackSync,
+    Trace,
     Review,
     Custom,
 }
@@ -78,9 +108,13 @@ impl PlanKind {
             Self::Build => "build",
             Self::Release => "release",
             Self::Deploy => "deploy",
+            Self::DependencyStack => "dependency_stack",
+            Self::IssueReconcile => "issue_reconcile",
             Self::PullRequest => "pull_request",
             Self::Ci => "ci",
             Self::Refactor => "refactor",
+            Self::StackSync => "stack_sync",
+            Self::Trace => "trace",
             Self::Review => "review",
             Self::Custom => "custom",
         }
@@ -163,6 +197,29 @@ fn default_blocking() -> bool {
     true
 }
 
+fn slug_fragment(value: &str) -> String {
+    let slug = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    if slug.is_empty() {
+        "unspecified".to_string()
+    } else {
+        slug
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
@@ -202,6 +259,16 @@ mod tests {
         assert!(plan.steps.is_empty());
         assert!(plan.warnings.is_empty());
         assert!(plan.hints.is_empty());
+    }
+
+    #[test]
+    fn test_for_description() {
+        let plan = HomeboyPlan::for_description(PlanKind::Trace, "Variant A/B");
+
+        assert_eq!(plan.id, "trace.variant-a-b");
+        assert_eq!(plan.kind, PlanKind::Trace);
+        assert_eq!(plan.subject.description.as_deref(), Some("Variant A/B"));
+        assert!(plan.steps.is_empty());
     }
 
     #[test]
