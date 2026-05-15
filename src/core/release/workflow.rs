@@ -241,7 +241,8 @@ fn format_tag(version: &str, monorepo: Option<&git::MonorepoContext>) -> String 
 }
 
 fn extract_new_version_from_plan(plan: &ReleasePlan) -> Option<String> {
-    plan.steps
+    plan.plan
+        .steps
         .iter()
         .find(|s| s.kind == "version")
         .and_then(|s| s.inputs.get("to"))
@@ -254,7 +255,8 @@ fn skipped_reason_from_plan(plan: &ReleasePlan) -> Option<String> {
         return None;
     }
 
-    plan.steps
+    plan.plan
+        .steps
         .iter()
         .find(|step| step.id == "release.skip")
         .and_then(|step| step.inputs.get("reason"))
@@ -706,24 +708,33 @@ mod tests {
 
         assert!(plan.enabled);
         assert_eq!(plan.component_id, "demo");
-        assert_eq!(plan.hints, actions);
-        assert_eq!(plan.steps.len(), 3);
-        assert_eq!(plan.steps[0].id, "recover.commit");
-        assert_eq!(plan.steps[0].status, PlanStepStatus::Ready);
-        assert_eq!(plan.steps[1].id, "recover.tag");
-        assert_eq!(plan.steps[1].status, PlanStepStatus::Ready);
-        assert_eq!(plan.steps[2].id, "recover.push");
-        assert_eq!(plan.steps[2].status, PlanStepStatus::Disabled);
+        assert_eq!(plan.plan.hints, actions);
+        assert_eq!(plan.plan.steps.len(), 3);
+        assert_eq!(plan.plan.steps[0].id, "recover.commit");
+        assert_eq!(plan.plan.steps[0].status, PlanStepStatus::Ready);
+        assert_eq!(plan.plan.steps[1].id, "recover.tag");
+        assert_eq!(plan.plan.steps[1].status, PlanStepStatus::Ready);
+        assert_eq!(plan.plan.steps[2].id, "recover.push");
+        assert_eq!(plan.plan.steps[2].status, PlanStepStatus::Disabled);
         assert_eq!(
-            plan.steps[2].inputs.get("reason").and_then(|v| v.as_str()),
+            plan.plan.steps[2]
+                .inputs
+                .get("reason")
+                .and_then(|v| v.as_str()),
             Some("already-complete")
         );
         assert_eq!(
-            plan.steps[0].inputs.get("version").and_then(|v| v.as_str()),
+            plan.plan.steps[0]
+                .inputs
+                .get("version")
+                .and_then(|v| v.as_str()),
             Some("1.2.3")
         );
         assert_eq!(
-            plan.steps[0].inputs.get("tag").and_then(|v| v.as_str()),
+            plan.plan.steps[0]
+                .inputs
+                .get("tag")
+                .and_then(|v| v.as_str()),
             Some("v1.2.3")
         );
     }
@@ -733,8 +744,9 @@ mod tests {
         let plan = recovery_release_plan("demo", "1.2.3", "v1.2.3", false, false, false, &[]);
 
         assert!(!plan.enabled);
-        assert!(plan.hints.is_empty());
+        assert!(plan.plan.hints.is_empty());
         assert!(plan
+            .plan
             .steps
             .iter()
             .all(|step| step.status == PlanStepStatus::Disabled));

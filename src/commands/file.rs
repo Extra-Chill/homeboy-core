@@ -397,6 +397,7 @@ pub fn run(args: FileArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<F
                     recursive: None,
                     entries: None,
                     content: None,
+                    size: None,
                     bytes_written: None,
                     stdout: None,
                     stderr: None,
