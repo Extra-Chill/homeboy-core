@@ -754,3 +754,7 @@ fn edit(args: EditArgs) -> CmdResult<FileEditOutput> {
         0,
     ))
 }
+
+#[cfg(test)]
+#[path = "../../tests/commands/file_test.rs"]
+mod file_test;
