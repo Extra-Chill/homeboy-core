@@ -4,6 +4,18 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.181.2] - 2026-05-15
+
+### Changed
+- make release plan access explicit
+- use generic plan steps in release
+- align file read coverage with audit conventions
+- satisfy project pin audit checks
+
+### Fixed
+- include file size in file read output
+- add atomic project pin updates
+
 ## [0.181.1] - 2026-05-15
 
 ### Changed
