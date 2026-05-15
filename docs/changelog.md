@@ -4,6 +4,17 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.181.0] - 2026-05-15
+
+### Added
+- add file mkdir command
+
+### Changed
+- extract quality plan substrate
+
+### Fixed
+- keep file mkdir audit-clean
+
 ## [0.180.1] - 2026-05-14
 
 ### Changed
