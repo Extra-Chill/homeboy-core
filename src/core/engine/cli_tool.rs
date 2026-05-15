@@ -219,15 +219,32 @@ fn build_project_command(
             .unwrap_or_else(|| cli_config.tool.clone())
     });
 
+    let (command_template, template_global_args) =
+        extract_wp_cli_global_template_args(cli_config, &cli_config.command_template);
+
     let mut variables = HashMap::new();
     variables.insert(TemplateVars::PROJECT_ID.to_string(), project.id.clone());
     variables.insert(TemplateVars::DOMAIN.to_string(), target_domain.clone());
-    variables.insert(
-        TemplateVars::ARGS.to_string(),
-        shell::quote_args(&command_args),
-    );
     variables.insert(TemplateVars::SITE_PATH.to_string(), base_path);
     variables.insert(TemplateVars::CLI_PATH.to_string(), cli_path);
+
+    let mut rendered_args = project_cli_flags(
+        project,
+        cli_config,
+        extension_id,
+        project_server_user(project).as_deref(),
+        true,
+    );
+    rendered_args.extend(
+        template_global_args
+            .into_iter()
+            .map(|arg| render_map(&arg, &variables)),
+    );
+    rendered_args.extend(command_args);
+    variables.insert(
+        TemplateVars::ARGS.to_string(),
+        shell::quote_args(&rendered_args),
+    );
 
     // Add extension_path so {{extension_path}} resolves in command templates
     let extension_dir = crate::extension::extension_path(extension_id);
@@ -238,9 +255,57 @@ fn build_project_command(
         );
     }
 
-    let mut rendered = render_map(&cli_config.command_template, &variables);
+    let rendered = render_map(&command_template, &variables);
 
-    // Append settings-based flags from extension config
+    Ok((target_domain, rendered))
+}
+
+fn extract_wp_cli_global_template_args(
+    cli_config: &CliConfig,
+    command_template: &str,
+) -> (String, Vec<String>) {
+    if cli_config.tool != "wp" {
+        return (command_template.to_string(), Vec::new());
+    }
+
+    let mut globals = Vec::new();
+    let mut parts = Vec::new();
+    let mut after_args = false;
+
+    for part in command_template.split_whitespace() {
+        if part == "{{args}}" {
+            after_args = true;
+            parts.push(part.to_string());
+            continue;
+        }
+
+        if after_args && is_wp_cli_global_arg(part) {
+            globals.push(part.to_string());
+            continue;
+        }
+
+        parts.push(part.to_string());
+    }
+
+    (parts.join(" "), globals)
+}
+
+fn is_wp_cli_global_arg(arg: &str) -> bool {
+    matches!(arg, "--path" | "--url" | "--user" | "--allow-root")
+        || arg.starts_with("--path=")
+        || arg.starts_with("--url=")
+        || arg.starts_with("--user=")
+}
+
+fn project_cli_flags(
+    project: &Project,
+    cli_config: &CliConfig,
+    extension_id: &str,
+    server_user: Option<&str>,
+    quote_setting_values: bool,
+) -> Vec<String> {
+    let mut flags = Vec::new();
+
     if let Some(extension_config) = project
         .extensions
         .as_ref()
@@ -252,20 +317,27 @@ fn build_project_command(
                 .get(setting_key)
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
-                .map(|value_str| flag_template.replace("{{value}}", &shell::quote_arg(value_str)))
+                .map(|value_str| {
+                    let value = if quote_setting_values {
+                        shell::quote_arg(value_str)
+                    } else {
+                        value_str.to_string()
+                    };
+                    flag_template.replace("{{value}}", &value)
+                })
             {
-                rendered.push(' ');
-                rendered.push_str(&flag);
+                flags.push(flag);
             }
         }
     }
 
-    for flag in matching_auto_flags(cli_config, project_server_user(project).as_deref()) {
-        rendered.push(' ');
-        rendered.push_str(flag);
-    }
+    flags.extend(
+        matching_auto_flags(cli_config, server_user)
+            .into_iter()
+            .map(str::to_string),
+    );
 
-    Ok((target_domain, rendered))
+    flags
 }
 
 fn project_server_user(project: &Project) -> Option<String> {
@@ -367,6 +439,7 @@ fn resolve_subtarget(project: &Project, args: &[String]) -> Result<(String, Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::ScopedExtensionConfig;
     use crate::extension::{CliAutoFlagCondition, CliHelpConfig};
 
     fn cli_config(auto_flags: Vec<CliAutoFlag>) -> CliConfig {
@@ -486,5 +559,93 @@ mod tests {
         .expect("build command");
 
         assert!(command.starts_with("wp core version"));
+    }
+
+    #[test]
+    fn project_cli_flags_render_before_wp_subcommand_args() {
+        let mut settings_flags = HashMap::new();
+        settings_flags.insert("path".to_string(), "--path={{value}}".to_string());
+        settings_flags.insert("url".to_string(), "--url={{value}}".to_string());
+
+        let mut config = cli_config(vec![CliAutoFlag {
+            when: CliAutoFlagCondition::default(),
+            flag: "--allow-root".to_string(),
+        }]);
+        config.settings_flags = settings_flags;
+
+        let mut wordpress_settings = HashMap::new();
+        wordpress_settings.insert(
+            "path".to_string(),
+            serde_json::Value::String("/htdocs/__wp__".to_string()),
+        );
+        wordpress_settings.insert(
+            "url".to_string(),
+            serde_json::Value::String("balanced-jovial-earth.wpcloudstation.dev".to_string()),
+        );
+
+        let mut extensions = HashMap::new();
+        extensions.insert(
+            "wordpress".to_string(),
+            ScopedExtensionConfig {
+                settings: wordpress_settings,
+                ..Default::default()
+            },
+        );
+
+        let project = Project {
+            id: "intelligence-horse".to_string(),
+            domain: Some("balanced-jovial-earth.wpcloudstation.dev".to_string()),
+            base_path: Some("/htdocs/__wp__".to_string()),
+            extensions: Some(extensions),
+            ..Default::default()
+        };
+
+        let (_, command) = build_project_command(
+            &project,
+            &config,
+            "wordpress",
+            &["core".into(), "version".into()],
+        )
+        .expect("build command");
+
+        let core_pos = command.find(" core version").expect("core version args");
+        for flag in [
+            "--path=/htdocs/__wp__",
+            "--url=balanced-jovial-earth.wpcloudstation.dev",
+            "--allow-root",
+        ] {
+            let flag_pos = command.find(flag).expect("global flag");
+            assert!(
+                flag_pos < core_pos,
+                "expected {flag} before WP-CLI subcommand in {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn wp_cli_template_globals_render_before_subcommand_args() {
+        let mut config = cli_config(Vec::new());
+        config.command_template =
+            "{{cliPath}} {{args}} --path={{sitePath}} --url={{domain}}".to_string();
+
+        let project = Project {
+            id: "intelligence-horse".to_string(),
+            domain: Some("balanced-jovial-earth.wpcloudstation.dev".to_string()),
+            base_path: Some("/htdocs/__wp__".to_string()),
+            ..Default::default()
+        };
+
+        let (_, command) = build_project_command(
+            &project,
+            &config,
+            "wordpress",
+            &["core".into(), "version".into()],
+        )
+        .expect("build command");
+
+        assert_eq!(
+            command,
+            "wp --path=/htdocs/__wp__ --url=balanced-jovial-earth.wpcloudstation.dev core version"
+        );
     }
 }

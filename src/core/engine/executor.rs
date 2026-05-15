@@ -110,7 +110,14 @@ pub fn execute_for_project_direct(
     }
 
     // Fallback to shell execution
-    let command = build_shell_command(&base_path, cli_config, project, args, target_domain)?;
+    let command = build_shell_command(
+        &base_path,
+        cli_config,
+        project,
+        extension_id,
+        args,
+        target_domain,
+    )?;
     execute_for_project(project, &command)
 }
 
@@ -219,37 +226,21 @@ fn parse_direct_template(
     // Handle {{args}} - expand to individual args
     let mut command_parts: Vec<String> =
         template.split_whitespace().map(|s| s.to_string()).collect();
+    let template_global_args = extract_wp_cli_global_args(cli_config, &mut command_parts);
 
     // Find and replace {{args}} placeholder with actual args
-    let mut final_args: Vec<String> =
+    let final_args: Vec<String> =
         if let Some(pos) = command_parts.iter().position(|p| p == "{{args}}") {
             command_parts.remove(pos);
             let mut result = Vec::new();
             result.extend(command_parts);
+            result.extend(project_cli_flags(project, cli_config, extension_id));
+            result.extend(template_global_args);
             result.extend(args.iter().cloned());
             result
         } else {
             command_parts
         };
-
-    // Apply settings_flags from project extension config
-    if let Some(extension_config) = project
-        .extensions
-        .as_ref()
-        .and_then(|m| m.get(extension_id))
-    {
-        for (setting_key, flag_template) in &cli_config.settings_flags {
-            if let Some(flag) = extension_config
-                .settings
-                .get(setting_key)
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(|value_str| flag_template.replace("{{value}}", value_str))
-            {
-                final_args.push(flag);
-            }
-        }
-    }
 
     // Extract working directory from working_dir_template
     let working_dir = cli_config.working_dir_template.as_ref().and_then(|t| {
@@ -278,10 +269,67 @@ fn parse_direct_template(
     })
 }
 
+fn project_cli_flags(project: &Project, cli_config: &CliConfig, extension_id: &str) -> Vec<String> {
+    let mut flags = Vec::new();
+
+    if let Some(extension_config) = project
+        .extensions
+        .as_ref()
+        .and_then(|m| m.get(extension_id))
+    {
+        for (setting_key, flag_template) in &cli_config.settings_flags {
+            if let Some(flag) = extension_config
+                .settings
+                .get(setting_key)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|value_str| flag_template.replace("{{value}}", value_str))
+            {
+                flags.push(flag);
+            }
+        }
+    }
+
+    flags
+}
+
+fn extract_wp_cli_global_args(
+    cli_config: &CliConfig,
+    command_parts: &mut Vec<String>,
+) -> Vec<String> {
+    if cli_config.tool != "wp" {
+        return Vec::new();
+    }
+
+    let Some(args_pos) = command_parts.iter().position(|part| part == "{{args}}") else {
+        return Vec::new();
+    };
+
+    let mut globals = Vec::new();
+    let mut index = args_pos + 1;
+    while index < command_parts.len() {
+        if is_wp_cli_global_arg(&command_parts[index]) {
+            globals.push(command_parts.remove(index));
+        } else {
+            index += 1;
+        }
+    }
+
+    globals
+}
+
+fn is_wp_cli_global_arg(arg: &str) -> bool {
+    matches!(arg, "--path" | "--url" | "--user" | "--allow-root")
+        || arg.starts_with("--path=")
+        || arg.starts_with("--url=")
+        || arg.starts_with("--user=")
+}
+
 fn build_shell_command(
     base_path: &str,
     cli_config: &CliConfig,
     project: &Project,
+    extension_id: &str,
     args: &[String],
     target_domain: &str,
 ) -> Result<String> {
@@ -302,8 +350,17 @@ fn build_shell_command(
     // Expand {{domain}}
     template = template.replace("{{domain}}", target_domain);
 
+    let mut command_parts: Vec<String> =
+        template.split_whitespace().map(|s| s.to_string()).collect();
+    let template_global_args = extract_wp_cli_global_args(cli_config, &mut command_parts);
+    template = command_parts.join(" ");
+
+    let mut rendered_args = project_cli_flags(project, cli_config, extension_id);
+    rendered_args.extend(template_global_args);
+    rendered_args.extend(args.iter().cloned());
+
     // Quote and join args
-    let quoted_args = shell::quote_args(args);
+    let quoted_args = shell::quote_args(&rendered_args);
     template = template.replace("{{args}}", &quoted_args);
 
     Ok(template)
