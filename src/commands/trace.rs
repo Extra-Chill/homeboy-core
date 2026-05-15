@@ -48,7 +48,9 @@ use output::{
     render_compare_markdown, render_matrix_markdown, run_compare, TraceAggregateSpanSample,
 };
 use probes::trace_probes_for_args;
-use schedule::{TraceSchedule, TraceVariantMatrixMode};
+pub(super) use schedule::{
+    plan_trace_run_order, TraceRunPlanEntry, TraceSchedule, TraceVariantMatrixMode,
+};
 
 #[cfg(test)]
 use matrix::{expand_variant_matrix, TraceVariantStackItem};
@@ -157,45 +159,6 @@ pub struct TraceArgs {
     /// Remove stale trace overlay locks even when touched files are dirty.
     #[arg(long, alias = "force-stale-lock-cleanup")]
     pub force: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct TraceRunPlanEntry {
-    index: usize,
-    group: String,
-    iteration: usize,
-}
-
-fn plan_trace_run_order(
-    repeat: usize,
-    schedule: TraceSchedule,
-    groups: &[&str],
-) -> Vec<TraceRunPlanEntry> {
-    let mut entries = Vec::new();
-    let mut push_entry = |group: &str, iteration: usize| {
-        entries.push(TraceRunPlanEntry {
-            index: entries.len() + 1,
-            group: group.to_string(),
-            iteration,
-        });
-    };
-    match schedule {
-        TraceSchedule::Grouped => {
-            for group in groups {
-                for iteration in 1..=repeat {
-                    push_entry(group, iteration);
-                }
-            }
-        }
-        TraceSchedule::Interleaved => {
-            for iteration in 1..=repeat {
-                for group in groups {
-                    push_entry(group, iteration);
-                }
-            }
-        }
-    }
-    entries
 }
 
 pub fn is_markdown_mode(args: &TraceArgs) -> bool {

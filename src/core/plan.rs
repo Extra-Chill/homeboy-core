@@ -86,6 +86,7 @@ impl Default for HomeboyPlan {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanKind {
+    Audit,
     Quality,
     Build,
     Release,
@@ -104,6 +105,7 @@ pub enum PlanKind {
 impl PlanKind {
     fn slug(&self) -> &'static str {
         match self {
+            Self::Audit => "audit",
             Self::Quality => "quality",
             Self::Build => "build",
             Self::Release => "release",
