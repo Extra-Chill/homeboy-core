@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 
 use crate::error::Result;
+use crate::plan::PlanStep;
 
 use super::context::{load_component, resolve_extensions};
 use super::execution_dispatch::{
     execute_release_plan_step, release_step_is_show_stopper, ReleaseExecutionContext,
 };
 use super::plan_steps::build_preflight_steps;
-use super::types::{ReleaseOptions, ReleasePlan, ReleasePlanStep, ReleaseState, ReleaseStepResult};
+use super::types::{ReleaseOptions, ReleasePlan, ReleaseState, ReleaseStepResult};
 
 pub(super) fn build_initial_preflight_plan(
     component_id: &str,
@@ -34,7 +35,7 @@ pub(super) fn initial_executable_preflight_ids() -> &'static [&'static str] {
 }
 
 pub(super) fn execute_plan_steps(
-    steps: &[ReleasePlanStep],
+    steps: &[PlanStep],
     component_id: &str,
     options: &ReleaseOptions,
     results: &mut Vec<ReleaseStepResult>,
@@ -77,7 +78,8 @@ mod tests {
     use super::{
         build_initial_preflight_plan, execute_plan_steps, initial_executable_preflight_ids,
     };
-    use crate::release::types::{ReleaseOptions, ReleasePlanStatus};
+    use crate::plan::PlanStepStatus;
+    use crate::release::types::ReleaseOptions;
     use std::collections::HashSet;
 
     #[test]
@@ -96,7 +98,7 @@ mod tests {
             .steps
             .iter()
             .any(|step| step.id == "preflight.git_identity"
-                && step.status == ReleasePlanStatus::Disabled));
+                && step.status == PlanStepStatus::Disabled));
     }
 
     #[test]

@@ -2,11 +2,9 @@ use crate::component::Component;
 use crate::error::{Error, Result};
 use crate::extension::ExtensionManifest;
 use crate::git;
+use crate::plan::{PlanStep, PlanStepStatus};
 use crate::release::executor;
-use crate::release::types::{
-    ReleaseOptions, ReleasePlanStatus, ReleasePlanStep, ReleaseState, ReleaseStepResult,
-    ReleaseStepStatus,
-};
+use crate::release::types::{ReleaseOptions, ReleaseState, ReleaseStepResult, ReleaseStepStatus};
 
 pub(super) struct ReleaseExecutionContext<'a> {
     pub(super) component: &'a Component,
@@ -18,10 +16,10 @@ pub(super) struct ReleaseExecutionContext<'a> {
 }
 
 pub(super) fn execute_release_plan_step(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     context: &mut ReleaseExecutionContext,
 ) -> Result<Option<ReleaseStepResult>> {
-    if matches!(step.status, ReleasePlanStatus::Disabled) || release_step_is_plan_only(step) {
+    if matches!(step.status, PlanStepStatus::Disabled) || release_step_is_plan_only(step) {
         return Ok(None);
     }
 
@@ -135,7 +133,7 @@ pub(super) fn execute_release_plan_step(
     }
 }
 
-fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
+fn release_step_is_plan_only(step: &PlanStep) -> bool {
     (step.kind.starts_with("preflight.")
         && step.kind != "preflight.default_branch"
         && step.kind != "preflight.git_identity"
@@ -150,7 +148,7 @@ fn release_step_is_plan_only(step: &ReleasePlanStep) -> bool {
 }
 
 fn run_default_branch_preflight(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
     match super::planning_git::validate_default_branch(context.component) {
@@ -169,7 +167,7 @@ fn run_default_branch_preflight(
 }
 
 fn run_working_tree_preflight(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
     match super::planning_worktree::validate_working_tree_fail_fast(context.component) {
@@ -188,7 +186,7 @@ fn run_working_tree_preflight(
 }
 
 fn run_remote_sync_preflight(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
     match super::planning_git::validate_remote_sync(context.component) {
@@ -206,7 +204,7 @@ fn run_remote_sync_preflight(
     }
 }
 
-fn run_bump_policy_preflight(step: &ReleasePlanStep) -> ReleaseStepResult {
+fn run_bump_policy_preflight(step: &PlanStep) -> ReleaseStepResult {
     let requested = step
         .inputs
         .get("requested")
@@ -261,27 +259,21 @@ fn run_bump_policy_preflight(step: &ReleasePlanStep) -> ReleaseStepResult {
     }
 }
 
-fn run_lint_preflight(
-    step: &ReleasePlanStep,
-    context: &ReleaseExecutionContext,
-) -> ReleaseStepResult {
+fn run_lint_preflight(step: &PlanStep, context: &ReleaseExecutionContext) -> ReleaseStepResult {
     match super::planning_quality::validate_lint_quality(context.component) {
         Ok(ran) => successful_quality_result(step, ran),
         Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
-fn run_test_preflight(
-    step: &ReleasePlanStep,
-    context: &ReleaseExecutionContext,
-) -> ReleaseStepResult {
+fn run_test_preflight(step: &PlanStep, context: &ReleaseExecutionContext) -> ReleaseStepResult {
     match super::planning_quality::validate_test_quality(context.component) {
         Ok(ran) => successful_quality_result(step, ran),
         Err(err) => failed_result(&step.id, &step.kind, err),
     }
 }
 
-fn successful_quality_result(step: &ReleasePlanStep, ran: bool) -> ReleaseStepResult {
+fn successful_quality_result(step: &PlanStep, ran: bool) -> ReleaseStepResult {
     ReleaseStepResult {
         id: step.id.clone(),
         step_type: step.kind.clone(),
@@ -295,7 +287,7 @@ fn successful_quality_result(step: &ReleasePlanStep, ran: bool) -> ReleaseStepRe
 }
 
 fn run_changelog_bootstrap_preflight(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     context: &ReleaseExecutionContext,
 ) -> ReleaseStepResult {
     match super::planning_changelog::ensure_changelog_initialized(context.component) {
@@ -314,7 +306,7 @@ fn run_changelog_bootstrap_preflight(
 }
 
 fn configure_git_identity(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     context: &ReleaseExecutionContext,
 ) -> Result<ReleaseStepResult> {
     let identity_value = step
@@ -370,7 +362,7 @@ pub(super) fn release_step_is_show_stopper(result: &ReleaseStepResult) -> bool {
     )
 }
 
-fn step_config_string_array(step: &ReleasePlanStep, key: &str) -> Vec<String> {
+fn step_config_string_array(step: &PlanStep, key: &str) -> Vec<String> {
     step.inputs
         .get(key)
         .and_then(|value| value.as_array())
@@ -404,9 +396,9 @@ mod tests {
         ReleaseExecutionContext,
     };
     use crate::component::Component;
+    use crate::plan::{PlanStep, PlanStepStatus};
     use crate::release::types::{
-        ReleaseOptions, ReleasePlanStatus, ReleasePlanStep, ReleaseState, ReleaseStepResult,
-        ReleaseStepStatus,
+        ReleaseOptions, ReleaseState, ReleaseStepResult, ReleaseStepStatus,
     };
 
     #[test]
@@ -800,15 +792,15 @@ mod tests {
         assert_eq!(result.error.as_deref(), Some("boom"));
     }
 
-    fn plan_step(step_type: &str) -> ReleasePlanStep {
-        ReleasePlanStep {
+    fn plan_step(step_type: &str) -> PlanStep {
+        PlanStep {
             id: step_type.to_string(),
             kind: step_type.to_string(),
             label: None,
             blocking: true,
             scope: Vec::new(),
             needs: Vec::new(),
-            status: ReleasePlanStatus::Ready,
+            status: PlanStepStatus::Ready,
             inputs: std::collections::HashMap::new(),
             outputs: std::collections::HashMap::new(),
             skip_reason: None,

@@ -1,12 +1,13 @@
 use crate::component::Component;
 use crate::error::{Error, Result};
-use crate::release::types::{ReleasePlanStep, ReleaseState, ReleaseStepResult};
+use crate::plan::PlanStep;
+use crate::release::types::{ReleaseState, ReleaseStepResult};
 use crate::version;
 
 use super::step_success;
 
 pub(crate) fn run_changelog_finalize(
-    step: &ReleasePlanStep,
+    step: &PlanStep,
     component: &Component,
     state: &mut ReleaseState,
 ) -> Result<ReleaseStepResult> {
@@ -52,7 +53,8 @@ pub(crate) fn run_changelog_finalize(
 mod tests {
     use super::run_changelog_finalize;
     use crate::component::{Component, VersionTarget};
-    use crate::release::types::{ReleasePlanStatus, ReleasePlanStep, ReleaseState};
+    use crate::plan::{PlanStep, PlanStepStatus};
+    use crate::release::types::ReleaseState;
     use crate::release::ReleaseStepStatus;
 
     #[test]
@@ -79,14 +81,14 @@ mod tests {
             }]),
             ..Component::default()
         };
-        let mut step = ReleasePlanStep {
+        let mut step = PlanStep {
             id: "changelog.finalize".to_string(),
             kind: "changelog.finalize".to_string(),
             label: None,
             blocking: true,
             scope: Vec::new(),
             needs: Vec::new(),
-            status: ReleasePlanStatus::Ready,
+            status: PlanStepStatus::Ready,
             inputs: std::collections::HashMap::new(),
             outputs: std::collections::HashMap::new(),
             skip_reason: None,
