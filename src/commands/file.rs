@@ -1,8 +1,11 @@
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use homeboy::context::require_project_base_path;
+use homeboy::engine::{command, executor, shell};
 use homeboy::project::files::{self, FileEntry, GrepMatch, LineChange};
 use homeboy::server::transfer::{self, TransferConfig, TransferOutput};
+use homeboy::{join_remote_path, project};
 
 use super::CmdResult;
 
@@ -37,6 +40,13 @@ enum FileCommand {
         /// Project ID
         project_id: String,
         /// Remote file path
+        path: String,
+    },
+    /// Create a directory
+    Mkdir {
+        /// Project ID
+        project_id: String,
+        /// Remote directory path
         path: String,
     },
     /// Delete a file or directory
@@ -360,6 +370,36 @@ pub fn run(args: FileArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<F
         FileCommand::Write { project_id, path } => {
             let (out, code) = write(&project_id, &path)?;
             Ok((FileCommandOutput::Standard(out), code))
+        }
+        FileCommand::Mkdir { project_id, path } => {
+            let project = project::load(&project_id)?;
+            let project_base_path = require_project_base_path(&project_id, &project)?;
+            let full_path = join_remote_path(Some(&project_base_path), &path)?;
+            let output = executor::execute_for_project(
+                &project,
+                &format!("mkdir {}", shell::quote_path(&full_path)),
+            )?;
+            command::require_success(output.success, &output.stderr, "MKDIR")?;
+
+            Ok((
+                FileCommandOutput::Standard(FileOutput {
+                    command: "file.mkdir".to_string(),
+                    project_id,
+                    base_path: Some(project_base_path),
+                    path: Some(full_path),
+                    old_path: None,
+                    new_path: None,
+                    recursive: None,
+                    entries: None,
+                    content: None,
+                    bytes_written: None,
+                    stdout: None,
+                    stderr: None,
+                    exit_code: 0,
+                    success: true,
+                }),
+                0,
+            ))
         }
         FileCommand::Delete {
             project_id,
