@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.181.5] - 2026-05-15
+
+### Changed
+- finish generic audit and trace plans
+
 ## [0.181.4] - 2026-05-15
 
 ### Changed
