@@ -30,7 +30,7 @@ pub(crate) fn run_with_plan(
 
     let initial_plan = build_initial_preflight_plan(component_id, options);
     let initial_stop = execute_plan_steps(
-        &initial_plan.steps,
+        &initial_plan.plan.steps,
         component_id,
         options,
         &mut results,
@@ -50,7 +50,7 @@ pub(crate) fn run_with_plan(
         initial_executable_preflight_ids().iter().copied().collect();
 
     execute_plan_steps(
-        &release_plan.steps,
+        &release_plan.plan.steps,
         component_id,
         options,
         &mut results,

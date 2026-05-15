@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 
 use crate::is_zero_u32;
 use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanSubject};
@@ -50,20 +49,6 @@ impl ReleasePlan {
             enabled,
             semver_recommendation,
         }
-    }
-}
-
-impl Deref for ReleasePlan {
-    type Target = HomeboyPlan;
-
-    fn deref(&self) -> &Self::Target {
-        &self.plan
-    }
-}
-
-impl DerefMut for ReleasePlan {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.plan
     }
 }
 

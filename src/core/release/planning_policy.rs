@@ -78,16 +78,19 @@ mod tests {
 
         assert!(!plan.enabled);
         assert_eq!(plan.component_id, "demo");
-        assert_eq!(plan.steps.len(), 1);
-        assert_eq!(plan.steps[0].id, "release.skip");
-        assert_eq!(plan.steps[0].kind, "release.skip");
-        assert_eq!(plan.steps[0].status, PlanStepStatus::Disabled);
+        assert_eq!(plan.plan.steps.len(), 1);
+        assert_eq!(plan.plan.steps[0].id, "release.skip");
+        assert_eq!(plan.plan.steps[0].kind, "release.skip");
+        assert_eq!(plan.plan.steps[0].status, PlanStepStatus::Disabled);
         assert_eq!(
-            plan.steps[0].inputs.get("reason").and_then(|v| v.as_str()),
+            plan.plan.steps[0]
+                .inputs
+                .get("reason")
+                .and_then(|v| v.as_str()),
             Some("no-releasable-commits")
         );
         assert_eq!(
-            plan.hints,
+            plan.plan.hints,
             vec!["Use --bump to force a release when this is intentional"]
         );
     }
@@ -122,11 +125,14 @@ mod tests {
         assert!(!plan.enabled);
         assert!(plan.semver_recommendation.is_some());
         assert_eq!(
-            plan.steps[0].inputs.get("reason").and_then(|v| v.as_str()),
+            plan.plan.steps[0]
+                .inputs
+                .get("reason")
+                .and_then(|v| v.as_str()),
             Some("major-requires-flag")
         );
         assert_eq!(
-            plan.hints,
+            plan.plan.hints,
             vec!["Re-run with: homeboy release demo --bump major"]
         );
     }

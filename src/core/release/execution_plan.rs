@@ -90,11 +90,17 @@ mod tests {
         };
 
         let plan = build_initial_preflight_plan("fixture", &options);
-        let ids: Vec<&str> = plan.steps.iter().map(|step| step.id.as_str()).collect();
+        let ids: Vec<&str> = plan
+            .plan
+            .steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect();
 
         assert_eq!(ids, initial_executable_preflight_ids().to_vec());
         assert!(plan.semver_recommendation.is_none());
         assert!(plan
+            .plan
             .steps
             .iter()
             .any(|step| step.id == "preflight.git_identity"
