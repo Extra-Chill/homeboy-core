@@ -414,10 +414,10 @@ fn pin(command: ProjectPinCommand) -> CmdResult<ProjectOutput> {
         ProjectPinCommand::Update {
             project_id,
             path,
-            r#type,
+            r#type: update_type,
             label,
             tail,
-        } => pin_update(&project_id, &path, r#type, label, tail),
+        } => pin_update(&project_id, &path, update_type, label, tail),
         ProjectPinCommand::Rename {
             project_id,
             old_path,

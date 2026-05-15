@@ -43,6 +43,24 @@ pub struct ProjectPinOutput {
 pub fn list_pins(project_id: &str, pin_type: PinType) -> Result<ProjectPinOutput> {
     let project = load(project_id)?;
 
+    Ok(list_pins_output(project_id, pin_type, &project))
+}
+
+fn list_pins_output(project_id: &str, pin_type: PinType, project: &Project) -> ProjectPinOutput {
+    let (items, type_string) = list_pin_items(pin_type, project);
+
+    ProjectPinOutput {
+        action: "list".to_string(),
+        project_id: project_id.to_string(),
+        r#type: type_string.to_string(),
+        items: Some(items),
+        added: None,
+        removed: None,
+        updated: None,
+    }
+}
+
+fn list_pin_items(pin_type: PinType, project: &Project) -> (Vec<ProjectPinListItem>, &'static str) {
     let (items, type_string) = match pin_type {
         PinType::File => (
             project
@@ -74,15 +92,7 @@ pub fn list_pins(project_id: &str, pin_type: PinType) -> Result<ProjectPinOutput
         ),
     };
 
-    Ok(ProjectPinOutput {
-        action: "list".to_string(),
-        project_id: project_id.to_string(),
-        r#type: type_string.to_string(),
-        items: Some(items),
-        added: None,
-        removed: None,
-        updated: None,
-    })
+    (items, type_string)
 }
 
 pub fn add_pin(
@@ -94,36 +104,44 @@ pub fn add_pin(
     let type_string = pin_type_name(pin_type).to_string();
     pin(project_id, pin_type, path, options)?;
 
-    Ok(ProjectPinOutput {
-        action: "add".to_string(),
+    Ok(change_pin_output("add", project_id, &type_string, path))
+}
+
+fn change_pin_output(
+    action: &str,
+    project_id: &str,
+    type_string: &str,
+    path: &str,
+) -> ProjectPinOutput {
+    let change = ProjectPinChange {
+        path: path.to_string(),
+        r#type: type_string.to_string(),
+    };
+
+    ProjectPinOutput {
+        action: action.to_string(),
         project_id: project_id.to_string(),
-        r#type: type_string.clone(),
+        r#type: type_string.to_string(),
         items: None,
-        added: Some(ProjectPinChange {
-            path: path.to_string(),
-            r#type: type_string,
-        }),
-        removed: None,
+        added: if action == "add" {
+            Some(change.clone())
+        } else {
+            None
+        },
+        removed: if action == "remove" {
+            Some(change)
+        } else {
+            None
+        },
         updated: None,
-    })
+    }
 }
 
 pub fn remove_pin(project_id: &str, pin_type: PinType, path: &str) -> Result<ProjectPinOutput> {
     let type_string = pin_type_name(pin_type).to_string();
     unpin(project_id, pin_type, path)?;
 
-    Ok(ProjectPinOutput {
-        action: "remove".to_string(),
-        project_id: project_id.to_string(),
-        r#type: type_string.clone(),
-        items: None,
-        added: None,
-        removed: Some(ProjectPinChange {
-            path: path.to_string(),
-            r#type: type_string,
-        }),
-        updated: None,
-    })
+    Ok(change_pin_output("remove", project_id, &type_string, path))
 }
 
 pub fn update_pin(
@@ -375,7 +393,40 @@ mod tests {
     }
 
     #[test]
-    fn update_log_pin_changes_tail_lines() {
+    fn test_list_pins() {
+        let output = list_pins_output("site", PinType::Log, &project());
+
+        assert_eq!(output.action, "list");
+        assert_eq!(output.project_id, "site");
+        assert_eq!(output.r#type, "log");
+        let items = output.items.expect("list items");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].path, "logs/php.log");
+        assert_eq!(items[0].tail_lines, Some(100));
+    }
+
+    #[test]
+    fn test_add_pin() {
+        let output = change_pin_output("add", "site", "file", "wp-config.php");
+
+        assert_eq!(output.action, "add");
+        assert_eq!(output.r#type, "file");
+        assert_eq!(output.added.expect("added pin").path, "wp-config.php");
+        assert!(output.removed.is_none());
+    }
+
+    #[test]
+    fn test_remove_pin() {
+        let output = change_pin_output("remove", "site", "log", "logs/php.log");
+
+        assert_eq!(output.action, "remove");
+        assert_eq!(output.r#type, "log");
+        assert_eq!(output.removed.expect("removed pin").path, "logs/php.log");
+        assert!(output.added.is_none());
+    }
+
+    #[test]
+    fn test_update_pin() {
         let mut project = project();
 
         let updated = update_pin_in_project(
@@ -415,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_file_pin_changes_path() {
+    fn test_rename_pin() {
         let mut project = project();
 
         let updated = rename_pin_in_project(
