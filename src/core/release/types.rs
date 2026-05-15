@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::is_zero_u32;
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanSubject};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep};
 
 /// Ordered release plan shared by dry-run output and release execution.
 ///
@@ -28,23 +28,13 @@ impl ReleasePlan {
         hints: Vec<String>,
     ) -> Self {
         let component_id = component_id.into();
+        let mut plan = HomeboyPlan::for_component(PlanKind::Release, component_id.clone());
+        plan.steps = steps;
+        plan.warnings = warnings;
+        plan.hints = hints;
+
         Self {
-            plan: HomeboyPlan {
-                id: format!("release.{component_id}"),
-                kind: PlanKind::Release,
-                subject: PlanSubject {
-                    component_id: Some(component_id.clone()),
-                    ..PlanSubject::default()
-                },
-                mode: None,
-                inputs: HashMap::new(),
-                policy: HashMap::new(),
-                steps,
-                artifacts: Vec::new(),
-                summary: None,
-                warnings: warnings.clone(),
-                hints: hints.clone(),
-            },
+            plan,
             component_id,
             enabled,
             semver_recommendation,

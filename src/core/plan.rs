@@ -33,6 +33,28 @@ pub struct HomeboyPlan {
     pub hints: Vec<String>,
 }
 
+impl HomeboyPlan {
+    pub fn for_component(kind: PlanKind, component_id: impl Into<String>) -> Self {
+        let component_id = component_id.into();
+        Self {
+            id: format!("{}.{component_id}", kind.slug()),
+            kind,
+            subject: PlanSubject {
+                component_id: Some(component_id),
+                ..PlanSubject::default()
+            },
+            mode: None,
+            inputs: HashMap::new(),
+            policy: HashMap::new(),
+            steps: Vec::new(),
+            artifacts: Vec::new(),
+            summary: None,
+            warnings: Vec::new(),
+            hints: Vec::new(),
+        }
+    }
+}
+
 /// High-level plan family. `Custom` gives extensions and future command
 /// families a stable escape hatch without changing the schema shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,6 +69,22 @@ pub enum PlanKind {
     Refactor,
     Review,
     Custom,
+}
+
+impl PlanKind {
+    fn slug(&self) -> &'static str {
+        match self {
+            Self::Quality => "quality",
+            Self::Build => "build",
+            Self::Release => "release",
+            Self::Deploy => "deploy",
+            Self::PullRequest => "pull_request",
+            Self::Ci => "ci",
+            Self::Refactor => "refactor",
+            Self::Review => "review",
+            Self::Custom => "custom",
+        }
+    }
 }
 
 /// The thing a plan is about: a component, a file/symbol scope, or a prose
@@ -127,8 +165,7 @@ fn default_blocking() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSubject};
-    use std::collections::HashMap;
+    use super::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
 
     #[test]
     fn serializes_plan_kind_as_snake_case() {
@@ -139,22 +176,7 @@ mod tests {
 
     #[test]
     fn serializes_minimal_component_plan() {
-        let plan = HomeboyPlan {
-            id: "release.homeboy".to_string(),
-            kind: PlanKind::Release,
-            subject: PlanSubject {
-                component_id: Some("homeboy".to_string()),
-                ..PlanSubject::default()
-            },
-            mode: None,
-            inputs: HashMap::new(),
-            policy: HashMap::new(),
-            steps: Vec::new(),
-            artifacts: Vec::new(),
-            summary: None,
-            warnings: Vec::new(),
-            hints: Vec::new(),
-        };
+        let plan = HomeboyPlan::for_component(PlanKind::Release, "homeboy");
 
         let serialized = serde_json::to_value(&plan).expect("serialize plan");
 
@@ -168,6 +190,18 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn test_for_component() {
+        let plan = HomeboyPlan::for_component(PlanKind::Quality, "fixture");
+
+        assert_eq!(plan.id, "quality.fixture");
+        assert_eq!(plan.kind, PlanKind::Quality);
+        assert_eq!(plan.subject.component_id.as_deref(), Some("fixture"));
+        assert!(plan.steps.is_empty());
+        assert!(plan.warnings.is_empty());
+        assert!(plan.hints.is_empty());
     }
 
     #[test]
