@@ -76,8 +76,8 @@ mod tests {
         let plan = release_skip_plan("demo", &ReleaseOptions::default(), None)
             .expect("no releasable commits should skip");
 
-        assert!(!plan.enabled);
-        assert_eq!(plan.component_id, "demo");
+        assert!(!plan.enabled());
+        assert_eq!(plan.component_id(), Some("demo"));
         assert_eq!(plan.plan.steps.len(), 1);
         assert_eq!(plan.plan.steps[0].id, "release.skip");
         assert_eq!(plan.plan.steps[0].kind, "release.skip");
@@ -122,8 +122,8 @@ mod tests {
         let plan = release_skip_plan("demo", &options, Some(recommendation))
             .expect("implicit major should skip");
 
-        assert!(!plan.enabled);
-        assert!(plan.semver_recommendation.is_some());
+        assert!(!plan.enabled());
+        assert!(plan.semver_recommendation().is_some());
         assert_eq!(
             plan.plan.steps[0]
                 .inputs

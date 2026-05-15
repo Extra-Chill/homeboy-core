@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::ser::Error as SerializeError;
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
 use crate::is_zero_u32;
@@ -8,14 +9,11 @@ use crate::plan::{HomeboyPlan, PlanKind, PlanStep};
 ///
 /// `ReleasePlan` is rendered in `--dry-run` and `--json` output, then walked by
 /// `pipeline::run()` for real releases so the previewed steps match execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ReleasePlan {
-    #[serde(flatten)]
     pub plan: HomeboyPlan,
-    pub component_id: String,
-    pub enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub semver_recommendation: Option<ReleaseSemverRecommendation>,
+    enabled: bool,
+    semver_recommendation: Option<ReleaseSemverRecommendation>,
 }
 
 impl ReleasePlan {
@@ -35,10 +33,49 @@ impl ReleasePlan {
 
         Self {
             plan,
-            component_id,
             enabled,
             semver_recommendation,
         }
+    }
+
+    pub fn component_id(&self) -> Option<&str> {
+        self.plan.subject.component_id.as_deref()
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub fn semver_recommendation(&self) -> Option<&ReleaseSemverRecommendation> {
+        self.semver_recommendation.as_ref()
+    }
+}
+
+impl Serialize for ReleasePlan {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut value = serde_json::to_value(&self.plan).map_err(S::Error::custom)?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| S::Error::custom("release plan did not serialize to a JSON object"))?;
+
+        if let Some(component_id) = self.component_id() {
+            object.insert(
+                "component_id".to_string(),
+                serde_json::Value::String(component_id.to_string()),
+            );
+        }
+        object.insert("enabled".to_string(), serde_json::Value::Bool(self.enabled));
+        if let Some(semver_recommendation) = self.semver_recommendation.as_ref() {
+            object.insert(
+                "semver_recommendation".to_string(),
+                serde_json::to_value(semver_recommendation).map_err(S::Error::custom)?,
+            );
+        }
+
+        value.serialize(serializer)
     }
 }
 
@@ -319,6 +356,63 @@ pub struct BatchReleaseSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_component_id() {
+        let plan = ReleasePlan::new("demo", true, Vec::new(), None, Vec::new(), Vec::new());
+
+        assert_eq!(plan.component_id(), Some("demo"));
+    }
+
+    #[test]
+    fn test_enabled() {
+        let enabled = ReleasePlan::new("demo", true, Vec::new(), None, Vec::new(), Vec::new());
+        let disabled = ReleasePlan::new("demo", false, Vec::new(), None, Vec::new(), Vec::new());
+
+        assert!(enabled.enabled());
+        assert!(!disabled.enabled());
+    }
+
+    #[test]
+    fn test_semver_recommendation() {
+        let recommendation = ReleaseSemverRecommendation {
+            latest_tag: Some("v1.0.0".to_string()),
+            range: "v1.0.0..HEAD".to_string(),
+            commits: Vec::new(),
+            recommended_bump: Some("minor".to_string()),
+            requested_bump: "minor".to_string(),
+            is_underbump: false,
+            reasons: Vec::new(),
+        };
+        let plan = ReleasePlan::new(
+            "demo",
+            true,
+            Vec::new(),
+            Some(recommendation),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert_eq!(
+            plan.semver_recommendation()
+                .and_then(|recommendation| recommendation.recommended_bump.as_deref()),
+            Some("minor")
+        );
+    }
+
+    #[test]
+    fn release_plan_serializes_legacy_component_fields_from_generic_plan() {
+        let plan = ReleasePlan::new("demo", true, Vec::new(), None, Vec::new(), Vec::new());
+
+        let serialized = serde_json::to_value(&plan).expect("serialize release plan");
+
+        assert_eq!(serialized["id"], "release.demo");
+        assert_eq!(serialized["kind"], "release");
+        assert_eq!(serialized["subject"]["component_id"], "demo");
+        assert_eq!(serialized["component_id"], "demo");
+        assert_eq!(serialized["enabled"], true);
+        assert!(serialized.get("semver_recommendation").is_none());
+    }
 
     #[test]
     fn release_command_input_defaults_do_not_force_lower_bumps() {

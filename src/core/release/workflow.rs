@@ -251,7 +251,7 @@ fn extract_new_version_from_plan(plan: &ReleasePlan) -> Option<String> {
 }
 
 fn skipped_reason_from_plan(plan: &ReleasePlan) -> Option<String> {
-    if plan.enabled {
+    if plan.enabled() {
         return None;
     }
 
@@ -706,8 +706,8 @@ mod tests {
         ];
         let plan = recovery_release_plan("demo", "1.2.3", "v1.2.3", true, true, false, &actions);
 
-        assert!(plan.enabled);
-        assert_eq!(plan.component_id, "demo");
+        assert!(plan.enabled());
+        assert_eq!(plan.component_id(), Some("demo"));
         assert_eq!(plan.plan.hints, actions);
         assert_eq!(plan.plan.steps.len(), 3);
         assert_eq!(plan.plan.steps[0].id, "recover.commit");
@@ -743,7 +743,7 @@ mod tests {
     fn recovery_release_plan_is_disabled_when_nothing_needed() {
         let plan = recovery_release_plan("demo", "1.2.3", "v1.2.3", false, false, false, &[]);
 
-        assert!(!plan.enabled);
+        assert!(!plan.enabled());
         assert!(plan.plan.hints.is_empty());
         assert!(plan
             .plan

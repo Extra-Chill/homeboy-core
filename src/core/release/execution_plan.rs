@@ -98,7 +98,7 @@ mod tests {
             .collect();
 
         assert_eq!(ids, initial_executable_preflight_ids().to_vec());
-        assert!(plan.semver_recommendation.is_none());
+        assert!(plan.semver_recommendation().is_none());
         assert!(plan
             .plan
             .steps
