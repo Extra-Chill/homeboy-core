@@ -1,4 +1,5 @@
 use clap::{ArgMatches, Command, CommandFactory, FromArgMatches};
+use std::path::Path;
 
 use homeboy::cli_surface::{
     Cli, CommandOutputArtifactPolicy, CommandRawOutputMode, CommandResponseMode, Commands,
@@ -119,7 +120,7 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     let normalized = args::normalize(args);
 
-    let matches = match cmd.try_get_matches_from(normalized) {
+    let matches = match cmd.try_get_matches_from(normalized.clone()) {
         Ok(m) => m,
         Err(e) => {
             if let Some(output) = try_augment_clap_error(&e) {
@@ -167,6 +168,35 @@ fn main() -> std::process::ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
+
+    if let Some(runner_id) = cli.runner.as_deref() {
+        if !cli.command.supports_lab_runner() {
+            let err = homeboy::Error::validation_invalid_argument(
+                "runner",
+                "--runner is only supported for hot Lab-offload commands: lint, test, audit, bench, and trace",
+                Some(runner_id.to_string()),
+                None,
+            );
+            output::print_result::<serde_json::Value>(Err(err)).ok();
+            return std::process::ExitCode::from(exit_code_to_u8(2));
+        }
+        if let Some(flag) = cli.command.lab_offload_mutation_flag() {
+            let err = homeboy::Error::validation_invalid_argument(
+                "runner",
+                format!(
+                    "Lab offload does not run commands that may write canonical workspace state ({flag})"
+                ),
+                Some(runner_id.to_string()),
+                Some(vec![
+                    "Run the command locally without --runner when you intend to write files or baselines."
+                        .to_string(),
+                ]),
+            );
+            output::print_result::<serde_json::Value>(Err(err)).ok();
+            return std::process::ExitCode::from(exit_code_to_u8(2));
+        }
+        return run_lab_offload(runner_id, &normalized, output_file.as_deref());
+    }
 
     homeboy::set_artifact_root_override(cli.artifact_root.clone().or(artifact_root_override));
 
@@ -327,6 +357,155 @@ fn exit_code_to_u8(code: i32) -> u8 {
         255
     } else {
         code as u8
+    }
+}
+
+fn run_lab_offload(
+    runner_id: &str,
+    normalized_args: &[String],
+    output_file: Option<&str>,
+) -> std::process::ExitCode {
+    match run_lab_offload_inner(runner_id, normalized_args, output_file) {
+        Ok(exit_code) => std::process::ExitCode::from(exit_code_to_u8(exit_code)),
+        Err(err) => {
+            output::print_result::<serde_json::Value>(Err(err)).ok();
+            std::process::ExitCode::from(exit_code_to_u8(1))
+        }
+    }
+}
+
+fn run_lab_offload_inner(
+    runner_id: &str,
+    normalized_args: &[String],
+    output_file: Option<&str>,
+) -> homeboy::Result<i32> {
+    let runner = homeboy::runner::load(runner_id)?;
+    if runner.kind != homeboy::runner::RunnerKind::Ssh {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "runner",
+            "Lab offload requires a remote SSH runner; local runners would execute on this machine",
+            Some(runner.id),
+            Some(vec![
+                "Register an SSH runner and run `homeboy runner connect <runner-id>` first."
+                    .to_string(),
+            ]),
+        ));
+    }
+
+    let status = homeboy::runner::status(runner_id)?;
+    if !status.connected {
+        return Err(homeboy::Error::validation_invalid_argument(
+            "runner",
+            "Lab offload requires a connected runner daemon",
+            Some(runner_id.to_string()),
+            Some(vec![format!(
+                "Run `homeboy runner connect {runner_id}` before using --runner."
+            )]),
+        ));
+    }
+
+    let workspace_root = runner.workspace_root.as_deref().ok_or_else(|| {
+        homeboy::Error::validation_invalid_argument(
+            "workspace_root",
+            "Lab offload requires runner.workspace_root so the local checkout can be mapped remotely",
+            Some(runner.id.clone()),
+            Some(vec![
+                "This Wave 3 adapter assumes workspace sync/provenance has placed the same checkout basename under runner.workspace_root.".to_string(),
+            ]),
+        )
+    })?;
+    let remote_cwd = remote_cwd_for_current_checkout(workspace_root)?;
+    let homeboy_path = runner.homeboy_path.as_deref().unwrap_or("homeboy");
+    let mut command = vec![homeboy_path.to_string()];
+    command.extend(strip_runner_flag(normalized_args).into_iter().skip(1));
+
+    eprintln!(
+        "Lab offload: running `{}` on runner `{}` in `{}`.",
+        command.join(" "),
+        runner_id,
+        remote_cwd
+    );
+    let (exec_output, exit_code) = homeboy::runner::exec(
+        runner_id,
+        homeboy::runner::RunnerExecOptions {
+            cwd: Some(remote_cwd),
+            allow_ssh: false,
+            command,
+        },
+    )?;
+
+    if !exec_output.stderr.is_empty() {
+        eprint!("{}", exec_output.stderr);
+    }
+    if let Some(path) = output_file {
+        std::fs::write(path, &exec_output.stdout).map_err(|err| {
+            homeboy::Error::internal_io(err.to_string(), Some(format!("write {path}")))
+        })?;
+    }
+    print!("{}", exec_output.stdout);
+    Ok(exit_code)
+}
+
+fn remote_cwd_for_current_checkout(workspace_root: &str) -> homeboy::Result<String> {
+    let cwd = std::env::current_dir().map_err(|err| {
+        homeboy::Error::internal_io(err.to_string(), Some("read cwd".to_string()))
+    })?;
+    let basename = cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            homeboy::Error::validation_invalid_argument(
+                "cwd",
+                "current checkout path has no basename for Lab workspace mapping",
+                Some(cwd.display().to_string()),
+                None,
+            )
+        })?;
+    Ok(Path::new(workspace_root)
+        .join(basename)
+        .to_string_lossy()
+        .to_string())
+}
+
+fn strip_runner_flag(args: &[String]) -> Vec<String> {
+    let mut stripped = Vec::with_capacity(args.len());
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--runner" {
+            let _ = iter.next();
+            continue;
+        }
+        if arg.starts_with("--runner=") {
+            continue;
+        }
+        stripped.push(arg.clone());
+    }
+    stripped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_runner_flag;
+
+    #[test]
+    fn strips_runner_flag_forms_before_remote_exec() {
+        let args = vec![
+            "homeboy".to_string(),
+            "lint".to_string(),
+            "--runner".to_string(),
+            "lab-a".to_string(),
+            "--json-summary".to_string(),
+            "--runner=lab-b".to_string(),
+        ];
+
+        assert_eq!(
+            strip_runner_flag(&args),
+            vec![
+                "homeboy".to_string(),
+                "lint".to_string(),
+                "--json-summary".to_string()
+            ]
+        );
     }
 }
 
