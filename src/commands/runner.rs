@@ -156,6 +156,10 @@ enum RunnerCommand {
         #[arg(long)]
         ssh: bool,
 
+        /// Capture the file delta produced by the remote command as a patch artifact
+        #[arg(long)]
+        capture_patch: bool,
+
         /// Command and arguments to execute on the runner
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
@@ -264,8 +268,9 @@ pub fn run(
             id,
             cwd,
             ssh,
+            capture_patch,
             command,
-        } => map_execution(exec(&id, cwd, ssh, command)),
+        } => map_execution(exec(&id, cwd, ssh, capture_patch, command)),
         RunnerCommand::Workspace { command } => match command {
             RunnerWorkspaceCommand::Sync {
                 runner_id,
@@ -512,6 +517,7 @@ fn exec(
     runner_id: &str,
     cwd: Option<String>,
     allow_ssh: bool,
+    capture_patch: bool,
     command: Vec<String>,
 ) -> CmdResult<RunnerExecOutput> {
     runner::exec(
@@ -520,6 +526,8 @@ fn exec(
             cwd,
             allow_ssh,
             command,
+            capture_patch,
+            source_snapshot: None,
         },
     )
 }

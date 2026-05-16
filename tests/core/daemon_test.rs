@@ -219,6 +219,81 @@ fn routes_exec_body_to_daemon_job() {
 }
 
 #[test]
+fn exec_capture_patch_records_remote_delta_artifact() {
+    let _home = HomeGuard::new();
+    let workspace = tempfile::tempdir().expect("workspace");
+    std::fs::write(workspace.path().join("file.txt"), "before\n").expect("seed file");
+    let source_snapshot = SourceSnapshot::existing_remote(
+        "lab-local",
+        &workspace.path().display().to_string(),
+        Some(workspace.path().display().to_string().as_str()),
+    );
+    let store = JobStore::default();
+    let response = route_with_job_store_and_body(
+        "POST",
+        "/exec",
+        Some(serde_json::json!({
+            "runner_id": "lab-local",
+            "cwd": workspace.path(),
+            "command": ["sh", "-c", "printf 'after\n' > file.txt"],
+            "capture_patch": true,
+            "source_snapshot": source_snapshot,
+        })),
+        &store,
+    );
+
+    assert_eq!(response.status_code, 200);
+    let job_id = response.body["body"]["job"]["id"]
+        .as_str()
+        .expect("job id")
+        .to_string();
+    let job = wait_for_job(&store, &job_id);
+    assert_eq!(format!("{:?}", job.status), "Succeeded");
+
+    let events = store.events(job.id).expect("events");
+    let result = events
+        .iter()
+        .rev()
+        .filter_map(|event| event.data.as_ref())
+        .find(|data| data.get("patch").is_some())
+        .expect("patch result");
+    let patch = &result["patch"];
+    assert_eq!(patch["runner_id"], "lab-local");
+    assert_eq!(patch["remote_path"], workspace.path().display().to_string());
+    assert_eq!(patch["modified_files"], serde_json::json!(["file.txt"]));
+    assert_eq!(patch["dirty_snapshot"], false);
+    assert_eq!(patch["baseline_missing"], false);
+    assert!(patch["patch_artifact_id"].as_str().is_some());
+
+    let observation_store = ObservationStore::open_initialized().expect("observation store");
+    let run_id = format!("runner-exec-{job_id}");
+    let artifacts = observation_store
+        .list_artifacts(&run_id)
+        .expect("patch artifacts");
+    assert_eq!(artifacts.len(), 1);
+    let patch_body = std::fs::read_to_string(&artifacts[0].path).expect("patch file");
+    assert!(patch_body.contains("-before"));
+    assert!(patch_body.contains("+after"));
+}
+
+fn wait_for_job(store: &JobStore, job_id: &str) -> crate::api_jobs::Job {
+    let id = uuid::Uuid::parse_str(job_id).expect("uuid");
+    for _ in 0..100 {
+        let job = store.get(id).expect("job");
+        if matches!(
+            job.status,
+            crate::api_jobs::JobStatus::Succeeded
+                | crate::api_jobs::JobStatus::Failed
+                | crate::api_jobs::JobStatus::Cancelled
+        ) {
+            return job;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    store.get(id).expect("job")
+}
+
+#[test]
 fn route_rejects_unknown_paths_and_methods() {
     assert_eq!(route("GET", "/missing").status_code, 404);
     assert_eq!(route("POST", "/health").status_code, 405);
