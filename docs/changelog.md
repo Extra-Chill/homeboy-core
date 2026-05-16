@@ -4,6 +4,14 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.183.0] - 2026-05-16
+
+### Added
+- add runner doctor diagnostics
+
+### Changed
+- Expose daemon artifact retrieval endpoints
+
 ## [0.182.0] - 2026-05-16
 
 ### Added
