@@ -683,7 +683,7 @@ impl ObservationStore {
         collect_rows(rows, "collect artifact records")
     }
 
-    fn get_artifact(&self, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
+    pub fn get_artifact(&self, artifact_id: &str) -> Result<Option<ArtifactRecord>> {
         validate_required("artifact_id", artifact_id)?;
         self.connection
             .query_row(

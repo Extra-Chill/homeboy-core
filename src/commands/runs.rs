@@ -12,6 +12,9 @@ mod query;
 mod reconcile;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io;
+use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use serde::Serialize;
@@ -57,6 +60,8 @@ enum RunsCommand {
     Show { run_id: String },
     /// List artifacts recorded for one run
     Artifacts { run_id: String },
+    /// Retrieve or sync recorded run artifacts
+    Artifact(RunsArtifactArgs),
     /// List findings recorded for one run
     Findings(findings::RunsFindingsArgs),
     /// Show one recorded finding
@@ -102,6 +107,7 @@ pub enum RunsOutput {
     Compare(RunsCompareOutput),
     Show(RunsShowOutput),
     Artifacts(RunsArtifactsOutput),
+    ArtifactGet(RunsArtifactGetOutput),
     Findings(RunsFindingsOutput),
     Finding(RunsFindingOutput),
     LatestFinding(RunsLatestFindingOutput),
@@ -132,6 +138,40 @@ pub struct RunsArtifactsOutput {
     pub command: &'static str,
     pub run_id: String,
     pub artifacts: Vec<ArtifactRecord>,
+}
+
+#[derive(Args, Clone)]
+pub struct RunsArtifactArgs {
+    #[command(subcommand)]
+    command: RunsArtifactCommand,
+}
+
+#[derive(Subcommand, Clone)]
+enum RunsArtifactCommand {
+    /// Copy a recorded file artifact to a local path
+    Get(RunsArtifactGetArgs),
+}
+
+#[derive(Args, Clone)]
+pub struct RunsArtifactGetArgs {
+    /// Observation run id that owns the artifact
+    pub run_id: String,
+    /// Artifact id/path token from `homeboy runs artifacts <run-id>`
+    pub artifact_id: String,
+    /// Destination file path. Defaults to the recorded artifact filename.
+    #[arg(long, short = 'o')]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Serialize)]
+pub struct RunsArtifactGetOutput {
+    pub command: &'static str,
+    pub run_id: String,
+    pub artifact_id: String,
+    pub output_path: String,
+    pub content_type: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub sha256: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -207,6 +247,7 @@ pub fn run(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<RunsOutput> {
         RunsCommand::Reconcile(args) => reconcile_runs(args),
         RunsCommand::Show { run_id } => show_run(&run_id),
         RunsCommand::Artifacts { run_id } => artifacts(&run_id),
+        RunsCommand::Artifact(args) => artifact_command(args),
         RunsCommand::Findings(args) => findings::findings(args),
         RunsCommand::Finding { finding_id } => findings::finding(&finding_id),
         RunsCommand::LatestFinding(args) => findings::latest_finding(args),
@@ -277,6 +318,94 @@ pub fn artifacts(run_id: &str) -> CmdResult<RunsOutput> {
             command: "runs.artifacts",
             run_id: run_id.to_string(),
             artifacts: store.list_artifacts(run_id)?,
+        }),
+        0,
+    ))
+}
+
+fn artifact_command(args: RunsArtifactArgs) -> CmdResult<RunsOutput> {
+    match args.command {
+        RunsArtifactCommand::Get(args) => artifact_get(args),
+    }
+}
+
+fn artifact_get(args: RunsArtifactGetArgs) -> CmdResult<RunsOutput> {
+    let store = ObservationStore::open_initialized()?;
+    require_run(&store, &args.run_id)?;
+    let artifact = store.get_artifact(&args.artifact_id)?.ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "artifact_id",
+            format!("artifact record not found: {}", args.artifact_id),
+            Some(args.artifact_id.clone()),
+            None,
+        )
+    })?;
+
+    if artifact.run_id != args.run_id {
+        return Err(Error::validation_invalid_argument(
+            "artifact_id",
+            "artifact does not belong to requested run",
+            Some(args.artifact_id),
+            None,
+        ));
+    }
+    if artifact.artifact_type != "file" {
+        return Err(Error::validation_invalid_argument(
+            "artifact_id",
+            format!(
+                "artifact {} is {}, not a downloadable file",
+                artifact.id, artifact.artifact_type
+            ),
+            Some(artifact.id),
+            None,
+        ));
+    }
+
+    let source = PathBuf::from(&artifact.path);
+    let file_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&artifact.id)
+        .to_string();
+    let output = args.output.unwrap_or_else(|| PathBuf::from(file_name));
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Error::internal_io(e.to_string(), Some(format!("create {}", parent.display())))
+        })?;
+    }
+
+    let mut reader = File::open(&source).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!("open artifact {}", source.display())),
+        )
+    })?;
+    let mut writer = File::create(&output).map_err(|e| {
+        Error::internal_io(e.to_string(), Some(format!("create {}", output.display())))
+    })?;
+    io::copy(&mut reader, &mut writer).map_err(|e| {
+        Error::internal_io(
+            e.to_string(),
+            Some(format!(
+                "copy artifact {} to {}",
+                artifact.id,
+                output.display()
+            )),
+        )
+    })?;
+
+    Ok((
+        RunsOutput::ArtifactGet(RunsArtifactGetOutput {
+            command: "runs.artifact.get",
+            run_id: artifact.run_id,
+            artifact_id: artifact.id,
+            output_path: output.display().to_string(),
+            content_type: artifact.mime,
+            size_bytes: artifact.size_bytes,
+            sha256: artifact.sha256,
         }),
         0,
     ))
@@ -716,6 +845,50 @@ mod tests {
                 output.artifacts[0].url.as_deref(),
                 Some("https://example.test/")
             );
+        });
+    }
+
+    #[test]
+    fn artifact_get_copies_registered_file_without_raw_path_lookup() {
+        with_isolated_home(|home| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let run = store
+                .start_run(sample_run("bench", "homeboy", "studio", Value::Null))
+                .expect("run");
+            let artifact_path = home.path().join("bench-results.json");
+            std::fs::write(&artifact_path, br#"{"ok":true}"#).expect("artifact");
+            let artifact = store
+                .record_artifact(&run.id, "bench_results", &artifact_path)
+                .expect("record artifact");
+            let output_path = home.path().join("downloaded.json");
+
+            let (output, _) = artifact_get(RunsArtifactGetArgs {
+                run_id: run.id.clone(),
+                artifact_id: artifact.id.clone(),
+                output: Some(output_path.clone()),
+            })
+            .expect("get artifact");
+
+            let RunsOutput::ArtifactGet(output) = output else {
+                panic!("expected artifact get output");
+            };
+            assert_eq!(output.command, "runs.artifact.get");
+            assert_eq!(output.artifact_id, artifact.id);
+            assert_eq!(
+                std::fs::read(&output_path).expect("downloaded"),
+                br#"{"ok":true}"#
+            );
+
+            let err = match artifact_get(RunsArtifactGetArgs {
+                run_id: run.id,
+                artifact_id: artifact_path.display().to_string(),
+                output: Some(home.path().join("bad.json")),
+            }) {
+                Ok(_) => panic!("raw paths are not accepted as artifact ids"),
+                Err(err) => err,
+            };
+            assert!(err.to_string().contains("artifact record not found"));
         });
     }
 

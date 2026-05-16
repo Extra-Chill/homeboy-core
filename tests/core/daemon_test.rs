@@ -1,5 +1,6 @@
 use super::*;
 use crate::api_jobs::JobStore;
+use crate::observation::{NewRunRecord, ObservationStore};
 use crate::test_support::HomeGuard;
 
 #[test]
@@ -72,6 +73,55 @@ fn routes_read_only_http_api_contract() {
     let findings = route("GET", "/runs/run-missing/findings");
     assert_eq!(findings.status_code, 404);
     assert_eq!(findings.body["error"], "validation.invalid_argument");
+}
+
+#[test]
+fn routes_registered_artifact_downloads_and_sync_manifest() {
+    let _home = HomeGuard::new();
+    let home_path = std::path::PathBuf::from(std::env::var("HOME").expect("home"));
+    let store = ObservationStore::open_initialized().expect("store");
+    let run = store
+        .start_run(NewRunRecord {
+            kind: "bench".to_string(),
+            component_id: Some("homeboy".to_string()),
+            command: Some("homeboy bench".to_string()),
+            cwd: Some("/tmp/homeboy-fixture".to_string()),
+            homeboy_version: Some("test-version".to_string()),
+            git_sha: Some("abc123".to_string()),
+            rig_id: Some("studio".to_string()),
+            metadata_json: serde_json::json!({}),
+        })
+        .expect("run");
+    let artifact_path = home_path.join("bench-results.json");
+    std::fs::write(&artifact_path, br#"{"ok":true}"#).expect("artifact");
+    let artifact = store
+        .record_artifact(&run.id, "bench_results", &artifact_path)
+        .expect("record artifact");
+
+    let download = route(
+        "GET",
+        &format!("/runs/{}/artifacts/{}", run.id, artifact.id),
+    );
+    assert_eq!(download.status_code, 200);
+    assert!(download.artifact.is_some());
+    assert_eq!(download.body["artifact"]["id"], artifact.id);
+    assert_eq!(download.body["size_bytes"], 11);
+
+    let sync = route("GET", &format!("/runs/{}/artifacts/sync", run.id));
+    assert_eq!(sync.status_code, 200);
+    assert!(sync.artifact.is_none());
+    assert_eq!(sync.body["command"], "api.runs.artifacts.sync");
+    assert_eq!(sync.body["artifacts"][0]["id"], artifact.id);
+    assert_eq!(
+        sync.body["artifacts"][0]["download_path"],
+        format!("/runs/{}/artifacts/{}", run.id, artifact.id)
+    );
+
+    let raw_path = route(
+        "GET",
+        &format!("/runs/{}/artifacts/{}", run.id, artifact_path.display()),
+    );
+    assert_eq!(raw_path.status_code, 404);
 }
 
 #[test]
