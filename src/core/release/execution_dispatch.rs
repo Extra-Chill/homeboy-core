@@ -396,7 +396,7 @@ mod tests {
         ReleaseExecutionContext,
     };
     use crate::component::Component;
-    use crate::plan::{PlanStep, PlanStepStatus};
+    use crate::plan::PlanStep;
     use crate::release::types::{
         ReleaseOptions, ReleaseState, ReleaseStepResult, ReleaseStepStatus,
     };
@@ -793,20 +793,7 @@ mod tests {
     }
 
     fn plan_step(step_type: &str) -> PlanStep {
-        PlanStep {
-            id: step_type.to_string(),
-            kind: step_type.to_string(),
-            label: None,
-            blocking: true,
-            scope: Vec::new(),
-            needs: Vec::new(),
-            status: PlanStepStatus::Ready,
-            inputs: std::collections::HashMap::new(),
-            outputs: std::collections::HashMap::new(),
-            skip_reason: None,
-            policy: std::collections::HashMap::new(),
-            missing: Vec::new(),
-        }
+        PlanStep::ready(step_type, step_type).build()
     }
 
     fn failed_step_result(step_type: &str) -> ReleaseStepResult {

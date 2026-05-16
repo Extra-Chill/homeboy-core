@@ -188,8 +188,33 @@ impl PlanStep {
         PlanStepBuilder::new(id, kind, PlanStepStatus::Ready)
     }
 
+    pub(crate) fn ready_labeled(
+        id: impl Into<String>,
+        kind: impl Into<String>,
+        label: impl Into<String>,
+        needs: impl IntoIterator<Item = String>,
+        inputs: impl IntoIterator<Item = (String, serde_json::Value)>,
+    ) -> Self {
+        Self::ready(id, kind)
+            .label(label)
+            .needs(needs)
+            .inputs(inputs)
+            .build()
+    }
+
     pub(crate) fn disabled(id: impl Into<String>, kind: impl Into<String>) -> PlanStepBuilder {
         PlanStepBuilder::new(id, kind, PlanStepStatus::Disabled)
+    }
+
+    pub(crate) fn disabled_with_reason(
+        id: impl Into<String>,
+        kind: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> PlanStepBuilder {
+        let reason = reason.into();
+        Self::disabled(id, kind)
+            .input_value("reason", serde_json::Value::String(reason.clone()))
+            .skip_reason(reason)
     }
 }
 
@@ -665,6 +690,22 @@ mod tests {
     }
 
     #[test]
+    fn test_ready_labeled() {
+        let step = PlanStep::ready_labeled(
+            "test",
+            "quality.test",
+            "Run tests",
+            vec!["lint".to_string()],
+            vec![("profile".to_string(), serde_json::json!("ci"))],
+        );
+
+        assert_eq!(step.status, PlanStepStatus::Ready);
+        assert_eq!(step.label.as_deref(), Some("Run tests"));
+        assert_eq!(step.needs, vec!["lint"]);
+        assert_eq!(step.inputs.get("profile"), Some(&serde_json::json!("ci")));
+    }
+
+    #[test]
     fn test_disabled() {
         let step = PlanStep::disabled("audit", "quality.audit").build();
 
@@ -717,6 +758,20 @@ mod tests {
             .build();
 
         assert_eq!(step.skip_reason.as_deref(), Some("filtered"));
+    }
+
+    #[test]
+    fn test_disabled_with_reason() {
+        let step = PlanStep::disabled_with_reason("release.skip", "release.skip", "no-commits")
+            .label("No releasable commits")
+            .build();
+
+        assert_eq!(step.status, PlanStepStatus::Disabled);
+        assert_eq!(step.skip_reason.as_deref(), Some("no-commits"));
+        assert_eq!(
+            step.inputs.get("reason").and_then(|value| value.as_str()),
+            Some("no-commits")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::plan::{PlanStep, PlanStepStatus};
+use crate::plan::PlanStep;
 
 use super::types::{ReleaseOptions, ReleasePlan, ReleaseSemverRecommendation};
 
@@ -40,23 +40,11 @@ fn skipped_release_plan(
     ReleasePlan::new(
         component_id,
         false,
-        vec![PlanStep {
-            id: "release.skip".to_string(),
-            kind: "release.skip".to_string(),
-            label: Some(label.to_string()),
-            blocking: true,
-            scope: Vec::new(),
-            needs: Vec::new(),
-            status: PlanStepStatus::Disabled,
-            inputs: std::collections::HashMap::from([(
-                "reason".to_string(),
-                serde_json::Value::String(reason.to_string()),
-            )]),
-            outputs: std::collections::HashMap::new(),
-            skip_reason: Some(reason.to_string()),
-            policy: std::collections::HashMap::new(),
-            missing: Vec::new(),
-        }],
+        vec![
+            PlanStep::disabled_with_reason("release.skip", "release.skip", reason)
+                .label(label)
+                .build(),
+        ],
         semver_recommendation,
         Vec::new(),
         vec![hint.to_string()],

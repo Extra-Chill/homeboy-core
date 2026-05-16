@@ -1,7 +1,7 @@
 use crate::component::Component;
 use crate::extension::ExtensionManifest;
 use crate::git;
-use crate::plan::{PlanStep, PlanStepStatus};
+use crate::plan::PlanStep;
 use crate::quality::{build_quality_steps as build_shared_quality_steps, QualityPlanOptions};
 use crate::release::pipeline_capabilities::{
     get_publish_targets, has_package_capability, has_prepare_capability,
@@ -37,20 +37,7 @@ fn ready_step(
     needs: Vec<String>,
     config: StepConfig,
 ) -> PlanStep {
-    PlanStep {
-        id: id.to_string(),
-        kind: step_type.to_string(),
-        label: Some(label.into()),
-        blocking: true,
-        scope: Vec::new(),
-        needs,
-        status: PlanStepStatus::Ready,
-        inputs: config,
-        outputs: StepConfig::new(),
-        skip_reason: None,
-        policy: StepConfig::new(),
-        missing: Vec::new(),
-    }
+    PlanStep::ready_labeled(id, step_type, label, needs, config)
 }
 
 fn disabled_step(
@@ -59,20 +46,10 @@ fn disabled_step(
     label: impl Into<String>,
     config: StepConfig,
 ) -> PlanStep {
-    PlanStep {
-        id: id.to_string(),
-        kind: step_type.to_string(),
-        label: Some(label.into()),
-        blocking: true,
-        scope: Vec::new(),
-        needs: Vec::new(),
-        status: PlanStepStatus::Disabled,
-        inputs: config,
-        outputs: StepConfig::new(),
-        skip_reason: None,
-        policy: StepConfig::new(),
-        missing: Vec::new(),
-    }
+    PlanStep::disabled(id, step_type)
+        .label(label)
+        .inputs(config)
+        .build()
 }
 
 fn string_config(key: &str, value: impl Into<String>) -> StepConfig {
