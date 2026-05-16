@@ -145,12 +145,16 @@ pub fn run(
         RunnerCommand::Show { id } => map_registry(show(&id)),
         RunnerCommand::Set { args } => map_registry(set(args)),
         RunnerCommand::Remove { id } => map_registry(remove(&id)),
-        RunnerCommand::Doctor { runner_id } => doctor::run(&runner_id),
+        RunnerCommand::Doctor { runner_id } => map_doctor(doctor::run(&runner_id)),
     }
 }
 
 fn map_registry(result: CmdResult<RunnerOutput>) -> CmdResult<RunnerCommandOutput> {
     result.map(|(output, exit_code)| (RunnerCommandOutput::Registry(output), exit_code))
+}
+
+fn map_doctor(result: CmdResult<doctor::RunnerDoctorOutput>) -> CmdResult<RunnerCommandOutput> {
+    result.map(|(output, exit_code)| (RunnerCommandOutput::Doctor(output), exit_code))
 }
 
 struct RunnerAddInput {

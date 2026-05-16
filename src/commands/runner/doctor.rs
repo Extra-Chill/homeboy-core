@@ -63,10 +63,6 @@ mod types {
     pub struct RunnerRegistrySummary {
         pub id: String,
         pub kind: RunnerKind,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub workspace_root: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub homeboy_path: Option<String>,
     }
 
     #[derive(Debug, Serialize)]
@@ -184,7 +180,7 @@ mod target {
     pub fn resolve(runner_id: &str) -> homeboy::Result<RunnerTarget> {
         match runner::load(runner_id) {
             Ok(runner) => from_registry(runner_id, runner),
-            Err(err) if is_local_runner_id(runner_id) => Ok(RunnerTarget::Local {
+            Err(_) if is_local_runner_id(runner_id) => Ok(RunnerTarget::Local {
                 id: runner_id.to_string(),
                 runner: None,
             }),
@@ -368,7 +364,10 @@ mod remote {
         server: &Server,
         client: &SshClient,
     ) -> RunnerDoctorOutput {
-        let workspace_root = runner.workspace_root.clone().unwrap_or_else(|| ".".to_string());
+        let workspace_root = runner
+            .workspace_root
+            .clone()
+            .unwrap_or_else(|| ".".to_string());
         let artifact_root = "$HOME/.local/share/homeboy/artifacts".to_string();
         let mut checks = Vec::new();
         let mut tools = BTreeMap::new();
@@ -391,7 +390,10 @@ mod remote {
         let homeboy = HomeboyProbe {
             version: common::remote_line(
                 client,
-                &format!("{} --version | awk '{{print $2}}'", common::shell_word(homeboy_command)),
+                &format!(
+                    "{} --version | awk '{{print $2}}'",
+                    common::shell_word(homeboy_command)
+                ),
             )
             .unwrap_or_else(|| "unknown".to_string()),
             path: runner
@@ -445,7 +447,9 @@ mod remote {
             None => checks::warning(
                 "memory",
                 "RAM totals could not be detected".to_string(),
-                Some("Ensure /proc/meminfo or sysctl is available on the remote runner".to_string()),
+                Some(
+                    "Ensure /proc/meminfo or sysctl is available on the remote runner".to_string(),
+                ),
             ),
         });
 
@@ -481,7 +485,8 @@ mod remote {
             "Make the remote workspace root writable by the runner user",
         ));
 
-        let artifact_store_available = probes::remote_artifact_store_available(client, &artifact_root);
+        let artifact_store_available =
+            probes::remote_artifact_store_available(client, &artifact_root);
         checks.push(checks::path_writable_check(
             "artifact_store.available",
             artifact_store_available,
@@ -537,15 +542,78 @@ mod probes {
 
     pub fn tool_specs() -> &'static [ToolSpec] {
         &[
-            ToolSpec { id: "git", check_id: "tool.git", command: "git", version_args: &["--version"], required: true, remediation: "Install git and ensure it is on PATH" },
-            ToolSpec { id: "gh", check_id: "tool.github_cli", command: "gh", version_args: &["--version"], required: false, remediation: "Install GitHub CLI (`gh`) for PR and issue workflows" },
-            ToolSpec { id: "node", check_id: "tool.node", command: "node", version_args: &["--version"], required: false, remediation: "Install Node.js for JavaScript/TypeScript components" },
-            ToolSpec { id: "npm", check_id: "tool.npm", command: "npm", version_args: &["--version"], required: false, remediation: "Install npm with Node.js" },
-            ToolSpec { id: "pnpm", check_id: "tool.pnpm", command: "pnpm", version_args: &["--version"], required: false, remediation: "Install pnpm for repos that use pnpm-lock.yaml" },
-            ToolSpec { id: "php", check_id: "tool.php", command: "php", version_args: &["--version"], required: false, remediation: "Install PHP for WordPress/PHP components" },
-            ToolSpec { id: "composer", check_id: "tool.composer", command: "composer", version_args: &["--version"], required: false, remediation: "Install Composer for PHP dependencies" },
-            ToolSpec { id: "docker", check_id: "tool.docker", command: "docker", version_args: &["--version"], required: false, remediation: "Install and start Docker for container-backed rigs" },
-            ToolSpec { id: "playwright", check_id: "tool.playwright", command: "playwright", version_args: &["--version"], required: false, remediation: "Install Playwright CLI and browsers for browser traces" },
+            ToolSpec {
+                id: "git",
+                check_id: "tool.git",
+                command: "git",
+                version_args: &["--version"],
+                required: true,
+                remediation: "Install git and ensure it is on PATH",
+            },
+            ToolSpec {
+                id: "gh",
+                check_id: "tool.github_cli",
+                command: "gh",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install GitHub CLI (`gh`) for PR and issue workflows",
+            },
+            ToolSpec {
+                id: "node",
+                check_id: "tool.node",
+                command: "node",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install Node.js for JavaScript/TypeScript components",
+            },
+            ToolSpec {
+                id: "npm",
+                check_id: "tool.npm",
+                command: "npm",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install npm with Node.js",
+            },
+            ToolSpec {
+                id: "pnpm",
+                check_id: "tool.pnpm",
+                command: "pnpm",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install pnpm for repos that use pnpm-lock.yaml",
+            },
+            ToolSpec {
+                id: "php",
+                check_id: "tool.php",
+                command: "php",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install PHP for WordPress/PHP components",
+            },
+            ToolSpec {
+                id: "composer",
+                check_id: "tool.composer",
+                command: "composer",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install Composer for PHP dependencies",
+            },
+            ToolSpec {
+                id: "docker",
+                check_id: "tool.docker",
+                command: "docker",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install and start Docker for container-backed rigs",
+            },
+            ToolSpec {
+                id: "playwright",
+                check_id: "tool.playwright",
+                command: "playwright",
+                version_args: &["--version"],
+                required: false,
+                remediation: "Install Playwright CLI and browsers for browser traces",
+            },
         ]
     }
 
@@ -581,24 +649,76 @@ mod probes {
     }
 
     pub fn local_tool_probe(command: &str, version_args: &[&str]) -> ToolProbe {
-        let path = common::local_command_line("sh", &["-lc", &format!("command -v {}", common::shell_word(command))]);
+        let path = common::local_command_line(
+            "sh",
+            &[
+                "-lc",
+                &format!("command -v {}", common::shell_word(command)),
+            ],
+        );
         let Some(path) = path else {
-            return ToolProbe { available: false, path: None, version: None, error: Some("not found on PATH".to_string()) };
+            return ToolProbe {
+                available: false,
+                path: None,
+                version: None,
+                error: Some("not found on PATH".to_string()),
+            };
         };
-        let version = Command::new(command).args(version_args).output().ok().and_then(|output| {
-            if output.status.success() { common::first_output_line(&output.stdout, &output.stderr) } else { None }
-        });
-        ToolProbe { available: true, path: Some(path), version, error: None }
+        let version = Command::new(command)
+            .args(version_args)
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    common::first_output_line(&output.stdout, &output.stderr)
+                } else {
+                    None
+                }
+            });
+        ToolProbe {
+            available: true,
+            path: Some(path),
+            version,
+            error: None,
+        }
     }
 
-    pub fn remote_tool_probe(client: &SshClient, command: &str, version_args: &[&str]) -> ToolProbe {
-        let path = common::remote_line(client, &format!("command -v {}", common::shell_word(command)));
+    pub fn remote_tool_probe(
+        client: &SshClient,
+        command: &str,
+        version_args: &[&str],
+    ) -> ToolProbe {
+        let path = common::remote_line(
+            client,
+            &format!("command -v {}", common::shell_word(command)),
+        );
         let Some(path) = path else {
-            return ToolProbe { available: false, path: None, version: None, error: Some("not found on PATH".to_string()) };
+            return ToolProbe {
+                available: false,
+                path: None,
+                version: None,
+                error: Some("not found on PATH".to_string()),
+            };
         };
-        let args = version_args.iter().map(|arg| common::shell_word(arg)).collect::<Vec<_>>().join(" ");
-        let version = common::remote_line(client, &format!("{} {} 2>&1 | sed -n '1p'", common::shell_word(command), args));
-        ToolProbe { available: true, path: Some(path), version, error: None }
+        let args = version_args
+            .iter()
+            .map(|arg| common::shell_word(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let version = common::remote_line(
+            client,
+            &format!(
+                "{} {} 2>&1 | sed -n '1p'",
+                common::shell_word(command),
+                args
+            ),
+        );
+        ToolProbe {
+            available: true,
+            path: Some(path),
+            version,
+            error: None,
+        }
     }
 
     pub fn local_memory_probe() -> Option<MemoryProbe> {
@@ -617,14 +737,19 @@ mod probes {
             "awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null",
         )
         .and_then(|value| value.parse::<u64>().ok());
-        Some(MemoryProbe { total_mb, available_mb })
+        Some(MemoryProbe {
+            total_mb,
+            available_mb,
+        })
     }
 
     pub fn local_disk_probe(path: &Path) -> Option<DiskProbe> {
         let c_path = std::ffi::CString::new(path.to_string_lossy().as_bytes()).ok()?;
         let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
         let rc = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
-        if rc != 0 { return None; }
+        if rc != 0 {
+            return None;
+        }
         let stat = unsafe { stat.assume_init() };
         let block_size: u64 = stat.f_frsize.max(1).into();
         let total_blocks: u64 = stat.f_blocks.into();
@@ -637,16 +762,29 @@ mod probes {
     }
 
     pub fn remote_disk_probe(client: &SshClient, path: &str) -> Option<DiskProbe> {
-        let line = common::remote_line(client, &format!("df -Pk {} | awk 'NR==2 {{print $2 \" \" $4}}'", common::shell_word(path)))?;
+        let line = common::remote_line(
+            client,
+            &format!(
+                "df -Pk {} | awk 'NR==2 {{print $2 \" \" $4}}'",
+                common::shell_word(path)
+            ),
+        )?;
         let mut parts = line.split_whitespace();
         let total_kb = parts.next()?.parse::<u64>().ok()?;
         let available_kb = parts.next()?.parse::<u64>().ok()?;
-        Some(DiskProbe { path: path.to_string(), total_mb: total_kb / 1024, available_mb: available_kb / 1024 })
+        Some(DiskProbe {
+            path: path.to_string(),
+            total_mb: total_kb / 1024,
+            available_mb: available_kb / 1024,
+        })
     }
 
     pub fn local_browser_ready() -> bool {
         browser_cache_candidates().into_iter().any(|path| {
-            path.is_dir() && fs::read_dir(path).map(|mut entries| entries.next().is_some()).unwrap_or(false)
+            path.is_dir()
+                && fs::read_dir(path)
+                    .map(|mut entries| entries.next().is_some())
+                    .unwrap_or(false)
         })
     }
 
@@ -672,12 +810,17 @@ mod probes {
     }
 
     pub fn remote_path_writable(client: &SshClient, path: &str) -> bool {
-        client.execute(&format!("test -w {}", common::shell_word(path))).success
+        client
+            .execute(&format!("test -w {}", common::shell_word(path)))
+            .success
     }
 
     pub fn remote_artifact_store_available(client: &SshClient, path: &str) -> bool {
         client
-            .execute(&format!("if [ -e {0} ]; then test -w {0}; else test -w $(dirname {0}); fi", common::shell_word(path)))
+            .execute(&format!(
+                "if [ -e {0} ]; then test -w {0}; else test -w $(dirname {0}); fi",
+                common::shell_word(path)
+            ))
             .success
     }
 
@@ -685,19 +828,27 @@ mod probes {
         let raw = fs::read_to_string("/proc/meminfo").ok()?;
         let total_kb = meminfo_value_kb(&raw, "MemTotal")?;
         let available_kb = meminfo_value_kb(&raw, "MemAvailable");
-        Some(MemoryProbe { total_mb: total_kb / 1024, available_mb: available_kb.map(|kb| kb / 1024) })
+        Some(MemoryProbe {
+            total_mb: total_kb / 1024,
+            available_mb: available_kb.map(|kb| kb / 1024),
+        })
     }
 
     fn memory_from_macos_sysctl() -> Option<MemoryProbe> {
         let total_bytes = common::local_command_line("sysctl", &["-n", "hw.memsize"])?;
         let total_mb = total_bytes.parse::<u64>().ok()? / 1024 / 1024;
-        Some(MemoryProbe { total_mb, available_mb: None })
+        Some(MemoryProbe {
+            total_mb,
+            available_mb: None,
+        })
     }
 
     fn meminfo_value_kb(raw: &str, key: &str) -> Option<u64> {
         raw.lines().find_map(|line| {
             let (name, rest) = line.split_once(':')?;
-            if name != key { return None; }
+            if name != key {
+                return None;
+            }
             rest.split_whitespace().next()?.parse::<u64>().ok()
         })
     }
@@ -705,7 +856,9 @@ mod probes {
     fn browser_cache_candidates() -> Vec<PathBuf> {
         let mut candidates = Vec::new();
         if let Ok(path) = env::var("PLAYWRIGHT_BROWSERS_PATH") {
-            if !path.trim().is_empty() { candidates.push(PathBuf::from(path)); }
+            if !path.trim().is_empty() {
+                candidates.push(PathBuf::from(path));
+            }
         }
         if let Ok(home) = env::var("HOME") {
             let home = PathBuf::from(home);
@@ -722,7 +875,11 @@ mod checks {
 
     pub fn tool_check(spec: probes::ToolSpec, probe: &ToolProbe) -> RunnerCheck {
         if probe.available {
-            ok(spec.check_id, format!("{} is available", spec.command), None)
+            ok(
+                spec.check_id,
+                format!("{} is available", spec.command),
+                None,
+            )
         } else if spec.required {
             error(
                 spec.check_id,
@@ -741,47 +898,121 @@ mod checks {
 
     pub fn playwright_check(playwright: bool, browser_ready: bool) -> RunnerCheck {
         match (playwright, browser_ready) {
-            (true, true) => ok("playwright.browser_ready", "Playwright CLI and browser cache are detectable".to_string(), None),
-            (true, false) => warning("playwright.browser_ready", "Playwright CLI is available but browser readiness was not detected".to_string(), Some("Run `playwright install` in the relevant project if browser traces fail".to_string())),
-            (false, true) => warning("playwright.browser_ready", "Browser cache is present but Playwright CLI was not found".to_string(), Some("Install Playwright CLI in the runner environment".to_string())),
-            (false, false) => warning("playwright.browser_ready", "Playwright/browser readiness was not detected".to_string(), Some("Install Playwright and browser binaries for browser-backed traces".to_string())),
+            (true, true) => ok(
+                "playwright.browser_ready",
+                "Playwright CLI and browser cache are detectable".to_string(),
+                None,
+            ),
+            (true, false) => warning(
+                "playwright.browser_ready",
+                "Playwright CLI is available but browser readiness was not detected".to_string(),
+                Some(
+                    "Run `playwright install` in the relevant project if browser traces fail"
+                        .to_string(),
+                ),
+            ),
+            (false, true) => warning(
+                "playwright.browser_ready",
+                "Browser cache is present but Playwright CLI was not found".to_string(),
+                Some("Install Playwright CLI in the runner environment".to_string()),
+            ),
+            (false, false) => warning(
+                "playwright.browser_ready",
+                "Playwright/browser readiness was not detected".to_string(),
+                Some(
+                    "Install Playwright and browser binaries for browser-backed traces".to_string(),
+                ),
+            ),
         }
     }
 
-    pub fn path_writable_check(id: &'static str, writable: bool, path: &Path, remediation: &str) -> RunnerCheck {
+    pub fn path_writable_check(
+        id: &'static str,
+        writable: bool,
+        path: &Path,
+        remediation: &str,
+    ) -> RunnerCheck {
         let mut details = BTreeMap::new();
         details.insert("path".to_string(), common::display_path(path));
         if writable {
-            ok_with_details(id, "Path is writable by the runner user".to_string(), details)
+            ok_with_details(
+                id,
+                "Path is writable by the runner user".to_string(),
+                details,
+            )
         } else {
-            error(id, "Path is not writable by the runner user".to_string(), Some(remediation.to_string()), details)
+            error(
+                id,
+                "Path is not writable by the runner user".to_string(),
+                Some(remediation.to_string()),
+                details,
+            )
         }
     }
 
     pub fn ok(id: &'static str, message: String, remediation: Option<String>) -> RunnerCheck {
-        RunnerCheck { id, status: RunnerDoctorStatus::Ok, message, remediation, details: BTreeMap::new() }
+        RunnerCheck {
+            id,
+            status: RunnerDoctorStatus::Ok,
+            message,
+            remediation,
+            details: BTreeMap::new(),
+        }
     }
 
     pub fn warning(id: &'static str, message: String, remediation: Option<String>) -> RunnerCheck {
-        RunnerCheck { id, status: RunnerDoctorStatus::Warning, message, remediation, details: BTreeMap::new() }
+        RunnerCheck {
+            id,
+            status: RunnerDoctorStatus::Warning,
+            message,
+            remediation,
+            details: BTreeMap::new(),
+        }
     }
 
-    pub fn error(id: &'static str, message: String, remediation: Option<String>, details: BTreeMap<String, String>) -> RunnerCheck {
-        RunnerCheck { id, status: RunnerDoctorStatus::Error, message, remediation, details }
+    pub fn error(
+        id: &'static str,
+        message: String,
+        remediation: Option<String>,
+        details: BTreeMap<String, String>,
+    ) -> RunnerCheck {
+        RunnerCheck {
+            id,
+            status: RunnerDoctorStatus::Error,
+            message,
+            remediation,
+            details,
+        }
     }
 
     pub fn overall_status(checks: &[RunnerCheck]) -> RunnerDoctorStatus {
-        if checks.iter().any(|check| check.status == RunnerDoctorStatus::Error) {
+        if checks
+            .iter()
+            .any(|check| check.status == RunnerDoctorStatus::Error)
+        {
             RunnerDoctorStatus::Error
-        } else if checks.iter().any(|check| check.status == RunnerDoctorStatus::Warning) {
+        } else if checks
+            .iter()
+            .any(|check| check.status == RunnerDoctorStatus::Warning)
+        {
             RunnerDoctorStatus::Warning
         } else {
             RunnerDoctorStatus::Ok
         }
     }
 
-    fn ok_with_details(id: &'static str, message: String, details: BTreeMap<String, String>) -> RunnerCheck {
-        RunnerCheck { id, status: RunnerDoctorStatus::Ok, message, remediation: None, details }
+    fn ok_with_details(
+        id: &'static str,
+        message: String,
+        details: BTreeMap<String, String>,
+    ) -> RunnerCheck {
+        RunnerCheck {
+            id,
+            status: RunnerDoctorStatus::Ok,
+            message,
+            remediation: None,
+            details,
+        }
     }
 }
 
@@ -790,14 +1021,23 @@ mod common {
 
     pub fn local_command_line(command: &str, args: &[&str]) -> Option<String> {
         let output = Command::new(command).args(args).output().ok()?;
-        if !output.status.success() { return None; }
+        if !output.status.success() {
+            return None;
+        }
         first_output_line(&output.stdout, &output.stderr)
     }
 
     pub fn remote_line(client: &SshClient, command: &str) -> Option<String> {
         let output = client.execute(command);
-        if !output.success { return None; }
-        output.stdout.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_string)
+        if !output.success {
+            return None;
+        }
+        output
+            .stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(str::to_string)
     }
 
     pub fn first_output_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
@@ -835,8 +1075,6 @@ fn runner_summary(
         registry: runner.map(|runner| types::RunnerRegistrySummary {
             id: runner.id.clone(),
             kind: runner.kind.clone(),
-            workspace_root: runner.workspace_root.clone(),
-            homeboy_path: runner.homeboy_path.clone(),
         }),
         server: server.map(|server| types::RunnerServerSummary {
             id: server.id.clone(),
@@ -863,14 +1101,22 @@ mod tests {
         assert!(value.get("status").is_some());
         assert!(value.get("capabilities").is_some());
         assert!(value.get("resources").is_some());
-        assert!(value.get("checks").and_then(|checks| checks.as_array()).is_some());
+        assert!(value
+            .get("checks")
+            .and_then(|checks| checks.as_array())
+            .is_some());
     }
 
     #[test]
     fn overall_status_promotes_errors_over_warnings() {
         let checks = vec![
             checks::warning("optional", "optional missing".to_string(), None),
-            checks::error("required", "required missing".to_string(), None, BTreeMap::new()),
+            checks::error(
+                "required",
+                "required missing".to_string(),
+                None,
+                BTreeMap::new(),
+            ),
         ];
         assert_eq!(checks::overall_status(&checks), RunnerDoctorStatus::Error);
     }
