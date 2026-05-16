@@ -53,7 +53,7 @@ pub(crate) fn run_changelog_finalize(
 mod tests {
     use super::run_changelog_finalize;
     use crate::component::{Component, VersionTarget};
-    use crate::plan::{PlanStep, PlanStepStatus};
+    use crate::plan::PlanStep;
     use crate::release::types::ReleaseState;
     use crate::release::ReleaseStepStatus;
 
@@ -81,20 +81,7 @@ mod tests {
             }]),
             ..Component::default()
         };
-        let mut step = PlanStep {
-            id: "changelog.finalize".to_string(),
-            kind: "changelog.finalize".to_string(),
-            label: None,
-            blocking: true,
-            scope: Vec::new(),
-            needs: Vec::new(),
-            status: PlanStepStatus::Ready,
-            inputs: std::collections::HashMap::new(),
-            outputs: std::collections::HashMap::new(),
-            skip_reason: None,
-            policy: std::collections::HashMap::new(),
-            missing: Vec::new(),
-        };
+        let mut step = PlanStep::ready("changelog.finalize", "changelog.finalize").build();
         step.inputs
             .insert("from".to_string(), serde_json::json!("0.6.12"));
         step.inputs

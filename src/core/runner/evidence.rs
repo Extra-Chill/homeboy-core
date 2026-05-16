@@ -537,6 +537,7 @@ mod tests {
                 started_at_ms: Some(1_700_000_000_000),
                 finished_at_ms: Some(1_700_000_001_000),
                 event_count: 0,
+                source_snapshot: None,
                 stale_reason: None,
             };
             let run = mirror_job_run(

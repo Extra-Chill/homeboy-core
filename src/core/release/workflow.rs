@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::git;
-use crate::plan::{PlanStep, PlanStepStatus};
+use crate::plan::PlanStep;
 
 use super::context::load_component;
 use super::types::{
@@ -486,35 +486,13 @@ fn recovery_release_plan(
 }
 
 fn recovery_step(id: &str, label: impl Into<String>, needed: bool, needs: Vec<String>) -> PlanStep {
-    let mut config = std::collections::HashMap::new();
-    if !needed {
-        config.insert(
-            "reason".to_string(),
-            serde_json::Value::String("already-complete".to_string()),
-        );
-    }
-
-    PlanStep {
-        id: id.to_string(),
-        kind: id.to_string(),
-        label: Some(label.into()),
-        blocking: true,
-        scope: Vec::new(),
-        needs,
-        status: if needed {
-            PlanStepStatus::Ready
-        } else {
-            PlanStepStatus::Disabled
-        },
-        inputs: config,
-        outputs: std::collections::HashMap::new(),
-        skip_reason: if needed {
-            None
-        } else {
-            Some("already-complete".to_string())
-        },
-        policy: std::collections::HashMap::new(),
-        missing: Vec::new(),
+    if needed {
+        PlanStep::ready_labeled(id, id, label, needs, std::collections::HashMap::new())
+    } else {
+        PlanStep::disabled_with_reason(id, id, "already-complete")
+            .label(label)
+            .needs(needs)
+            .build()
     }
 }
 
@@ -670,23 +648,12 @@ mod tests {
         let plan = ReleasePlan::new(
             "demo",
             true,
-            vec![PlanStep {
-                id: "version".to_string(),
-                kind: "version".to_string(),
-                label: None,
-                blocking: true,
-                scope: Vec::new(),
-                needs: Vec::new(),
-                status: PlanStepStatus::Ready,
-                inputs: HashMap::from([(
+            vec![PlanStep::ready("version", "version")
+                .inputs(HashMap::from([(
                     "to".to_string(),
                     serde_json::Value::String("1.2.3".to_string()),
-                )]),
-                outputs: HashMap::new(),
-                skip_reason: None,
-                policy: HashMap::new(),
-                missing: Vec::new(),
-            }],
+                )]))
+                .build()],
             None,
             Vec::new(),
             Vec::new(),
