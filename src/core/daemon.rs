@@ -11,6 +11,7 @@ use crate::api_jobs::JobStore;
 use crate::error::{Error, Result};
 use crate::http_api::{self, HttpMethod};
 use crate::paths;
+use crate::source_snapshot::SourceSnapshot;
 
 mod artifact_download;
 pub use artifact_download::ArtifactDownload;
@@ -62,6 +63,8 @@ struct ExecRequest {
     runner_id: Option<String>,
     cwd: String,
     command: Vec<String>,
+    #[serde(default)]
+    source_snapshot: Option<SourceSnapshot>,
 }
 
 pub fn parse_bind_addr(addr: &str) -> Result<SocketAddr> {
@@ -269,52 +272,74 @@ fn enqueue_exec_job(
         ));
     }
 
+    let runner_id = request.runner_id.as_deref().unwrap_or("unknown");
+    let source_snapshot = request.source_snapshot.clone().or_else(|| {
+        Some(SourceSnapshot::existing_remote(
+            runner_id,
+            &request.cwd,
+            None,
+        ))
+    });
+
     let summary = json!({
         "runner_id": request.runner_id,
         "cwd": request.cwd,
         "command": request.command,
+        "source_snapshot": source_snapshot,
     });
     let operation = "runner.exec".to_string();
-    let runner = job_store.run_background(operation, move |job| {
-        job.progress(json!({
-            "phase": "started",
-            "runner_id": request.runner_id,
-            "cwd": request.cwd,
-            "command": request.command,
-            "job_id": job.job_id(),
-        }))?;
-        let output = Command::new(&request.command[0])
-            .args(&request.command[1..])
-            .current_dir(&request.cwd)
-            .output()
-            .map_err(|err| {
+    let runner = job_store.run_background_with_source_snapshot(
+        operation,
+        source_snapshot.clone(),
+        move |job| {
+            job.progress(json!({
+                "phase": "started",
+                "runner_id": request.runner_id,
+                "cwd": request.cwd,
+                "command": request.command,
+                "job_id": job.job_id(),
+                "source_snapshot": source_snapshot,
+            }))?;
+            let mut command = Command::new(&request.command[0]);
+            command
+                .args(&request.command[1..])
+                .current_dir(&request.cwd);
+            if let Some(snapshot) = &source_snapshot {
+                command.env(
+                    "HOMEBOY_SOURCE_SNAPSHOT_JSON",
+                    serde_json::to_string(snapshot).unwrap_or_default(),
+                );
+            }
+            let output = command.output().map_err(|err| {
                 Error::internal_io(
                     err.to_string(),
                     Some("execute daemon runner command".to_string()),
                 )
             })?;
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let exit_code = output.status.code().unwrap_or(1);
-        if !stdout.is_empty() {
-            job.stdout(stdout.clone())?;
-        }
-        if !stderr.is_empty() {
-            job.stderr(stderr.clone())?;
-        }
-        job.progress(json!({
-            "phase": "finished",
-            "exit_code": exit_code,
-        }))?;
-        Ok(json!({
-            "runner_id": request.runner_id,
-            "cwd": request.cwd,
-            "command": request.command,
-            "exit_code": exit_code,
-            "stdout": stdout,
-            "stderr": stderr,
-        }))
-    });
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code().unwrap_or(1);
+            if !stdout.is_empty() {
+                job.stdout(stdout.clone())?;
+            }
+            if !stderr.is_empty() {
+                job.stderr(stderr.clone())?;
+            }
+            job.progress(json!({
+                "phase": "finished",
+                "exit_code": exit_code,
+            }))?;
+            Ok(json!({
+                "runner_id": request.runner_id,
+                "cwd": request.cwd,
+                "command": request.command,
+                "exit_code": exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
+                "source_snapshot": source_snapshot,
+            }))
+        },
+    );
     let job = job_store.get(runner.job_id)?;
 
     Ok(json!({

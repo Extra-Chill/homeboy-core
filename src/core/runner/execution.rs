@@ -8,6 +8,7 @@ use crate::api_jobs::{Job, JobEvent, JobStatus};
 use crate::engine::shell;
 use crate::error::{Error, Result};
 use crate::server::{self, SshClient};
+use crate::source_snapshot::SourceSnapshot;
 
 use super::{load, status, Runner, RunnerKind};
 
@@ -36,6 +37,8 @@ pub struct RunnerExecOutput {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_snapshot: Option<SourceSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job: Option<Job>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,12 +99,15 @@ fn exec_via_daemon(
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|err| Error::internal_unexpected(format!("build daemon HTTP client: {err}")))?;
+    let source_snapshot =
+        SourceSnapshot::existing_remote(&runner.id, &cwd, runner.workspace_root.as_deref());
     let response = client
         .post(format!("{}/exec", local_url.trim_end_matches('/')))
         .json(&json!({
             "runner_id": runner.id,
             "cwd": cwd,
             "command": command,
+            "source_snapshot": source_snapshot,
         }))
         .send()
         .map_err(|err| {
@@ -173,6 +179,7 @@ fn exec_via_daemon(
             exit_code,
             stdout,
             stderr,
+            source_snapshot: Some(source_snapshot),
             job_id: Some(job.id.to_string()),
             job: Some(job),
             job_events: Some(events),
@@ -251,12 +258,19 @@ fn exec_local(
             .args(&command[1..])
             .current_dir(&cwd),
     )?;
+    let source_snapshot = SourceSnapshot::collect_local(
+        &runner.id,
+        std::path::Path::new(&cwd),
+        Some(&cwd),
+        "existing_remote",
+    );
     Ok(exec_output(
         runner,
         RunnerExecMode::Local,
         cwd,
         command,
         output,
+        Some(source_snapshot),
     ))
 }
 
@@ -281,6 +295,8 @@ fn exec_ssh(runner: &Runner, cwd: String, command: Vec<String>) -> Result<(Runne
             .join(" ")
     );
     let output = client.execute(&command_line);
+    let source_snapshot =
+        SourceSnapshot::existing_remote(&runner.id, &cwd, runner.workspace_root.as_deref());
     Ok(exec_output(
         runner,
         RunnerExecMode::Ssh,
@@ -291,6 +307,7 @@ fn exec_ssh(runner: &Runner, cwd: String, command: Vec<String>) -> Result<(Runne
             stderr: output.stderr,
             exit_code: output.exit_code,
         },
+        Some(source_snapshot),
     ))
 }
 
@@ -317,6 +334,7 @@ fn exec_output(
     cwd: String,
     command: Vec<String>,
     output: ProcessOutput,
+    source_snapshot: Option<SourceSnapshot>,
 ) -> (RunnerExecOutput, i32) {
     let exit_code = output.exit_code;
     (
@@ -329,6 +347,7 @@ fn exec_output(
             exit_code,
             stdout: output.stdout,
             stderr: output.stderr,
+            source_snapshot,
             job: None,
             job_id: None,
             job_events: None,
@@ -459,6 +478,10 @@ mod tests {
             assert_eq!(output.runner_id, "lab-local");
             assert_eq!(output.mode, RunnerExecMode::Local);
             assert_eq!(output.stdout, "ok");
+            let source_snapshot = output.source_snapshot.expect("source snapshot");
+            assert_eq!(source_snapshot.runner_id, "lab-local");
+            assert_eq!(source_snapshot.sync_mode, "existing_remote");
+            assert!(source_snapshot.snapshot_hash.starts_with("sha256:"));
             assert!(output.job_id.is_none());
         });
     }

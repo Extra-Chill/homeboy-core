@@ -1077,16 +1077,26 @@ fn with_run_owner_metadata(mut metadata: serde_json::Value) -> serde_json::Value
         "pid": std::process::id(),
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
+    let source_snapshot = std::env::var("HOMEBOY_SOURCE_SNAPSHOT_JSON")
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
 
     if let Some(object) = metadata.as_object_mut() {
         object.insert("homeboy_run_owner".to_string(), owner);
+        if let Some(source_snapshot) = source_snapshot {
+            object.insert("source_snapshot".to_string(), source_snapshot);
+        }
         return metadata;
     }
 
-    serde_json::json!({
+    let mut wrapped = serde_json::json!({
         "homeboy_run_owner": owner,
         "homeboy_original_metadata": metadata,
-    })
+    });
+    if let (Some(object), Some(source_snapshot)) = (wrapped.as_object_mut(), source_snapshot) {
+        object.insert("source_snapshot".to_string(), source_snapshot);
+    }
+    wrapped
 }
 
 fn parse_metadata(raw: String) -> rusqlite::Result<serde_json::Value> {
@@ -1365,6 +1375,29 @@ mod api_coverage_tests {
             let run = store.start_run(new_run("bench")).expect("start");
             assert_eq!(run.status, "running");
             assert_eq!(run.kind, "bench");
+        });
+    }
+
+    #[test]
+    fn test_start_run_records_source_snapshot_from_environment() {
+        with_isolated_home(|_| {
+            let _xdg = XdgGuard::unset();
+            let store = ObservationStore::open_initialized().expect("store");
+            let snapshot = serde_json::json!({
+                "runner_id": "lab",
+                "remote_path": "/srv/homeboy/repo",
+                "dirty": true,
+                "sync_mode": "snapshot",
+                "snapshot_hash": "sha256:dirty",
+                "synced_at": "2026-05-16T00:00:00Z",
+                "sync_excludes": ["node_modules/"]
+            });
+
+            std::env::set_var("HOMEBOY_SOURCE_SNAPSHOT_JSON", snapshot.to_string());
+            let run = store.start_run(new_run("test")).expect("start");
+            std::env::remove_var("HOMEBOY_SOURCE_SNAPSHOT_JSON");
+
+            assert_eq!(run.metadata_json["source_snapshot"], snapshot);
         });
     }
 

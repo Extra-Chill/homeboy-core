@@ -33,16 +33,12 @@ pub(super) fn execute_component_deploy(
 
     // Try downloading release artifact from GitHub instead of building locally.
     // This is the preferred path when the component has remote_url set.
-    let release_artifact: Option<PathBuf> = if should_try_download_release_artifact(
-        component,
-        config,
-        is_git_deploy,
-        is_file_deploy,
-    ) {
-        try_download_release_artifact(component)
-    } else {
-        None
-    };
+    let release_artifact: Option<PathBuf> =
+        if should_try_download_release_artifact(component, config, is_git_deploy, is_file_deploy) {
+            try_download_release_artifact(component)
+        } else {
+            None
+        };
 
     // Build (git-deploy, file-deploy, skip-build, and release-download skip this step)
     let (build_exit_code, build_error) =

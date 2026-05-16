@@ -192,7 +192,30 @@ fn routes_exec_body_to_daemon_job() {
     assert_eq!(response.status_code, 200);
     assert_eq!(response.body["endpoint"], "jobs.exec");
     assert_eq!(response.body["body"]["command"], "api.runner.exec.enqueue");
+    assert_eq!(
+        response.body["body"]["job"]["source_snapshot"]["runner_id"],
+        "lab-local"
+    );
+    assert_eq!(
+        response.body["body"]["job"]["source_snapshot"]["remote_path"],
+        std::env::current_dir()
+            .expect("cwd")
+            .to_string_lossy()
+            .to_string()
+    );
+    assert_eq!(
+        response.body["body"]["job"]["source_snapshot"]["sync_mode"],
+        "existing_remote"
+    );
     assert_eq!(store.list().len(), 1);
+    assert_eq!(
+        store.list()[0]
+            .source_snapshot
+            .as_ref()
+            .expect("stored source snapshot")
+            .runner_id,
+        "lab-local"
+    );
 }
 
 #[test]
