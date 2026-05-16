@@ -34,6 +34,7 @@ pub enum ErrorCode {
     RigPipelineFailed,
     RigServiceFailed,
     RigResourceConflict,
+    RunnerNotFound,
     StackNotFound,
     StackApplyConflict,
 
@@ -82,6 +83,7 @@ impl ErrorCode {
             ErrorCode::RigPipelineFailed => "rig.pipeline_failed",
             ErrorCode::RigServiceFailed => "rig.service_failed",
             ErrorCode::RigResourceConflict => "rig.resource_conflict",
+            ErrorCode::RunnerNotFound => "runner.not_found",
             ErrorCode::StackNotFound => "stack.not_found",
             ErrorCode::StackApplyConflict => "stack.apply_conflict",
 
@@ -421,6 +423,10 @@ impl Error {
 
     pub fn rig_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
         Self::entity_not_found(ErrorCode::RigNotFound, "Rig", id, suggestions)
+    }
+
+    pub fn runner_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
+        Self::entity_not_found(ErrorCode::RunnerNotFound, "Runner", id, suggestions)
     }
 
     pub fn stack_not_found(id: impl Into<String>, suggestions: Vec<String>) -> Self {
