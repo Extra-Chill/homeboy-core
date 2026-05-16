@@ -145,11 +145,6 @@ pub fn servers() -> Result<PathBuf> {
     Ok(homeboy()?.join("servers"))
 }
 
-/// Runners directory (~/.config/homeboy/runners/).
-pub fn runners() -> Result<PathBuf> {
-    Ok(homeboy()?.join("runners"))
-}
-
 /// Components directory
 pub fn components() -> Result<PathBuf> {
     Ok(homeboy()?.join("components"))
@@ -516,6 +511,28 @@ mod tests {
                 .and_then(|p| p.file_name())
                 .and_then(|s| s.to_str()),
             Some("studio-dev.state")
+        );
+    }
+
+    #[test]
+    fn test_runner_sessions_dir_under_homeboy_dir() {
+        let path = runner_sessions_dir().expect("runner_sessions_dir resolves");
+        assert!(path.ends_with("runner-sessions"), "got {}", path.display());
+        assert!(path.parent().expect("parent").ends_with("homeboy"));
+    }
+
+    #[test]
+    fn test_runner_session_file_uses_id_filename() {
+        let path = runner_session_file("lab-box").expect("runner_session_file resolves");
+        assert_eq!(
+            path.file_name().and_then(|s| s.to_str()),
+            Some("lab-box.json")
+        );
+        assert_eq!(
+            path.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str()),
+            Some("runner-sessions")
         );
     }
 
