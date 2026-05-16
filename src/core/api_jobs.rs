@@ -13,6 +13,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::core::error::{Error, Result};
+use crate::core::source_snapshot::SourceSnapshot;
 
 const DEFAULT_EVENT_RETENTION_LIMIT: usize = 1000;
 
@@ -55,6 +56,8 @@ pub struct Job {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_at_ms: Option<u64>,
     pub event_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_snapshot: Option<SourceSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_reason: Option<String>,
 }
@@ -145,6 +148,14 @@ impl JobStore {
     }
 
     pub(crate) fn create(&self, operation: impl Into<String>) -> Job {
+        self.create_with_source_snapshot(operation, None)
+    }
+
+    pub(crate) fn create_with_source_snapshot(
+        &self,
+        operation: impl Into<String>,
+        source_snapshot: Option<SourceSnapshot>,
+    ) -> Job {
         let now = timestamp_ms();
         let job = Job {
             id: Uuid::new_v4(),
@@ -155,6 +166,7 @@ impl JobStore {
             started_at_ms: None,
             finished_at_ms: None,
             event_count: 0,
+            source_snapshot,
             stale_reason: None,
         };
 
@@ -272,7 +284,20 @@ impl JobStore {
         T: Serialize + Send + 'static,
         F: FnOnce(JobHandle) -> Result<T> + Send + 'static,
     {
-        let job = self.create(operation);
+        self.run_background_with_source_snapshot(operation, None, run)
+    }
+
+    pub(crate) fn run_background_with_source_snapshot<T, F>(
+        &self,
+        operation: impl Into<String>,
+        source_snapshot: Option<SourceSnapshot>,
+        run: F,
+    ) -> JobRunner
+    where
+        T: Serialize + Send + 'static,
+        F: FnOnce(JobHandle) -> Result<T> + Send + 'static,
+    {
+        let job = self.create_with_source_snapshot(operation, source_snapshot);
         let job_id = job.id;
         let handle_store = self.clone();
         let worker_store = self.clone();
@@ -535,6 +560,21 @@ mod tests {
         assert_eq!(job.operation, "audit");
         assert_eq!(job.status, JobStatus::Queued);
         assert_eq!(job.event_count, 1);
+        assert!(job.source_snapshot.is_none());
+    }
+
+    #[test]
+    fn test_create_with_source_snapshot() {
+        let store = JobStore::default();
+        let snapshot =
+            SourceSnapshot::existing_remote("lab", "/srv/homeboy/repo", Some("/srv/homeboy"));
+        let job = store.create_with_source_snapshot("runner.exec", Some(snapshot.clone()));
+
+        assert_eq!(job.source_snapshot, Some(snapshot.clone()));
+        assert_eq!(
+            store.get(job.id).expect("job").source_snapshot,
+            Some(snapshot)
+        );
     }
 
     #[test]
