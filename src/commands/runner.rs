@@ -9,10 +9,19 @@ use homeboy::{EntityCrudOutput, MergeOutput};
 
 use super::{CmdResult, DynamicSetArgs};
 
+mod doctor;
+
 #[derive(Debug, Default, Serialize)]
 pub struct RunnerExtra {}
 
 pub type RunnerOutput = EntityCrudOutput<Runner, RunnerExtra>;
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum RunnerCommandOutput {
+    Registry(RunnerOutput),
+    Doctor(doctor::RunnerDoctorOutput),
+}
 
 #[derive(Args)]
 pub struct RunnerArgs {
@@ -81,6 +90,12 @@ enum RunnerCommand {
         /// Runner ID
         id: String,
     },
+    /// Diagnose a local or configured SSH runner without mutating it
+    Doctor {
+        /// Runner ID. Use `local`, `localhost`, or `self` for this machine;
+        /// other values resolve through `homeboy runner` configuration.
+        runner_id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -98,7 +113,10 @@ impl From<RunnerKindArg> for RunnerKind {
     }
 }
 
-pub fn run(args: RunnerArgs, _global: &crate::commands::GlobalArgs) -> CmdResult<RunnerOutput> {
+pub fn run(
+    args: RunnerArgs,
+    _global: &crate::commands::GlobalArgs,
+) -> CmdResult<RunnerCommandOutput> {
     match args.command {
         RunnerCommand::Add {
             json,
@@ -111,7 +129,7 @@ pub fn run(args: RunnerArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             daemon,
             concurrency_limit,
             artifact_policy,
-        } => add(RunnerAddInput {
+        } => map_registry(add(RunnerAddInput {
             json,
             skip_existing,
             id,
@@ -122,12 +140,17 @@ pub fn run(args: RunnerArgs, _global: &crate::commands::GlobalArgs) -> CmdResult
             daemon,
             concurrency_limit,
             artifact_policy,
-        }),
-        RunnerCommand::List => list(),
-        RunnerCommand::Show { id } => show(&id),
-        RunnerCommand::Set { args } => set(args),
-        RunnerCommand::Remove { id } => remove(&id),
+        })),
+        RunnerCommand::List => map_registry(list()),
+        RunnerCommand::Show { id } => map_registry(show(&id)),
+        RunnerCommand::Set { args } => map_registry(set(args)),
+        RunnerCommand::Remove { id } => map_registry(remove(&id)),
+        RunnerCommand::Doctor { runner_id } => doctor::run(&runner_id),
     }
+}
+
+fn map_registry(result: CmdResult<RunnerOutput>) -> CmdResult<RunnerCommandOutput> {
+    result.map(|(output, exit_code)| (RunnerCommandOutput::Registry(output), exit_code))
 }
 
 struct RunnerAddInput {
