@@ -33,11 +33,12 @@ pub(super) fn execute_component_deploy(
 
     // Try downloading release artifact from GitHub instead of building locally.
     // This is the preferred path when the component has remote_url set.
-    let release_artifact: Option<PathBuf> = if !is_git_deploy
-        && !is_file_deploy
-        && !config.skip_build
-        && release_download::supports_release_deploy(component)
-    {
+    let release_artifact: Option<PathBuf> = if should_try_download_release_artifact(
+        component,
+        config,
+        is_git_deploy,
+        is_file_deploy,
+    ) {
         try_download_release_artifact(component)
     } else {
         None
@@ -152,6 +153,19 @@ pub(super) fn execute_component_deploy(
         build_exit_code,
         release_artifact.as_ref(),
     )
+}
+
+fn should_try_download_release_artifact(
+    component: &Component,
+    config: &DeployConfig,
+    is_git_deploy: bool,
+    is_file_deploy: bool,
+) -> bool {
+    !is_git_deploy
+        && !is_file_deploy
+        && !config.head
+        && !config.skip_build
+        && release_download::supports_release_deploy(component)
 }
 
 fn failed_component_deploy_result(
@@ -650,8 +664,9 @@ fn cleanup_build_dependencies(
 
 #[cfg(test)]
 mod tests {
-    use super::failed_component_deploy_result;
+    use super::{failed_component_deploy_result, should_try_download_release_artifact};
     use crate::component::Component;
+    use crate::core::deploy::types::DeployConfig;
 
     #[test]
     fn test_execute_component_deploy_failure_helper_preserves_build_exit_code() {
@@ -675,5 +690,34 @@ mod tests {
         assert_eq!(result.remote_version.as_deref(), Some("0.9.0"));
         assert_eq!(result.build_exit_code, Some(7));
         assert_eq!(result.error.as_deref(), Some("deploy failed"));
+    }
+
+    #[test]
+    fn head_deploy_skips_release_artifact_download() {
+        let component = Component {
+            id: "example".to_string(),
+            remote_url: Some("https://github.com/example/example".to_string()),
+            build_artifact: Some("build/example.zip".to_string()),
+            ..Component::default()
+        };
+        let config = DeployConfig {
+            component_ids: Vec::new(),
+            all: false,
+            outdated: false,
+            behind_upstream: false,
+            dry_run: false,
+            check: false,
+            force: false,
+            skip_build: false,
+            keep_deps: false,
+            expected_version: None,
+            no_pull: false,
+            head: true,
+            tagged: false,
+        };
+
+        assert!(!should_try_download_release_artifact(
+            &component, &config, false, false
+        ));
     }
 }
