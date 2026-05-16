@@ -4,6 +4,23 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.185.0] - 2026-05-16
+
+### Added
+- offload hot commands to lab runners
+- sync runner workspaces
+- record runner source snapshots
+- execute commands on runners
+- add plan construction helpers
+
+### Changed
+- reuse plan step builders
+- detect direct aggregate construction
+
+### Fixed
+- mirror runner evidence into local runs
+- honor head deploys for release artifacts
+
 ## [0.184.0] - 2026-05-16
 
 ### Added
