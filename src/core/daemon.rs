@@ -3,7 +3,8 @@ use serde_json::json;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::api_jobs::JobStore;
@@ -53,6 +54,14 @@ pub struct HttpResponse {
     pub status_code: u16,
     pub body: serde_json::Value,
     pub artifact: Option<ArtifactDownload>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ExecRequest {
+    #[serde(default)]
+    runner_id: Option<String>,
+    cwd: String,
+    command: Vec<String>,
 }
 
 pub fn parse_bind_addr(addr: &str) -> Result<SocketAddr> {
@@ -209,8 +218,114 @@ pub fn route_with_job_store_and_body(
             body: json!({ "error": "method_not_allowed" }),
             artifact: None,
         },
+        ("POST", "/exec") => match enqueue_exec_job(body, job_store) {
+            Ok(body) => HttpResponse {
+                status_code: 200,
+                body: json!({
+                    "status": 200,
+                    "endpoint": "jobs.exec",
+                    "body": body,
+                }),
+                artifact: None,
+            },
+            Err(err) => error_response(400, err),
+        },
+        ("GET", "/exec") => HttpResponse {
+            status_code: 405,
+            body: json!({ "error": "method_not_allowed" }),
+            artifact: None,
+        },
         _ => route_read_only_api(method, path, body, job_store),
     }
+}
+
+fn enqueue_exec_job(
+    body: Option<serde_json::Value>,
+    job_store: &JobStore,
+) -> Result<serde_json::Value> {
+    let request: ExecRequest =
+        serde_json::from_value(body.unwrap_or_else(|| json!({}))).map_err(|err| {
+            Error::validation_invalid_argument(
+                "body",
+                format!("invalid exec request body: {err}"),
+                None,
+                None,
+            )
+        })?;
+    if request.command.is_empty() {
+        return Err(Error::validation_invalid_argument(
+            "command",
+            "exec request requires command array",
+            None,
+            None,
+        ));
+    }
+    if request.cwd.is_empty() || !Path::new(&request.cwd).is_absolute() {
+        return Err(Error::validation_invalid_argument(
+            "cwd",
+            "exec request requires an absolute cwd",
+            Some(request.cwd),
+            None,
+        ));
+    }
+
+    let summary = json!({
+        "runner_id": request.runner_id,
+        "cwd": request.cwd,
+        "command": request.command,
+    });
+    let operation = "runner.exec".to_string();
+    let runner = job_store.run_background(operation, move |job| {
+        job.progress(json!({
+            "phase": "started",
+            "runner_id": request.runner_id,
+            "cwd": request.cwd,
+            "command": request.command,
+            "job_id": job.job_id(),
+        }))?;
+        let output = Command::new(&request.command[0])
+            .args(&request.command[1..])
+            .current_dir(&request.cwd)
+            .output()
+            .map_err(|err| {
+                Error::internal_io(
+                    err.to_string(),
+                    Some("execute daemon runner command".to_string()),
+                )
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let exit_code = output.status.code().unwrap_or(1);
+        if !stdout.is_empty() {
+            job.stdout(stdout.clone())?;
+        }
+        if !stderr.is_empty() {
+            job.stderr(stderr.clone())?;
+        }
+        job.progress(json!({
+            "phase": "finished",
+            "exit_code": exit_code,
+        }))?;
+        Ok(json!({
+            "runner_id": request.runner_id,
+            "cwd": request.cwd,
+            "command": request.command,
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+        }))
+    });
+    let job = job_store.get(runner.job_id)?;
+
+    Ok(json!({
+        "command": "api.runner.exec.enqueue",
+        "job": job,
+        "poll": {
+            "job": format!("/jobs/{}", runner.job_id),
+            "events": format!("/jobs/{}/events", runner.job_id),
+        },
+        "request": summary,
+    }))
 }
 
 fn daemon_job_store() -> &'static JobStore {

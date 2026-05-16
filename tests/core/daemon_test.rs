@@ -176,6 +176,26 @@ fn routes_json_body_to_analysis_enqueue() {
 }
 
 #[test]
+fn routes_exec_body_to_daemon_job() {
+    let store = JobStore::default();
+    let response = route_with_job_store_and_body(
+        "POST",
+        "/exec",
+        Some(serde_json::json!({
+            "runner_id": "lab-local",
+            "cwd": std::env::current_dir().expect("cwd"),
+            "command": ["sh", "-c", "printf ok"]
+        })),
+        &store,
+    );
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.body["endpoint"], "jobs.exec");
+    assert_eq!(response.body["body"]["command"], "api.runner.exec.enqueue");
+    assert_eq!(store.list().len(), 1);
+}
+
+#[test]
 fn route_rejects_unknown_paths_and_methods() {
     assert_eq!(route("GET", "/missing").status_code, 404);
     assert_eq!(route("POST", "/health").status_code, 405);

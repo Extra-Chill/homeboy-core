@@ -5,7 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use homeboy::runner::{
-    self, Runner, RunnerConnectReport, RunnerDisconnectReport, RunnerKind, RunnerStatusReport,
+    self, Runner, RunnerConnectReport, RunnerDisconnectReport, RunnerExecOutput, RunnerKind,
+    RunnerStatusReport,
 };
 use homeboy::{EntityCrudOutput, MergeOutput};
 
@@ -27,6 +28,12 @@ pub enum RunnerConnectionOutput {
     Disconnect(RunnerDisconnectReport),
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RunnerExecutionOutput {
+    Exec(RunnerExecOutput),
+}
+
 pub type RunnerOutput = EntityCrudOutput<Runner, RunnerExtra>;
 
 #[derive(Debug, Serialize)]
@@ -34,6 +41,7 @@ pub type RunnerOutput = EntityCrudOutput<Runner, RunnerExtra>;
 pub enum RunnerCommandOutput {
     Registry(RunnerOutput),
     Doctor(doctor::RunnerDoctorOutput),
+    Execution(RunnerExecutionOutput),
 }
 
 #[derive(Args)]
@@ -124,6 +132,25 @@ enum RunnerCommand {
         /// Runner ID
         id: String,
     },
+    /// Execute a command on a configured runner
+    Exec {
+        /// Runner ID
+        id: String,
+
+        /// Remote/current working directory. SSH runners require this to be
+        /// inside the runner workspace root unless the runner has a default
+        /// workspace_root.
+        #[arg(long)]
+        cwd: Option<String>,
+
+        /// Allow explicit SSH command execution when no daemon session is connected
+        #[arg(long)]
+        ssh: bool,
+
+        /// Command and arguments to execute on the runner
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -177,6 +204,12 @@ pub fn run(
         RunnerCommand::Connect { id } => map_registry(connect(&id)),
         RunnerCommand::Status { id } => map_registry(status(&id)),
         RunnerCommand::Disconnect { id } => map_registry(disconnect(&id)),
+        RunnerCommand::Exec {
+            id,
+            cwd,
+            ssh,
+            command,
+        } => map_execution(exec(&id, cwd, ssh, command)),
     }
 }
 
@@ -186,6 +219,15 @@ fn map_registry(result: CmdResult<RunnerOutput>) -> CmdResult<RunnerCommandOutpu
 
 fn map_doctor(result: CmdResult<doctor::RunnerDoctorOutput>) -> CmdResult<RunnerCommandOutput> {
     result.map(|(output, exit_code)| (RunnerCommandOutput::Doctor(output), exit_code))
+}
+
+fn map_execution(result: CmdResult<RunnerExecOutput>) -> CmdResult<RunnerCommandOutput> {
+    result.map(|(output, exit_code)| {
+        (
+            RunnerCommandOutput::Execution(RunnerExecutionOutput::Exec(output)),
+            exit_code,
+        )
+    })
 }
 
 struct RunnerAddInput {
@@ -378,4 +420,20 @@ fn disconnect(id: &str) -> CmdResult<RunnerOutput> {
         },
         0,
     ))
+}
+
+fn exec(
+    runner_id: &str,
+    cwd: Option<String>,
+    allow_ssh: bool,
+    command: Vec<String>,
+) -> CmdResult<RunnerExecOutput> {
+    runner::exec(
+        runner_id,
+        runner::RunnerExecOptions {
+            cwd,
+            allow_ssh,
+            command,
+        },
+    )
 }

@@ -9,11 +9,14 @@ use crate::output::{CreateOutput, MergeOutput, RemoveResult};
 use crate::server;
 
 mod connection;
+mod execution;
 
 pub use connection::{
     connect, disconnect, status, RunnerConnectReport, RunnerDisconnectReport, RunnerFailureKind,
     RunnerSession, RunnerStatusReport,
 };
+pub(crate) use execution::daemon_api_get;
+pub use execution::{exec, RunnerExecMode, RunnerExecOptions, RunnerExecOutput};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
