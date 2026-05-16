@@ -143,7 +143,7 @@ pub fn serve(addr: SocketAddr) -> Result<DaemonState> {
         Error::internal_io(e.to_string(), Some("read daemon local address".to_string()))
     })?;
     let state = write_state(local_addr)?;
-    let job_store = JobStore::default();
+    let job_store = JobStore::open(paths::daemon_jobs_file()?)?;
 
     for stream in listener.incoming() {
         match stream {
@@ -283,6 +283,7 @@ fn config_paths_body() -> Result<serde_json::Value> {
         "rigs": paths::rigs()?.display().to_string(),
         "stacks": paths::stacks()?.display().to_string(),
         "daemon_state": paths::daemon_state_file()?.display().to_string(),
+        "daemon_jobs": paths::daemon_jobs_file()?.display().to_string(),
     }))
 }
 
