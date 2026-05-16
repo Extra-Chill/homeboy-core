@@ -6,7 +6,7 @@
 homeboy runner <COMMAND>
 ```
 
-`runner` manages durable execution backends. It records where future Homeboy workflows can run, but it does not execute remote commands.
+`runner` manages durable execution backends. It records where Homeboy workflows can run and can execute explicit commands through a connected runner daemon or an opt-in SSH diagnostic path.
 
 ## Subcommands
 
@@ -56,6 +56,23 @@ Updates a runner by merging a JSON object into `runners/<id>.json`.
 homeboy runner remove <id>
 ```
 
+### `exec`
+
+```sh
+homeboy runner exec <runner-id> -- <command...>
+homeboy runner exec <runner-id> --cwd /runner/workspace/project -- <command...>
+homeboy runner exec <runner-id> --ssh --cwd /runner/workspace/project -- <command...>
+```
+
+`exec` submits the command to the connected runner daemon when `homeboy runner connect <runner-id>` has established a live loopback tunnel. If no daemon session is connected, local runners execute directly and SSH runners require explicit `--ssh`.
+
+Path rules:
+
+- SSH runners require `workspace_root` so local paths are not silently reused remotely.
+- SSH `--cwd` must be an absolute path under the configured `workspace_root`.
+- Omitting `--cwd` on an SSH runner uses the runner `workspace_root`.
+- `--ssh` is an MVP/diagnostic fallback; daemon execution is preferred because it records job metadata and supports artifact-oriented workflows.
+
 ## Runner Shape
 
 Runner records are stored as JSON config entities under `~/.config/homeboy/runners/`.
@@ -86,7 +103,7 @@ Rules:
 
 All command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The `data` payload uses the generic entity CRUD shape:
 
-- `command`: action identifier such as `runner.add`, `runner.list`, `runner.show`, `runner.set`, or `runner.remove`
+- `command`: action identifier such as `runner.add`, `runner.list`, `runner.show`, `runner.set`, `runner.remove`, or `runner.exec`
 - `id`: present for single-runner actions
 - `entity`: runner configuration for single-runner read/write actions
 - `entities`: list for `list`

@@ -5,7 +5,7 @@ Inspect persisted observation-store runs and artifacts.
 ## Synopsis
 
 ```bash
-homeboy runs list [--kind bench|rig|trace] [--component <id>] [--rig <id>] [--status <status>] [--limit 20]
+homeboy runs list [--runner <runner-id>] [--kind bench|rig|trace] [--component <id>] [--rig <id>] [--status <status>] [--limit 20]
 homeboy runs distribution --field <metadata.path> [--kind bench] [--component <id>] [--rig <id>] [--scenario <id>] [--status <status>] [--limit 20]
 homeboy runs compare [--kind bench] [--component <id>] [--rig <id>] [--scenario <id>] [--metric <name>] [--limit 20] [--format table|json]
 homeboy runs show <run-id>
@@ -18,6 +18,8 @@ homeboy runs import <dir>
 ## Description
 
 `homeboy runs` is a read-only query surface over Homeboy's local observation store. Producers such as `bench`, `rig`, and `trace` write run and artifact records; this command lets humans and agents inspect that evidence without opening SQLite directly.
+
+`homeboy runs list --runner <runner-id>` queries a connected runner daemon instead of the local observation store, preserving the normal `runs.list` JSON payload while returning evidence from the runner machine.
 
 The JSON output includes stable run fields: run id, kind, status, timestamps, component id, rig id, git SHA, command, cwd, metadata, and artifact records where relevant.
 

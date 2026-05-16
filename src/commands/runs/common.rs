@@ -11,7 +11,24 @@ use std::time::Duration;
 
 use homeboy::observation::{ObservationStore, RunListFilter, RunRecord};
 use homeboy::Error;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RunSummary {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub component_id: Option<String>,
+    pub rig_id: Option<String>,
+    pub git_sha: Option<String>,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_note: Option<String>,
+}
 
 /// Convert a `--since <duration>` flag value into an RFC-3339 timestamp.
 ///

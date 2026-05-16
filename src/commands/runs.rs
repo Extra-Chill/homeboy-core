@@ -10,6 +10,7 @@ mod gh_actions;
 mod latest;
 mod query;
 mod reconcile;
+mod remote;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -27,6 +28,7 @@ use super::{CmdResult, GlobalArgs};
 use bundle::{
     export_runs, import_runs, RunsExportArgs, RunsExportOutput, RunsImportArgs, RunsImportOutput,
 };
+pub use common::RunSummary;
 use compare::{compare_runs, RunsCompareArgs, RunsCompareOutput};
 pub use distribution::{runs_distribution, RunsDistributionArgs, RunsDistributionOutput};
 use drift::{runs_drift, RunsDriftArgs, RunsDriftOutput};
@@ -81,6 +83,9 @@ enum RunsCommand {
 
 #[derive(Args, Clone, Default)]
 pub struct RunsListArgs {
+    /// Query runs from a connected execution runner daemon
+    #[arg(long)]
+    pub runner: Option<String>,
     /// Run kind: bench, rig, trace, etc.
     #[arg(long)]
     pub kind: Option<String>,
@@ -194,22 +199,6 @@ pub struct BenchCompareOutput {
     pub missing: Vec<BenchMissingMetric>,
 }
 
-#[derive(Serialize, Clone)]
-pub struct RunSummary {
-    pub id: String,
-    pub kind: String,
-    pub status: String,
-    pub started_at: String,
-    pub finished_at: Option<String>,
-    pub component_id: Option<String>,
-    pub rig_id: Option<String>,
-    pub git_sha: Option<String>,
-    pub command: Option<String>,
-    pub cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status_note: Option<String>,
-}
-
 #[derive(Serialize)]
 pub struct RunDetail {
     #[serde(flatten)]
@@ -281,6 +270,10 @@ pub fn run_markdown(args: RunsArgs, _global: &GlobalArgs) -> CmdResult<String> {
 }
 
 pub fn list_runs(args: RunsListArgs, command: &'static str) -> CmdResult<RunsOutput> {
+    if let Some(runner_id) = args.runner.clone() {
+        return remote::list_runner_runs(&runner_id, args, command);
+    }
+
     let store = ObservationStore::open_initialized()?;
     reconcile::reconcile_owned_stale_running_runs(&store, 1000)?;
     let runs = store
@@ -684,6 +677,7 @@ mod tests {
 
             let (output, _) = list_runs(
                 RunsListArgs {
+                    runner: None,
                     kind: Some("bench".to_string()),
                     component_id: Some("homeboy".to_string()),
                     rig: Some("studio".to_string()),
@@ -728,6 +722,7 @@ mod tests {
 
             let (output, _) = list_runs(
                 RunsListArgs {
+                    runner: None,
                     kind: Some("bench".to_string()),
                     component_id: Some("homeboy".to_string()),
                     rig: Some("studio".to_string()),
