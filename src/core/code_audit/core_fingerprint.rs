@@ -250,6 +250,8 @@ pub fn fingerprint_from_grammar(
         runtime_dispatched_types,
         convention_tags: Vec::new(),
         trait_impl_methods,
+        aggregate_literals: Vec::new(),
+        aggregate_construction_seams: Vec::new(),
     })
 }
 
