@@ -31,10 +31,10 @@ pub enum ErrorCode {
     ExtensionUnsupported,
     DocsTopicNotFound,
     RigNotFound,
+    RunnerNotFound,
     RigPipelineFailed,
     RigServiceFailed,
     RigResourceConflict,
-    RunnerNotFound,
     StackNotFound,
     StackApplyConflict,
 
@@ -80,10 +80,10 @@ impl ErrorCode {
             ErrorCode::ExtensionUnsupported => "extension.unsupported",
             ErrorCode::DocsTopicNotFound => "docs.topic_not_found",
             ErrorCode::RigNotFound => "rig.not_found",
+            ErrorCode::RunnerNotFound => "runner.not_found",
             ErrorCode::RigPipelineFailed => "rig.pipeline_failed",
             ErrorCode::RigServiceFailed => "rig.service_failed",
             ErrorCode::RigResourceConflict => "rig.resource_conflict",
-            ErrorCode::RunnerNotFound => "runner.not_found",
             ErrorCode::StackNotFound => "stack.not_found",
             ErrorCode::StackApplyConflict => "stack.apply_conflict",
 
