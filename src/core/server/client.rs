@@ -45,6 +45,15 @@ pub struct CommandOutput {
     pub child_resource: Option<ExtensionChildResourceSummary>,
 }
 
+pub struct SshTunnelOutput {
+    pub local_port: u16,
+    pub pid: Option<u32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub success: bool,
+    pub exit_code: i32,
+}
+
 impl SshClient {
     pub fn from_server(server: &Server, server_id: &str) -> Result<Self> {
         let identity_file = match &server.identity_file {
@@ -263,6 +272,60 @@ impl SshClient {
 
         let args = self.build_session_control_args("exit")?;
         Ok(self.run_managed_session_command(args, false))
+    }
+
+    pub fn open_loopback_tunnel(
+        &self,
+        local_port: u16,
+        remote_host: &str,
+        remote_port: u16,
+    ) -> SshTunnelOutput {
+        if self.is_local {
+            return SshTunnelOutput {
+                local_port: remote_port,
+                pid: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                success: true,
+                exit_code: 0,
+            };
+        }
+
+        let mut args = self.build_ssh_args(None, false);
+        let target = args
+            .pop()
+            .unwrap_or_else(|| format!("{}@{}", self.user, self.host));
+        args.extend([
+            "-N".to_string(),
+            "-L".to_string(),
+            format!("127.0.0.1:{}:{}:{}", local_port, remote_host, remote_port),
+            target,
+        ]);
+
+        let child = Command::new("ssh")
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        match child {
+            Ok(child) => SshTunnelOutput {
+                local_port,
+                pid: Some(child.id()),
+                stdout: String::new(),
+                stderr: String::new(),
+                success: true,
+                exit_code: 0,
+            },
+            Err(err) => SshTunnelOutput {
+                local_port,
+                pid: None,
+                stdout: String::new(),
+                stderr: format!("SSH tunnel error: {}", err),
+                success: false,
+                exit_code: -1,
+            },
+        }
     }
 
     fn run_managed_session_command(

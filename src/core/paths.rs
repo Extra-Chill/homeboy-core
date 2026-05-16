@@ -145,6 +145,11 @@ pub fn servers() -> Result<PathBuf> {
     Ok(homeboy()?.join("servers"))
 }
 
+/// Runners directory (~/.config/homeboy/runners/).
+pub fn runners() -> Result<PathBuf> {
+    Ok(homeboy()?.join("runners"))
+}
+
 /// Components directory
 pub fn components() -> Result<PathBuf> {
     Ok(homeboy()?.join("components"))
@@ -253,6 +258,16 @@ pub fn daemon_state_file() -> Result<PathBuf> {
 /// Daemon durable job state file (~/.config/homeboy/daemon/jobs.json).
 pub fn daemon_jobs_file() -> Result<PathBuf> {
     Ok(daemon_state_dir()?.join("jobs.json"))
+}
+
+/// Runner connection session state directory (~/.config/homeboy/runner-sessions/).
+pub fn runner_sessions_dir() -> Result<PathBuf> {
+    Ok(homeboy()?.join("runner-sessions"))
+}
+
+/// Runner connection session state file (~/.config/homeboy/runner-sessions/{id}.json).
+pub fn runner_session_file(id: &str) -> Result<PathBuf> {
+    Ok(runner_sessions_dir()?.join(format!("{}.json", id)))
 }
 
 /// Stack config file path (~/.config/homeboy/stacks/{id}.json)

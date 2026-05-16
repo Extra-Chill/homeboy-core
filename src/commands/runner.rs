@@ -4,7 +4,9 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::Value;
 
-use homeboy::runner::{self, Runner, RunnerKind};
+use homeboy::runner::{
+    self, Runner, RunnerConnectReport, RunnerDisconnectReport, RunnerKind, RunnerStatusReport,
+};
 use homeboy::{EntityCrudOutput, MergeOutput};
 
 use super::{CmdResult, DynamicSetArgs};
@@ -12,7 +14,18 @@ use super::{CmdResult, DynamicSetArgs};
 mod doctor;
 
 #[derive(Debug, Default, Serialize)]
-pub struct RunnerExtra {}
+pub struct RunnerExtra {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<RunnerConnectionOutput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RunnerConnectionOutput {
+    Connect(RunnerConnectReport),
+    Status(RunnerStatusReport),
+    Disconnect(RunnerDisconnectReport),
+}
 
 pub type RunnerOutput = EntityCrudOutput<Runner, RunnerExtra>;
 
@@ -96,6 +109,21 @@ enum RunnerCommand {
         /// other values resolve through `homeboy runner` configuration.
         runner_id: String,
     },
+    /// Connect to a runner by starting a loopback-only remote daemon and SSH tunnel
+    Connect {
+        /// Runner ID
+        id: String,
+    },
+    /// Show persisted runner tunnel status
+    Status {
+        /// Runner ID
+        id: String,
+    },
+    /// Close a runner tunnel and remove its persisted session state
+    Disconnect {
+        /// Runner ID
+        id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -146,6 +174,9 @@ pub fn run(
         RunnerCommand::Set { args } => map_registry(set(args)),
         RunnerCommand::Remove { id } => map_registry(remove(&id)),
         RunnerCommand::Doctor { runner_id } => map_doctor(doctor::run(&runner_id)),
+        RunnerCommand::Connect { id } => map_registry(connect(&id)),
+        RunnerCommand::Status { id } => map_registry(status(&id)),
+        RunnerCommand::Disconnect { id } => map_registry(disconnect(&id)),
     }
 }
 
@@ -300,6 +331,49 @@ fn remove(id: &str) -> CmdResult<RunnerOutput> {
             command: "runner.remove".to_string(),
             id: Some(id.to_string()),
             deleted: vec![id.to_string()],
+            ..Default::default()
+        },
+        0,
+    ))
+}
+
+fn connect(id: &str) -> CmdResult<RunnerOutput> {
+    let (report, exit_code) = runner::connect(id)?;
+    Ok((
+        RunnerOutput {
+            command: "runner.connect".to_string(),
+            id: Some(id.to_string()),
+            extra: RunnerExtra {
+                connection: Some(RunnerConnectionOutput::Connect(report)),
+            },
+            ..Default::default()
+        },
+        exit_code,
+    ))
+}
+
+fn status(id: &str) -> CmdResult<RunnerOutput> {
+    Ok((
+        RunnerOutput {
+            command: "runner.status".to_string(),
+            id: Some(id.to_string()),
+            extra: RunnerExtra {
+                connection: Some(RunnerConnectionOutput::Status(runner::status(id)?)),
+            },
+            ..Default::default()
+        },
+        0,
+    ))
+}
+
+fn disconnect(id: &str) -> CmdResult<RunnerOutput> {
+    Ok((
+        RunnerOutput {
+            command: "runner.disconnect".to_string(),
+            id: Some(id.to_string()),
+            extra: RunnerExtra {
+                connection: Some(RunnerConnectionOutput::Disconnect(runner::disconnect(id)?)),
+            },
             ..Default::default()
         },
         0,
