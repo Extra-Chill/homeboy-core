@@ -237,6 +237,9 @@ pub enum AuditFinding {
     /// Repeated exhaustive match blocks over the same enum duplicate a
     /// label/getter/policy contract that should likely live on the enum.
     RepeatedEnumDispatchContract,
+    /// Direct aggregate/struct literals are repeated even though a canonical
+    /// construction seam exists for the same type.
+    DirectAggregateConstruction,
     /// Configured ecosystem/language/framework term appears in core-owned source.
     CoreBoundaryLeak,
 }
@@ -295,6 +298,7 @@ impl AuditFinding {
             "unwired_nested_rust_test",
             "parallel_runner_setup",
             "repeated_enum_dispatch_contract",
+            "direct_aggregate_construction",
             "core_boundary_leak",
         ]
     }

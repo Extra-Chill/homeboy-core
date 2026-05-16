@@ -583,6 +583,34 @@ pub struct DeadCodeMarker {
     pub marker_type: String,
 }
 
+/// Extension-reported direct aggregate literal construction site.
+///
+/// Language extensions own syntax recognition; core only groups these generic
+/// facts to detect repeated inline construction where a canonical seam exists.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct AggregateLiteral {
+    /// Aggregate type name, e.g. a struct/class/interface-backed record.
+    pub type_name: String,
+    /// Field/property names initialized at the literal site.
+    #[serde(default)]
+    pub fields: Vec<String>,
+    /// Source line where the literal starts, if available.
+    #[serde(default)]
+    pub line: usize,
+}
+
+/// Extension-reported canonical construction seam for an aggregate type.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct AggregateConstructionSeam {
+    /// Aggregate type name this seam constructs.
+    pub type_name: String,
+    /// Generic seam name, e.g. `new`, `builder`, `from_config`, `build_foo`.
+    pub method: String,
+    /// Source line where the seam is declared, if available.
+    #[serde(default)]
+    pub line: usize,
+}
+
 /// Output from a fingerprint extension script.
 /// Matches the structural data extracted from a source file.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -672,6 +700,12 @@ pub struct FingerprintOutput {
     /// groups files with the same normalized tag set together.
     #[serde(default)]
     pub convention_tags: Vec<String>,
+    /// Direct aggregate literal construction sites reported by an extension.
+    #[serde(default)]
+    pub aggregate_literals: Vec<AggregateLiteral>,
+    /// Canonical construction seams reported by an extension.
+    #[serde(default)]
+    pub aggregate_construction_seams: Vec<AggregateConstructionSeam>,
 }
 
 // ============================================================================

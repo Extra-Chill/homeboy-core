@@ -11,6 +11,7 @@
 //! 5. Producing actionable findings for outliers
 //! 6. Analyzing structural complexity (god files, high item counts)
 
+mod aggregate_construction;
 pub mod baseline;
 mod checks;
 pub mod codebase_map;
@@ -153,6 +154,7 @@ pub(crate) struct AuditExecutionPlan {
     pub(crate) run_shared_scaffolding: bool,
     pub(crate) run_parallel_runner_setup: bool,
     pub(crate) run_enum_dispatch_contracts: bool,
+    pub(crate) run_aggregate_construction: bool,
 }
 
 impl AuditExecutionPlan {
@@ -185,6 +187,7 @@ impl AuditExecutionPlan {
                 run_shared_scaffolding: true,
                 run_parallel_runner_setup: true,
                 run_enum_dispatch_contracts: true,
+                run_aggregate_construction: true,
             },
         )
     }
@@ -356,6 +359,11 @@ impl AuditExecutionPlan {
                     exclude,
                     &[AuditFinding::RepeatedEnumDispatchContract],
                 ),
+                run_aggregate_construction: Self::family_enabled(
+                    only,
+                    exclude,
+                    &[AuditFinding::DirectAggregateConstruction],
+                ),
             },
         )
     }
@@ -395,6 +403,7 @@ impl AuditExecutionPlan {
             ("shared_scaffolding", self.run_shared_scaffolding),
             ("parallel_runner_setup", self.run_parallel_runner_setup),
             ("enum_dispatch_contracts", self.run_enum_dispatch_contracts),
+            ("aggregate_construction", self.run_aggregate_construction),
         ]
         .into_iter()
         .map(|(name, enabled)| {
@@ -448,6 +457,7 @@ impl AuditExecutionPlan {
             || self.run_shared_scaffolding
             || self.run_parallel_runner_setup
             || self.run_enum_dispatch_contracts
+            || self.run_aggregate_construction
     }
 }
 
@@ -1213,6 +1223,21 @@ fn audit_internal(
             enum_dispatch_findings.len()
         );
         all_findings.extend(enum_dispatch_findings);
+    }
+
+    // Phase 4x: Direct aggregate construction despite canonical construction seams.
+    let aggregate_construction_findings = if plan.run_aggregate_construction {
+        aggregate_construction::run(&all_fingerprints)
+    } else {
+        Vec::new()
+    };
+    if !aggregate_construction_findings.is_empty() {
+        log_status!(
+            "audit",
+            "Aggregate construction: {} finding(s) (direct literals bypass construction seams)",
+            aggregate_construction_findings.len()
+        );
+        all_findings.extend(aggregate_construction_findings);
     }
 
     // Phase 4p: Impact-scoped filtering — when auditing changed files only,

@@ -95,6 +95,10 @@ pub struct FileFingerprint {
     pub convention_tags: Vec<String>,
     /// Method names that are trait implementations (called via trait dispatch).
     pub trait_impl_methods: Vec<String>,
+    /// Extension-reported direct aggregate literal construction sites.
+    pub aggregate_literals: Vec<crate::extension::AggregateLiteral>,
+    /// Extension-reported canonical construction seams for aggregate types.
+    pub aggregate_construction_seams: Vec<crate::extension::AggregateConstructionSeam>,
 }
 
 /// Extract a structural fingerprint from a source file on disk.
@@ -189,6 +193,8 @@ pub(crate) fn fingerprint_extension_content(
         runtime_dispatched_types: output.runtime_dispatched_types,
         convention_tags: normalize_convention_tags(output.convention_tags),
         trait_impl_methods: Vec::new(), // Extension scripts don't track this
+        aggregate_literals: output.aggregate_literals,
+        aggregate_construction_seams: output.aggregate_construction_seams,
     })
 }
 
