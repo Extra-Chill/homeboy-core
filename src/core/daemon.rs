@@ -11,6 +11,9 @@ use crate::error::{Error, Result};
 use crate::http_api::{self, HttpMethod};
 use crate::paths;
 
+mod artifact_download;
+pub use artifact_download::ArtifactDownload;
+
 pub const DEFAULT_ADDR: &str = "127.0.0.1:0";
 
 static DAEMON_JOB_STORE: OnceLock<JobStore> = OnceLock::new();
@@ -49,6 +52,7 @@ pub struct DaemonStopResult {
 pub struct HttpResponse {
     pub status_code: u16,
     pub body: serde_json::Value,
+    pub artifact: Option<ArtifactDownload>,
 }
 
 pub fn parse_bind_addr(addr: &str) -> Result<SocketAddr> {
@@ -183,23 +187,27 @@ pub fn route_with_job_store_and_body(
                 "status": "ok",
                 "version": env!("CARGO_PKG_VERSION"),
             }),
+            artifact: None,
         },
         ("GET", "/version") => HttpResponse {
             status_code: 200,
             body: json!({
                 "version": env!("CARGO_PKG_VERSION"),
             }),
+            artifact: None,
         },
         ("GET", "/config/paths") => match config_paths_body() {
             Ok(body) => HttpResponse {
                 status_code: 200,
                 body,
+                artifact: None,
             },
             Err(err) => error_response(500, err),
         },
         ("POST", "/health") | ("POST", "/version") | ("POST", "/config/paths") => HttpResponse {
             status_code: 405,
             body: json!({ "error": "method_not_allowed" }),
+            artifact: None,
         },
         _ => route_read_only_api(method, path, body, job_store),
     }
@@ -222,9 +230,16 @@ fn route_read_only_api(
             return HttpResponse {
                 status_code: 405,
                 body: json!({ "error": "method_not_allowed" }),
+                artifact: None,
             };
         }
     };
+
+    if matches!(method, HttpMethod::Get) {
+        if let Some(response) = artifact_download::route(path) {
+            return response;
+        }
+    }
 
     match http_api::handle_with_jobs(
         http_api::HttpApiRequest {
@@ -238,6 +253,7 @@ fn route_read_only_api(
             status_code: response.status,
             body: serde_json::to_value(response)
                 .unwrap_or_else(|_| json!({ "error": "internal_json" })),
+            artifact: None,
         },
         Err(err) => error_response(404, err),
     }
@@ -252,6 +268,7 @@ fn error_response(status_code: u16, err: Error) -> HttpResponse {
             "details": err.details,
             "hints": err.hints,
         }),
+        artifact: None,
     }
 }
 
@@ -329,6 +346,10 @@ fn handle_connection(mut stream: TcpStream, job_store: &JobStore) -> std::io::Re
 }
 
 fn write_http_response(mut stream: TcpStream, response: HttpResponse) -> std::io::Result<()> {
+    if let Some(artifact) = response.artifact {
+        return artifact_download::write_response(stream, response.status_code, artifact);
+    }
+
     let body = serde_json::to_string_pretty(&json!({
         "success": (200..300).contains(&response.status_code),
         "data": response.body,
