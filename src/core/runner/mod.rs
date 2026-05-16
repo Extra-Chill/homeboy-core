@@ -9,12 +9,16 @@ use crate::output::{CreateOutput, MergeOutput, RemoveResult};
 use crate::server;
 
 mod connection;
+mod evidence;
 mod execution;
 mod workspace;
 
 pub use connection::{
     connect, disconnect, status, RunnerConnectReport, RunnerDisconnectReport, RunnerFailureKind,
     RunnerSession, RunnerStatusReport,
+};
+pub use evidence::{
+    download_remote_artifact, is_remote_runner_artifact_path, RemoteArtifactDownload,
 };
 pub(crate) use execution::daemon_api_get;
 pub use execution::{exec, RunnerExecMode, RunnerExecOptions, RunnerExecOutput};

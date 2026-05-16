@@ -11,6 +11,7 @@ mod latest;
 mod query;
 mod reconcile;
 mod remote;
+mod remote_artifact;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -343,6 +344,9 @@ fn artifact_get(args: RunsArtifactGetArgs) -> CmdResult<RunsOutput> {
         ));
     }
     if artifact.artifact_type != "file" {
+        if remote_artifact::is_remote_artifact(&artifact) {
+            return remote_artifact::get(artifact, args.output);
+        }
         return Err(Error::validation_invalid_argument(
             "artifact_id",
             format!(
