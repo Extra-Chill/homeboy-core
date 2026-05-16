@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.184.0] - 2026-05-16
+
+### Added
+- bootstrap runner daemon over SSH tunnel
+
 ## [0.183.1] - 2026-05-16
 
 ### Changed
