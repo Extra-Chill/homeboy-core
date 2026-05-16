@@ -32,7 +32,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
 
 use super::apply::{
     checkout_force, cherry_pick, ensure_head_remote, fetch_remote_branch, fetch_sha, AppliedPr,
@@ -305,22 +305,6 @@ fn sync_homeboy_plan(
     would_mutate: bool,
     blocked: bool,
 ) -> HomeboyPlan {
-    let mut plan = HomeboyPlan::for_description(PlanKind::StackSync, spec.id.clone());
-    plan.inputs.insert(
-        "stack_id".to_string(),
-        serde_json::Value::String(spec.id.clone()),
-    );
-    plan.inputs.insert(
-        "target_exists".to_string(),
-        serde_json::Value::Bool(target_exists),
-    );
-    plan.policy.insert(
-        "would_mutate".to_string(),
-        serde_json::Value::Bool(would_mutate),
-    );
-    plan.policy
-        .insert("blocked".to_string(), serde_json::Value::Bool(blocked));
-
     let mut steps = Vec::new();
     for pr in dropped {
         steps.push(sync_pr_step(
@@ -350,24 +334,14 @@ fn sync_homeboy_plan(
         ));
     }
 
-    plan.summary = Some(PlanSummary {
-        total_steps: steps.len(),
-        ready: steps
-            .iter()
-            .filter(|step| step.status == PlanStepStatus::Ready)
-            .count(),
-        blocked: steps
-            .iter()
-            .filter(|step| step.status == PlanStepStatus::Missing)
-            .count(),
-        skipped: steps
-            .iter()
-            .filter(|step| step.status == PlanStepStatus::Skipped)
-            .count(),
-        next_actions: Vec::new(),
-    });
-    plan.steps = steps;
-    plan
+    HomeboyPlan::builder_for_description(PlanKind::StackSync, spec.id.clone())
+        .input_value("stack_id", serde_json::Value::String(spec.id.clone()))
+        .input_value("target_exists", serde_json::Value::Bool(target_exists))
+        .policy_value("would_mutate", serde_json::Value::Bool(would_mutate))
+        .policy_value("blocked", serde_json::Value::Bool(blocked))
+        .steps(steps)
+        .summarize()
+        .build()
 }
 
 fn sync_pr_step(
@@ -391,20 +365,16 @@ fn sync_pr_step(
         serde_json::Value::String(reason.to_string()),
     );
 
-    PlanStep {
-        id: format!("stack.sync.{action}.{repo}#{number}"),
-        kind: format!("stack.sync.{action}"),
-        label: Some(format!("{action} {repo}#{number}")),
-        blocking: status == PlanStepStatus::Missing,
-        scope: vec![format!("{repo}#{number}")],
-        needs: Vec::new(),
-        status,
-        inputs,
-        outputs: std::collections::HashMap::new(),
-        skip_reason: None,
-        policy: std::collections::HashMap::new(),
-        missing: Vec::new(),
-    }
+    PlanStep::builder(
+        format!("stack.sync.{action}.{repo}#{number}"),
+        format!("stack.sync.{action}"),
+        status.clone(),
+    )
+    .label(format!("{action} {repo}#{number}"))
+    .blocking(status == PlanStepStatus::Missing)
+    .scope(vec![format!("{repo}#{number}")])
+    .inputs(inputs)
+    .build()
 }
 
 /// Read-only preview for `homeboy stack diff`.

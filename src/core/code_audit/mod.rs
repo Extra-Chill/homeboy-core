@@ -76,7 +76,7 @@ pub use report::AuditCommandOutput;
 pub use run::{run_main_audit_workflow, AuditRunWorkflowArgs, AuditRunWorkflowResult};
 pub use walker::is_test_path;
 
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
 use crate::{component, component::AuditConfig, is_zero, Result};
 
 /// Summary counts for the audit report.
@@ -361,25 +361,11 @@ impl AuditExecutionPlan {
     }
 
     fn with_generic_plan(mode: &str, mut audit: Self) -> Self {
-        let mut plan = HomeboyPlan::for_description(PlanKind::Audit, "audit execution");
-        plan.mode = Some(mode.to_string());
-        plan.steps = audit.detector_steps();
-        plan.summary = Some(PlanSummary {
-            total_steps: plan.steps.len(),
-            ready: plan
-                .steps
-                .iter()
-                .filter(|step| step.status == PlanStepStatus::Ready)
-                .count(),
-            blocked: 0,
-            skipped: plan
-                .steps
-                .iter()
-                .filter(|step| step.status == PlanStepStatus::Disabled)
-                .count(),
-            next_actions: Vec::new(),
-        });
-        audit.plan = plan;
+        audit.plan = HomeboyPlan::builder_for_description(PlanKind::Audit, "audit execution")
+            .mode(mode)
+            .steps(audit.detector_steps())
+            .summarize_disabled_as_skipped()
+            .build();
         audit
     }
 
@@ -411,23 +397,24 @@ impl AuditExecutionPlan {
             ("enum_dispatch_contracts", self.run_enum_dispatch_contracts),
         ]
         .into_iter()
-        .map(|(name, enabled)| PlanStep {
-            id: format!("audit.{name}"),
-            kind: format!("audit.detector.{name}"),
-            label: Some(name.replace('_', " ")),
-            blocking: true,
-            scope: Vec::new(),
-            needs: Vec::new(),
-            status: if enabled {
-                PlanStepStatus::Ready
+        .map(|(name, enabled)| {
+            let builder = PlanStep::builder(
+                format!("audit.{name}"),
+                format!("audit.detector.{name}"),
+                if enabled {
+                    PlanStepStatus::Ready
+                } else {
+                    PlanStepStatus::Disabled
+                },
+            )
+            .label(name.replace('_', " "));
+
+            if enabled {
+                builder
             } else {
-                PlanStepStatus::Disabled
-            },
-            inputs: std::collections::HashMap::new(),
-            outputs: std::collections::HashMap::new(),
-            skip_reason: (!enabled).then(|| "filtered".to_string()),
-            policy: std::collections::HashMap::new(),
-            missing: Vec::new(),
+                builder.skip_reason("filtered")
+            }
+            .build()
         })
         .collect()
     }

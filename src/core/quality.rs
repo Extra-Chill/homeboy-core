@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualityPlanOptions {
@@ -61,10 +59,12 @@ impl QualityPlanOptions {
 
 pub fn build_quality_plan(options: QualityPlanOptions) -> HomeboyPlan {
     let steps = build_quality_steps(&options);
-    let mut plan = HomeboyPlan::for_component(PlanKind::Quality, options.component_id);
-    plan.mode = options.mode;
-    plan.steps = steps;
-    plan
+    let mut builder =
+        HomeboyPlan::builder_for_component(PlanKind::Quality, options.component_id).steps(steps);
+    if let Some(mode) = options.mode {
+        builder = builder.mode(mode);
+    }
+    builder.build()
 }
 
 pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
@@ -125,40 +125,20 @@ pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
 }
 
 fn ready_step(prefix: &str, name: &str, label: &str, needs: Vec<String>) -> PlanStep {
-    PlanStep {
-        id: step_id(prefix, name),
-        kind: step_id(prefix, name),
-        label: Some(label.to_string()),
-        blocking: true,
-        scope: Vec::new(),
-        needs,
-        status: PlanStepStatus::Ready,
-        inputs: HashMap::new(),
-        outputs: HashMap::new(),
-        skip_reason: None,
-        policy: HashMap::new(),
-        missing: Vec::new(),
-    }
+    let id = step_id(prefix, name);
+    PlanStep::ready(id.clone(), id)
+        .label(label)
+        .needs(needs)
+        .build()
 }
 
 fn disabled_step(prefix: &str, name: &str, label: &str, reason: &str) -> PlanStep {
-    PlanStep {
-        id: step_id(prefix, name),
-        kind: step_id(prefix, name),
-        label: Some(label.to_string()),
-        blocking: true,
-        scope: Vec::new(),
-        needs: Vec::new(),
-        status: PlanStepStatus::Disabled,
-        inputs: HashMap::from([(
-            "reason".to_string(),
-            serde_json::Value::String(reason.to_string()),
-        )]),
-        outputs: HashMap::new(),
-        skip_reason: Some(reason.to_string()),
-        policy: HashMap::new(),
-        missing: Vec::new(),
-    }
+    let id = step_id(prefix, name);
+    PlanStep::disabled(id.clone(), id)
+        .label(label)
+        .input_value("reason", serde_json::Value::String(reason.to_string()))
+        .skip_reason(reason)
+        .build()
 }
 
 fn step_id(prefix: &str, name: &str) -> String {

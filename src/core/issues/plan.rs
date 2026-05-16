@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::code_audit::FindingConfidence;
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
 
 /// One row of incoming findings: "command produced N findings of category X
 /// for component Y." This is the input grain reconcile reasons over.
@@ -180,27 +180,10 @@ pub struct ReconcilePlan {
 impl ReconcilePlan {
     pub fn new(component_id: impl Into<String>, actions: Vec<ReconcileAction>) -> Self {
         let component_id = component_id.into();
-        let mut plan = HomeboyPlan::for_component(PlanKind::IssueReconcile, component_id);
-        plan.steps = actions.iter().enumerate().map(action_step).collect();
-        plan.summary = Some(PlanSummary {
-            total_steps: plan.steps.len(),
-            ready: plan
-                .steps
-                .iter()
-                .filter(|step| step.status == PlanStepStatus::Ready)
-                .count(),
-            blocked: plan
-                .steps
-                .iter()
-                .filter(|step| step.status == PlanStepStatus::Missing)
-                .count(),
-            skipped: plan
-                .steps
-                .iter()
-                .filter(|step| step.status == PlanStepStatus::Skipped)
-                .count(),
-            next_actions: Vec::new(),
-        });
+        let plan = HomeboyPlan::builder_for_component(PlanKind::IssueReconcile, component_id)
+            .steps(actions.iter().enumerate().map(action_step))
+            .summarize()
+            .build();
 
         Self { plan, actions }
     }
@@ -237,27 +220,26 @@ fn action_step((index, action): (usize, &ReconcileAction)) -> PlanStep {
         serde_json::to_value(action).unwrap_or(serde_json::Value::Null),
     );
 
-    PlanStep {
-        id: format!("issues.reconcile.{:03}.{}", index + 1, action_kind),
-        kind: format!("issues.reconcile.{action_kind}"),
-        label: Some(action_label(action)),
-        blocking: !matches!(action, ReconcileAction::Skip { .. }),
-        scope: Vec::new(),
-        needs: Vec::new(),
-        status: if matches!(action, ReconcileAction::Skip { .. }) {
+    let id = format!("issues.reconcile.{:03}.{}", index + 1, action_kind);
+    let kind = format!("issues.reconcile.{action_kind}");
+    let builder = PlanStep::builder(
+        id,
+        kind,
+        if matches!(action, ReconcileAction::Skip { .. }) {
             PlanStepStatus::Skipped
         } else {
             PlanStepStatus::Ready
         },
-        inputs,
-        outputs: std::collections::HashMap::new(),
-        skip_reason: match action {
-            ReconcileAction::Skip { reason, .. } => Some(format!("{:?}", reason)),
-            _ => None,
-        },
-        policy: std::collections::HashMap::new(),
-        missing: Vec::new(),
+    )
+    .label(action_label(action))
+    .blocking(!matches!(action, ReconcileAction::Skip { .. }))
+    .inputs(inputs);
+
+    match action {
+        ReconcileAction::Skip { reason, .. } => builder.skip_reason(format!("{:?}", reason)),
+        _ => builder,
     }
+    .build()
 }
 
 fn action_kind(action: &ReconcileAction) -> &'static str {

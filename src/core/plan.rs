@@ -73,6 +73,20 @@ impl HomeboyPlan {
             hints: Vec::new(),
         }
     }
+
+    pub(crate) fn builder_for_component(
+        kind: PlanKind,
+        component_id: impl Into<String>,
+    ) -> PlanBuilder {
+        PlanBuilder::from_plan(Self::for_component(kind, component_id))
+    }
+
+    pub(crate) fn builder_for_description(
+        kind: PlanKind,
+        description: impl Into<String>,
+    ) -> PlanBuilder {
+        PlanBuilder::from_plan(Self::for_description(kind, description))
+    }
 }
 
 impl Default for HomeboyPlan {
@@ -161,6 +175,168 @@ pub struct PlanStep {
     pub missing: Vec<String>,
 }
 
+impl PlanStep {
+    pub(crate) fn builder(
+        id: impl Into<String>,
+        kind: impl Into<String>,
+        status: PlanStepStatus,
+    ) -> PlanStepBuilder {
+        PlanStepBuilder::new(id, kind, status)
+    }
+
+    pub(crate) fn ready(id: impl Into<String>, kind: impl Into<String>) -> PlanStepBuilder {
+        PlanStepBuilder::new(id, kind, PlanStepStatus::Ready)
+    }
+
+    pub(crate) fn disabled(id: impl Into<String>, kind: impl Into<String>) -> PlanStepBuilder {
+        PlanStepBuilder::new(id, kind, PlanStepStatus::Disabled)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlanBuilder {
+    plan: HomeboyPlan,
+    summary_mode: SummaryMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SummaryMode {
+    None,
+    Standard,
+    DisabledAsSkipped,
+}
+
+impl PlanBuilder {
+    pub(crate) fn from_plan(plan: HomeboyPlan) -> Self {
+        Self {
+            plan,
+            summary_mode: SummaryMode::None,
+        }
+    }
+
+    pub(crate) fn mode(mut self, mode: impl Into<String>) -> Self {
+        self.plan.mode = Some(mode.into());
+        self
+    }
+
+    pub(crate) fn input_value(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.plan.inputs.insert(key.into(), value);
+        self
+    }
+
+    pub(crate) fn policy_value(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.plan.policy.insert(key.into(), value);
+        self
+    }
+
+    pub(crate) fn warnings(mut self, warnings: impl IntoIterator<Item = String>) -> Self {
+        self.plan.warnings.extend(warnings);
+        self
+    }
+
+    pub(crate) fn steps(mut self, steps: impl IntoIterator<Item = PlanStep>) -> Self {
+        self.plan.steps.extend(steps);
+        self
+    }
+
+    pub(crate) fn summarize(mut self) -> Self {
+        self.summary_mode = SummaryMode::Standard;
+        self
+    }
+
+    pub(crate) fn summarize_disabled_as_skipped(mut self) -> Self {
+        self.summary_mode = SummaryMode::DisabledAsSkipped;
+        self
+    }
+
+    pub(crate) fn build(mut self) -> HomeboyPlan {
+        match self.summary_mode {
+            SummaryMode::None => {}
+            SummaryMode::Standard => {
+                self.plan.summary = Some(PlanSummary::from_steps(&self.plan.steps));
+            }
+            SummaryMode::DisabledAsSkipped => {
+                self.plan.summary = Some(PlanSummary::from_steps_counting_disabled_as_skipped(
+                    &self.plan.steps,
+                ));
+            }
+        }
+        self.plan
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlanStepBuilder {
+    step: PlanStep,
+}
+
+impl PlanStepBuilder {
+    pub(crate) fn new(
+        id: impl Into<String>,
+        kind: impl Into<String>,
+        status: PlanStepStatus,
+    ) -> Self {
+        Self {
+            step: PlanStep {
+                id: id.into(),
+                kind: kind.into(),
+                label: None,
+                blocking: true,
+                scope: Vec::new(),
+                needs: Vec::new(),
+                status,
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+                skip_reason: None,
+                policy: HashMap::new(),
+                missing: Vec::new(),
+            },
+        }
+    }
+
+    pub(crate) fn label(mut self, label: impl Into<String>) -> Self {
+        self.step.label = Some(label.into());
+        self
+    }
+
+    pub(crate) fn blocking(mut self, blocking: bool) -> Self {
+        self.step.blocking = blocking;
+        self
+    }
+
+    pub(crate) fn scope(mut self, scope: impl IntoIterator<Item = String>) -> Self {
+        self.step.scope.extend(scope);
+        self
+    }
+
+    pub(crate) fn needs(mut self, needs: impl IntoIterator<Item = String>) -> Self {
+        self.step.needs.extend(needs);
+        self
+    }
+
+    pub(crate) fn input_value(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.step.inputs.insert(key.into(), value);
+        self
+    }
+
+    pub(crate) fn inputs(
+        mut self,
+        inputs: impl IntoIterator<Item = (String, serde_json::Value)>,
+    ) -> Self {
+        self.step.inputs.extend(inputs);
+        self
+    }
+
+    pub(crate) fn skip_reason(mut self, reason: impl Into<String>) -> Self {
+        self.step.skip_reason = Some(reason.into());
+        self
+    }
+
+    pub(crate) fn build(self) -> PlanStep {
+        self.step
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStepStatus {
@@ -195,6 +371,41 @@ pub struct PlanSummary {
     pub next_actions: Vec<String>,
 }
 
+impl PlanSummary {
+    pub(crate) fn from_steps(steps: &[PlanStep]) -> Self {
+        Self::from_steps_with_skipped_statuses(steps, &[PlanStepStatus::Skipped])
+    }
+
+    pub(crate) fn from_steps_counting_disabled_as_skipped(steps: &[PlanStep]) -> Self {
+        Self::from_steps_with_skipped_statuses(
+            steps,
+            &[PlanStepStatus::Skipped, PlanStepStatus::Disabled],
+        )
+    }
+
+    fn from_steps_with_skipped_statuses(
+        steps: &[PlanStep],
+        skipped_statuses: &[PlanStepStatus],
+    ) -> Self {
+        Self {
+            total_steps: steps.len(),
+            ready: steps
+                .iter()
+                .filter(|step| step.status == PlanStepStatus::Ready)
+                .count(),
+            blocked: steps
+                .iter()
+                .filter(|step| step.status == PlanStepStatus::Missing)
+                .count(),
+            skipped: steps
+                .iter()
+                .filter(|step| skipped_statuses.contains(&step.status))
+                .count(),
+            next_actions: Vec::new(),
+        }
+    }
+}
+
 fn default_blocking() -> bool {
     true
 }
@@ -224,7 +435,7 @@ fn slug_fragment(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
+    use super::{HomeboyPlan, PlanBuilder, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
 
     #[test]
     fn serializes_plan_kind_as_snake_case() {
@@ -293,5 +504,240 @@ mod tests {
             serde_json::to_value(PlanStepStatus::PartialSuccess).expect("serialize step status");
 
         assert_eq!(serialized, serde_json::json!("partial_success"));
+    }
+
+    #[test]
+    fn builder_generates_summary_from_step_statuses() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Quality, "fixture")
+            .steps(vec![
+                PlanStep::ready("quality.lint", "quality.lint").build(),
+                PlanStep::builder("quality.test", "quality.test", PlanStepStatus::Missing).build(),
+                PlanStep::builder("quality.audit", "quality.audit", PlanStepStatus::Skipped)
+                    .build(),
+                PlanStep::disabled("quality.docs", "quality.docs").build(),
+            ])
+            .summarize()
+            .build();
+
+        assert_eq!(
+            plan.summary,
+            Some(PlanSummary {
+                total_steps: 4,
+                ready: 1,
+                blocked: 1,
+                skipped: 1,
+                next_actions: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn step_builder_preserves_minimal_step_json_shape() {
+        let step = PlanStep::ready("lint", "quality.lint")
+            .label("Run lint")
+            .blocking(false)
+            .needs(vec!["audit".to_string()])
+            .input_value("reason", serde_json::json!("manual"))
+            .skip_reason("manual")
+            .build();
+
+        let serialized = serde_json::to_value(&step).expect("serialize step");
+
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "id": "lint",
+                "kind": "quality.lint",
+                "label": "Run lint",
+                "blocking": false,
+                "needs": ["audit"],
+                "status": "ready",
+                "inputs": {
+                    "reason": "manual"
+                },
+                "skip_reason": "manual"
+            })
+        );
+    }
+
+    #[test]
+    fn test_builder_for_component() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Quality, "fixture").build();
+
+        assert_eq!(plan.subject.component_id.as_deref(), Some("fixture"));
+    }
+
+    #[test]
+    fn test_builder_for_description() {
+        let plan = HomeboyPlan::builder_for_description(PlanKind::Trace, "Variant A").build();
+
+        assert_eq!(plan.subject.description.as_deref(), Some("Variant A"));
+    }
+
+    #[test]
+    fn test_from_plan() {
+        let plan =
+            PlanBuilder::from_plan(HomeboyPlan::for_component(PlanKind::Build, "fixture")).build();
+
+        assert_eq!(plan.kind, PlanKind::Build);
+    }
+
+    #[test]
+    fn test_mode() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Review, "fixture")
+            .mode("changed")
+            .build();
+
+        assert_eq!(plan.mode.as_deref(), Some("changed"));
+    }
+
+    #[test]
+    fn test_input_value() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::StackSync, "fixture")
+            .input_value("target_exists", serde_json::json!(true))
+            .build();
+
+        assert_eq!(
+            plan.inputs.get("target_exists"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn test_policy_value() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::StackSync, "fixture")
+            .policy_value("blocked", serde_json::json!(false))
+            .build();
+
+        assert_eq!(plan.policy.get("blocked"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
+    fn test_warnings() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Refactor, "fixture")
+            .warnings(vec!["review grouping".to_string()])
+            .build();
+
+        assert_eq!(plan.warnings, vec!["review grouping"]);
+    }
+
+    #[test]
+    fn test_steps() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Quality, "fixture")
+            .steps(vec![PlanStep::ready("lint", "quality.lint").build()])
+            .build();
+
+        assert_eq!(plan.steps.len(), 1);
+    }
+
+    #[test]
+    fn test_summarize() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Quality, "fixture")
+            .steps(vec![PlanStep::ready("lint", "quality.lint").build()])
+            .summarize()
+            .build();
+
+        assert_eq!(plan.summary.as_ref().map(|summary| summary.ready), Some(1));
+    }
+
+    #[test]
+    fn test_summarize_disabled_as_skipped() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Audit, "fixture")
+            .steps(vec![PlanStep::disabled(
+                "audit.docs",
+                "audit.detector.docs",
+            )
+            .build()])
+            .summarize_disabled_as_skipped()
+            .build();
+
+        assert_eq!(
+            plan.summary.as_ref().map(|summary| summary.skipped),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_ready() {
+        let step = PlanStep::ready("lint", "quality.lint").build();
+
+        assert_eq!(step.status, PlanStepStatus::Ready);
+    }
+
+    #[test]
+    fn test_disabled() {
+        let step = PlanStep::disabled("audit", "quality.audit").build();
+
+        assert_eq!(step.status, PlanStepStatus::Disabled);
+    }
+
+    #[test]
+    fn test_label() {
+        let step = PlanStep::ready("lint", "quality.lint")
+            .label("Run lint")
+            .build();
+
+        assert_eq!(step.label.as_deref(), Some("Run lint"));
+    }
+
+    #[test]
+    fn test_scope() {
+        let step = PlanStep::ready("deps", "deps.stack")
+            .scope(vec!["downstream".to_string()])
+            .build();
+
+        assert_eq!(step.scope, vec!["downstream"]);
+    }
+
+    #[test]
+    fn test_needs() {
+        let step = PlanStep::ready("test", "quality.test")
+            .needs(vec!["lint".to_string()])
+            .build();
+
+        assert_eq!(step.needs, vec!["lint"]);
+    }
+
+    #[test]
+    fn test_inputs() {
+        let step = PlanStep::ready("deps", "deps.stack")
+            .inputs(vec![("package".to_string(), serde_json::json!("homeboy"))])
+            .build();
+
+        assert_eq!(
+            step.inputs.get("package"),
+            Some(&serde_json::json!("homeboy"))
+        );
+    }
+
+    #[test]
+    fn test_skip_reason() {
+        let step = PlanStep::disabled("audit", "quality.audit")
+            .skip_reason("filtered")
+            .build();
+
+        assert_eq!(step.skip_reason.as_deref(), Some("filtered"));
+    }
+
+    #[test]
+    fn test_from_steps() {
+        let summary = PlanSummary::from_steps(&[
+            PlanStep::ready("lint", "quality.lint").build(),
+            PlanStep::builder("test", "quality.test", PlanStepStatus::Missing).build(),
+        ]);
+
+        assert_eq!(summary.ready, 1);
+        assert_eq!(summary.blocked, 1);
+    }
+
+    #[test]
+    fn test_from_steps_counting_disabled_as_skipped() {
+        let summary = PlanSummary::from_steps_counting_disabled_as_skipped(&[PlanStep::disabled(
+            "audit",
+            "audit.detector.docs",
+        )
+        .build()]);
+
+        assert_eq!(summary.skipped, 1);
     }
 }

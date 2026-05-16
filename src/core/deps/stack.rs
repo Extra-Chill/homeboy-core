@@ -1,5 +1,5 @@
 use crate::component::{self, Component, DependencyStackEdge};
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep};
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -208,15 +208,10 @@ pub fn stack_plan_from_components(
 impl DependencyStackPlan {
     pub fn new(upstream: impl Into<String>, steps: Vec<DependencyStackPlanStep>) -> Self {
         let upstream = upstream.into();
-        let mut plan = HomeboyPlan::for_component(PlanKind::DependencyStack, upstream.clone());
-        plan.steps = steps.iter().map(stack_step).collect();
-        plan.summary = Some(PlanSummary {
-            total_steps: plan.steps.len(),
-            ready: plan.steps.len(),
-            blocked: 0,
-            skipped: 0,
-            next_actions: Vec::new(),
-        });
+        let plan = HomeboyPlan::builder_for_component(PlanKind::DependencyStack, upstream.clone())
+            .steps(steps.iter().map(stack_step))
+            .summarize()
+            .build();
 
         Self {
             plan,
@@ -254,23 +249,17 @@ fn stack_step(step: &DependencyStackPlanStep) -> PlanStep {
         serde_json::Value::String(step.update_command.clone()),
     );
 
-    PlanStep {
-        id: format!("deps.stack.{:03}.{}", step.sequence, step.downstream),
-        kind: "deps.stack.update_downstream".to_string(),
-        label: Some(format!(
-            "Update {} in {} from {}",
-            step.package, step.downstream, step.upstream
-        )),
-        blocking: true,
-        scope: vec![step.downstream.clone()],
-        needs: Vec::new(),
-        status: PlanStepStatus::Ready,
-        inputs,
-        outputs: std::collections::HashMap::new(),
-        skip_reason: None,
-        policy: std::collections::HashMap::new(),
-        missing: Vec::new(),
-    }
+    PlanStep::ready(
+        format!("deps.stack.{:03}.{}", step.sequence, step.downstream),
+        "deps.stack.update_downstream",
+    )
+    .label(format!(
+        "Update {} in {} from {}",
+        step.package, step.downstream, step.upstream
+    ))
+    .scope(vec![step.downstream.clone()])
+    .inputs(inputs)
+    .build()
 }
 
 fn edge_status(component: &Component, edge: &DependencyStackEdge) -> DependencyStackEdgeStatus {
