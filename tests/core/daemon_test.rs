@@ -40,6 +40,10 @@ fn routes_health_version_and_config_paths() {
         .as_str()
         .unwrap()
         .ends_with("daemon/state.json"));
+    assert!(paths.body["daemon_jobs"]
+        .as_str()
+        .unwrap()
+        .ends_with("daemon/jobs.json"));
 }
 
 #[test]
