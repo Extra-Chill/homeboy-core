@@ -132,6 +132,7 @@ fn exit_code_for_error(code: ErrorCode) -> i32 {
         | ErrorCode::ExtensionUnsupported
         | ErrorCode::DocsTopicNotFound
         | ErrorCode::RigNotFound
+        | ErrorCode::RunnerNotFound
         | ErrorCode::StackNotFound
         | ErrorCode::ProjectNoActive => 4,
 

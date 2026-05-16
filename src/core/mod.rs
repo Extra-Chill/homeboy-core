@@ -30,6 +30,7 @@ pub mod quality;
 pub mod refactor;
 pub mod release;
 pub mod rig;
+pub mod runner;
 pub mod scope;
 pub mod self_status;
 pub mod server;

@@ -32,6 +32,7 @@
 - [release](release.md) — local release pipeline
 - [review](review.md) — scoped audit + lint + test umbrella for PR-style changes
 - [rig](rig.md) — reproducible local dev environments ([spec](rig-spec.md))
+- [runner](runner.md) — local and SSH execution runner registry
 - [runs](runs.md) — persisted observation runs and artifacts
 - [server](server.md)
 - [self](self.md) — active binary and install-signal inspection
