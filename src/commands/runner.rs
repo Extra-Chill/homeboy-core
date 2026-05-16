@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use homeboy::runner::{
     self, Runner, RunnerConnectReport, RunnerDisconnectReport, RunnerExecOutput, RunnerKind,
-    RunnerStatusReport,
+    RunnerStatusReport, RunnerWorkspaceSyncMode, RunnerWorkspaceSyncOutput,
 };
 use homeboy::{EntityCrudOutput, MergeOutput};
 
@@ -34,6 +34,12 @@ pub enum RunnerExecutionOutput {
     Exec(RunnerExecOutput),
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RunnerWorkspaceOutput {
+    Sync(RunnerWorkspaceSyncOutput),
+}
+
 pub type RunnerOutput = EntityCrudOutput<Runner, RunnerExtra>;
 
 #[derive(Debug, Serialize)]
@@ -42,6 +48,7 @@ pub enum RunnerCommandOutput {
     Registry(RunnerOutput),
     Doctor(doctor::RunnerDoctorOutput),
     Execution(RunnerExecutionOutput),
+    Workspace(RunnerWorkspaceOutput),
 }
 
 #[derive(Args)]
@@ -151,12 +158,50 @@ enum RunnerCommand {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
+    /// Materialize local workspaces on a configured runner
+    Workspace {
+        #[command(subcommand)]
+        command: RunnerWorkspaceCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum RunnerWorkspaceCommand {
+    /// Sync a local worktree snapshot into the runner workspace root
+    Sync {
+        /// Runner ID
+        runner_id: String,
+
+        /// Local worktree path to materialize for Lab execution
+        #[arg(long)]
+        path: String,
+
+        /// Sync mode. snapshot includes dirty local files; git requires a clean tree and clones/checks out HEAD remotely.
+        #[arg(long, value_enum, default_value_t = RunnerWorkspaceSyncModeArg::Snapshot)]
+        mode: RunnerWorkspaceSyncModeArg,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum RunnerKindArg {
     Local,
     Ssh,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum RunnerWorkspaceSyncModeArg {
+    #[default]
+    Snapshot,
+    Git,
+}
+
+impl From<RunnerWorkspaceSyncModeArg> for RunnerWorkspaceSyncMode {
+    fn from(value: RunnerWorkspaceSyncModeArg) -> Self {
+        match value {
+            RunnerWorkspaceSyncModeArg::Snapshot => RunnerWorkspaceSyncMode::Snapshot,
+            RunnerWorkspaceSyncModeArg::Git => RunnerWorkspaceSyncMode::Git,
+        }
+    }
 }
 
 impl From<RunnerKindArg> for RunnerKind {
@@ -210,6 +255,13 @@ pub fn run(
             ssh,
             command,
         } => map_execution(exec(&id, cwd, ssh, command)),
+        RunnerCommand::Workspace { command } => match command {
+            RunnerWorkspaceCommand::Sync {
+                runner_id,
+                path,
+                mode,
+            } => map_workspace(workspace_sync(&runner_id, path, mode)),
+        },
     }
 }
 
@@ -225,6 +277,15 @@ fn map_execution(result: CmdResult<RunnerExecOutput>) -> CmdResult<RunnerCommand
     result.map(|(output, exit_code)| {
         (
             RunnerCommandOutput::Execution(RunnerExecutionOutput::Exec(output)),
+            exit_code,
+        )
+    })
+}
+
+fn map_workspace(result: CmdResult<RunnerWorkspaceSyncOutput>) -> CmdResult<RunnerCommandOutput> {
+    result.map(|(output, exit_code)| {
+        (
+            RunnerCommandOutput::Workspace(RunnerWorkspaceOutput::Sync(output)),
             exit_code,
         )
     })
@@ -434,6 +495,20 @@ fn exec(
             cwd,
             allow_ssh,
             command,
+        },
+    )
+}
+
+fn workspace_sync(
+    runner_id: &str,
+    path: String,
+    mode: RunnerWorkspaceSyncModeArg,
+) -> CmdResult<RunnerWorkspaceSyncOutput> {
+    runner::sync_workspace(
+        runner_id,
+        runner::RunnerWorkspaceSyncOptions {
+            path,
+            mode: RunnerWorkspaceSyncMode::from(mode),
         },
     )
 }

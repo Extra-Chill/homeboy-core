@@ -10,6 +10,7 @@ use crate::server;
 
 mod connection;
 mod execution;
+mod workspace;
 
 pub use connection::{
     connect, disconnect, status, RunnerConnectReport, RunnerDisconnectReport, RunnerFailureKind,
@@ -17,6 +18,9 @@ pub use connection::{
 };
 pub(crate) use execution::daemon_api_get;
 pub use execution::{exec, RunnerExecMode, RunnerExecOptions, RunnerExecOutput};
+pub use workspace::{
+    sync_workspace, RunnerWorkspaceSyncMode, RunnerWorkspaceSyncOptions, RunnerWorkspaceSyncOutput,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
