@@ -73,6 +73,28 @@ Path rules:
 - Omitting `--cwd` on an SSH runner uses the runner `workspace_root`.
 - `--ssh` is an MVP/diagnostic fallback; daemon execution is preferred because it records job metadata and supports artifact-oriented workflows.
 
+### `workspace sync`
+
+```sh
+homeboy runner workspace sync <runner-id> --path <local-worktree>
+homeboy runner workspace sync <runner-id> --path <local-worktree> --mode snapshot
+homeboy runner workspace sync <runner-id> --path <local-worktree> --mode git
+```
+
+`workspace sync` materializes a laptop worktree under the runner's configured `workspace_root` so Lab execution can run against an explicit remote path while Git operations and canonical edits stay local.
+
+Modes:
+
+- `snapshot` copies the current local tree, including dirty edits, through a tar stream.
+- `git` requires a clean local tree, then clones or refreshes `remote.origin.url` on the runner and checks out local `HEAD` detached.
+
+Safety rules:
+
+- The remote path is deterministic and lives under `<workspace_root>/_lab_workspaces/`.
+- Snapshot sync excludes dependency directories, build outputs, caches, `.git`, and common secret file patterns such as `.env*`, `*.pem`, and `*.key`.
+- Output includes `local_path`, `remote_path`, `sync_mode`, `snapshot_identity`, and snapshot `files` / `bytes` when available.
+- The runner workspace is execution-only; this command does not push branches, commit, or make the runner authoritative for source changes.
+
 ## Runner Shape
 
 Runner records are stored as JSON config entities under `~/.config/homeboy/runners/`.
@@ -103,7 +125,7 @@ Rules:
 
 All command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The `data` payload uses the generic entity CRUD shape:
 
-- `command`: action identifier such as `runner.add`, `runner.list`, `runner.show`, `runner.set`, `runner.remove`, or `runner.exec`
+- `command`: action identifier such as `runner.add`, `runner.list`, `runner.show`, `runner.set`, `runner.remove`, `runner.exec`, or `runner.workspace.sync`
 - `id`: present for single-runner actions
 - `entity`: runner configuration for single-runner read/write actions
 - `entities`: list for `list`
