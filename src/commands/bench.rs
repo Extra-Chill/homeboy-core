@@ -37,6 +37,10 @@ impl BenchArgs {
     pub fn is_run_command(&self) -> bool {
         self.command.is_none()
     }
+
+    pub fn lab_offload_writes_local_state(&self) -> bool {
+        self.run.baseline_args.baseline || self.run.baseline_args.ratchet
+    }
 }
 
 #[derive(Subcommand)]
