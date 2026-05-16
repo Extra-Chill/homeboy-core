@@ -95,6 +95,60 @@ Safety rules:
 - Output includes `local_path`, `remote_path`, `sync_mode`, `snapshot_identity`, and snapshot `files` / `bytes` when available.
 - The runner workspace is execution-only; this command does not push branches, commit, or make the runner authoritative for source changes.
 
+### `workspace apply`
+
+```sh
+homeboy runner workspace apply <lab-apply.json>
+homeboy runner workspace apply <lab-apply.json> --force
+```
+
+`workspace apply` brings a Lab-generated fix artifact back to the local source worktree recorded in the artifact's `source_snapshot.local_path`. It is local-only: it does not commit, push, or make the Lab runner canonical. Reviewability stays in normal local Git via `git status` and `git diff`.
+
+Safety rules:
+
+- The artifact must identify the local source worktree through `source_snapshot.local_path`.
+- Homeboy recalculates the current local `source_snapshot.snapshot_hash` before applying.
+- If the local source worktree drifted since the Lab snapshot, apply is refused unless `--force` is explicit.
+- Unified diffs are checked with `git apply --check` before mutation, so conflicts do not partially apply.
+- Delta paths must be relative and stay inside the source worktree.
+- Output includes `apply_status`, `modified_files`, `expected_snapshot_hash`, and `current_snapshot_hash`.
+
+Temporary Wave 4 adapter contract, until the Lab fix-capture contract settles:
+
+```json
+{
+  "source_snapshot": {
+    "runner_id": "lab-a",
+    "local_path": "/Users/chubes/Developer/project@branch",
+    "remote_path": "/srv/homeboy/_lab_workspaces/project-abc123",
+    "git_sha": "...",
+    "dirty": false,
+    "sync_mode": "snapshot",
+    "snapshot_hash": "sha256:...",
+    "synced_at": "2026-05-16T00:00:00Z",
+    "sync_excludes": [".git/", "node_modules/"]
+  },
+  "patch": {
+    "format": "unified_diff",
+    "content": "diff --git a/file.txt b/file.txt\n..."
+  }
+}
+```
+
+Delta form is also accepted for explicit file replacement/deletion:
+
+```json
+{
+  "source_snapshot": { "...": "..." },
+  "delta": {
+    "files": [
+      { "path": "src/file.txt", "content_base64": "Li4u" },
+      { "path": "obsolete.txt", "delete": true }
+    ]
+  }
+}
+```
+
 ## Runner Shape
 
 Runner records are stored as JSON config entities under `~/.config/homeboy/runners/`.
@@ -125,7 +179,7 @@ Rules:
 
 All command output is wrapped in the global JSON envelope described in the [JSON output contract](../architecture/output-system.md). The `data` payload uses the generic entity CRUD shape:
 
-- `command`: action identifier such as `runner.add`, `runner.list`, `runner.show`, `runner.set`, `runner.remove`, `runner.exec`, or `runner.workspace.sync`
+- `command`: action identifier such as `runner.add`, `runner.list`, `runner.show`, `runner.set`, `runner.remove`, `runner.exec`, `runner.workspace.sync`, or `runner.workspace.apply`
 - `id`: present for single-runner actions
 - `entity`: runner configuration for single-runner read/write actions
 - `entities`: list for `list`

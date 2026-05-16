@@ -6,7 +6,8 @@ use serde_json::Value;
 
 use homeboy::runner::{
     self, Runner, RunnerConnectReport, RunnerDisconnectReport, RunnerExecOutput, RunnerKind,
-    RunnerStatusReport, RunnerWorkspaceSyncMode, RunnerWorkspaceSyncOutput,
+    RunnerStatusReport, RunnerWorkspaceApplyOutput, RunnerWorkspaceSyncMode,
+    RunnerWorkspaceSyncOutput,
 };
 use homeboy::{EntityCrudOutput, MergeOutput};
 
@@ -38,6 +39,7 @@ pub enum RunnerExecutionOutput {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum RunnerWorkspaceOutput {
     Sync(RunnerWorkspaceSyncOutput),
+    Apply(RunnerWorkspaceApplyOutput),
 }
 
 pub type RunnerOutput = EntityCrudOutput<Runner, RunnerExtra>;
@@ -180,6 +182,15 @@ enum RunnerWorkspaceCommand {
         #[arg(long, value_enum, default_value_t = RunnerWorkspaceSyncModeArg::Snapshot)]
         mode: RunnerWorkspaceSyncModeArg,
     },
+    /// Apply a Lab-generated patch/delta back to its local source worktree
+    Apply {
+        /// Lab apply JSON artifact path
+        input: String,
+
+        /// Apply even when the local worktree snapshot no longer matches the Lab source snapshot
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -261,6 +272,9 @@ pub fn run(
                 path,
                 mode,
             } => map_workspace(workspace_sync(&runner_id, path, mode)),
+            RunnerWorkspaceCommand::Apply { input, force } => map_workspace_apply(
+                runner::apply_workspace_patch(runner::RunnerWorkspaceApplyOptions { input, force }),
+            ),
         },
     }
 }
@@ -286,6 +300,17 @@ fn map_workspace(result: CmdResult<RunnerWorkspaceSyncOutput>) -> CmdResult<Runn
     result.map(|(output, exit_code)| {
         (
             RunnerCommandOutput::Workspace(RunnerWorkspaceOutput::Sync(output)),
+            exit_code,
+        )
+    })
+}
+
+fn map_workspace_apply(
+    result: CmdResult<RunnerWorkspaceApplyOutput>,
+) -> CmdResult<RunnerCommandOutput> {
+    result.map(|(output, exit_code)| {
+        (
+            RunnerCommandOutput::Workspace(RunnerWorkspaceOutput::Apply(output)),
             exit_code,
         )
     })
