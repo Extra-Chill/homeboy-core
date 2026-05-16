@@ -834,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_store_persists_completed_jobs_and_events() {
+    fn test_open() {
         let temp = tempfile::tempdir().expect("temp dir");
         let path = temp.path().join("jobs.json");
         let store = JobStore::open(&path).expect("durable store opens");
@@ -890,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_store_bounds_retained_event_history() {
+    fn test_open_with_event_retention() {
         let temp = tempfile::tempdir().expect("temp dir");
         let path = temp.path().join("jobs.json");
         let store = JobStore::open_with_event_retention(&path, 3).expect("durable store opens");
