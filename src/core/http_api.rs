@@ -5,6 +5,7 @@
 //! command behavior. Long-running analysis endpoints enqueue daemon-owned jobs
 //! so HTTP requests can return immediately while clients poll job events.
 
+use base64::Engine;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -56,6 +57,7 @@ pub enum HttpEndpoint {
     Runs,
     Run { id: String },
     RunArtifacts { id: String },
+    RunArtifactContent { id: String, artifact_id: String },
     RunFindings { id: String },
     AuditRuns,
     BenchRuns,
@@ -116,6 +118,7 @@ impl HttpEndpoint {
             Self::Runs => "runs.list",
             Self::Run { .. } => "runs.show",
             Self::RunArtifacts { .. } => "runs.artifacts",
+            Self::RunArtifactContent { .. } => "runs.artifact.content",
             Self::RunFindings { .. } => "runs.findings",
             Self::AuditRuns => "audit.runs",
             Self::BenchRuns => "bench.runs",
@@ -164,6 +167,12 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
         (HttpMethod::Get, ["runs", id, "artifacts"]) => Ok(HttpEndpoint::RunArtifacts {
             id: (*id).to_string(),
         }),
+        (HttpMethod::Get, ["runs", id, "artifacts", artifact_id, "content"]) => {
+            Ok(HttpEndpoint::RunArtifactContent {
+                id: (*id).to_string(),
+                artifact_id: (*artifact_id).to_string(),
+            })
+        }
         (HttpMethod::Get, ["runs", id, "findings"]) => Ok(HttpEndpoint::RunFindings {
             id: (*id).to_string(),
         }),
@@ -209,6 +218,7 @@ pub fn route(method: HttpMethod, path: &str) -> Result<HttpEndpoint> {
                 "GET /runs".to_string(),
                 "GET /runs/:id".to_string(),
                 "GET /runs/:id/artifacts".to_string(),
+                "GET /runs/:id/artifacts/:artifact_id/content".to_string(),
                 "GET /runs/:id/findings".to_string(),
                 "GET /audit/runs".to_string(),
                 "GET /bench/runs".to_string(),
@@ -293,6 +303,7 @@ pub fn handle_with_jobs(request: HttpApiRequest, job_store: &JobStore) -> Result
                 "artifacts": store.list_artifacts(id)?,
             })
         }
+        HttpEndpoint::RunArtifactContent { id, artifact_id } => artifact_content(id, artifact_id)?,
         HttpEndpoint::RunFindings { id } => {
             let store = ObservationStore::open_initialized()?;
             require_run(&store, id)?;
@@ -343,6 +354,59 @@ pub fn handle_with_jobs(request: HttpApiRequest, job_store: &JobStore) -> Result
         endpoint: endpoint.name().to_string(),
         body,
     })
+}
+
+fn artifact_content(run_id: &str, artifact_id: &str) -> Result<Value> {
+    let store = ObservationStore::open_initialized()?;
+    require_run(&store, run_id)?;
+    let artifact = store.get_artifact(artifact_id)?.ok_or_else(|| {
+        Error::validation_invalid_argument(
+            "artifact_id",
+            format!("artifact record not found: {artifact_id}"),
+            Some(artifact_id.to_string()),
+            None,
+        )
+    })?;
+    if artifact.run_id != run_id {
+        return Err(Error::validation_invalid_argument(
+            "artifact_id",
+            "artifact does not belong to requested run",
+            Some(artifact_id.to_string()),
+            None,
+        ));
+    }
+    if artifact.artifact_type != "file" {
+        return Err(Error::validation_invalid_argument(
+            "artifact_id",
+            format!(
+                "artifact {} is {}, not a downloadable file",
+                artifact.id, artifact.artifact_type
+            ),
+            Some(artifact.id),
+            None,
+        ));
+    }
+    let path = std::path::PathBuf::from(&artifact.path);
+    let content = std::fs::read(&path).map_err(|err| {
+        Error::internal_io(
+            err.to_string(),
+            Some(format!("read recorded artifact {}", path.display())),
+        )
+    })?;
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&artifact.id);
+    Ok(json!({
+        "command": "api.runs.artifact.content",
+        "run_id": run_id,
+        "artifact_id": artifact.id,
+        "filename": filename,
+        "mime": artifact.mime,
+        "size_bytes": artifact.size_bytes,
+        "sha256": artifact.sha256,
+        "content_base64": base64::engine::general_purpose::STANDARD.encode(content),
+    }))
 }
 
 fn path_segments(path: &str) -> Vec<String> {

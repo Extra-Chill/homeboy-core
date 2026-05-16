@@ -9,6 +9,7 @@ use crate::engine::shell;
 use crate::error::{Error, Result};
 use crate::server::{self, SshClient};
 
+use super::evidence::mirror_daemon_evidence;
 use super::{load, status, Runner, RunnerKind};
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,8 @@ pub struct RunnerExecOutput {
     pub job_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_events: Option<Vec<JobEvent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_run_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +166,8 @@ fn exec_via_daemon(
             }
         });
 
+    let mirror = mirror_daemon_evidence(runner, &cwd, &command, &job, &events, &result)?;
+
     Ok((
         RunnerExecOutput {
             command: "runner.exec",
@@ -176,6 +181,7 @@ fn exec_via_daemon(
             job_id: Some(job.id.to_string()),
             job: Some(job),
             job_events: Some(events),
+            mirror_run_id: mirror.map(|run| run.id),
         },
         exit_code,
     ))
@@ -332,6 +338,7 @@ fn exec_output(
             job: None,
             job_id: None,
             job_events: None,
+            mirror_run_id: None,
         },
         exit_code,
     )
