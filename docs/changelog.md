@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.182.0] - 2026-05-16
+
+### Added
+- add runner registry
+
 ## [0.181.6] - 2026-05-15
 
 ### Fixed
