@@ -351,20 +351,6 @@ fn sync_pr_step(
     status: PlanStepStatus,
     reason: &str,
 ) -> PlanStep {
-    let mut inputs = std::collections::HashMap::new();
-    inputs.insert(
-        "repo".to_string(),
-        serde_json::Value::String(repo.to_string()),
-    );
-    inputs.insert(
-        "number".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(number)),
-    );
-    inputs.insert(
-        "reason".to_string(),
-        serde_json::Value::String(reason.to_string()),
-    );
-
     PlanStep::builder(
         format!("stack.sync.{action}.{repo}#{number}"),
         format!("stack.sync.{action}"),
@@ -373,7 +359,12 @@ fn sync_pr_step(
     .label(format!("{action} {repo}#{number}"))
     .blocking(status == PlanStepStatus::Missing)
     .scope(vec![format!("{repo}#{number}")])
-    .inputs(inputs)
+    .input_value("repo", serde_json::Value::String(repo.to_string()))
+    .input_value(
+        "number",
+        serde_json::Value::Number(serde_json::Number::from(number)),
+    )
+    .input_value("reason", serde_json::Value::String(reason.to_string()))
     .build()
 }
 
