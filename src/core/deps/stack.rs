@@ -223,32 +223,6 @@ impl DependencyStackPlan {
 }
 
 fn stack_step(step: &DependencyStackPlanStep) -> PlanStep {
-    let mut inputs = std::collections::HashMap::new();
-    inputs.insert(
-        "declaring_component_id".to_string(),
-        serde_json::Value::String(step.declaring_component_id.clone()),
-    );
-    inputs.insert(
-        "upstream".to_string(),
-        serde_json::Value::String(step.upstream.clone()),
-    );
-    inputs.insert(
-        "downstream".to_string(),
-        serde_json::Value::String(step.downstream.clone()),
-    );
-    inputs.insert(
-        "downstream_path".to_string(),
-        serde_json::Value::String(step.downstream_path.clone()),
-    );
-    inputs.insert(
-        "package".to_string(),
-        serde_json::Value::String(step.package.clone()),
-    );
-    inputs.insert(
-        "update_command".to_string(),
-        serde_json::Value::String(step.update_command.clone()),
-    );
-
     PlanStep::ready(
         format!("deps.stack.{:03}.{}", step.sequence, step.downstream),
         "deps.stack.update_downstream",
@@ -258,7 +232,24 @@ fn stack_step(step: &DependencyStackPlanStep) -> PlanStep {
         step.package, step.downstream, step.upstream
     ))
     .scope(vec![step.downstream.clone()])
-    .inputs(inputs)
+    .input_value(
+        "declaring_component_id",
+        serde_json::Value::String(step.declaring_component_id.clone()),
+    )
+    .input_value("upstream", serde_json::Value::String(step.upstream.clone()))
+    .input_value(
+        "downstream",
+        serde_json::Value::String(step.downstream.clone()),
+    )
+    .input_value(
+        "downstream_path",
+        serde_json::Value::String(step.downstream_path.clone()),
+    )
+    .input_value("package", serde_json::Value::String(step.package.clone()))
+    .input_value(
+        "update_command",
+        serde_json::Value::String(step.update_command.clone()),
+    )
     .build()
 }
 
