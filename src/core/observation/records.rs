@@ -5,32 +5,13 @@ use std::{collections::BTreeMap, path::Path};
 use crate::code_audit::{self, report::finding_kind_key};
 use crate::extension::lint::LintFinding;
 
+mod run_builder;
+mod run_status;
 mod triage_items;
 
+pub use run_builder::NewRunRecordBuilder;
+pub use run_status::RunStatus;
 pub use triage_items::{NewTriageItemRecord, TriageItemRecord, TriagePullRequestSignals};
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub enum RunStatus {
-    Running,
-    Pass,
-    Fail,
-    Error,
-    Skipped,
-    Stale,
-}
-
-impl RunStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::Pass => "pass",
-            Self::Fail => "fail",
-            Self::Error => "error",
-            Self::Skipped => "skipped",
-            Self::Stale => "stale",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NewRunRecord {
@@ -42,6 +23,12 @@ pub struct NewRunRecord {
     pub git_sha: Option<String>,
     pub rig_id: Option<String>,
     pub metadata_json: serde_json::Value,
+}
+
+impl NewRunRecord {
+    pub fn builder(kind: impl Into<String>) -> NewRunRecordBuilder {
+        NewRunRecordBuilder::new(kind)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -405,13 +392,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_run_status_as_str() {
-        assert_eq!(RunStatus::Running.as_str(), "running");
-        assert_eq!(RunStatus::Pass.as_str(), "pass");
-        assert_eq!(RunStatus::Fail.as_str(), "fail");
-        assert_eq!(RunStatus::Error.as_str(), "error");
-        assert_eq!(RunStatus::Skipped.as_str(), "skipped");
-        assert_eq!(RunStatus::Stale.as_str(), "stale");
+    fn test_builder() {
+        let record = NewRunRecord::builder("lint").build();
+
+        assert_eq!(record.kind, "lint");
+        assert_eq!(record.metadata_json, serde_json::json!({}));
     }
 
     #[test]
