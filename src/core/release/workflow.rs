@@ -639,9 +639,8 @@ pub fn run_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{PlanStep, PlanStepStatus};
+    use crate::plan::{PlanStep, PlanStepStatus, PlanValues};
     use crate::release::{ReleaseRunResult, ReleaseStepResult, ReleaseStepStatus};
-    use std::collections::HashMap;
 
     #[test]
     fn extracts_new_version_from_plan() {
@@ -649,10 +648,7 @@ mod tests {
             "demo",
             true,
             vec![PlanStep::ready("version", "version")
-                .inputs(HashMap::from([(
-                    "to".to_string(),
-                    serde_json::Value::String("1.2.3".to_string()),
-                )]))
+                .inputs(PlanValues::new().string("to", "1.2.3"))
                 .build()],
             None,
             Vec::new(),

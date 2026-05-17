@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep};
+use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep, PlanValues};
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -59,16 +59,9 @@ pub(crate) fn plan_trace_run_order(
 }
 
 fn trace_run_entry_plan(index: usize, group: &str, iteration: usize) -> HomeboyPlan {
-    let inputs = vec![
-        (
-            "group".to_string(),
-            serde_json::Value::String(group.to_string()),
-        ),
-        (
-            "iteration".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(iteration)),
-        ),
-    ];
+    let inputs = PlanValues::new()
+        .string("group", group)
+        .number("iteration", iteration as u64);
 
     HomeboyPlan::builder_for_description(PlanKind::Trace, format!("{group} {iteration}"))
         .mode("run_order")

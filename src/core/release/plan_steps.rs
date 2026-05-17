@@ -1,7 +1,7 @@
 use crate::component::Component;
 use crate::extension::ExtensionManifest;
 use crate::git;
-use crate::plan::PlanStep;
+use crate::plan::{PlanStep, PlanValues};
 use crate::quality::{build_quality_steps as build_shared_quality_steps, QualityPlanOptions};
 use crate::release::pipeline_capabilities::{
     get_publish_targets, has_package_capability, has_prepare_capability,
@@ -9,7 +9,7 @@ use crate::release::pipeline_capabilities::{
 use crate::release::types::{ReleaseChangelogPlan, ReleaseOptions, ReleaseSemverRecommendation};
 use crate::Result;
 
-type StepConfig = std::collections::HashMap<String, serde_json::Value>;
+type StepConfig = PlanValues;
 
 /// Return true if this component should get a GitHub Release created.
 ///
@@ -53,9 +53,7 @@ fn disabled_step(
 }
 
 fn string_config(key: &str, value: impl Into<String>) -> StepConfig {
-    let mut config = StepConfig::new();
-    config.insert(key.to_string(), serde_json::Value::String(value.into()));
-    config
+    StepConfig::new().string(key, value)
 }
 
 pub(super) fn build_preflight_steps(
@@ -112,17 +110,12 @@ pub(super) fn build_preflight_steps(
 
     steps.extend(build_quality_steps(options));
 
-    let mut changelog_config = StepConfig::new();
-    changelog_config.insert(
-        "dry_run".to_string(),
-        serde_json::Value::Bool(options.dry_run),
-    );
     steps.push(ready_step(
         "preflight.changelog_bootstrap",
         "preflight.changelog_bootstrap",
         "Ensure changelog exists",
         vec!["preflight.test".to_string()],
-        changelog_config,
+        StepConfig::new().bool("dry_run", options.dry_run),
     ));
 
     steps
@@ -148,36 +141,24 @@ fn build_bump_policy_step(
         );
     };
 
-    let mut config = StepConfig::new();
-    config.insert(
-        "requested".to_string(),
-        serde_json::Value::String(recommendation.requested_bump.clone()),
-    );
+    let mut config = StepConfig::new()
+        .string("requested", recommendation.requested_bump.clone())
+        .bool("underbump", recommendation.is_underbump)
+        .bool("force_lower_bump", options.bump_policy.force_lower_bump);
     if let Some(recommended) = recommendation.recommended_bump.as_ref() {
-        config.insert(
-            "recommended".to_string(),
-            serde_json::Value::String(recommended.clone()),
-        );
+        config = config.string("recommended", recommended.clone());
     }
-    config.insert(
-        "underbump".to_string(),
-        serde_json::Value::Bool(recommendation.is_underbump),
-    );
-    config.insert(
-        "force_lower_bump".to_string(),
-        serde_json::Value::Bool(options.bump_policy.force_lower_bump),
-    );
 
     if recommendation.is_underbump {
-        config.insert(
-            "policy".to_string(),
-            serde_json::Value::String(if options.dry_run {
+        config = config.string(
+            "policy",
+            if options.dry_run {
                 "preview-lower-bump".to_string()
             } else if options.bump_policy.force_lower_bump {
                 "forced-lower-bump".to_string()
             } else {
                 "requires-force-lower-bump".to_string()
-            }),
+            },
         );
     }
 
@@ -219,15 +200,10 @@ pub(super) fn build_release_steps(
         new_version,
     ));
 
-    let mut version_config = string_config("bump", options.bump_type.clone());
-    version_config.insert(
-        "from".to_string(),
-        serde_json::Value::String(current_version.to_string()),
-    );
-    version_config.insert(
-        "to".to_string(),
-        serde_json::Value::String(new_version.to_string()),
-    );
+    let version_config = StepConfig::new()
+        .string("bump", options.bump_type.clone())
+        .string("from", current_version)
+        .string("to", new_version);
     steps.push(ready_step(
         "version",
         "version",
@@ -285,14 +261,12 @@ pub(super) fn build_release_steps(
         string_config("name", tag_name),
     ));
 
-    let mut push_config = StepConfig::new();
-    push_config.insert("tags".to_string(), serde_json::Value::Bool(true));
     steps.push(ready_step(
         "git.push",
         "git.push",
         "Push to remote",
         vec!["git.tag".to_string()],
-        push_config,
+        StepConfig::new().bool("tags", true),
     ));
 
     if !options.skip_github_release && github_release_applies(component) {
@@ -380,55 +354,22 @@ fn build_changelog_steps(
     current_version: &str,
     new_version: &str,
 ) -> Vec<PlanStep> {
-    let mut policy_config = StepConfig::new();
-    policy_config.insert(
-        "policy".to_string(),
-        serde_json::Value::String(changelog_plan.policy.clone()),
-    );
-    policy_config.insert(
-        "path".to_string(),
-        serde_json::Value::String(changelog_plan.path.clone()),
-    );
-    policy_config.insert(
-        "dry_run".to_string(),
-        serde_json::Value::Bool(changelog_plan.dry_run),
-    );
+    let policy_config = StepConfig::new()
+        .string("policy", changelog_plan.policy.clone())
+        .string("path", changelog_plan.path.clone())
+        .bool("dry_run", changelog_plan.dry_run);
 
-    let mut generate_config = StepConfig::new();
-    generate_config.insert(
-        "source".to_string(),
-        serde_json::Value::String("commits".to_string()),
-    );
-    generate_config.insert(
-        "entry_count".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(changelog_plan.entry_count as u64)),
-    );
+    let generate_config = StepConfig::new()
+        .string("source", "commits")
+        .number("entry_count", changelog_plan.entry_count as u64);
 
-    let mut finalize_config = StepConfig::new();
-    finalize_config.insert(
-        "path".to_string(),
-        serde_json::Value::String(changelog_plan.path.clone()),
-    );
-    finalize_config.insert(
-        "from".to_string(),
-        serde_json::Value::String(current_version.to_string()),
-    );
-    finalize_config.insert(
-        "to".to_string(),
-        serde_json::Value::String(new_version.to_string()),
-    );
-    finalize_config.insert(
-        "entries".to_string(),
-        serde_json::to_value(&changelog_plan.entries).unwrap_or_default(),
-    );
-    finalize_config.insert(
-        "entry_count".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(changelog_plan.entry_count as u64)),
-    );
-    finalize_config.insert(
-        "mode".to_string(),
-        serde_json::Value::String("version-step".to_string()),
-    );
+    let finalize_config = StepConfig::new()
+        .string("path", changelog_plan.path.clone())
+        .string("from", current_version)
+        .string("to", new_version)
+        .json("entries", &changelog_plan.entries)
+        .number("entry_count", changelog_plan.entry_count as u64)
+        .string("mode", "version-step");
 
     vec![
         ready_step(
@@ -456,17 +397,7 @@ fn build_changelog_steps(
 }
 
 fn string_array_config(key: &str, values: &[String]) -> StepConfig {
-    let mut config = StepConfig::new();
-    config.insert(
-        key.to_string(),
-        serde_json::Value::Array(
-            values
-                .iter()
-                .map(|value| serde_json::Value::String(value.clone()))
-                .collect(),
-        ),
-    );
-    config
+    StepConfig::new().json(key, values)
 }
 
 #[cfg(test)]

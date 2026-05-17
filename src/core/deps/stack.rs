@@ -1,5 +1,5 @@
 use crate::component::{self, Component, DependencyStackEdge};
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanValues};
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -232,23 +232,17 @@ fn stack_step(step: &DependencyStackPlanStep) -> PlanStep {
         step.package, step.downstream, step.upstream
     ))
     .scope(vec![step.downstream.clone()])
-    .input_value(
-        "declaring_component_id",
-        serde_json::Value::String(step.declaring_component_id.clone()),
-    )
-    .input_value("upstream", serde_json::Value::String(step.upstream.clone()))
-    .input_value(
-        "downstream",
-        serde_json::Value::String(step.downstream.clone()),
-    )
-    .input_value(
-        "downstream_path",
-        serde_json::Value::String(step.downstream_path.clone()),
-    )
-    .input_value("package", serde_json::Value::String(step.package.clone()))
-    .input_value(
-        "update_command",
-        serde_json::Value::String(step.update_command.clone()),
+    .inputs(
+        PlanValues::new()
+            .string(
+                "declaring_component_id",
+                step.declaring_component_id.clone(),
+            )
+            .string("upstream", step.upstream.clone())
+            .string("downstream", step.downstream.clone())
+            .string("downstream_path", step.downstream_path.clone())
+            .string("package", step.package.clone())
+            .string("update_command", step.update_command.clone()),
     )
     .build()
 }

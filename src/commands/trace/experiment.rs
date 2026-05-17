@@ -5,7 +5,7 @@ use std::process::Command;
 
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
-use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep};
+use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep, PlanValues};
 use homeboy::rig;
 
 use super::{TraceArgs, TraceRigContext};
@@ -75,8 +75,11 @@ fn trace_experiment_plan(
 ) -> HomeboyPlan {
     HomeboyPlan::builder_for_description(PlanKind::Trace, format!("{rig_id} {name}"))
         .mode("experiment")
-        .input_value("rig_id", serde_json::Value::String(rig_id.to_string()))
-        .input_value("experiment", serde_json::Value::String(name.to_string()))
+        .inputs(
+            PlanValues::new()
+                .string("rig_id", rig_id)
+                .string("experiment", name),
+        )
         .steps(trace_experiment_steps(name, experiment))
         .summarize()
         .build()
@@ -105,9 +108,12 @@ fn trace_experiment_step(phase: &str, name: &str, index: usize, command: &str) -
     )
     .label(format!("{phase} trace experiment {name}"))
     .scope(vec![name.to_string()])
-    .input_value("experiment", serde_json::Value::String(name.to_string()))
-    .input_value("phase", serde_json::Value::String(phase.to_string()))
-    .input_value("command", serde_json::Value::String(command.to_string()))
+    .inputs(
+        PlanValues::new()
+            .string("experiment", name)
+            .string("phase", phase)
+            .string("command", command),
+    )
     .build()
 }
 
