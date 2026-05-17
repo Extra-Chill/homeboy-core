@@ -18,6 +18,8 @@ pub struct RunnerExecOptions {
     pub cwd: Option<String>,
     pub allow_ssh: bool,
     pub command: Vec<String>,
+    pub capture_patch: bool,
+    pub source_snapshot: Option<SourceSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -48,6 +50,8 @@ pub struct RunnerExecOutput {
     pub job_events: Option<Vec<JobEvent>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mirror_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,7 +77,14 @@ pub fn exec(runner_id: &str, options: RunnerExecOptions) -> Result<(RunnerExecOu
 
     if connected.connected {
         if let Some(session) = connected.session {
-            return exec_via_daemon(&runner, &session.local_url, cwd, options.command);
+            return exec_via_daemon(
+                &runner,
+                &session.local_url,
+                cwd,
+                options.command,
+                options.capture_patch,
+                options.source_snapshot,
+            );
         }
     }
 
@@ -97,19 +108,23 @@ fn exec_via_daemon(
     local_url: &str,
     cwd: String,
     command: Vec<String>,
+    capture_patch: bool,
+    source_snapshot_override: Option<SourceSnapshot>,
 ) -> Result<(RunnerExecOutput, i32)> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|err| Error::internal_unexpected(format!("build daemon HTTP client: {err}")))?;
-    let source_snapshot =
-        SourceSnapshot::existing_remote(&runner.id, &cwd, runner.workspace_root.as_deref());
+    let source_snapshot = source_snapshot_override.unwrap_or_else(|| {
+        SourceSnapshot::existing_remote(&runner.id, &cwd, runner.workspace_root.as_deref())
+    });
     let response = client
         .post(format!("{}/exec", local_url.trim_end_matches('/')))
         .json(&json!({
             "runner_id": runner.id,
             "cwd": cwd,
             "command": command,
+            "capture_patch": capture_patch,
             "source_snapshot": source_snapshot,
         }))
         .send()
@@ -160,6 +175,7 @@ fn exec_via_daemon(
     let result = result_event_data(&events).unwrap_or_else(|| json!({}));
     let stdout = string_field(&result, "stdout");
     let stderr = string_field(&result, "stderr");
+    let patch = result.get("patch").cloned();
     let exit_code = result
         .get("exit_code")
         .and_then(Value::as_i64)
@@ -189,6 +205,7 @@ fn exec_via_daemon(
             job: Some(job),
             job_events: Some(events),
             mirror_run_id: mirror.map(|run| run.id),
+            patch,
         },
         exit_code,
     ))
@@ -358,6 +375,7 @@ fn exec_output(
             job_id: None,
             job_events: None,
             mirror_run_id: None,
+            patch: None,
         },
         exit_code,
     )
@@ -477,6 +495,8 @@ mod tests {
                     cwd: None,
                     allow_ssh: false,
                     command: vec!["sh".to_string(), "-c".to_string(), "printf ok".to_string()],
+                    capture_patch: false,
+                    source_snapshot: None,
                 },
             )
             .expect("exec local runner");

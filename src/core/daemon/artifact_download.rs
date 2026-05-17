@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::error::{Error, Result};
 use crate::observation::{ArtifactRecord, ObservationStore};
 
-use super::HttpResponse;
+use super::{error_response, HttpResponse};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactDownload {
@@ -213,22 +213,97 @@ fn artifact_metadata_body(
     })
 }
 
-fn error_response(status_code: u16, err: Error) -> HttpResponse {
-    HttpResponse {
-        status_code,
-        body: json!({
-            "error": err.code.as_str(),
-            "message": err.message,
-            "details": err.details,
-            "hints": err.hints,
-        }),
-        artifact: None,
-    }
-}
-
 fn sanitize_header_value(value: &str) -> String {
     value
         .chars()
         .filter(|ch| !matches!(ch, '\r' | '\n' | '"'))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::observation::NewRunRecord;
+    use crate::test_support::HomeGuard;
+
+    #[test]
+    fn test_route() {
+        let _home = HomeGuard::new();
+        let home_path = std::path::PathBuf::from(std::env::var("HOME").expect("home"));
+        let store = ObservationStore::open_initialized().expect("store");
+        let run = store
+            .start_run(NewRunRecord {
+                kind: "runner-exec".to_string(),
+                component_id: None,
+                command: Some("homeboy runner exec".to_string()),
+                cwd: None,
+                homeboy_version: Some("test-version".to_string()),
+                git_sha: None,
+                rig_id: None,
+                metadata_json: json!({}),
+            })
+            .expect("run");
+        let artifact_path = home_path.join("artifact.txt");
+        fs::write(&artifact_path, "artifact body").expect("artifact file");
+        let artifact = store
+            .record_artifact(&run.id, "lab_fix_patch", &artifact_path)
+            .expect("artifact");
+
+        let response =
+            route(&format!("/runs/{}/artifacts/{}", run.id, artifact.id)).expect("artifact route");
+
+        assert_eq!(response.status_code, 200);
+        assert!(response.artifact.is_some());
+        assert_eq!(response.body["artifact"]["id"], artifact.id);
+    }
+
+    #[test]
+    fn test_sanitize_header_value_removes_response_splitting_chars() {
+        assert_eq!(sanitize_header_value("a\r\nb\"c"), "abc");
+    }
+
+    #[test]
+    fn test_write_response() {
+        let _home = HomeGuard::new();
+        let artifact_path = tempfile::NamedTempFile::new().expect("artifact file");
+        fs::write(artifact_path.path(), "artifact body").expect("artifact body");
+        let artifact = ArtifactDownload {
+            record: ArtifactRecord {
+                id: "artifact-1".to_string(),
+                run_id: "run-1".to_string(),
+                kind: "lab_fix_patch".to_string(),
+                artifact_type: "file".to_string(),
+                path: artifact_path.path().display().to_string(),
+                url: None,
+                sha256: Some("abc123".to_string()),
+                size_bytes: Some(13),
+                mime: Some("text/plain".to_string()),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            },
+            path: artifact_path.path().to_path_buf(),
+            content_type: "text/plain".to_string(),
+            size_bytes: 13,
+            filename: "artifact.txt".to_string(),
+        };
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        let addr = listener.local_addr().expect("addr");
+        let reader = std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+            let mut body = String::new();
+            std::io::Read::read_to_string(&mut stream, &mut body).expect("read response");
+            body
+        });
+        let (stream, _) = listener.accept().expect("accept");
+
+        write_response(stream, 200, artifact).expect("write response");
+        let response = reader.join().expect("reader");
+
+        assert!(response.contains("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/plain"));
+        assert!(response.ends_with("artifact body"));
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../tests/core/daemon/artifact_download_test.rs"]
+mod artifact_download_test;

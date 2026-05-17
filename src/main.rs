@@ -180,22 +180,13 @@ fn main() -> std::process::ExitCode {
             output::print_result::<serde_json::Value>(Err(err)).ok();
             return std::process::ExitCode::from(exit_code_to_u8(2));
         }
-        if let Some(flag) = cli.command.lab_offload_mutation_flag() {
-            let err = homeboy::Error::validation_invalid_argument(
-                "runner",
-                format!(
-                    "Lab offload does not run commands that may write canonical workspace state ({flag})"
-                ),
-                Some(runner_id.to_string()),
-                Some(vec![
-                    "Run the command locally without --runner when you intend to write files or baselines."
-                        .to_string(),
-                ]),
-            );
-            output::print_result::<serde_json::Value>(Err(err)).ok();
-            return std::process::ExitCode::from(exit_code_to_u8(2));
-        }
-        return run_lab_offload(runner_id, &normalized, output_file.as_deref());
+        let capture_patch = cli.command.lab_offload_mutation_flag().is_some();
+        return run_lab_offload(
+            runner_id,
+            &normalized,
+            output_file.as_deref(),
+            capture_patch,
+        );
     }
 
     homeboy::set_artifact_root_override(cli.artifact_root.clone().or(artifact_root_override));
@@ -364,8 +355,9 @@ fn run_lab_offload(
     runner_id: &str,
     normalized_args: &[String],
     output_file: Option<&str>,
+    capture_patch: bool,
 ) -> std::process::ExitCode {
-    match run_lab_offload_inner(runner_id, normalized_args, output_file) {
+    match run_lab_offload_inner(runner_id, normalized_args, output_file, capture_patch) {
         Ok(exit_code) => std::process::ExitCode::from(exit_code_to_u8(exit_code)),
         Err(err) => {
             output::print_result::<serde_json::Value>(Err(err)).ok();
@@ -378,6 +370,7 @@ fn run_lab_offload_inner(
     runner_id: &str,
     normalized_args: &[String],
     output_file: Option<&str>,
+    capture_patch: bool,
 ) -> homeboy::Result<i32> {
     let runner = homeboy::runner::load(runner_id)?;
     if runner.kind != homeboy::runner::RunnerKind::Ssh {
@@ -415,6 +408,14 @@ fn run_lab_offload_inner(
         )
     })?;
     let remote_cwd = remote_cwd_for_current_checkout(workspace_root)?;
+    let source_snapshot = homeboy::source_snapshot::SourceSnapshot::collect_local(
+        runner_id,
+        &std::env::current_dir().map_err(|err| {
+            homeboy::Error::internal_io(err.to_string(), Some("read cwd".to_string()))
+        })?,
+        Some(&remote_cwd),
+        "lab_offload",
+    );
     let homeboy_path = runner.homeboy_path.as_deref().unwrap_or("homeboy");
     let mut command = vec![homeboy_path.to_string()];
     command.extend(strip_runner_flag(normalized_args).into_iter().skip(1));
@@ -431,6 +432,8 @@ fn run_lab_offload_inner(
             cwd: Some(remote_cwd),
             allow_ssh: false,
             command,
+            capture_patch,
+            source_snapshot: Some(source_snapshot),
         },
     )?;
 

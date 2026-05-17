@@ -14,7 +14,9 @@ use crate::paths;
 use crate::source_snapshot::SourceSnapshot;
 
 mod artifact_download;
+mod patch_capture;
 pub use artifact_download::ArtifactDownload;
+use patch_capture::{capture_baseline, capture_patch_report};
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1:0";
 
@@ -64,6 +66,8 @@ struct ExecRequest {
     cwd: String,
     command: Vec<String>,
     #[serde(default)]
+    capture_patch: bool,
+    #[serde(default)]
     source_snapshot: Option<SourceSnapshot>,
 }
 
@@ -89,7 +93,7 @@ pub fn parse_bind_addr(addr: &str) -> Result<SocketAddr> {
     Ok(parsed)
 }
 
-pub fn state_path() -> Result<PathBuf> {
+fn state_path() -> Result<PathBuf> {
     paths::daemon_state_file()
 }
 
@@ -178,15 +182,11 @@ pub fn route(method: &str, path: &str) -> HttpResponse {
     route_with_job_store(method, path, daemon_job_store())
 }
 
-pub fn route_with_job_store(method: &str, path: &str, job_store: &JobStore) -> HttpResponse {
+fn route_with_job_store(method: &str, path: &str, job_store: &JobStore) -> HttpResponse {
     route_with_job_store_and_body(method, path, None, job_store)
 }
 
-pub fn route_with_body(method: &str, path: &str, body: Option<serde_json::Value>) -> HttpResponse {
-    route_with_job_store_and_body(method, path, body, daemon_job_store())
-}
-
-pub fn route_with_job_store_and_body(
+fn route_with_job_store_and_body(
     method: &str,
     path: &str,
     body: Option<serde_json::Value>,
@@ -285,6 +285,7 @@ fn enqueue_exec_job(
         "runner_id": request.runner_id,
         "cwd": request.cwd,
         "command": request.command,
+        "capture_patch": request.capture_patch,
         "source_snapshot": source_snapshot,
     });
     let operation = "runner.exec".to_string();
@@ -297,9 +298,15 @@ fn enqueue_exec_job(
                 "runner_id": request.runner_id,
                 "cwd": request.cwd,
                 "command": request.command,
+                "capture_patch": request.capture_patch,
                 "job_id": job.job_id(),
                 "source_snapshot": source_snapshot,
             }))?;
+            let baseline = if request.capture_patch {
+                Some(capture_baseline(&request.cwd)?)
+            } else {
+                None
+            };
             let mut command = Command::new(&request.command[0]);
             command
                 .args(&request.command[1..])
@@ -329,6 +336,19 @@ fn enqueue_exec_job(
                 "phase": "finished",
                 "exit_code": exit_code,
             }))?;
+            let patch = if let Some(baseline) = baseline {
+                Some(capture_patch_report(
+                    job.job_id(),
+                    request.runner_id.as_deref().unwrap_or("unknown"),
+                    &request.cwd,
+                    &request.command,
+                    source_snapshot.as_ref(),
+                    &baseline,
+                    exit_code,
+                )?)
+            } else {
+                None
+            };
             Ok(json!({
                 "runner_id": request.runner_id,
                 "cwd": request.cwd,
@@ -337,6 +357,7 @@ fn enqueue_exec_job(
                 "stdout": stdout,
                 "stderr": stderr,
                 "source_snapshot": source_snapshot,
+                "patch": patch,
             }))
         },
     );
@@ -399,7 +420,7 @@ fn route_read_only_api(
     }
 }
 
-fn error_response(status_code: u16, err: Error) -> HttpResponse {
+pub(super) fn error_response(status_code: u16, err: Error) -> HttpResponse {
     HttpResponse {
         status_code,
         body: json!({
