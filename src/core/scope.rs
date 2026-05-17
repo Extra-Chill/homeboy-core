@@ -51,6 +51,15 @@ impl Scope {
             Scope::Path { path, component_id } => component_id.as_deref().unwrap_or(path.as_str()),
         }
     }
+
+    pub fn command_name(&self, namespace: &str, path_kind: ScopeKind) -> String {
+        let kind = if matches!(self, Scope::Path { .. }) {
+            path_kind
+        } else {
+            self.kind()
+        };
+        format!("{namespace}.{}", kind.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -370,6 +379,22 @@ mod tests {
 
         assert_eq!(scope.kind(), ScopeKind::Path);
         assert_eq!(scope.id(), "homeboy");
+    }
+
+    #[test]
+    fn command_name_uses_scope_kind_with_path_override() {
+        assert_eq!(
+            Scope::Rig("studio".to_string()).command_name("triage", ScopeKind::Component),
+            "triage.rig"
+        );
+        assert_eq!(
+            Scope::Path {
+                path: "/tmp/checkout".to_string(),
+                component_id: None,
+            }
+            .command_name("triage", ScopeKind::Component),
+            "triage.component"
+        );
     }
 
     #[test]
