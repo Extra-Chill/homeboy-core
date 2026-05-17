@@ -604,6 +604,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::test_support;
 
     #[test]
     fn rejects_non_loopback_remote_daemon_address() {
@@ -650,5 +651,52 @@ mod tests {
         assert!(tunnel.success);
         assert_eq!(tunnel.pid, None);
         assert_eq!(tunnel.stderr, "");
+    }
+
+    #[test]
+    fn connect_reports_local_runner_as_unsupported() {
+        test_support::with_isolated_home(|_| {
+            crate::runner::create(r#"{"id":"lab-local","kind":"local"}"#, false)
+                .expect("create runner");
+
+            let (report, exit_code) = connect("lab-local").expect("connect report");
+
+            assert_eq!(exit_code, 20);
+            assert!(!report.connected);
+            assert_eq!(report.failure_kind, Some(RunnerFailureKind::SshFailure));
+            assert!(report
+                .failure_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("only SSH runners"));
+        });
+    }
+
+    #[test]
+    fn disconnect_removes_existing_session_file() {
+        test_support::with_isolated_home(|_| {
+            crate::runner::create(r#"{"id":"lab-local","kind":"local"}"#, false)
+                .expect("create runner");
+            let session = RunnerSession {
+                runner_id: "lab-local".to_string(),
+                server_id: None,
+                remote_daemon_address: "127.0.0.1:49152".to_string(),
+                local_port: 49153,
+                local_url: "http://127.0.0.1:49153".to_string(),
+                tunnel_pid: None,
+                remote_daemon_pid: None,
+                homeboy_version: "test".to_string(),
+                connected_at: Utc::now().to_rfc3339(),
+            };
+            write_session(&session).expect("write session");
+            let path = session_path("lab-local").expect("session path");
+            assert!(path.exists());
+
+            let report = disconnect("lab-local").expect("disconnect");
+
+            assert!(report.disconnected);
+            assert_eq!(report.session.expect("session").runner_id, "lab-local");
+            assert!(!path.exists());
+        });
     }
 }

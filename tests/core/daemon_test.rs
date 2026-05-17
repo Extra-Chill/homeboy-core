@@ -19,6 +19,105 @@ fn parse_bind_addr_rejects_public_bind() {
 }
 
 #[test]
+fn state_path_uses_daemon_state_location() {
+    let _home = HomeGuard::new();
+
+    let path = state_path().expect("state path");
+
+    assert!(path.ends_with("daemon/state.json"));
+}
+
+#[test]
+fn test_pid_is_running_rejects_impossible_pid_and_drives_status() {
+    let _home = HomeGuard::new();
+    let path = state_path().expect("state path");
+    std::fs::create_dir_all(path.parent().expect("state parent")).expect("state dir");
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "address": "127.0.0.1:49152",
+            "pid": u32::MAX,
+            "state_path": path.display().to_string(),
+        })
+        .to_string(),
+    )
+    .expect("write state");
+
+    assert!(pid_is_running(std::process::id()));
+    assert!(!pid_is_running(u32::MAX));
+    assert!(!read_status().expect("status").running);
+}
+
+#[test]
+fn read_status_reports_stale_state_as_not_running() {
+    let _home = HomeGuard::new();
+    let path = state_path().expect("state path");
+    std::fs::create_dir_all(path.parent().expect("state parent")).expect("state dir");
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "address": "127.0.0.1:49152",
+            "pid": u32::MAX,
+            "state_path": path.display().to_string(),
+        })
+        .to_string(),
+    )
+    .expect("write state");
+
+    let status = read_status().expect("status");
+
+    assert!(!status.running);
+    assert_eq!(status.state.expect("state").pid, u32::MAX);
+}
+
+#[test]
+fn stop_without_state_reports_noop() {
+    let _home = HomeGuard::new();
+
+    let result = stop().expect("stop");
+
+    assert!(!result.stopped);
+    assert_eq!(result.pid, None);
+    assert!(result.state_path.ends_with("daemon/state.json"));
+}
+
+#[test]
+fn test_serve_writes_state_and_routes_health_requests() {
+    let _home = HomeGuard::new();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+    let addr = listener.local_addr().expect("addr");
+    drop(listener);
+
+    std::thread::spawn(move || {
+        let _ = serve(addr);
+    });
+
+    let mut stream = None;
+    for _ in 0..100 {
+        match std::net::TcpStream::connect(addr) {
+            Ok(candidate) => {
+                stream = Some(candidate);
+                break;
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+    let mut stream = stream.expect("daemon connection");
+    stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .expect("write request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read response");
+
+    let status = read_status().expect("status");
+
+    assert!(response.contains("200 OK"));
+    assert!(response.contains("\"status\": \"ok\""));
+    assert!(status.running);
+    assert_eq!(status.state.expect("state").address, addr.to_string());
+}
+
+#[test]
 fn routes_health_version_and_config_paths() {
     let _home = HomeGuard::new();
 
@@ -173,6 +272,23 @@ fn routes_json_body_to_analysis_enqueue() {
     assert_eq!(response.body["endpoint"], "jobs.required");
     assert_eq!(response.body["body"]["command"], "api.lint.enqueue");
     assert_eq!(store.list().len(), 1);
+}
+
+#[test]
+fn route_with_body_validates_exec_requests() {
+    let _home = HomeGuard::new();
+    let response = route_with_job_store_and_body(
+        "POST",
+        "/exec",
+        Some(serde_json::json!({
+            "cwd": "relative",
+            "command": []
+        })),
+        daemon_job_store(),
+    );
+
+    assert_eq!(response.status_code, 400);
+    assert_eq!(response.body["error"], "validation.invalid_argument");
 }
 
 #[test]
