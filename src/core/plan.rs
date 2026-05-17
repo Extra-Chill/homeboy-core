@@ -249,6 +249,14 @@ impl PlanBuilder {
         self
     }
 
+    pub(crate) fn inputs(
+        mut self,
+        inputs: impl IntoIterator<Item = (String, serde_json::Value)>,
+    ) -> Self {
+        self.plan.inputs.extend(inputs);
+        self
+    }
+
     pub(crate) fn policy_value(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
         self.plan.policy.insert(key.into(), value);
         self
@@ -626,6 +634,22 @@ mod tests {
             plan.inputs.get("target_exists"),
             Some(&serde_json::json!(true))
         );
+    }
+
+    #[test]
+    fn test_plan_inputs() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(vec![
+                ("group".to_string(), serde_json::json!("baseline")),
+                ("iteration".to_string(), serde_json::json!(2)),
+            ])
+            .build();
+
+        assert_eq!(
+            plan.inputs.get("group"),
+            Some(&serde_json::json!("baseline"))
+        );
+        assert_eq!(plan.inputs.get("iteration"), Some(&serde_json::json!(2)));
     }
 
     #[test]
