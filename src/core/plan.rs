@@ -8,6 +8,56 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PlanValues {
+    values: HashMap<String, serde_json::Value>,
+}
+
+impl PlanValues {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn string(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.values
+            .insert(key.into(), serde_json::Value::String(value.into()));
+        self
+    }
+
+    pub(crate) fn bool(mut self, key: impl Into<String>, value: bool) -> Self {
+        self.values
+            .insert(key.into(), serde_json::Value::Bool(value));
+        self
+    }
+
+    pub(crate) fn number(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<serde_json::Number>,
+    ) -> Self {
+        self.values
+            .insert(key.into(), serde_json::Value::Number(value.into()));
+        self
+    }
+
+    pub(crate) fn json<T: Serialize>(mut self, key: impl Into<String>, value: T) -> Self {
+        self.values.insert(
+            key.into(),
+            serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
+        );
+        self
+    }
+}
+
+impl IntoIterator for PlanValues {
+    type Item = (String, serde_json::Value);
+    type IntoIter = std::collections::hash_map::IntoIter<String, serde_json::Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.into_iter()
+    }
+}
+
 /// A typed plan that can describe quality, build, release, deploy, PR, CI,
 /// refactor, review, or domain-specific workflows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -244,11 +294,6 @@ impl PlanBuilder {
         self
     }
 
-    pub(crate) fn input_value(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.plan.inputs.insert(key.into(), value);
-        self
-    }
-
     pub(crate) fn inputs(
         mut self,
         inputs: impl IntoIterator<Item = (String, serde_json::Value)>,
@@ -468,7 +513,9 @@ fn slug_fragment(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeboyPlan, PlanBuilder, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
+    use super::{
+        HomeboyPlan, PlanBuilder, PlanKind, PlanStep, PlanStepStatus, PlanSummary, PlanValues,
+    };
 
     #[test]
     fn serializes_plan_kind_as_snake_case() {
@@ -625,18 +672,6 @@ mod tests {
     }
 
     #[test]
-    fn test_input_value() {
-        let plan = HomeboyPlan::builder_for_component(PlanKind::StackSync, "fixture")
-            .input_value("target_exists", serde_json::json!(true))
-            .build();
-
-        assert_eq!(
-            plan.inputs.get("target_exists"),
-            Some(&serde_json::json!(true))
-        );
-    }
-
-    #[test]
     fn test_plan_inputs() {
         let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
             .inputs(vec![
@@ -650,6 +685,60 @@ mod tests {
             Some(&serde_json::json!("baseline"))
         );
         assert_eq!(plan.inputs.get("iteration"), Some(&serde_json::json!(2)));
+    }
+
+    #[test]
+    fn test_string() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().string("group", "baseline"))
+            .build();
+
+        assert_eq!(
+            plan.inputs.get("group"),
+            Some(&serde_json::json!("baseline"))
+        );
+    }
+
+    #[test]
+    fn test_bool() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().bool("dry_run", true))
+            .build();
+
+        assert_eq!(plan.inputs.get("dry_run"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_number() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().number("iteration", 2_u64))
+            .build();
+
+        assert_eq!(plan.inputs.get("iteration"), Some(&serde_json::json!(2)));
+    }
+
+    #[test]
+    fn test_plan_values_json() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().json("items", ["first", "second"]))
+            .build();
+
+        assert_eq!(
+            plan.inputs.get("items"),
+            Some(&serde_json::json!(["first", "second"]))
+        );
+    }
+
+    #[test]
+    fn test_input_value() {
+        let step = PlanStep::ready("lint", "quality.lint")
+            .input_value("reason", serde_json::json!("manual"))
+            .build();
+
+        assert_eq!(
+            step.inputs.get("reason"),
+            Some(&serde_json::json!("manual"))
+        );
     }
 
     #[test]

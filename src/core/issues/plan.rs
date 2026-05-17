@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::code_audit::FindingConfidence;
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanValues};
 
 /// One row of incoming findings: "command produced N findings of category X
 /// for component Y." This is the input grain reconcile reasons over.
@@ -227,10 +227,7 @@ fn action_step((index, action): (usize, &ReconcileAction)) -> PlanStep {
     )
     .label(action_label(action))
     .blocking(!matches!(action, ReconcileAction::Skip { .. }))
-    .input_value(
-        "action",
-        serde_json::to_value(action).unwrap_or(serde_json::Value::Null),
-    );
+    .inputs(PlanValues::new().json("action", action));
 
     match action {
         ReconcileAction::Skip { reason, .. } => builder.skip_reason(format!("{:?}", reason)),

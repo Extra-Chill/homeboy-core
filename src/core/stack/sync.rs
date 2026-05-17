@@ -32,7 +32,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanValues};
 
 use super::apply::{
     checkout_force, cherry_pick, ensure_head_remote, fetch_remote_branch, fetch_sha, AppliedPr,
@@ -335,8 +335,11 @@ fn sync_homeboy_plan(
     }
 
     HomeboyPlan::builder_for_description(PlanKind::StackSync, spec.id.clone())
-        .input_value("stack_id", serde_json::Value::String(spec.id.clone()))
-        .input_value("target_exists", serde_json::Value::Bool(target_exists))
+        .inputs(
+            PlanValues::new()
+                .string("stack_id", spec.id.clone())
+                .bool("target_exists", target_exists),
+        )
         .policy_value("would_mutate", serde_json::Value::Bool(would_mutate))
         .policy_value("blocked", serde_json::Value::Bool(blocked))
         .steps(steps)
@@ -359,12 +362,12 @@ fn sync_pr_step(
     .label(format!("{action} {repo}#{number}"))
     .blocking(status == PlanStepStatus::Missing)
     .scope(vec![format!("{repo}#{number}")])
-    .input_value("repo", serde_json::Value::String(repo.to_string()))
-    .input_value(
-        "number",
-        serde_json::Value::Number(serde_json::Number::from(number)),
+    .inputs(
+        PlanValues::new()
+            .string("repo", repo)
+            .number("number", number)
+            .string("reason", reason),
     )
-    .input_value("reason", serde_json::Value::String(reason.to_string()))
     .build()
 }
 

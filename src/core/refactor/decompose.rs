@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::extension::{self, grammar, grammar_items, ParsedItem};
-use crate::plan::{HomeboyPlan, PlanKind, PlanStep};
+use crate::plan::{HomeboyPlan, PlanKind, PlanStep, PlanValues};
 use crate::Result;
 
 use super::move_items::{MoveOptions, MoveResult};
@@ -103,11 +103,11 @@ fn decompose_homeboy_plan(
 ) -> HomeboyPlan {
     HomeboyPlan::builder_for_description(PlanKind::Refactor, file.to_string())
         .mode("decompose")
-        .input_value("file", serde_json::Value::String(file.to_string()))
-        .input_value("strategy", serde_json::Value::String(strategy.to_string()))
-        .input_value(
-            "total_items",
-            serde_json::Value::Number(serde_json::Number::from(total_items)),
+        .inputs(
+            PlanValues::new()
+                .string("file", file)
+                .string("strategy", strategy)
+                .number("total_items", total_items as u64),
         )
         .steps(groups.iter().map(decompose_group_step))
         .warnings(warnings.to_vec())
@@ -126,14 +126,11 @@ fn decompose_group_step(group: &DecomposeGroup) -> PlanStep {
         group.suggested_target
     ))
     .scope(group.item_names.clone())
-    .input_value("group", serde_json::Value::String(group.name.clone()))
-    .input_value(
-        "suggested_target",
-        serde_json::Value::String(group.suggested_target.clone()),
-    )
-    .input_value(
-        "item_names",
-        serde_json::to_value(&group.item_names).unwrap_or(serde_json::Value::Null),
+    .inputs(
+        PlanValues::new()
+            .string("group", group.name.clone())
+            .string("suggested_target", group.suggested_target.clone())
+            .json("item_names", &group.item_names),
     )
     .build()
 }
