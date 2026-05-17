@@ -105,20 +105,9 @@ fn trace_experiment_step(phase: &str, name: &str, index: usize, command: &str) -
     )
     .label(format!("{phase} trace experiment {name}"))
     .scope(vec![name.to_string()])
-    .inputs(vec![
-        (
-            "experiment".to_string(),
-            serde_json::Value::String(name.to_string()),
-        ),
-        (
-            "phase".to_string(),
-            serde_json::Value::String(phase.to_string()),
-        ),
-        (
-            "command".to_string(),
-            serde_json::Value::String(command.to_string()),
-        ),
-    ])
+    .input_value("experiment", serde_json::Value::String(name.to_string()))
+    .input_value("phase", serde_json::Value::String(phase.to_string()))
+    .input_value("command", serde_json::Value::String(command.to_string()))
     .build()
 }
 

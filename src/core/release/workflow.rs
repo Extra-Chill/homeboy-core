@@ -487,7 +487,7 @@ fn recovery_release_plan(
 
 fn recovery_step(id: &str, label: impl Into<String>, needed: bool, needs: Vec<String>) -> PlanStep {
     if needed {
-        PlanStep::ready_labeled(id, id, label, needs, std::collections::HashMap::new())
+        PlanStep::ready_labeled(id, id, label, needs, std::iter::empty())
     } else {
         PlanStep::disabled_with_reason(id, id, "already-complete")
             .label(label)
