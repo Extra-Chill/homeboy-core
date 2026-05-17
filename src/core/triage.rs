@@ -20,7 +20,7 @@ use crate::observation::{
     NewRunRecord, NewTriageItemRecord, ObservationStore, RunListFilter, RunStatus,
     TriageItemRecord, TriagePullRequestSignals,
 };
-use crate::scope::{self, Scope, ScopeComponentRef, ScopeOutput};
+use crate::scope::{self, Scope, ScopeComponentRef, ScopeKind, ScopeOutput};
 
 pub use crate::scope::Scope as TriageTarget;
 
@@ -41,7 +41,7 @@ pub struct TriageOptions {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TriageOutput {
-    pub command: &'static str,
+    pub command: String,
     pub target: ScopeOutput,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<TriageObservationOutput>,
@@ -268,8 +268,9 @@ pub fn run(target: TriageTarget, options: TriageOptions) -> Result<TriageOutput>
 
     let summary = summarize(&components, &unresolved);
     let unresolved_summary = summarize_unresolved(&unresolved);
+    let command = triage_command(&target);
     let mut output = TriageOutput {
-        command: triage_command(&target),
+        command: command.clone(),
         target: ScopeOutput::from(&target),
         observation: None,
         summary,
@@ -315,7 +316,7 @@ impl TriageObservation {
             .start_run(NewRunRecord {
                 kind: "triage".to_string(),
                 component_id: Some(component_id),
-                command: Some(triage_command(target).to_string()),
+                command: Some(triage_command(target)),
                 cwd: std::env::current_dir()
                     .ok()
                     .map(|path| path.to_string_lossy().to_string()),
@@ -657,18 +658,11 @@ fn resolve_target_components(target: &TriageTarget) -> Result<Vec<ComponentRef>>
     }
 }
 
-fn triage_command(target: &TriageTarget) -> &'static str {
-    match target {
-        Scope::Component(_) => "triage.component",
-        Scope::Project(_) => "triage.project",
-        Scope::Fleet(_) => "triage.fleet",
-        Scope::Rig(_) => "triage.rig",
-        Scope::Workspace => "triage.workspace",
-        // `--path` is an escape hatch on subcommands (currently `component`); keep
-        // the same command identity so JSON consumers don't see a phantom
-        // `triage.path` verb.
-        Scope::Path { .. } => "triage.component",
-    }
+fn triage_command(target: &TriageTarget) -> String {
+    // `--path` is an escape hatch on subcommands (currently `component`); keep
+    // the same command identity so JSON consumers don't see a phantom
+    // `triage.path` verb.
+    target.command_name("triage", ScopeKind::Component)
 }
 
 fn dedupe_refs_by_repo(component_refs: Vec<ComponentRef>) -> Vec<ComponentRef> {
