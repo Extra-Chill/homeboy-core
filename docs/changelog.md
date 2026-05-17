@@ -4,6 +4,11 @@ All notable changes to Homeboy CLI are documented in this file.
 
 (This file is embedded into the CLI binary and is also viewable via `homeboy changelog`.)
 
+## [0.186.4] - 2026-05-17
+
+### Changed
+- reuse stack sync step inputs
+
 ## [0.186.3] - 2026-05-17
 
 ### Changed
