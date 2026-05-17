@@ -30,16 +30,16 @@ pub(super) fn start(start: ReviewObservationStart<'_>) -> Option<ReviewObservati
         start.scope,
         start.changed_file_count,
     );
-    ActiveObservation::start_best_effort(NewRunRecord {
-        kind: "review".to_string(),
-        component_id: Some(start.component_id.to_string()),
-        command: Some(review_observation_command(start.component_id, start.args)),
-        cwd: Some(start.source_path.to_string_lossy().to_string()),
-        homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        git_sha: short_head_revision_at(start.source_path),
-        rig_id: None,
-        metadata_json: metadata.clone(),
-    })
+    ActiveObservation::start_best_effort(
+        NewRunRecord::builder("review")
+            .component_id(start.component_id)
+            .command(review_observation_command(start.component_id, start.args))
+            .cwd_path(start.source_path)
+            .current_homeboy_version()
+            .git_sha(short_head_revision_at(start.source_path))
+            .metadata(metadata.clone())
+            .build(),
+    )
     .map(ReviewObservation)
 }
 

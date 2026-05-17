@@ -204,16 +204,16 @@ fn start_test_observation(
     run_dir: Option<&RunDir>,
 ) -> Option<TestObservation> {
     let metadata = test_observation_initial_metadata(source_path, args, mode, run_dir);
-    ActiveObservation::start_best_effort(NewRunRecord {
-        kind: "test".to_string(),
-        component_id: Some(component_id.to_string()),
-        command: Some(test_observation_command(component_id, args)),
-        cwd: Some(source_path.to_string_lossy().to_string()),
-        homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        git_sha: short_head_revision_at(source_path),
-        rig_id: None,
-        metadata_json: metadata.clone(),
-    })
+    ActiveObservation::start_best_effort(
+        NewRunRecord::builder("test")
+            .component_id(component_id)
+            .command(test_observation_command(component_id, args))
+            .cwd_path(source_path)
+            .current_homeboy_version()
+            .git_sha(short_head_revision_at(source_path))
+            .metadata(metadata.clone())
+            .build(),
+    )
     .map(TestObservation)
 }
 

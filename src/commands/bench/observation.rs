@@ -48,20 +48,21 @@ pub(super) fn start(start: BenchObservationStart<'_>) -> Option<BenchObservation
         start.rig_snapshot,
         start.run_dir,
     );
-    ActiveObservation::start_best_effort(NewRunRecord {
-        kind: "bench".to_string(),
-        component_id: Some(start.component_id.to_string()),
-        command: Some(bench_observation_command(
-            start.component_id,
-            start.args,
-            start.rig_id,
-        )),
-        cwd: Some(start.source_path.to_string_lossy().to_string()),
-        homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        git_sha: short_head_revision_at(start.source_path),
-        rig_id: start.rig_id.map(str::to_string),
-        metadata_json: metadata.clone(),
-    })
+    ActiveObservation::start_best_effort(
+        NewRunRecord::builder("bench")
+            .component_id(start.component_id)
+            .command(bench_observation_command(
+                start.component_id,
+                start.args,
+                start.rig_id,
+            ))
+            .cwd_path(start.source_path)
+            .current_homeboy_version()
+            .git_sha(short_head_revision_at(start.source_path))
+            .optional_rig_id(start.rig_id)
+            .metadata(metadata.clone())
+            .build(),
+    )
     .map(BenchObservation)
 }
 

@@ -211,16 +211,15 @@ struct LintObservation(ActiveObservation);
 
 impl LintObservation {
     fn start(component_id: String, source_path: &std::path::Path, command: String) -> Option<Self> {
-        ActiveObservation::start_best_effort(NewRunRecord {
-            kind: "lint".to_string(),
-            component_id: Some(component_id),
-            command: Some(command),
-            cwd: Some(source_path.to_string_lossy().to_string()),
-            homeboy_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            git_sha: None,
-            rig_id: None,
-            metadata_json: serde_json::json!({ "source": "homeboy lint" }),
-        })
+        ActiveObservation::start_best_effort(
+            NewRunRecord::builder("lint")
+                .component_id(component_id)
+                .command(command)
+                .cwd_path(source_path)
+                .current_homeboy_version()
+                .metadata(serde_json::json!({ "source": "homeboy lint" }))
+                .build(),
+        )
         .map(Self)
     }
 
