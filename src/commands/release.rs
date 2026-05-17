@@ -3,8 +3,8 @@ use serde::Serialize;
 
 use homeboy::component;
 use homeboy::deploy::{self, ReleaseStateStatus};
-use homeboy::project;
 use homeboy::release::{self, BatchReleaseResult, ReleaseCommandInput, ReleaseCommandResult};
+use homeboy::scope::{self, Scope};
 
 use super::utils::args::{DryRunArgs, HiddenJsonArgs};
 use super::CmdResult;
@@ -213,8 +213,8 @@ fn resolve_component_ids(
     components: &[String],
 ) -> homeboy::Result<Vec<String>> {
     if let Some(ref project_id) = args.project {
-        let proj = project::load(project_id)?;
-        let components = project::resolve_project_components(&proj)?;
+        let components =
+            scope::resolve_scope_component_records(&Scope::Project(project_id.into()))?;
 
         if components.is_empty() {
             return Err(homeboy::Error::validation_invalid_argument(
