@@ -214,12 +214,6 @@ impl ReconcilePlan {
 
 fn action_step((index, action): (usize, &ReconcileAction)) -> PlanStep {
     let action_kind = action_kind(action);
-    let mut inputs = std::collections::HashMap::new();
-    inputs.insert(
-        "action".to_string(),
-        serde_json::to_value(action).unwrap_or(serde_json::Value::Null),
-    );
-
     let id = format!("issues.reconcile.{:03}.{}", index + 1, action_kind);
     let kind = format!("issues.reconcile.{action_kind}");
     let builder = PlanStep::builder(
@@ -233,7 +227,10 @@ fn action_step((index, action): (usize, &ReconcileAction)) -> PlanStep {
     )
     .label(action_label(action))
     .blocking(!matches!(action, ReconcileAction::Skip { .. }))
-    .inputs(inputs);
+    .input_value(
+        "action",
+        serde_json::to_value(action).unwrap_or(serde_json::Value::Null),
+    );
 
     match action {
         ReconcileAction::Skip { reason, .. } => builder.skip_reason(format!("{:?}", reason)),
