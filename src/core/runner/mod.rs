@@ -8,11 +8,16 @@ use crate::error::{Error, Result};
 use crate::output::{CreateOutput, MergeOutput, RemoveResult};
 use crate::server;
 
+mod apply;
 mod connection;
 mod evidence;
 mod execution;
 mod workspace;
 
+pub use apply::{
+    apply_workspace_patch, RunnerWorkspaceApplyOptions, RunnerWorkspaceApplyOutput,
+    RunnerWorkspaceApplyStatus,
+};
 pub use connection::{
     connect, disconnect, status, RunnerConnectReport, RunnerDisconnectReport, RunnerFailureKind,
     RunnerSession, RunnerStatusReport,
