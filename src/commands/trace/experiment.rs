@@ -5,7 +5,7 @@ use std::process::Command;
 
 use homeboy::engine::run_dir::RunDir;
 use homeboy::extension::trace as extension_trace;
-use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep, PlanStepStatus, PlanSummary};
+use homeboy::plan::{HomeboyPlan, PlanKind, PlanStep};
 use homeboy::rig;
 
 use super::{TraceArgs, TraceRigContext};
@@ -73,25 +73,13 @@ fn trace_experiment_plan(
     name: &str,
     experiment: &rig::TraceExperimentSpec,
 ) -> HomeboyPlan {
-    let mut plan = HomeboyPlan::for_description(PlanKind::Trace, format!("{rig_id} {name}"));
-    plan.mode = Some("experiment".to_string());
-    plan.inputs.insert(
-        "rig_id".to_string(),
-        serde_json::Value::String(rig_id.to_string()),
-    );
-    plan.inputs.insert(
-        "experiment".to_string(),
-        serde_json::Value::String(name.to_string()),
-    );
-    plan.steps = trace_experiment_steps(name, experiment);
-    plan.summary = Some(PlanSummary {
-        total_steps: plan.steps.len(),
-        ready: plan.steps.len(),
-        blocked: 0,
-        skipped: 0,
-        next_actions: Vec::new(),
-    });
-    plan
+    HomeboyPlan::builder_for_description(PlanKind::Trace, format!("{rig_id} {name}"))
+        .mode("experiment")
+        .input_value("rig_id", serde_json::Value::String(rig_id.to_string()))
+        .input_value("experiment", serde_json::Value::String(name.to_string()))
+        .steps(trace_experiment_steps(name, experiment))
+        .summarize()
+        .build()
 }
 
 fn trace_experiment_steps(name: &str, experiment: &rig::TraceExperimentSpec) -> Vec<PlanStep> {
@@ -111,34 +99,27 @@ fn trace_experiment_steps(name: &str, experiment: &rig::TraceExperimentSpec) -> 
 }
 
 fn trace_experiment_step(phase: &str, name: &str, index: usize, command: &str) -> PlanStep {
-    let mut inputs = std::collections::HashMap::new();
-    inputs.insert(
-        "experiment".to_string(),
-        serde_json::Value::String(name.to_string()),
-    );
-    inputs.insert(
-        "phase".to_string(),
-        serde_json::Value::String(phase.to_string()),
-    );
-    inputs.insert(
-        "command".to_string(),
-        serde_json::Value::String(command.to_string()),
-    );
-
-    PlanStep {
-        id: format!("trace.experiment.{phase}.{index}"),
-        kind: format!("trace.experiment.{phase}"),
-        label: Some(format!("{phase} trace experiment {name}")),
-        blocking: true,
-        scope: vec![name.to_string()],
-        needs: Vec::new(),
-        status: PlanStepStatus::Ready,
-        inputs,
-        outputs: std::collections::HashMap::new(),
-        skip_reason: None,
-        policy: std::collections::HashMap::new(),
-        missing: Vec::new(),
-    }
+    PlanStep::ready(
+        format!("trace.experiment.{phase}.{index}"),
+        format!("trace.experiment.{phase}"),
+    )
+    .label(format!("{phase} trace experiment {name}"))
+    .scope(vec![name.to_string()])
+    .inputs(vec![
+        (
+            "experiment".to_string(),
+            serde_json::Value::String(name.to_string()),
+        ),
+        (
+            "phase".to_string(),
+            serde_json::Value::String(phase.to_string()),
+        ),
+        (
+            "command".to_string(),
+            serde_json::Value::String(command.to_string()),
+        ),
+    ])
+    .build()
 }
 
 pub(super) fn trace_experiment_settings(
