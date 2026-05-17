@@ -116,20 +116,6 @@ fn decompose_homeboy_plan(
 }
 
 fn decompose_group_step(group: &DecomposeGroup) -> PlanStep {
-    let mut inputs = std::collections::HashMap::new();
-    inputs.insert(
-        "group".to_string(),
-        serde_json::Value::String(group.name.clone()),
-    );
-    inputs.insert(
-        "suggested_target".to_string(),
-        serde_json::Value::String(group.suggested_target.clone()),
-    );
-    inputs.insert(
-        "item_names".to_string(),
-        serde_json::to_value(&group.item_names).unwrap_or(serde_json::Value::Null),
-    );
-
     PlanStep::ready(
         format!("refactor.decompose.{}", group.name),
         "refactor.decompose.extract_group",
@@ -140,7 +126,15 @@ fn decompose_group_step(group: &DecomposeGroup) -> PlanStep {
         group.suggested_target
     ))
     .scope(group.item_names.clone())
-    .inputs(inputs)
+    .input_value("group", serde_json::Value::String(group.name.clone()))
+    .input_value(
+        "suggested_target",
+        serde_json::Value::String(group.suggested_target.clone()),
+    )
+    .input_value(
+        "item_names",
+        serde_json::to_value(&group.item_names).unwrap_or(serde_json::Value::Null),
+    )
     .build()
 }
 
