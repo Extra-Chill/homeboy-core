@@ -126,18 +126,19 @@ pub fn build_quality_steps(options: &QualityPlanOptions) -> Vec<PlanStep> {
 
 fn ready_step(prefix: &str, name: &str, label: &str, needs: Vec<String>) -> PlanStep {
     let id = step_id(prefix, name);
-    PlanStep::ready(id.clone(), id)
-        .label(label)
-        .needs(needs)
-        .build()
+    PlanStep::ready_labeled(
+        id.clone(),
+        id,
+        label,
+        needs,
+        std::iter::empty::<(String, serde_json::Value)>(),
+    )
 }
 
 fn disabled_step(prefix: &str, name: &str, label: &str, reason: &str) -> PlanStep {
     let id = step_id(prefix, name);
-    PlanStep::disabled(id.clone(), id)
+    PlanStep::disabled_with_reason(id.clone(), id, reason)
         .label(label)
-        .input_value("reason", serde_json::Value::String(reason.to_string()))
-        .skip_reason(reason)
         .build()
 }
 
