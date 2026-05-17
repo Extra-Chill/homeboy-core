@@ -688,26 +688,56 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_values_builder() {
+    fn test_string() {
         let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
-            .inputs(
-                PlanValues::new()
-                    .string("group", "baseline")
-                    .bool("dry_run", true)
-                    .number("iteration", 2_u64)
-                    .json("items", ["first", "second"]),
-            )
+            .inputs(PlanValues::new().string("group", "baseline"))
             .build();
 
         assert_eq!(
             plan.inputs.get("group"),
             Some(&serde_json::json!("baseline"))
         );
+    }
+
+    #[test]
+    fn test_bool() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().bool("dry_run", true))
+            .build();
+
         assert_eq!(plan.inputs.get("dry_run"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_number() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().number("iteration", 2_u64))
+            .build();
+
         assert_eq!(plan.inputs.get("iteration"), Some(&serde_json::json!(2)));
+    }
+
+    #[test]
+    fn test_plan_values_json() {
+        let plan = HomeboyPlan::builder_for_component(PlanKind::Trace, "fixture")
+            .inputs(PlanValues::new().json("items", ["first", "second"]))
+            .build();
+
         assert_eq!(
             plan.inputs.get("items"),
             Some(&serde_json::json!(["first", "second"]))
+        );
+    }
+
+    #[test]
+    fn test_input_value() {
+        let step = PlanStep::ready("lint", "quality.lint")
+            .input_value("reason", serde_json::json!("manual"))
+            .build();
+
+        assert_eq!(
+            step.inputs.get("reason"),
+            Some(&serde_json::json!("manual"))
         );
     }
 
